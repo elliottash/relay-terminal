@@ -1,0 +1,34 @@
+===== a queued card prompt draws a row in the card console's §12 queue strip =====
+PASS q1 the card page is open with its console (boardCardDocument is on screen)
+PASS q1 the first turn is running (boardBusyStrip is on screen)
+PASS q2 the queued card prompt has a row in the §12 strip (queueList is on screen)
+  queueTitle: QUEUE
+  queueHint:  ↑ take back to edit · drag to reorder · × remove
+  the strip's rows, read off queueList: + trace the card please x 
+PASS q2 and the row is the owner's own words, not the prompt the model is sent
+PASS q3 ↑ took the row out of the strip
+  the prompt box after ↑: trace the card please| 
+PASS q3 and it came back into the prompt box as an unsent draft
+  agent comments on the thread after the phase: 1
+PASS q4 the withdrawn prompt never ran: one answer on the thread, and the first turn's
+PASS q4 and its question is still on the thread, unanswered (owner decision 5)
+===== one console, several cards: the transcript changes hands with the card =====
+PASS s1 card C's turn is in the card console's transcript
+PASS s2 card D's console draws none of card C's turn
+PASS s2 and card D's own turn is drawn in it
+PASS s3 card C's transcript is drawn again when its card is reopened
+  (the replay's mark was not read by OCR in s04-console.txt; the words above are the check)
+PASS s3 and card D's turn did not come back with it
+===== a restart on the same profile: same tab, same conversation =====
+PASS r1 the card's turn is in a helper conversation file of its own
+  tab ids in the saved state the restart read: "tab_id": "tf3c86ec602ec" 
+PASS r2 the thread is complete after the restart
+  tab ids after the restart: "tab_id": "tf3c86ec602ec" 
+PASS r3 the tab id survived the restart (#FEJQ's tab_id, saved and restored)
+  the card's conversation before: /tmp/rl-ctrf.W37d/home/.local/share/relay/helper-sessions/33101ff0a59db6b4/3b22169efcc6e4959d73387cf1623ce9.json
+  and the file the turn after the restart went into: /tmp/rl-ctrf.W37d/home/.local/share/relay/helper-sessions/33101ff0a59db6b4/3b22169efcc6e4959d73387cf1623ce9.json
+PASS r4 the turn after the restart went into the card's own conversation, the one from before it
+  HISTORY turns=2 (what the model was actually handed)
+PASS r4 and the model was handed the conversation it had (2 user turns)
+
+18 passed, 0 failed

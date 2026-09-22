@@ -186,3 +186,88 @@ Two things for whoever takes steps 4-7:
 3. **The restart check is not decidable in this drive**: the restarted window came back with a *different tab id* (`r06/r07-tab-*.txt`), and a card's conversation is keyed per (tab, card), so a different conversation is the right answer to a different tab. The per-(tab, card) file itself is proved in the backend drive (its item 6), and this run shows the card's turn in a helper conversation file of its own and the thread complete after the restart.
 
 Also for whoever writes step 6: `board_ask` and `board_cancel` now carry `surface: "card:<ID>"` beside `card`, and `TabConsoleContext` keys a card console's conversation `<tab id>/card:<ID>` while every other console keeps the tab's.
+
+<!-- relay:entry 20260921T234305Z-vx author=agent kind=evidence model=gpt-6-astra pane=e34bb1dc turn=7a0a5d9d8ce04b4aa82402b5b3c24583/dab438e19a2f44748e88f8b28778b8b0 -->
+Owner reports: "check out this inconsitency: @/home/elliott/.cache/RelayTerminal/relay/images/relay-paste-20260921-194033.png \n\nthis is the board agent. the model selected was astra, but you can see at the top it says kimi". Screenshot shows card #ESDF turn label kimi-k3 and picker gpt-6-astra. Read-only investigation reproduced a stale card model using CardTurns plus tests/test_board_turns.py FakeAgent/FakeTools: submit on kimi-k3, change builder's main model to gpt-6-astra, submit again; main=gpt-6-astra, existing card=kimi-k3. Code: board_protocol._build_card_console snapshots main.config at creation; CardTurns.submit reuses that agent; worker.model_changed rebases main/subagents but not card agents; set_agent_role also targets turns.agent. This proves a mismatch path, not which exact sequence produced the screenshot (its turn was not found in retained logs). Related guest limitation: _usable_config refuses guest configurations, while worker.configure's switchboard guest fallback may select Kimi. Model changes must reach the addressed card's actual provider/harness and the picker must reflect that agent. Existing ownership respected: no source edits or takeover. Coordinate with #MDL1; verify an already-used card after selecting Astra, not just a fresh card.
+
+<!-- relay:entry 20260922T000340Z-e4 author=claude-code kind=evidence -->
+**The final pass is in, and #CTRN is complete.** Two commits of code and one of evidence, and the
+three things the steps 4-5 drive left open are closed.
+
+**1. A queued card prompt has a row in the §12 strip** (`7a5d7f27`). The owner's report on this
+card was "the queue doesn't work like the main terminal", and the card page was the last surface
+it was true of: a card's prompt travels as `board_ask`, waits in *that card's* supervisor and
+comes back as `queue_changed`, which `rebuildQueueStrip` did not read.
+
+One rule, for every pane: **the worker's list for this console's surface is the truth**, and the
+pane's own pending items are the optimistic overlay in front of it — they are not in the worker's
+queue yet, so they run after everything that is. `Pane` keeps the worker's rows whole
+(`m_workerItems`, `m_workerSteering` — every surface's, in the worker's order, because
+`queue_move`'s `to` is a position in *that* list) and draws the ones whose `surface` is this
+console's and that it does not already draw itself (`heldHere`: a steer it made, or an `ask` it
+sent that is still in `m_itemPrompts`). A row's text is `preview`, the owner's own words.
+
+A terminal pane is byte-for-byte what it was, and not by a special case: a terminal context's
+surface is that pane's own session token, so every row of its worker's queue is one it sent and
+`heldHere` holds all of them. The ten-shot pixel gate says so (below).
+
+The affordances are the strip's, and **every op names the queue it is for** — `queue_remove`,
+`queue_move`, `queue_steer`, `queue_unsteer`, `queue_clear`, `resume_queue` and **`cancel`**:
+Esc in a card console stopped the *tab's* turn until now. Editing a row withdraws it and asks
+again through the context, which is the two steps a person would take; the full prompt comes from
+what this console handed its context, because the row itself is 120 characters and writing that
+back would truncate it. A row sent from elsewhere is selectable, movable and removable, and says
+so rather than being edited from its preview.
+
+**2. One console, several cards** (`7a5d7f27`). The card page keeps **one** console — one vterm
+per open card is the cost Risk 4 named — and hands the transcript over with the card:
+`ConsoleHandle::clearTranscript(surface)` banks what is on screen under the surface it was
+printed for, resets the emulator, its scrollback and the fold ledger, and draws that card's back.
+A card reopened in the same tab draws its own transcript; the conversation behind it never moved
+(one per (tab, card), §30.7) and the record is still the thread above.
+
+**3. The restart is decided, and the code was right.** The steps 4-5 drive's restarted window came
+back with a different tab id — because **the drive relaunched with `--workspace`**, and
+`src/main.cpp` reads an explicit `--workspace` as "start fresh here" exactly as `--fresh` does
+(`startFresh = parser.isSet(fresh) || parser.isSet(workspace)`), so `restoreSavedLayout()` never
+ran. Relaunching with neither: the tab id is identical on both sides, the card's thread is
+complete, the turn after the restart goes into the **same conversation file** as the turn before
+it, and the model is handed `HISTORY turns=2`. #FEJQ's `tab_id` is saved by `serializeTab` and
+read back by `addTab`; nothing was wrong with it.
+
+**4. The segfault on SIGTERM has a cause and a fix** (`7a5d7f27`). No `gui_crash` frames survived
+— the drive copied `relay.log` mid-run and deleted its sandbox at exit — but `/var/log/apport.log`
+pins it: signal 11, the drive's own pid, 25 s after that log's last line, which is when the phase
+SIGTERMs relay. The code says the rest. `m_consoles` owns every console's wrapped context and is
+an ordinary member of `RelayWindow`, so it is destroyed **before** `~QWidget` deletes the console
+panes; a SIGTERM quit never runs `closeEvent` (`installQuitSignals` → `quit()` → `~WindowManager`
+deletes the windows outright), so `~Pane` wrote `m_context->onChanged = nullptr` into a freed
+`TabConsoleContext` and each pane's `destroyed` handler read a `QList` whose destructor had
+already run. `~RelayWindow` now lets the consoles go first, while everything is still alive. It is
+the same shape as #SWPH's `crash-after-pane-close` (`7fce9ef8`), reached by the other door.
+
+**Also here**, from the docs pass's reading of the code: `spec.scope` is `"console"` rather than
+`"card"` (step 3 deleted that tool scope; it only still arrived because `RETIRED_SCOPES` maps it
+for older GUIs), and three comments corrected where the code had moved under them —
+`cardSurfaceOf`'s envelope note, `board_cancel`'s `surface` (provenance, not routing) and
+`CARD_BLOCKED`'s (`board_ask`, not `ask`).
+
+**What the live drive then found** (`acda4552`): the "▸ running" line said nothing on a card (a
+console's prompt is kept out of `m_itemPrompts` on purpose, so `runningLabel()` had nothing to
+read), and the transcript coming back said "this shell is new" on a surface with no shell.
+
+**Evidence**: `docs/qa_evidence/2026-09-21-card-turns-final/` — 18 checks, all passed, plus the
+ten-shot terminal-pane pixel gate against `7dd8fdaddf11`, the tip before the first of these
+commits. Every non-zero pixel count in it is the caret, the turn clock or the busy spinner's
+animation frame; the §12 strip in `07-queued` is identical.
+
+**#QRC1 landed in the middle of this** (`3ebf3673`): ↑ on an empty prompt box now takes the head
+of the queue back as an unsent draft rather than selecting it in place, and that session had
+already read this card's rows into `recallQueueHead` — a worker row goes back with
+`queue_remove` naming the card's queue when the pane holds the prompt, and keeps the selection
+when all it has is the worker's 120-character preview. `5f834ce7` finishes the pair: the row
+leaves the strip at once rather than at the worker's next `queue_changed` (without it a row the
+person had just taken back sat on screen with its own words in the box under it), and the two
+`consolemode` cases now say what `main` does. So ↑ on a card's queued prompt **takes it back**,
+and the drive checks that: the op names the card's queue, the whole prompt comes back and not the
+preview, and nothing is sent.

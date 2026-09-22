@@ -1,0 +1,11 @@
+shot                        whole below-header
+01-fresh                    22794    22181
+02-thinking                  1556      943
+03-fold-open                 1556      943
+03b-fold-closed              1520      907
+04-toolrow                   1520      907
+05-modelbox                  1520      907
+06-modelbox-closed           1520      907
+07-queued                    3803     3190
+08-esc                       3985     3372
+09-after                     3949     3336

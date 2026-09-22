@@ -1,0 +1,8 @@
+» stub
+» + thought for 1s
+» read fixture.txt - 1 line
+TRACEDONE the fixture is what the drive wrote into it.
++ 1 tool call : 16 s (Actions >» Open last agent turn)
+Reply — Enter discusses, Ctrl+Enter plans
+< 97% left claude-opus-5 + high -~ @&
+Esc back to the board eedit ddone Tabreply Enterdiscuss por Ctri+Enter plan xexecute vverify Ctrl+Shift

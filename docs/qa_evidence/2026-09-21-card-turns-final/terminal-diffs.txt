@@ -1,0 +1,42 @@
+compare -metric AE, whole window and below the pane header (crop 1400x824+0+76).
+before = 7dd8fdaddf11 (the tip this session's first commit landed onto)
+after  = 7a5d7f272447 (that commit), both built from a clean `git archive` export.
+Both runs pass the same six OCR checks (term-before/notes.txt, term-after/notes.txt).
+
+shot                      whole  below-header
+01-fresh                  21274         21274
+02-thinking                   0             0
+03-fold-open                 36            36
+03b-fold-closed               0             0
+04-toolrow                    0             0
+05-modelbox                   0             0
+06-modelbox-closed            0             0
+07-queued                   142             0
+08-esc                      263           263
+09-after                    263           263
+
+Six of the ten are pixel-identical, and every non-zero number is something the drive cannot hold
+still between two runs of the *same* binary:
+
+  21274  a **startup toast** — "Automatic agent turns: 0 used of 50 · 500 steps / 2000 tool calls
+         per turn · request audit off" — a 627x34 box at +744+755, still up in one run's first
+         shot and already gone in the other's (terminal-diff-01-fresh-toast.png, before above,
+         after below). It is Relay telling the pane its own limits at launch; nothing in this
+         card writes it.
+     36  the caret in the prompt box, a 2x18 box at +36+817, blinking. The step 1, 3 and 5
+         evidence and the #AGNT drive measured the same box the same way.
+    142  the busy spinner in the tab strip and the pane header, a 62x45 box at +15+17, caught at
+         two frames of its own animation (terminal-diff-07-queued.png). Above the header crop,
+         which is why `below-header` is 0 for 07-queued.
+    263  one more word of the stub's stream before Esc landed — "…eight" against "…eight nine",
+         a 39x12 box at +429+504 (terminal-diff-08-esc-stream.png). 09-after is the same screen
+         afterwards, so it carries the same box.
+
+The §12 queue strip is in 07-queued and it is **identical below the header**: "▸ running  ✦ count
+slowly for me" and the queued row "✦ count slowly again", same rows, same pixels. That is the
+check this card needed most, because a terminal pane's strip is the one thing the change had to
+leave alone: its context's surface is the pane's own session token, so every row of its worker's
+queue is one it sent and `Pane::heldHere` holds all of them.
+
+`terminal-diffs-tip.txt` is the same drive against today's tip and its numbers are large; see
+NOTES.md, "The terminal pane is unchanged", for why none of it is this card's.

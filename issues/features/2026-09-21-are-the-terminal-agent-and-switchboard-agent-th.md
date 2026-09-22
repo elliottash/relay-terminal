@@ -1,13 +1,18 @@
 ---
 id: CTRN
 type: work
-status: executing
+status: needs-verification
 labels: [feature, agent, switchboard, architecture]
 assignee: agent
 rank: zzzzzzzzzzzzzzzk
 created: '2026-09-21'
 source: Owner, terminal, 2026-09-21, asking whether the two agents are one system yet
-links: {plans: [], commits: [], evidence: [], related: [AGNT, FEJQ, 8YQ9, 3XZV, VZ69, T71W, DR4K, 0Z13, VN69, R9G7], github: null}
+links: {plans: [], commits: [8f5322a9, 1b9571ce, cb866888, ab0834e5, 4951b5b1, 3f3d1dfc,
+    4af1d7cc, 21660474, d9577277, dc083b31, 421361bb, cd75da79, 7a5d7f27, acda4552,
+    5f834ce7], evidence: ['docs/qa_evidence/2026-09-21-card-turns-backend',
+    'docs/qa_evidence/2026-09-21-card-turns-console',
+    'docs/qa_evidence/2026-09-21-card-turns-final'], related: [AGNT, FEJQ, 8YQ9, 3XZV,
+    VZ69, T71W, DR4K, 0Z13, VN69, R9G7, QRC1], github: null}
 ---
 # A card turn is an ordinary console turn: the last surface that still has its own agent
 
@@ -637,3 +642,89 @@ The checks are listed under Verify. Nothing else in the repository is edited.
 9. **The phone is unchanged.** Options › Remote on: a device discusses a card, sees the question
    and the answer land as thread entries and nothing else, and its Stop puts the lamp out
    (`board_cancelled`, #SWPH's bug).
+
+## Execution Summary
+
+Seven steps, in the order the plan set: 1–3 the backend, 4–5 the GUI, 6 the docs, 7 the live
+drive and what it found.
+
+- **Step 1** (`8f5322a9`) — a `TurnSupervisor` can be asked for a card turn: `mode` and `card`
+  ride beside `surface`, `screen` and `readonly`, every queue row and the boundary pair carry
+  them, and `Agent.set_card_turn` opens the `CardScope` that already existed.
+- **Step 2** (`1b9571ce`) — a supervisor per card. A second prompt on a busy card queues instead
+  of being refused; the queue ops, `cancel` and `resume_queue` are addressed by `surface`; every
+  event of a card's turn carries `surface: "card:<ID>"`. `ab0834e5` made the queue row show the
+  owner's words rather than the model's prompt.
+- **Step 3** (`cb866888`) — one tool list. `Agent.tools()`'s `card_scope` branch and
+  `CardScope.tool_specs` are gone, `"card"` has left `SCOPES`, and a Discuss, a Plan and an
+  ordinary console turn are offered byte-identical tools. `4951b5b1` fixed what that uncovered: a
+  console kept a console's board tools when a project arrived mid-conversation.
+- **Step 4** (`21660474`) — the card page stops drawing the turn: the thread view's live tail and
+  its four `append*` methods are gone, and the busy strip keeps #VZ69's wording and its ✕ minus
+  the progress line.
+- **Step 5** (`d9577277`) — `deliverToConsoles` routes by `surface`, and a card console's
+  conversation is keyed `<tab id>/card:<ID>`.
+- **Step 6** (`cd75da79`) — the protocol and the architecture docs say a card turn is an ordinary
+  console turn.
+- **Step 7** — the live drives. `dc083b31` is what the first one found (the page was still
+  refusing the second prompt; the card's console had no size); `7a5d7f27` and `acda4552` are what
+  the second one needed, below.
+
+**The final pass**, which is the one step allowed to open `src/Pane.h`:
+
+- **The §12 queue strip reads the worker's queue** (`7a5d7f27`). One rule for every pane: the
+  worker's list for this console's surface is the truth, and the pane's own pending items are the
+  optimistic overlay in front of it. A queued card prompt has a row with the owner's words; ↑
+  selects it, Ctrl+↑↓ moves it, Shift+Delete removes it and Enter on an edited one withdraws it
+  and asks again — every op naming the card's own queue. **Esc** does too, which it did not: an
+  untagged `cancel` from a card console stopped the *tab's* turn.
+- **One console, several cards** (`7a5d7f27`). The card page still keeps one console — one vterm
+  per open card is the cost Risk 4 named — and hands its transcript over with the card:
+  `ConsoleHandle::clearTranscript` banks what is on screen under the surface it was printed for,
+  resets the emulator, the scrollback and the fold ledger, and draws that card's back.
+- **A use-after-free at quit** (`7a5d7f27`). `m_consoles` owns the console contexts and is an
+  ordinary member, so it was destroyed before `~QWidget` deleted the console panes: on a SIGTERM
+  quit `~Pane` wrote into a freed wrapper. This is the segfault the steps 4-5 drive saw once and
+  could not reproduce.
+- **What the second drive found** (`acda4552`): the "▸ running" line said nothing on a card, and
+  the transcript coming back said "this shell is new" on a surface with no shell.
+
+## Tests
+
+- `tests/test_queue.py`, `test_board_turns.py`, `test_board_protocol.py`, `test_board_tools.py`,
+  `test_agent_context.py`, `test_agent.py`, `test_board_chat.py`, `test_app_tools.py`,
+  `test_roles.py` — **718 tests, green** on a clean `git archive` export (steps 1-3).
+- `ctest -R '^consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit$'`
+  — green. `consolemode` gained four cases for the strip (a `queue_changed` for this surface
+  draws rows the console never submitted and skips another console's; a terminal pane draws none
+  of them; remove and move carry the surface, and so does Esc; a line this console sent comes
+  back as an editable row). `board` gained the card-to-card transcript hand-over.
+- `boardexecute` fails 3 of 5 exactly as #48S3's thread records, unchanged by any commit here.
+
+## QA checklist
+
+The evidence is three drives: `docs/qa_evidence/2026-09-21-card-turns-backend` (the wire, end to
+end), `-console` (the GUI, steps 4-5) and `-final` (the queue strip, the transcript hand-over and
+the restart). What a verifier should check by hand, because none of the three could:
+
+1. **A real provider.** Every drive above runs against a loopback stub. Discuss and Plan a card
+   on a real model: the reasoning fold, the tool rows and the answer in the card's console, the
+   thread entry with `mode=`/`model=`/`turn=`, and a Plan's `write_file` refused in the sentence
+   that names Execute.
+2. **The phone's `board_ask`.** A paired device discusses a card while the card page is open
+   here: its question and the answer land as thread entries, its prompt appears as a row in
+   **this** console's §12 strip with the owner's words (the row is drawn from the worker's queue,
+   whoever filled it), and the "▸ running" line names it.
+3. **A long queue under load.** Five or six prompts queued on one card while another card works:
+   the rows stay in delivery order, Ctrl+↑↓ reorders them through `queue_move`, Shift+Delete
+   removes the right one, Clear empties that card's queue and not the tab's, and the turns run in
+   the order the strip showed. ↑ is #QRC1's since `3ebf3673`: on the head row it takes the prompt
+   back as an unsent draft rather than selecting it, and a row this console did not send keeps
+   the selection instead, because its text is the worker's 120-character preview.
+4. **Two tabs on one card.** Open the same card in two tabs and ask in both: two conversations
+   (`<tab id>/card:<ID>`), two queues, and neither strip shows the other's rows.
+5. **An open question for the owner, not a check.** A device's Stop sends `board_cancel`, which
+   cancels the card's supervisor — and cancelling *pauses* that card's queue. A device has no
+   `resume_queue` (§17.1), so anything queued behind a turn a phone stopped waits until somebody
+   resumes it from the desk. Should a device's Stop clear the card's queue instead of pausing it?
+   That is a product decision and nothing here assumes an answer.
