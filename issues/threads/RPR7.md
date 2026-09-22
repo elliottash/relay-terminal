@@ -24,3 +24,16 @@ Read-only attempt to inspect the live upstream mapping failed: ssh could not res
 <!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
 ### Codex · 2026-09-22 01:48
 Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Renamed this existing card and its thread; retained its old ID in aliases. Earlier thread entries remain byte-for-byte intact. Updated current card cross-references and documentation; historical evidence paths and source comments retain the original codes. No change to status, ownership, task completion or outstanding decisions.
+
+<!-- relay:entry 20260922T015132Z-ds author=codex kind=decision -->
+### Codex · 2026-09-22 01:51
+> 1 pro - per person
+> 2 i think there should be two versions actually.
+>
+> relay pro could be glm 5.3 (high / main), glm 5.3 flash (flash)
+>
+> relay ultra could be astra or fable -- lets defer that
+
+Implementation: per-person revocable codes; Pro high/main use GLM 5.3 and flash uses GLM 5.3 Flash. Ultra is explicitly deferred. Lite retains Relay Free (the prior recommendation; no Pro lite was requested). Keep current quota/spend ceilings unless configured otherwise; no billing or production deployment in this change.
+
+Resumed execution under the existing claim.

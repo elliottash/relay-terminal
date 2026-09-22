@@ -22,3 +22,11 @@ Confirmed the transport allowlist: thinking, reasoning, reasoning_effort, temper
 <!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
 ### Codex · 2026-09-22 01:48
 Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated this card’s current references to the renamed cards; prior thread entries are unchanged.
+
+<!-- relay:entry 20260922T015132Z-ds author=codex kind=decision -->
+### Codex · 2026-09-22 01:51
+> add the extra json
+
+Implement the optional JSON-object field on custom providers, preserving the transport's existing supported-parameter contract.
+
+Resumed execution under the existing claim.

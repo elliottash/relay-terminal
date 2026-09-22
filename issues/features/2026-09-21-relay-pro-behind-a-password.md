@@ -2,10 +2,9 @@
 id: RPR7
 aliases: [RLP7]
 type: work
-status: discussing
+status: executing
 labels: [feature, models, gateway]
 assignee: codex
-waiting_on: owner
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21'
@@ -15,6 +14,16 @@ links: {plans: [], commits: [], evidence: [], related: [MDP1], github: null}
 
 ## Issue
 remind me what are the high / main / flash models in relay free? i want to also plan a relay pro that i can enable with a password
+
+## Decisions
+> 1 pro - per person
+> 2 i think there should be two versions actually.
+>
+> relay pro could be glm 5.3 (high / main), glm 5.3 flash (flash)
+>
+> relay ultra could be astra or fable -- lets defer that
+
+Implementation: per-person revocable codes; Pro high/main use GLM 5.3 and flash uses GLM 5.3 Flash. Ultra is explicitly deferred. Lite retains Relay Free (the prior recommendation; no Pro lite was requested). Keep current quota/spend ceilings unless configured otherwise; no billing or production deployment in this change.
 
 ## Discussion points
 Relay Free is three abstract models (`relay-main`, `relay-flash`, `relay-lite`) that the gateway on
@@ -45,13 +54,13 @@ The access code must be stored through the keyring and omitted from logs and pub
 abstract model IDs rather than duplicate that mapping.
 
 ## Done means
-Pending the owner's product decisions: a valid code enables the selected Pro models; missing,
+A valid per-person code enables Pro high/main (GLM 5.3) and flash (GLM 5.3 Flash); missing,
 invalid or revoked codes cannot call Pro, including through a modified client. Free and BYOK
 continue working. The provider row reflects the gateway's entitlement result, and the selected
 lite policy is tested. No upstream credentials appear in the desktop or evidence.
 
 ## Plan
-**Goal:** password-enabled hosted Pro, scoped by the owner's answers above.
+**Goal:** per-person code access to GLM 5.3 high/main and GLM 5.3 Flash; Ultra deferred, lite remains Free.
 **Findings:** gateway auth/role routing is in `gateway/server.py`, configuration in
 `gateway/config.py`, installation/token storage in `gateway/store.py`, hosted desktop access in
 `backend/relay_core/hosted.py` and `provider.py`, provider UI in `src/RelayWindow.h`.
@@ -64,7 +73,7 @@ lite policy is tested. No upstream credentials appear in the desktop or evidence
 4. Integrate the chosen Pro defaults/levels with `presets.py`, `model-ranking.md` and role resolution.
 5. Exercise valid/invalid/revoked access, Free regression, quota and streaming paths against a
    local fake upstream, then drive provider activation/deactivation in isolated Relay.
-**Risks:** exact upstreams, quotas and rollout remain unspecified. Live deployment is separate
+**Risks:** operator credentials/prices and production rollout are deployment configuration; current quota and spend ceilings remain. Live deployment is separate
 from preparing and verifying code; no production configuration has been changed.
 **Verify:** targeted gateway/hosted/provider tests and live isolated GUI evidence, including a
 forged Pro request without entitlement and revocation of an already-issued session token.

@@ -1,10 +1,9 @@
 ---
 id: XJSN
 type: work
-status: discussing
+status: executing
 labels: [feature, models]
 assignee: codex
-waiting_on: owner
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21 — left over from #MDP1 t:a15'
@@ -19,6 +18,11 @@ custom provider stores a name, base URL, model ids and a reasoning style
 (`backend/relay_core/customproviders.py`) and carries no request body, so the field had nowhere to
 go. Nothing regressed for a built-in provider: `provider/extra` is still written by
 `configurePreset` from the worker's own preset row.
+
+## Decisions
+> add the extra json
+
+Implement the optional JSON-object field on custom providers, preserving the transport's existing supported-parameter contract.
 
 ## Discussion points
 Whether anyone needs it decides the work. If custom endpoints must carry a body, the field belongs
@@ -36,13 +40,13 @@ letting a successfully saved provider fail at its first configure.
 The add/edit form lives in `RelayWindow::modelsSection` (`askForCustom`).
 
 ## Done means
-If the owner chooses to retain the field: a custom provider can save, edit and clear an optional
+A custom provider can save, edit and clear an optional
 JSON object; malformed JSON or a non-object stays in the form with an actionable error. The object
 survives restart and asynchronous model discovery and reaches that provider's outgoing requests.
 Existing custom providers without the field and built-in providers behave as before.
 
 ## Plan
-**Goal:** restore optional extra request JSON on the custom-provider path, if retained.
+**Goal:** restore optional extra request JSON on the custom-provider path.
 **Findings:** `backend/relay_core/customproviders.py`, `src/RelayWindow.h` (`askForCustom`),
 `backend/relay_core/session_protocol.py`, `tests/test_customproviders.py`, protocol §28.6.
 **Steps:**
