@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/tmp/mdl1-startup-regression/drive.py", line 135, in <module>
+    run_case('first-prompt','none',0,'build')
+  File "/tmp/mdl1-startup-regression/drive.py", line 121, in run_case
+    assert configs[0]['request']['guest'].get('model')=='gpt-6-astra', configs
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: configure guest.model missing (full fixture request omitted).

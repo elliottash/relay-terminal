@@ -182,7 +182,7 @@ Independent verification 2026-09-22; item numbers preserve the original 19-item 
 Evidence and limits: `docs/qa_evidence/2026-09-22-verify-MDL1/README.md`.
 Final decisions supersede the old modal/mode-page expectations.
 
-- [ ] 1. PARTIAL: new pane follows main rank 1 and level; deferred guest UI and first-prompt protocol fixture pass. A real authenticated Codex turn now passes, but executes gpt-5.6-sol despite seeded gpt-6-astra; guest rank-1 selection remains unresolved.
+- [x] 1. New pane follows main rank 1 and level, including real authenticated Codex gpt-6-astra/high. Fixed missing guest.model/effort handoff in d7c27b95; deferred UI, wire regression and real first turn pass (rank1-fixed evidence).
 - [x] 2. A per-pane pick leaves the next pane on main rank 1.
 - [x] 3. Ctrl+Shift+M → priorities → Alt+Up/Down reorders main; the next pane follows. Live defect fixed in 85d0dd0f.
 - [x] 4. `/swap` from a third model goes to rank 1, retains its explanation, then returns.
@@ -203,10 +203,11 @@ Final decisions supersede the old modal/mode-page expectations.
 - [x] 19. Edit an isolated ranking copy, restart worker, fill from defaults: lists follow the edit. Worker restart is required by the file's documented contract.
 
 ## Verdict
-2026-09-22, Codex: **17 pass, 2 partial/blocked; not a full QA pass.**
-The two remaining checks are the real guest rank-1 discrepancy and live paired-phone
-presentation. The authenticated Codex startup/turn now passes (real-guest evidence), but uses
-gpt-5.6-sol despite seeded gpt-6-astra. The JS tests do not prove live phone presentation. Found and fixed Alt+Up/Down being intercepted by window pane navigation; only that hunk
+2026-09-22, Codex: **18 pass, 1 partial/blocked; not a full QA pass.**
+The remaining check is live paired-phone presentation. Fixed ranked guest startup in
+`d7c27b95ead2fe6c7b332a2a7627c8bac104e0ac`: real signed-in Codex now displays and executes
+gpt-6-astra/high on its first prompt; catalog, screenshots, wire regression and logs are in
+rank1-fixed evidence. The JS tests do not prove live phone presentation. Found and fixed Alt+Up/Down being intercepted by window pane navigation; only that hunk
 landed in `85d0dd0f7dea0023dceaea9b6b8d4d858156805c`, after wrapper and exact-tree builds,
 targeted modelpicker/modelspane tests, and a successful live reorder/new-pane regression.
 

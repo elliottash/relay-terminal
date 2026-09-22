@@ -1,0 +1,5 @@
+Shared wrapper-built binary:
+first-prompt: PASS
+
+Exact landed-tree binary:
+first-prompt: PASS

@@ -1,0 +1,7 @@
+2026-09-22T01:35:10.912Z INFO relay.worker pane=[redacted] worker_start version=0.1.0 pid=[redacted] level=info
+2026-09-22T01:35:30.759Z INFO relay.guest_harness pane=[redacted] guest_harness_started guest=codex model=gpt-6-astra resumed=False fork=False permissions=bypass effort=high
+2026-09-22T01:35:30.765Z INFO relay.worker pane=[redacted] configured model=gpt-6-astra host=codex role=main skills=2 agents=3 stall_s=60 session=[redacted]
+2026-09-22T01:35:30.806Z INFO relay.agent pane=[redacted] turn_start session=[redacted] turn=[redacted] model=gpt-6-astra host=codex mode=build effort=high prompt_chars=59 messages=1 stall_s=60 max_steps=500
+2026-09-22T01:35:39.455Z INFO relay.agent pane=[redacted] turn_end session=[redacted] turn=[redacted] outcome=done ms=8649 thinking_ms=0 tools=0 retries=0 open_items=0
+2026-09-22T01:36:05.583Z INFO relay.worker pane=[redacted] worker_stop pid=[redacted]
+2026-09-22T01:36:05.664Z INFO relay.guest_harness pane=[redacted] guest_harness_closed guest=codex

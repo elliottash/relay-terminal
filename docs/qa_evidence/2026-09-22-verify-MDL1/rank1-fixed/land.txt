@@ -1,0 +1,20 @@
+warning: session 1cxd-b (contact: Opus subagent, #1CXD areas B1+B2) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session enter-resumes (contact: #7JD1 Enter-resumes subagent) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session fable-box2 (contact: Claude Fable subagent: #MDL1 t:a8, the model box as classes) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session pnav (no --contact given; you cannot reach it) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session share-by-folder (no --contact given; you cannot reach it) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session share-neutral (no --contact given; you cannot reach it) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session share-neutral-finish (no --contact given; you cannot reach it) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session windows-startup (no --contact given; you cannot reach it) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+warning: session windows-utf8 (no --contact given; you cannot reach it) has also claimed src/Pane.h — hunks that appeared after it began are contested and will be held for review
+onto main (tip c4c1c50aa571), 2 path(s), digest 6ace3d54c91e:
+  docs/qa_evidence/2026-09-22-verify-MDL1/startup/drive.py: 1 hunk; +3 -0; snapshot 2m old
+  src/Pane.h: 2 hunks; +5 -0; snapshot 2m old; 2 CONTESTED; also claimed by session fable-box2 (contact: Claude Fable subagent: #MDL1 t:a8, the model box as classes), session share-by-folder (no --contact given; you cannot reach it), session share-neutral (no --contact given; you cannot reach it), session windows-utf8 (no --contact given; you cannot reach it), session windows-startup (no --contact given; you cannot reach it), session share-neutral-finish (no --contact given; you cannot reach it), session enter-resumes (contact: #7JD1 Enter-resumes subagent), session 1cxd-b (contact: Opus subagent, #1CXD areas B1+B2), session pnav (no --contact given; you cannot reach it)
+verify: tree 79b37ead228f materialised in /tmp/claude-1000/land/mdl1guestfix/verify/src (7609 file(s) refreshed)
+verify: cmake -S /tmp/claude-1000/land/mdl1guestfix/verify/src -B /tmp/claude-1000/land/mdl1guestfix/verify/build
+verify: cmake --build /tmp/claude-1000/land/mdl1guestfix/verify/build --parallel 8 --target relay
+verify: the exact tree builds
+landed d7c27b95ead2fe6c7b332a2a7627c8bac104e0ac on main
+  docs/qa_evidence/2026-09-22-verify-MDL1/startup/drive.py
+  src/Pane.h
+d7c27b95ead2fe6c7b332a2a7627c8bac104e0ac

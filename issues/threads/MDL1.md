@@ -904,3 +904,11 @@ Parent handoff: verification evidence landed in abbd41efaac21a0cdefc64f29ef0d83a
 <!-- relay:entry 20260922T013039Z-zr author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:30
 Real authenticated Codex startup/turn verified through the isolated live Relay UI: MDL1_OK, 4219ms, zero tools. No owner setup needed. Evidence: docs/qa_evidence/2026-09-22-verify-MDL1/real-guest/. The displayed/executed model is gpt-5.6-sol/low despite seeded gpt-6-astra/low; item 1 therefore remains partial pending catalog/fallback versus selection investigation. Live phone remains blocked; total stays 17 pass/2 partial. Earlier hosted fallback attempt is disclosed, not counted as guest proof. Disposable auth copy removed, no secrets committed; front matter unchanged.
+
+<!-- relay:entry 20260922T013454Z-zg author=codex kind=progress -->
+### Codex · 2026-09-22 01:34
+Follow-up root cause confirmed: real codex debug models includes gpt-6-astra and high. GUI logged ranked gpt-6-astra through configure_sent, but start_provider reads guest.model, which the deferred startup left empty. Added a first-prompt wire assertion that fails on the pre-fix binary. Scoped five-line Pane.h fix stages the ranked model/effort in the guest block and shows the pending model before startup. Wrapper build running, then real authenticated turn and exact-tree landing build; no RelayWindow edits.
+
+<!-- relay:entry 20260922T013758Z-zh author=codex kind=evidence -->
+### Codex · 2026-09-22 01:37
+Rank-one discrepancy resolved: real catalog includes gpt-6-astra/high; this was a missing guest.model/effort handoff, not an invalid fixture. Five-line scoped fix landed in d7c27b95ead2fe6c7b332a2a7627c8bac104e0ac after exact-tree build. Updated wire regression fails before and passes after. Fresh authenticated real Relay/Codex turn displays and executes gpt-6-astra/high, returns MDL1_OK in 8649ms, zero tools. Wrapper build and 3 targeted CTests pass. Evidence: docs/qa_evidence/2026-09-22-verify-MDL1/rank1-fixed/. Overall now 18 pass, one partial/blocked: live phone presentation. Front matter preserved; no RelayWindow or other-card edits. Auth copy removed.

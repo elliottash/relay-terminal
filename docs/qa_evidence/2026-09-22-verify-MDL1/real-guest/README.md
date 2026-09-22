@@ -1,5 +1,7 @@
 # Real authenticated guest follow-up
 
+**Historical pre-fix evidence. Resolved by d7c27b95; see [rank1-fixed](../rank1-fixed/README.md). Item 1 now passes.**
+
 Live shared `build/relay`, isolated Xvfb/HOME/config/data/runtime; installed real Codex, existing signed-in auth copied only into disposable HOME and removed on exit. No credentials copied here. No agent was delegated. Prompt: `Reply with exactly MDL1_OK. Do not use tools or read files.`
 
 `before-first-prompt.png` shows gpt-5.6-sol/low. `worker-sanitized.log` shows no configure before the prompt, then guest_harness_started guest=codex, configured host=codex model=gpt-5.6-sol, one successful turn in 4219 ms, tools=0. `after-15s.png` shows MDL1_OK. The real authenticated guest startup/turn works without additional owner setup.
