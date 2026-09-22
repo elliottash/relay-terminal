@@ -1,0 +1,216 @@
+{
+  "binary": "/tmp/claude-1000/land/driven/verify/build/relay",
+  "sha256": "637ec11d705dce90a6c6598e5ab2c1c31b3c2cb046f72181ea99a290bd8f9bae",
+  "data": "/tmp/claude-1000/land/driven/verify/src",
+  "root": "/tmp/v74y5-uf8jdy6h",
+  "display": ":300",
+  "steps": [
+    {
+      "op": "action",
+      "name": "board.open",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "type": "app_command_result"
+      },
+      "exit": 0
+    },
+    {
+      "op": "open",
+      "name": "T9QA",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "type": "app_command_result"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "sections",
+      "text": "",
+      "response": {
+        "error": "card_not_open",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "sections",
+      "text": "",
+      "response": {
+        "card": "T9QA",
+        "ok": true,
+        "text": "Issue\nFresh named-control marker 74Y5.\nDone means\nRead this exact marker by name.\nTests\ntests/missing_test.py\n\nTHREAD\nNo replies yet. Enter in the box below discusses the card with the agent, Ctrl+Enter has it Plan the work, and Ctrl+Shift+Enter leaves a comment for whoever picks it up."
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "nonexistent",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "type",
+      "name": "composer",
+      "text": "must not run",
+      "response": {
+        "error": "not_a_named_box",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "type",
+      "name": "boardFilter",
+      "text": "hidden",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "press",
+      "name": "boardTestsCheck",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardTestsFindings",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardTestsFindings",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<span style=\"color:#a2968c\">Check \u00b7 1 not applicable \u00b7 1 finding</span>\n<a href=\"tests/missing_test.py\" style=\"color:#a2968c;text-decoration:none\">not-applicable \u00b7 unittest:tests.missing_test</a> \u00b7 tests/missing_test.py is not in the project any more\n<a href=\"tests/missing_test.py\" style=\"color:#a2968c;text-decoration:none\">notice \u00b7 unittest:tests.missing_test</a> \u00b7 tests/missing_test.py is not in the project any more"
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "boardCardClose",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardFilter",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": ""
+      },
+      "exit": 0
+    },
+    {
+      "op": "type",
+      "name": "boardFilter",
+      "text": "T9QA",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardFilter",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "T9QA"
+      },
+      "exit": 0
+    },
+    {
+      "op": "type",
+      "name": "boardFilter",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "open",
+      "name": "T9QA",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "type": "app_command_result"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "sections",
+      "text": "",
+      "response": {
+        "card": "T9QA",
+        "ok": true,
+        "text": "Issue\nFresh named-control marker 74Y5.\nDone means\nRead this exact marker by name.\nTests\ntests/missing_test.py\nCheck 2026-09-21 21:39\nnot-applicable \u00b7 unittest:tests.missing_test \u2014 tests/missing_test.py is not in the project any more\nnotice \u00b7 unittest:tests.missing_test \u2014 tests/missing_test.py is not in the project any more history: thread\n\nTHREAD \u00b7 1\n\u2726 agent  evidence \u00b7 just now\nCheck \u00b7 1 not-applicable; 1 advisory finding(s). The status is under ## Tests; earlier checks are in this thread."
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "notice",
+      "text": "",
+      "response": {
+        "ok": true,
+        "text": ""
+      },
+      "exit": 0
+    },
+    {
+      "op": "panes",
+      "name": "",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "panes": [
+          {
+            "busy": false,
+            "cwd": "/tmp/v74y5-uf8jdy6h",
+            "focused": true,
+            "id": "d457638f-1072-4280-a810-61d068592771",
+            "mode": "auto",
+            "model": "guest:claude",
+            "tab": "ta47e12521615",
+            "title": "v74y5-uf8jdy6h"
+          }
+        ],
+        "type": "app_command_result"
+      },
+      "exit": 0
+    }
+  ]
+}
