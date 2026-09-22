@@ -39,7 +39,7 @@ jobs:
           python-version: '3.13'
       - name: Restore pinned Qt
         id: qt-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/Qt/6.8.3
           key: qt-6.8.3-macos-${{ matrix.arch }}-clang64-v1
@@ -48,6 +48,12 @@ jobs:
       - name: Install pinned Qt
         if: steps.qt-cache.outputs.cache-hit != 'true'
         run: python -m aqt install-qt mac desktop 6.8.3 clang_64 -O "$RUNNER_TEMP/Qt"
+      - name: Save installed Qt before testing
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/Qt/6.8.3
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
       - name: Expose Qt tools
         run: echo "$RUNNER_TEMP/Qt/6.8.3/macos/bin" >> "$GITHUB_PATH"
       - name: Native Python storage, Keychain and worker
