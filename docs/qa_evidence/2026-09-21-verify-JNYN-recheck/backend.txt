@@ -1,0 +1,3 @@
+Retry after failure: [{"root": "/tmp/tmpfnpj9glf/issues", "event": "tryit", "card_id": "RGHT", "state": "finished", "outcome": "done", "out": "docs/qa_evidence/2026-09-21-tryit-RGHT", "run_id": "t-e2fa0e", "section_written": true, "staging_failed": false, "reusing": false, "message": "Staged it; one question on the card.", "id": "k1"}]
+Existing Human QA after try_answer: '1. Existing owner decision?\n   Answer: Keep the old layout.\n\n<!-- relay:tryit-human start -->\n1. Was it clear?\n   Answer: Verifier synthetic answer.\n\nGenerated from `## Try it` and the answer on the thread. Press Try it again, or answer again, and it is rewritten.\n<!-- relay:tryit-human end -->\n'
+Prior owner decision preserved: True
