@@ -15,6 +15,7 @@ Validation:
 - `ctest --test-dir build -R '^consolemode$' --output-on-failure`: passed (1/1).
 - `XDG_CONFIG_HOME=/tmp/relay-queue-fifo-config QT_QPA_PLATFORM=xcb xvfb-run -a build/relay-consolemode-tests`: passed; isolated settings and a real X11 Qt event loop.
 - Board check: existing unrelated errors/warnings; none refer to this card/thread.
+- Exact committed tree `12478185`: `relay-consolemode-tests` built through the land.py gate, and `ctest --test-dir /tmp/claude-1000/land/queue-fifo/verify/build -R '^consolemode$' --output-on-failure` passed (1/1).
 
 The live tests use a stub worker and inspect outgoing messages; they do not run a
 live model provider. Separate verification remains pending.

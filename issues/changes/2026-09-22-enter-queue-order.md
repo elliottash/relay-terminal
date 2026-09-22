@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mqfif
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-enter-queue-order/], related: [7JD1], github: null}
+links: {plans: [], commits: [124781856813f371cd066034ef4ad7bb90103be3], evidence: [docs/qa_evidence/2026-09-22-enter-queue-order/], related: [7JD1], github: null}
 ---
 # Repeated Enter sends the head of the queue
 
@@ -29,3 +29,4 @@ Fix the empty-Enter selector in src/Pane.h and keep explicit remote steering tar
 
 ## Execution Summary
 Empty Enter promotes the FIFO head and then escalates that same steer before considering another queued prompt. Explicit remote steering remains id-targeted. Updated the queue hint. Composer-key regression passes through CTest and under Xvfb with isolated settings. tests_check has no findings; evidence records this run (the board's historical test store is older).
+Landed as 12478185. The exact commit tree built relay-consolemode-tests and its consolemode CTest passed (1/1), independent of other sessions' working-tree edits.
