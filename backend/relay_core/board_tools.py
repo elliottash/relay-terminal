@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Switchboard agent tools: the six `board_*` tools and their guardrails (phase 1).
 
-Design: `docs/SWITCHBOARD-DESIGN.md` sections 6.1-6.3 and the owner decisions in 12
+Design: `docs/BOARD-DESIGN.md` sections 6.1-6.3 and the owner decisions in 12
 (especially 12.3: owner text *may* be rewritten, but every change is logged in the card's
 thread holding the old and the new text, so any rewrite can be reverted).
 
@@ -602,7 +602,7 @@ def unanswered_human_qa(body: str) -> list[str]:
     """The numbered `## Human QA` questions with no answer under them (#WC3E).
 
     The answered form is one line, and it is the *only* one: an indented line under the question
-    beginning `Answer:` (docs/SWITCHBOARD-FORMAT.md 2.7).  Indented, because that is what ties the
+    beginning `Answer:` (docs/BOARD-FORMAT.md 2.7).  Indented, because that is what ties the
     answer to its question in a list a person edits by hand; one spelling, because a rule that
     closes cards has to be checkable by reading the file.  Everything else in the section -- the
     brief, the setup, the observations -- is prose, and prose gates nothing.
@@ -929,7 +929,7 @@ CHAT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_upda
 #: only while a keybinding catalogue has been sent.
 CHAT_APP_TOOLS = ("set_keybinding",)
 
-#: Where a Plan turn writes. SWITCHBOARD-DESIGN 12.4: plan mode writes the plan onto the card.
+#: Where a Plan turn writes. BOARD-DESIGN 12.4: plan mode writes the plan onto the card.
 PLAN_HEADING = "Plan"
 
 #: The expectations, written before the work (#WC3E, 2026-09-21): what the card is for, and how
@@ -941,7 +941,7 @@ DONE_MEANS_HEADING = "Done means"
 #: The section a person's judgement lives in (#7BM4): numbered questions for a human reviewer.
 #: A question with no answer under it is unsettled, and an agent may not close the card over it
 #: (`_human_qa_gate`).  An answer is an indented line beginning `Answer:` under the question;
-#: docs/SWITCHBOARD-FORMAT.md 2.7 is the normative form.
+#: docs/BOARD-FORMAT.md 2.7 is the normative form.
 HUMAN_QA_HEADING = "Human QA"
 
 MAX_SEARCH_MATCHES = 80
@@ -3058,7 +3058,7 @@ class BoardTools:
         Switchboard's own Done column is unaffected, which is what "waits for the person" means.
 
         A question is a numbered line in `## Human QA`; it is answered by an indented line under
-        it beginning `Answer:` (docs/SWITCHBOARD-FORMAT.md 2.7).  Prose with no numbered question
+        it beginning `Answer:` (docs/BOARD-FORMAT.md 2.7).  Prose with no numbered question
         gates nothing -- the section is a brief as often as it is a question list.
         """
         if status != "done" or self.context.actor == OWNER_ACTOR:

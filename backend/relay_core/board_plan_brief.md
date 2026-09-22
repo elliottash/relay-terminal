@@ -1,6 +1,6 @@
 <!-- Board Plan brief v3 (#WC3E; v2 #K3TY, protocol 19.10; v1 #XS6Q). Sent at the head of
      every Plan turn on a card, after the card itself on the first one. `{card}` is the card's id
-     and `{plan_heading}` the section it writes (`Plan`; SWITCHBOARD-DESIGN 12.4: plan mode writes
+     and `{plan_heading}` the section it writes (`Plan`; BOARD-DESIGN 12.4: plan mode writes
      the plan onto the card). v3 adds `## Done means`, the other section a Plan turn may write. -->
 
 This is a **Plan** turn on #{card}: write the plan for this card, or revise the one it has, into

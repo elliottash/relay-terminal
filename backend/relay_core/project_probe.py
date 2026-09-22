@@ -638,7 +638,7 @@ def _read_checklist(project: Path, path: Path) -> list[TrackerItem]:
     * A **top-level unchecked box** becomes one item; the boxes nested under it become its
       `## Tasks`, whatever their own marks, because they describe that one piece of work.
     * A **checked** top-level box is ignored — it is already done and importing it would fill
-      the board with history nobody asked for (`docs/SWITCHBOARD-DESIGN.md` §7).
+      the board with history nobody asked for (`docs/BOARD-DESIGN.md` §7).
     * A **heading whose section has no boxes at all** becomes one item carrying that prose,
       which is how a hand-kept `IDEAS.md` of paragraphs comes across.
 

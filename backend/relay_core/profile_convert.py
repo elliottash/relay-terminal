@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Profiles in, a table out — the arithmetic behind `scripts/relay-profile` (card #7BM4).
 
-Every profiling product shows a table before the flame graph (`docs/SWITCHBOARD-TOOLING-RESEARCH.md`
+Every profiling product shows a table before the flame graph (`docs/BOARD-TOOLING-RESEARCH.md`
 section 4.3: Sentry's Slowest Functions, Pyroscope's Top table, speedscope's own Sandwich), and
 Relay has no QtWebEngine, so the table is the view that stays in the app and the flame graph is
 the one that leaves it.  This module is the part of that which is arithmetic rather than shell:

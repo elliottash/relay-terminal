@@ -399,7 +399,7 @@ def apply(board, proposals: Sequence[Proposal], *, tab: str | None = None,
     column, a thread, an undo record and a `board_changed` event — exactly as if the user had
     typed it into the Switchboard pane.  **Nothing the import read is touched**: a `TODO.md`,
     a `tasks.json` and a `backlog/` are byte-identical afterwards, which is the owner's rule
-    that converting must never mutate the source (`docs/SWITCHBOARD-DESIGN.md` §7).
+    that converting must never mutate the source (`docs/BOARD-DESIGN.md` §7).
 
     Three passes, because a card cannot be blocked by one that does not exist yet:
 

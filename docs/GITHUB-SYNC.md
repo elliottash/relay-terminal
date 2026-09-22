@@ -1,8 +1,8 @@
 # The Board ↔ GitHub Issues, two-way
 
 Card [`#GDQN`](../issues/features/2026-09-17-github-issues-sync.md). Design context:
-[`SWITCHBOARD-DESIGN.md`](SWITCHBOARD-DESIGN.md) §10 phase 3, format:
-[`SWITCHBOARD-FORMAT.md`](SWITCHBOARD-FORMAT.md).
+[`BOARD-DESIGN.md`](BOARD-DESIGN.md) §10 phase 3, format:
+[`BOARD-FORMAT.md`](BOARD-FORMAT.md).
 
 Implementation: `backend/relay_core/forge_sync.py` (the provider-neutral engine) and
 `backend/relay_core/forge_github.py` (the GitHub provider). Tests: `tests/test_forge_sync.py`,

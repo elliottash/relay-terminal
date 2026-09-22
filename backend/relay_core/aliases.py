@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Aliases: saved terminal commands and prompts, Warp-workflow style (issue G8DK).
 
-One Markdown file per alias, in the Switchboard format (`docs/SWITCHBOARD-FORMAT.md`): YAML front
+One Markdown file per alias, in the Switchboard format (`docs/BOARD-FORMAT.md`): YAML front
 matter with `type: alias`, then the body.  Global aliases live in the global Switchboard
 (`$XDG_CONFIG_HOME/relay/switchboard/aliases/`), local ones in the repository Switchboard
 (`<repo>/.switchboard/aliases/`, `<repo>/switchboard/aliases/`, `<repo>/issues/aliases/`, or

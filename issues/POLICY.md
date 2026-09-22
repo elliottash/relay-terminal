@@ -193,7 +193,7 @@ the detail; do not repeat it in the terminal.
 
 Everything above names Relay's `board_*` tools. When a tool is unavailable — including
 create/claim outside the five-tool bridge — reach the board by editing files. Here is each call
-as a file edit. The bytes are specified in `docs/SWITCHBOARD-FORMAT.md`; invent no field and no
+as a file edit. The bytes are specified in `docs/BOARD-FORMAT.md`; invent no field and no
 heading that is not there.
 
 ### Read the board — `board_list`, `board_read`, `board_card_get`

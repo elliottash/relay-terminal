@@ -5,7 +5,7 @@
 // `## Tasks` checklist, the links and the thread with a reply box. No tabs (owner decision,
 // 2026-09-18): "bug" and "feature" are labels, done is a status, and the filter box is the way
 // to slice the list.
-// Design: docs/SWITCHBOARD-DESIGN.md sections 4 and 4.6. Protocol: docs/AGENT-SESSIONS-PROTOCOL.md 19.
+// Design: docs/BOARD-DESIGN.md sections 4 and 4.6. Protocol: docs/AGENT-SESSIONS-PROTOCOL.md 19.
 //
 // The view holds no process: it hands JSON commands to `onSend` and is fed events through
 // `handleEvent`, so it can be driven by a per-window Switchboard worker or, in tests, by hand.

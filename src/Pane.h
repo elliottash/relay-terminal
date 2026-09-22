@@ -11543,7 +11543,7 @@ private:
             m_turnText += text;
             turnHeader(); printInline(text, Ink::Agent);
         } else if (type == QStringLiteral("tool_output")) {
-            // Collapsed by default (SWITCHBOARD-DESIGN.md 4.3): a tool's output is counted, not
+            // Collapsed by default (BOARD-DESIGN.md 4.3): a tool's output is counted, not
             // poured into the pane. Card #X5D1 read an earlier owner decision as "print all of it";
             // the owner corrected that on 2026-09-17. What the count is for changed with #TK9C: the
             // call's own line carries it live, and its fold holds the text. Agent options › Show

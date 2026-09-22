@@ -2719,11 +2719,11 @@ than that is one `conversation_summarize` away.
 
 ## 19. Board: cards, threads and the Board agent (v1.8, 2026-09-21)
 
-Phase 1 of `docs/SWITCHBOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
+Phase 1 of `docs/BOARD-DESIGN.md` (sections 4–6, 9.1 and the owner decisions in 12). The
 Board **is** a folder in the project: `board/` on a board created from 2026-09-21 on,
 `.switchboard/` or `switchboard/` on one filed between 2026-09-18 and then, `issues/` on one filed
 before that (19.12). `backend/relay_core/board.py` owns the bytes
-(format: `docs/SWITCHBOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
+(format: `docs/BOARD-FORMAT.md`), `backend/relay_core/board_tools.py` owns the six agent
 tools and their guardrails, `backend/relay_core/board_protocol.py` owns the messages below, and
 `backend/relay_core/board_policy.md` is the versioned system-prompt block. The GUI never parses a
 card: it asks for rows and detail and sends back intents. Tests: `tests/test_board_tools.py`,
@@ -2926,7 +2926,7 @@ is lost.
 `board_not_found`.
 
 The pane is one list of every open card, sectioned by status, with no tab row (owner decision,
-2026-09-18; `docs/SWITCHBOARD-DESIGN.md` 4.6). `config.tabs` is therefore no longer a view: it is
+2026-09-18; `docs/BOARD-DESIGN.md` 4.6). `config.tabs` is therefore no longer a view: it is
 the set of category folders a card's file can live in, offered in the card detail's picker and in
 the `m` menu, and `board_move {tab}` still re-files a card between them. `config.columns` and
 `config.column_statuses` are the sections.
@@ -3471,7 +3471,7 @@ has none. The agent's own
 `implemented_by` argument is accepted only when the worker has no signature at all — a guest CLI
 writing through the bridge — and is otherwise overwritten, because a typed provider name is a
 guess and the worker's is not. Both fields are ordinary work-card front matter
-(`docs/SWITCHBOARD-FORMAT.md` 2.2) and both appear on every board row; the same-family refusal on
+(`docs/BOARD-FORMAT.md` 2.2) and both appear on every board row; the same-family refusal on
 closing a QA card is unchanged, except that it now reads the family through this table.
 
 **Self-closed** (2026-09-20, card `#93WR`). A card is self-closed when its status is `done` and its
@@ -3663,7 +3663,7 @@ surface off nothing, because `board_cancel` named its card before surfaces exist
 Owner, 2026-09-21: new boards are created in `board/`. That replaces the `.switchboard/` of
 2026-09-19, which hid the cards from a ripgrep-based agent so well that an agent reaching for them
 with a bare `rg` found nothing and concluded the project had no board
-(`docs/SWITCHBOARD-FORMAT.md` §1). A visible folder turns that trade the other way round, so the
+(`docs/BOARD-FORMAT.md` §1). A visible folder turns that trade the other way round, so the
 generated pointer block and `POLICY.md` teach the exclusion instead: exclude the cards from a code
 search with `rg -g '!board/'`. Reading stays tolerant in every direction: `board.BOARD_FOLDERS` is
 `board`, `.switchboard`, `switchboard`, `issues`, newest first, and the first of those that has a
@@ -3700,7 +3700,7 @@ edited, is not "uncommitted" by this rule).
 
 **How it moves.** `git mv` inside a checkout where the folder is tracked, a plain `Path.rename`
 otherwise (an uncommitted board, or no git at all). Either way `.gitattributes`' union-merge line
-(`docs/SWITCHBOARD-FORMAT.md` §3) is rewritten from the old name to the new one and reported in
+(`docs/BOARD-FORMAT.md` §3) is rewritten from the old name to the new one and reported in
 `files`; nothing else about the board's bytes changes, because a rename is the one thing this
 message does. Afterwards the worker re-points itself at the new root (`_point`, as `set_board`
 does, 19.11), so the tools, the agent's tools and the GUI move together and no message in flight
@@ -3808,7 +3808,7 @@ same pane. A worker with no pane of its own — the Board worker, a test — has
 value the marker could not hold is a protocol error rather than a quiet drop. A `set_board` without
 the field leaves the worker's token alone: the board changed, not the pane.
 
-**`session`** is the new work-card front-matter field (`SWITCHBOARD-FORMAT.md` 2.2): the pane
+**`session`** is the new work-card front-matter field (`BOARD-FORMAT.md` 2.2): the pane
 session token of the session holding the card. It is **immutable to a model** — the tool writes it
 from `configure`, so a card cannot be taken by typing a token into a patch — and a card in
 `executing` (or `in-progress`) with a `session` is **held** by that pane. The Board draws it
@@ -3868,7 +3868,7 @@ card's body is built from, one per workflow stage, in body order — `Issue`, `D
 `Discussion points`, `Planning notes`, `Done means`, `Plan`, `Tasks`, `Execution Summary`,
 `Tests`, `Profile`, `Try it`, `QA checklist`, `Human QA`, `Verdict`, `Resolution` — plus
 `Merged in` and `Split`, written by the merge and split tools. The full table (stage, author,
-what each holds) is `SWITCHBOARD-FORMAT.md` 2.7; the canonical list is
+what each holds) is `BOARD-FORMAT.md` 2.7; the canonical list is
 `relay_core.board.CARD_SECTIONS`. `Done means`, `Human QA`, `Profile` and `Try it` joined it on
 2026-09-21: the board had grown all four and `check` was warning on the cards that used them,
 which is the schema disagreeing with itself. **The list is complete**, and that is the claim the
@@ -3957,7 +3957,7 @@ Implementation: `backend/relay_core/aliases.py` (the store, the format, substitu
 | global | `$XDG_CONFIG_HOME/relay/switchboard` (override: `RELAY_GLOBAL_SWITCHBOARD`) | `aliases/<name>.md` |
 | local | the repository's board folder when it has a Board, else `<repo>/.relay` | `aliases/<name>.md` |
 
-An alias is a Board card (`docs/SWITCHBOARD-FORMAT.md`) of the new type `alias`, with the
+An alias is a Board card (`docs/BOARD-FORMAT.md`) of the new type `alias`, with the
 fields `name`, `kind` (`command` \| `prompt`) and `shell` on top of the common ones, statuses
 `active` and `retired`, and `retired` cards under `aliases/archive/`. `relay-board.py check`
 validates them like any other card.
@@ -7348,7 +7348,7 @@ Row
 - **One run at a time**, refused with a sentence rather than queued: two builds in one build
   directory, or two `perf record`s, are one wrong profile rather than two.
 - **The table before the flame graph.** Every profiling product settled on that independently
-  (`docs/SWITCHBOARD-TOOLING-RESEARCH.md` section 4.3), and Relay has no QtWebEngine, so the table
+  (`docs/BOARD-TOOLING-RESEARCH.md` section 4.3), and Relay has no QtWebEngine, so the table
   is drawn natively and the flame graph leaves the app through `scripts/relay-speedscope` — the
   local static bundle, in the system browser, with nothing uploaded.
 - **Numbers are committed, samples are not.** The summary goes onto a card under `## Profile` and
@@ -7441,7 +7441,7 @@ that was tried and failed has to read differently from a card nobody pressed the
    under `## Try it` as `Expected: …`. Once — a second answer refreshes the summary and leaves the
    section alone, and the file name is what tells the pointer line from the revealed text;
 3. `## Human QA`, **generated** from `## Try it` and the answer, in the shape
-   `docs/SWITCHBOARD-FORMAT.md` 2.8 fixes — a numbered question with an indented `Answer:` line
+   `docs/BOARD-FORMAT.md` 2.8 fixes — a numbered question with an indented `Answer:` line
    under it, then the expected result and where the evidence is. That is the only answered form
    `board_tools.unanswered_human_qa` recognises, so the close gate and Try it interlock by
    construction: the section is written by `try_answer` and by nothing else, so a card is never
@@ -7474,7 +7474,7 @@ Card `#AQ6X`, decisions 1–12; `docs/SIGNALS-RESEARCH.md` R1–R13 is the reaso
 threshold below cites it. A **signal** is one keyed item per failing check — a test today, a build
 failure and a `check` problem next, crashes and CI after that — that a machine opens on evidence and
 closes only when the check passes. It is not a card and it is not in git: it is the *fold* of two
-append-only files under the board's private root (`SWITCHBOARD-FORMAT.md` §5.1), so no occurrence is
+append-only files under the board's private root (`BOARD-FORMAT.md` §5.1), so no occurrence is
 ever stored twice and nothing here contends on `land.py`.
 
 Backend: `backend/relay_core/signals.py` (the record, the fold, every constant) and

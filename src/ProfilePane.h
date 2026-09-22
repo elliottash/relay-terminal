@@ -5,7 +5,7 @@
 // the two things you do with a profile that is not a number you already believe.
 //
 // The table comes before the flame graph because every profiling product arrived at that
-// independently (docs/SWITCHBOARD-TOOLING-RESEARCH.md section 4.3: Sentry's Slowest Functions,
+// independently (docs/BOARD-TOOLING-RESEARCH.md section 4.3: Sentry's Slowest Functions,
 // Pyroscope's Top table, speedscope's own Sandwich), and because Relay has no QtWebEngine the
 // table is the view that stays in the app: four columns, name / self / total / share, sorted by
 // self, and the flame graph is a line that hands the raw file to `scripts/relay-speedscope`.

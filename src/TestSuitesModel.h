@@ -4,7 +4,7 @@
 // issues/features/2026-09-20-switchboard-tooling-hub-tests-profile-and-what-else.md).
 //
 // A row is a **test, not a run** — Buildkite's and Datadog's shape, researched in
-// docs/SWITCHBOARD-TOOLING-RESEARCH.md §3 — folded out of the four `tests_*` events the board
+// docs/BOARD-TOOLING-RESEARCH.md §3 — folded out of the four `tests_*` events the board
 // worker sends (the wire contract, docs/AGENT-SESSIONS-PROTOCOL.md §31 once phase 3 lands):
 //
 //   tests_list     the whole inventory plus the summary line the header wears

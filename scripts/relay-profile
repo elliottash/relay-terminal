@@ -23,7 +23,7 @@
 # and `summary.md` (the table in Markdown, which is what goes onto a card) — and prints the
 # directory and the `scripts/relay-speedscope` line that opens the flame graph.  The table comes
 # first and the flame graph second because that is what every profiling product settled on
-# (docs/SWITCHBOARD-TOOLING-RESEARCH.md section 4.3).
+# (docs/BOARD-TOOLING-RESEARCH.md section 4.3).
 #
 # Machine setup, and each of these commands by hand: docs/PROFILING.md.
 set -uo pipefail

@@ -3302,7 +3302,7 @@ private:
         QString statuses;     // "2 passed · 1 failed · 1 not applicable", counted out of it
     };
 
-    // The section, read the way the format defines it (SWITCHBOARD-FORMAT, protocol 31.5): one
+    // The section, read the way the format defines it (BOARD-FORMAT, protocol 31.5): one
     // test per Markdown list line, then the worker's dated `### Check` blocks. The count is the
     // list lines before the first block, so a check never inflates the number of tests a card
     // is said to name. The worker is the authority on which of those lines really name a test —

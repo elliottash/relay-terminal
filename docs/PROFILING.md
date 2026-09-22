@@ -3,7 +3,7 @@
 Card #7BM4 (2026-09-20). The Board's **Test suites** pane and **Profile** button run
 ordinary tools; this page says which, how a machine is set up for them, and the exact commands,
 so everything the buttons do can also be done by hand and checked. Research and sources:
-[`SWITCHBOARD-TOOLING-RESEARCH.md`](SWITCHBOARD-TOOLING-RESEARCH.md). The measured profile of
+[`BOARD-TOOLING-RESEARCH.md`](BOARD-TOOLING-RESEARCH.md). The measured profile of
 Relay itself is `docs/qa_evidence/2026-09-20-perf-profile/REPORT.md` (#PF4K).
 
 ## 1. Setting a machine up

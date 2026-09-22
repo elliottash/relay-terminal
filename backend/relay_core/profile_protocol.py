@@ -12,7 +12,7 @@ the card records under `## Profile`.
     profile_stop                  -> profile  finished (state "stopped") | error
 
 Four targets, because "profile the project" is four different things here (the research in
-`docs/SWITCHBOARD-TOOLING-RESEARCH.md` section 4.2, and the owner's answer on the card: the button
+`docs/BOARD-TOOLING-RESEARCH.md` section 4.2, and the owner's answer on the card: the button
 asks, and the build ships first).  Each is a fixed argument vector — the request names a target,
 never a command — so nothing a GUI or an agent sends can turn this into "run anything".
 

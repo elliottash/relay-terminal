@@ -17,8 +17,8 @@ saying yes to a Board is not saying yes to an import.
 
 Implementation: `backend/relay_core/project_probe.py` (finding) and
 `backend/relay_core/board_import.py` (proposing, writing). The board format itself is
-`docs/SWITCHBOARD-FORMAT.md`; the product design, including §7 "Detecting and converting
-non-compliant notes", is `docs/SWITCHBOARD-DESIGN.md`.
+`docs/BOARD-FORMAT.md`; the product design, including §7 "Detecting and converting
+non-compliant notes", is `docs/BOARD-DESIGN.md`.
 
 ---
 
@@ -67,7 +67,7 @@ the project's `CLAUDE.md` and `AGENTS.md` pointing at it, with `AGENTS.md` creat
 has none (it starts with an `@CLAUDE.md` import so it cannot shadow the project's own instructions,
 and `WARP.md` is never touched). Both are generated, so a stale copy is rewritten and nothing
 outside the markers is changed; the files appear in the `board_created` event's `files` list like
-the rest. The format doc has the detail (`SWITCHBOARD-FORMAT.md` §4.1), and
+the rest. The format doc has the detail (`BOARD-FORMAT.md` §4.1), and
 `scripts/relay-board.py policy` regenerates them for a board that predates them. This is the one
 part of initialization that writes outside the board folder, and it writes instruction files only:
 no card, no code, nothing else in the project.
@@ -80,7 +80,7 @@ Three rules the GUI must keep:
 3. **A project that already has a board is never asked.** `board.present` is true and the
    dialog does not open. A project with a *pre-board* `issues/` tree is asked, and the offer
    is `migrate`, which is a different operation from an import (it converts the files in
-   place; see `docs/SWITCHBOARD-FORMAT.md` §6).
+   place; see `docs/BOARD-FORMAT.md` §6).
 
 ### The one path that does not ask: "Initialize new project here"
 
@@ -274,7 +274,7 @@ checked items are ignored outright — §4.4.
 ### 4.2 Priorities become rank order
 
 The board has no priority field; it has `rank`, a fractional index that orders a column
-(`docs/SWITCHBOARD-FORMAT.md` §2.4). So priority is expressed as order: proposals are sorted
+(`docs/BOARD-FORMAT.md` §2.4). So priority is expressed as order: proposals are sorted
 `critical < high < medium < low < lowest`, then by the tracker's own order inside one tracker,
 and cards are created in that order. `BoardTools` appends each new card to the end of its
 column, so each column comes out in the source's priority order. Nothing is renumbered.
@@ -297,7 +297,7 @@ A Beads `parent-child` edge becomes the `parent` field, which is also a legal ca
 Beads' non-blocking edge types (`related`, `discovered-from`, `tracks`, …) are not imported.
 
 Dependencies **between the items of one card** are written too, as the `blocked_by=` marker of
-`SWITCHBOARD-FORMAT.md` §2.5 (Task Master's subtasks are the only source that has them). The same
+`BOARD-FORMAT.md` §2.5 (Task Master's subtasks are the only source that has them). The same
 two rules hold: a sibling becomes that item's marker, a dependency on another *task* becomes
 `blocked_by=#CARD` for the card that task imported as, and anything outside the run is dropped.
 
@@ -312,7 +312,7 @@ At the project root and in `docs/`, matched case-insensitively. Nowhere else: a
 |---|---|
 | a top-level unchecked box | one card |
 | boxes nested under it | that card's `## Tasks`, each keeping its own mark |
-| a **checked** top-level box | nothing — ignored (`SWITCHBOARD-DESIGN.md` §7) |
+| a **checked** top-level box | nothing — ignored (`BOARD-DESIGN.md` §7) |
 | a `##` section with no boxes in it at all | one card carrying that prose |
 | the `# ` title and the paragraph under it | nothing — that is the document, not a card |
 | `- [-]`, `- [/]`, `- [~]` | an in-progress item |
@@ -519,7 +519,7 @@ Three passes, because a card cannot be blocked by one that does not exist yet:
 are byte-identical afterwards; `tests/test_board_import.py` hashes every file outside the board
 directory before and after each import and compares. Removing converted text from a source is a
 separate, explicit action the design reserves for later
-(`SWITCHBOARD-DESIGN.md` §7, "Remove converted text from sources") and is not implemented here.
+(`BOARD-DESIGN.md` §7, "Remove converted text from sources") and is not implemented here.
 
 Cards land in the `features` tab when the board has one, else the first folder-backed tab;
 `tab=` overrides it and an unknown or filter-only tab is refused before anything is written.
@@ -556,7 +556,7 @@ Neither is worth it for how few projects use it. Revisit if it comes up.
 
 ### GitHub and Trello imports
 
-`SWITCHBOARD-DESIGN.md` §7 lists a GitHub export (`gh issue list --json`) and Trello JSON as
+`BOARD-DESIGN.md` §7 lists a GitHub export (`gh issue list --json`) and Trello JSON as
 importable. Both are files the user produces deliberately, so they are an import of a *file the
 user hands over*, not something the probe finds — a different entry point, and not implemented
 here.
@@ -644,7 +644,7 @@ this machine, every path in them is local, and they answer a dialog only the des
 ## 9. Known limits
 
 * ~~A Task Master subtask's dependencies are not written.~~ **Fixed 2026-09-18.**
-  `board_update_card`'s `tasks` now takes `blocked_by` per item (`SWITCHBOARD-FORMAT.md` §2.5):
+  `board_update_card`'s `tasks` now takes `blocked_by` per item (`BOARD-FORMAT.md` §2.5):
   a number is the 1-based position of another item in the same call, which is how a list that has
   no ids yet names itself; a string is an item id already on the card, or `#K7Q2`. The importer
   uses it, so a subtask that waits for a sibling gets a `blocked_by=` marker, and one that waits

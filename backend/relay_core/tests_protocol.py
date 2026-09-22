@@ -23,7 +23,7 @@ Five requests, answered with the four events of the wire contract:
 names are gone, never run or failing (#7BM4 phase 4).
 
 Three rules this module keeps, all of them learned from the research in
-`docs/SWITCHBOARD-TOOLING-RESEARCH.md` and from the ways a test runner behind a button goes
+`docs/BOARD-TOOLING-RESEARCH.md` and from the ways a test runner behind a button goes
 wrong:
 
 * **Never a full suite implicitly.**  A run names its tests.  There is no "run everything"

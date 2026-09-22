@@ -1565,7 +1565,7 @@ action (protocol 19.17). A visible `board/` is found by an ordinary `rg`, which 
 generated pointer block and `POLICY.md` teach `rg -g '!board/'` for the searches that do not want
 it. Its `board.yaml` is the marker, and that marker
 is the switch — everything here is inert without it. Design:
-`docs/SWITCHBOARD-DESIGN.md`; bytes: `docs/SWITCHBOARD-FORMAT.md`; protocol:
+`docs/BOARD-DESIGN.md`; bytes: `docs/BOARD-FORMAT.md`; protocol:
 `docs/AGENT-SESSIONS-PROTOCOL.md` section 19.
 
 **Which board, and whose** (card #JN7X, `src/Projects.h`, `src/BoardWorkspace.h`). A tab is

@@ -12,7 +12,7 @@
 // Three things are deliberately not Markdown's defaults:
 //
 // * **HTML comments are never shown.** `<!-- t:a3 -->` and `<!-- relay:entry … -->` are the
-//   board's own bookkeeping (docs/SWITCHBOARD-FORMAT.md 2.5 and 3); GitHub hides them and so does
+//   board's own bookkeeping (docs/BOARD-FORMAT.md 2.5 and 3); GitHub hides them and so does
 //   this. Inside a code fence they are code and stay.
 // * **A link is text until it is confirmed.** It is drawn as its words followed by the address,
 //   and tapping it calls `onLink(url, text)` — the view shows a sheet with the whole address
@@ -424,7 +424,7 @@ export function renderMarkdown(source, options = {}) {
   return root;
 }
 
-// A card body, by section (docs/SWITCHBOARD-FORMAT.md 2.7): the `# title` line is the page's own
+// A card body, by section (docs/BOARD-FORMAT.md 2.7): the `# title` line is the page's own
 // heading and is dropped, and each `## Heading` starts a section whose name is handed back beside
 // its lines, so the view can draw the tasks from the card's parsed checklist instead of from text.
 export function bodySections(source) {

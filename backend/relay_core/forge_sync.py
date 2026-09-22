@@ -40,7 +40,7 @@ atomically after every card, so a run that is killed half way resumes where it s
 is not fatal: `links.github` in the card's front matter is the durable link, and the engine falls
 back to a conservative merge (differences become conflicts, nothing is overwritten).
 
-Docs: `docs/GITHUB-SYNC.md`.  Format: `docs/SWITCHBOARD-FORMAT.md`.
+Docs: `docs/GITHUB-SYNC.md`.  Format: `docs/BOARD-FORMAT.md`.
 """
 from __future__ import annotations
 

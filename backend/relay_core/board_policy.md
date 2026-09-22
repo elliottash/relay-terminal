@@ -1,4 +1,4 @@
-<!-- Board agent policy v7 (docs/SWITCHBOARD-DESIGN.md 6.2, owner decisions 12).
+<!-- Board agent policy v7 (docs/BOARD-DESIGN.md 6.2, owner decisions 12).
      v2, 2026-09-20 (#R9G7): work goes through a card, and a pane claims the card it works
      (`board_claim`, rules 1 and 5); the procedure is the bundled `deliver` skill.
      v3, 2026-09-20 (#R9G7, owner: "for small requests, we are not going to want the full

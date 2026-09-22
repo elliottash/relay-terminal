@@ -2,7 +2,7 @@
 
 Research date: 2026-09-20, for card #AQ6X (a `signal` card type: a fault a machine writes and a
 machine closes, first source failed tests) and its neighbour #7BM4 (Test suites pane, JSONL run
-history, `## Tests` and Check). `docs/SWITCHBOARD-TOOLING-RESEARCH.md` already covers how Buildkite,
+history, `## Tests` and Check). `docs/BOARD-TOOLING-RESEARCH.md` already covers how Buildkite,
 Datadog, Trunk, TestGrid and Sentry **measure** tests; none of that is repeated. The subject here is
 what happens **after** a failure is detected: does it become a tracked item, under what key, what
 opens it, what closes it, what reopens it, and what keeps it from drowning the people reading the
@@ -71,7 +71,7 @@ a model or a person asking.
 **Claims exist and are per pane.** `session` (2026-09-20, #R9G7) is the pane session token written
 only by `board_claim` (`BoardTools._claim`, `board_tools.py:2364`); a second claimant is refused
 with `board_claimed_elsewhere`, and the field is dropped when the card reaches `done`/`dropped` or
-the pane closes (`docs/SWITCHBOARD-FORMAT.md` §2.2). That is the whole of what a signal needs for
+the pane closes (`docs/BOARD-FORMAT.md` §2.2). That is the whole of what a signal needs for
 "two panes do not chase the same red test", and it is independent of where the signal is stored.
 
 **The check command already emits keyed machine findings.** `Problem {code, path, message,
@@ -93,12 +93,12 @@ run, from every pane that runs tests.
 gitignored, one object per test execution `{ts, runner, id, result, duration, commit, run_id}`
 (#7BM4 Storage; tooling research §3.5). `issues/.private/` is the per-machine root, `Board.card_paths()`
 walks only `*.md` two levels down so `check` ignores other files there, and it already holds two
-non-card state files (`forge-sync.json`, `forge-logins.yaml`; SWITCHBOARD-FORMAT §5).
+non-card state files (`forge-sync.json`, `forge-logins.yaml`; BOARD-FORMAT §5).
 
 **Crashes and QA verdicts are already machine-readable.** `gui_crash signal=… name=… addr=…
 build=…` followed by `gui_crash_frames_begin` in `~/.local/share/relay/logs/relay.log`
 (`docs/CRASH-DIAGNOSIS.md`), and the verdict-on-close contract enforced by `board_move_card`
-(SWITCHBOARD-DESIGN §4). Both are candidate sources (§11.10).
+(BOARD-DESIGN §4). Both are candidate sources (§11.10).
 
 ## 3. Error trackers: grouping is the product
 

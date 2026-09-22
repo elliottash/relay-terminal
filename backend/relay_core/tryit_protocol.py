@@ -561,7 +561,7 @@ def _plain(text: str) -> str:
 def human_qa(card_id: str, parsed: dict, answer: str, expected: str) -> str:
     """`## Human QA`, generated from `## Try it` and the answer — never typed twice.
 
-    In the form `docs/SWITCHBOARD-FORMAT.md` 2.8 fixes, so the two mechanisms interlock: the
+    In the form `docs/BOARD-FORMAT.md` 2.8 fixes, so the two mechanisms interlock: the
     question is a **numbered line** and its answer is an **indented line beginning `Answer:`**,
     which is the only answered shape `board_tools.unanswered_human_qa` recognises.  A Try it
     section with no answer yet leaves no `## Human QA` at all — this is written by `try_answer`
@@ -606,7 +606,7 @@ def verify_staging(repo, card_id: str, body: str = "") -> dict | None:
 
     Two ways of finding it, in this order, because the record is the authority and the glob is
     only the convention: the card's own `staged:` line — written by Verify beside its
-    `simulation:` line (docs/SWITCHBOARD-FORMAT.md 2.8) — and then
+    `simulation:` line (docs/BOARD-FORMAT.md 2.8) — and then
     `docs/qa_evidence/<date>-verify-<ID>/`, newest date last.  A directory that is not there is
     not a staging, and a directory without a `stage.sh` is reported with an empty `stage` so the
     brief's step 2 can say why it fell through to step 3.

@@ -5,7 +5,7 @@ me a proposal on that, and make it integrated with the switchboard as much as po
 elements on a card, etc)." / "also memories can be viewable / editable in the switchboard alongisde plans and issues."
 / Memory location: "in the repo switchboard, allowing private memories as well like private cards".
 
-Builds on `docs/SWITCHBOARD-DESIGN.md` (sections 2, 4, 6, 8 and owner decisions in 12) and
+Builds on `docs/BOARD-DESIGN.md` (sections 2, 4, 6, 8 and owner decisions in 12) and
 `docs/MEMORY-AND-MULTI-REQUEST-RESEARCH.md` (items 2–5 and 9, owner decisions in 9). Nothing here is implemented.
 Citation keys follow `docs/AGENT-FEATURES-RESEARCH.md`: **CC:x** = `https://code.claude.com/docs/en/x` (fetched
 2026-09-17); **W:x** = `https://docs.warp.dev/x`; **(3P)** =

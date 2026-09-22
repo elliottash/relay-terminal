@@ -8,7 +8,7 @@ built part carries a note where it is proposed. Everything else here — the pan
 the lamp, remote pairing, the icon — is still design, and no other source file has been touched.
 Source references updated 2026-09-18, when `src/main.cpp` was split into one header per unit: they
 now name the function and its file, because the original line numbers had already drifted.
-Companions: `docs/SWITCHBOARD-DESIGN.md` (the tracker), `site/index.html` + `site/style.css` (the
+Companions: `docs/BOARD-DESIGN.md` (the tracker), `site/index.html` + `site/style.css` (the
 hero patch panel, shipped), `issues/features/2026-09-17-color-themes.md` (`#0JA7`, themes),
 `issues/features/2026-09-17-remote-phone-and-multiplayer.md` (`#W5N2`, phone pairing).
 
@@ -224,7 +224,7 @@ reduced motion (§6). **Verdict: do, immediately after #1 — they are one widge
 ### 3. Engraved column headers and card chips in the Switchboard · **DO**
 
 > **Built, and then the layout changed.** The columns became one sectioned list of rows
-> (SWITCHBOARD-DESIGN 4.6, 2026-09-18). The engraved label survives as the section header,
+> (BOARD-DESIGN 4.6, 2026-09-18). The engraved label survives as the section header,
 > painted by `RowDelegate` from the same tokens with a hairline rule above it; the QSS names
 > are now `#boardList`, `#boardListPane` and `#boardCount`.
 
@@ -239,7 +239,7 @@ of this document is approved.**
 **Status (2026-09-17, UX pass):** done in plain materials only: enamel-style headers (uppercase mono,
 letter-spaced, `@muted`) on flat `@surface` column strips, cards painted from the theme tokens, the
 `board*` rules at the end of the stylesheet in `src/Theme.cpp`. No brass, so nothing here depends on
-the `board.*` theme group of section 3.4. See `docs/SWITCHBOARD-DESIGN.md` section 4.5.
+the `board.*` theme group of section 3.4. See `docs/BOARD-DESIGN.md` section 4.5.
 
 ### 4. Remote pairing as a call being patched through · **DO (restrained)**
 
