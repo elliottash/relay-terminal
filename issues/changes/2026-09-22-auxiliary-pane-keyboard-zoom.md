@@ -7,7 +7,7 @@ labels: [bug, keyboard, panes]
 rank: mazp7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c], evidence: [docs/qa_evidence/2026-09-22-AZP7/README.md], related: [Z00M], github: null}
+links: {plans: [], commits: [7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c, 71884947385d6bba9bfc082b47505b4e6d6c1d6d, 224a1ae144b907c574be25fe52fc5ff0e2a88a38], evidence: [docs/qa_evidence/2026-09-22-AZP7/README.md], related: [Z00M], github: null}
 ---
 # Ctrl plus/minus does not zoom auxiliary panes
 

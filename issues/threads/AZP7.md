@@ -23,3 +23,7 @@ Linked implementation 7c0774c8fa8cbcf3121ac5b0feb738c24c7e804c; exact-tree appli
 <!-- relay:entry 20260922T234347Z-a2 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:43
 Added full Relay keyboard dispatch staging: actual Ctrl+= x3, Ctrl+minus, Ctrl+0 with Activity focused. Rendered word widths 66 → 85 → 80 → 66 pixels; reset Activity and owner terminal pixel comparisons pass. Recorded live-drive.py, six screenshots, measurements and limitations; card remains needs-verification. No production-code changes; unrelated onInterview hunk was excluded from implementation.
+
+<!-- relay:entry 20260922T234403Z-a2 author=codex kind=evidence -->
+### Codex · 2026-09-22 23:44
+Linked full-window keyboard evidence commit 224a1ae144b907c574be25fe52fc5ff0e2a88a38 and earlier evidence link commit.
