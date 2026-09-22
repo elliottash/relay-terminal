@@ -1,13 +1,13 @@
 ---
 id: HG26
 type: work
-status: executing
+status: needs-verification
 labels: [feature, diagnostics, qa]
 assignee: codex
 rank: zh26
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [b1e58b5ee771dba09ce7fc541595dbb8ef5fa46d], evidence: [docs/qa_evidence/2026-09-22-debug-hygiene/report.md], related: [AQ6X, MSW7, YJG7, WEVT, SW1D, SJTR, 25XG], github: null}
+links: {plans: [], commits: [b1e58b5ee771dba09ce7fc541595dbb8ef5fa46d, 2f257ae6, 9bef2478, 24a6b202, 5304f3a2, a89d2199, 665814e7, b6d1999c, c26b0ec5, e280f0ec, 53f59865, 3e77ced3], evidence: [docs/qa_evidence/2026-09-22-debug-hygiene/report.md, docs/qa_evidence/2026-09-22-debug-hygiene/delivery.md], related: [AQ6X, MSW7, YJG7, WEVT, SW1D, SJTR, 25XG], github: null}
 ---
 # Debug and hygiene workstream grounded in runtime logs and signals
 
@@ -30,9 +30,14 @@ Targeted tests and isolated GUI evidence establish delivery; unrelated work and 
 **Verify:** Targeted unit tests for each package, exact-tree build gates for C++ changes, isolated GUI scenarios and review of aggregate output. No full suite or automatic review scheduling is required.
 
 ## Execution Summary
-Completed the requested analysis and proposed five work packages in the linked evidence report: outcome/origin hygiene, model/provider reliability on #MSW7/#YJG7, collection-signal recovery on #AQ6X, targeted card verification, and a recurring review. The aggregate contains 3,938 tool results and 337 unsuccessful classifications; test traffic and normal poll/exit semantics make these unsuitable as raw bug counts. Existing signals and cards were not taken over or modified. Application fixes remain proposals.
+Delivered the complete proposed workstream with five Relay subagents and parent integration. Logging distinguishes pending/refused/command/timeout/transport/internal/unknown outcomes, appends origin/run/build identity, isolates test logs in scoped runners/fixtures, and classifies worker exits by lifecycle intent. Reports add classified rates, p50/p95, safe reason codes, explicit signal-card links, private retained snapshots and non-additive weekly review.
+Existing model-switch/fallback fixes were independently verified; quota suppression is typed, bounded, interruptible and credential-aware. Collection failures now retain runnable scope and resolve only on same-scope evidence. Two real 177-test module runs naturally resolved the owned historical signals without manual state changes.
+WEVT is verified/done; 40SN and SW1D advanced to QA with fresh startup and real Kimi preview/Apply evidence on a disposable board. Independent report review found and confirmed the fix for malformed snapshot timestamps. Full evidence and commit mapping: docs/qa_evidence/2026-09-22-debug-hygiene/delivery.md. No unrelated board cleanup or automatic scheduling was performed.
 
 ## Tests
-- manual: docs/qa_evidence/2026-09-22-debug-hygiene/report.md
-- `python3 scripts/relay-events.py --since 2026-09-22 --json`
-- `python3 scripts/relay-board.py signals`
+- manual: docs/qa_evidence/2026-09-22-debug-hygiene/delivery.md
+- manual: docs/qa_evidence/2026-09-22-hg26-logging/results.md
+- manual: docs/qa_evidence/2026-09-22-quota-suppression/report.md
+- manual: docs/qa_evidence/2026-09-22-debug-hygiene/collection-recovery.md
+- manual: docs/qa_evidence/2026-09-22-hg26-verification/report.md
+- manual: docs/qa_evidence/2026-09-22-hg26-report-review/report.md
