@@ -1,0 +1,34 @@
+Source: 7d59e9673f680baf34a29fbebfc95cd31f667eab
+Release run: https://github.com/elliottash/relay-terminal/actions/runs/35677749794
+Native Intel job: 106587838102 — success
+
+private-python-tls.json
+{"ca_paths": {"cafile": "/private/etc/ssl/cert.pem", "capath": "/private/etc/ssl/certs", "openssl_cafile_env": "SSL_CERT_FILE", "openssl_cafile": "/private/etc/ssl/cert.pem", "openssl_capath_env": "SSL_CERT_DIR", "openssl_capath": "/private/etc/ssl/certs"}, "ca_count": 128, "https_status": 200}
+
+relay-open.json
+{"socket": "/private/tmp/relay-install-0tdp3tx3/profile/relay-open-fCLmji/open.sock", "acknowledged": true}
+
+gui-stderr.txt
+
+logs/worker.log
+2026-09-22T02:11:02.124Z INFO relay.worker pane=dedfbaac worker_start version=0.1.0 pid=26584 level=info
+2026-09-22T02:11:02.794Z INFO relay.worker pane=dedfbaac configured model=relay-main host=api.relay-terminal.ai role=main skills=2 agents=3 stall_s=60 session=c117da181e2444e998438987b2013afd
+2026-09-22T02:11:03.907Z INFO relay.worker pane=dedfbaac configured model=relay-main host=api.relay-terminal.ai role=main skills=2 agents=3 stall_s=60 session=d183cdfceb9641f08288072dbdfe7931
+2026-09-22T02:11:04.327Z INFO relay.worker pane=dedfbaac worker_stop pid=26584
+
+Selected runner assertions:
+2026-09-22T02:03:19.7139530Z test_native_discovery_ignores_overridden_home (test_macos_runtime.MacPlatformTests.test_native_discovery_ignores_overridden_home) ... ok
+2026-09-22T02:08:00.5631330Z PASS   : PtyTest::initTestCase()
+2026-09-22T02:08:00.6529900Z PASS   : PtyTest::echoAndExitCode()
+2026-09-22T02:08:00.7349570Z PASS   : PtyTest::environmentAndWorkingDirectory()
+2026-09-22T02:08:01.0660730Z PASS   : PtyTest::interactiveInputResizeAndForeground()
+2026-09-22T02:08:01.8813620Z PASS   : PtyTest::lineDisciplineFromTheMaster()
+2026-09-22T02:08:03.2757590Z PASS   : PtyTest::largeInputDoesNotBlock()
+2026-09-22T02:08:03.2759870Z PASS   : PtyTest::missingProgram()
+2026-09-22T02:08:03.5814640Z PASS   : PtyTest::destructorDoesNotWaitForDetachedChild()
+2026-09-22T02:08:03.7480400Z PASS   : PtyTest::terminateHangsUp()
+2026-09-22T02:08:03.7488650Z PASS   : PtyTest::cleanupTestCase()
+2026-09-22T02:10:27.3940640Z /Users/runner/work/relay-terminal/relay-terminal/stage-macos/bundle/Relay.app: valid on disk
+2026-09-22T02:10:27.3946600Z /Users/runner/work/relay-terminal/relay-terminal/stage-macos/bundle/Relay.app: satisfies its Designated Requirement
+2026-09-22T02:10:27.3979060Z PASS 70 native Mach-O files: architecture, private/system linkage, signatures
+2026-09-22T02:11:06.6224660Z PASS installed macOS DMG: relocation, private Python/Bash, PTY handshake, GUI worker, clean exit
