@@ -11,8 +11,8 @@ The core now maps the first cell of the top history row through reflow and clamp
 - Focused ViewTest: 7 cases passed under Xvfb with isolated XDG_CONFIG_HOME (plain history, insertion folds, prose print-width transitions, existing fold/search/prose regressions).
 - Exact commands and test output: [tests.txt](tests.txt).
 - Staged widget screenshots: [before](fold-before.png), [30 columns](fold-width-30.png), [80 columns](fold-width-80.png), [50 columns](fold-width-50.png). Inspected the 30-column capture: `detail 12` remains at the top and wraps below it.
-- The exact-tree landing gate built the app and engine tests with Ghostty enabled and passed 4 core and 7 view cases on each core. Output is in [ghostty-tests.txt](ghostty-tests.txt). The follow-up also tests blank wrapped rows.
-- Repository board check reports existing unrelated errors/warnings; no #SRA7 card/thread findings. Board/tests MCP tools are unavailable; evidence is recorded via the file fallback. The local TestsCommands.check_card equivalent is used for the card check.
+- The exact-tree landing gate built the app and engine tests with Ghostty enabled and passed 4 core and 7 view cases on each core. Output is in [ghostty-tests.txt](ghostty-tests.txt). Follow-up `f1f8126a0b96a35cb7c0a77c3413eb73ffbc6a4a` passed the same exact-tree gate with 5 core and 7 view cases per core (24 cases total), including blank wrapped rows.
+- Repository board check reports existing unrelated errors/warnings; no #SRA7 card/thread findings. Board/tests MCP tools are unavailable; evidence is recorded via the file fallback. The local TestsCommands.check_card equivalent reports no findings and no blocking signals for #SRA7.
 
 These are implementer checks, not independent QA or a sphinxpad retest.
 

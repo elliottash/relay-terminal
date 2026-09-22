@@ -7,7 +7,7 @@ labels: [bug, terminal]
 rank: msra7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [a7fd665d48d598aabb056e1dc869a9af7b8cd5f2], evidence: [docs/qa_evidence/2026-09-22-SRA7/], related: [], github: null}
+links: {plans: [], commits: [a7fd665d48d598aabb056e1dc869a9af7b8cd5f2, f1f8126a0b96a35cb7c0a77c3413eb73ffbc6a4a], evidence: [docs/qa_evidence/2026-09-22-SRA7/], related: [], github: null}
 ---
 # Pane resize should preserve the top visible scrollback location
 
