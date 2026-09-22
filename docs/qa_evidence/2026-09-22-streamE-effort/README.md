@@ -7,7 +7,7 @@ client's render guard and the chip's own words (`44a46ca1`); this is the half th
 phone is *told*, and what it is told when its tap is refused.
 
 Commits: `2ee01f0c` (the hub's cleaner and the tests), `d329d88a` (the desktop's builder, the
-refusal answer), `<doc>` (the protocol section and this folder).
+refusal answer), `a0882679` (the protocol section and this folder).
 
 ## The seam, measured rather than described
 
