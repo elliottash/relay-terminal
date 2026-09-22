@@ -1,14 +1,19 @@
-# CFG1 verification — 2026-09-22 UTC
+# CFG1 verification and follow-up fix — 2026-09-22 UTC
 
-PARTIAL PASS / OPTIONS PROPAGATION FAIL. A new Xvfb display, isolated HOME/XDG profile, fixture board and local stub model exercised both Switchboard console contexts. No external model/account was used. A transparent worker stdin tee (`worker-tap.py`) forwarded the original protocol to the real worker and recorded selected messages in `wire.jsonl`.
+The post-fix live run passes. `post-fix/result.json` is produced only after all protocol assertions succeed; `post-fix/run.txt` records the completed driver.
 
-- `03-card.png` creates the card console after the list console. `idle-start.txt` and `idle-end.txt` bracket 61 seconds with both contexts alive; no helper configure messages occur in that interval.
-- `05-card-answer.png` shows the card’s successful discussion. Its configuration carries `name: card`, `surface: card:<fixture ID>`, and the card brief.
-- `06-back-list.png` and `07-list-answer.png` show the return to the list and its successful ask. The worker switches to `name: switchboard`, `surface: switchboard`, with the list brief.
-- `08-options-search.png` locates the Options “Step limit per turn” row; `09-limit-37.png` shows its value changed to 37. Only the terminal worker receives `set_agent_options` with `max_steps: 37`; the helper remains configured at 500. The driver assertion fails with `AssertionError: 500`. A subsequent context switch had masked this gap in a preliminary manual run.
+The original run (files in this directory) caught a real Options propagation defect: the terminal received a step limit of 37 while the helper stayed at 500. Its failing trace and screenshots are preserved. `src/RelayWindow.h` now wraps the two Security turn-limit rows with the existing `alsoBoardWorkers()` helper, pushing both changes and resets to live helper workers. Only that +10/-2 source hunk belongs to this fix.
 
-Reproduce: `bash docs/qa_evidence/2026-09-22-verify-CFG1/drive.sh`. The script reuses fixture/UI helpers from the earlier AGNT drive, not earlier results. `relay-log.txt` and `worker-log.txt` are this run’s fresh logs.
+The fresh isolated Xvfb/HOME/XDG fixture in `post-fix/` proves:
 
-Targeted checks: windowstate, consolemode and agentcontext all passed in recorded run `20260922T011245Z-3882`; no signals opened. CFG1 itself is proved by the live protocol observation, since its window-level routing has no isolated unit seam.
+- Both Switchboard contexts coexist for 61 seconds with zero configure messages.
+- The card's `board_ask` and list's `ask` each follow their own context/brief configuration on the same helper PID.
+- The GUI Step limit row sends `max_steps: 37`, and the Tool-call limit row sends `max_tool_calls: 43`, to that helper. No ask or context switch occurs after the limit-edit timestamp. Screenshots 09 and 10 show the changed rows.
 
-Implementation: `4764200e`. This verification used the current shared checkout, including unrelated uncommitted edits; none were altered or committed here. A scoped fix is needed: the Security step/tool-call limit rows are plain `numberRow` instances and never call the existing `alsoBoardWorkers()` wrapper. `proposed-fix.patch` is a reviewable two-row fix, not applied: the user requires coordination for shared code and `src/RelayWindow.h` is held by mdl1verify and other live sessions. No Relay messaging tools are exposed in this harness. A preliminary fixture attempt was stopped after discovering its old model defaults; the final driver pins the local stub. A preliminary Escape navigation stayed in the card console; the final driver targets the named `boardBack` widget instead (OCR of the Back link was also unreliable).
+The local stub answers all model requests; no external account/model is used. `worker-tap.py` transparently forwards selected input messages to the real worker. The captured run explicitly blurred both number editors by clicking the Options search field; the driver now performs those clicks inline. Tab now navigates pane tabs and is not a reliable way to commit these edits. The driver targets the named Back/search/number widgets. Reproduce with `bash docs/qa_evidence/2026-09-22-verify-CFG1/drive.sh` (defaults to the `post-fix/` output folder).
+
+Build: `scripts/relay-build --wait-seconds 60 --target relay`, successful in 58 seconds. The live run uses a frozen `/tmp/relay-cfgact-fixed` copy, identified by SHA256 and source HEAD in `post-fix/provenance.txt`; unrelated shared-checkout edits are disclosed there. Landing separately builds the exact commit tree, excluding other sessions' uncommitted hunks.
+
+Checks: `consolemode` and `agentcontext` passed in recorded run `20260922T012657Z-5754`, no signals opened. `PYTHONPATH=backend:tests python3 -m unittest test_security.SectionPlacementTests` passed all four cases. The live protocol assertions prove propagation, which those existing unit checks do not cover.
+
+Parent coordinated the shared-header edit with MDL1 and explicitly authorized it. No further owner approval was needed. The fix is delivered for independent review of this post-fix evidence.

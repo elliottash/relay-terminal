@@ -1,0 +1,27 @@
+{
+  "run_id": "20260922T012657Z-5754",
+  "state": "finished",
+  "requested": 2,
+  "ran": 2,
+  "counts": {
+    "pass": 2,
+    "fail": 0,
+    "skip": 0
+  },
+  "tests": [
+    {
+      "id": "ctest:agentcontext",
+      "result": "pass",
+      "duration": 0.004
+    },
+    {
+      "id": "ctest:consolemode",
+      "result": "pass",
+      "duration": 0.706
+    }
+  ],
+  "skipped": [],
+  "opened": [],
+  "rerun": [],
+  "message": "the run produced no results"
+}

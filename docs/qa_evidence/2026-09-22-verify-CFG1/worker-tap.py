@@ -5,7 +5,7 @@ def forward():
     for line in sys.stdin.buffer:
         try:
             msg = json.loads(line)
-            if msg.get('type') in ('configure', 'ask', 'set_agent_options', 'board_card_discuss'):
+            if msg.get('type') in ('configure', 'ask', 'set_agent_options', 'board_ask'):
                 with open(os.environ['QA_WIRE'], 'a') as f:
                     f.write(json.dumps({'time':time.time(),'pid':os.getpid(),'message':msg})+'\n')
         except Exception:

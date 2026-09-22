@@ -1,0 +1,6 @@
+Binary: /tmp/relay-cfgact-fixed, frozen copy of build/relay after scripts/relay-build
+SHA256: a5d754ed0c0790722b7b4922923984a92d6734a39858acac8e0b7b40da854f79
+HEAD at freeze: b72e4b17de48cb87570a3c76c38518f9c3590b4a
+Source includes CFG1 two-row alsoBoardWorkers patch and unrelated shared-checkout edits. The only owned source hunk is +10/-2 in Security limit rows; land.py exact-tree build will separately validate the commit.
+Security placement check: PYTHONPATH=backend:tests python3 -m unittest test_security.SectionPlacementTests — 4 tests, OK.
+Recorded targeted run: 20260922T012657Z-5754 — consolemode and agentcontext pass, no signals opened.

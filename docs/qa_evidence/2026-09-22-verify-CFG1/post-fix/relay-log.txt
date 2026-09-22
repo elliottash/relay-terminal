@@ -1,0 +1,28 @@
+2026-09-22T01:31:40.920Z INFO relay.gui gui_start version=0.1.0 build=2026-09-21.21H.-- pid=3252265 level=info
+2026-09-22T01:31:40.967Z INFO relay.gui worker_start pane=84995002 workspace_set=1
+2026-09-22T01:31:41.081Z INFO relay.gui event type=ready pane=84995002
+2026-09-22T01:31:41.124Z INFO relay.gui configure_sent pane=84995002 preset=local:stub model=stub worker=2
+2026-09-22T01:31:41.144Z INFO relay.gui event type=configured pane=84995002 model=stub
+2026-09-22T01:32:01.381Z INFO relay.gui board_state pane=84995002 board=/tmp/rl-agnt.Jmvb/home/project/issues state=ready
+2026-09-22T01:32:01.523Z INFO relay.gui event type=ready pane=5d666d5a
+2026-09-22T01:32:01.523Z INFO relay.gui event type=configured pane=5d666d5a model=stub
+2026-09-22T01:32:01.543Z INFO relay.gui event type=configured pane=5d666d5a model=stub
+2026-09-22T01:32:15.444Z INFO relay.gui event type=ready pane=6a398dbd
+2026-09-22T01:32:15.444Z INFO relay.gui event type=configured pane=6a398dbd model=stub
+2026-09-22T01:32:15.464Z INFO relay.gui event type=configured pane=5d666d5a model=stub
+2026-09-22T01:32:15.506Z INFO relay.gui event type=configured pane=6a398dbd model=stub
+2026-09-22T01:33:27.467Z INFO relay.gui event type=agent_started pane=6a398dbd turn_id=d7f0c0e399b84914908b35b4234b858d
+2026-09-22T01:33:28.051Z INFO relay.gui event type=turn_summary pane=6a398dbd turn_id=d7f0c0e399b84914908b35b4234b858d outcome=done ms=618
+2026-09-22T01:33:28.067Z INFO relay.gui event type=agent_finished pane=6a398dbd outcome=done
+2026-09-22T01:33:52.505Z INFO relay.gui event type=configured pane=5d666d5a model=stub
+2026-09-22T01:33:52.562Z INFO relay.gui event type=configured pane=6a398dbd model=stub
+2026-09-22T01:33:52.678Z INFO relay.gui event type=agent_started pane=5d666d5a turn_id=1e9a914006a845a0ae91766f834738ba
+2026-09-22T01:33:52.691Z INFO relay.gui event type=agent_started pane=6a398dbd turn_id=1e9a914006a845a0ae91766f834738ba
+2026-09-22T01:33:53.137Z INFO relay.gui event type=turn_summary pane=5d666d5a turn_id=1e9a914006a845a0ae91766f834738ba outcome=done ms=604
+2026-09-22T01:33:53.137Z INFO relay.gui event type=turn_summary pane=6a398dbd turn_id=1e9a914006a845a0ae91766f834738ba outcome=done ms=604
+2026-09-22T01:33:53.138Z INFO relay.gui event type=agent_finished pane=5d666d5a outcome=done
+2026-09-22T01:33:53.178Z INFO relay.gui event type=agent_finished pane=6a398dbd outcome=done
+2026-09-22T01:34:26.289Z INFO relay.gui event type=configured pane=5d666d5a model=stub
+2026-09-22T01:34:26.342Z INFO relay.gui event type=configured pane=6a398dbd model=stub
+2026-09-22T01:34:49.234Z INFO relay.gui event type=configured pane=5d666d5a model=stub
+2026-09-22T01:34:49.291Z INFO relay.gui event type=configured pane=6a398dbd model=stub

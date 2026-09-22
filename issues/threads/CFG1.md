@@ -24,3 +24,14 @@ Check · 1 not-applicable, 2 passed; 2 advisory finding(s). The status is under 
 <!-- relay:entry 20260922T012336Z-cv author=codex kind=progress -->
 ### Codex · 2026-09-22 01:23
 Linked evidence/record commit 92f3e5b31e5d390ba517a7ef7d588d40b3569a5e. ACT1 is closed; CFG1 awaits coordination for the prepared shared-header fix.
+
+<!-- relay:entry 20260922T012514Z-cv author=codex kind=progress -->
+### Codex · 2026-09-22 01:25
+Parent coordinated with MDL1 and explicitly authorized the two-row alsoBoardWorkers fix. Correction to the prior question: coordination was required, not an additional owner approval. Resumed execution and applied only the step/tool-call limit row wrappers after a fresh land.py snapshot. Will preserve failed-run evidence and record a separate post-fix live run with protocol assertions.
+
+<!-- relay:entry 20260922T012658Z-rp author=agent kind=evidence -->
+Check · 2 not-applicable, 2 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T013523Z-cv author=codex kind=evidence -->
+### Codex · 2026-09-22 01:35
+Coordinated two-row source fix verified live: both limit edits reach helper PID 3253763 with no later ask or context switch; 61-second idle and card/list brief assertions pass. Frozen binary SHA256 is in post-fix/provenance.txt. Both targeted CTest cases and four Security placement checks pass. Moved to needs-verification for parent review of the newly implemented fix; no owner approval needed. Updated execution summary, tests and verdict; preserved the earlier failed-run evidence.

@@ -1,0 +1,20 @@
+{
+  "verdict": "PASS",
+  "idle_seconds": 61,
+  "configures_during_idle": 0,
+  "helper_pid": 3253763,
+  "asks": [
+    {
+      "time": 1790040807.40471,
+      "type": "board_ask"
+    },
+    {
+      "time": 1790040832.497864,
+      "type": "ask"
+    }
+  ],
+  "max_steps_after_edit": 37,
+  "max_tool_calls_after_edit": 43,
+  "asks_after_limit_edit": 0,
+  "context_switches_after_limit_edit": 0
+}
