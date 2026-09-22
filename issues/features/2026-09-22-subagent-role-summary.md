@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mr0pe
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-subagent-role-summary/], related: [], github: null}
+links: {plans: [], commits: [7e901529cb2d46335f06b109fbe50d865d15b1bc, 12169c6a58e48defef66b08bd5ea9d4023bd52cb], evidence: [docs/qa_evidence/2026-09-22-subagent-role-summary/], related: [], github: null}
 ---
 # Prefix subagent tracker summaries with their role
 
