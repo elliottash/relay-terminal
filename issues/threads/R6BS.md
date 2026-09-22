@@ -33,3 +33,7 @@ Native installer launch and worker startup passed again with clean logs. Runtime
 <!-- relay:entry 20260922T002724Z-a9 author=codex kind=progress -->
 ### Codex · 2026-09-22 00:27
 Native Windows full gates and upload passed on 6fe3554f in 35670149891. Linux and local broad checks exposed stale fixtures from recent repository changes; corrected and targeted checks pass. New Try-it functionality received native Windows path/PowerShell support. Current release candidate 59a51d9 is running in 35671890154; previous artifacts are isolated. PF14 records the unresolved intermittent profiling assertion without weakening it. Updated evidence README with exact scope and results.
+
+<!-- relay:entry 20260922T003311Z-b1 author=codex kind=progress -->
+### Codex · 2026-09-22 00:33
+Owner added: "can we build for mac as well". Expanded release scope to native Apple Silicon and Intel macOS bundles/DMGs. Plan uses Qt6, private modern Bash/Python, native Keychain and Darwin platform support; delegated platform, packaging and Python parts to the existing subagents. Existing Linux/Windows candidate 59a51d9 continues while the Mac port is implemented.

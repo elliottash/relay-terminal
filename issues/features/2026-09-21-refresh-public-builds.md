@@ -14,6 +14,8 @@ links: {plans: [], commits: [aa104e92, 92563ceb, ff18787e, f2216313, 2cfcb3f0, b
 ## Issue
 update a clean commit, push, and update the linux and windows builds available on the web site
 
+can we build for mac as well
+
 ## Decisions
 "Native Windows installer" — Windows means a native application, not WSL.
 
@@ -23,13 +25,14 @@ update a clean commit, push, and update the linux and windows builds available o
 Published releases end at v0.1.0-beta.2 and contain six Linux packages, source and checksums. The release pipeline builds Linux only. `engine/pty/PtyWin.cpp` explicitly returns “ConPTY backend not implemented yet”; Windows native packaging is absent. Asked whether Windows means WSL or a native installer while preparing the independent Linux work.
 
 ## Plan
-**Goal:** Push committed work, publish verified updated packages, and expose accurate downloads on the site.
+**Goal:** Push committed work, publish verified Linux, native Windows and native macOS packages, and expose accurate downloads on the site.
 **Findings:** `.github/workflows/release.yml`, `packaging/deb/`, `docs/RELEASING.md`. The working tree includes other sessions’ unfinished changes; only committed source will be released.
 **Steps:**
 1. Prepare beta.3 metadata, push main and inspect CI on that exact revision.
 2. Resolve release build failures within scope, cut a fresh tag and verify package jobs and smoke tests.
 3. Implement and smoke-test ConPTY on a native Windows runner; establish the native application/installer build, including platform-specific runtime and shell integration. Use bundled PowerShell 7 as the default shell, with native ConPTY and private Python runtime.
-4. Publish release notes and update website download links only after assets exist; handle Windows according to the owner's clarification.
+4. Add native macOS builds for Apple Silicon and Intel: Qt6 application bundle, private modern Bash/Python runtimes, native Keychain and Darwin process support. Package DMGs and smoke-test the real app on native runners. Ad-hoc signing is available; notarization requires Apple signing credentials not currently configured.
+5. Publish release notes and update website download links only after assets exist. Keep each platform artifact tied to its tested source; do not delay already-verified Linux/Windows assets unnecessarily while adding macOS.
 **Risks:** Existing CI failures may block release. Native Windows support is a port, not a rebuild; no Windows binary will be advertised without a working build.
 **Verify:** CI, package smoke tests, release asset checksum verification, website links and deployed bytes.
 
@@ -37,7 +40,8 @@ Published releases end at v0.1.0-beta.2 and contain six Linux packages, source a
 - [x] Review website changes, correct product description and heading decoration. <!-- t:a1 -->
 - [x] Implement native ConPTY, PowerShell integration and Windows runtime support with subagents. <!-- t:a2 -->
 - [x] Build and exercise a per-user Windows installer on a native runner. <!-- t:a3 -->
-- [ ] Pass final release gates, publish Linux and Windows assets and verify checksums. <!-- t:a4 -->
+- [ ] Implement and smoke-test native macOS application bundles for Apple Silicon and Intel. <!-- t:a6 -->
+- [ ] Pass final release gates, publish supported platform assets and verify checksums. <!-- t:a4 -->
 - [ ] Deploy versioned website downloads and verify the live page. <!-- t:a5 -->
 
 ## Tests
