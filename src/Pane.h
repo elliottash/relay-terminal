@@ -11348,6 +11348,7 @@ private:
                 if (const QString guest = guestOfPreset(choice); !guest.isEmpty()) {
                     m_deferredPreset = choice;
                     m_deferredModel = startModel;
+                    m_paneModel = startModel;   // show the ranked model before the guest starts
                     m_currentPreset = choice;   // the box says what this pane is on
                     relay::log::info(QStringLiteral("harness_deferred pane=%1 preset=%2 model=%3").arg(paneLogId(), choice, startModel));
                     status(QStringLiteral("%1 is this pane's agent; it starts on your first prompt.")
@@ -14520,6 +14521,10 @@ private:
     bool startDeferred() {
         if (m_deferredPreset.isEmpty() || m_configuring) return false;
         const QString preset = m_deferredPreset, model = m_deferredModel;
+        // The harness reads the guest block, not configure's API model field (#MDL1).
+        // Carry this pane's ranked model and level across that boundary together.
+        if (!model.isEmpty()) m_guestRequest.insert(QStringLiteral("model"), model);
+        if (!m_effort.isEmpty()) m_guestRequest.insert(QStringLiteral("effort"), m_effort);
         relay::log::info(QStringLiteral("harness_deferred_start pane=%1 preset=%2 model=%3").arg(paneLogId(), preset, model));
         configurePreset(preset, false, model);
         return m_configuring;

@@ -117,6 +117,9 @@ announced=true
                 count=1 if failure=='none' else 2 if failure=='once' else 3
                 assert len(commands('process_start'))==count, records()
                 configs=commands('configure')
+                assert configs[0]['request']['model']=='gpt-6-astra', configs
+                assert configs[0]['request']['guest'].get('model')=='gpt-6-astra', configs
+                assert configs[0]['request']['guest'].get('effort')=='high', configs
                 assert all(c['request']==configs[0]['request'] for c in configs), 'retry changed provider/config'
                 subprocess.run(['import','-window',win,str(OUT/(name+'-after.png'))],env=env,check=True)
                 (OUT/(name+'-requests.jsonl')).write_text((home/'requests.jsonl').read_text())
