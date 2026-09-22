@@ -1,0 +1,11 @@
+[idle] drawn
+[busy_queue] drawn
+[thinking_long_tail] drawn
+[allowance] drawn
+[view_only] drawn
+chips: [["rp-chip rp-mode","auto"],["rp-chip-text","auto"],["rp-chip rp-folder",""],["rp-chip-text",""],["rp-chip rp-sessions-button","Thinking copy test"],["rp-chip rp-clock",""],["rp-chip-text",""],["rp-chip rp-context","100% left"],["rp-chip-text","100% left"],["rp-chip rp-allowance",""],["rp-chip-text",""],["rp-chip rp-model","fake · local✓ fake · localKimi K2 · MainGLM 4.6 · FlashBonsai 2 27B · Local"],["rp-chip rp-effort","highlowmedium✓ high"],["rp-chip rp-more","⋯"]]
+effort chip: 
+model element: rp-model-wrap
+sent so far: []
+sessions opener: rp-chip rp-sessions-button | Thinking copy test
+console: []
