@@ -21,3 +21,16 @@ Independent verification FAIL; returned to Ready. Fresh report maps all Done mea
 <!-- relay:entry 20260922T011456Z-a3 author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:14
 Verification record landed as f819daa617fa7fc34bde95c9fa0bc1d59c974d36; linked in commits. Board check reports 13 existing errors / 745 warnings, none naming JNYN or its card path. Relay MCP unavailable, no delegation used.
+
+<!-- relay:entry 20260922T011618Z-4r author=agent kind=progress model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+Resuming implementation after independent failure report: scope staging failure notes to the active run and preserve pre-existing Human QA decisions when updating Try it answers; add regression tests, then return to the independent verifier.
+
+<!-- relay:entry 20260922T013956Z-w3 author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 not-applicable, 1 passed; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T014211Z-a4 author=codex kind=evidence -->
+### Codex · 2026-09-22 01:42
+Updated independent QA checklist and Verdict to clear both fixed defects using 132d3523 repair recheck. Kept broader staging pending a2, no status move and no Human QA changes. Original failure evidence retained; no blanket FAIL remains.
+
+<!-- relay:entry 20260922T014212Z-6z author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235… → {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235…; appended to `## Execution Summary`

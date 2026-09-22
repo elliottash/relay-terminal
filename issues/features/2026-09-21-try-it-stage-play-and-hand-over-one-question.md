@@ -1,15 +1,15 @@
 ---
 id: JNYN
 type: work
-assignee: codex-verify-jnyn-a1
-status: ready
+status: executing
 labels: [feature, switchboard, qa]
 component: [gui, worker]
+assignee: codex-verify-jnyn-a1
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzc
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [f819daa617fa7fc34bde95c9fa0bc1d59c974d36, 03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9], evidence: [docs/qa_evidence/2026-09-21-tryit/, docs/qa_evidence/2026-09-21-verify-JNYN-fresh/], related: [YZ8G, 7BM4, WC3E], github: null}
+links: {plans: [], commits: [1f3a7af0e7467dff0037cd56d285e3aef2d19727, 132d35235d29e9f5931c2391c9c4fb24026f0cc8, f819daa617fa7fc34bde95c9fa0bc1d59c974d36, 03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9, 1f3a7af0e7467dff0037cd56d285e3aef2d19727, 132d3523], evidence: [docs/qa_evidence/2026-09-21-verify-JNYN-recheck/, docs/qa_evidence/2026-09-21-tryit/, docs/qa_evidence/2026-09-21-verify-JNYN-fresh/, docs/qa_evidence/2026-09-21-verify-JNYN-recheck/], related: [YZ8G, 7BM4, WC3E], github: null}
 ---
 # Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
 
@@ -53,6 +53,7 @@ Try it is protocol § 31.10. Three commits:
 Owner's three steps (2026-09-21): Try it is the third. When Verify (#WC3E) has left a `staged:`
 directory — `docs/qa_evidence/<date>-verify-<ID>/stage.sh` — `verify_staging` finds it and the
 turn reuses it instead of replaying the mechanical pass; the `started` event says `reusing`.
+2026-09-21 repair after fresh independent verification: 1f3a7af0e7467dff0037cd56d285e3aef2d19727 scopes failure-note lookup to entries created during the current run and updates only the generated Try it Human QA block, preserving prior owner decisions. Two regression cases added; all 34 protocol cases pass. Independent repair recheck: 132d3523, docs/qa_evidence/2026-09-21-verify-JNYN-recheck/report.md. Full configured-model staging is being exercised with #7BM4.
 
 ## Tests
 - `tests/test_tryit_protocol.py` — 32 cases: the turn's started / progress / finished events,
@@ -65,23 +66,25 @@ turn reuses it instead of replaying the mechanical pass; the `started` event say
   Relay on an isolated Xvfb display and profile, with the Switchboard agent on its configured
   model.
 
+### Check 2026-09-21 21:39
+- passed · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- missing-evidence · ctest:cardtests — no run of ctest -R cardtests for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-21-tryit/ — manual evidence, recorded by hand: Try it pressed for real on #7BM4, from a
+- notice · ctest:cardtests — ctest -R cardtests has never run here
+- warning · manual:docs/qa_evidence/2026-09-21-tryit/ — manual evidence Try it pressed for real on #7BM4, from a is not there
+history: thread
 ## QA checklist
-Independent Codex review, 2026-09-21 local / 2026-09-22 UTC. Fresh evidence:
-`docs/qa_evidence/2026-09-21-verify-JNYN-fresh/report.md`.
-- Done means 1 — PARTIAL: protocol reuse tests pass; live agent reuse not exercised.
-- Done means 2 — PARTIAL/BLOCKED: actual isolated UI action/open/answer drive on pinned build-gate binary; supported provider absent, successful agent staging not established.
-- Done means 3 — FAIL: successful retry still reports the previous run's staging failure (`backend.txt`).
-- Done means 4 — FAIL: normal answer/reveal works, but `try_answer` erases existing Human QA decisions (`backend.txt`, `fixture-after.md`, `thread-after.md`). Real card's Human QA untouched.
-- Done means 5 — NOT ESTABLISHED: full GUI/backend/CLI agent staging on own board remains unverified.
-- Tests: `tests/test_tryit_protocol.py` — PASS 32/32 via unittest (`tests.txt`).
-- Tests: `ctest -R cardtests` — PASS 1/1 existing build; source provenance unestablished (`tests.txt`).
-- Tests: configured-model manual #7BM4 — NOT REPRODUCED; fresh #T9QA UI click refused without supported provider (`ui-try.png`).
-Actual backend revision: unchanged tested files at `0241d05ef19393e84c0ef98655c9687466a92efc`.
-GUI is exploratory `/tmp/claude-1000/land/jnyn/verify/build/relay`, not current main;
-binary SHA256 and source manifest/blob identities are in `runtime.txt`.
+Independent Codex verifier a1, updated 2026-09-21 local / 2026-09-22 UTC after repair.
+- Done means 1 — PARTIAL: protocol reuse tests pass; configured-model reuse remains pending a2's end-to-end evidence.
+- Done means 2 — PARTIAL: real UI open/answer/reveal passes on verified 82acbc04 GUI with clean fixed 1f3a7af0 backend; successful autonomous staging remains pending a2.
+- Done means 3 — PASS for reported defect: original successful-retry reproduction now returns staging_failed=false and the successful report; original error-path coverage still passes.
+- Done means 4 — PASS: original prior-decision-loss reproduction now preserves the existing answer; actual isolated UI confirms preservation, new verdict and reveal. Real card Human QA untouched.
+- Done means 5 — PENDING: broad GUI/backend/CLI configured-model staging is not established by this narrow repair recheck; a2 owns the live #7BM4 run.
+- Tests test_tryit_protocol.py — PASS 34/34 against clean 1f3a7af0 export.
+- Tests ctest cardtests — earlier 1/1 PASS remains supporting evidence only; repair was backend-only.
+- Tests configured-model manual #7BM4 — PENDING a2's independent record, not counted from old implementer captures.
+Fresh repair evidence: docs/qa_evidence/2026-09-21-verify-JNYN-recheck/report.md (commit 132d35235d29e9f5931c2391c9c4fb24026f0cc8); original failure record retained in docs/qa_evidence/2026-09-21-verify-JNYN-fresh/.
+Actual repair backend: 1f3a7af0e7467dff0037cd56d285e3aef2d19727; exact GUI gate 82acbc04, separately identified rather than claimed as a single rebuilt revision.
 
 ## Verdict
-2026-09-21 local / 2026-09-22 UTC — **FAIL; returned to Ready for implementation repair.**
-Scope failure-note lookup to the current Try it run and preserve pre-existing Human QA decisions.
-After repair, rerun the two fresh reproductions and complete a clean-revision, configured-provider
-staging pass. Prior interrupted-verifier artifacts are not proof. No implementation changed.
+2026-09-21 local / 2026-09-22 UTC — **PASS for both repaired defects and actual UI answer flow; broader staging verdict PENDING a2.** The earlier blanket FAIL is superseded: independent original reproductions now pass and 34 protocol tests pass. Do not close from this limited recheck alone. Status deliberately unchanged while parent coordinates a2's end-to-end evidence.
