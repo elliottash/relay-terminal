@@ -72,5 +72,9 @@ history: thread
 - [x] Independent injections after genuine preparation proved cancellation and changed-session guards refuse before execution. Native board and per-turn terminal capability regression tests passed. Previously reported misleading missing-host guidance is fixed.
 - [ ] Visible-terminal GUI completion/input-control lifecycle remains with the coordinated #S7KC drive; this verifier did not run a build, GUI or live paid Codex/Claude model session.
 
+- [x] Independent GUI verifier a2 completed the remaining handoff check: real localhost Bash terminal visibly executes the handed-off command and reports exact HANDOFF_STDOUT with exit 1 before disconnect; read/stdin control and Ctrl+C were separately live-driven. Evidence: `docs/qa_evidence/2026-09-22-verify-S7KC/build6/12-terminal-handoff.png` and `build6/handoff-events.jsonl`.
+
 ## Verdict
 **Backend scope passes independent verification.** Evidence: `docs/qa_evidence/2026-09-22-verify-S7GX/README.md`, committed as `56e73a8418126ae627cbd1b768e8410c21a1422f`. Both adapter naming mappings and actual MCP transport were exercised with real SSH; the provider fixture avoids model calls. Worker live-update routing was reviewed statically, with executor session-change behavior tested independently. Cancellation evidence establishes stopping the SSH job, not every possible descendant remote process. This is not full-card GUI sign-off: complete the remaining visible-terminal handoff verification with #S7KC before closing the card. Card status is unchanged.
+
+Independent GUI addendum (a2): **the earlier outstanding visible-terminal handoff check now passes.** The prior backend verifier’s no-GUI limitation describes that earlier session; a2 ran the separate GUI/real-SSH drive. Combined backend and GUI evidence does not include paid model CLIs, all descendant-process cancellation cases, or two physical hosts. Card status unchanged.

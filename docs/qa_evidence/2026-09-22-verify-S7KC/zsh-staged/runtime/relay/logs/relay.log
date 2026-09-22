@@ -1,0 +1,8 @@
+2026-09-22T15:22:00.324Z INFO relay.gui gui_start version=0.1.0 build=2026-09-22.11H.04 pid=1108062 level=info
+2026-09-22T15:22:00.369Z INFO relay.gui model_picker pane=3e4cdca0 state={"configured":false,"data":"guest:claude","display":"Loading models…","effort":"high","model":"","picked":"","preset":"","reason":"initial","role":"main","row":"Claude Code","rows":[]}
+2026-09-22T15:22:00.373Z INFO relay.gui worker_start pane=3e4cdca0 workspace_set=1
+2026-09-22T15:22:00.412Z INFO relay.gui event type=ready pane=3e4cdca0
+2026-09-22T15:22:07.000Z INFO relay.gui login_begin pane=3e4cdca0 program=ssh resolvable=1
+2026-09-22T15:22:07.010Z INFO relay.gui login_resolved pane=3e4cdca0 shared=0
+2026-09-22T15:22:07.501Z INFO relay.gui login_enhance pane=3e4cdca0 bytes=2890
+2026-09-22T15:22:24.554Z INFO relay.gui login_end pane=3e4cdca0

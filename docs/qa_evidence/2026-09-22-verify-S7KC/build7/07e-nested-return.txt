@@ -1,0 +1,34 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+(aaa LLL LLL 5d
+
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+WRAP - XXXXXXXXXXXXXKHXXK HANH AH HAH HAHN H AHH HHH HHH HHH HHH HHH HH HHH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH HHH HHH HHI
+XX XXX KAKA AHA AHH HHH KKH HHH H HHH HK HHH HHH HK HHH HHH HH HHH HHH HHH HH HHH HHH
+bash-5.2$
+
+MULTI-A
+MULTI-B
+bash-5.2$
+
+bash-5.2$
+
+aE
+bash-5.2$
+
+bash-5.2$ exit
+exit
+
+Connection to 127.0.0.1 closed.
+bash-5.2$
+
+‘Agent in control - Ctrl+H to take control
+
+Shell commands or agent prompts. 2 for help auto
+
+ees w)
+

@@ -1,0 +1,12 @@
+= work - cpu 00%-mem00% x + a 4
+
+>» (= localhost ) work
+
+SCREEN- PROOF sshis running | Letthe agent drive | | Take control (Ctrl+H) |
+
+® Relaying - printf '\033[?1049h\033[HSCREEN-PROOF;; read -rsn1; printf '\033[?1049’...
+
+Shell commands or agent prompts. 2? for help auto
+
+SSH localhost/home/elliott Loading models.. ¥ high v & @
+

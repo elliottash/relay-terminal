@@ -1,0 +1,41 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+(aaa LLL LLL 5d
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+WRAP - XXXXXXXXXXXXXKKXXK HANH AHH AHH AHH HHH H KKH HHH HHH HHH HHH HH HHH HHH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH
+XX XXX KKH AANA AHH KKH H HHH KKH H KKH H KKH HK HHH HHH HHH H HHH HHH HHH HHH HK
+bash-5.2$
+
+MULTI-A
+MULTI-B
+bash-5.2$
+
+A
+
+Queued - the command runs when the terminal is free
+
+QUEUE 1 take back to edit - drag to reorder - x remove
+
+> running $ sleep 20
+
+_ $ echo CANCELLED_MUST_NOT_RUN x
+
+Relaying - sleep 20...
+
+Bhell commands or agent prompts. 2 for help
+
+auto
+
+JM 2)
+
+=
+
+mp/relay-ssh-audit-38tcs26k/remote | Loading models... ¥
+

@@ -47,3 +47,7 @@ Check · 1 not-applicable, 2 passed; 1 advisory finding(s). The status is under 
 
 <!-- relay:entry 20260922T152510Z-q4 author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
 - ✦ agent moved this card · Executing → Needs verification · Guest bridge implementation and independent real MCP/SSH backend checks pass; real GUI handoff reports exact output and exit before disconnect in coordinated S7KC evidence. · evidence docs/qa_evidence/2026-09-22-verify-S7GX/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T152830Z-a2 author=codex kind=evidence -->
+### Codex a2 · 2026-09-22 15:28
+Independent verifier added QA evidence and scoped verdict after real SSH GUI drives on build7 11H.05. Original defects fixed; custom PATH and delayed stale lookups pass. S7KC native-control inline/prompt artifact has a passing isolated remedy trial awaiting implementation. S7GX GUI handoff passes. No status movement; evidence docs/qa_evidence/2026-09-22-verify-S7KC/.

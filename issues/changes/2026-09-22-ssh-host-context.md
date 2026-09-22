@@ -72,3 +72,15 @@ manual: docs/qa_evidence/2026-09-22-verify-S7KC/
 - not-applicable · manual:docs/qa_evidence/2026-09-22-verify-S7KC/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-S7KC/
 - notice · unittest:tests.test_ssh_remote — tests/test_ssh_remote.py: 1 of 46 are slow (test_handed_back_jobs_carry_the_host)
 history: thread
+
+## QA checklist
+- [x] Independent GUI drive verifies host/cwd display after cd and local restoration after SSH exit; local-only filename does not complete remotely, remote-only filename and host-labelled @ collision picker do.
+- [x] Custom interactive remote PATH completion now passes on 11H.05 after `0b4b1798`: remote_only_p completes to remote_only_probe after exporting the remote fixture bin directory.
+- [x] A real remote completion query delayed two seconds completes printen to printenv; replies after draft edit and after SSH disconnect are discarded without stale insertion or popup (`delayed7/`).
+- [x] Removing availability of the isolated control socket explicitly refuses remote completion without local fallback (`build7/16-missing-socket-lookup.png`). Restoring local context restores local filename completion.
+- [x] Real nested SSH localhost -> 127.0.0.1 withholds control_path and reachable until original shell returns; exit clears remote context. These are distinct SSH destinations/authenticated sessions on one machine, not two physical hosts.
+- [x] a1's separate backend evidence covers remote/local attachment collision content and session guards: `docs/qa_evidence/2026-09-22-verify-S7GX/`.
+- [ ] Suggestions were reviewed statically but not exercised through a provider; two physical hosts and network packet-loss conditions were not available in this run.
+
+## Verdict
+Independent a2: **passes the exercised host-context, interactive PATH, stale lookup and destination-guard checks.** `docs/qa_evidence/2026-09-22-verify-S7KC/build7/README.md` and `delayed7/README.md` record real SSH plus a two-second compgen shim; no paid model CLI. The initial PATH mismatch is fixed in `0b4b1798`. Scope limits above remain explicit; no claim that same-machine aliases establish every cross-machine identity case. Status unchanged.

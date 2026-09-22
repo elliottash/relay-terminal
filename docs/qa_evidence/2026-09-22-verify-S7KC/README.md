@@ -50,3 +50,15 @@ Repeated both drives on 11H.03; see [final/README.md](final/README.md). All thre
 ## Build6 / 11H.04
 
 All three original failures are fixed. Extended drive and separate zsh control comparison recorded in [build6/README.md](build6/README.md); it includes two narrower follow-up findings for parent assessment.
+
+## Latest shell binding comparison
+
+The staging-only zsh redraw widget was independently retested in [zsh-staged/README.md](zsh-staged/README.md). Ordinary submits show one prompt, but Ctrl+H after no-provider inline text still duplicates the preceding prompt. This narrower artifact is unresolved.
+
+## Delayed completion
+
+[delayed2/README.md](delayed2/README.md) passes live standard remote command completion plus delayed-result discard after draft edit and after SSH disconnect. The first shim attempt was invalid and is explicitly labelled in delayed/README.md.
+
+## Final native-input verdict
+
+2944d892 resolves the last native-control finding in an independent fresh drive using landed shell code: [zsh-final/README.md](zsh-final/README.md). All reproduced defects have verified fixes. Earlier failure notes remain as audit history.

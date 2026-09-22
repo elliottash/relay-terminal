@@ -1,0 +1,38 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+(aaa LLL LLL 5d
+
+QUEUED- AFTER-SLEEP
+bash-5.2$
+
+printf ‘RECEIVED
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+BE-A-COMMAND
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+WRAP - XXXXXXXXXXXXXKHXXK HANH AH HAHN HAHN HHH HHH HHH HHH HHH HHH HH HHH HHH H HHH H HHH HH HHH HHH HH HHH HHH HH HHH HHH HHH HHI
+XX XXX KKK AANA AHH KKH H KKH H KH HK HH HHH HK HHH HHH H HHH HK HHH HHH HH HHH HHH HHH
+bash-5.2$
+
+“MULT:
+
+tf ‘MULT
+
+MULTI-A
+MULTI-B
+bash-5.2$
+
+bash-5.2$
+
+aE
+bash-5.2$
+Bhell commands or agent prompts... 2 for help auto
+
+ees w)
+

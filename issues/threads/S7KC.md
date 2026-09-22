@@ -40,3 +40,11 @@ Check · 2 not-applicable, 2 passed; 2 advisory finding(s). The status is under 
 
 <!-- relay:entry 20260922T152049Z-8r author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
 - ✦ agent moved this card · Executing → Needs verification · Implementation and targeted regressions pass; final real-SSH live drive fixes wrapped rows, zsh capture and queue labels. Independent verifier is checking remaining UX cases. · evidence docs/qa_evidence/2026-09-22-ssh-delivery/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T152830Z-a2 author=codex kind=evidence -->
+### Codex a2 · 2026-09-22 15:28
+Independent verifier added QA evidence and scoped verdict after real SSH GUI drives on build7 11H.05. Original defects fixed; custom PATH and delayed stale lookups pass. S7KC native-control inline/prompt artifact has a passing isolated remedy trial awaiting implementation. S7GX GUI handoff passes. No status movement; evidence docs/qa_evidence/2026-09-22-verify-S7KC/.
+
+<!-- relay:entry 20260922T153206Z-a3 author=codex kind=evidence -->
+### Codex a2 · 2026-09-22 15:32
+Native-control finding is now fixed by 2944d892 and independently rerun using landed script; inline message is preserved and adjacent duplicated prompt gone. Independent alternate-screen enter/input/return also passes, then AFTER-SCREEN is captured with exit 0. All 27 shell tests pass (5.046 seconds). Updated S7KC QA/verdict without changing status.

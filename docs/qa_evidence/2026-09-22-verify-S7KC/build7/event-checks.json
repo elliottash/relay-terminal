@@ -1,0 +1,14 @@
+{
+  "remote_clean_output_host_exit": true,
+  "failure_exit_1": true,
+  "queue_dispatched_after_sleep": true,
+  "stdin_answer_is_distinct": true,
+  "multiline_one_clean_history_entry": true,
+  "zsh_exit_1": true,
+  "zsh_clean_output": true,
+  "nested_binding_withheld_until_return": true,
+  "outer_binding_restored": true,
+  "disconnect_clears_context": true,
+  "interrupt_exit_130": true,
+  "cancelled_command_not_dispatched": true
+}

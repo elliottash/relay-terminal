@@ -71,3 +71,15 @@ Targeted engine check: `RELAY_ENGINE_TEST=CoreTest build/engine/relay-engine-tes
 - notice · unittest:tests.test_ssh_shell — tests/test_ssh_shell.py: 1 of 26 are slow (test_zsh_over_ssh)
 - warning · card — none of the listed tests is named after anything this card changed (issues/changes/2026-09-22-guest-ssh-tools.md, issues/changes/2026-09-22-ssh-command-lifecycle.md, issues/changes/2026-09-22-ssh-host-context.md…)
 history: thread
+
+## QA checklist
+- [x] Independent a2 GUI drives on 11H.04/11H.05 verified idle SSH badge without cyan activity, actual running-command activity, ordinary/wrapped/multiline highlighting and spacing; the original wrapped-row and stale queue-label failures are fixed.
+- [x] Real Bash/zsh SSH history has host/cwd, command text, clean output and exit status; failures report exit 1. Zsh transient percent-marker contamination is fixed.
+- [x] Sleep queue dispatch, explicit read ANSWER versus queued command, queue cancellation, Ctrl+C exit 130, nested SSH unwind, reconnect and local restoration were driven. Cancelled command never entered execution history.
+- [x] Visible Bash terminal handoff reports exact HANDOFF_STDOUT and exit 1 while SSH remains connected, independently of transport exit.
+- [x] Native-control artifact fixed in `2944d892` and independently rerun using landed script: Ctrl+H preserves the inline error and leaves one fresh prompt; native command returns normally (`zsh-final/`).
+- [x] Independent alternate-screen fixture enters DEC 1049, accepts native input, restores normal screen/prompt and then records clean AFTER-SCREEN exit 0 (`fullscreen/`).
+- [ ] Full curses applications/tmux, disabled/partial integration and third-party OSC acceptance were not independently live-driven by a2; no blanket claim for those cases. The 27 focused shell tests pass and cover some hook variants.
+
+## Verdict
+Independent a2: **passes the exercised SSH lifecycle, native-input and handoff checks, with the stated coverage limits.** Evidence: `docs/qa_evidence/2026-09-22-verify-S7KC/build7/README.md`, `build6/README.md`, and `zsh-final/README.md`. Parent implementation revisions are `5e07a8d6`, `0b4b1798` and `2944d892`; GUI build7 is 11H.05. Real SSH used localhost and 127.0.0.1 as distinct SSH destinations on the same physical machine, with a deterministic GUI worker and no paid model CLI. Status unchanged.

@@ -1,0 +1,31 @@
+= work - cpu00%-mem00% x + OQ\4 eG 2 - 0x
+
+\O"E
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -38tcs26k/work$
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9: /tmp/relay-ssh-audit -38tcs26k/work$
+
+bash-5.2$
+
+printf 'REMOTE-ONE\nREMOTE- TWO:
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+No agent provider is configured to fix it.
+
+exited with status 1 on localhost
+
+bash-5.2$
+
+cat REMOTE_ONLY_PROOF.txt
+
+ees w)
+

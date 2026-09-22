@@ -1,0 +1,35 @@
+= work - cpu00%-mem00% x + OQ\4 eG 2 - 0x
+
+O8r*
+
+bash-5.2$
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+INPUT> ANSWER
+RECEIVED=ANSWER.
+bash-5.2$
+
+SHOULD-BE-A- COMMAND
+bash-5.2$
+
+WRAP - XXXXXXXXXXXXXKHXXK HANH AH HAH HAHN HHH HHH HHH HHH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH HH HHH HHH HHH HHI
+XX XXX KKH AAA KKH KKH H KKH H HHH HK HH HHH H HHH H KKH HH HHH HHH HK HHH HHH HHH HHH
+bash-5.2$
+
+“MULT:
+
+tf ‘MULT
+
+MULTI-A
+MULTI-B
+bash-5.2$
+
+bash-5.2$
+
+localhost ready
+
+remote_only_probe
+--stitmp/relay-ssh-audie-aetcs2eWremote <—
+

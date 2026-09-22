@@ -1,0 +1,47 @@
+= work - cpu00%-mem00% x + OQ\4 eG 2 - 0x
+(eae LLL LLL
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE -TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+x exited with status 1 on localhost.
+d_/tmp/ri y-ssh-audit re
+
+bash-5.2$
+
+bash-5.2$
+
+printf "QUEUED-AFTER-SLEEP’
+
+QUEUED-AFTER-SLEEP
+bash-5.2$
+
+INPUT> Queued : the command runs when the terminal is free
+
+1 take back to edit - drag to reorder - x remove
+
+QUEUE
+» running $ read -r-p 'INPUT> ' value; printf 'RECEIVED=%s\n' "$value"
+
+| $ echo SHOULD-BE-A-COMMAND
+
+© Relaying - read -r -p 'INPUT> ' value; printf 'RECEIVED=%s\n' "$value"...
+
+auto
+
+Shell commands or agent prompts. 2 for help
+
+JM 2)
+
+=
+
+mp/relay-ssh-audit-38tcs26k/remote | Loading models... ¥
+

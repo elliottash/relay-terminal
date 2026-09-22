@@ -34,3 +34,7 @@ Check · 3 not-applicable, 3 passed; 1 advisory finding(s). The status is under 
 
 <!-- relay:entry 20260922T152050Z-wp author=agent kind=event model=gpt-6-astra pane=994d8863 turn=fc8ca9abaf2147cb82e1e6068bae5444/51c7012d200246ccab0062e02e8d12bf -->
 - ✦ agent moved this card · Executing → Needs verification · Implementation and targeted regressions pass; final real-SSH live drive fixes wrapped rows, zsh capture and queue labels. Independent verifier is checking remaining UX cases. · evidence docs/qa_evidence/2026-09-22-ssh-delivery/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T152830Z-a2 author=codex kind=evidence -->
+### Codex a2 · 2026-09-22 15:28
+Independent verifier added QA evidence and scoped verdict after real SSH GUI drives on build7 11H.05. Original defects fixed; custom PATH and delayed stale lookups pass. S7KC native-control inline/prompt artifact has a passing isolated remedy trial awaiting implementation. S7GX GUI handoff passes. No status movement; evidence docs/qa_evidence/2026-09-22-verify-S7KC/.

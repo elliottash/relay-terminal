@@ -1,0 +1,33 @@
+@ work - cpu00%-mem00% = + OQ\4 eG 2 - 0x
+
+\O"E
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -38tcs26k/work$
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9:/tmp/relay-ssh-audit -38tcs26k/work$
+
+bash-5.2$
+
+printf ‘REMOTE-ONE\nREMOTE-TWO\n'
+
+REMOTE - ONE
+REMOTE - TWO
+bash-5.2$
+
+/tmp
+bash-5.2$
+
+exited No_agent provider is configured to fix it
+
+ith status 1 on localhost
+
+it
+
+Relaying - sleep 7...
+
+Shell commands or agent prompts. 2 for help auto
+
+ees w)
+
