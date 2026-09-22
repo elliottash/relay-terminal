@@ -430,7 +430,7 @@ void ProjectInitTests::theWindowOffersItPassivelyAndRemembersTheAnswer()
     QVERIFY(!window.isEmpty());
 
     // Trigger (3), and the one passive entry point the owner allowed.
-    QVERIFY(window.contains(QStringLiteral("askProjectInit(relay::projectinit::Trigger::Switchboard)")));
+    QVERIFY(window.contains(QStringLiteral("askProjectInit(relay::projectinit::Trigger::Switchboard, QString(), &why)")));
     QVERIFY(window.contains(QStringLiteral("Initialize a project here…")));
     QVERIFY(window.contains(QStringLiteral("Next time: type /init in any prompt box")));
 
