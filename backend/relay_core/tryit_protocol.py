@@ -546,7 +546,10 @@ def human_qa(card_id: str, parsed: dict, answer: str, expected: str) -> str:
     lines = [f"1. {question}",
              f"   Answer: {answer}"]
     if expected:
-        lines += ["", f"   Expected: {expected}"]
+        # One indented block under the numbered item: every line of it, not only the first, or
+        # the continuation lines fall out of the question they belong to.
+        body = " ".join(part.strip() for part in expected.splitlines() if part.strip())
+        lines += ["", f"   Expected: {body}"]
     where: list[str] = []
     if parsed.get("open"):
         where.append(f"opened with `{parsed['open']}`")

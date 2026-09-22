@@ -2445,8 +2445,16 @@ public:
                     continue;
                 }
             }
-            if (out.question.isEmpty() && line.endsWith(QLatin1Char('?')))
+            if (out.question.isEmpty() && line.endsWith(QLatin1Char('?'))) {
+                // The strip draws the question as a sentence, so the list marker the section
+                // wrote it under ("3. Did it stop you?") and any bold markers come off first —
+                // the same tidy `tryit_protocol._plain` does on the worker side.
+                static const QRegularExpression marker(
+                    QStringLiteral("^(?:[-*+]\\s+|\\d+[.)]\\s+)"));
                 out.question = line;
+                out.question.remove(marker);
+                out.question.remove(QStringLiteral("**"));
+            }
         }
         return out;
     }
