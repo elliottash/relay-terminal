@@ -409,6 +409,7 @@ commit, and runs only its own tests.
 
 ## Execution Summary
 Resumed and landed GUI folder behavior (82acbc04993a), documentation renames/redirects (e4377755c8cb), and remaining live backend wording found by audit (fe82d4344e98). New boards use board/; all legacy spellings stay readable; issues/ unchanged. Targeted Python batches: 848 + 834 pass; initial six GUI test targets pass. Evidence: docs/qa_evidence/2026-09-21-1CXD-delivery/. Historical comments and evidence retain old wording; frozen identifiers/icon unchanged.
+Session handoff, 2026-09-21: implementation is landed, not work to resume from the old snapshots. B1 GUI folder migration: 82acbc04993a; Area E three BOARD-* docs plus redirect stubs: e4377755c8cb; remaining live backend wording: fe82d4344e98. Area A tail was already 42ca4995. Six targeted GUI suites and 848+834 Python tests passed. Evidence: docs/qa_evidence/2026-09-21-1CXD-delivery/. Next: independent verification against Done means, especially legacy-folder read/write and residual historical comments versus the strict grep criterion. Preserve frozen identifiers, icon and issues/. No rename implementation agent remains running.
 
 ## Tests
 `ctest -R projects`
@@ -423,27 +424,21 @@ Resumed and landed GUI folder behavior (82acbc04993a), documentation renames/red
 `tests/test_tryit_protocol.py`
 manual: docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt
 
-### Check 2026-09-21 21:37
-- missing-evidence · ctest:projects — no run of ctest -R projects for this revision, from any host, and no attached result
-- missing-evidence · ctest:boardworkspace — no run of ctest -R boardworkspace for this revision, from any host, and no attached result
-- missing-evidence · ctest:boardsections — no run of ctest -R boardsections for this revision, from any host, and no attached result
-- missing-evidence · ctest:projectinit — no run of ctest -R projectinit for this revision, from any host, and no attached result
-- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
-- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
-- missing-evidence · unittest:tests.test_board — no run of tests/test_board.py for this revision, from any host, and no attached result
-- missing-evidence · unittest:tests.test_board_tools — no run of tests/test_board_tools.py for this revision, from any host, and no attached result
-- missing-evidence · unittest:tests.test_board_protocol — no run of tests/test_board_protocol.py for this revision, from any host, and no attached result
-- missing-evidence · unittest:tests.test_tryit_protocol — no run of tests/test_tryit_protocol.py for this revision, from any host, and no attached result
+### Check 2026-09-21 21:39
+- passed · ctest:projects — ctest -R projects passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
+- passed · ctest:boardworkspace — ctest -R boardworkspace passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
+- passed · ctest:boardsections — ctest -R boardsections passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
+- passed · ctest:projectinit — ctest -R projectinit passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
+- missing-evidence · ctest:board — no run of ctest -R board for this revision, from any host, and no attached result
+- missing-evidence · ctest:boardpane — no run of ctest -R boardpane for this revision, from any host, and no attached result
+- passed · unittest:tests.test_board — tests/test_board.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- passed · unittest:tests.test_board_tools — tests/test_board_tools.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- passed · unittest:tests.test_board_protocol — tests/test_board_protocol.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- passed · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
 - not-applicable · manual:docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt
-- notice · ctest:projects — ctest -R projects has never run here
-- notice · ctest:boardworkspace — ctest -R boardworkspace has never run here
-- notice · ctest:boardsections — ctest -R boardsections has never run here
-- notice · ctest:projectinit — ctest -R projectinit has never run here
 - notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
-- notice · unittest:tests.test_board — tests/test_board.py: 114 of 129 never ran here (test_new_id_shape, test_all_digit_and_lowercase_ids_are_invalid, test_new_id_avoids_taken…)
 - notice · unittest:tests.test_board — tests/test_board.py: 2 of 129 are skipped for good (test_union_merge_keeps_both_sides_entries, test_check_flags_private_files_tracked_by_git)
-- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 11 of 257 never ran here (test_a_card_turn_does_not_move_a_consoles_tool_list, test_the_new_sections_are_in_the_schema_and_agent_writable, test_check_no_longer_warns_on_them…)
 - notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 257 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
-- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 155 of 166 never ran here (test_board_open_answers_with_the_config_the_cards_and_the_problems, test_a_card_row_carries_what_the_pane_draws, test_a_row_says_when_the_card_last_changed…)
-- notice · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py: 34 of 34 never ran here (test_successful_retry_does_not_report_previous_failure, test_the_types_match_the_protocol_modules, test_it_starts_one_turn_with_the_brief_the_card_and_the_evidence_directory…)
+- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 2 of 176 are slow (test_a_row_says_when_the_card_last_changed, test_board_open_sends_the_rows_in_batches_no_message_can_overflow)
+- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 10 of 176 are not in the project any more (test_a_bad_comment_kinds_block_is_reported_before_anything_is_sent, test_a_board_with_no_repository_says_where_to_put_one, test_a_forge_that_refuses_answers_one_error_with_no_token_in_it…)
 history: thread

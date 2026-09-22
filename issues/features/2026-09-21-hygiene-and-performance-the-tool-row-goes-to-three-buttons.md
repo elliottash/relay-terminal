@@ -2,14 +2,14 @@
 id: SW1D
 type: work
 status: needs-verification
-assignee: codex
 labels: [feature, switchboard, qa]
 component: [gui]
+assignee: codex
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzf
 created: '2026-09-21'
-source: 'owner, 2026-09-21'
-links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e, 7133156a0d1955c4ecf35c68ac705b2cd4a218d0], evidence: [docs/qa_evidence/2026-09-21-sw1d/], related: [YZ8G, 1CXD, SJTR], github: null}
+source: owner, 2026-09-21
+links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e, 7133156a0d1955c4ecf35c68ac705b2cd4a218d0, a83e139f22c0], evidence: [docs/qa_evidence/2026-09-21-sw1d/, docs/qa_evidence/2026-09-21-verify-SW1D-a1/], related: [YZ8G, 1CXD, SJTR], github: null}
 ---
 # Hygiene and Performance: the board's tool row goes from four buttons to three
 
@@ -72,6 +72,7 @@ its four targets, with updated pane titles and notices. Card-page Check and wire
 are unchanged. Parent #74Y5 driver changes were excluded from the landing diff.
 Follow-up updates the existing board-model cleanup tests to enter through Hygiene and registers
 the stable `profile` pane type with the visible title Performance.
+Session handoff, 2026-09-21: added owner request delivered after #1CXD B1. Implementation e325845d plus follow-up 7133156a: Hygiene · Tests · Performance, format check first, then cleanup preview/Stop/Apply; Performance pane chrome renamed too. 87 Board cases and four targeted suites passed. Independent bounded evidence a83e139f: docs/qa_evidence/2026-09-21-verify-SW1D-a1/report.md confirms exact-build row, format-first and Performance routing; deterministic preview/apply transitions pass. Live model-generated cleanup preview and successful Apply remain unverified because that isolated fixture lacked a supported provider. Next verifier should complete that bounded live path. Keep needs-verification; do not reimplement the row.
 
 ## Tests
 - `ctest -R board --test-dir build` — tests/boardmodel_test.cpp

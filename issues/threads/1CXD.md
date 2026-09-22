@@ -78,3 +78,9 @@ GUI folder changes landed as 82acbc04993a after exact-tree build gate; projects,
 
 <!-- relay:entry 20260922T013726Z-mf author=agent kind=evidence -->
 Check · 8 missing-evidence, 1 not-applicable, 2 passed; 11 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T013955Z-t6 author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 8 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T020006Z-16 author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
+- ✦ agent updated this card · appended to `## Execution Summary`

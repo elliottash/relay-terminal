@@ -1,15 +1,15 @@
 ---
 id: 7BM4
 type: work
-status: executing
+status: ready
 labels: [feature, switchboard, tests, profiling]
 component: [gui, worker]
 assignee: codex
 implemented_by: anthropic/claude-fable-5.1
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
-source: 'owner, Claude Code session, 2026-09-20'
-links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e], evidence: [docs/qa_evidence/2026-09-21-verify-7BM4/report.md, docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
+source: owner, Claude Code session, 2026-09-20
+links: {plans: [], commits: [c8b0a8d2, 912ab11a, eb0a9b76, 4ac7b57d, 71355e7a, db035cfd, 5e306871, 8ad92248, 6348ebef, 6bb87f04, cf7d1a5f, 97a019fc, 0152697f, f56a6ea0, 432a17f0, a10bb2a4, fd45d116, f86266da, b81c861a, fd7a9a71, 936bc28a, 4818709e, 2bd23344, e34b1df6, 21f5b001, 20c4e29e, d8b255157167a80c2693833019a8964bce6d0330, 0014fa103f756ab06b0fd4670ec256626eb19ac3, 34030318c2d20632c979787895d765026f37083f], evidence: [docs/qa_evidence/2026-09-21-verify-7BM4/report.md, docs/qa_evidence/2026-09-20-test-suites-pane/, docs/qa_evidence/2026-09-20-card-tests-check/, docs/qa_evidence/2026-09-20-profile-button/, docs/qa_evidence/2026-09-20-switchboard-tooling-hub/HUMAN-QA.md, docs/qa_evidence/2026-09-21-7BM4-repair/, docs/qa_evidence/2026-09-21-verify-7BM4/], related: [R9G7, SDXE, PF4K, YZ8G, 561P], github: null}
 ---
 # Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits
 
@@ -284,9 +284,14 @@ The prior implementer's checklist was not used as verification evidence.
 - staged: docs/qa_evidence/2026-09-21-verify-7BM4/
 
 Unresolved: long-card body truncation; clipped Check findings on that card; missing Done means;
-real-model Verify → Try it → answer completion still being exercised (GLM failed HTTP 429,
-Kimi has started and made tools calls, completion not claimed); all three owner judgments below.
-Reviewed by gpt-6-astra on 2026-09-21: 3 findings.
+verifier updates/QA transition overwrite implemented_by with the verifier identity (exact calls in
+`kimi-board-calls.json`); answer submission replaces the original Human QA questions in the
+disposable card (`kimi-final-card.md` versus `kimi-answer-card.md`); all three owner judgments below.
+Real-model Verify (64 tools) and Try it (17 tools) both completed; the GUI accepted an explicitly
+automated observation and recorded/revealed it on disk. No owner judgment was supplied. The long
+card hid Try it task/question/Open and the revealed result; see `25-try-written.png`,
+`26-answer-submitted.png` and `flow-summary.json`. GLM's earlier attempt failed HTTP 429.
+Reviewed by gpt-6-astra on 2026-09-21: 5 findings.
 
 ## Human QA
 The owner is put into a staged project in which this card's three problems are happening; an AI
@@ -304,5 +309,12 @@ Not ready to close. Clean revision `0241d05ef193` passes all 237 named backend t
 all four named CTest suites. The fresh orders simulation proves the short-card gate,
 flaky-test history and actual build-profile attachment. The real long card still hides its
 Tests section through truncation and clips its Check findings. Missing Done means and
-unanswered Human QA judgments remain. The requested real-model end-to-end flow is pending;
-a started model turn is not a completed verification. Details: fresh evidence `report.md`.
+unanswered Human QA judgments remain. The actual Kimi Verify run completed (64 tools, outcome done);
+Try it completed (17 tools), and its answer field accepted a clearly labeled automated observation.
+The full sequence was exercised, but fails: truncation hides Try it task/question/Open/reveal,
+verifier writes overwrite implementer attribution, and answer submission drops the original Human
+QA questions in the disposable copy. The shared card retains those questions unanswered.
+Details: fresh evidence `report.md`, `flow-summary.json`, and before/after `kimi-*.md` snapshots.
+
+## Execution Summary
+Session handoff, 2026-09-21: a2 completed the real Verify → Try it → automated-answer sequence on clean 0241d05e, after GLM HTTP429 and a Kimi fallback. 237 backend tests, four GUI suites and fresh gate/history/profile/attachment scenarios passed. Full baseline report: docs/qa_evidence/2026-09-21-verify-7BM4/report.md (not an all-green verdict). Three baseline failures are already repaired: d8b25515 fixes desktop body truncation and clipped findings; 1f3a7af0 fixes lost prior Human QA. Parent clean-build repair proof: docs/qa_evidence/2026-09-21-7BM4-repair/ (177 backend tests, two GUI suites, 20-test long-card live drive). The verifier's baseline checklist is retained as historical evidence, not a claim the repaired revision still fails. Next: independently recheck the generated Try it handoff on exact repaired GUI/backend; fix/file the remaining verifier-identity overwrite in board_tools.py (_update/_move stamp implemented_by during verification); record missing Done means from original Issue/Decisions before any new implementation. All three original Human QA questions remain intact and unanswered. Do not close or invent owner answers. No verification process remains running.

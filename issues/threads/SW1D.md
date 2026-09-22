@@ -39,3 +39,9 @@ Preserved parent verify-brief assertions; card remains needs-verification.
 Follow-up landed 7133156a0d1955c4ecf35c68ac705b2cd4a218d0. Exact-tree application build passed;
 isolated-tree board and panestatus suites also passed 2/2 (2.37 seconds). All parent-owned
 changes were preserved. Shared combined four-suite run and GUI evidence are recorded above.
+
+<!-- relay:entry 20260922T030003Z-s3 author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260922T030003Z-s4 author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["e325845d59af145ea6b692d38e7c526ad48b9f2e", "7133156a0… → {"plans": [], "commits": ["e325845d59af145ea6b692d38e7c526ad48b9f2e", "7133156a0…

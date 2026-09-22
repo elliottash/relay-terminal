@@ -1,11 +1,12 @@
 ---
 id: 74Y5
 type: work
-status: needs-verification
+status: done
 labels: [feature, switchboard, qa]
 component: [gui, worker]
 assignee: codex
 implemented_by: openai/gpt-6-astra via codex
+verified_by: openai/gpt-6-astra via codex
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzze
 created: '2026-09-21'
@@ -41,6 +42,7 @@ Failure would show as: a brief asking a person to run tests or attach evidence; 
 
 ## Execution Summary
 Landed ece752ef33a41f3cb2fc1b3ee90a89c9c67863c5: a named local socket driver (`scripts/relay-drive`), Board control open/press/read/type with explicit refusals, action-registry and pane routing, and named performance targets. Verify and Try it now require the numbered check/agent/person path, counts, reasons and human minutes before staging. `docs/DRIVING-APPS.md` documents the seam. The tooling fixture uses names throughout; all three isolated live phases reached their rendered outcomes. Evidence: docs/qa_evidence/2026-09-21-74Y5-named-drive/. Independent verification is running separately.
+Session handoff, 2026-09-21: implementation ece752ef, implementer captures ab380302, independent verifier evidence e0442a22 and PASS record c0f39021 are landed. Exact clean GUI/backend passed 19 named open/press/read/type operations; three targeted suites passed. See docs/qa_evidence/2026-09-21-verify-74Y5-a1/report.md. Named tooling scenarios are in docs/qa_evidence/2026-09-21-74Y5-named-drive/. No remaining implementation work; independent Verdict permits closure.
 
 ## Tests
 `ctest --test-dir build -R '^(board|boardpane)$' --output-on-failure`

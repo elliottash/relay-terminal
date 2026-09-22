@@ -1,15 +1,16 @@
 ---
 id: JNYN
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, qa]
 component: [gui, worker]
 assignee: codex-verify-jnyn-a1
+implemented_by: openai/gpt-6-astra via codex
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzc
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [1f3a7af0e7467dff0037cd56d285e3aef2d19727, 132d35235d29e9f5931c2391c9c4fb24026f0cc8, f819daa617fa7fc34bde95c9fa0bc1d59c974d36, 03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9, 1f3a7af0e7467dff0037cd56d285e3aef2d19727, 132d3523], evidence: [docs/qa_evidence/2026-09-21-verify-JNYN-recheck/, docs/qa_evidence/2026-09-21-tryit/, docs/qa_evidence/2026-09-21-verify-JNYN-fresh/, docs/qa_evidence/2026-09-21-verify-JNYN-recheck/], related: [YZ8G, 7BM4, WC3E], github: null}
+links: {plans: [], commits: [1f3a7af0e7467dff0037cd56d285e3aef2d19727, 132d35235d29e9f5931c2391c9c4fb24026f0cc8, f819daa617fa7fc34bde95c9fa0bc1d59c974d36, 03701acf, 79ef050e, bca9a82e, a739dd45, 39bab9d9, 132d3523, 34030318c2d20632c979787895d765026f37083f], evidence: [docs/qa_evidence/2026-09-21-verify-JNYN-recheck/, docs/qa_evidence/2026-09-21-tryit/, docs/qa_evidence/2026-09-21-verify-JNYN-fresh/, docs/qa_evidence/2026-09-21-verify-7BM4/], related: [YZ8G, 7BM4, WC3E], github: null}
 ---
 # Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
 
@@ -54,6 +55,7 @@ Owner's three steps (2026-09-21): Try it is the third. When Verify (#WC3E) has l
 directory — `docs/qa_evidence/<date>-verify-<ID>/stage.sh` — `verify_staging` finds it and the
 turn reuses it instead of replaying the mechanical pass; the `started` event says `reusing`.
 2026-09-21 repair after fresh independent verification: 1f3a7af0e7467dff0037cd56d285e3aef2d19727 scopes failure-note lookup to entries created during the current run and updates only the generated Try it Human QA block, preserving prior owner decisions. Two regression cases added; all 34 protocol cases pass. Independent repair recheck: 132d3523, docs/qa_evidence/2026-09-21-verify-JNYN-recheck/report.md. Full configured-model staging is being exercised with #7BM4.
+Session handoff, 2026-09-21: two defects found by fresh verifier are repaired in 1f3a7af0: old failure notes no longer poison a retry; generated answers preserve existing Human QA. Independent narrow recheck 132d3523 passes both reproductions, real UI answer/reveal and 34 protocol tests (docs/qa_evidence/2026-09-21-verify-JNYN-recheck/). Separate real-model flow on OLD clean revision 0241d05e completed Kimi Verify (64 tools), reused staging in Try it (17 tools), then submitted a clearly automated fixture answer; its old-revision preservation/truncation failures do not establish regressions in the repairs. See docs/qa_evidence/2026-09-21-verify-7BM4/report.md. Long-card display repaired in d8b25515. Next: independent combined recheck using repaired GUI/backend and generated staged artifacts; it was interrupted before completion. Broader GUI/backend/CLI staging remains unproved. Keep open; no owner judgement has been supplied.
 
 ## Tests
 - `tests/test_tryit_protocol.py` — 32 cases: the turn's started / progress / finished events,

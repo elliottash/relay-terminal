@@ -34,3 +34,12 @@ Updated independent QA checklist and Verdict to clear both fixed defects using 1
 
 <!-- relay:entry 20260922T014212Z-6z author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235… → {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235…; appended to `## Execution Summary`
+
+<!-- relay:entry 20260922T020007Z-fk author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260922T020029Z-dw author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
+- ✦ agent moved this card · Executing → Needs verification · Repairs landed and narrow independent recheck passes; next session must finish combined current-build staging verification. · evidence docs/qa_evidence/2026-09-21-verify-JNYN-recheck/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T020120Z-5m author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235… → {"plans": [], "commits": ["1f3a7af0e7467dff0037cd56d285e3aef2d19727", "132d35235…

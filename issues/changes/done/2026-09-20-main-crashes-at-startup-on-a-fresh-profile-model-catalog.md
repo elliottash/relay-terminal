@@ -44,6 +44,7 @@ It blocks human QA of anything on a fresh profile (#7BM4's walkthrough is waitin
 
 ## Execution Summary
 The original crash does not reproduce on clean committed tree 82acbc04993a with its matching backend and an isolated empty profile. It reached worker-ready/model configuration and stayed alive until a deliberate 15-second timeout. No model-catalog code change was warranted. The historical heap-corruption cause remains unestablished; see docs/qa_evidence/2026-09-21-561P-current/README.md.
+Session handoff, 2026-09-21: remains Done. Parent and independent verifier reproduced clean empty-profile startup successfully at 82acbc04 with matching backend; independent evidence 4fbf48b1, final record 9abd3984. docs/qa_evidence/2026-09-21-verify-561P-a1/report.md identifies binary, manifest and deliberate stop. This is current non-reproduction, not a diagnosed fix for historical heap corruption. No further work unless the crash reproduces.
 
 ## Tests
 manual: docs/qa_evidence/2026-09-21-561P-current/README.md
