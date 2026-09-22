@@ -102,7 +102,7 @@ that conflict.
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
 | Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
-| Ctrl+Shift+S | Switchboard: this repository's cards, threads and plans (again to close it) |
+| Ctrl+Shift+S | Board: this repository's cards, threads and plans (again to close it) |
 | Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing searches every model you have made available) |
 | Alt+F, Alt+H | This pane on the Flash model / the High model, and back to main (`/flash`, `/high`, `/main`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
@@ -132,13 +132,13 @@ which reloads live. Copy on select is off by default (Options › Terminal).
 
 **Actions and Options** are two panes that open beside the one you are in, one at a time.
 **Actions** (Ctrl+Shift+A) is everything you can do *now*, to this pane, conversation or window —
-resume a session, open the Switchboard, pick the model, a new pane, rewind, open Options — in one
+resume a session, open the Board, pick the model, a new pane, rewind, open Options — in one
 list you can filter, recent first, each with its keys. **Options** (Ctrl+Shift+O, the gear at the
 top right, or Ctrl+,) is what *persists*: a tab per section — General, Appearance, Models, Terminal,
 Agent, Voice, Privacy, Keyboard — with every setting as a real control. The two open side by side:
 each key opens, focuses or closes its own pane and leaves the other where it is, so a setting can be
 read next to the action that uses it. The title bar has a button for each tool pane, left of the gear: Actions,
-Sessions and the Switchboard, each with the glyph its pane wears. Either search box reaches both: in Actions, an option shows as an
+Sessions and the Board, each with the glyph its pane wears. Either search box reaches both: in Actions, an option shows as an
 "Options › …" row that takes you to it. Type, ↑ ↓, Enter runs the action or changes the row; Esc
 closes and puts focus back where it was, so nothing there needs the mouse.
 
@@ -435,7 +435,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 
 Relay is not a Konsole fork and does not read or change your Konsole settings or dotfiles.
 
-### Switchboard (Ctrl+Shift+S)
+### The Board (Ctrl+Shift+S)
 
 The repository's `issues/` tracker as a board: one Markdown card per issue, plan or memory, in
 git, readable on GitHub and usable without Relay. Tabs are categories (Features, Bugs, Design,
@@ -448,7 +448,7 @@ append-only, one entry per write.
   `t` sends `#ID` to the composer, `Del` (or the card's Delete button) deletes one after a
   confirm — undoable for 30 seconds, and agents have no delete at all.
 - **In the terminal**: `#` and a few characters picks a card, `/card <text>` captures one without
-  leaving the prompt, `/switchboard` opens the pane. A `#K7Q2` in a prompt hands the agent the
+  leaving the prompt, `/board` opens the pane. A `#K7Q2` in a prompt hands the agent the
   card, its open tasks and its recent thread.
 - **The agent keeps it** (`board.yaml`'s `agent.autonomy`): every request you make that it does
   not finish becomes a card or updates one, questions go on the card with a recommendation,

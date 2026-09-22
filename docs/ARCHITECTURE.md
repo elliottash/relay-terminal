@@ -1640,7 +1640,7 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
 
 Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
 tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
-("Board") and `/switchboard`. `/card <text>` adds a card to the Inbox verbatim without
+("Board") and `/board` (`/switchboard` is a silent alias). `/card <text>` adds a card to the Inbox verbatim without
 opening anything. Both attach the tab to the pane's candidate project; a candidate with no board
 yet gets one quiet status line and **nothing is created** (the init question is protocol 19.12).
 The layout node is `{"board": {"workspace", "tab"}}`, and a tab attached to a project is saved as

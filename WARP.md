@@ -41,7 +41,7 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 "card" had grown eight meanings, two of them inside one parenthesis in `src/Pane.h`, so the word is
 now spent where it is listed here and nowhere else.
 
-- **card** is a Switchboard record, of any of its four types (`CARD_TYPES = ("work", "plan",
+- **card** is a Board record, of any of its four types (`CARD_TYPES = ("work", "plan",
   "memory", "alias")`, `backend/relay_core/board.py`). Say *work card*, *plan card*, *memory card*
   or *alias card* when the type matters. It is not narrowed to issue cards: that would leave the
   other three types with no noun.

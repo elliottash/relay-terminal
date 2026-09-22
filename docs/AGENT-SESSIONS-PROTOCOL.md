@@ -3359,7 +3359,7 @@ and `src/ProjectInitBlock.h` draws it). Exactly five acts may raise the question
 |---|---|---|
 | the first prompt sent to the agent in a pane standing in a git repository with no board | `agent-work` | `Pane::submitAgent` |
 | the agent's first card | `agent-card` | the worker's `board_init_request` |
-| opening the Board (Ctrl+Shift+S, the palette, `/switchboard`) | `switchboard` | `RelayWindow::toggleBoardPane` |
+| opening the Board (Ctrl+Shift+S, the palette, `/board`) | `switchboard` | `RelayWindow::toggleBoardPane` |
 | `/card <text>` — the text is held and lands as the first card on the yes | `card-command` | `Pane` |
 | `/init`, which also clears a remembered no, and with no candidate offers the pane's own directory | `init-command` | `Pane`, and one palette item |
 

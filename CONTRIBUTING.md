@@ -9,7 +9,7 @@ maintainable and its licensing can stay clear.
 
 The issue tracker is the `issues/` folder in this repository: one Markdown file per issue, named
 `YYYY-MM-DD-short-slug.md`, with the format in `docs/SWITCHBOARD-FORMAT.md` and the conventions
-in `issues/README.md`. It is Relay's own Switchboard — the same board Relay creates for any project
+in `issues/README.md`. It is Relay's own Board — the same board Relay creates for any project
 — so the app can open it. In short:
 
 - Open and in-progress cards sit at the top of `issues/features/` (new capabilities) or
