@@ -216,6 +216,8 @@ def main():
             if not isinstance(request, dict):
                 raise ValueError("Protocol message must be an object.")
             kind = request.get("type")
+            if kind == "set_model" and board.refuse_model_selection(request):
+                continue
             if kind == "route":
                 known = request.get("known_commands", [])
                 if not isinstance(known, list) or len(known) > 20000 or not all(isinstance(x, str) for x in known):
@@ -661,6 +663,8 @@ def main():
                                                              "model": request.get("model"),
                                                              "effort": request.get("effort")})
                             if isinstance(pick, str) and pick.strip() else agent.roles.resolve(role))
+                if board.refuse_model_selection(request, resolved.config):
+                    continue
                 new_role = "main" if resolved.is_main else role
                 changed = {"event": "model_changed", "id": request.get("id"), "model": resolved.config.model,
                            "model_name": model_name(resolved.preset_id, resolved.config.model),

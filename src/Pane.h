@@ -8261,8 +8261,10 @@ private:
             printInline(QStringLiteral("✗ %1\n").arg(reason.isEmpty() ? refused + QStringLiteral(" did not take over.") : reason),
                         Ink::Error);
             if (!m_agentBusy && !moreTurnsPending()) closeInline();
-            const QString what = QStringLiteral("Still on %1 · %2's window is too small for this conversation")
-                                     .arg(modelNameFor(m_currentPreset, m_model), refused);
+            const QString what = event.value(QStringLiteral("code")).toString() == QStringLiteral("board_model_unavailable")
+                ? QStringLiteral("Still on %1 · %2").arg(modelNameFor(m_currentPreset, m_model), reason)
+                : QStringLiteral("Still on %1 · %2's window is too small for this conversation")
+                      .arg(modelNameFor(m_currentPreset, m_model), refused);
             status(what); toast(what);
             updateContextLabel();
             changed();

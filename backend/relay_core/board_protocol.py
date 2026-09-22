@@ -14,6 +14,7 @@ the card reseeds it, so the file stays the memory and a collaborator continues t
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import secrets
@@ -645,6 +646,43 @@ class BoardCommands:
             self.init.cancel = cancel
         agent.refresh_system_prompt()
 
+    def refuse_model_selection(self, request, config=None):
+        """A helper cannot promise a model its card runners cannot use (#BMS1)."""
+        if not self.console:
+            return False
+        main = self._agent()
+        if main is None:
+            return False
+        guest = GHP.guest_name(config) if config is not None else GHP.guest_name(request.get("preset"))
+        reason = (GHP.helper_refusal(guest) if guest else
+                  "Wait for the board's running and queued card turns to finish before changing models."
+                  if not self.cards.idle() else "")
+        if not reason:
+            return False
+        self.emit({"event": "model_switch_refused", "id": request.get("id"),
+                   "at": "request", "model": request.get("model", ""),
+                   "current_model": main.config.model,
+                   "preset": main.preset.id if main.preset else None,
+                   "context_window": main.context.window, "effort": main.effort,
+                   "reason": reason, "code": "board_model_unavailable"})
+        return True
+
+    def _sync_card_model(self, session):
+        """Keep a cached idle conversation on the helper's selected provider (#BMS1)."""
+        main = self._agent()
+        if not self.console or main is None or session is None or not session.idle:
+            return
+        config = self._usable_config(main.config)
+        agent = session.agent
+        preset = main.preset.id if main.preset else None
+        old_preset = agent.preset.id if agent.preset else None
+        if agent.config != config or old_preset != preset or agent.effort != main.effort:
+            # set_model adapts history and token accounting while retaining the conversation.
+            # Copy: effort and temporary Plan routing must not mutate the tab's config.
+            agent.effort = main.effort
+            agent.set_model(copy.deepcopy(config), preset, main.context.window)
+        agent.roles = main.roles
+
     @staticmethod
     def _usable_config(config):
         """The config a helper turn may be built on, or the one sentence saying why there is none.
@@ -697,7 +735,7 @@ class BoardCommands:
                              "(this project has no board.yaml, or its autonomy is off).")
         workspace = str(tools.board.repo)
         session_dir, session_id = self._card_session_file(card_id)
-        agent = Agent(self._usable_config(main.config), workspace, emit,
+        agent = Agent(copy.deepcopy(self._usable_config(main.config)), workspace, emit,
                       max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
                       skills=getattr(main.executor, "skills", None),
                       preset_id=main.preset.id if main.preset else None,
@@ -2024,6 +2062,7 @@ class BoardCommands:
         # in the §12 strip instead of being refused; what the mode may touch is enforced for the
         # length of the turn by `Agent.set_card_turn`, which opens the `CardScope` on this card's
         # own tools when the turn starts and closes it when it ends.
+        self._sync_card_model(self.cards.session(card_id))
         self.cards.submit(card_id, mode, prompt, rid, seed_hash=card_hash, preview=said)
 
     def card_queue(self, surface):

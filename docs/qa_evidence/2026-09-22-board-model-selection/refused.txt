@@ -1,0 +1,29 @@
+>+ © project (2) - cpu 00%-mem 00% < + 2 4em@e o _ox
+© project (OE BR x
+elliott@spark-dec9: /tmp/rl-ctrn.5aDT/home/project$ « Ries)
+#1906 #ID+prompt(t) Openfile(o) x
+The console draws the card turn i Delete (Del)
+Discussing v Features v Done (d)
+issues/features/2026-09-21 -the-console-draws-the-card-turn.md
+Issue
+the console's brief has a board
+THREAD -3
+‘owner Discuss just now
+say hello to the card
++ owner moved this card « Inbox ~ Discussing - the discussion started - just now
++ agent Discuss - stub -just now
+Hello from the tab’s one agent.
+> stub
+Hello from the tab's one agent.
+x The helper agent cannot run on Claude Code. Add a provider
+under Options » Models, or pick a model for the helper in its
+model box.
+x The helper agent cannot run on Codex. Add a provider under
+Options » Models, or pick a model for the helper in its model
+box.
+un on Codex. Add a provider under Options » Models, or pick a model for the helper in its model box.
+Reply — Enter discusses, Ctrl+Enter plans
+< o7%left stub ¥ high v | o
+Shell commands or agent prompts... ? for help auto
+Atmp/ri-ctrn.SaDT/home/project |S claude-opus5 ¥ high vo
+Esc back to the board eedit ddone Tabreply Enter discuss por Ctrl+Enter plan xexecute vverify Del delete
