@@ -22,7 +22,8 @@ if (stage/'share/relay').exists():
     shutil.copytree(stage/'share/relay',app/'Contents/Resources/relay',symlinks=True,dirs_exist_ok=True)
 PY
 resources="$app/Contents/Resources"
-mkdir -p "$resources/python" "$resources/licenses"
+mkdir -p "$resources/python" "$resources/licenses" "$resources/relay/data/icons/hicolor/256x256/apps"
+cp data/icons/hicolor/256x256/apps/org.relayterminal.Relay.png "$resources/relay/data/icons/hicolor/256x256/apps/"
 python3 - "$app/Contents/Info.plist" "$version" <<'PYINFO'
 import plistlib,sys
 from pathlib import Path

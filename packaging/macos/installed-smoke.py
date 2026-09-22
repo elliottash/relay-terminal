@@ -94,12 +94,22 @@ def main():
                    PYTHONPATH=os.pathsep.join(map(str, (resources / 'relay/backend', resources / 'relay',
                                                        resources / 'python/lib/python3.13/site-packages'))),
                    PATH='/usr/bin:/bin:/usr/sbin:/sbin')
-        for key in ('QT_PLUGIN_PATH', 'QTDIR', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH', 'PYTHONHOME', 'QT_QPA_PLATFORM'):
+        for key in ('QT_PLUGIN_PATH', 'QTDIR', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH', 'PYTHONHOME', 'QT_QPA_PLATFORM', 'SSL_CERT_FILE', 'SSL_CERT_DIR'):
             env.pop(key, None)
         subprocess.run([str(python), '-S', '-c',
                         'import cryptography,ssl; from relay_core import agent, board; import remote.gui_host'],
                        env=env, check=True)
-        subprocess.run([str(python), '-S', 'tests/test_worker_encoding.py', '--worker',
+        # Validate real certificate trust after relocating, with no runner CA environment.
+        tls_check = subprocess.run([str(python), '-S', '-c',
+            "import json,ssl,urllib.request; "
+            "context=ssl.create_default_context(); "
+            "assert context.cert_store_stats()['x509_ca'] > 0, ssl.get_default_verify_paths(); "
+            "response=urllib.request.urlopen('https://www.python.org/',context=context,timeout=20); "
+            "assert response.status == 200; "
+            "print(json.dumps({'ca_paths':ssl.get_default_verify_paths()._asdict(),'ca_count':context.cert_store_stats()['x509_ca'],'https_status':response.status}))"],
+            env=env, check=True, capture_output=True, text=True)
+        (evidence / 'private-python-tls.json').write_text(tls_check.stdout)
+        subprocess.run([str(python), '-S', 'tests/test_worker_encoding.py' , '--worker',
                         str(resources / 'relay/backend/worker.py')], env=env, check=True)
         check_shell(resources, env, work, evidence)
         with (evidence / 'gui-stderr.txt').open('wb') as log:
