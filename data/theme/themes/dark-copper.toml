@@ -46,7 +46,7 @@ error = "#e06c75"
 # of: the copper accent is itself an orange. A vermilion — redder in hue and half again as
 # saturated — keeps dE 27.1 from the copper, 36.6 from the red and 47.0 from the amber.
 action = "#e56a30"
-# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# A tool pane's header band (the Board and its neighbours), its own token since
 # 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
 # you. The switchboard metal from [board] below — this theme's brass is copper, straight off the
 # reference. dE 23.7 from the amber, which is what keeps a band clear of a flag.
@@ -89,7 +89,7 @@ palette = [
 
 [board]
 # The switchboard materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), painted since 2026-09-19: `face`
-# is the ground of the Switchboard pane, `metal` a lit piece of its hardware and `metal_dim` the
+# is the ground of the Board pane, `metal` a lit piece of its hardware and `metal_dim` the
 # same hardware unlit. Brass becomes copper here, straight off the reference: 5.91:1 metal on face,
 # legible as enamel text. This is the one theme whose chrome and board are the same material, so
 # check the board widgets against it first.

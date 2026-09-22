@@ -27,7 +27,7 @@ error = "#fc7f70"
 # Actions (owner, 2026-09-18). Upstream Gruvbox's own bright orange, so the port keeps its palette:
 # 4.59:1 at worst, dE 39.4 from the red and 35.5 from the yellow.
 action = "#fe8019"
-# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# A tool pane's header band (the Board and its neighbours), its own token since
 # 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
 # you. Gruvbox's own dim yellow (palette 3) against its bright yellow (palette 11, the amber above):
 # the pair the palette already ships, doing the job it was designed for.
@@ -62,7 +62,7 @@ palette = [
 ]
 
 [board]
-# The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), out of gruvbox's own palette
+# The Board's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), out of gruvbox's own palette
 # rather than invented for it: the face is bg0_hard, the metal is the dim yellow (palette 3, which
 # is also this theme's `tool`) at 6.61:1 on it, and the unlit metal is that yellow half sunk into
 # the face. Warm hardware on a warm ground is what this palette was always doing.

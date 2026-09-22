@@ -28,14 +28,14 @@ success = "#7ec88c"
 warning = "#e5c07b"
 error = "#e06c75"
 # The Actions pane's band, glyph and title-bar button (owner, 2026-09-18: "make actions
-# red-orange"). A fifth meaning hue, sitting between the amber `warning` the Switchboard uses and
+# red-orange"). A fifth meaning hue, sitting between the amber `warning` the Board uses and
 # the red `error` an ssh pane is banded in, and CIELAB dE 30.9 / 32.3 from them. A theme that
 # leaves it out gets its own `error` turned to a red-orange at the same luminance.
 action = "#e5844f"
-# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# A tool pane's header band (the Board and its neighbours), its own token since
 # 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
 # you. Relay's own brass (docs/SWITCHBOARD-AESTHETIC.md). Deeper and duller than the amber
-# above it: a material the Switchboard's band is made of, not a flag. 7.01:1 on the darkest ground.
+# above it: a material the Board's band is made of, not a flag. 7.01:1 on the darkest ground.
 tool = "#c8a45c"
 # The two input destinations; the mode chip, the caret and the prefix chips take these.
 # "You can open this" (owner, 2026-09-19: "dark green, like Warp"): a path, a URL, a card reference,
@@ -68,7 +68,7 @@ palette = [
 ]
 
 [board]
-# The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), painted by src/BoardPane.cpp:
+# The Board's materials (docs/SWITCHBOARD-AESTHETIC.md 3.4), painted by src/BoardPane.cpp:
 # `face` is the board the rows are mounted on, `metal` a lit piece of hardware — a jack ring, the
 # engraved rule under a section name — and `metal_dim` the same hardware unlit. These are the
 # proposal's own three colours: bakelite, brass, and brass sunk into the bakelite. Brass on bakelite

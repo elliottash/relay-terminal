@@ -37,7 +37,7 @@ error = "#c0273a"
 # Actions (owner, 2026-09-18). A burnt orange deep enough for paper: 4.96:1 on the darkest ground
 # it is painted on, dE 29.9 from the red and 26.6 from the ochre warning.
 action = "#a8450c"
-# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# A tool pane's header band (the Board and its neighbours), its own token since
 # 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
 # you. Bronze for the page: the brass darkened until it reads as metal on paper rather than as a
 # highlighter. 8.08:1 on the lightest ground, dE 28.4 from this theme's amber.
@@ -77,7 +77,7 @@ palette = [
 ]
 
 [board]
-# The Switchboard's materials (docs/SWITCHBOARD-AESTHETIC.md 3.3, 3.4). Brass does not survive a
+# The Board's materials (docs/SWITCHBOARD-AESTHETIC.md 3.3, 3.4). Brass does not survive a
 # light ground — #c8a45c is 2.35:1 on white — so the metal is oxidised rather than inverted: this
 # theme's own bronze, the one its tool bands already wear, at 8.24:1 on the face. The face is a
 # phenolic cream a step deeper than the paper background, so the board reads as a sheet laid on the

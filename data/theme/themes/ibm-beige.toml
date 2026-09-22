@@ -47,7 +47,7 @@ error = "#931c17"
 # neighbours. That is the same order of separation this theme's greyed destination pair settled on
 # (dE 20.3), and the band carries the bolt glyph and the word "Actions" besides.
 action = "#803700"
-# A tool pane's header band (the Switchboard and its neighbours), its own token since
+# A tool pane's header band (the Board and its neighbours), its own token since
 # 2026-09-19: it used to be `warning`, and amber has to mean one thing — something is waiting on
 # you. The dark bronze from [board] below. Brass does not survive a light ground, so the band's metal
 # is oxidised rather than inverted, exactly as the board's is. 4.65:1 on the case beige.
