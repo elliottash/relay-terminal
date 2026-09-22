@@ -1,0 +1,21 @@
+Published: https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.3
+Verified source/tag: 59a51d92578b2c77284e2ecb9ffcde98f7671b7d
+Package checks: https://github.com/elliottash/relay-terminal/actions/runs/35671890154
+All six Linux and both Windows jobs pass. Ubuntu24 ARM passed one retry of known PF14.
+Publisher bot failed403; gh account API initially404 before tag existed. Authorized SSH tag
+was pushed at the verified source, then nine assets uploaded and published with gh.
+All nine GitHub asset digests/sizes match local files. Eight direct site download links HTTP200.
+Site commit: d485439063ce6249e3131f66a1c42bf6b2362207
+Both apex and www return200 and exact committed index.html/style.css bytes.
+HTML SHA256 prefix: 2a2556a5bddc; CSS: 031b52587fe1.
+Known Try-it bugs explicitly listed in beta3 release notes; fixes are in the next release source.
+
+Payload SHA256SUMS:
+4a8184498e6425abc7ecc498b45a91e09092a2dcdbaa40ee7869b1b1b4fd5dc6  relay-0.1.0-beta.3.tar.gz
+bbae6066323acb7e7f9d6950021aca8b676bb960e32ef131b6667b362aa40026  relay_0.1.0-beta.3_debian13_amd64.deb
+ae09cc2238ca58ccf8b58946e1c9047467c41e7724461a3bf9a016185201473b  relay_0.1.0-beta.3_debian13_arm64.deb
+4c4e741cf8e689b55a10feb00ac2bf84c4c88e7dbf6d1242c1d96bffd377049a  relay_0.1.0-beta.3_ubuntu24.04_amd64.deb
+0909212262ad636660c0b973e35b22105efa7368346b5a843f673781a4dae68a  relay_0.1.0-beta.3_ubuntu24.04_arm64.deb
+8d65c658a32e1a5a7a718632fcc9c355e6b493d6fd639fce64aec5459b42a41a  relay_0.1.0-beta.3_ubuntu26.04_amd64.deb
+b23048285dbc4f91ed7091cb37b28200cad93e20b1ebbeeb0cbc1586d791e019  relay_0.1.0-beta.3_ubuntu26.04_arm64.deb
+964953ea1029233d7e0fd8f4517007940b17cb6afc2b4ba62a8bbebfd7179c40  relay_0.1.0-beta.3_windows_x64_setup.exe

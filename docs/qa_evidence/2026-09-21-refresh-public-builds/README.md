@@ -51,3 +51,7 @@ separate and will not be mixed into this release.
 - 5c4a321b, cd0f6792, 4b730020: native Keychain, file opening, Bash jobs, Try-it and platform-aware main/delegated/router prompts. Targeted Python regressions pass; Keychain awaits native runner.
 - e1000574: two native Mac runners, pinned private runtimes, DMG packaging, relocation/signature audit and installed GUI/PTY/worker checks. Local script syntax and Bash patch application checks pass.
 - Native workflow: https://github.com/elliottash/relay-terminal/actions/runs/35673472747 (Apple Silicon and Intel). Downloads remain pending successful native gates.
+
+## Linux and Windows published
+
+`v0.1.0-beta.3` is live at source `59a51d9`, after all six Linux package jobs and both Windows gates passed. Uploaded digests, package metadata, source provenance and live site checks are recorded in `beta3-publication.txt`. Site downloads deployed from `d4854390`; all direct assets return 200 and both hostnames match the committed HTML/CSS. Mac verification continues separately.

@@ -41,3 +41,7 @@ Owner added: "can we build for mac as well". Expanded release scope to native Ap
 <!-- relay:entry 20260922T004951Z-b2 author=codex kind=progress -->
 ### Codex · 2026-09-22 00:49
 Native macOS implementation and DMG packaging landed through df9ea698; both native architectures are running in 35673472747. Bundles contain modern Bash, Python and Qt, use Keychain, Darwin process APIs and macOS URL handling. Exact Linux app build passes. Windows release gates on 59a51d9 pass; Ubuntu 24 ARM encountered the known PF14 intermittent profiler assertion, with remaining Linux package jobs being checked before publication. No unverified download links deployed.
+
+<!-- relay:entry 20260922T012743Z-b3 author=codex kind=evidence -->
+### Codex · 2026-09-22 01:27
+Published beta3 Linux/native Windows assets from verified59a51d9 after all platform gates passed. Bot publication failed403; authorized SSH tag plus gh publication succeeded. All uploaded hashes/sizes and eight direct downloads verified. Deployed site d4854390, exact HTML/CSS on apex+www. Mac source/build/runtime tests pass, with packaging audits being completed; final Mac downloads remain pending. Evidence: beta3-publication.txt.
