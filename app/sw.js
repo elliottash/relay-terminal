@@ -53,7 +53,7 @@ self.addEventListener('push', (event) => {
       // lock-screen-triggered request out of this app's control.
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
-      // …or the card, when it is a Switchboard card that started waiting on you (#SWPH): an
+      // …or the card, when it is a board card that started waiting on you (#SWPH): an
       // opaque four-character id, and like the pane id the only thing here that names anything.
       data: { pane: body.pane, card: body.card },
     });

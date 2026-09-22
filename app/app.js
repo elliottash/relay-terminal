@@ -32,7 +32,7 @@ import { NOTIFY_SWITCHES, ALL_KINDS, switchesFrom, kindsFor } from './notifykind
 // against this origin's rendezvous and comes back with a fragment; a pairing fragment (`s=`) goes
 // into the pairing flow below exactly as a scanned link does.
 import { joinWithCode, cleanCode, cleanPin, validCode, validPin, meetProblem } from './meet.js';
-// The Switchboard (#SWPH): the inbox's first row, the board screen and a card's page, drawn from
+// The Board (#SWPH): the inbox's first row, the board screen and a card's page, drawn from
 // the desktop's own board events. This file only carries its messages in and out.
 import { mountBoard } from './board.js';
 // One name for a model, the worker's own where it sent one (card #MDL1, rule 1).
@@ -164,7 +164,7 @@ function post(message, onError) {
     .catch((error) => { if (onError) onError(error); });
 }
 
-// ---- the Switchboard (#SWPH) --------------------------------------------------------------------
+// ---- the Board (#SWPH) --------------------------------------------------------------------
 
 // The count on the app icon is everything that wants you: panes, and cards waiting on you.
 const paintBadge = () => updateBadge(panes.filter(needsYou).length + board.waiting());
@@ -1870,7 +1870,7 @@ rrp.addEventListener('panes', (event) => {
 
 rrp.addEventListener('agent', (event) => onAgent(event.detail));
 
-// The desktop's Switchboard events, sanitised by the hub (REMOTE-PROTOCOL.md section 17).
+// The desktop's board events, sanitised by the hub (REMOTE-PROTOCOL.md section 17).
 rrp.addEventListener('board_event', (event) => board.onEvent(event.detail));
 
 rrp.addEventListener('control', (event) => onControl(event.detail));
@@ -1982,7 +1982,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // has only just been created has no `message` handler yet, so the id comes in the URL instead
   // and the query is dropped again so a reload does not re-open it.
   const asked = new URLSearchParams(location.search).get('pane');
-  // …or with `?card=…`, when it was a Switchboard card that started waiting on you (#SWPH).
+  // …or with `?card=…`, when it was a board card that started waiting on you (#SWPH).
   const askedCard = new URLSearchParams(location.search).get('card');
   if (asked) pendingOpen = asked;
   if (askedCard) board.open(askedCard);

@@ -28,7 +28,7 @@ export const NOTIFY_SWITCHES = [
     name: 'needs',
     label: 'When something needs me',
     // The three where nothing more happens until the person answers: a pane asking, a password
-    // prompt, and — since the Switchboard reached the phone (#SWPH) — a card that has started
+    // prompt, and — since the Board reached the phone (#SWPH) — a card that has started
     // waiting on its owner. The same decision as `waiting_input`, so the same switch.
     kinds: ['waiting_input', 'password', 'card_waiting'],
   },

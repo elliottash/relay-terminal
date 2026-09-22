@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Switchboard on the phone (card #SWPH): cards by stage, a card's body and thread, and the
+// The Board on the phone (card #SWPH): cards by stage, a card's body and thread, and the
 // card actions, by touch.
 //
 // One model, two views (#0VT4): the desktop's own `BoardWorker` is the only thing that reads or
@@ -208,7 +208,7 @@ export function mountBoard(options) {
   let seq = 0;                  // request ids
   const asked = new Map();      // rid -> {type, card, text, mode, status, queued}
   let config = null;
-  let exists = true;            // the project has a Switchboard at all
+  let exists = true;            // the project has a board at all
   let project = '';
   const rows = new Map();       // card id -> row
   let rev = 0;
@@ -241,12 +241,12 @@ export function mountBoard(options) {
 
   // ---- the inbox row ----------------------------------------------------------------------
   // Drawn like a pane's row and deliberately not one: `.pane-row` is the list of the desktop's
-  // panes, which the app and its tests count and index, and the Switchboard is not a pane.
+  // panes, which the app and its tests count and index, and the Board is not a pane.
   const inboxRow = button('rb-inbox-row');
   inboxRow.id = 'board-row';
   inboxRow.hidden = true;
   const inboxHead = el('div', 'rb-inbox-head');
-  const inboxTitle = el('span', 'rb-inbox-title', 'Switchboard');
+  const inboxTitle = el('span', 'rb-inbox-title', 'Board');
   const inboxChip = el('span', 'chip warn rb-inbox-chip');
   inboxChip.hidden = true;
   inboxHead.append(inboxTitle, inboxChip);
@@ -263,7 +263,7 @@ export function mountBoard(options) {
   const bar = el('div', 'rb-bar');
   const back = button('rb-back', '‹', 'Back to the inbox');
   const barTitle = el('div', 'rb-bar-title');
-  const barName = el('div', 'rb-bar-name', 'Switchboard');
+  const barName = el('div', 'rb-bar-name', 'Board');
   const barSub = el('div', 'rb-bar-sub');
   barTitle.append(barName, barSub);
   const refresh = button('rb-bar-button rb-refresh', '↻', 'Refresh the board');
@@ -393,7 +393,7 @@ export function mountBoard(options) {
     inboxChip.hidden = count === 0;
     inboxChip.textContent = `${count} waiting on you`;
     if (!loaded) inboxSub.textContent = online() ? 'Loading…' : 'Offline';
-    else if (!exists) inboxSub.textContent = 'This project has no Switchboard yet.';
+    else if (!exists) inboxSub.textContent = 'This project has no board yet.';
     else {
       const openCards = [...rows.values()].filter((row) => !closed(row)).length;
       inboxSub.textContent = `${project ? `${project} · ` : ''}${openCards} open ${openCards === 1 ? 'card' : 'cards'}`;
@@ -603,9 +603,9 @@ export function mountBoard(options) {
     };
 
     if (!loaded) {
-      nodes.push(el('div', 'rb-empty', online() ? 'Loading the Switchboard…' : 'Offline. The board shows once your desktop is reachable.'));
+      nodes.push(el('div', 'rb-empty', online() ? 'Loading the Board…' : 'Offline. The board shows once your desktop is reachable.'));
     } else if (!exists) {
-      nodes.push(el('div', 'rb-empty', 'This project has no Switchboard yet. Create one on the desktop: the Switchboard pane offers it.'));
+      nodes.push(el('div', 'rb-empty', 'This project has no board yet. Create one on the desktop: the Board pane offers it.'));
     } else {
       const all = shownRows();
       const filtered = query.trim() !== '';
@@ -1495,7 +1495,7 @@ export function mountBoard(options) {
         if (rid && rid === cardAsked) cardAsked = 0;
         if (note?.type === 'board_open') {
           openAsked = false;
-          // The desktop's project has no Switchboard (yet): that is a state of the board, drawn
+          // The desktop's project has no board (yet): that is a state of the board, drawn
           // where the cards would be, not an error to dismiss.
           if (code === 'board_not_found' || code === 'board_not_initialized') {
             loaded = true;

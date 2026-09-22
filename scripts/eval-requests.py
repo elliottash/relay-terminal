@@ -24,7 +24,7 @@ To compare two versions of the prompt, one flag apart:
 
 `--system-file` / `--todo-rules-file` replace `agent.SYSTEM` and `todos.RULES` before the Agent is
 built; `--profile short` is the landed short profile (#GMCF decision 7: its SYSTEM, no todo tool, its
-eight tools, plus the five board tools and the tiered policy when a scenario attaches a Switchboard),
+eight tools, plus the five board tools and the tiered policy when a scenario attaches a board),
 passed as the `prompt_profile` agent option, so A and B differ by that flag alone. Scenario 13 is the
 board one — file a card and claim it, the owner's condition for giving the short profile any board
 tools at all. `--context '{"terminal_handoff": "agent"}'` puts a
@@ -190,7 +190,7 @@ class Stub:
             if "finish the installer" in text:                      # scenario 12 (the password prompt)
                 add("program", "type_into_program",
                     {"text": "y", "submit": True, "intent": "answer the installer's Continue? prompt"})
-            if "put it on the Switchboard" in text:                 # scenario 13 (the board five)
+            if "put it on the board" in text:                       # scenario 13 (the board five)
                 # The policy's rule 2: `request` is the user's own words, verbatim. The stub does
                 # what the rule says so that a run can tell a broken tool list from a model that
                 # paraphrased; the title is the stub's own, as the rule allows.
@@ -564,7 +564,7 @@ def scenario12(run: Run, ws: Path, timeout: float) -> dict:
 
 
 def attach_board(run: Run, ws: Path):
-    """A Switchboard on this scenario's workspace, wired up as `configure` wires a pane's.
+    """A board on this scenario's workspace, wired up as `configure` wires a pane's.
 
     The owner's condition for giving the short profile any board tools at all (#GMCF, 2026-09-20):
     "can this model file a card and claim it". Nothing keyless can answer that, so this is a real
@@ -603,7 +603,7 @@ CARD_REPORT = ("the pane header flickers for about a second every time I rename 
 
 
 def scenario13(run: Run, ws: Path, timeout: float) -> dict:
-    """File a card on a Switchboard and claim it — the owner's condition for the board five.
+    """File a card on a board and claim it — the owner's condition for the board five.
 
     Decision 8's sub-question was "none until an A/B shows a 27B model can file a card"; the owner
     answered it "yes, give the Local tier the five-tool board set" (2026-09-20) and asked for the
@@ -614,7 +614,7 @@ def scenario13(run: Run, ws: Path, timeout: float) -> dict:
     """
     board = attach_board(run, ws)
     run.sup.submit(
-        f"Don't fix this now — put it on the Switchboard so it is not lost, and claim the card so "
+        f"Don't fix this now — put it on the board so it is not lost, and claim the card so "
         f"I can see it is yours: {CARD_REPORT}.", "now")
     run.idle(timeout)
     cards = board.board.cards()

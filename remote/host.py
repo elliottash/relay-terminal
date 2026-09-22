@@ -442,7 +442,7 @@ class Channel:
 
     def _note_board_refusal(self, kind: str, message: dict) -> None:
         """A `board_request` refused at the gate — a guest's, or a `view` / `agent` device's — is
-        in the audit log like the ones the Switchboard's own handler refuses (section 17.1).
+        in the audit log like the ones the board's own handler refuses (section 17.1).
 
         Those two never reach `Host._on_board_request`, which is where `board_refused` was
         written, so the one asker the owner most wants to hear about — somebody he let into a
@@ -1669,7 +1669,7 @@ class Host:
                          + (["screen", "takeover"] if self.screens else [])
                          + (["history"] if self.scrollback else [])
                          + (["pane_state"] if self.pane_state else [])
-                         # The Switchboard (section 17): the owner's level only, and only where a
+                         # The Board (section 17): the owner's level only, and only where a
                          # GUI is there to answer, so the client shows the row or does not.
                          + (["board"] if self.pane_state and device.capability == wire.FULL
                             else [])),
@@ -2984,8 +2984,8 @@ class Host:
         self._pane_state_line({"t": "conversation_open", "pane": pane, "session": session,
                                **self._pane_state_origin(channel)})
 
-    # ---- the Switchboard on a device (card #SWPH) -------------------------------------------------
-    # docs/REMOTE-PROTOCOL.md section 17. The desktop's Switchboard runs on a per-window
+    # ---- the Board on a device (card #SWPH) -------------------------------------------------
+    # docs/REMOTE-PROTOCOL.md section 17. The desktop's board runs on a per-window
     # BoardWorker the hub never sees, so the GUI bridges it: a `full` device's
     # `board_request {rid, request}` is cleaned against remote/board_state.py's allow-list,
     # rate-limited, audited — the type, the card and the device, never the text — and handed to
@@ -3008,7 +3008,7 @@ class Host:
             # GUEST_NEVER already refused a guest; this is the second lock.
             raise wire.WireError("not_permitted", "a guest never gets that.")
         if channel.capability() != wire.FULL:
-            raise wire.WireError("not_permitted", "the Switchboard needs a full device.")
+            raise wire.WireError("not_permitted", "the Board needs a full device.")
         rid = board_state_mod.rid_of(message)
         book = self._board_book()
         device = channel.device
@@ -3024,11 +3024,11 @@ class Host:
             await refuse(refused.code, refused.message)
             return
         if not book.allow(channel.device_id, request["type"]):
-            await refuse("rate_limited", "too many Switchboard requests; slow down.")
+            await refuse("rate_limited", "too many board requests; slow down.")
             return
         send = getattr(self.source, "send", None)
         if not callable(send):
-            await refuse("not_permitted", "this desktop does not publish a Switchboard.")
+            await refuse("not_permitted", "this desktop does not publish a board.")
             return
         self.audit.record("board_request", device=channel.device_id, type=request["type"],
                           card=request.get("id"))
@@ -3095,7 +3095,7 @@ LIMITS.update({
     "queue_edit": (60, 60),
 })
 
-# The Switchboard on a device (card #SWPH): the same late import, for the same reason.
+# The Board on a device (card #SWPH): the same late import, for the same reason.
 from . import board_state as board_state_mod  # noqa: E402
 
 BOARD_ANSWER_TIMEOUT = board_state_mod.ANSWER_TIMEOUT

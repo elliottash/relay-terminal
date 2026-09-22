@@ -146,7 +146,7 @@ the GUI never links a crypto library and this process never touches a widget.
     {"t":"share_state","pane":"p1","paused":true,"reason":"away"}   why guests cannot act:
                                               "owner" (you paused) or "away" (present-only)
 
-  The Switchboard on a device (card #SWPH, docs/REMOTE-PROTOCOL.md section 17), both ways
+  The Board on a device (card #SWPH, docs/REMOTE-PROTOCOL.md section 17), both ways
     here → GUI  {"t":"board_request","rid":N,"device":"<device id>","name":"<device name>",
                  "request":{"type":"board_move","id":"K7Q2","status":"planned","reason":"…"}}
                                               one of the ten requests a `full` device may make,
@@ -782,7 +782,7 @@ class Sidecar:
         elif kind in ("pane_state", "queue_edit_text"):
             if self.host is not None:
                 self.host.pane_state_from_gui(message)
-        # The Switchboard on a device (card #SWPH, section 17): what the window's BoardWorker
+        # The Board on a device (card #SWPH, section 17): what the window's BoardWorker
         # emitted, for the device that asked (`rid`) or for every `full` device (`rid` null). The
         # hub scrubs it (remote/board_state.py); nothing is passed on as it arrived.
         elif kind == "board_event":

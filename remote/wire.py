@@ -256,12 +256,12 @@ GUEST_NEVER.update({
 })
 SERVER_TYPES = SERVER_TYPES | frozenset({"pane_state", "queue_edit_text"})
 
-# The Switchboard on a device (card #SWPH, section 17) -----------------------------------------------
+# The Board on a device (card #SWPH, section 17) -----------------------------------------------
 # One client type and one server type. `board_request {rid, request}` wraps the eleven board requests a
 # device may make — which ones, their fields and their caps are remote/board_state.py's allow-list,
 # and everything else about a board (deleting, folders, cleanup, claiming, attaching, initializing,
 # imports, GitHub sync, anything carrying a path) is refused there. It is `full` and nothing less:
-# the Switchboard is every card of every project the desktop has open, not the one conversation a
+# the board is every card of every project the desktop has open, not the one conversation a
 # viewer or a partner was paired for. `board_event {rid, event}` carries the desktop's answer,
 # scrubbed by the same module, to `full` devices only; it is absent from GUEST_SERVER_TYPES, so
 # `Channel.send` drops it for a participant whatever a sender does.
@@ -269,7 +269,7 @@ CLIENT_TYPES.update({
     "board_request": FULL,         # {rid, request: {type, …}}; see board_state.REQUESTS
 })
 GUEST_NEVER.update({
-    "board_request": "the Switchboard is the owner's cards and threads, not the shared pane",
+    "board_request": "the board is the owner's cards and threads, not the shared pane",
 })
 SERVER_TYPES = SERVER_TYPES | frozenset({"board_event"})
 # A device never *sends* a board event: it would be a forged answer from the desktop's own worker.
@@ -310,7 +310,7 @@ FORWARDED_EVENTS = frozenset({
     # from this pane's own conversation, which the phone is already watching. Tab labels are the
     # GUI's own (protocol 18.3) and never cross this wire.
     "session_title", "session_summary",
-    # Switchboard (protocol 19): cards, their threads and what the agent did to them. A phone
+    # Board (protocol 19): cards, their threads and what the agent did to them. A phone
     # watching a pane should see the board move for the same reason the desktop does; the card
     # bodies are the user's own notes, already in git, not desktop-local configuration.
     "board", "board_activity", "board_card", "board_changed", "board_problems",
@@ -404,7 +404,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     # A todo handed to a subagent from the task list: the answer to the desktop's own click. The
     # phone sees the result in `todos` and `subagent_started`.
     "todo_subagent": "reply to the desktop's own request",
-    # A board made in a repo: the workspace path is a local file path (Switchboard).
+    # A board made in a repo: the workspace path is a local file path (the board folder).
     "board_created": "desktop-local administration; carries a local file path",
     # Which project a pane is attached to, and the question that creating a board asks
     # (protocol 19.11 and 19.12). Both carry local directory paths, and the question can only be

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Switchboard on the phone (app/board.js, card #SWPH) in a real browser.
+"""The Board on the phone (app/board.js, card #SWPH) in a real browser.
 
 The page under test is the real client — app/index.html, app/app.js, the outbox, the viewport —
 with one file swapped: the static server answers ``/app/rrp.js`` with
@@ -7,7 +7,7 @@ with one file swapped: the static server answers ``/app/rrp.js`` with
 what the client would have put on the wire, and lets the test play the hub. What is worth
 asserting is the contract on the card, because everything else about a board is the desktop's:
 
-* the Switchboard row is in the inbox only when ``welcome.features`` has ``board`` (and the device
+* the Board row is in the inbox only when ``welcome.features`` has ``board`` (and the device
   is ``full``), it counts the cards waiting on the owner, and they count on the app badge;
 * the stages come in the desktop's section order, "Waiting on you" first, closed stages folded;
 * a card's Markdown is drawn as nodes: no element a card asked for exists, no HTML comment shows,
@@ -238,7 +238,7 @@ class BoardViewTests(unittest.TestCase):
 
         self.drive(main())
 
-    def test_a_project_with_no_switchboard_says_so_where_the_cards_would_be(self):
+    def test_a_project_with_no_board_says_so_where_the_cards_would_be(self):
         async def main():
             browser = Browser()
             await browser.start()
@@ -247,12 +247,12 @@ class BoardViewTests(unittest.TestCase):
                 await browser.wait_for("window.fakeRrp.boardRequests().some(m => m.request.type === 'board_open')")
                 asked = await self.last_request(browser, "board_open")
                 refusal = {"event": "error", "code": "board_not_found", "request": "board_open",
-                           "text": "This project has no Switchboard."}
+                           "text": "This project has no board."}
                 await browser.evaluate(f"window.fakeRrp.board({asked['rid']}, {js(refusal)})")
-                await browser.wait_for("document.querySelector('#board-row .rb-inbox-sub').textContent.includes('no Switchboard')")
+                await browser.wait_for("document.querySelector('#board-row .rb-inbox-sub').textContent.includes('no board')")
                 await browser.evaluate("document.getElementById('board-row').click()")
                 await browser.wait_for(shown("screen-board"))
-                self.assertIn("no Switchboard yet", await browser.evaluate("document.querySelector('.rb-empty').textContent"))
+                self.assertIn("no board yet", await browser.evaluate("document.querySelector('.rb-empty').textContent"))
                 self.assertEqual(await browser.evaluate("document.querySelectorAll('.rb-row').length"), 0)
             finally:
                 await browser.stop()

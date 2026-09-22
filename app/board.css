@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
-/* The Switchboard on the phone (app/board.js, card #SWPH). Layout only, like app/pane.css: the
+/* The Board on the phone (app/board.js, card #SWPH). Layout only, like app/pane.css: the
    root is a `.relay-pane`, so every colour and font here is a variable from app/pane-theme.css —
    generated from the desktop's src/Theme.cpp — and no literal colour appears in this file. The
    board's own materials are the theme's too (docs/SWITCHBOARD-AESTHETIC.md): section headers are

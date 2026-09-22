@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Switchboard on a paired device (docs/REMOTE-PROTOCOL.md section 17, card #SWPH).
+"""The Board on a paired device (docs/REMOTE-PROTOCOL.md section 17, card #SWPH).
 
-The desktop's Switchboard runs on a per-window ``BoardWorker`` the hub never sees. The GUI bridges
+The desktop's board runs on a per-window ``BoardWorker`` the hub never sees. The GUI bridges
 it: a ``full`` device sends ``board_request {rid, request}``, the hub hands the GUI a
 ``board_request`` line, and the GUI answers with ``board_event {rid | null, event}`` lines carrying
 what its worker emitted. This module is the two gates in between, so that no caller has to
@@ -247,7 +247,7 @@ def clean_request(request) -> dict:
         raise Refused("not_permitted", f"never from a device: {reason}.", kind)
     fields = REQUESTS.get(kind)
     if fields is None:
-        raise Refused("unknown_type", "that is not a Switchboard request a device may send.")
+        raise Refused("unknown_type", "that is not a board request a device may send.")
     if _path_key_in(request):
         raise Refused("not_permitted", "a device never names a file or a folder.", kind)
     for name, value in request.items():

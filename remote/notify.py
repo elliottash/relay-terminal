@@ -52,7 +52,7 @@ SEAL_KEY_BYTES = 32
 # device: `push_subscribe` carries `kinds`, and sending it again changes them without the browser
 # asking for permission a second time.
 #
-# `card_waiting` (card #SWPH, section 17.5) is the sixth: a Switchboard card that starts waiting on
+# `card_waiting` (card #SWPH, section 17.5) is the sixth: a board card that starts waiting on
 # the owner. It is the same decision as `waiting_input` — something has stopped until you answer —
 # and sits under the same switch on the phone, which is how `kinds_of` reads a list written by a
 # client that had never heard of it.
@@ -186,7 +186,7 @@ class Notifier:
         self._status: dict[str, str] = {}
         self._turn_started: dict[str, float] = {}
         self._last_push: dict[str, float] = {}
-        # Who each Switchboard card was last known to wait on, per board (`board_key`), and whether
+        # Who each board card was last known to wait on, per board (`board_key`), and whether
         # that board has been seen whole yet. Section 17.5.
         self._boards: dict[str, dict] = {}
         self._last_card_push: dict[str, float] = {}
@@ -258,7 +258,7 @@ class Notifier:
         """A **cleaned** board event (remote/board_state.py): a card that now waits on the owner.
 
         The last known `waiting_on` is kept per card. A push is for a *change* to `owner`: nothing
-        on the first sight of a board — opening the Switchboard on the phone must not ring it once
+        on the first sight of a board — opening the Board on the phone must not ring it once
         per card already waiting — and nothing for a card first seen before its board has been
         seen whole, because then there is no telling a new card from one not read yet. Once the
         board is known, a card that *arrives in a change* already waiting on the owner is a change
