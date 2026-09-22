@@ -6,7 +6,12 @@ Worker logs append origin/run/build identity while preserving the existing event
 
 `Pane.h` changes only the worker-finished logging block: lifecycle shutdown/reconfigure at INFO, unexpected termination at ERROR, with reason and expected flag. No model/provider switching hunks changed.
 
+Implementation commit: `5304f3a244f829c1b79305f0a6225578089b00a2` on main. The landing tool built the exact proposed tree successfully before updating main; all scoped paths were clean afterwards.
+
 ## Validation
+
+- Exact-tree landing gate: tree `a7d536f2e6f5`, configured and built `relay` successfully in the land tool's isolated verification directory.
+- Live recorder → parent report integration: one pending wait and one nonzero command parsed as two QA-origin calls, matching outcomes, zero skipped records. The first ad hoc assertion incorrectly expected a top-level `tool_calls` key; corrected to sum each tool row's `calls` and reran successfully.
 
 - `PYTHONPATH=backend:tests python3 -m unittest test_tool_outcomes test_logs test_guest_harness_codex.ToolTurnTest test_guest_harness_claude.BashTurnTest test_guest_harness_provider.TurnTests test_tools.ToolTests.test_timeout test_tools.ToolTests.test_command_output_and_exit test_roles -v`: **123 tests passed**; `tests.txt`.
 - `RELAY_SESSION=hg26-logging scripts/relay-build --target relay`: passed; build `2026-09-22.12H.02`. Existing missing-initializer warning at `Pane.h` ForkText is unrelated.
