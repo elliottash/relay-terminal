@@ -179,7 +179,8 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
    - `windows`: runs the reusable native Windows tests, installer build and installed GUI smoke.
    - `macos`: runs the reusable Apple Silicon and Intel tests, DMG builds and installed GUI smoke.
    - `release`: waits for every platform, collects six `.deb`s, the Windows installer, two DMGs
-     and the source tarball, writes `SHA256SUMS`, verifies/creates the immutable tag, and creates
+     and the source tarball, writes `SHA256SUMS`, uploads `verified-release-assets` for recovery,
+     verifies/creates the immutable tag, and creates
      the GitHub release (`--prerelease` for tags with `-`).
    - `aur`: disabled (see below).
    The arm64 jobs use GitHub's `ubuntu-24.04-arm` runners; if they are unavailable for the
@@ -197,6 +198,77 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
 If an untagged dispatch fails, fix and push `main`, then dispatch again with the unused tag name.
 If the tag already exists, use a new beta tag for changed source. Never move or reuse a tag that
 users may have downloaded.
+
+## Recovering a publication failure
+
+If every package build, test and installed smoke gate passed but **Create release** failed,
+an owner-authorized publisher can use the same tested assets with their authorized GitHub
+account. The release job uploads `verified-release-assets` (including `SHA256SUMS`) before
+attempting publication. Do not rebuild from current `main` or publish artifacts from failed
+package jobs.
+
+For beta.3, run `35671890154` tested commit
+`59a51d92578b2c77284e2ecb9ffcde98f7671b7d`. Its publication request returned HTTP 403
+`Resource not accessible by integration` with the workflow token despite `contents: write`.
+The authorized account also received HTTP 404 before the tested tag was pushed over Git SSH;
+creation succeeded after that push. These are observed responses, not a diagnosis of their cause.
+That older run predates the combined artifact: recovery collected its source, six successful
+`deb-*` artifacts and `windows-installer`, then checked every payload hash against the release
+job's **Collect assets and checksums** log. Its package gates did not yet include macOS.
+
+For subsequent runs, inspect the selected run's jobs and immutable `headSha`, confirm that every
+package gate succeeded, and choose an empty local directory. Run these commands in Bash from
+the repository, replacing the run and tag with the intended release:
+
+```bash
+set -euo pipefail
+repo=elliottash/relay-terminal
+run=REPLACE_WITH_VERIFIED_RUN_ID
+tag=vX.Y.Z-beta.N
+tested_sha=$(gh run view "$run" --repo "$repo" --json headSha --jq .headSha)
+release_dir=$(mktemp -d)
+gh run download "$run" --repo "$repo" --name verified-release-assets --dir "$release_dir"
+(cd "$release_dir" && sha256sum --check SHA256SUMS)
+archive_sha=$(python3 - "$release_dir/relay-${tag#v}.tar.gz" <<'PYTHON'
+import sys, tarfile
+with tarfile.open(sys.argv[1], "r:gz") as archive:
+    print(archive.pax_headers.get("comment", ""))
+PYTHON
+)
+test "$archive_sha" = "$tested_sha"
+```
+
+Also compare `SHA256SUMS` with the selected run's **Collect assets and checksums** output and
+check the expected platform filenames/count before publishing. Use Git SSH to push only the
+exact tested tag. Existing local or remote tags must already resolve to that commit; a mismatch
+requires a new release version, never a force push or moved tag:
+
+```bash
+ssh_remote=git@github.com:elliottash/relay-terminal.git
+remote_tags=$(git ls-remote "$ssh_remote" "refs/tags/$tag" "refs/tags/$tag^{}")
+remote_sha=$(printf '%s\n' "$remote_tags" | sort -k2 | tail -1 | cut -f1)
+if [ -n "$remote_sha" ]; then
+  test "$remote_sha" = "$tested_sha"
+else
+  git cat-file -e "$tested_sha^{commit}"
+  if git show-ref --verify --quiet "refs/tags/$tag"; then
+    test "$(git rev-parse "$tag^{commit}")" = "$tested_sha"
+  else
+    git tag "$tag" "$tested_sha"
+  fi
+  git push "$ssh_remote" "refs/tags/$tag:refs/tags/$tag"
+fi
+# Use the authorized account, with no workflow-token override in this shell.
+gh auth status
+flags=(--verify-tag --generate-notes --title "Relay ${tag#v}")
+case "$tag" in *-*) flags+=(--prerelease) ;; esac
+gh release create "$tag" --repo "$repo" "${flags[@]}" "$release_dir"/*
+```
+
+Pushing the tag can trigger another workflow run. Coordinate publication with that run so only
+one publisher creates the release. If a release already exists, inspect its tag and assets
+before acting; do not replace published assets blindly. Finally, download the public release
+assets into a fresh directory and verify their checksums again before updating website links.
 
 ## AUR
 
