@@ -625,6 +625,7 @@ if(RELAY_BUILD_APP)
         set(RELAY_BUILD_ID_DIR "$<TARGET_BUNDLE_DIR:relay>/Contents/Resources")
     endif()
     add_custom_command(TARGET relay POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${RELAY_BUILD_ID_DIR}"
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-id.py "${RELAY_BUILD_ID_DIR}"
         COMMENT "Numbering this build of relay" VERBATIM)
     if(NOT APPLE)
