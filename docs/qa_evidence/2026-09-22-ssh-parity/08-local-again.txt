@@ -1,0 +1,40 @@
+© work - cpu00%-mem00% x + a4
+
+© work
+
+elliott@spark-dcc9: /tmp/relay-ssh-audit -ubqgpOwp/work$
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9:/tmp/relay-ssh-audit -ubqgpOwp/work$
+
+bash-5.2$ printf 'REMOTE-ONE\nREMOTE-TWO\n"
+REMOTE - ONE
+
+REMOTE -TWO
+
+bash-5.2$ cd /tmp; pwd; false
+
+7tmp
+
+bash-5.2$ sleep 7
+
+bash-5.2$ read -r -p ‘INPUT> ' value; printf 'RECEIVED=%s\n' "$value"
+INPUT> echo SHOULD-BE-A-COMMAND
+
+RECEIVED=echo SHOULD-BE-A-COMMAND
+
+bash-5.2$ exit
+
+exit
+
+Shared connection to localhost closed.
+
+elliott@spark-dcc9: /tmp/relay-ssh-audit -ubqgpOwp/work$
+
+Shell ready exit 0
+
+Bhell commands or agent prompts... 2? for help auto
+
+Itmp/relay-ssh-audit-ubqgpowp/work —«& Claude Code v high vo
+

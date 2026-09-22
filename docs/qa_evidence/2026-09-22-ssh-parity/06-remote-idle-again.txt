@@ -1,0 +1,35 @@
+= work - cpu00%-mem00% x + OQ\4 eG 2 - 0x
+
+@®s
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -ubqgpOwp/work$
+
+LOCAL-ONE
+LOCAL-TWO
+elliott@spark-dcc9:/tmp/relay-ssh-audit -ubqgpOwp/work$
+
+bash-5.2$ printf 'REMOTE-ONE\nREMOTE-TWO\n"
+REMOTE - ONE
+
+REMOTE -TWO
+
+bash-5.2$ cd /tmp; pwd; false
+
+7tmp
+
+bash-5.2$ sleep 7
+
+bash-5.2$
+
+© Relaying ssh...
+
+Bhell commands or agent prompts. 2 for help
+
+auto
+
+JM 2)
+
+=
+
+Itmp/relay-ssh-audit-ubqgpOwp/work “Claude Code >
+

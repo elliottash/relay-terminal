@@ -1,0 +1,20 @@
+© work - cpu 00%-mem 00% x +
+© work
+
+elliott@spark-dcc9: /tmp/relay-ssh-audit -ubqgpOwp/work$
+
+LOCAL -ONE
+
+LOCAL-TWO
+
+elliott@spark-dcc9:/tmp/relay-ssh-audit -ubqgpOwp/work$
+
+Shell ready
+Shell commands or agent prompts. 2? for help
+
+‘/tmp/relay-ssh-audit-ubqgpowp/work
+
+<
+
+Claude Code v high vo
+
