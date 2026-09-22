@@ -10,6 +10,7 @@ Skipped when Chrome is not installed.
 """
 import asyncio
 import base64
+import copy
 import json
 import os
 import re
@@ -21,6 +22,7 @@ from pathlib import Path
 from remote import host as host_mod
 from remote import identity as identity_mod
 from remote import notify
+from remote import pane_state as pane_state_mod
 from remote import panes as panes_mod
 from remote import wire
 from rendezvous.server import Store, build
@@ -1579,6 +1581,208 @@ class TerminalBarTests(unittest.TestCase):
                             " return true; })()")
                         self.fits(await self.note(browser), f"written: {sentence[:30]}…")
                     await shot(browser, "term-bar-longest-sentence")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+
+class PublishingSource(ScrollbackSource):
+    """The demo desktop with the one seam a GUI has that it lacks: a `send` for sidecar lines.
+
+    `Host` decides the `pane_state` feature by whether the source can be asked at all
+    (`self.pane_state = callable(getattr(self.source, "send", None))`), so a browser test of the
+    pane view needs this before the client will ever mount one. The states themselves go in
+    through `host.pane_state_published`, which is what the GUI's line lands in.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.to_gui: list[dict] = []
+
+    def send(self, message: dict) -> None:
+        self.to_gui.append(message)
+
+
+def a_state(pane: str, rows: int, running: str = "") -> dict:
+    """A `pane_state` the hub takes whole: the protocol's own example with the queue trimmed to
+    what one test wants to watch change."""
+    state = copy.deepcopy(pane_state_mod.EXAMPLE)
+    state["pane"] = pane
+    state["queue"]["rows"] = state["queue"]["rows"][:rows]
+    state["queue"]["running"] = {"label": running} if running else None
+    return state
+
+
+A_QUESTION = {
+    "event": "question", "id": "q1",
+    "questions": [{"header": "Before the migration", "question": "Drop the old table first?",
+                   "options": [{"label": "Drop it"}, {"label": "Keep it"}]}],
+}
+
+
+@unittest.skipUnless(find_chrome(), "no Chrome or Chromium installed")
+class PocketAndBackTests(unittest.TestCase):
+    """What a phone does when it comes back, and what the system Back button does (#PKT5).
+
+    A phone is asleep in a pocket for most of a turn: iOS closes the socket seconds after the app
+    leaves the foreground, so "coming back" is the normal case and not an edge one.
+    """
+
+    async def open_phone(self, browser, harness, pane="pane-1"):
+        url, _ = await harness.host.open_pairing()
+        await phone_screen(browser)
+        await browser.navigate(url)
+        await browser.wait_for(shown("screen-inbox"), timeout=60)
+        await browser.wait_for("document.querySelectorAll('.pane-row').length > 0", timeout=30)
+        await browser.evaluate(
+            f"document.querySelector('[data-pane-id=\"{pane}\"]').click()")
+        await browser.wait_for(shown("screen-thread"), timeout=20)
+
+    async def drop(self, harness) -> None:
+        for channel in list(harness.host.channels.values()):
+            await channel.close("test drop")
+
+    def test_a_phone_that_slept_comes_back_to_the_pane_as_it_is_now(self):
+        """`pane_focus` replays the agent ring, a screen and `control`; it does not replay a
+        `pane_state`, and `resume` deliberately cannot. So the pane the phone came back to was
+        the pane it left — the old queue count, the old Stop, the old strip — until something
+        unrelated happened to move. The resume asks for the state, as opening a pane does."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=PublishingSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_phone(browser, harness)
+                    harness.host.pane_state_published(
+                        a_state("pane-1", 1, "✦ please plan this out"))
+                    await browser.wait_for(
+                        "document.querySelectorAll('.rp-row').length === 1", timeout=20)
+
+                    await self.drop(harness)
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'offline'"
+                        " ? 'offline' : null", timeout=20)
+                    # The turn moves on without the phone: two more prompts queued, and the one
+                    # that was running has finished.
+                    harness.host.pane_state_published(a_state("pane-1", 3))
+
+                    await browser.wait_for(
+                        "document.getElementById('link-status').textContent === 'connected'"
+                        " ? 'connected' : null", timeout=40)
+                    await browser.wait_for(
+                        "document.querySelectorAll('.rp-row').length === 3", timeout=20)
+                    self.assertTrue(await browser.evaluate(
+                        "document.querySelector('.rp-queue-running').hidden"),
+                        "the pane still says the old prompt is running")
+                    await shot(browser, "resume-pane-state")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_back_from_a_thread_lands_in_the_inbox_and_keeps_the_page(self):
+        """Android's Back from a thread closed the installed app, and in a tab it left the origin
+        — with the connection, the pane list and the outbox. It now closes the thread; from the
+        inbox, with nothing open, it leaves as it always did."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=PublishingSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_phone(browser, harness)
+                    root = await browser.evaluate("location.href")
+                    # A mark on this document: if Back reloads the page or leaves the origin, the
+                    # mark goes with it — and so would the connection and the outbox.
+                    await browser.evaluate("window.__thisDocument = 'still here'; true")
+
+                    await browser.evaluate("history.back(); true")
+                    await browser.wait_for(shown("screen-inbox"), timeout=20)
+                    self.assertEqual(await browser.evaluate("window.__thisDocument"), "still here",
+                                     "Back reloaded the page instead of closing the thread")
+                    self.assertEqual(await browser.evaluate("location.href"), root)
+                    self.assertEqual(await browser.evaluate(SCREENS_SHOWN), 1)
+                    self.assertEqual(await browser.evaluate(
+                        "document.getElementById('link-status').textContent"), "connected",
+                        "the connection went with the thread")
+                    await shot(browser, "back-to-the-inbox")
+
+                    # And it does not trap Back: with nothing open, the next one leaves. This one
+                    # is a real navigation, so the page goes out from under the evaluation that
+                    # asked for it and from under the next few polls.
+                    try:
+                        await browser.evaluate("setTimeout(() => history.back(), 0); true")
+                    except RuntimeError:
+                        pass
+                    left = False
+                    for _ in range(100):
+                        await asyncio.sleep(0.1)
+                        try:
+                            left = await browser.evaluate("location.href") == "about:blank"
+                        except RuntimeError:
+                            continue          # mid-navigation; ask again
+                        if left:
+                            break
+                    self.assertTrue(left, "Back from the inbox did not leave the app")
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 240))
+
+    def test_a_notification_for_another_pane_leaves_nothing_of_the_last_one(self):
+        """The `open_pane` branch of the service worker's message never closed the pane that was
+        open: its mounted view, and any sheet up in it, stayed on screen under the new pane's
+        title, and a row tapped in it acted on the old pane. The new pane's ask — replayed on
+        `pane_focus`, before its first `pane_state` — was never drawn either."""
+        async def main():
+            async with Harness(capability=wire.FULL, source=PublishingSource) as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await self.open_phone(browser, harness)
+                    harness.host.pane_state_published(
+                        a_state("pane-1", 3, "✦ please plan this out"))
+                    await browser.wait_for(
+                        "document.querySelectorAll('.rp-row').length === 3", timeout=20)
+
+                    # The agent on the *other* pane stops to ask something. The phone is not
+                    # looking at that pane, so the client keeps the ask for whenever it is.
+                    harness.source._emit("pane-2", A_QUESTION)
+                    await asyncio.sleep(0.5)
+
+                    # A notification for pane-2 is tapped: app/sw.js posts the id to this page.
+                    await browser.evaluate("""
+                        (() => {
+                          navigator.serviceWorker.dispatchEvent(new MessageEvent('message',
+                            { data: { t: 'open_pane', pane: 'pane-2' } }));
+                          return true;
+                        })()
+                    """)
+                    await browser.wait_for(
+                        "document.getElementById('thread-title').textContent === 'engine tests'"
+                        " ? 'pane-2' : null", timeout=20)
+                    # Nothing of pane-1 is left behind it.
+                    self.assertEqual(await browser.evaluate(
+                        "document.querySelectorAll('#pane-view .rp-row').length"), 0,
+                        "pane-1's queue rows are still on screen under pane-2's title")
+                    self.assertTrue(await browser.evaluate(
+                        "document.getElementById('pane-view').hidden"))
+
+                    # pane-2's own state mounts its own view, and the ask that was waiting for it
+                    # is handed over as the view is built.
+                    harness.host.pane_state_published(a_state("pane-2", 2))
+                    await browser.wait_for(
+                        "document.querySelectorAll('.rp-row').length === 2", timeout=20)
+                    asked = await browser.wait_for(
+                        "(() => { const a = document.querySelector('.rp-ask');"
+                        " return a && !a.hidden ? a.textContent : null; })()", timeout=20)
+                    self.assertIn("Drop the old table first?", asked)
+                    await shot(browser, "notification-onto-another-pane")
+
+                    problems = [line for line in browser.console
+                                if "EXCEPTION" in line or "error:" in line.lower()]
+                    self.assertEqual(problems, [], f"console errors: {problems}")
                 finally:
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 240))

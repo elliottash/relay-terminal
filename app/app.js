@@ -502,7 +502,7 @@ function scheduleReconnect(delay = 3000) {
       // resume itself went out: a `compose` that arrives before the streams are back would be
       // answered into a stream this client has not caught up on. A failed resume keeps it.
       const resumed = await rrp.resume();
-      if (current) rrp.send({ t: 'pane_focus', pane: current }).catch(() => {});
+      if (current) refocusPane(current);
       if (resumed) await outbox.flush();
     } catch {
       scheduleReconnect();
@@ -965,7 +965,47 @@ function closePaneView() {
   $('pane-view').replaceChildren();
 }
 
+// Tell the desktop which pane is being watched, and ask for the one thing it will not send
+// again by itself. `pane_focus` replays the agent ring, a screen snapshot, `control` and
+// `participants` — never a `pane_state`, and `resume` deliberately cannot replay one either
+// ("the latest state is kept outside self.streams on purpose", remote/host.py). An idle pane
+// publishes on change, and the change happened while the socket was down, so a phone coming out
+// of a pocket came back to the old queue count, the old Stop and the old strip and stayed there
+// until something unrelated moved (#PKT5). The hub's `book.latest` has the right answer. So both
+// ways in — opening a pane, and coming back to the one already open — ask the same two things.
+function refocusPane(paneId) {
+  rrp.send({ t: 'pane_focus', pane: paneId }).catch(() => {});
+  // Only where the desktop says it publishes one: without the feature the view is never mounted
+  // and the terminal stays where it is.
+  if (features.includes('pane_state')) {
+    rrp.send({ t: 'pane_state_get', pane: paneId }).catch(() => {});
+  }
+}
+
+// Let go of the pane that is open: the keyboard if this device holds it, the desktop's focus,
+// and the mounted view with whatever sheet it has up. Both leaving for the inbox and moving
+// straight to another pane do this — a notification tap onto pane B used to leave A's view on
+// screen under B's title, where a row tapped in it emitted `conversation_open` for A (#PKT5).
+function leavePane() {
+  if (current) {
+    if (driving) rrp.send({ t: 'control_release', pane: current }).catch(() => {});
+    rrp.send({ t: 'pane_blur', pane: current }).catch(() => {});
+  }
+  closePaneView();
+  driving = false;
+  directKeys = false;
+  presence = [];
+}
+
 function openPane(paneId) {
+  // Tearing down the previous pane also drops its view, so the next `pane_state` mounts a fresh
+  // one — and `ensurePaneView` hands it the ask that was replayed for this pane on `pane_focus`,
+  // which its early return had been skipping.
+  if (current && current !== paneId) leavePane();
+  // Only one screen is ever drawn, so the board is not open behind a thread. Saying so keeps its
+  // own bookkeeping — and Back's idea of what is open — true; `close()` is what its ‹ does, and
+  // it keeps the reply that was half typed on the card.
+  if (board.visible) board.close();
   current = paneId;
   const pane = panes.find((item) => item.id === paneId);
   $('thread-title').textContent = pane?.title || paneId;
@@ -982,10 +1022,8 @@ function openPane(paneId) {
   renderPresence();
   openTerminal();
   show('thread');
-  rrp.send({ t: 'pane_focus', pane: paneId }).catch(() => {});
-  // Ask for this pane's state, when the desktop says it publishes one. Without the feature the
-  // view is never mounted and the terminal stays where it is.
-  if (features.includes('pane_state')) rrp.send({ t: 'pane_state_get', pane: paneId }).catch(() => {});
+  refocusPane(paneId);
+  syncBackEntry();
 }
 
 // A notification was tapped, on this pane (section 9.2: the sealed body carries the pane id and
@@ -1003,17 +1041,72 @@ function requestOpenPane(paneId) {
 }
 
 function closePane() {
-  if (current) {
-    if (driving) rrp.send({ t: 'control_release', pane: current }).catch(() => {});
-    rrp.send({ t: 'pane_blur', pane: current }).catch(() => {});
-  }
-  closePaneView();
+  leavePane();
   current = null;
-  driving = false;
-  presence = [];
   renderPresence();
   show('inbox');
+  syncBackEntry();
 }
+
+// ---- the system Back button (#PKT5) ---------------------------------------------------------
+
+// On Android, Back is the gesture for "close what is open", and nothing here listened for it:
+// from a thread it closed the installed app, and in a browser tab it left the origin — taking
+// the connection, the pane list and the in-memory outbox (a prompt typed offline, waiting to
+// flush) with it. Escape and a tap on a backdrop are the desktop's gestures and a deliberate tap
+// outside; neither is what a thumb reaches for.
+//
+// So while anything is open the app keeps one spare history entry of its own. Back pops that
+// instead of the page, the deepest open layer closes, and a new spare goes on while anything is
+// still open — sheet, then the card or the thread, then the inbox. With nothing open the spare is
+// dropped again, so Back from the inbox leaves in one press, which is what it should do.
+let backSpare = false;      // a spare entry of ours is on top of the history stack
+let backDropping = false;   // a `popstate` we caused ourselves by dropping that spare
+
+function anythingOpen() {
+  return Boolean(current) || board.visible;
+}
+
+// The layers Back unwinds, deepest first; each says whether it had something to close. The two
+// sheet layers belong to app/pane.js and app/board.js, which draw and dismiss their own: this
+// file calls their handle when they offer one and otherwise falls through to the layer below,
+// which is the pane or the board itself.
+function closeOneLayer() {
+  if (paneView && typeof paneView.closeSheet === 'function' && paneView.closeSheet()) return true;
+  if (typeof board.closeSheet === 'function' && board.closeSheet()) return true;
+  if (typeof board.closeCard === 'function' && board.closeCard()) return true;
+  if (current) { closePane(); return true; }
+  if (board.visible) { board.close(); return true; }
+  return false;
+}
+
+function syncBackEntry() {
+  const open = anythingOpen();
+  if (open === backSpare) return;
+  if (open) {
+    // Same URL: this is a depth of the app, not a page of it. The app's own `replaceState` after
+    // pairing is what decides the address.
+    history.pushState({ relayBack: true }, '', location.href);
+    backSpare = true;
+    return;
+  }
+  backSpare = false;
+  backDropping = true;
+  history.back();
+}
+
+window.addEventListener('popstate', () => {
+  if (backDropping) { backDropping = false; return; }
+  backSpare = false;
+  if (closeOneLayer()) syncBackEntry();
+  // Nothing was open: the pop stands and this Back has left the app, which is the right answer
+  // from the inbox.
+});
+
+// The board navigates itself — its rows, its card's ‹ — and says nothing to this file about it.
+// Every one of those is a tap, so the spare is reconciled after any tap that changed what is
+// open. In the capture phase, because a handler that stops propagation still changed the screen.
+document.addEventListener('click', () => { queueMicrotask(syncBackEntry); }, true);
 
 // ---- terminal -----------------------------------------------------------------------------
 
@@ -2237,6 +2330,7 @@ if ('serviceWorker' in navigator) {
     if (data && data.t === 'open_card' && typeof data.card === 'string') {
       if (current) closePane();
       board.open(data.card);
+      syncBackEntry();     // no tap opened this, so nothing else reconciles Back's spare entry
     }
   });
 }
