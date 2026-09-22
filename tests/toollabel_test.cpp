@@ -35,6 +35,17 @@ QJsonObject read(int lines) {
 class ToolLabelTests : public QObject {
     Q_OBJECT
 private slots:
+    void refusalGradeKeepsFailureAndRejectsStringCodes() {
+        const Label refused = relay::toollabel::parse(json(
+            "{'kind':'edit','title':'edit x.py','ok':false,'refused':true,'error':'guard refused'}"));
+        QVERIFY(refused.hasRefused);
+        QVERIFY(refused.refused);
+        QVERIFY(refused.failed());
+        QCOMPARE(refused.line(), QStringLiteral("edit x.py · guard refused"));
+        QVERIFY(!relay::toollabel::parse(json("{'title':'runtime','ok':false,'refused':'busy'}")).refused);
+        QVERIFY(!relay::toollabel::fromEvent(failedRun()).refused);
+    }
+
     // ---- the line ----------------------------------------------------------------------------
 
     void lineIsTitleThenStats() {

@@ -32,6 +32,7 @@ struct HiddenRow {
     QString title;       // the first part, in the tool ink (the error ink when `failed`)
     QString rest;        // " · 212 lines · 8 s", muted; may be empty
     bool failed = false;
+    bool refused = false;
 };
 
 // One turn's worth of them, in the order they happened.

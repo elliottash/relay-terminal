@@ -3272,6 +3272,9 @@ There are three channels, and one meaning per colour:
 | `tool` (brass) | this pane is a tool | the Board's band and its neighbours' |
 | `link` (dark green) | **you can open this** | a path, folder, URL or `#card` in program output (at rest, since 2026-09-19), the hover underline and the keyboard walk, a fold's "open x.py" row, OSC 8 hyperlinks, the agent's Markdown links (ANSI 2), the composer's path token, `QPalette::Link` |
 
+**Red is only for failures.** A tool call a guard refused on purpose keeps its ✗ but wears
+the neutral tool ink (#25XG); amber still means waiting on a person.
+
 **Amber has one job.** Until 2026-09-19 it also drew a tool pane's header band, the `!` terminal
 prefix chip and a Board cleanup *while it ran* — none of which is waiting on anybody — so the
 one signal that must never be missed was the busiest colour in the app. The band took `[ui] tool`

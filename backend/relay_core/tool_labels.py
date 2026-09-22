@@ -311,6 +311,8 @@ def result_label(name, args, result, *, ms=None, existed=None) -> dict:
     happened = ok or not _error_message(result)
     label = {"kind": base["kind"], "running": base["running"],
              "title": base["title"] if happened else base["failed"], "ok": ok}
+    if result.get("refused") is True:
+        label["refused"] = True
     if result.get("still_running"):
         label["kind"] = "job"
     if base.get("path"):

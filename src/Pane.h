@@ -6561,6 +6561,7 @@ private:
         hidden.title = row.title;
         hidden.rest = row.rest;
         hidden.failed = row.failed;
+        hidden.refused = row.refused;
         m_internalsLedger.add(turn, hidden, merged);
     }
 
@@ -6618,7 +6619,7 @@ private:
             printInline(QStringLiteral("── %1 ──\n").arg(request.isEmpty() ? QStringLiteral("agent turn") : request), Ink::Note);
             for (const relay::internals::HiddenRow &row : turn.rows) {
                 const bool thinking = row.kind == relay::internals::HiddenRow::Kind::Thinking;
-                printAnchoredRow(row.anchor, row.title, row.rest, thinking ? Ink::Note : row.failed ? Ink::Error : Ink::Tool);
+                printAnchoredRow(row.anchor, row.title, row.rest, thinking ? Ink::Note : row.failed && !row.refused ? Ink::Error : Ink::Tool);
                 if (thinking) m_lastThinkingAnchor = row.anchor;   // Alt+R reopens the last one
             }
         }
@@ -6810,7 +6811,7 @@ private:
         out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\";
         // Two levels, as everywhere else in the pane: a failure takes the error ink, everything
         // else is the same muted grey, and the stats are the italic grey notes already use.
-        out += inkCode(step.row.failed ? Ink::Error : Ink::Tool) + QByteArray("▸ ");
+        out += inkCode(step.row.failed && !step.row.refused ? Ink::Error : Ink::Tool) + QByteArray("▸ ");
         // A card row folds on a click like any other; only its own `#K7Q2` links to the card
         // (card #1NW3). The segment is a mid-line switch of the OSC 8 anchor — the same mechanism
         // the whole-row open-call anchor uses — and the fold anchor still opens the row at
@@ -11759,7 +11760,7 @@ private:
                 // replayed by flushInline() cannot be rewritten and nothing would fold under it.
                 ensureLineStart();
                 printInline(QStringLiteral("▸ ") + label.line() + QLatin1Char('\n'),
-                            label.failed() ? Ink::Error : Ink::Tool);
+                            label.failed() && !label.refused ? Ink::Error : Ink::Tool);
             } else {
                 beginBlock(relay::gaps::Block::Call);   // already Call after its start: no gap (#5AWD)
                 m_callCursor.setCells(callLineCells());

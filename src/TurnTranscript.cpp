@@ -78,7 +78,7 @@ QTreeWidgetItem *TurnTranscriptView::addRow(QTreeWidgetItem *parent, const QJson
                        : new QTreeWidgetItem(m_tools, {line, exactDuration(tool)});
     const QString callId = tool.value(QStringLiteral("call_id")).toString();
     row->setData(0, Qt::UserRole, callId);
-    row->setForeground(0, ok ? relay::theme::Text : relay::theme::SyntaxUnknown);
+    row->setForeground(0, ok ? relay::theme::Text : label.refused ? relay::theme::TextMuted : relay::theme::SyntaxUnknown);
     row->setForeground(1, relay::theme::TextMuted);
     row->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
     QString tip = QStringLiteral("Enter or double-click opens the full output");
@@ -128,7 +128,7 @@ void TurnTranscriptView::setSummary(const QJsonObject &summary) {
             child->setData(0, Qt::UserRole, tool.value(QStringLiteral("call_id")).toString());
         } else if (!label.error.isEmpty()) {
             auto *child = new QTreeWidgetItem(head, {label.error, QString()});
-            child->setForeground(0, relay::theme::SyntaxUnknown);
+            child->setForeground(0, label.refused ? relay::theme::TextMuted : relay::theme::SyntaxUnknown);
             child->setData(0, Qt::UserRole, tool.value(QStringLiteral("call_id")).toString());
         }
     }
@@ -231,7 +231,7 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
     };
     if (label.valid) {
         add((label.failed() ? QStringLiteral("✗ ") : QStringLiteral("✓ ")) + label.line() + QLatin1Char('\n'),
-            label.failed() ? relay::theme::SyntaxUnknown : relay::theme::Text, true);
+            label.failed() ? (label.refused ? relay::theme::TextMuted : relay::theme::SyntaxUnknown) : relay::theme::Text, true);
     }
     const QJsonArray sections = reply.value(QStringLiteral("detail")).toArray();
     for (const auto &value : sections) {
@@ -257,7 +257,7 @@ void TurnTranscriptView::setToolOutput(const QJsonObject &reply) {
                     add(line + QLatin1Char('\n'), relay::theme::TextMuted);
             }
         } else {
-            const QColor colour = style == QStringLiteral("error")  ? relay::theme::SyntaxUnknown
+            const QColor colour = style == QStringLiteral("error")  ? (label.refused ? relay::theme::TextMuted : relay::theme::SyntaxUnknown)
                                 : style == QStringLiteral("code")   ? relay::theme::SyntaxCommand
                                 : style == QStringLiteral("text")   ? relay::theme::Text
                                                                     : relay::theme::TextMuted;

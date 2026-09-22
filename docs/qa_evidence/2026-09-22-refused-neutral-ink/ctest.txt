@@ -1,0 +1,14 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 15: subagents
+1/4 Test #15: subagents ........................   Passed    0.54 sec
+    Start 87: toollabel
+2/4 Test #87: toollabel ........................   Passed    0.00 sec
+    Start 88: calllines
+3/4 Test #88: calllines ........................   Passed    0.14 sec
+    Start 89: turntranscript
+4/4 Test #89: turntranscript ...................   Passed    0.06 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   0.74 sec

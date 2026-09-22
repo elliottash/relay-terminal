@@ -125,6 +125,7 @@ QString fit(const QString &text, int cells) {
 Row finishedRow(const toollabel::Label &label, int cells) {
     Row out;
     out.failed = label.failed();
+    out.refused = label.refused;
     out.title = label.title.isEmpty() ? QStringLiteral("tool call") : label.title;
     if (out.failed) out.title += QStringLiteral(" ✗");
     QStringList pieces = label.stats;
@@ -576,7 +577,8 @@ QVector<FoldLine> foldForReply(const QJsonObject &reply, const Palette &palette,
         } else if (style == QStringLiteral("tasks")) {
             appendTasks(out, text, palette);
         } else {
-            const QColor colour = style == QStringLiteral("error") ? palette.error : palette.text;
+            const QColor colour = style == QStringLiteral("error")
+                ? (toollabel::fromEvent(reply).refused ? palette.muted : palette.error) : palette.text;
             const QStringList lines = stripAnsi(text).split(QLatin1Char('\n'));
             for (const QString &line : lines) out << row(line, colour);
         }

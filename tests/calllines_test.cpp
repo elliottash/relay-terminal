@@ -86,6 +86,26 @@ QString describe(const QVector<FoldLine> &lines) {
 class CallLinesTests : public QObject {
     Q_OBJECT
 private slots:
+    void refusedFoldMessageIsMutedButFailureIsRed() {
+        auto reply = json("{'label':{'kind':'edit','title':'edit x.py','ok':false,'refused':true},"
+                          "'detail':[{'style':'error','text':'guard refused'}]}");
+        QCOMPARE(foldForReply(reply, palette(), {}).first().spans.first().fg, palette().muted);
+        reply.remove(QStringLiteral("label"));
+        QCOMPARE(foldForReply(reply, palette(), {}).first().spans.first().fg, palette().error);
+    }
+
+    void refusedRowKeepsMarkerMessageAndFold() {
+        const auto refused = label("{'kind':'read','title':'read x.py','ok':false,"
+                                   "'refused':true,'error':'guard refused','open':{'type':'file'}}");
+        const Row row = finishedRow(refused, 0);
+        QVERIFY(row.failed);
+        QVERIFY(row.refused);
+        QCOMPARE(clickFor(refused), Click::Fold);
+        QCOMPARE(row.title, QStringLiteral("read x.py ✗"));
+        QCOMPARE(row.rest, QStringLiteral(" · guard refused"));
+        QVERIFY(!finishedRow(pytest(), 0).refused);
+    }
+
     // ---- the anchor URI ------------------------------------------------------------------------
 
     void uriRoundTrips() {

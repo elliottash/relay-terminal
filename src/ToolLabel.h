@@ -38,6 +38,8 @@ struct Label {
 
     bool hasOk = false;        // `ok` was sent (it is on tool_result only)
     bool ok = true;
+    bool hasRefused = false;
+    bool refused = false;     // deliberate guard refusal: keep ✗, use neutral tool ink
     bool hasInlineDiff = false;
     bool inlineDiff = false;   // the diff is at most 12 changed lines: print it with no click
 

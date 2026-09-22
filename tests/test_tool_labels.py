@@ -601,3 +601,20 @@ class SafeArgsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RefusalGradeTests(unittest.TestCase):
+    def test_only_boolean_true_marks_a_refusal(self):
+        for flag in (True, False, "busy", 1, None):
+            with self.subTest(flag=flag):
+                result = {"error": "guard refused", "refused": flag}
+                label = T.result_label("read_file", {"path": "x.py"}, result)
+                self.assertFalse(label["ok"])
+                self.assertEqual(label["open"], {"type": "fold"})
+                self.assertNotIn("merge", label)
+                self.assertEqual(label.get("refused", False), flag is True)
+                self.assertEqual(label["error"], "guard refused")
+        self.assertNotIn("refused", T.result_label("read_file", {}, {"error": "disk failure"}))
+        runtime = T.result_label("program_input", {}, {"ok": False, "refused": "busy"})
+        self.assertNotIn("refused", runtime)
+        self.assertEqual(runtime["error"], "refused: busy")

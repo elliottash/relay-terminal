@@ -73,6 +73,7 @@ struct Row {
     QString title;
     QString rest;       // " · 212 lines · exit 1 · 8 s", or empty
     bool failed = false;
+    bool refused = false;  // ink grade: tool ink when refused, error ink when merely failed
     QString text() const { return title + rest; }
 };
 

@@ -2160,7 +2160,7 @@ class Agent:
                     call_started = time.monotonic()
                     calls_used += 1
                     if calls_used > self.max_tool_calls:
-                        result = {"error": "Tool budget reached. Do not request more tools this turn."}
+                        result = {"error": "Tool budget reached. Do not request more tools this turn.", "refused": True}
                     else:
                         try:
                             args = json.loads(func["arguments"])
@@ -2192,8 +2192,10 @@ class Agent:
                                                                           existed=label_existed),
                                        "turn_id": turn_id, "call_id": call["id"]})
                             result = self._execute(prepared, turn)
-                        except (OSError, ValueError, UnicodeError) as exc:
+                        except (OSError, UnicodeError) as exc:
                             result = {"error": str(exc)[:2000]}
+                        except ValueError as exc:
+                            result = {"error": str(exc)[:2000], "refused": True}
                     add({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
                     self._autosave_soon()
                     ms = int((time.monotonic() - call_started) * 1000)

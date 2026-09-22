@@ -36,6 +36,41 @@ class AgentTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.root=Path(self.temp.name)
     def tearDown(self): self.temp.cleanup()
 
+    def test_guard_refusal_grade_survives_events_storage_and_model_messages(self):
+        for stage in ("_prepare", "_execute"):
+            for error, refused in ((ValueError("guard refused"), True),
+                                   (OSError("disk failed"), False),
+                                   (UnicodeDecodeError("utf8", b"\xff", 0, 1, "invalid"), False)):
+                with self.subTest(stage=stage, error=type(error).__name__):
+                    events = []
+                    fake = FakeProvider(tool("run_command", {"command": "true"}))
+                    agent = Agent(CONFIG, self.temp.name, events.append, provider=fake)
+                    with mock.patch.object(agent, stage, side_effect=error):
+                        agent.ask("do it")
+                    event = next(e for e in events if e["event"] == "tool_result")
+                    summary = next(e for e in events if e["event"] == "turn_summary")
+                    stored = agent.tool_output(event["turn_id"], "call-1")
+                    for label in (event["label"], summary["tools"][0]["label"], stored["label"]):
+                        self.assertFalse(label["ok"])
+                        self.assertEqual(label.get("refused", False), refused)
+                    message = json.loads(next(m["content"] for m in fake.messages if m["role"] == "tool"))
+                    self.assertEqual(message.get("refused", False), refused)
+                    self.assertEqual(event["result"], message)
+
+    def test_tool_budget_is_a_refusal(self):
+        response = tool("run_command", {"command": "true"})
+        second = json.loads(json.dumps(response["tool_calls"][0]))
+        second["id"] = "call-2"
+        response["tool_calls"].append(second)
+        events = []
+        agent = Agent(CONFIG, self.temp.name, events.append,
+                      provider=FakeProvider(response), max_tool_calls=1)
+        agent.ask("do it")
+        results = [e for e in events if e["event"] == "tool_result"]
+        self.assertTrue(results[1]["result"]["refused"])
+        self.assertTrue(results[1]["label"]["refused"])
+        self.assertFalse(results[1]["label"]["ok"])
+
     def test_command_runs_without_approval(self):
         events=[]
         fake=FakeProvider(tool('run_command', {'command': 'printf HELLO; touch sentinel'}))

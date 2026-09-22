@@ -79,6 +79,10 @@ Label parse(const QJsonObject &label) {
         const QString text = stat.toString();
         if (!text.isEmpty()) out.stats << text;
     }
+    if (label.contains(QStringLiteral("refused"))) {
+        out.hasRefused = true;
+        out.refused = label.value(QStringLiteral("refused")).toBool(false);
+    }
     if (label.contains(QStringLiteral("ok"))) { out.hasOk = true; out.ok = label.value(QStringLiteral("ok")).toBool(true); }
     if (label.contains(QStringLiteral("inline_diff"))) {
         out.hasInlineDiff = true;

@@ -350,7 +350,7 @@ void SubagentTranscriptView::rewriteLine(ToolCall &call, const QString &text, In
 }
 
 void SubagentTranscriptView::drawRow(ToolCall &call) {
-    rewriteLine(call, rowText(call), call.done && call.label.failed() ? Ink::Error : Ink::Tool);
+    rewriteLine(call, rowText(call), call.done && call.label.failed() && !call.label.refused ? Ink::Error : Ink::Tool);
 }
 
 int SubagentTranscriptView::indexOfCall(const QString &callId) const {

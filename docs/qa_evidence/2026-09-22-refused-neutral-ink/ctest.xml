@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="Linux-c++"
+	tests="4"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname="spark-dcc9"
+	time="0"
+	timestamp="2026-09-22T00:54:42"
+	>
+	<testcase name="subagents" classname="subagents" time="0.536595" status="run">
+		<properties/>
+		<system-out>********* Start testing of SubagentsTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : SubagentsTests::initTestCase()
+QWARN  : SubagentsTests::transcriptMarkdownAndThinkingMatchPane() This plugin does not support propagateSizeHints()
+PASS   : SubagentsTests::transcriptMarkdownAndThinkingMatchPane()
+PASS   : SubagentsTests::startProgressFinishLifecycle()
+PASS   : SubagentsTests::handoffPendingBeyondCap()
+PASS   : SubagentsTests::transcriptEventsAreRoutedAndConsumed()
+PASS   : SubagentsTests::mainEventsAreObservedNotConsumed()
+PASS   : SubagentsTests::dismissAndClearKeepLiveRows()
+PASS   : SubagentsTests::resumedAgentRestartsRow()
+PASS   : SubagentsTests::todoSubagentNamesItsTask()
+PASS   : SubagentsTests::foregroundSubagentsAreTrackedForTheWaitLine()
+PASS   : SubagentsTests::formatting()
+PASS   : SubagentsTests::definitionsList()
+PASS   : SubagentsTests::panelKeyboardNavigation()
+PASS   : SubagentsTest...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="toollabel" classname="toollabel" time="0.00363929" status="run">
+		<properties/>
+		<system-out>********* Start testing of ToolLabelTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : ToolLabelTests::initTestCase()
+PASS   : ToolLabelTests::refusalGradeKeepsFailureAndRejectsStringCodes()
+PASS   : ToolLabelTests::lineIsTitleThenStats()
+PASS   : ToolLabelTests::aCallThatNeverRanSaysWhyOnTheSameLine()
+PASS   : ToolLabelTests::aRunThatFailedDoesNotRepeatItsExitCode()
+PASS   : ToolLabelTests::anInlineDiffAndAPathAreReadBack()
+PASS   : ToolLabelTests::aBigDiffOpensTheDiffPane()
+PASS   : ToolLabelTests::openCarriesItsSubject()
+PASS   : ToolLabelTests::aTurnSummaryItemTakesItsVerdictFromBesideTheLabel()
+PASS   : ToolLabelTests::aWorkerWithoutLabelsStillGetsOneLine()
+PASS   : ToolLabelTests::aLongPathInAFallbackShortensToItsBaseName()
+PASS   : ToolLabelTests::anUnknownToolFallsBackToItsHumanisedName()
+PASS   : ToolLabelTests::aFallbackTakesTheExitCodeAndTheError()
+PASS   : ToolLabelTests::anEmptyEventIsNot...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="calllines" classname="calllines" time="0.141605" status="run">
+		<properties/>
+		<system-out>********* Start testing of CallLinesTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : CallLinesTests::initTestCase()
+PASS   : CallLinesTests::refusedFoldMessageIsMutedButFailureIsRed()
+PASS   : CallLinesTests::refusedRowKeepsMarkerMessageAndFold()
+PASS   : CallLinesTests::uriRoundTrips()
+PASS   : CallLinesTests::mergedUriCarriesItsCount()
+PASS   : CallLinesTests::everyAnchorCarriesEnoughToRefetchTheCall()
+PASS   : CallLinesTests::theFoldOpenInPaneLinkNamesOneRefetchableCall()
+PASS   : CallLinesTests::plusInACallIdIsNotACount()
+PASS   : CallLinesTests::openUriIsItsOwnScheme()
+PASS   : CallLinesTests::otherUrisAreRefused()
+PASS   : CallLinesTests::finishedRowSplitsTitleFromStats()
+PASS   : CallLinesTests::aCallThatNeverRanSaysWhy()
+PASS   : CallLinesTests::aNarrowPaneLosesTheStatsFirst()
+PASS   : CallLinesTests::aPaneTooNarrowForTheTitleCutsTheTitle()
+PASS   : CallLinesTests::widthZeroNeverCuts()
+PASS ...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="turntranscript" classname="turntranscript" time="0.0567341" status="run">
+		<properties/>
+		<system-out>********* Start testing of TurnTranscriptTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : TurnTranscriptTests::initTestCase()
+PASS   : TurnTranscriptTests::refusedRowsAreMutedWhileFailuresStayRed()
+PASS   : TurnTranscriptTests::rowsAreTheLabelsLineNotTheToolName()
+PASS   : TurnTranscriptTests::aRunOfReadsIsOneRowWithItsCallsUnderIt()
+PASS   : TurnTranscriptTests::aFailedReadStandsOnItsOwn()
+PASS   : TurnTranscriptTests::aWorkerWithoutLabelsKeepsItsPreview()
+PASS   : TurnTranscriptTests::theLogRendersTheDetailSections()
+PASS   : TurnTranscriptTests::aBigDiffGoesToTheHostsDiffPane()
+PASS   : TurnTranscriptTests::aSmallDiffStaysInTheLog()
+PASS   : TurnTranscriptTests::aWorkerWithoutSectionsStillShowsItsText()
+PASS   : TurnTranscriptTests::theReasoningSurvivesTheTranscriptReply()
+PASS   : TurnTranscriptTests::activatingARowAsksTheHostForItsOutput()
+PASS   : TurnTranscriptTests::cleanupTestCase()
+Totals:...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+</testsuite>

@@ -1,13 +1,15 @@
 ---
 id: 25XG
 type: work
-status: executing
+status: needs-verification
 labels: [feature, ux]
 assignee: agent
+implemented_by: openai/gpt-6-astra via codex
+session: dfbdbb20-f0a8-4e44-8243-331a27498502
 rank: zzzzzzzw
 created: '2026-09-19'
 source: 'pane 1, 2026-09-19 (Discuss on #SFP6)'
-links: {plans: [], commits: [], evidence: [], related: [SFP6], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-refused-neutral-ink/], related: [SFP6], github: null}
 ---
 # Refused tool calls keep the ✗ but render in neutral ink, not red
 
@@ -99,3 +101,21 @@ A tool call a guard deliberately refused (edit_file's 128 KiB cap, path guards, 
 - Extend `tests/test_agent.py`: a fake tool raising `ValueError` → `tool_result` event's label carries `refused: true` and the model-facing result too; one raising `OSError` (and a `UnicodeDecodeError`) → no flag.
 - `ctest --test-dir build -R "toollabel|calllines"` — `toollabel_test.cpp`: `refused` parses, `failed()` still true; `calllines_test.cpp`: `finishedRow` on a refused label sets `failed` and `refused` and keeps the `" ✗"` suffix.
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME`: have the agent `edit_file` on a >128 KiB file (`src/BoardPane.cpp`) — expect `▸ edit BoardPane.cpp ✗ · File exceeds the 128 KiB preview/read limit.` in the muted tool ink; then `run_command ls /nonexistent` — still red. Screenshot both into `docs/qa_evidence/2026-MM-DD-refused-neutral-ink/` and move the card to `needs_qa_llm` with the checklist.
+
+## Done means
+- Guard and tool-budget refusals keep their ✗ and explanatory message, rendered in neutral tool ink in live and replayed transcripts.
+- Actual execution and decoding failures remain red; string-coded runtime refusals retain their existing failure styling.
+- Refused calls remain unsuccessful, unmerged, and expandable on click. A missing marker/message, red deliberate refusal, or neutral runtime failure is a regression.
+
+## Tests
+- `tests/test_tool_labels.py`
+- `tests/test_agent.py`
+- `ctest -R '^(toollabel|calllines|turntranscript|subagents)$'`
+- `manual: docs/qa_evidence/2026-09-22-refused-neutral-ink/live.png`
+
+## Execution Summary
+Implemented deliberate refusal grading from backend results through labels and all four C++ transcript surfaces; ✗, message, unsuccessful verdict, no-merge and fold semantics remain. Runtime/string-code refusals and OS/decoding failures retain red. Hidden Activity rows preserve the flag on replay. Expanded error text also remains neutral for refused calls.
+
+103 Python tests and four targeted C++ suites pass; Relay builds. Isolated Xvfb screenshot shows a real 140,000-byte edit refusal in muted ink and ls /nonexistent in red. Evidence and reproduction: `docs/qa_evidence/2026-09-22-refused-neutral-ink/README.md`.
+
+Implemented locally. Existing unrelated edits were preserved; the separate verifier owns the QA checklist and live replay verification.

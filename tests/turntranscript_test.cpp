@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The turn pane's tool list and its detail log (src/TurnTranscript.h, protocol § 23).
 #include "TurnTranscript.h"
+#include "Theme.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPlainTextEdit>
 #include <QTest>
 #include <QTreeWidget>
+#include <QTextBlock>
+#include <QTextCursor>
 #include <QTreeWidgetItem>
 
 using relay::TurnTranscriptView;
@@ -36,6 +39,23 @@ QString log(const TurnTranscriptView &view) {
 class TurnTranscriptTests : public QObject {
     Q_OBJECT
 private slots:
+    void refusedRowsAreMutedWhileFailuresStayRed() {
+        TurnTranscriptView view(QStringLiteral("t1"));
+        view.setSummary(json("{'tools':["
+            "{'call_id':'c1','ok':false,'label':{'kind':'edit','title':'edit x.py','ok':false,'refused':true,'error':'guard refused'}},"
+            "{'call_id':'c2','ok':false,'label':{'kind':'run','title':'ran false','ok':false}}]}"));
+        QVERIFY(row(view, 0)->text(0).startsWith(QStringLiteral("✗ ")));
+        QCOMPARE(row(view, 0)->foreground(0).color(), QColor(relay::theme::TextMuted));
+        QCOMPARE(row(view, 0)->child(0)->foreground(0).color(), QColor(relay::theme::TextMuted));
+        view.setToolOutput(json("{'call_id':'c1','label':{'kind':'edit','title':'edit x.py','ok':false,'refused':true},"
+                               "'detail':[{'style':'error','text':'guard refused'}]}"));
+        const auto *edit = view.findChild<QPlainTextEdit *>(QStringLiteral("turnLog"));
+        QTextCursor error = edit->document()->find(QStringLiteral("guard refused"));
+        QVERIFY(!error.isNull());
+        QCOMPARE(error.charFormat().foreground().color(), QColor(relay::theme::TextMuted));
+        QCOMPARE(row(view, 1)->foreground(0).color(), QColor(relay::theme::SyntaxUnknown));
+    }
+
     void rowsAreTheLabelsLineNotTheToolName() {
         TurnTranscriptView view(QStringLiteral("t1"));
         view.setSummary(json(

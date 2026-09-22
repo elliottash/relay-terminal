@@ -4466,6 +4466,7 @@ title line, the last line of the block, the diff — is now a field.
 | `title` | string | past tense, once it is done: "ran pytest", "wrote x.py". Always present. On `tool_started` it is the title as far as it is known then (see `existed` below) |
 | `stats` | string[] | short pieces in display order, §23.4. Absent when there are none |
 | `ok` | bool | on `tool_result` only. Same verdict the turn record keeps: no `error`, no `ok: false`, not timed out, exit code 0 or none |
+| `refused` | bool | on `tool_result` only. True for a deliberate guard or tool-budget refusal. The call keeps its unsuccessful verdict, ✗, message, and fold; surfaces use neutral tool ink rather than error ink. String-coded runtime refusals do not set this flag. |
 | `error` | string | only when the call **did not happen**: first line of the error, at most 120 characters. A command that ran and exited 1 is `ok: false` with **no** `error` — `stats` already says `exit 1`, and `title` stays "ran pytest" |
 | `path` | string | workspace-relative path, for the file kinds (`read_file`, `list_directory`, `write_file`, `edit_file`), so the surface can open the file. Skill files have no workspace path and send none |
 | `inline_diff` | bool | present for a successful write or edit: `true` when the diff is at most **12** changed lines (added + removed) — small enough that a surface may show it in place; Relay folds it under the row, collapsed until the row is clicked (#WXT6); `false` when it is bigger |
