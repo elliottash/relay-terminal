@@ -1,0 +1,14 @@
+inbox drawn; screens shown = 1
+links: [["https://relay-terminal.ai/docs/remote","https://relay-terminal.ai/docs/remote","_blank","noopener noreferrer"],["http://127.0.0.1:8080/health","http://127.0.0.1:8080/health","_blank","noopener noreferrer"],["www.example.com","https://www.example.com","_blank","noopener noreferrer"],["https://github.com/relay/relay-terminal/pull/12#issue-7","https://github.com/relay/relay-terminal/pull/12#issue-7","_blank","noopener noreferrer"],["https://example.com/a_(b)_c","https://example.com/a_(b)_c","_blank","noopener noreferrer"],["https://example.com/path?q=1&r=2#frag","https://example.com/path?q=1&r=2#frag","_blank","noopener noreferrer"]]
+rows with something in them: ["  see https://relay-terminal.ai/docs/remote for the protocol.","  http://127.0.0.1:8080/health (the fake model) answers ok.","  www.example.com has no scheme of its own.","  the run is at https://github.com/relay/relay-terminal/pull/12#issue-7, review it.","  (see https://example.com/a_(b)_c) and the note after it.","  traceback: File \"backend/relay_core/router.py\", line 88, in route","  wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-wide-end","  mailto:e@elliottash.com and ftp://old.example.com are not http.","  https://example.com/path?q=1&r=2#frag, then a comma."]
+font at rest: 12px
+A- present: True  A+ present: True
+font after four A+: 20px
+after A+: {"scrollWidth":2476,"clientWidth":390,"overflowX":"auto"}
+font after eight A-: 10.55px
+stored floor: 6
+font after reload: 10.55px
+focused before send: TEXTAREA
+focused after send: TEXTAREA
+typed at the desktop: []
+console: ["verbose: [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o", "info: Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner.", "verbose: [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o", "info: Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner."]
