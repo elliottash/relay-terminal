@@ -28,7 +28,10 @@ the worker sending it as the row's `extra`. If not, the card is dropped and the 
 ## Planning notes
 Code review, 2026-09-22 (Codex): `CustomProvider.as_preset()` currently supplies `{}` for `extra`.
 `session_protocol.provider_config()` already reads `preset.extra`, and the transport already
-supports it. The missing path is storage/catalog/form rather than a new transport.
+supports it. The missing path is storage/catalog/form rather than a new transport. Its current validation
+allows only `thinking`, `reasoning`, `reasoning_effort`, `temperature` and `top_p`; retaining this
+field means preserving that contract and rejecting unsupported keys before saving, rather than
+letting a successfully saved provider fail at its first configure.
 `save()` and `_record_served()` reconstruct the dataclass, so both must preserve the new field.
 The add/edit form lives in `RelayWindow::modelsSection` (`askForCustom`).
 

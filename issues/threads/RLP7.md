@@ -16,3 +16,7 @@ Moved to discussing, waiting_on owner.
 <!-- relay:entry 20260922T010803Z-r1 author=codex kind=plan -->
 ### Codex · 2026-09-22 01:08
 Recorded implementation findings, provisional Done means and a checkable plan. No implementation or deployment while the product decision is pending.
+
+<!-- relay:entry 20260922T010911Z-s1 author=codex kind=progress -->
+### Codex · 2026-09-22 01:09
+Read-only attempt to inspect the live upstream mapping failed: ssh could not resolve elliott-main-1. No production change made. docs/RELAY-FREE.md records GLM 5.3 Flash for main/high, DeepSeek V4.1 Flash for flash and Gemini 3.5 Flash Lite for lite via OpenRouter; that documentation is not proof of the current deployed mapping.
