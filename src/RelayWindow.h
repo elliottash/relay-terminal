@@ -966,6 +966,16 @@ protected:
                 break;
             }
         }
+        // The embedded priorities editor owns Alt+Up/Down for reordering (#MDL1).
+        // This application-wide filter runs before the picker's own event filter;
+        // let both the override and key press reach it instead of navigating panes.
+        if (key->modifiers() == Qt::AltModifier
+            && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down)) {
+            for (QWidget *parent = widget; parent; parent = parent->parentWidget())
+                if (auto *picker = dynamic_cast<relay::ModelPicker *>(parent);
+                    picker && picker->sectionsPage())
+                    return QMainWindow::eventFilter(object, event);
+        }
         const QString id = Keymap::instance().match(key);
         if (id.isEmpty()) return QMainWindow::eventFilter(object, event);
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
