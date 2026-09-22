@@ -1,0 +1,210 @@
+############################################ drive1  (staged in /tmp/claude-1000/v-pr4q-drive1)
+=== card JDYG revision: 
+--- statuses (Done means 1):
+   passed             ctest:totals                 ctest -R totals passed for this revision on laptop, 2026-09-21T12:24:35Z
+   failed             ctest:totals_large_order     ctest -R totals_large_order failed for this revision on laptop
+   not-applicable     ctest:rounding               ctest -R rounding is not in the project any more
+   missing-evidence   unittest:tests.test_invoice  no run of tests/test_invoice.py for this revision, from any host, and no attached result
+--- actions: ['Run these', 'Replace retired check', 'Open the failing one']
+--- findings (advisory):
+   notice           retired                  ctest -R rounding is not in the project any more
+   notice           never-run                tests/test_invoice.py: 3 of 3 never ran here (test_total_matches_the_order, test_large_ord
+   notice           failing                  ctest -R totals_large_order failed the last time it ran, 2026-09-21T12:24:35Z
+--- full statuses json:
+[
+ {
+  "test": "ctest:totals",
+  "invocation": "ctest -R totals",
+  "status": "passed",
+  "retired": false,
+  "evidence": [
+   {
+    "run_id": "seed-19",
+    "host": "laptop",
+    "commit": "0e4da571",
+    "ts": "2026-09-21T12:24:35Z",
+    "result": "pass",
+    "applicable": true
+   },
+   {
+    "run_id": "seed-18",
+    "host": "desktop",
+    "commit": "0e4da571",
+    "ts": "2026-09-21T00:24:35Z",
+    "result": "pass",
+    "applicable": true
+   },
+   {
+    "run_id": "seed-17",
+    "host": "laptop",
+    "commit": "0e4da571",
+    "ts": "2026-09-20T12:24:35Z",
+    "result": "pass",
+    "applicable": true
+   }
+  ],
+  "use_existing": true,
+  "accepted": false,
+  "message": "ctest -R totals passed for this revision on laptop, 2026-09-21T12:24:35Z"
+ },
+ {
+  "test": "ctest:totals_large_order",
+  "invocation": "ctest -R totals_large_order",
+  "status": "failed",
+  "retired": false,
+  "evidence": [
+   {
+    "run_id": "seed-19",
+    "host": "laptop",
+    "commit": "0e4da571",
+    "ts": "2026-09-21T12:24:35Z",
+    "result": "fail",
+    "applicable": true
+   },
+   {
+    "run_id": "seed-18",
+    "host": "desktop",
+    "commit": "0e4da571",
+    "ts": "2026-09-21T00:24:35Z",
+    "result": "fail",
+    "applicable": true
+   },
+   {
+    "run_id": "seed-17",
+    "host": "laptop",
+    "commit": "0e4da571",
+    "ts": "2026-09-20T12:24:35Z",
+    "result": "fail",
+    "applicable": true
+   }
+  ],
+  "use_existing": false,
+  "accepted": false,
+  "message": "ctest -R totals_large_order failed for this revision on laptop"
+ },
+ {
+  "test": "ctest:rounding",
+  "invocation": "ctest -R rounding",
+  "status": "not-applicable",
+  "retired": true,
+  "evidence": [],
+  "use_existing": false,
+  "accepted": false,
+  "message": "ctest -R rounding is not in the project any more"
+ },
+ {
+  "test": "unittest:tests.test_invoice",
+  "invocation": "tests/test_invoice.py",
+  "status": "missing-evidence",
+  "retired": false,
+  "evidence": [],
+  "use_existing": false,
+  "accepted": false,
+  "message": "no run of tests/test_invoice.py for this revision, from any host, and no attached result"
+ }
+]
+
+############################################ drive2  (staged in /tmp/claude-1000/v-pr4q-drive2)
+card_revision(with card): (['2d43780017a4'], '2026-09-21T20:24:35-04:00', '2d43780017a4')
+check revision: '2d43780017a4'
+counts: {'passed': 1, 'failed': 1, 'not-applicable': 1, 'missing-evidence': 1}
+
+=== Done means 4: gate_move to needs-qa-llm
+{
+ "code": "tests_gate",
+ "card": "CFR8",
+ "tests": [
+  "ctest:totals_large_order",
+  "unittest:tests.test_invoice"
+ ],
+ "revision": "2d43780017a4",
+ "message": "#CFR8 is not proven yet: 1 failed, 1 missing-evidence (totals_large_order, test_invoice). Run them, use an existing result, or move it with an override that says why.",
+ "reasons": [
+  "failed: ctest -R totals_large_order failed for this revision on laptop",
+  "missing-evidence: no run of tests/test_invoice.py for this revision, from any host, and no attached result"
+ ]
+}
+
+=== Done means 5: card with no ## Tests (CYWR)
+1st: tests_none | #CYWR names no checks, so nothing here says it works: which checks prove it? Add them to `## Tests`, or say that none apply and move it again.
+2nd: None (moves)
+3rd: None (moves)
+thread note: ['<!-- relay:tests-none card=CYWR -->']
+
+############################################ drive3  (staged in /tmp/claude-1000/v-pr4q-drive3)
+== A: move refused (statuses shown)
+   code: tests_gate | tests: ['ctest:totals_large_order', 'unittest:tests.test_invoice'] | rev: c8ab526d8b56
+   text: #VXQ8 is not proven yet: 1 failed, 1 missing-evidence (totals_large_order, test_invoice). Run them, use an existing result, or move it with an override that says why.
+   statuses: [('ctest:totals', 'passed'), ('ctest:totals_large_order', 'failed'), ('ctest:rounding', 'not-applicable'), ('unittest:tests.test_invoice', 'missing-evidence')]
+   card still: needs-verification
+
+== B: the same move with an override lands it
+   error: None | card now: done
+   override markers on thread:
+      - `ctest:totals_large_order` <!-- relay:override test=ctest:totals_large_order rev=c8ab526d8b56 until=2026-10-05 -->
+      - `unittest:tests.test_invoice` <!-- relay:override test=unittest:tests.test_invoice rev=c8ab526d8b56 until=2026-10-05 -->
+
+== C: put it back and move again — asked again?
+   card back at: needs-verification
+   second attempt error: None
+   card now: done
+
+== D: a different revision — the override must not hold
+   live_overrides at this revision: ['ctest:totals_large_order', 'unittest:tests.test_invoice']
+   live_overrides at another revision: []
+
+############################################ drive4  (staged in /tmp/claude-1000/v-pr4q-drive4)
+== E: the offer — which listed check carries `use_existing`
+   ctest:totals                 passed            use_existing=True accepted=False
+   ctest:totals_large_order     failed            use_existing=False accepted=False
+   ctest:rounding               not-applicable    use_existing=False accepted=False
+   unittest:tests.test_invoice  missing-evidence  use_existing=False accepted=False
+   offered on: [('ctest:totals', 'laptop', 'seed-19')]
+
+== F: first Check writes ONE `### Check` status, replaced in place
+   `### Check` headings in the card after three checks: 1
+   --- the `## Tests` section as it now stands ---
+   | ## Tests
+   | - `ctest -R totals` — tests/totals_test.cpp
+   | - `ctest -R totals_large_order` — tests/totals_large_order_test.cpp
+   | - `ctest -R rounding` — tests/rounding_test.cpp
+   | - `tests/test_invoice.py`
+   | 
+   | ### Check 2026-09-21 20:24
+   | - passed · ctest:totals — ctest -R totals passed for this revision on laptop, 2026-09-21T12:24:42Z
+   | - failed · ctest:totals_large_order — ctest -R totals_large_order failed for this revision on laptop
+   | - not-applicable · ctest:rounding — ctest -R rounding is not in the project any more
+   | - missing-evidence · unittest:tests.test_invoice — no run of tests/test_invoice.py for this revision, from any host, and no attached result
+   | - notice · ctest:rounding — ctest -R rounding is not in the project any more
+   | - notice · unittest:tests.test_invoice — tests/test_invoice.py: 3 of 3 never ran here (test_total_matches_the_order, test_large_order_has_one_line_per_item, test_currency_is_printed_with_two_decimals)
+   | - notice · ctest:totals_large_order — ctest -R totals_large_order failed the last time it ran, 2026-09-21T12:24:42Z
+   | history: thread
+   ends with `history: thread`: True
+   the four `## Tests` lines are untouched: True
+
+== G: tests_accept — the laptop's run accepted as this card's evidence
+   accept marker on the card: ['- accepted · ctest:totals — run seed-19 from laptop, 2026-09-21T12:24:42Z accepted as evidence for this revision <!-- relay:accept test=ctest:totals run=seed-19 rev=cda17c0bff64 -->']
+   front matter untouched (no new field): True
+   thread evidence entry: ['Accepted run `seed-19` of `ctest:totals` from laptop (cda17c0b, pass) as evidence for revision cda17c0bff64.']
+   after accepting, use_existing on that row: [False] accepted: [True]
+   event kinds emitted by accept: ['tests_check']
+
+== H: refresh_checks — a finished run re-checks the cards whose tests it ran
+   cards re-checked for a run of ctest:totals_large_order: ['YS6A']
+   events: [('tests_check', 'YS6A')]
+   a run no card names: []
+
+############################################ drive5  (staged in /tmp/claude-1000/v-pr4q-drive5)
+before: missing-evidence
+ingest: {'folders': [{'folder': 'sphinxpad-2026-09-21-0900', 'run_id': 'sphinxpad-ci-41', 'executions': 3}], 'executions': 3}
+after: passed | tests/test_invoice.py passed for this revision on sphinxpad, 2026-09-21T18:00:00Z
+evidence rows: [('sphinxpad', 'sphinxpad-ci-41', 'pass', True), ('sphinxpad', 'sphinxpad-ci-41', 'pass', True), ('sphinxpad', 'sphinxpad-ci-41', 'pass', True)]
+use_existing offered: True
+gate now blocks on: ['ctest:totals_large_order']
+
+############################################ drive6  (staged in /tmp/claude-1000/v-pr4q-drive6)
+gate says: #DMFM is not proven yet: 1 failed, 1 missing-evidence (totals_large_order, test_invoice). Run them, use an existing result, or move it with an override that says why.
+board_move_card (agent tool): {'card': None, 'status': 'done'}
+card status now: done
+thread has an override marker: False
+

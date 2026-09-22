@@ -1,0 +1,26 @@
+import json, os, sys
+from pathlib import Path
+X = Path(os.environ["X"]); D = Path(os.environ.get("WORK", "/tmp/claude-1000/v-pr4q-orders"))
+sys.path.insert(0, str(X / "backend"))
+from relay_core import tests_protocol as TP
+staged = json.loads((D / "STAGED.json").read_text())
+DONE = staged["cards"]["done"]; FLAKY = staged["cards"]["flaky"]
+tc = TP.TestsCommands(D, emit=lambda e: None)
+board = tc.board(); card = board.card_by_id(DONE)
+print("card_revision(with card):", tc.card_revision(DONE, card))
+r = tc.check_card(DONE)
+print("check revision:", repr(r["revision"]))
+print("counts:", {s['status']: sum(1 for x in r['statuses'] if x['status']==s['status']) for s in r['statuses']})
+print()
+print("=== Done means 4: gate_move to needs-qa-llm")
+g = tc.gate_move(DONE, "needs-qa-llm")
+print(json.dumps({k: g[k] for k in ("code","card","tests","revision","message","reasons")}, indent=1) if g else "None (not blocked)")
+print()
+print("=== Done means 5: card with no ## Tests (%s)" % FLAKY)
+g1 = tc.gate_move(FLAKY, "needs-qa-llm")
+print("1st:", (g1 or {}).get("code"), "|", (g1 or {}).get("message"))
+g2 = tc.gate_move(FLAKY, "needs-qa-llm")
+print("2nd:", "None (moves)" if g2 is None else g2.get("code"))
+g3 = tc.gate_move(FLAKY, "needs-qa-llm")
+print("3rd:", "None (moves)" if g3 is None else g3.get("code"))
+print("thread note:", [l for l in (Path(D/".switchboard/threads"/f"{FLAKY}.md").read_text().splitlines()) if "tests-none" in l])

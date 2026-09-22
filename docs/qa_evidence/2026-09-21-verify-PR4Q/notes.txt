@@ -1,0 +1,80 @@
+#PR4Q — verifier's own pass (a separate session from the implementer)
+=====================================================================
+
+Revision checked: d6682f97 (the newest in the card's `links.commits` chain; the five code and
+doc commits are bebbe336, 60b3fa43, 2d1901e6, 630db31e, c3a88caa).
+Everything below was produced on a CLEAN EXPORT of that revision, never in the shared checkout:
+
+    X=$(mktemp -d /tmp/claude-1000/v-pr4q.XXXX) && git archive d6682f97 | tar -x -C $X
+
+`stage.sh` in this folder puts the whole situation back. `drives/run.sh` replays the six backend
+drives, each on its own fresh staging; `gui-start.sh` + `x.sh` are the Xvfb/xdotool harness the
+captures below were taken with (the ai-pass.sh recipe, RELAY_BIN=$X/build/relay, isolated
+HOME/XDG_*/TMPDIR, RELAY_KEYRING=off, ended with kill -TERM).
+
+Fixture: the #7BM4 `orders` project (stage.py), which gives one card in Needs verification with
+four listed checks — one that passes, one that fails, one retired out of the project, one that
+has never run — plus ten days of run history from two hosts (desktop and laptop), and a second
+card with no `## Tests` section at all.
+
+tests.txt          the two unittest modules (170 tests, OK), each `## Tests` class verbosely,
+                   and `ctest -R cardtests` (15 cases, all PASS) — all on the export's own build.
+backend-drives.txt six drives through `relay_core.tests_protocol.TestsCommands` and the real
+                   `board_protocol` move path. Drive by drive:
+                     1  the four statuses on one card, with the evidence rows behind each
+                     2  `gate_move` refuses on failed + missing-evidence only; the no-`## Tests`
+                        card is asked once (`tests_none`) and moves on the 2nd and 3rd attempts
+                     3  the real `board_move` path: refused, then landed with an override whose
+                        markers are scoped to (check, revision) and expire; the same move is not
+                        asked again; `live_overrides` is empty for a different revision
+                     4  `use_existing` only on the row a pass exists for; three Checks leave ONE
+                        `### Check` block ending `history: thread` with the `## Tests` lines
+                        untouched; `tests_accept` writes the marker into the block (no front
+                        matter) and the row flips to accepted; `refresh_checks` re-checks the card
+                     5  an ATTACHED result — a `relay-remote-tests` folder with meta.json and a
+                        JUnit file at this card's commit — ingests and turns missing-evidence
+                        into passed, and the gate stops blocking on it
+                     6  the unresolved note: the AGENT's own `board_move_card` tool lands the same
+                        card with no gate, no question and no override marker
+
+The live drive (one capture per step, in order):
+  00-board .. 02-card      the staged board, the Needs-verification lane, card #ZYDF opened
+  03-four-statuses         ONE Check click: "4 listed · checked … · 1 passed · 1 failed ·
+                           1 missing evidence · 1 not applicable", one row per listed check in
+                           those words, the three advisory notices under them, the actions
+                           Run these / Replace retired check / Open the failing one, and
+                           "Use this existing result" on the passed row (its newest run is the
+                           laptop's, not this machine's)
+  04-accepted              after "Use this existing result": the offer is gone and the card's
+                           `### Check` block gained
+                             - accepted · ctest:totals — run seed-19 from laptop … <!-- relay:accept
+                               test=ctest:totals run=seed-19 rev=307ac063fe7b -->
+                           with an `evidence` entry on the thread and no new front-matter field
+  05-replace-retired       "Replace retired check" opens the four `## Tests` lines in a box whose
+                           hint names the retired one ("ctest -R rounding is not in the project any
+                           more"); the findings rows go while it is open (the 630db31e layout fix)
+  06-cancelled             Cancel puts the rows back
+  07-gate-refusal          Needs verification → Done is REFUSED: "#ZYDF is not proven yet:
+                           1 failed, 1 missing-evidence (totals_large_order, test_invoice)…" —
+                           the retired check is not among them, so it does not block
+  08/09/10                 Override… asks ONCE ("Why is #ZYDF ready to move although its tests do
+                           not prove it?"), the reason is typed, and the move lands ("Moved #ZYDF
+                           with the tests check overridden"). The thread's `decision` entry carries
+                           one marker per waived check, rev=307ac063fe7b until=2026-10-05.
+  11/12/13                 moved back to Needs verification and to Done again: it lands with NO
+                           question at all ("Marked #ZYDF done")
+  14 .. 18                 #5XQ5 has no `## Tests`. Its first move towards a QA lane is answered
+                           with the one question — "Which checks prove #5XQ5? One per line." —
+                           with "None apply" beside Save. "None apply" puts the answer on the
+                           thread, `<!-- relay:tests-none card=5XQ5 -->` is recorded as a note so
+                           it is asked exactly once, and the move goes through.
+  19 .. 22                 the refresh: 21-before-run is a fresh Check ("1 passed · 1 failed ·
+                           1 missing evidence · 1 not applicable"); "Run these" is clicked once and
+                           22-run-started is the strip AFTER the run with NO second Check click —
+                           "2 passed · 1 failed · 1 not applicable", tests/test_invoice.py now
+                           `passed … on spark-dcc9`. (The notice in that shot is #AQ6X's signal
+                           card opening from the still-failing check; not this card's business.)
+
+What the implementer's own evidence claimed (docs/qa_evidence/2026-09-21-check-gate-statuses/)
+was read PNG by PNG and reproduced here step for step on a different staging, with different
+card ids and a different commit. Nothing in it was found to overstate what the code does.
