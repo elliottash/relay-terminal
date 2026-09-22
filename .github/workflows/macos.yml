@@ -49,6 +49,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p test_macos_runtime.py -v
           python -m unittest discover -s tests -p test_macos_tryit.py -v
+          python -m unittest discover -s tests -p test_macos_prompts.py -v
           python -m unittest discover -s tests -p test_platform_storage.py -v
           python -m unittest discover -s tests -p test_worker_encoding.py -v
       - name: Native process, crash and runtime-directory tests
