@@ -1,6 +1,6 @@
 ---
-id: MDP1
-aliases: [MDL1]
+id: 4BPE
+aliases: [MDL1, MDP1]
 type: work
 status: needs-verification
 labels: [feature, models]

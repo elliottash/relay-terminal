@@ -51,3 +51,6 @@ Implemented Pro personal codes, gateway checks and revocation, desktop activatio
 <!-- relay:entry 20260922T021833Z-qa author=codex kind=evidence -->
 ### Codex · 2026-09-22 02:18
 Independent verifier a5 reports PASS, evidence commit 50c23e65. Root reviewed the checklist, tests and live screenshots: valid activation/Pro turn succeed; revocation denies next turn with no upstream increase; Free/BYOK and credential guards pass. Copied verifier checklist/verdict to the card and closed implementation as done. Production rollout remains separate and is documented in gateway/README.md. XJSN also independently verified and closed.
+
+<!-- relay:entry 20260922T030529Z-y6 author=codex kind=progress -->
+Owner requested fresh valid keys. Renamed the existing card #RPR7 → #MKZ0 using board.new_id; retained earlier codes as aliases. Card status, ownership, evidence paths and prior thread entries are preserved. New code passes board.valid_id and was collision-checked against card IDs and aliases.

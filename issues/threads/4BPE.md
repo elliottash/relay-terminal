@@ -916,3 +916,6 @@ Rank-one discrepancy resolved: real catalog includes gpt-6-astra/high; this was 
 <!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
 ### Codex · 2026-09-22 01:48
 Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Renamed this existing card and its thread; retained its old ID in aliases. Earlier thread entries remain byte-for-byte intact. Updated current card cross-references and documentation; historical evidence paths and source comments retain the original codes. No change to status, ownership, task completion or outstanding decisions.
+
+<!-- relay:entry 20260922T030529Z-vw author=codex kind=progress -->
+Owner requested fresh valid keys. Renamed the existing card #MDP1 → #4BPE using board.new_id; retained earlier codes as aliases. Card status, ownership, evidence paths and prior thread entries are preserved. New code passes board.valid_id and was collision-checked against card IDs and aliases.
