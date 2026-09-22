@@ -1,0 +1,26 @@
+{
+  "revision": "82acbc04993af406b9b091f659165e6ba356241c",
+  "binary": "/tmp/claude-1000/land/1cxd-b/verify/build/relay",
+  "binary_sha256": "c285932e3cf5dbb925c9f1b78b53a53e5b7af737779296f6f3ab14e9ecc00ca9",
+  "data": "/tmp/claude-1000/land/1cxd-b/verify/src",
+  "sandbox": "/tmp/v561p-5jlyqmvn",
+  "display": ":300",
+  "empty_profile": true,
+  "alive_at_15s": true,
+  "alive_before_deliberate_stop": true,
+  "elapsed_before_stop": 20.08043459703913,
+  "returncode": 0,
+  "worker_ready": true,
+  "gui_crash": false,
+  "environment": {
+    "HOME": "/tmp/v561p-5jlyqmvn/home",
+    "XDG_CONFIG_HOME": "/tmp/v561p-5jlyqmvn/config",
+    "XDG_DATA_HOME": "/tmp/v561p-5jlyqmvn/data",
+    "XDG_CACHE_HOME": "/tmp/v561p-5jlyqmvn/cache",
+    "XDG_RUNTIME_DIR": "/tmp/v561p-5jlyqmvn/run",
+    "TMPDIR": "/tmp/v561p-5jlyqmvn/tmp",
+    "RELAY_KEYRING": "off",
+    "RELAY_NO_ISOLATION": "1",
+    "RELAY_DATA_DIR": "/tmp/claude-1000/land/1cxd-b/verify/src"
+  }
+}
