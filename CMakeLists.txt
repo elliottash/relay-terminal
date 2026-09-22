@@ -714,6 +714,11 @@ if(BUILD_TESTING)
     set_tests_properties(modelsettings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The models pane (card #MDL1 t:a11): its three tabs, the class tab it opens on, Enter landing
     # in the pane it serves, and Escape leaving it open.
+    add_executable(relay-panetabnavigation-tests tests/panetabnavigation_test.cpp)
+    target_include_directories(relay-panetabnavigation-tests PRIVATE src)
+    target_link_libraries(relay-panetabnavigation-tests PRIVATE ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    add_test(NAME panetabnavigation COMMAND relay-panetabnavigation-tests)
+    set_tests_properties(panetabnavigation PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-modelspane-tests tests/modelspane_test.cpp)
     target_link_libraries(relay-modelspane-tests PRIVATE relay-modelspane ${RELAY_QT}::Test)
     add_test(NAME modelspane COMMAND relay-modelspane-tests)

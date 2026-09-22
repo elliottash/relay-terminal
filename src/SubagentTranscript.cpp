@@ -1,3 +1,4 @@
+#include "PaneTabNavigation.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SubagentTranscript.h"
 #include "CopyOnSelect.h"
@@ -616,7 +617,8 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
         if (onBackToMain) onBackToMain();
     });
     m_header->addWidget(m_back);
-    m_bar = new QTabBar;
+    m_bar = new QTabBar(this);
+    relay::paneTabs::registerTabs(this, m_bar);
     m_bar->setObjectName(QStringLiteral("subagentTabBar"));
     m_bar->setDocumentMode(true);
     m_bar->setTabsClosable(true);

@@ -1,3 +1,4 @@
+#include "PaneTabNavigation.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ModelPicker.h"
 
@@ -160,7 +161,8 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     }
 
     // ----- the tabs: one per tier list, then the flat one ----------------------------------------
-    m_tabs = new QTabBar;
+    m_tabs = new QTabBar(this);
+    relay::paneTabs::registerTabs(this, m_tabs);
     m_tabs->setObjectName(QStringLiteral("modelTabs"));
     m_tabs->setExpanding(false);
     m_tabs->setDrawBase(true);
@@ -1467,7 +1469,7 @@ bool ModelPicker::handleShortcut(QKeyEvent *event) {
     const bool alt = mods & Qt::AltModifier;
     // Ctrl+Tab walks this widget's own tabs — unless it is hosted in the models pane, where it is
     // not this widget's to answer at all: Ctrl+Tab is the window's **Next tab** (Keymap
-    // `tab.next`), so it never reaches a pane. The host's three tabs are Alt+1/2/3 and ←/→ on the
+    // `tab.next`), so it never reaches a pane. The host's tabs use Tab/Shift+Tab and ←/→ on the
     // flat tab; the class tabs keep ←/→.
     if (ctrl && (key == Qt::Key_Tab || key == Qt::Key_Backtab)) {
         if (m_hosted) return false;

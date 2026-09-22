@@ -561,6 +561,7 @@ public:
          const QString &engineCore = relay::defaultEngineCore(),
          relay::agent::Context *context = nullptr)
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
+        setProperty("paneTabKeysReserved", true); // Console completion and Shift+Tab Plan own these keys.
         m_engineCore = engineCore;
         m_data = dataRoot();
         m_python = relayPython();

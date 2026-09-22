@@ -1,3 +1,4 @@
+#include "PaneTabNavigation.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Conversations.h"
 #include "ModelCatalog.h"
@@ -1008,7 +1009,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     box->addWidget(hint);
     box->addLayout(buttons);
 
-    m_tabs = new QTabWidget;
+    m_tabs = new QTabWidget(this);
+    relay::paneTabs::registerTabs(this, m_tabs->tabBar());
     m_tabs->setObjectName(QStringLiteral("sessionsTabs"));
     m_tabs->setDocumentMode(true);
     m_sessionPages = new QStackedWidget;

@@ -698,6 +698,17 @@ to see what i did before"). It first became one shared file, which the owner the
 
 ## 4. Keyboard: Keymap, presets, palette
 
+### Tabs inside panes
+
+`PaneTabNavigation.h` registers eligible tab bars explicitly: Projects/Sessions/Globals,
+Models, Options, the standalone model picker and subagent transcripts. Tab cycles forward;
+Shift+Tab cycles backward, wrapping and skipping unavailable tabs. The nearest visible
+registered bar wins. `RelayWindow` handles these keys before the global action map.
+Console widgets reserve both keys for completion and Plan; writable text editors and active
+completion popups keep their normal behavior. Ctrl+Tab / Ctrl+Shift+Tab still select window
+tabs. Clicking a pane tab teaches this fixed convention through `pane.tabs.mouse`, respecting
+the shortcut-hint setting and show limits. Pane tabs have no Alt-number bindings.
+
 ### Shortcut hints
 
 `src/Hints.*` (`relay::ShortcutHints`) decides whether a hint may show: on by default
@@ -2227,7 +2238,7 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   where this machine serves one — plus `all`, which the host draws as its own tab and so leaves
   this widget's tab row (`setHosted`); `Context::tier` is the mode the pane is in, so it
   opens on the list it would be editing, and ←/→ (empty filter, or the caret at that end) walk the
-  class tabs; the host's three are Alt+1/2/3. A tier tab is `curation::tierList(tier)` itself: one row per list
+  class tabs; the host's tabs use Tab / Shift+Tab. A tier tab is `curation::tierList(tier)` itself: one row per list
   *entry*, numbered, the model named once and the provider in a "via" column, rank 1 of main
   marked, an unusable or exhausted rank greyed in place with the reason in the "left" column. The
   edits — Alt+↑/↓, a drag (`commitDragOrder`), Delete, Ctrl+Enter with `models::tierStartEffort`,
@@ -2267,10 +2278,8 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   **priorities**, the picker's class tabs, and **jobs**, `relay::JobsTab` — what each job Relay does
   runs on, and a model of its own for one (design 5.9, above). The middle two are **one**
   `ModelPicker`, put on `all` or on a
-  class by this pane's tab bar. ←/→ walk the class tabs, and these four are **Alt+1…Alt+4** — not
-  Ctrl+Tab, which is the window's Next tab (`tab.next`) and never reaches a pane — as a
-  `WidgetWithChildrenShortcut`, because the providers tab has a search line of its own that
-  swallows keys an event filter on the pane would never see.
+  class by this pane's tab bar. ←/→ walk the class tabs. **Tab / Shift+Tab** cycle the host tabs
+  through the shared pane convention; Alt-number bindings are reserved for future use.
   `ModelsPane::Target` is the served pane and nothing else: its title for the header line
   ("for: …"), its session token (how a re-target is told from a re-read), its catalog, model, level
   and mode, the worker's last `model_roles` (`roleSummary`, `tierSummary` — the jobs tab's "runs

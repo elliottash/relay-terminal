@@ -1,3 +1,4 @@
+#include "PaneTabNavigation.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPane.h"
 
@@ -500,7 +501,8 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
     m_header = header;
     layout->addLayout(header);
 
-    m_tabs = new QTabBar;
+    m_tabs = new QTabBar(this);
+    relay::paneTabs::registerTabs(this, m_tabs);
     m_tabs->setObjectName(QStringLiteral("settingsTabs"));
     m_tabs->setExpanding(false);
     m_tabs->setDrawBase(false);

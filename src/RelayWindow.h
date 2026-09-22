@@ -1,3 +1,4 @@
+#include "PaneTabNavigation.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
@@ -937,11 +938,21 @@ protected:
                 if (resized) relabelTabsForWidth();
             });
         }
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto *bar = qobject_cast<QTabBar *>(object);
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            if (bar && bar->window() == this && bar->property("paneTabNavigationOwner").isValid()
+                && mouse->button() == Qt::LeftButton && bar->tabAt(mouse->pos()) >= 0
+                && bar->tabAt(mouse->pos()) != bar->currentIndex())
+                hint(QStringLiteral("pane.tabs.mouse"),
+                     relay::ShortcutHints::nextTime(QStringLiteral("Tab / Shift+Tab"), QStringLiteral("pane tabs")));
+        }
         if (event->type() != QEvent::KeyPress && event->type() != QEvent::ShortcutOverride)
             return QMainWindow::eventFilter(object, event);
         auto *widget = qobject_cast<QWidget *>(object);
         if (!widget || widget->window() != this) return QMainWindow::eventFilter(object, event);
         auto *key = static_cast<QKeyEvent *>(event);
+        if (relay::paneTabs::handle(widget, key)) return true;
         // Keyboard walk over the links in the output (issue GWXM). While it runs, Enter opens
         // the highlighted link, Esc leaves and the arrows move; the keys are taken here, so the
         // walk works with the prompt box focused, which is the normal state. Anything else ends
