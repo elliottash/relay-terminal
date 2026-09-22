@@ -540,6 +540,88 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    # The prompt box, typed into the way a person does: the value and the `input` event the view
+    # sizes and enables Send from.
+    TYPE = ("(() => { const b = document.querySelector('.rp-input'); b.focus(); b.value = %s;"
+            " b.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    PRESS = ("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',"
+             " {key: %s, bubbles: true, cancelable: true}))")
+
+    def test_send_puts_the_keyboard_down_on_a_thumb_and_leaves_the_focus_on_a_laptop(self):
+        """#KBD7: the Send button called `box.focus()` on the statement after `compose()` blurred,
+        so the tap a phone actually uses put the on-screen keyboard straight back up. The blur
+        cannot be unconditional either: `enter()` is reachable only from the box's own keydown, so
+        a laptop that lost the focus lost Enter's escalation with it."""
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                # A touch device: sent is sent, and the keyboard comes down.
+                await self.open(browser, "busy_queue", query="&input=touch")
+                await browser.evaluate(self.TYPE % js("plan the next step"))
+                self.assertTrue(await browser.evaluate(
+                    "document.activeElement === document.querySelector('.rp-input')"))
+                await browser.evaluate("document.querySelector('.rp-send').click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertFalse(await browser.evaluate(
+                    "document.activeElement === document.querySelector('.rp-input')"),
+                    "a tap on Send left the box focused, so the keyboard came back up")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-input').value"), "")
+
+                # A device with a physical keyboard: the box keeps the focus, and the second Enter
+                # on the now-empty box still makes the queued prompt a steer.
+                await self.open(browser, "busy_queue", query="&input=mouse")
+                await browser.evaluate(self.TYPE % js("plan the next step"))
+                await browser.evaluate("document.querySelector('.rp-send').click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertTrue(await browser.evaluate(
+                    "document.activeElement === document.querySelector('.rp-input')"),
+                    "the box lost the focus Enter's escalation needs")
+                sent = await self.sent(browser)
+                self.assertEqual(sent[0]["t"], "compose")
+                self.assertEqual(sent[0]["when"], "queue")
+                await browser.evaluate(self.PRESS % js("Enter"))
+                await browser.wait_for("window.paneDemo.sent.length > 1")
+                sent = await self.sent(browser)
+                self.assertEqual([sent[1]["t"], sent[1]["when"], sent[1]["text"]],
+                                 ["compose", "steer", "plan the next step"])
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_answering_the_ask_empties_the_box_the_way_an_ordinary_send_does(self):
+        """#KBD7: the ask branch of `compose()` returned without clearing the box, so the typed
+        answer to question 1 was still there, with Send enabled, and the next tap sent it again as
+        the answer to question 2."""
+        state = fixture("idle")
+        wrapped = {"t": "agent", "pane": state["pane"], "event": self.QUESTION}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "idle", query="&input=touch")
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.agentEvent(%s)" % json.dumps(wrapped)))
+                await browser.evaluate(self.TYPE % js("this file only, please"))
+                self.assertFalse(await browser.evaluate("document.querySelector('.rp-send').disabled"))
+                await browser.evaluate(self.PRESS % js("Enter"))
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                self.assertEqual(await browser.evaluate("document.querySelector('.rp-input').value"), "",
+                                 "the answer stayed in the box and the next tap would send it again")
+                self.assertTrue(await browser.evaluate("document.querySelector('.rp-send').disabled"))
+                # And the view has stepped to question 2, which the empty box now answers.
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelector('.rp-ask-header').textContent"), "Anything else")
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_a_level_only_state_repaints_the_chip_and_the_closed_chip_has_no_tick(self):
         """#EFT9: the level is in neither half of the model's signature, so a `pane_state` whose
         model did not move used to be dropped and the chip kept the level the pane had left. And

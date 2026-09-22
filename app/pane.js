@@ -696,6 +696,17 @@ export function mountPane(container, options = {}) {
     });
   }
 
+  // Sent is sent: on a touch screen the on-screen keyboard comes down, so the terminal the answer
+  // is arriving in is the whole screen again (a phone's request, 2026-09-22). On a device with a
+  // physical keyboard the box keeps the focus. It used to say here that a physical keyboard's
+  // blur is invisible, so the blur could be unconditional; it is not invisible to this view.
+  // `enter()` is reachable only from the box's own keydown listener, so a blurred box takes the
+  // three-step Enter escalation, `queue_resume` on an empty box (#7JD1) and ArrowUp row selection
+  // with it — every one of them needs the focus the blur removes (#KBD7).
+  function keyboardDown() {
+    if (root.dataset.input === 'touch') box.blur();
+  }
+
   function compose(text, when) {
     if (!text.trim()) return;
     if (askList()[questionAt]) {
@@ -706,7 +717,12 @@ export function mountPane(container, options = {}) {
       // away, which is a smaller cost than a wrong answer on the phone's screen.
       answerAsk(text, when);
       editRow = '';
-      box.blur();                    // sent is sent: the on-screen keyboard comes down
+      // Emptied like an ordinary send: the answer to question 1 used to stay in the box, blurred,
+      // with Send enabled, so the next tap sent it again as the answer to question 2 (#KBD7).
+      box.value = '';
+      fitBox();
+      renderSendState();
+      keyboardDown();
       return;
     }
     sendCompose(text, when);
@@ -717,10 +733,7 @@ export function mountPane(container, options = {}) {
     box.value = '';
     fitBox();
     renderSendState();
-    // Sent is sent: the on-screen keyboard comes down, so the terminal the answer is arriving
-    // in is the whole screen again (a phone's request, 2026-09-22). A physical keyboard's blur
-    // is invisible, so this is unconditional.
-    box.blur();
+    keyboardDown();
   }
 
   function enter() {
@@ -1143,7 +1156,11 @@ export function mountPane(container, options = {}) {
   on(sendButton, 'click', () => {
     const text = box.value;
     if (text.trim()) compose(text, busy() ? 'queue' : 'now');
-    box.focus();
+    // The button took the focus, and on a laptop the box needs it back — Enter's escalation,
+    // `queue_resume` and ArrowUp are all on the box's own keydown. On a touch screen it must not
+    // have it back: a tap on Send is the gesture a phone actually uses, and this line put the
+    // on-screen keyboard straight up again (#KBD7).
+    if (root.dataset.input !== 'touch') box.focus();
   });
   on(sendMenuButton, 'click', openSendMenu);
   on(stopButton, 'click', () => {
