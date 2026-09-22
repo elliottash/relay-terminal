@@ -23,3 +23,5 @@ Verification on the shared main checkout:
 
 No relay_board tools were exposed by discovery; used POLICY.md's file fallback. No further
 delegation. HG26, Agent._record_tool and Pane.h worker-exit logging were not edited.
+
+Implementation/evidence commit: `24a6b202d8121b35173b9aabe456c9c7eb32a72c` (land.py exact Python byte-compilation gate passed).

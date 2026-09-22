@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: zmsw7
 created: '2026-09-22'
 source: Codex session analysis in a Relay pane, 2026-09-22
-links: {plans: [], commits: [552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-quota-suppression/report.md, docs/qa_evidence/2026-09-22-model-session-audit/, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [4BPE, YJG7, GH5T], github: null}
+links: {plans: [], commits: [24a6b202d8121b35173b9aabe456c9c7eb32a72c, 552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-quota-suppression/report.md, docs/qa_evidence/2026-09-22-model-session-audit/, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [4BPE, YJG7, GH5T], github: null}
 ---
 # Role model selection can fail while leaving the selected mode changed
 

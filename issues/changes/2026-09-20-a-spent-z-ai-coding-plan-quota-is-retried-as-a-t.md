@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: zzzzzzzzzzzzzzzi
 created: '2026-09-20'
 source: pane, 2026-09-20
-links: {plans: [], commits: [552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-quota-suppression/report.md, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [VMZP, G9VE, DC4J], github: null}
+links: {plans: [], commits: [24a6b202d8121b35173b9aabe456c9c7eb32a72c, 552982fa58c6f82a0999452888e88f980b37c22e], evidence: [docs/qa_evidence/2026-09-22-quota-suppression/report.md, docs/qa_evidence/2026-09-22-model-switch-fixes/], related: [VMZP, G9VE, DC4J], github: null}
 ---
 # A spent Z.AI Coding Plan quota is retried as a transient 429, and the pane never says when it resets
 

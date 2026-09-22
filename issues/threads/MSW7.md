@@ -36,3 +36,6 @@ Read complete card/thread and implementation 552982fa. Atomic transport switchin
 
 <!-- relay:entry 20260922T165621Z-p2 author=codex-hg26-p2 kind=evidence -->
 Follow-up complete; needs-verification. 220 targeted tests and all 14 isolated GUI stages pass; scripts/relay-build --target relay passed. Existing switching/fallback implementation preserved; new quota suppression and failed guest→native transport test. Evidence: docs/qa_evidence/2026-09-22-quota-suppression/report.md. No HG26 or logging edits.
+
+<!-- relay:entry 20260922T165701Z-r2 author=codex-hg26-p2 kind=evidence -->
+Landed follow-up in 24a6b202d8121b35173b9aabe456c9c7eb32a72c through land.py; added commit link. Still needs independent verification.
