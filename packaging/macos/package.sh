@@ -64,7 +64,9 @@ export RELAY_BASH="$resources/bash/bin/bash"
 export PYTHONDONTWRITEBYTECODE=1
 "$python" -S -c 'import cryptography; from relay_core import agent, board, keystore; import remote.gui_host'
 "$python" -S tests/test_worker_encoding.py --worker "$resources/relay/backend/worker.py"
-macdeployqt "$app" -always-overwrite -no-codesign
+# Qt6.8 supports -codesign but not the newer -no-codesign flag. Final signing below
+# covers all runtimes and notices after framework deployment.
+macdeployqt "$app" -always-overwrite
 qtroot=$(cd "$(dirname "$(command -v macdeployqt)")/.." && pwd)
 if [[ -d $qtroot/licenses ]]; then cp -R "$qtroot/licenses" "$resources/licenses/Qt"; fi
 cp LICENSE "$resources/licenses/Relay-AGPL-3.0.txt"
