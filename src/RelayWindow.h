@@ -2465,8 +2465,8 @@ private:
         models.title = QStringLiteral("Models");
         models.blurb = QStringLiteral("Relay runs on the models you already pay for: an API key, a coding-plan subscription "
                                       "(GLM, Kimi, MiniMax), or your Claude Code and Codex logins. Keys live in the "
-                                      "desktop keyring and requests go straight to the provider, never through Relay's "
-                                      "server; Relay Free, the included allowance, is the one exception and goes through "
+                                      "desktop keyring and your own providers receive requests directly. Relay Free and "
+                                      "Relay Pro send prompts through "
                                       "Relay's hosted service. A profile names the five lists as a set, so \"AI work\" "
                                       "and \"admin work\" can rank models differently and swap in one switch (/profile). "
                                       "The lists themselves are the models pane: Ctrl+Shift+M, /model "

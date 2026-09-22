@@ -11393,7 +11393,9 @@ private:
             else status(QStringLiteral("Custom provider removed."));
             relay::SettingsWatch::instance().notify();   // the row appears or goes as the fresh presets land
         } else if (type == QStringLiteral("key_stored")) {
-            status(QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
+            status(event.value(QStringLiteral("preset")).toString() == QStringLiteral("relay-pro")
+                ? QStringLiteral("Relay Pro access confirmed; code saved to the keyring.")
+                : QStringLiteral("API key saved to the keyring for ") + event.value(QStringLiteral("preset")).toString());
             refreshPresets();   // Options › Models: the provider's models become usable rows
         } else if (type == QStringLiteral("queued")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();

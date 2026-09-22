@@ -266,7 +266,9 @@ void KeysDialog::handleEvent(const QJsonObject &event) {
             if (QTreeWidgetItem *item = rowFor(str(preset, "id"))) item->setText(KeyStatus, hostedStatus(preset));
         }
     } else if (type == QStringLiteral("key_stored")) {
-        m_status->setText(QStringLiteral("Key saved to the keyring."));
+        m_status->setText(event.value(QStringLiteral("preset")).toString() == QStringLiteral("relay-pro")
+            ? QStringLiteral("Relay Pro access confirmed; code saved to the keyring.")
+            : QStringLiteral("Key saved to the keyring."));
         if (send) send({{"type", "presets"}});
         if (onKeysChanged) onKeysChanged();
     } else if (type == QStringLiteral("key_removed")) {
