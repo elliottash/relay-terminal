@@ -1,10 +1,11 @@
 ---
 id: 62M4
 type: work
-status: needs-verification
+status: done
 labels: [feature, remote]
 assignee: codex
 implemented_by: openai/gpt-5.6-sol via codex
+verified_by: openai/gpt-5.6-sol via codex
 rank: zzzzzzzzzzzzzzzzw
 created: '2026-09-22'
 links: {plans: [], commits: [5f4f17d26234bf5ef4ae2dc18ac1445493717b80, c5643b44b3883ae218eb8d21b2f4c63f43c637a6], evidence: [docs/qa_evidence/2026-09-22-phone-indicator-icon-only/], related: [], github: null}
