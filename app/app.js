@@ -1802,7 +1802,9 @@ function sendPrompt() {
   const text = box.value.trim();
   if (!text || !current) return;
   const fail = (error) => { $('term-note').textContent = error.message; };
-  const clear = () => { box.value = ''; box.style.height = 'auto'; };
+  // Sent is sent: the on-screen keyboard comes down, so the terminal the answer is arriving
+  // in is the whole screen again (a phone's request, 2026-09-22).
+  const clear = () => { box.value = ''; box.style.height = 'auto'; box.blur(); };
 
   if (driving) {
     toLive();
@@ -2055,6 +2057,10 @@ window.addEventListener('DOMContentLoaded', () => {
     updateDriveUi();
   });
   $('term-direct').addEventListener('click', () => setDirectKeys(!directKeys));
+  // The terminal's own A−/A+: the desktop's columns are the desktop's width, so on a phone the
+  // fitted font is six pixels of nothing. The floor is the reader's choice (app/screen.js).
+  $('term-font-smaller').addEventListener('click', () => screenView?.setFontFloor(screenView.fontFloor() - 2));
+  $('term-font-bigger').addEventListener('click', () => screenView?.setFontFloor(screenView.fontFloor() + 2));
   $('term-capture').addEventListener('keydown', onDirectKey);
   // Never let the field accumulate text: it is a focus target, not an input.
   $('term-capture').addEventListener('input', (event) => { event.target.value = ''; });

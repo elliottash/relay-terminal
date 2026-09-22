@@ -174,7 +174,14 @@ export class ScreenView {
     // Two pixels of slack: a browser rounds each glyph's advance, so a grid sized to exactly the
     // content width can still land a fraction of a pixel over it and scroll sideways.
     const exact = ((available - inset - 2) / this.cols) / this.advance();
-    const size = Math.max(6, Math.min(16, Math.floor(exact * 100) / 100));
+    // The desktop's columns are the desktop's width; on a phone they do not fit, and fitting them
+    // anyway once meant six-pixel text nobody could read (a phone's request, 2026-09-22). So the
+    // fit is a floor, not a clamp: the font is never smaller than the reader's choice (12px
+    // unless the A−/A+ buttons in the bar moved it), and a grid wider than the screen scrolls
+    // sideways in the wrap, which could already scroll either way.
+    const fitted = Math.floor(exact * 100) / 100;
+    const floor = this.fontFloor();
+    const size = Math.min(Math.max(fitted, floor), Math.max(16, floor));
     const text = `${size.toFixed(2)}px`;
     this.needsFit = false;
     this.fitCols = this.cols;
@@ -190,6 +197,24 @@ export class ScreenView {
   refit() {
     this.needsFit = true;
     this.fit();
+  }
+
+  // The smallest font the terminal will draw, the reader's own choice (fit() above). Six is the
+  // old behaviour — always fit every column, however small that gets — and twelve reads on a
+  // phone. A−/A+ in the terminal bar move it in steps of two.
+  fontFloor() {
+    try {
+      const stored = Number(window.localStorage.getItem('relay.term-font-floor'));
+      if (Number.isFinite(stored) && stored >= 6 && stored <= 24) return stored;
+    } catch { /* private mode: the default stands, and A−/A+ work for the session */ }
+    return 12;
+  }
+
+  setFontFloor(floor) {
+    try {
+      window.localStorage.setItem('relay.term-font-floor', String(Math.max(6, Math.min(24, floor))));
+    } catch { /* private mode: it holds only until the page goes */ }
+    this.refit();
   }
 
   // The advance width of one monospace glyph as a fraction of the font size, measured in the

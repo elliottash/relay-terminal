@@ -110,7 +110,19 @@ class ScreenCostTests(unittest.TestCase):
             await browser.start()
             try:
                 await self.bench(browser)
+                # Wide enough that the fit is above the 12px floor (app/screen.js): the whole
+                # point below is watching the size move, and the harness's own window sits low
+                # enough that the floor would pin it.
+                await browser.evaluate(
+                    "document.getElementById('terminal-pane').style.width = '1000px'")
                 sized = (await browser.evaluate("screenHarness.report()"))["fontSize"]
+                # The observer that caught the width change fires on the next rendered frame, and
+                # an idle page renders none — let one happen here, so the zeroed counters below
+                # measure the stream and not this.
+                await browser.evaluate(
+                    "new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+                # The resize's own refit has now happened; count from here.
+                await browser.evaluate("screenHarness.zero()")
                 self.assertTrue(sized.endswith("px"), sized)
                 await browser.evaluate(f"screenHarness.stream({FRAMES}, 5)", timeout=60)
                 report = await browser.evaluate("screenHarness.report()")
@@ -127,17 +139,30 @@ class ScreenCostTests(unittest.TestCase):
                 narrow = await browser.evaluate("screenHarness.report()")
                 self.assertGreater(narrow["style"], 0, "a resize did not re-measure")
                 self.assertNotEqual(narrow["fontSize"], sized)
-                self.assertEqual(await browser.evaluate(
+                # The fit is a floor now, not a clamp (app/screen.js, 2026-09-22): a narrow pane
+                # keeps a readable font and scrolls sideways instead of drawing six-pixel text.
+                # So the grid may be wider here — what must never happen is clipping.
+                self.assertGreaterEqual(float(narrow["fontSize"].rstrip("px")), 12,
+                                        "the font fell below the readable floor")
+                self.assertGreaterEqual(await browser.evaluate(
                     "(() => { const w = document.getElementById('screen-wrap');"
-                    " return w.scrollWidth - w.clientWidth; })()"), 0,
-                    "the grid is wider than its container")
+                    " return w.scrollWidth; })()"),
+                    await browser.evaluate(
+                        "(() => { const w = document.getElementById('screen-wrap');"
+                        " return w.clientWidth; })()"),
+                    "the grid was clipped instead of scrolling")
 
                 # And so is a container that changes size with the window standing still, which
                 # is what app/viewport.js does for an on-screen keyboard. Only the observer
                 # catches that one.
+                # Wide enough to fit again past the floor (80 cols at 800px is ~16px), so the
+                # fit is measured and the font grows back.
                 await browser.evaluate("screenHarness.zero();"
                                        " document.getElementById('terminal-pane').style.width ="
-                                       " '520px'")
+                                       " '800px'")
+                # As above: the observer fires on the next rendered frame; give it one.
+                await browser.evaluate(
+                    "new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
                 await browser.wait_for(
                     f"screenHarness.report().fontSize !== {narrow['fontSize']!r}", timeout=10)
             finally:

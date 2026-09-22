@@ -297,6 +297,11 @@ details.tool > summary::marker { color: var(--muted); }
   border-top: 1px solid var(--line); background: var(--panel);
 }
 #term-note { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A−/A+: the terminal font floor (app/screen.js). Quiet, unlike Take over. */
+#term-font-smaller, #term-font-bigger {
+  background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 9px; font: inherit; font-weight: 600; cursor: pointer; flex: 0 0 auto;
+}
 #term-take, #term-release, #term-send {
   background: var(--accent); color: #10131a; border: 0; border-radius: 8px;
   padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer;
