@@ -106,7 +106,11 @@ inline int relayFuzzyScore(const QString &needle, const QString &haystack) {
 namespace relay::buildinfo {
 inline QString idOnDisk() {
     const QFileInfo exe(QCoreApplication::applicationFilePath());
+#ifdef Q_OS_MACOS
+    QFile file(exe.absolutePath() + QStringLiteral("/../Resources/relay.build-id"));
+#else
     QFile file(exe.absolutePath() + QStringLiteral("/relay.build-id"));
+#endif
     if (file.open(QIODevice::ReadOnly)) {
         const QString id = QString::fromUtf8(file.readLine(64)).trimmed();
         if (!id.isEmpty()) return id;

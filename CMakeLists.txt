@@ -619,10 +619,17 @@ if(RELAY_BUILD_APP)
     # POST_BUILD runs exactly when `relay` was relinked, so the number counts real builds; it is
     # written beside the binary (relay.build-id), which the app reads when it starts and shows in
     # Options > General > Diagnostics. Installed with the binary; a binary without it says so.
+    set(RELAY_BUILD_ID_DIR "$<TARGET_FILE_DIR:relay>")
+    if(APPLE)
+        # Contents/MacOS is reserved for executable code by codesign.
+        set(RELAY_BUILD_ID_DIR "$<TARGET_BUNDLE_DIR:relay>/Contents/Resources")
+    endif()
     add_custom_command(TARGET relay POST_BUILD
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-id.py $<TARGET_FILE_DIR:relay>
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/build-id.py "${RELAY_BUILD_ID_DIR}"
         COMMENT "Numbering this build of relay" VERBATIM)
-    install(FILES $<TARGET_FILE_DIR:relay>/relay.build-id DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    if(NOT APPLE)
+        install(FILES $<TARGET_FILE_DIR:relay>/relay.build-id DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
+    endif()
     target_link_libraries(relay PRIVATE relay-panestate)   # pane_state (relay-terminal-71)
     target_link_libraries(relay PRIVATE relay-remotesettings)   # Options > Remote, the always-on switch (#PH0N)
     target_link_libraries(relay PRIVATE relay-internals)   # the agent internals pane (#QT8C)
