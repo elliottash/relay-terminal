@@ -44,6 +44,7 @@ struct FoldSpan {
     bool bold = false;
     bool italic = false;
     bool underline = false;
+    bool strike = false;  // SGR 9: what `~~text~~` renders as (MarkdownAnsi)
     bool dim = false;
     bool reverse = false;
     QString link;         // non-empty: clickable, reported through onLinkActivated

@@ -452,11 +452,13 @@ QColor markdownFg(int sgr, const Palette &palette) {
 // Everything a FoldSpan can say, apart from the words themselves.
 bool sameInk(const FoldSpan &a, const FoldSpan &b) {
     return a.fg == b.fg && a.bg == b.bg && a.bold == b.bold && a.italic == b.italic
-        && a.underline == b.underline && a.dim == b.dim && a.link == b.link && a.sgr == b.sgr;
+        && a.underline == b.underline && a.strike == b.strike && a.dim == b.dim && a.link == b.link
+        && a.sgr == b.sgr;
 }
 
 // The renderer's ANSI into spans, one FoldLine per line. Only what a FoldSpan can say survives —
-// bold, dim, italic, underline and the foreground; anything else the renderer emitted is dropped.
+// bold, dim, italic, underline, strikethrough and the foreground; anything else the renderer
+// emitted is dropped.
 // Attributes carry across a newline exactly as they would on a grid, and MarkdownAnsi re-states
 // each line's whole style at its start, so a line's first sequence lands as its own.
 // `carry` is the attribute state the chunk ends in. The whole-text caller passes none and gets a
@@ -525,9 +527,10 @@ void appendMarkdown(QVector<FoldLine> &out, const QString &ansi, const Palette &
                     // ink. Bare 32 is **Done:**, which stays muted like the rest of the prose.
                     else if (n == 32 && span.underline)
                         span.fg = palette.link.isValid() ? palette.link : palette.code;
+                    else if (n == 9) span.strike = true;
                     else if ((n >= 30 && n <= 37) || n == 39 || (n >= 90 && n <= 97))
                         span.fg = markdownFg(n, palette);
-                    // 9 (crossed out) and the rest: a fold row cannot say them
+                    // The rest: a fold row cannot say them
                 }
                 span.link = openLink;   // a reset clears the span, never the run it sits in
             } else {

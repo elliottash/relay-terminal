@@ -180,6 +180,14 @@ public:
     // cannot take part in that merge: with a fold open only the fold's own
     // matches would then be stepped.
     virtual int searchCurrentRow() const { return -1; }
+    // How many matches lie on the absolute scrollback rows [fromRow, toRow], or
+    // -1 when this core cannot say. A row hidden by a taken-over prose block is
+    // painted from the fold's own lines, and the view's fold search counts the
+    // matches there itself; a core that also counts them makes every match in a
+    // re-wrapped reply count twice, so the view subtracts this (#RW9T).
+    // libghostty-vt exposes only the total and the viewport's matches, so it
+    // answers -1 and the view leaves its total alone.
+    virtual int searchMatchesInRows(int /*fromRow*/, int /*toRow*/) const { return -1; }
 
     // ---- input (results arrive through events.reply)
     virtual void sendKey(const KeyInput &key) = 0;

@@ -45,6 +45,7 @@
 #include <QStringList>
 #include <QVector>
 
+#include <utility>
 #include <vector>
 
 namespace relay {
@@ -60,6 +61,7 @@ public:
         bool bold = false;
         bool italic = false;
         bool underline = false;
+        bool strike = false;
         bool dim = false;
         bool reverse = false;
         QString link;
@@ -130,6 +132,10 @@ public:
     // A real row hidden by a taken-over replacement fold (its text is the
     // fold's, so the view treats core matches there as the fold's matches).
     bool rowHidden(int realRow) const;
+    // Those rows as [first, last] ranges of absolute real rows, in order. The
+    // find asks the core how many of its matches lie in them and subtracts
+    // that: the same text is counted again from the fold's own lines (#RW9T).
+    std::vector<std::pair<int, int>> hiddenRowRanges() const;
 
     // ---- layout
     // columns: the grid width. indent: how far the block is pushed in (2..4).

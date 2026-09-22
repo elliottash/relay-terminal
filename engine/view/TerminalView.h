@@ -90,6 +90,9 @@ public:
     int find(const QString &text, bool backwards); // returns match count
     // Matches of the current needle: the core's, plus the ones inside open folds.
     int searchMatchCount() const;
+    // The core's matches on rows a taken-over prose block hides; the count
+    // subtracts them, because the fold counts that text itself (#RW9T).
+    int hiddenCoreMatches() const;
     // The selected match, counted from the newest (0), or -1 when there is none.
     int searchIndex() const { return m_searchIndex; }
     // One match towards older content (backwards) or newer, wrapping. Returns

@@ -1731,6 +1731,85 @@ private slots:
         }
     }
 
+    // #RW9T: a `~~struck~~` run keeps its rule once a resize hands the block to the replacement
+    // renderer. The struck line and the plain line below it hold the same words, so the extra ink
+    // in the struck band is the rule and nothing else.
+    void strikethroughSurvivesRewrap()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QFont font = t.view->terminalFont();
+        font.setStyleStrategy(QFont::NoAntialias);
+        t.view->setTerminalFont(font);
+        t.backend->resizeTerminal(16, 100);
+        const QColor bg = t.view->colorScheme().background;
+        const QString anchor = QStringLiteral("relay://prose/strike/1");
+        MarkdownAnsi md;
+        const QString rendered =
+            md.feed(QStringLiteral("~~alpha beta~~\n\nalpha beta\n")) + md.finish();
+        ProseCollector collector;
+        collector.feed(rendered);
+        const QVector<FoldLine> lines = collector.take();
+        t.backend->writeToDisplay("\x1b]8;;" + anchor.toUtf8() + "\x1b\\"
+            + QString(rendered).replace("\n", "\r\n").toUtf8() + "\x1b]8;;\x1b\\");
+        QVERIFY(t.waitScreen(QStringLiteral("alpha beta")));
+        t.backend->setProseBlock(anchor, lines, 100);
+        for (int width : {100, 60, 120}) {   // 100 is the print width: the grid's own rows
+            t.backend->resizeTerminal(16, width);
+            const QImage img = t.grab();
+            const QStringList rows = t.view->visibleRowsText();
+            int struckRow = -1, plainRow = -1;
+            for (int j = 0; j < rows.size(); ++j) {
+                if (!rows[j].contains(QStringLiteral("alpha beta")))
+                    continue;
+                if (struckRow < 0) struckRow = j;
+                else { plainRow = j; break; }
+            }
+            QVERIFY2(struckRow >= 0 && plainRow >= 0, "both copies of the line are on screen");
+            const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+            const int struck = countNonBackground(
+                img, QRect(2, 2 + struckRow * ch, 10 * cw, ch), bg);
+            const int plain = countNonBackground(
+                img, QRect(2, 2 + plainRow * ch, 10 * cw, ch), bg);
+            // The rule is one pixel row across ten cells; the words are identical, so anything
+            // near that much extra ink can only be the rule.
+            QVERIFY2(struck > plain + 5 * cw,
+                     qPrintable(QStringLiteral("width %1: struck %2 ink, plain %3")
+                                    .arg(width).arg(struck).arg(plain)));
+        }
+    }
+
+    // #RW9T: the core goes on matching the real rows a taken-over block hides, and FoldSearch
+    // counts the same text again from the block's own lines. The find reports each match once.
+    void findCountsRewrappedMatchesOnce()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(16, 100);
+        const QString anchor = QStringLiteral("relay://prose/find/1");
+        MarkdownAnsi md;
+        const QString rendered =
+            md.feed(QStringLiteral("qzneedle one\nqzneedle two\n")) + md.finish();
+        ProseCollector collector;
+        collector.feed(rendered);
+        const QVector<FoldLine> lines = collector.take();
+        t.backend->writeToDisplay("\x1b]8;;" + anchor.toUtf8() + "\x1b\\"
+            + QString(rendered).replace("\n", "\r\n").toUtf8() + "\x1b]8;;\x1b\\");
+        QVERIFY(t.waitScreen(QStringLiteral("qzneedle two")));
+        t.backend->setProseBlock(anchor, lines, 100);
+        t.grab();
+        QCOMPARE(t.view->find(QStringLiteral("qzneedle"), false), 2);
+        for (int width : {60, 120, 100}) {
+            t.backend->resizeTerminal(16, width);
+            t.grab();
+            QCOMPARE(t.view->find(QStringLiteral("qzneedle"), false), 2);
+            QCOMPARE(t.view->searchMatchCount(), 2);
+            // Away from the print width both counts are live at once: the core still holds two
+            // matches on the rows the block hides, and those are what used to be added on top.
+            QCOMPARE(t.view->hiddenCoreMatches(), width == 100 ? 0 : 2);
+        }
+    }
+
     void markdownLinkLabelsAreClickable()
     {
         QFETCH_GLOBAL(QString, core);

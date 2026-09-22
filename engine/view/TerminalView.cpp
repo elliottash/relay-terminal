@@ -1079,6 +1079,11 @@ void TerminalView::paintFoldRow(QPainter &p, int screenRow, int foldIndex, int f
             fg = m_scheme.link;
         if (hit)
             fg = m_scheme.searchText;
+        // SGR 9, in the ink the cell ended up with and across a blank cell too, as paintRow
+        // draws AttrStrike (#RW9T): a `~~struck~~` run keeps its rule when the block is
+        // re-wrapped, instead of losing it at every width but the one it was printed at.
+        if (c.strike)
+            p.fillRect(QRect(x, y + m_ch / 2, c.width * m_cw, 1), fg);
         const int variant = (c.bold ? 1 : 0) | (c.italic ? 2 : 0);
         const std::u32string cps = c.text.toStdU32String();
         if (!cps.empty() && cps[0] != U' ') {
@@ -1215,6 +1220,11 @@ void TerminalView::paintProseRow(QPainter &p, int screenRow, const FoldLayer::Fo
             fg = m_scheme.link;
         if (hit)
             fg = m_scheme.searchText;
+        // SGR 9, in the ink the cell ended up with and across a blank cell too, as paintRow
+        // draws AttrStrike (#RW9T): a `~~struck~~` run keeps its rule when the block is
+        // re-wrapped, instead of losing it at every width but the one it was printed at.
+        if (c.strike)
+            p.fillRect(QRect(x, y + m_ch / 2, c.width * m_cw, 1), fg);
         const int variant = (c.bold ? 1 : 0) | (c.italic ? 2 : 0);
         const std::u32string cps = c.text.toStdU32String();
         if (!cps.empty() && cps[0] != U' ') {
@@ -3555,10 +3565,35 @@ void TerminalView::refreshSearchLabel()
     updateSearchLabel(count, count == 0 ? -1 : m_searchIndex);
 }
 
+// The core's matches on the real rows a taken-over prose block hides. Those rows
+// are not painted: the block is drawn from its own logical lines and FoldSearch
+// counts the matches in them, so the core's copies are the same matches seen
+// twice — searchStep() already steps past them, and the count subtracts them
+// (#RW9T). A core that cannot answer the question (libghostty-vt exposes only
+// the total and the viewport's matches) answers -1 and nothing is subtracted.
+int TerminalView::hiddenCoreMatches() const
+{
+    if (!foldsVisible())
+        return 0;
+    const std::vector<std::pair<int, int>> ranges = m_folds.hiddenRowRanges();
+    if (ranges.empty())
+        return 0;
+    return m_session->withCore([&](VtCore &c) {
+        int n = 0;
+        for (const std::pair<int, int> &r : ranges) {
+            const int in = c.searchMatchesInRows(r.first, r.second);
+            if (in < 0)
+                return 0;
+            n += in;
+        }
+        return n;
+    });
+}
+
 int TerminalView::searchMatchCount() const
 {
     const int core = m_session->withCore([](VtCore &c) { return c.searchMatchCount(); });
-    return foldsVisible() ? core + m_foldSearch.matchCount(m_folds) : core;
+    return foldsVisible() ? core - hiddenCoreMatches() + m_foldSearch.matchCount(m_folds) : core;
 }
 
 void TerminalView::ensureVisualRowVisible(int visualRow)
@@ -3620,7 +3655,7 @@ int TerminalView::searchStep(bool backwards, int *index)
         selected = s.index;
         // The core may have recomputed its matches while stepping.
         count = m_session->withCore([](VtCore &c) { return c.searchMatchCount(); })
-                + m_foldSearch.matchCount(m_folds);
+                - hiddenCoreMatches() + m_foldSearch.matchCount(m_folds);
         ensureVisualRowVisible(s.visualRow);
     }
     m_searchIndex = selected;

@@ -1506,6 +1506,20 @@ int LibVtermCore::searchStep(bool backwards)
 
 int LibVtermCore::searchMatchCount() const { return int(d->matches.size()); }
 
+int LibVtermCore::searchMatchesInRows(int fromRow, int toRow) const
+{
+    if (fromRow > toRow)
+        return 0;
+    const qint64 first = d->firstId();
+    int n = 0;
+    for (const Impl::Match &m : d->matches) {
+        const qint64 row = m.line - first;
+        if (row >= fromRow && row <= toRow)
+            ++n;
+    }
+    return n;
+}
+
 int LibVtermCore::searchCurrentRow() const
 {
     if (d->current < 0 || d->current >= int(d->matches.size()))

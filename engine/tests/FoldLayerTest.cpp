@@ -570,6 +570,44 @@ private slots:
         QCOMPARE(fold->cells[1].back().fgPacked, CellColor::indexed(5));   // magenta
     }
 
+    // #RW9T: `~~struck~~` renders as SGR 9, which the grid paints (AttrStrike). It has to reach
+    // the fold's cells too, or a block loses its rule the moment a resize takes it over.
+    void proseSpansKeepStrikethrough()
+    {
+        ProseCollector c;
+        c.feed(QStringLiteral("keep \x1b[9mgone\x1b[29m back\x1b[0m\n"));
+        const QVector<FoldLine> out = c.take();
+        QCOMPARE(out.size(), 1);
+        QCOMPARE(out[0].spans.size(), 3);
+        QVERIFY(!out[0].spans[0].strike);
+        QCOMPARE(out[0].spans[1].text, QStringLiteral("gone"));
+        QVERIFY(out[0].spans[1].strike);
+        QCOMPARE(out[0].spans[1].sgr, QStringLiteral("9"));
+        QVERIFY(!out[0].spans[2].strike);
+        FoldLayer f;
+        f.setGeometry(80, 3);
+        f.setProse(QStringLiteral("relay://prose/s"), out, 40);
+        const FoldLayer::Fold *fold = f.fold(QStringLiteral("relay://prose/s"));
+        QVERIFY(fold->cells[0][5].strike);    // 'g' of "gone"
+        QVERIFY(!fold->cells[0][0].strike);   // 'k' of "keep"
+    }
+
+    // #RW9T: only an SGR carries style. An erase or a cursor move has parameters that read as
+    // SGR parameters, and handing them to the same parser set faint, bold or an ink.
+    void proseSpansIgnoreNonSgrControlSequences()
+    {
+        ProseCollector c;
+        c.feed(QStringLiteral("\x1b[2K\x1b[1G\x1b[3Aplain\n"));
+        const QVector<FoldLine> out = c.take();
+        QCOMPARE(out.size(), 1);
+        QCOMPARE(out[0].spans.size(), 1);
+        QCOMPARE(out[0].spans[0].text, QStringLiteral("plain"));
+        QVERIFY(!out[0].spans[0].dim);
+        QVERIFY(!out[0].spans[0].bold);
+        QVERIFY(!out[0].spans[0].italic);
+        QVERIFY(out[0].spans[0].sgr.isEmpty());
+    }
+
     void proseSpansSurviveArbitraryChunkBoundaries()
     {
         const QString rendered = QStringLiteral(

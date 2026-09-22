@@ -127,6 +127,7 @@ void FoldLayer::layout(Fold *f) const
                 c.bold = span.bold;
                 c.italic = span.italic;
                 c.underline = span.underline;
+                c.strike = span.strike;
                 c.dim = span.dim;
                 c.reverse = span.reverse;
                 c.link = span.link;
@@ -322,6 +323,16 @@ bool FoldLayer::rowHidden(int realRow) const
             return true;
     }
     return false;
+}
+
+std::vector<std::pair<int, int>> FoldLayer::hiddenRowRanges() const
+{
+    std::vector<std::pair<int, int>> out;
+    for (const Anchor &a : m_anchors) {
+        if (a.replacement)
+            out.emplace_back(a.startRow, a.row);
+    }
+    return out;
 }
 
 // A replacement fold takes over only away from the width its rows were printed

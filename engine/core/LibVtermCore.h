@@ -58,6 +58,7 @@ public:
     int searchSet(const QString &needle) override;
     int searchStep(bool backwards) override;
     int searchMatchCount() const override;
+    int searchMatchesInRows(int fromRow, int toRow) const override;
     int searchCurrentRow() const override;
 
     void sendKey(const KeyInput &key) override;
