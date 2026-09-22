@@ -12,7 +12,7 @@ on:
       tag:
         description: Release tag to create only after all package gates pass
         required: true
-        default: v0.1.0-beta.3
+        default: v0.1.0-beta.4
         type: string
   push:
     tags: ['v*']
@@ -117,9 +117,15 @@ jobs:
     with:
       version: ${{ needs.source.outputs.version }}
 
+  macos:
+    needs: source
+    uses: ./.github/workflows/macos.yml
+    with:
+      version: ${{ needs.source.outputs.version }}
+
   release:
     name: GitHub release
-    needs: [source, deb, windows]
+    needs: [source, deb, windows, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -133,6 +139,8 @@ jobs:
           find artifacts -name '*.deb' -exec cp {} assets/ \;
           cp artifacts/source/relay-*.tar.gz assets/
           cp artifacts/windows-installer/*setup.exe assets/
+          cp artifacts/macos-arm64-installer/*_macos_arm64.dmg assets/
+          cp artifacts/macos-x64-installer/*_macos_x64.dmg assets/
           (cd assets && sha256sum -- * > SHA256SUMS)
           cat assets/SHA256SUMS
       - name: Create release
