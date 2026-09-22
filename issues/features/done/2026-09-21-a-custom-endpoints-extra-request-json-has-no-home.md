@@ -1,13 +1,13 @@
 ---
 id: XJSN
 type: work
-status: needs-verification
+status: done
 labels: [feature, models]
 assignee: codex
 rank: n
 created: '2026-09-21'
 source: 'Claude Code in a Relay pane, 2026-09-21 — left over from #MDP1 t:a15'
-links: {plans: [], commits: [2ae67cfcf27d95b66e70d3097523ff37092f8caa], evidence: [docs/qa_evidence/2026-09-22-custom-extra-json/README.md], related: [MDP1], github: null}
+links: {plans: [], commits: [2ae67cfcf27d95b66e70d3097523ff37092f8caa], evidence: [docs/qa_evidence/2026-09-22-custom-extra-json/README.md, docs/qa_evidence/2026-09-22-verify-XJSN/README.md], related: [MDP1], github: null}
 ---
 # A custom endpoint's extra request JSON has no home
 
@@ -77,3 +77,15 @@ manual: docs/qa_evidence/2026-09-22-custom-extra-json/README.md
 - passed · unittest:tests.test_customproviders — tests/test_customproviders.py passed for this revision on spark-dcc9, 2026-09-22T02:01:16Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-custom-extra-json/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-custom-extra-json/README.md
 history: thread
+
+## QA checklist
+- [x] Independent root reran all 27 custom-provider tests: legacy records, reload, discovery,
+  model switching, invalid values, and transport propagation pass.
+- [x] In a fresh isolated running Relay, added a custom endpoint with temperature 0.25 and
+  top_p 0.85; Test sent both in a captured real HTTP request.
+- [x] Edit prefilled the saved object. Replacing it with [] kept the form open with a clear error.
+- [x] Clearing the form and saving removed both parameters from the next captured request.
+
+## Verdict
+Pass — independently exercised by the root session after a4 implemented the change.
+Evidence: `docs/qa_evidence/2026-09-22-verify-XJSN/README.md`. Close as done.
