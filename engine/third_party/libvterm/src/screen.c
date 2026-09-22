@@ -765,11 +765,12 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
       }
 
       new_lineinfo[new_row].continuation = (new_row > new_row_start);
-      /* RELAY PATCH: keep line marks on the first row of the logical line, and
-       * a scrollback continuation on the first row */
-      if(old_lineinfo && new_row == new_row_start) {
-        new_lineinfo[new_row].relay_marks = old_lineinfo[old_row_start].relay_marks;
-        if(old_row_start == 0 && old_lineinfo[0].continuation)
+      /* RELAY PATCH: user role bits (MarkUserShell/Agent, 0x30) cover every
+       * wrapped row. Prompt boundary bits belong only on the first row. */
+      if(old_lineinfo) {
+        new_lineinfo[new_row].relay_marks = old_lineinfo[old_row_start].relay_marks &
+            (new_row == new_row_start ? 0xff : 0x30);
+        if(new_row == new_row_start && old_row_start == 0 && old_lineinfo[0].continuation)
           new_lineinfo[new_row].continuation = 1;
       }
     }

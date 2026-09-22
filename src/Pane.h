@@ -514,6 +514,7 @@ public:
         // A guest-composer entry is neither a Relay-agent prompt nor a shell command. It stays
         // in the pane's one delivery queue until this named guest reports that it is idle.
         QString guest;
+        QString remoteToken; // queued shell commands belong to this login only
         QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
@@ -5193,7 +5194,13 @@ private:
         m_cwdChip->setObjectName(QStringLiteral("stripChip"));
         m_cwdChip->setFocusPolicy(Qt::NoFocus);
         m_cwdChip->setCursor(Qt::PointingHandCursor);
-        connect(m_cwdChip, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_cwd, 0); });
+        connect(m_cwdChip, &QToolButton::clicked, this, [this] {
+            if (!onOpenPath) return;
+            if (m_login.active) {
+                if (loginReachable() && !m_login.cwd.isEmpty()) onOpenPath(relay::remote::folderUrl(loginHost(), m_login.cwd), 0);
+                else status(QStringLiteral("Remote folder is not available until the SSH shell is ready."));
+            } else onOpenPath(m_cwd, 0);
+        });
         routeRow->addWidget(m_cwdChip);
         m_shareChip = new QToolButton;
         m_shareChip->setObjectName(QStringLiteral("stripChip"));
@@ -9045,10 +9052,22 @@ private:
                          {QStringLiteral("exit_status"), exitStatus},
                          {QStringLiteral("cwd"), m_captureCwd},
                          {QStringLiteral("time"), double(m_captureAt)}};
+        if (m_login.active && !m_login.commandCwd.isEmpty()) item.insert(QStringLiteral("host"), loginHost());
         // With the shell integration the next prompt starts with OSC 133;A; everything from there
         // is the prompt being redrawn, not the command's output.
         QByteArray captured = m_capture;
+        if (m_login.active && !m_login.commandCwd.isEmpty()) {
+            const int start = captured.indexOf("\x1b]133;C");
+            if (start >= 0) {
+                const int bell = captured.indexOf('\a', start);
+                const int st = captured.indexOf("\x1b\\", start);
+                if (bell >= 0 && (st < 0 || bell < st)) captured = captured.mid(bell + 1);
+                else if (st >= 0) captured = captured.mid(st + 2);
+            }
+        }
         if (const int prompt = captured.indexOf("\x1b]133;A"); prompt >= 0) captured.truncate(prompt);
+        // Zsh emits and erases PROMPT_EOL_MARK before precmd and its OSC 133 marks.
+        if (const int end = captured.indexOf("\x1b]7772;end-output"); end >= 0) captured.truncate(end);
         QString output = relay::conversations::stripAnsi(captured);
         // The shell echoes the command it is about to run; that line is already the command row.
         if (output.startsWith(m_captureCommand)) output = output.mid(m_captureCommand.size());
@@ -10839,19 +10858,49 @@ private:
         // A folder on another machine (OSC 7 from a shell behind ssh names its host) is the
         // login's, never this pane's local directory, even when the same path exists here.
         m_backend->onCwdHostChanged = [this](const QString &path, const QString &host) {
-            if (m_login.active) { if (m_login.cwd != path) { m_login.cwd = path; changed(); } return; }
+            if (m_login.active) {
+                if (m_login.observedHost.isEmpty()) m_login.observedHost = host;
+                if (host != m_login.observedHost) { m_login.identityReady = false; forgetLoginFiles(); }
+                if (m_login.cwd != path) { hideAtPopup(); hideTabPopup(); m_login.cwd = path; updatePaths(); changed(); }
+                publishLoginContext();
+                return;
+            }
             if (!relay::remote::isLocalHost(host, QSysInfo::machineHostName())) return;
             if (path.isEmpty() || path == m_cwd || !QFileInfo(path).isDir()) return;
             m_cwd = path; updatePaths(); changed();
         };
         // OSC 133 prompt marks: Relay keeps its own command state from the Bash bridge, so the
         // marks are only remembered here (engine panes use them to jump between prompts).
+        m_backend->onShellIntegration = [this](const QString &token) {
+            if (!m_login.active || token != m_login.token) return;
+            if (!m_login.enhanced) {
+                m_capture.clear(); // bootstrap bytes are presentation, not user output
+                finishCommandCapture(-1); // the outer transport is no longer the command unit
+                m_runningSince.invalidate(); m_commandLoaded = false;
+                if (m_activeValid && !m_active.agent && m_active.remoteToken.isEmpty()) {
+                    m_activeValid = false; m_activeLoaded = false;
+                }
+            }
+            m_login.enhanced = true; m_login.identityReady = true;
+            if (m_login.pendingExit >= 0) { const int code = m_login.pendingExit; m_login.pendingExit = -1; finishLoginCommand(code); }
+            announceLoginFiles(); publishLoginContext();
+        };
         m_backend->onPromptMark = [this](char kind, int exitCode) {
             m_lastPromptMark = kind;
             if (kind == 'D') m_lastMarkExitCode = exitCode;
             // Marks while a login owns the terminal come from the remote shell: they say exactly
             // when it is at its prompt, without waiting for the screen poll.
-            if (m_login.active) { m_login.integration = true; updateLoginPrompt(); }
+            if (m_login.active) {
+                m_login.integration = true;
+                if (kind == 'C') {
+                    m_login.identityReady = false; forgetLoginFiles(); publishLoginContext();
+                }
+                if (kind == 'D') {
+                    if (m_login.enhanced) m_login.pendingExit = exitCode;
+                    else finishLoginCommand(exitCode);
+                }
+                updateLoginPrompt();
+            }
         };
         // Output of the commands Relay itself ran, for the conversation index (protocol 14).
         // Only enabled between "command loaded" and "shell ready", so it costs nothing otherwise.
@@ -10992,7 +11041,8 @@ private:
             static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
             const auto match = only.match(m_editor->toPlainText().trimmed());
             if (m_guest.isEmpty() && match.hasMatch()) {
-                const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
+                const QString path = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+                const QString absolute = m_login.active ? QString() : resolveComposerPath(path);
                 if (!absolute.isEmpty() && onOpenPath) {
                     m_editor->remember(m_editor->toPlainText().trimmed());
                     m_editor->clear();
@@ -11966,12 +12016,7 @@ private:
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
             return;
         }
-        if (route == QStringLiteral("shell") && loginTakesLines()) {
-            // A command for the remote shell: typed into the login, never queued for the local one.
-            typeIntoLogin(text);
-            return;
-        }
-        if (route == QStringLiteral("shell") && m_login.active) {
+        if (route == QStringLiteral("shell") && m_login.active && m_altScreen && !loginAtPrompt()) {
             // Logged in, but a full-screen program on the host has the keyboard. Queueing this for
             // the local shell would run it on the wrong machine (#S5SH): the text stays in the box.
             const QString keys = Keymap::instance().shortcutText(QStringLiteral("control.human"));
@@ -12038,6 +12083,22 @@ private:
     }
 
     bool runInTerminal(const QString &text, bool watch, int attempt, bool natural = false) {
+        if (m_login.active) {
+            if (!loginAtPrompt()) return false;
+            m_fixCommand = watch ? text : QString(); m_fixAttempt = attempt; m_fixWatch = watch; m_fixArmed = watch;
+            m_commandNatural = natural;
+            m_login.command = text; m_login.commandCwd = m_login.cwd; m_login.commandClock.start();
+            m_handoffArmed = m_handoffNext; m_handoffNext = false;
+            if (m_handoffArmed) m_handoffCommand = text;
+            beginCommandCapture(text, m_handoffArmed);
+            m_captureCwd = loginHistoryKey();
+            m_commandLog.append({text, loginHistoryKey()});
+            if (m_commandLog.size() > 500) m_commandLog.removeFirst();
+            if (m_activeValid && !m_active.agent) m_activeLoaded = true;
+            typeIntoLogin(text);
+            answerTerminalCommand(true, QStringLiteral("started"));
+            return true;
+        }
         if (!m_backend || !m_shellReady || m_loading || m_native) {
             status(QStringLiteral("Shell is not at an integrated prompt. Use native input; Relay will not type into a running program."));
             return false;
@@ -12834,6 +12895,13 @@ private:
                                 QStringLiteral("%1 started by this pane's agent still running. The work lists under "
                                                 "the composer show it; the header's relay mark blinks until it ends.")
                                     .arg(subject.isEmpty() ? QStringLiteral("Background work") : subject));
+            return;
+        }
+        if (m_login.active) {
+            if (m_login.atPrompt && m_login.command.isEmpty()) { m_busyLine->clearBusy(); return; }
+            const QString who = m_login.command.isEmpty() ? QStringLiteral("remote program") : m_login.command.section('\n', 0, 0);
+            m_busyLine->setBusy(relay::panestatus::State::Running, QStringLiteral("Relaying · %1…").arg(who),
+                               QStringLiteral("Running on %1").arg(loginHost()));
             return;
         }
         if (processBusy()) {
@@ -13984,9 +14052,9 @@ private:
         m_fixCommand = command; m_fixAttempt = attempt; m_fixAwaitingAgent = false; m_fixWatch = false; m_fixArmed = false;
         ensureLineStart();
         printInline(QStringLiteral("⟳ %1 · asking the agent to fix it (attempt %2 of %3)\n").arg(problem).arg(attempt).arg(kMaxFixAttempts), Ink::Note);
-        const QString prompt = QStringLiteral(
+        QString prompt = QStringLiteral(
             "Terminal fix request, attempt %1 of %2.\n"
-            "The user ran this command in their interactive Bash terminal, working directory %3:\n"
+            "The user ran this command in their interactive terminal, working directory %3:\n"
             "```bash\n%4\n```\n"
             "Problem: %5.\n"
             "You cannot see the terminal's output. If you need the error message, reproduce it with run_command "
@@ -13994,7 +14062,8 @@ private:
             "End your reply with the corrected command in a fenced block tagged relay-run, for example:\n"
             "```relay-run\nls -la\n```\n"
             "Relay runs that block in the user's terminal. If it cannot be fixed, end with an empty relay-run block and a one-line reason before it.")
-            .arg(attempt).arg(kMaxFixAttempts).arg(shellQuote(m_cwd), command, problem);
+            .arg(attempt).arg(kMaxFixAttempts).arg(shellQuote(m_login.active ? m_login.cwd : m_cwd), command, problem);
+        if (m_login.active) prompt += QStringLiteral("\nThis terminal is on SSH host %1. Pass host: \"%1\" to command/file tools; the directory above is on that host. Never reproduce this locally.\n").arg(loginHost());
         // Fix turns continue the command the user just ran, so they go ahead of queued items.
         QueueEntry entry; entry.agent = true; entry.fix = true; entry.text = prompt;
         if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
@@ -14442,7 +14511,7 @@ private:
             // its text, and print it back when the block closes (card #S5SH).
             m_login.promptRow.clear();
             m_login.promptBytes.clear();
-            if (loginAtPrompt() && !m_login.integration) {
+            if (loginAtPrompt() && !m_login.enhanced) {
                 const QPoint cursor = m_backend->cursorPosition();
                 // The bytes the host drew the prompt with, so it comes back in its own colours. They
                 // are only used when the text in them ends exactly where the cursor is: a prompt drawn
@@ -14605,7 +14674,7 @@ private:
         else if (m_backend && loginAtPrompt()) {
             // The remote shell: the integration binds the same keys there; without it the prompt
             // is printed back as it was, and the remote line editor never knew it was gone.
-            if (m_login.integration) sendShellInput(QStringLiteral("\x18\x10"));
+            if (m_login.enhanced && m_login.identityReady) sendShellInput(QStringLiteral("\x18\x10"));
             else if (!m_login.promptBytes.isEmpty()) writeTerminal(m_login.promptBytes + "\x1b[0m");
             else if (!m_login.promptRow.isEmpty()) writeTerminal(sanitize(m_login.promptRow).toUtf8());
             m_login.promptRow.clear(); m_login.promptBytes.clear();
@@ -14951,10 +15020,14 @@ private:
         if (m_editor->toPlainText() == m_submittedDraft) m_editor->clear();
         QueueEntry entry; entry.agent = false; entry.text = text; entry.watch = watch; entry.natural = natural;
         entry.handoff = handoff;
+        if (m_login.active) entry.remoteToken = m_login.token;
         enqueue(entry);
     }
 
-    bool shellIdleForQueue() const { return m_backend && m_shellReady && !m_loading && !m_native && !processBusy(); }
+    bool shellIdleForQueue() const {
+        if (m_login.active) return loginAtPrompt() && m_login.command.isEmpty();
+        return m_backend && m_shellReady && !m_loading && !m_native && !processBusy();
+    }
     // Relay's rich composer is the foreground guest's input line. We deliberately keep this out
     // of `program_input`: that tool is for an LLM acting under a per-turn delegation grant, while
     // this is the user's own composer text. Ctrl+U clears the TUI line, bracketed paste keeps a
@@ -15721,7 +15794,8 @@ private:
             return candidate.size() > prefix.size() && candidate.startsWith(prefix) && !candidate.contains('\n');
         };
         for (int i = m_commandLog.size() - 1; i >= 0; --i)
-            if (m_commandLog[i].second == m_cwd && fits(m_commandLog[i].first)) return m_commandLog[i].first.mid(prefix.size());
+            if (m_commandLog[i].second == (m_login.active ? loginHistoryKey() : m_cwd) && fits(m_commandLog[i].first)) return m_commandLog[i].first.mid(prefix.size());
+        if (m_login.active) return {}; // never suggest a command from another host
         const QStringList &history = m_editor->history();
         for (int i = history.size() - 1; i >= 0; --i) if (fits(history[i])) return history[i].mid(prefix.size());
         const QString shared = m_commandSuggestions.suggest(prefix);
@@ -15768,7 +15842,7 @@ private:
     }
 
     QString composerPath(const QString &absolute) const {
-        const QString rel = QDir(m_cwd).relativeFilePath(absolute);
+        const QString rel = m_login.active ? absolute : QDir(m_cwd).relativeFilePath(absolute);
         QString shown = rel.startsWith(QStringLiteral("../../..")) ? absolute : rel;
         return shown.contains(' ') ? QStringLiteral("\"%1\"").arg(shown) : shown;
     }
@@ -15781,6 +15855,7 @@ private:
         const auto match = token.match(before);
         if (!match.hasMatch() || cursor.position() == m_atDismissedAt) { hideAtPopup(); return; }
         const QString query = match.captured(1);
+        if (m_login.active) { completeRemote(true, query); return; }
         refreshFileIndex();
         struct Ranked { int score; QString path; };
         QList<Ranked> ranked;
@@ -16409,10 +16484,95 @@ private:
         return names;
     }
 
+    // A bounded asynchronous query on the exact authenticated login. Completion never
+    // probes this machine while SSH owns the pane. Discard replies after edit/cd/reconnect.
+    void completeRemote(bool attachment = false, const QString &query = QString()) {
+        if (!loginReachable()) { hideTabPopup(); hideAtPopup(); status(QStringLiteral("Remote completion unavailable until the SSH shell is ready.")); return; }
+        const QString draft = m_editor->toPlainText(), token = m_login.token, cwd = m_login.cwd;
+        const int position = m_editor->textCursor().position();
+        const QString socket = m_login.where.controlPath;
+        const auto range = relay::completionToken(m_editor->textCursor().block().text(), m_editor->textCursor().positionInBlock());
+        const QString prefix = attachment ? query : relay::unescapeToken(m_editor->textCursor().block().text().mid(range.start, range.length));
+        const bool commands = !attachment && range.commands && !prefix.contains('/') && !prefix.startsWith('~');
+        // NUL separated records permit filenames containing spaces. Never eval user input.
+        const QString body = QStringLiteral(R"SH(cd -- "$1" || exit
+p=$2
+case "$p" in '~/'*) p=$HOME/${p:2};; esac
+n=0
+if [ "$3" = command ]; then
+while IFS= read -r v; do printf 'c%s\0' "$v"; n=$((n+1)); [ "$n" -lt 200 ] || break; done < <(compgen -c -- "$p" | sort -u)
+fi
+if [ "$n" = 0 ]; then
+while IFS= read -r v; do
+[ ! -d "$v" ] || v=$v/
+case "$2" in '~/'*) v="~/${v#"$HOME"/}";; esac
+printf 'f%s\0' "$v"; n=$((n+1)); [ "$n" -lt 200 ] || break
+done < <(compgen -f -- "$p" | sort)
+fi
+)SH");
+        const QString script = QStringLiteral("bash -c ") + relay::remote::shellQuote(body)
+            + QStringLiteral(" -- ") + relay::remote::shellQuote(cwd.isEmpty() ? QStringLiteral(".") : cwd)
+            + ' ' + relay::remote::shellQuote(prefix) + ' ' + (commands ? QStringLiteral("command") : QStringLiteral("file"));
+        if (m_remoteCompletion) m_remoteCompletion->kill();
+        auto *process = new QProcess(this);
+        m_remoteCompletion = process;
+        auto output = std::make_shared<QByteArray>();
+        connect(process, &QProcess::readyReadStandardOutput, this, [process, output] {
+            output->append(process->readAllStandardOutput());
+            if (output->size() > 128 * 1024) process->kill();
+        });
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process, output, draft, token, cwd, socket, position, range, attachment](int code, QProcess::ExitStatus) {
+            output->append(process->readAllStandardOutput()); process->deleteLater();
+            if (!m_login.active || token != m_login.token || cwd != m_login.cwd || socket != m_login.where.controlPath
+                || !loginReachable() || m_editor->toPlainText() != draft || m_editor->textCursor().position() != position) return;
+            if (code != 0 || output->size() > 128 * 1024) { status(QStringLiteral("Remote completion failed.")); return; }
+            relay::Completion result = range;
+            for (const QByteArray &record : output->split('\0')) {
+                if (record.isEmpty()) continue;
+                const QString name = QString::fromUtf8(record.mid(1));
+                result.commands = record[0] == 'c';
+                result.labels << name;
+                result.inserts << (name.startsWith('~') ? '~' + relay::escapeToken(name.mid(1)) : relay::escapeToken(name));
+            }
+            if (attachment) {
+                if (result.labels.isEmpty()) { hideAtPopup(); return; }
+                if (!m_atList) {
+                    m_atList = new QListWidget(this); m_atList->setObjectName(QStringLiteral("atPicker"));
+                    m_atList->setFocusPolicy(Qt::NoFocus); m_atList->setUniformItemSizes(true);
+                    connect(m_atList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) { m_atList->setCurrentItem(item); acceptAtSelection(); });
+                }
+                m_atList->clear();
+                for (const QString &name : result.labels) {
+                    auto *item = new QListWidgetItem(loginHost() + ':' + name, m_atList);
+                    item->setData(Qt::UserRole, name);
+                }
+                m_atList->setCurrentRow(0); placeAtPopup(); m_atList->show(); m_atList->raise();
+                return;
+            }
+            if (result.inserts.isEmpty()) return;
+            result.common = result.inserts.first();
+            for (const QString &v : result.inserts) while (!v.startsWith(result.common)) result.common.chop(1);
+            if (result.inserts.size() == 1) {
+                const QString v = result.inserts.first(); replaceComposerToken(result, v + (v.endsWith('/') ? QString() : QStringLiteral(" ")));
+                hideTabPopup();
+            } else {
+                if (result.common.size() > result.length) replaceComposerToken(result, result.common);
+                showTabPopup(result);
+            }
+        });
+        connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) { status(QStringLiteral("SSH completion could not start.")); process->deleteLater(); }
+        });
+        QTimer::singleShot(10000, process, [process] { if (process->state() != QProcess::NotRunning) process->kill(); });
+        process->start(QStringLiteral("ssh"), relay::remote::sshCommand(loginHost(), socket, script));
+    }
+
     // Returns true when Tab did something: completed the word, or opened the candidate list.
     bool completeInComposer() {
         const QTextCursor cursor = m_editor->textCursor();
         if (cursor.hasSelection()) return false;
+        if (m_login.active) { completeRemote(); return true; }
         const QString line = cursor.block().text();
         const relay::Completion completion =
             relay::completeAt(line, cursor.positionInBlock(), m_cwd, knownCommandNames());
@@ -16481,7 +16641,7 @@ private:
         // folders that diverge at a dash, the "cd 2026-09-18-EG/-" of the owner's report.
         const QTextCursor cursor = m_editor->textCursor();
         const relay::Completion live =
-            relay::completeAt(cursor.block().text(), cursor.positionInBlock(), m_cwd, knownCommandNames());
+            relay::completionToken(cursor.block().text(), cursor.positionInBlock());
         replaceComposerToken(live, insert + (insert.endsWith('/') ? QString() : QStringLiteral(" ")));
         hideTabPopup();
     }
@@ -16586,7 +16746,13 @@ private:
         auto matches = token.globalMatch(text);
         while (matches.hasNext() && attachments.size() < 10) {
             const auto match = matches.next();
-            const QString absolute = resolveComposerPath(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1));
+            const QString path = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+            if (m_login.active) {
+                if (!seen.contains(path)) attachments.append(QJsonObject{{"path", path}, {"host", loginHost()}});
+                seen.insert(path);
+                continue;
+            }
+            const QString absolute = resolveComposerPath(path);
             if (absolute.isEmpty() || !QFileInfo(absolute).isFile() || seen.contains(absolute)) continue;
             seen.insert(absolute);
             attachments.append(QJsonObject{{"path", absolute}});
@@ -16700,6 +16866,7 @@ private:
         m_login = RemoteLogin();
         m_login.active = true;
         m_login.program = program;
+        m_login.token = QUuid::createUuid().toString(QUuid::WithoutBraces);
         if (m_backend) m_backend->setOutputCallbackEnabled(true);   // the prompt row, for printing it back
         m_login.group = foregroundPid();
         const QStringList argv = foregroundArgv();
@@ -16731,19 +16898,67 @@ private:
         QTimer::singleShot(3000, dump, [dump] { if (dump->state() != QProcess::NotRunning) dump->kill(); });
     }
 
+    QString loginHistoryKey() const { return loginHost() + QLatin1Char(':') + m_login.cwd; }
+
+    void publishLoginContext() {
+        if (m_workerReady) send({{"type", "remote_session_update"}, {"remote_session", loginContext()}});
+    }
+
+    void finishLoginCommand(int code) {
+        if (m_login.command.isEmpty()) return;
+        const QString command = m_login.command;
+        const qint64 ms = m_login.commandClock.isValid() ? m_login.commandClock.elapsed() : 0;
+        m_login.command.clear(); m_login.commandClock.invalidate();
+        finishCommandCapture(code);
+        if (m_handoffArmed) finishHandoff(code);
+        if (m_activeValid && !m_active.agent && m_activeLoaded) {
+            m_activeValid = false; m_activeLoaded = false;
+        }
+        if (code > 0 && code != 130 && !m_entries.isEmpty()) pauseQueue(QStringLiteral("`%1` on %2 exited with status %3").arg(command, loginHost()).arg(code));
+        if (m_fixArmed) {
+            const int attempt = m_fixAttempt;
+            const QString token = m_login.token;
+            clearFix();
+            if (code > 0 && code != 130 && code != 255) QTimer::singleShot(200, this, [this, command, code, attempt, token] {
+                if (!m_login.active || token != m_login.token) return;
+                startFix(command, QStringLiteral("exited with status %1 on %2").arg(code).arg(loginHost()), attempt + 1);
+            });
+        }
+        m_commandNatural = false;
+        if (QSettings().value(QStringLiteral("suggestions/next_command"), false).toBool() && !m_agentBusy) {
+            const auto context = loginContext();
+            const QString token = m_login.token;
+            QTimer::singleShot(250, this, [this, command, code, context, token] {
+                if (!m_login.active || token != m_login.token) return;
+                requestSuggestion(QStringLiteral("next_command"), {{"command", command}, {"exit_status", code},
+                                  {"cwd", context.value(QStringLiteral("host")).toString() + ":" + context.value(QStringLiteral("cwd")).toString()}, {"remote_session", context}});
+            });
+        }
+        if (ms > 30000) notify(QStringLiteral("Command finished on %1").arg(loginHost()),
+                              QStringLiteral("Exit %1 after %2 s").arg(code).arg(ms / 1000));
+        status(code < 0 ? QStringLiteral("Remote command finished · exit status unavailable")
+                       : QStringLiteral("%1 ready · exit %2").arg(loginHost()).arg(code));
+        QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); pumpQueue(); });
+    }
+
     void endLogin() {
         if (!m_login.active) return;
         relay::log::info(QStringLiteral("login_end pane=%1").arg(paneLogId()));
-        forgetLoginFiles();
+        forgetLoginFiles(); hideAtPopup(); hideTabPopup();
         if (m_login.offered) hideBanner();
         if (m_backend && !m_capturing) m_backend->setOutputCallbackEnabled(false);
+        if (!m_login.command.isEmpty()) finishLoginCommand(255);
+        // Pending remote commands must never spill into the local shell after disconnect.
+        for (int i = m_entries.size() - 1; i >= 0; --i)
+            if (!m_entries[i].remoteToken.isEmpty()) m_entries.removeAt(i);
         m_login = RemoteLogin();
+        publishLoginContext(); updatePaths(); rebuildQueueStrip();
         changed();
     }
 
     // The user's own authenticated connection to the host answers at its control socket.
     bool loginReachable() const {
-        if (!m_login.resolved || m_login.where.controlPath.isEmpty()) return false;
+        if (!m_login.resolved || !m_login.identityReady || m_login.where.controlPath.isEmpty()) return false;
         return QFileInfo(m_login.where.controlPath).exists();
     }
 
@@ -16752,7 +16967,7 @@ private:
         if (!m_login.active) return {};
         const bool reachable = loginReachable();
         QJsonObject out{{"program", m_login.program}, {"host", loginHost()},
-                        {"reachable", reachable}, {"shell_integration", m_login.integration},
+                        {"reachable", reachable}, {"shell_integration", m_login.enhanced},
                         {"at_prompt", m_login.atPrompt}};
         if (m_login.resolved) {
             out.insert(QStringLiteral("hostname"), m_login.where.hostname);
@@ -16772,7 +16987,7 @@ private:
         const bool before = m_login.atPrompt;
         if (m_native || !m_backend) {
             m_login.atPrompt = false; m_login.promptTicks = 0;
-        } else if (m_login.integration && !m_altScreen) {
+        } else if (m_login.integration && !m_altScreen && (m_login.identityReady || !m_login.enhanced)) {
             // The marks come from the shell Relay enhanced. On the alternate screen something else
             // is drawing (a remote tmux, mosh), its own shell's marks never reach here, and the
             // last mark is the "command started" of whatever opened it: the screen decides instead.
@@ -16798,18 +17013,21 @@ private:
                 toast(QStringLiteral("Logged in to %1 · the prompt box types there · %2 for keys")
                           .arg(loginHost(), Keymap::instance().shortcutText(QStringLiteral("control.human"))));
             }
+            if (!m_login.integration && !m_login.command.isEmpty()) finishLoginCommand(-1);
             maybeEnhanceLogin();
             flushInline();
+            QTimer::singleShot(0, this, [this] { pumpQueue(); refreshBusyLine(); });
             refreshProgramHint();
         }
-        if (before != m_login.atPrompt) updateTakeControl();
+        if (before != m_login.atPrompt) { updateTakeControl(); publishLoginContext(); }
+        refreshBusyLine();
     }
 
     // Load shell/remote-integration.sh into the remote shell once per login, per Options ›
     // Terminal › SSH sessions: automatically, after asking, or never. mosh drops the escape
     // sequences the script sends, so only ssh is enhanced.
     void maybeEnhanceLogin() {
-        if (m_login.program != QStringLiteral("ssh") || m_login.bootstrapped || m_login.integration) return;
+        if (m_login.program != QStringLiteral("ssh") || m_login.bootstrapped || m_login.enhanced) return;
         // Something on the host is asking a question (zsh's first-run menu on a host with no
         // ~/.zshrc, a pager, a wizard): its prompt is not a shell's, and a line typed into it is
         // an answer, not a command. Wait; the next real prompt enhances the login.
@@ -16837,7 +17055,8 @@ private:
         QFile file(m_data + QStringLiteral("/shell/remote-integration.sh"));
         if (!file.open(QIODevice::ReadOnly)) return;
         const QPoint cursor = m_backend->cursorPosition();
-        const QString line = relay::remote::bootstrapLine(file.readAll(), std::max(0, cursor.x()), m_backend->columns());
+        const QByteArray script = "RELAY_REMOTE_TOKEN='" + m_login.token.toUtf8() + "'\n" + file.readAll();
+        const QString line = relay::remote::bootstrapLine(script, std::max(0, cursor.x()), m_backend->columns());
         m_login.bootstrapped = true;
         m_login.atPrompt = false; m_login.promptTicks = 0;   // the line runs; the next prompt is the enhanced one
         sendShellInput(line + '\r');
@@ -16846,16 +17065,20 @@ private:
 
     // A line from the prompt box, typed into the login. Several lines go as one bracketed paste.
     void typeIntoLogin(const QString &text) {
-        m_editor->remember(text);
+        const bool idle = m_login.atPrompt;
+        if (idle) m_editor->remember(text);
         m_editor->clear();
         hideAtPopup(); clearAiGhost();
         if (m_inlineOpen) { ensureLineStart(); closeInline(); }
-        const bool idle = m_login.atPrompt;
         if (text.contains('\n')) m_backend->sendText(text, true);
         else sendShellInput(text);
+        // Capture the actual Readline buffer before Enter: history can join multiline input
+        // and PS0 sees each parsed line separately. This binding also stages its display rows.
+        if (m_login.enhanced && m_login.identityReady) sendShellInput(QStringLiteral("\x18\x10"));
+        m_login.identityReady = false; forgetLoginFiles(); publishLoginContext();
         sendShellInput(QStringLiteral("\r"));
         m_login.atPrompt = false; m_login.promptTicks = 0;
-        if (!idle) toast(QStringLiteral("Typed into %1 · it was busy, so the line waits for it").arg(loginHost()));
+        if (!idle) toast(QStringLiteral("Sent as input to the program on %1").arg(loginHost()));
         QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
     }
 
@@ -17524,6 +17747,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             const QString sent = m_workerPrompts.value(m_currentItem).text;
             return QStringLiteral("✦ ") + (sent.isEmpty() ? m_workerPreviews.value(m_currentItem) : sent);
         }
+        if (m_login.active) return m_login.command.isEmpty() ? QString() : QStringLiteral("$ ") + m_login.command;
         if (!m_promptReported && !m_pendingCommand.isEmpty()) return QStringLiteral("$ ") + m_pendingCommand;
         return {};
     }
@@ -17970,7 +18194,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             endDelegation(QStringLiteral("program_exited"));
             setGuest({});
             updateScreenPrompt();
-            m_remoteHandled = false; m_remoteProgram = false; endLogin();
+            m_remoteHandled = false; m_remoteProgram = false;
+            if (m_login.active) finishLoginCommand(status);
+            endLogin();
             m_secretDeclined = false; m_secretNotified = false;
             leaveSecretMode();
             if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
@@ -18130,10 +18356,11 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     void updatePaths() {
         if (m_cwdChip) {
             const QString home = QDir::homePath();
-            const QString shown = m_cwd.startsWith(home) ? QStringLiteral("~") + m_cwd.mid(home.size()) : m_cwd;
+            const QString shown = m_login.active ? QStringLiteral("SSH %1:%2").arg(loginHost(), m_login.cwd.isEmpty() ? QStringLiteral("?") : m_login.cwd)
+                : (m_cwd.startsWith(home) ? QStringLiteral("~") + m_cwd.mid(home.size()) : m_cwd);
             const QFontMetrics metrics(m_cwdChip->font());
             m_cwdChip->setText(metrics.elidedText(shown, Qt::ElideLeft, 260));
-            m_cwdChip->setToolTip(QStringLiteral("Terminal: ") + m_cwd + QStringLiteral("\nAgent workspace: ") + m_workspace
+            m_cwdChip->setToolTip(QStringLiteral("Terminal: ") + (m_login.active ? shown : m_cwd) + QStringLiteral("\nAgent workspace: ") + m_workspace
                                   + QStringLiteral("\nClick to open it in an explorer pane"));
         }
         if (!m_cwdLabel) return;
@@ -18147,7 +18374,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         // The full path is kept here; updateHeader() decides how much of it fits and elides the
         // rest away from the left, so the end of the path — the part that says where you are —
         // is the part that survives.
-        m_cwdText = tilde(m_cwd);
+        m_cwdText = m_login.active ? QStringLiteral("SSH %1:%2").arg(loginHost(), m_login.cwd) : tilde(m_cwd);
         m_cwdLabel->setToolTip(headerTooltip());
         updateHeader();
     }
@@ -18603,6 +18830,10 @@ private:
     bool m_altScreen = false, m_waiting = false, m_remoteHandled = false, m_remoteProgram = false;
     // An ssh or mosh login in the foreground (card #S5SH): see beginLogin().
     struct RemoteLogin {
+        QString token, observedHost, command, commandCwd;
+        int pendingExit = -1;
+        QElapsedTimer commandClock;
+        bool enhanced = false, identityReady = false;
         bool active = false;         // ssh/mosh owns the terminal and has for 300 ms
         qint64 group = 0;            // its foreground process group
         QString program;             // ssh, mosh, mosh-client
@@ -18697,6 +18928,7 @@ private:
     QString m_effortSnapFrom, m_effortSnapTo;
     QListWidget *m_slashList = nullptr;
     QListWidget *m_tabList = nullptr;   // Tab completion candidates
+    QPointer<QProcess> m_remoteCompletion;
     relay::Completion m_tabCompletion;
     QString m_effort = QStringLiteral("high"), m_agentMode = QStringLiteral("build"), m_sessionId, m_sessionDir, m_forkTitle;
     QString m_aiGhost, m_aiGhostKind, m_suggestionId, m_savedPlaceholder;

@@ -606,6 +606,7 @@ struct LibVtermCore::Impl {
                     if (col + w > newCols) {
                         out.push_back(std::move(cur));
                         cur = Line();
+                        cur.marks = lines[i].marks & (MarkUserShell | MarkUserAgent);
                         cur.continuation = true;
                         cur.wrapColumns = uint16_t(newCols);
                         col = 0;

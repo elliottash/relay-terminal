@@ -53,7 +53,7 @@ def real_ssh():
 class WrapperTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temp = tempfile.TemporaryDirectory(prefix="relay-ssh-test-")
+        cls.temp = tempfile.TemporaryDirectory(prefix="rs-")
         root = Path(cls.temp.name)
         cls.bin = root / "bin"
         cls.bin.mkdir()
@@ -312,6 +312,9 @@ class PtyShell:
                     and self.editing())
         os.write(self.master, line.encode() + b"\r")
         self.read(done)
+        # Multi-row prompts can arrive in several reads; include their final B marker.
+        while select.select([self.master], [], [], 0.05)[0]:
+            self.output += os.read(self.master, 65536)
         # Everything after the echoed line, up to and including the next prompt.
         return self.output[self.output.find(tail, start) + len(tail):]
 
@@ -370,6 +373,20 @@ class RemoteScriptTests(unittest.TestCase):
         self.addCleanup(shell.close)
         return shell
 
+    def test_staged_multiline_marks_input_once(self):
+        shell = self.bash()
+        shell.run(typed_line(2))
+        shell.output = b""
+        os.write(shell.master, b"\x1b[200~printf 'FIRST\\n';\nprintf 'SECOND\\n'\x1b[201~\x18\x10\r")
+        shell.wait_prompts(1)
+        while select.select([shell.master], [], [], 0.05)[0]:
+            shell.output += os.read(shell.master, 65536)
+        out = shell.output
+        self.assertEqual(out.count(osc(b"133;C")), 1)
+        self.assertEqual(out.count(osc(b"7772;shell")), 2)
+        self.assertIn(b"FIRST\r\nSECOND\r\n", out)
+        self.assertIn(osc(b"133;D;0"), out)
+
     def test_bash(self):
         s = self.bash()
         s.run("set -u; HISTCONTROL=ignoredups; PROMPT_COMMAND='user_pc=$((${user_pc:-0}+1))'")
@@ -377,7 +394,7 @@ class RemoteScriptTests(unittest.TestCase):
         out = s.run(typed_line(3))
         self.assertIn(b"\x1b[3A\r\x1b[J", out)
         self.assertIn(b"\x1b]7;file://" + self.hostname + b"/", out)
-        self.assertIn(osc(b"133;A") + b"RP> " + osc(b"133;B"), out)
+        self.assertIn(osc(b"133;A") + b"RP> \r\n\r\n" + osc(b"133;B"), out)
         self.assertNotIn(b"133;D", out)  # the typed line is not a command the user ran
         self.assertNotIn(b"unbound", out)
         self.assertNotIn(b"\x1bP", out)  # no multiplexer: nothing is wrapped in a DCS
@@ -446,12 +463,17 @@ class RemoteScriptTests(unittest.TestCase):
         out = s.run(typed_line(2))
         self.assertIn(b"\x1b[2A\r\x1b[J", out)
         self.assertIn(b"\x1b]7;file://" + self.hostname + b"/", out)
-        self.assertIn(osc(b"133;A") + b"RP> " + osc(b"133;B"), out)
+        self.assertIn(osc(b"133;A") + b"RP> \r\n\r\n" + osc(b"133;B"), out)
         self.assertNotIn(b"133;D", out)
         self.assertNotIn(b"\x1bP", out)
         out = s.run("(exit 4)")
         self.assertIn(osc(b"133;C"), out)
         self.assertIn(osc(b"133;D;4"), out)
+        out = s.run("printf 'NO-NEWLINE%%'")
+        output_start = out.index(osc(b"133;C")) + len(osc(b"133;C"))
+        output_end = out.index(osc(b"7772;end-output"), output_start)
+        self.assertEqual(out[output_start:output_end], b"NO-NEWLINE%")
+        self.assertLess(output_end, out.index(osc(b"133;D;0")))
         target = self.home / "a b"
         target.mkdir()
         self.assertIn(b"/a%20b\x07", s.run(f"cd '{target}'"))
@@ -492,7 +514,7 @@ class RemoteScriptTests(unittest.TestCase):
         out = s.run(typed_line(3))
         self.assertIn(b"\x1b[3A\r\x1b[J", out)
         self.assertIn(b"\x1b]7;file://" + self.hostname + b"/", out)
-        self.assertIn(osc(b"133;A") + b"RP> " + osc(b"133;B"), out)
+        self.assertIn(osc(b"133;A") + b"RP> \r\n\r\n" + osc(b"133;B"), out)
         self.assertNotIn(b"\x1bP", out)  # no multiplexer in between: nothing is wrapped
         out = s.run("(exit 6)")
         self.assertIn(osc(b"133;C"), out)
@@ -515,7 +537,7 @@ class RemoteScriptTests(unittest.TestCase):
         s = self.multiplexed(TMUX=f"{self.home}/no-such-tmux,1,0")
         out = s.run(typed_line(2))
         self.assertIn(b"\x1b[2A\r\x1b[J", out)  # the erase is a CSI tmux understands: not wrapped
-        self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), out)
+        self.assertIn(dcs(b"133;A") + b"RP> \r\n\r\n" + dcs(b"133;B"), out)
         self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", out)
         self.assertEqual(out.count(TMUX_HINT), 1)
         naked = out.replace(b"\x1bPtmux;\x1b\x1b]", b"")  # what was sent without a wrapper
@@ -537,7 +559,7 @@ class RemoteScriptTests(unittest.TestCase):
         s = PtyShell(["zsh", "-i"], env)
         self.addCleanup(s.close)
         out = s.run(typed_line(2))
-        self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), out)
+        self.assertIn(dcs(b"133;A") + b"RP> \r\n\r\n" + dcs(b"133;B"), out)
         self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", out)
         self.assertEqual(out.count(TMUX_HINT), 1)
         out = s.run("(exit 4)")
@@ -547,7 +569,7 @@ class RemoteScriptTests(unittest.TestCase):
     def test_screen_wraps_without_doubling_and_skips_a_long_path(self):
         s = self.multiplexed(STY="4242.pts-3.host")
         out = s.run(typed_line(2))
-        self.assertIn(dcs(b"133;A", tmux=False) + b"RP> " + dcs(b"133;B", tmux=False), out)
+        self.assertIn(dcs(b"133;A", tmux=False) + b"RP> \r\n\r\n" + dcs(b"133;B", tmux=False), out)
         self.assertIn(b"\x1bP\x1b]7;file://" + self.hostname + b"/", out)
         self.assertNotIn(b"\x1b\x1b", out)  # screen takes the sequence as it is
         self.assertNotIn(TMUX_HINT, out)
@@ -593,7 +615,7 @@ class RemoteScriptTests(unittest.TestCase):
         # Waiting half a second instead was a race the loaded machine won: the eval was still
         # running, the next line went into it, the command never ran, and the pane held no 133;C
         # mark for the assertion below to find. `s.read` keeps draining the pty while it waits.
-        marked_prompt = dcs(b"133;A") + b"RP> " + dcs(b"133;B")
+        marked_prompt = dcs(b"133;A") + b"RP> \r\n\r\n" + dcs(b"133;B")
         s.read(lambda: marked_prompt in raw.read_bytes(), timeout=20)
         os.write(s.master, b"printf 'RE%sY\\n' AD\r")
         s.read(lambda: b"READY" in s.output, timeout=10)
@@ -606,7 +628,7 @@ class RemoteScriptTests(unittest.TestCase):
         # under load. Wait for the command's D mark, which is the last thing this needs, to arrive.
         s.read(lambda: dcs(b"133;D;0") in raw.read_bytes(), timeout=20)
         pane = raw.read_bytes()  # what the shell wrote into the tmux pane
-        self.assertIn(dcs(b"133;A") + b"RP> " + dcs(b"133;B"), pane)
+        self.assertIn(dcs(b"133;A") + b"RP> \r\n\r\n" + dcs(b"133;B"), pane)
         self.assertIn(b"\x1bPtmux;\x1b\x1b]7;file://" + self.hostname + b"/", pane)
         self.assertIn(dcs(b"133;C"), pane)
         self.assertIn(dcs(b"133;D;0"), pane)
@@ -685,7 +707,7 @@ class RemoteScriptTests(unittest.TestCase):
         # input buffer holds 4 KB. The script's own size only bounds that.
         # The file may grow: what is typed is the file without its comments and blank lines.
         self.assertLess(len(REMOTE.read_bytes()), 6144)
-        self.assertLess(len(typed_line(10)), 2400)
+        self.assertLess(len(typed_line(10)), 3000)
 
 
 if __name__ == "__main__":

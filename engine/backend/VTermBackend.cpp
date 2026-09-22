@@ -62,6 +62,9 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
         if (onBell)
             onBell();
     });
+    connect(m_session, &TerminalSession::notification, this, [this](const QString &title, const QString &body) {
+        if (title == QStringLiteral("relay-shell") && onShellIntegration) onShellIntegration(body);
+    });
     connect(m_session, &TerminalSession::titleChanged, this, [this](const QString &t) {
         if (onTitleChanged)
             onTitleChanged(t);

@@ -287,8 +287,8 @@ private slots:
     void sshReusesTheUsersOwnConnection()
     {
         const QStringList argv = sshCommand(QStringLiteral("filly"), QStringLiteral("/run/r/abc"), QStringLiteral("echo hi"));
-        QCOMPARE(argv.mid(0, 11), (QStringList{"-S", "/run/r/abc", "-o", "ControlMaster=no", "-o", "BatchMode=yes",
-                                               "-o", "ConnectTimeout=10", "-T", "filly", "--"}));
+        QCOMPARE(argv.mid(0, 13), (QStringList{"-S", "/run/r/abc", "-o", "ControlMaster=no", "-o", "BatchMode=yes",
+                                               "-o", "ProxyCommand=false", "-o", "ConnectTimeout=10", "-T", "filly", "--"}));
         QCOMPARE(argv.last(), QStringLiteral("sh -c 'echo hi'"));
     }
 

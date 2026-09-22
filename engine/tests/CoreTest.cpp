@@ -266,6 +266,27 @@ private slots:
         QCOMPARE(int(up.lines[0].marks), int(MarkUserAgent));
     }
 
+    void wrappedUserRolesSurviveReflow()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core, 6, 10);
+        h.feed("\x1b]133;A\a\x1b]7772;shell\aabcdefghijklmnop\r\n");
+        h.vt->resize(7, 8, 8, 16);
+        auto f = h.frame();
+        QVERIFY(f.lines[0].marks & MarkUserShell);
+        QVERIFY(f.lines[1].marks & MarkUserShell);
+        QVERIFY(f.lines[0].marks & MarkPromptStart);
+        QVERIFY(!(f.lines[1].marks & MarkPromptStart));
+        QVERIFY(!(f.lines[2].marks & MarkUserShell));
+        for (int i = 0; i < 10; ++i) h.feed("filler\r\n");
+        h.vt->resize(7, 5, 8, 16);
+        std::vector<Line> hist;
+        h.vt->historyLines(0, h.vt->historyRows(), &hist);
+        QVERIFY(hist.size() >= 4);
+        for (int i = 0; i < 4; ++i) QVERIFY(hist[i].marks & MarkUserShell);
+        for (int i = 1; i < 4; ++i) QVERIFY(!(hist[i].marks & MarkPromptStart));
+    }
+
     // A row erased in full loses its role with its text. `/new` clears the screen through the
     // shell (Ctrl-L, then `\e[H\e[2J`), and the row the band was on is where the next
     // conversation's prompt lands: without this, the new conversation opened wearing the old

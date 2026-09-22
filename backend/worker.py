@@ -685,6 +685,12 @@ def main():
                             **({"warning": resolved.warning} if resolved.warning else {})},
                     refused_fields=lambda: {"agent_role": state["agent_role"]})
             # --- the agent typing into the program in the visible pane (protocol 17) ---
+            elif kind == "remote_session_update":
+                # Live pane identity can change while a guest turn is still running.
+                # Replace the snapshot atomically; do not wait on its active tool lock.
+                from relay_core import remote_session
+                if turns.agent is not None:
+                    turns.agent.executor.remote_session = remote_session.validate(request.get("remote_session") or None)
             elif kind == "program_state":
                 # The pane's live view: who owns the terminal, what it is asking, and whether the
                 # user has handed it over. A take-over arrives here as granted: false.

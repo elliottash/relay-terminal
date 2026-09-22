@@ -234,6 +234,7 @@ QStringList sshArguments(const QString &host, const QString &controlPath)
     return {QStringLiteral("-S"), controlPath,
             QStringLiteral("-o"), QStringLiteral("ControlMaster=no"),
             QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+            QStringLiteral("-o"), QStringLiteral("ProxyCommand=false"),
             QStringLiteral("-o"), QStringLiteral("ConnectTimeout=10"),
             QStringLiteral("-T"), host, QStringLiteral("--")};
 }

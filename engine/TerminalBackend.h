@@ -459,6 +459,8 @@ public:
     std::function<void()> onBell;
     // kind: 'A' prompt start, 'B' command start, 'C' output start, 'D' finished (exitCode, -1 if unknown)
     std::function<void(char kind, int exitCode)> onPromptMark;
+    // Ordered confirmation from the shell bootstrap, distinct from third-party OSC marks.
+    std::function<void(const QString &token)> onShellIntegration;
     // Raw PTY output in batches (enable with setOutputCallbackEnabled; costs a copy).
     std::function<void(const QByteArray &bytes)> onOutput;
     std::function<void(int exitCode)> onFinished;

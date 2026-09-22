@@ -1,14 +1,15 @@
 ---
 id: S7CX
 type: work
-status: inbox
+status: needs-verification
 labels: [bug, ssh, terminal]
-assignee: null
+assignee: codex
+implemented_by: openai/gpt-6-astra via codex
 priority: 2
 rank: mssh3
 created: '2026-09-22'
 source: 'Owner in Relay, 2026-09-22; delivery follow-ups to #SHPA'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-ssh-parity/], related: [SHPA, S5SH, S7GX, S7KC], github: null}
+links: {plans: [], commits: [7102b5071aaedd981421dbf4f1d873c29437deff], evidence: [docs/qa_evidence/2026-09-22-ssh-parity/, docs/qa_evidence/2026-09-22-ssh-delivery/, docs/qa_evidence/2026-09-22-verify-S7KC/], related: [SHPA, S5SH, S7GX, S7KC], github: null}
 ---
 # SSH composer uses the remote filesystem and verified host identity
 
@@ -38,7 +39,36 @@ Third delivery priority, but destination guards should coordinate early with #S7
 - Regression and live evidence cover remote-only/local-only paths, changing cwd, delayed/disconnected lookup, nested hosts, reconnect and local restoration, with no unintended local-file attachment.
 
 ## Tasks
-- [ ] Make displayed directory and completion/suggestion lookups use explicit local versus remote context. <!-- t:6w -->
-- [ ] Implement remote-aware @ lookup and attachment provenance using existing remote file operations. <!-- t:x0 -->
-- [ ] Reproduce nested SSH across two distinct destinations; add identity/capability guards and supported transition handling. <!-- t:r3 -->
-- [ ] Add collision/latency/disconnection tests and record live GUI/tool evidence for remote paths and host transitions. <!-- t:je -->
+- [x] Make displayed directory and completion/suggestion lookups use explicit local versus remote context. <!-- t:6w -->
+- [x] Implement remote-aware @ lookup and attachment provenance using existing remote file operations. <!-- t:x0 -->
+- [x] Reproduce nested SSH across two distinct destinations; add identity/capability guards and supported transition handling. <!-- t:r3 -->
+- [ ] Add collision/latency/disconnection tests and record live GUI/tool evidence for remote paths and host transitions. <!-- t:je s=in-progress -->
+
+## Plan
+**Goal:** Deliver the existing Done means with live evidence.
+**Findings:** See Planning notes and #SHPA; the audited paths are unchanged.
+**Steps:** Bind remote identity/cwd independently of local project state, guard nested identity changes, and make composer completion, suggestions and attachments remote-aware. Test remote/local filename collisions and stale/disconnected asynchronous lookups, then live-drive the GUI.
+**Risks:** Shared checkout; preserve other work. Remote and local command ownership must remain separate; do not route stale remote requests locally. No permanent remote shell startup changes.
+**Verify:** Targeted regression tests plus isolated Xvfb/real localhost SSH; record precise limits of guest and platform testing. Independent verifier reviews acceptance and live evidence after implementation.
+
+## Execution Summary
+Added remote host/cwd display, asynchronous bounded Tab/@ queries over the authenticated socket, host-scoped history suggestions, and explicit-host remote attachment loading with provenance. Per-login shell confirmation revokes host capabilities during command/nested-shell ownership and restores them only at the confirmed original prompt. Live context updates reach ongoing worker turns; lookup results are discarded after edits/cd/reconnect. Nested SSH is conservatively unavailable to host tools rather than misdirected to the outer connection.
+
+## Tests
+`tests/test_attachments.py`
+`tests/test_guest_board_bridge.py`
+`tests/test_ssh_remote.py`
+`ctest --test-dir build -R '^(completion|remotefiles|remotesession)$' --output-on-failure` — 3 passed.
+manual: docs/qa_evidence/2026-09-22-verify-S7GX/
+manual: docs/qa_evidence/2026-09-22-ssh-delivery/
+manual: docs/qa_evidence/2026-09-22-verify-S7KC/
+
+### Check 2026-09-22 11:19
+- passed · unittest:tests.test_attachments — tests/test_attachments.py passed for this revision on spark-dcc9, 2026-09-22T15:19:41Z
+- passed · unittest:tests.test_guest_board_bridge — tests/test_guest_board_bridge.py passed for this revision on spark-dcc9, 2026-09-22T15:19:41Z
+- passed · unittest:tests.test_ssh_remote — tests/test_ssh_remote.py passed for this revision on spark-dcc9, 2026-09-22T15:19:41Z
+- not-applicable · manual:docs/qa_evidence/2026-09-22-verify-S7GX/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-S7GX/
+- not-applicable · manual:docs/qa_evidence/2026-09-22-ssh-delivery/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-ssh-delivery/
+- not-applicable · manual:docs/qa_evidence/2026-09-22-verify-S7KC/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-S7KC/
+- notice · unittest:tests.test_ssh_remote — tests/test_ssh_remote.py: 1 of 46 are slow (test_handed_back_jobs_carry_the_host)
+history: thread

@@ -8032,3 +8032,13 @@ text-change signals in named Board editors only. Missing/hidden/disabled/ambiguo
 are refused, and no terminal or agent prompt accepts driver input. `profileTarget:<id>` names
 an enabled entry in the open Performance menu. Operations may start asynchronous work; drivers
 must poll the resulting state. Full control names and fixture rules: [DRIVING-APPS.md](DRIVING-APPS.md).
+
+### Live SSH context updates (#S7CX)
+
+`{"type":"remote_session_update","remote_session":{...}}` replaces the executor's validated
+remote context during an active turn. An empty object or null revokes it. Fields match the ask
+context's remote_session object. The pane sends updates on prompt/cwd/identity changes and exit;
+`reachable` requires confirmation from this login's Relay shell hooks, not merely an OSC mark.
+Remote @ attachments use `{"path":"relative/or/absolute","host":"alias"}` and resolve only
+against the live connection. Their content labels include the host. Guest MCP tools require host
+and never fall back to local paths; visible terminal handoff retains its existing per-turn grant.
