@@ -1,0 +1,6 @@
+Read-only checks, 2026-09-22 UTC.
+codex login status: exit 0, Logged in using ChatGPT.
+claude auth status: exit 0, loggedIn=true, authMethod=claude.ai, subscriptionType=max.
+Both installed in /home/elliott/.npm-global/bin.
+No credentials or account identifiers copied into evidence.
+Authentication readiness does not prove successful Relay guest startup or a provider turn.
