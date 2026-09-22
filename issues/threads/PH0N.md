@@ -206,3 +206,11 @@ day-to-day use. Phase 4 (a Capacitor shell) is a decision for after the week, no
 
 <!-- relay:entry 20260922T012000Z-k4 author=agent kind=event model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
 - ✦ agent moved this card · Needs verification → Discussing · Implementation already landed; awaiting owner device results required by the existing checklist.
+
+<!-- relay:entry 20260922T142237Z-r1 author=codex kind=evidence -->
+### Codex · 2026-09-22 14:22
+Owner reports after desktop restart: "home screen -- i cant log back in", "(without re-entering keys)", then "pairing code form". Treat restart/reconnect acceptance as failed pending diagnosis, not passed. Desktop sidecar was running and default profile retained saved devices. In current app/app.js, ordinary connection failure with a stored record shows the offline inbox, not the pairing form. The form can mean no usable stored record, explicit revocation, or app initialization failing before record load; phone storage and deployed runtime are not observable here. No keys reset, devices revoked or re-pairing performed. Hosted static fetch from this harness returned HTTP 403, which does not establish what the phone receives.
+
+<!-- relay:entry 20260922T142237Z-r2 author=codex kind=question -->
+### Codex · 2026-09-22 14:22
+1. Can you send a screenshot of the whole pairing screen, including any message below the fields? Recommendation: preserve the installed app and existing pairing while distinguishing missing storage from an app startup error; do not re-enter keys yet.
