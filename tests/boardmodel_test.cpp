@@ -331,6 +331,18 @@ struct Consoles {
     FakeConsole *card() const { return of(QStringLiteral("card")); }
 };
 
+// Enter Hygiene through its real first stage before a cleanup test uses stage two.
+void showHygiene(relay::BoardView &view, QList<QJsonObject> &sent)
+{
+    auto *hygiene = view.findChild<QToolButton *>(QStringLiteral("boardChatCheck"));
+    QVERIFY(hygiene);
+    hygiene->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
+    view.handleEvent({{"event", "board_problems"}, {"id", sent.last().value("id")},
+                      {"items", QJsonArray{}}});
+    QVERIFY(view.findChild<QToolButton *>(QStringLiteral("boardCleanup")));
+}
+
 // The card page's reply box: the composer inside the console the card page embedded.
 QPlainTextEdit *replyBox(relay::BoardView &view)
 {
@@ -420,7 +432,7 @@ private slots:
     void relayFreeSaysWhyItCannotVerifyAndAWeakPickWarns();
     // The board and the card as contexts (card #AGNT step 6, protocol 33)
     void theListPageAsksForASwitchboardConsoleKeyedByTheTab();
-    void theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters();
+    void theBoardsRowIsHygieneTestsAndPerformance();
     void checkIsUnscopedAndASectionsTriageNamesItsSection();
     void aProblemDraftsAFixInTheConsoleWithoutSendingIt();
     void theSurveysImportButtonSendsBoardImportApply();
@@ -1579,11 +1591,12 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
 void BoardModelTests::theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
+    Consoles consoles(view);   // Hygiene precedes the cleanup stage (#SW1D)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(500, 600);          // narrow enough that an open card takes the whole pane
     view.handleEvent(opened({row("K7Q2", "ready", "features")}));
+    showHygiene(view, sent);
 
     QWidget *head = view.findChild<QWidget *>(QStringLiteral("boardHead"));
     QWidget *tools = view.findChild<QWidget *>(QStringLiteral("boardListTools"));
@@ -2051,7 +2064,7 @@ void BoardModelTests::labelClicksCopyFiltersAndCardRefsZoom()
 void BoardModelTests::theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
+    Consoles consoles(view);   // Hygiene precedes the cleanup stage (#SW1D)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QStringList hinted;
@@ -2173,10 +2186,11 @@ QToolButton *cleanupButton(relay::BoardView &view)
 void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
+    Consoles consoles(view);   // Hygiene precedes the cleanup stage (#SW1D)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features"), row("M3XJ", "inbox", "features")}));
+    showHygiene(view, sent);
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QVERIFY(view.detailOpen());
     auto *document = view.findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
@@ -2184,9 +2198,8 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     const QString threadBefore = document->toPlainText();
 
     QVERIFY(cleanupButton(view));
-    // The label carries the letter that clicks it from the list (#PBX1, owner: "it should
-    // have the letter hotkeys for each switchboard action as well").
-    QCOMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up (u)"));
+    // Cleanup is the second stage in the findings panel, after the deterministic check.
+    QCOMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up"));
     sent.clear();
     // The button is looked up again after every click: the row is rebuilt from
     // `BoardContext::actions()` whenever the run's state moves, so the widget is a new one.
@@ -2200,7 +2213,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     const QString runId = sent.last().value("id").toString();
     QVERIFY(!runId.isEmpty());
     QVERIFY(view.cleanupRunning());
-    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Stop"));   // the stage becomes stoppable
 
     view.handleEvent(cleanupStarted(runId, true));
     QVERIFY(view.cleanupRunning());
@@ -2237,7 +2250,7 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
     view.handleEvent(cleanupEvent(QStringLiteral("done")));
     view.handleEvent(cleanupSummary(runId, true, QStringLiteral("done"), twoChanges(true)));
     QVERIFY(!view.cleanupRunning());
-    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up"));
     auto *panel = view.findChild<QWidget *>(QStringLiteral("boardCleanupPanel"));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     auto *body = view.findChild<QTextBrowser *>(QStringLiteral("boardCleanupBody"));
@@ -2261,10 +2274,11 @@ void BoardModelTests::aCleanupPreviewsFirstAndItsEventsNeverReachACardThread()
 void BoardModelTests::applyingAPreviewRunsTheCleanupForReal()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
+    Consoles consoles(view);   // Hygiene precedes the cleanup stage (#SW1D)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    showHygiene(view, sent);
     cleanupButton(view)->click();
     const QString previewId = sent.last().value("id").toString();
     view.handleEvent(cleanupStarted(previewId, true));
@@ -2286,7 +2300,7 @@ void BoardModelTests::applyingAPreviewRunsTheCleanupForReal()
     QVERIFY(panel->isHidden());          // the plan goes when the run it planned starts
 
     view.handleEvent(cleanupStarted(runId, false));
-    QVERIFY(view.notice().startsWith(QStringLiteral("Cleanup ·")));
+    QVERIFY(view.notice().startsWith(QStringLiteral("Hygiene · Cleanup ·")));
     view.handleEvent(cleanupSummary(runId, false, QStringLiteral("done"), twoChanges(false)));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     QVERIFY(head->text().contains(QStringLiteral("the board was rewritten")));
@@ -2306,6 +2320,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    showHygiene(view, sent);
     openCard(view, sent, card("K7Q2", "K7Q2 card", "the issue", "h1"));
     QPlainTextEdit *reply = replyBox(view);
     auto *error = view.findChild<QLabel *>(QStringLiteral("boardCardError"));
@@ -2332,6 +2347,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
     QList<QJsonObject> theirs;
     second.onSend = [&theirs](const QJsonObject &message) { theirs << message; };
     second.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    showHygiene(second, theirs);
     cleanupButton(second)->click();
     const QString refusedId = theirs.last().value("id").toString();
     second.handleEvent(QJsonObject{{"event", "error"}, {"id", refusedId}, {"code", "board_busy"},
@@ -2339,7 +2355,7 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
                                    {"card_id", "K7Q2"},
                                    {"text", "the agent is answering about #K7Q2"}});
     QVERIFY(!second.cleanupRunning());
-    QTRY_COMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(cleanupButton(second)->text(), QStringLiteral("Clean up"));
     QVERIFY(second.notice().contains(QStringLiteral("answering on #K7Q2")));
     QVERIFY(second.notice().contains(QStringLiteral("did not start")));
 
@@ -2367,16 +2383,17 @@ void BoardModelTests::aCleanupAndACardsAskRefuseEachOther()
 void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    Consoles consoles(view);   // Clean up and Check are the console's row now (#AGNT)
+    Consoles consoles(view);   // Hygiene precedes the cleanup stage (#SW1D)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    showHygiene(view, sent);
     cleanupButton(view)->click();
     const QString runId = sent.last().value("id").toString();
     view.handleEvent(cleanupStarted(runId, false));
     // The row is rebuilt from the context whenever the run's state moves, so the button is a new
     // widget each time: it is looked up again rather than held.
-    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Stop (u)"));   // the word changes, the letter does not
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Stop"));   // the stage becomes stoppable
 
     sent.clear();
     cleanupButton(view)->click();
@@ -2387,7 +2404,7 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
     view.handleEvent(cleanupEvent(QStringLiteral("cancelled")));
     view.handleEvent(cleanupSummary(runId, false, QStringLiteral("cancelled"), twoChanges(false)));
     QVERIFY(!view.cleanupRunning());
-    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(cleanupButton(view)->text(), QStringLiteral("Clean up"));
     auto *head = view.findChild<QLabel *>(QStringLiteral("boardCleanupHead"));
     QVERIFY(head->text().contains(QStringLiteral("stopped part way")));
     QVERIFY(view.notice().isEmpty());    // the progress line goes with the run
@@ -2398,13 +2415,14 @@ void BoardModelTests::stoppingACleanupSendsCancelAndTheSummarySaysSo()
 void BoardModelTests::theProgressLineKeepsOffAnOpenCardsControls()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
-    Consoles consoles(view);   // Clean up is the console's row now (#AGNT)
+    Consoles consoles(view);   // Hygiene precedes the cleanup stage (#SW1D)
     QList<QJsonObject> sent;
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.resize(500, 700);          // narrow: an open card takes the whole pane
     view.show();                    // the placement is geometry, so the layout has to have run
     QVERIFY(QTest::qWaitForWindowExposed(&view));
     view.handleEvent(opened({row("K7Q2", "inbox", "features")}));
+    showHygiene(view, sent);
     cleanupButton(view)->click();
     auto *notice = view.findChild<QFrame *>(QStringLiteral("boardNotice"));
     QVERIFY(notice);
@@ -3487,8 +3505,8 @@ void BoardModelTests::theListPageAsksForASwitchboardConsoleKeyedByTheTab()
 
 // The row of things that need no typing (owner, 2026-09-20: "we put the 'clean up' button there
 // for the main switchboard agent, for example", and "it should have the letter hotkeys for each
-// switchboard action as well"). Four actions, two letters, and the letters answer from the board.
-void BoardModelTests::theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters()
+// switchboard action as well"). Hygiene now combines the first two into one row entry.
+void BoardModelTests::theBoardsRowIsHygieneTestsAndPerformance()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     Consoles consoles(view);
@@ -3509,17 +3527,19 @@ void BoardModelTests::theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters(
     QStringList labels;
     for (const relay::agent::Action &action : console->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Check (k)"), QStringLiteral("Clean up (u)"),
-                                  QStringLiteral("Tests"), QStringLiteral("Profile")}));
+    QCOMPARE(labels, QStringList({QStringLiteral("Hygiene (k)"),
+                                  QStringLiteral("Tests"), QStringLiteral("Performance")}));
 
     // Each button carries the action's key as its object name, which is what the theme and the
     // tests find it by; Tests and Profile are keyless, and the row does not invent a letter.
     QVERIFY(rowButton(view, QStringLiteral("boardChatCheck")));
-    QVERIFY(rowButton(view, QStringLiteral("boardCleanup")));
+    QVERIFY(!rowButton(view, QStringLiteral("boardCleanup")));
     sent.clear();
     rowButton(view, QStringLiteral("boardChatCheck"))->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
     QVERIFY(!sent.last().contains(QStringLiteral("section")));
+    view.handleEvent({{"event", "board_problems"}, {"id", sent.last().value("id")},
+                      {"items", QJsonArray{}}});
 
     rowButton(view, QStringLiteral("boardTests"))->click();
     QCOMPARE(tests, 1);
@@ -3529,17 +3549,17 @@ void BoardModelTests::theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters(
     // found by the one name it is guaranteed to have, the action's key.
     QCOMPARE(profiled, static_cast<QWidget *>(rowButton(view, QStringLiteral("boardProfile"))));
 
-    // Clean up runs, and the word on the row becomes Stop while it does. The letter does not move.
+    // Clean up runs, and its stage button becomes Stop while it does.
     sent.clear();
     rowButton(view, QStringLiteral("boardCleanup"))->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_cleanup"));
     QVERIFY(sent.last().value("dry_run").toBool());       // the first run is always a preview
-    QTRY_COMPARE(rowButton(view, QStringLiteral("boardCleanup"))->text(), QStringLiteral("Stop (u)"));
+    QTRY_COMPARE(rowButton(view, QStringLiteral("boardCleanup"))->text(), QStringLiteral("Stop"));
     const QString runId = sent.last().value("id").toString();
     view.handleEvent(cleanupStarted(runId, true));
     view.handleEvent(cleanupSummary(runId, true, QStringLiteral("done"), QJsonArray{}));
     QVERIFY(!view.cleanupRunning());
-    QTRY_COMPARE(rowButton(view, QStringLiteral("boardCleanup"))->text(), QStringLiteral("Clean up (u)"));
+    QTRY_COMPARE(rowButton(view, QStringLiteral("boardCleanup"))->text(), QStringLiteral("Clean up"));
 
     // A letter typed on the board page reaches the row through the console's handle, and the key
     // legend names every keyed action without this page listing them.
@@ -3549,8 +3569,8 @@ void BoardModelTests::theBoardsRowIsCheckCleanUpTestsAndProfileWithTheirLetters(
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_check"));
     auto *keys = view.findChild<QLabel *>(QStringLiteral("boardKeys"));
     QVERIFY(keys);
-    QVERIFY2(keys->text().contains(QStringLiteral("<b>k</b> check")), qPrintable(keys->text()));
-    QVERIFY(keys->text().contains(QStringLiteral("<b>u</b> clean up")));
+    QVERIFY2(keys->text().contains(QStringLiteral("<b>k</b> hygiene")), qPrintable(keys->text()));
+    QVERIFY(!keys->text().contains(QStringLiteral("<b>u</b>")));
 }
 
 // Check's findings are a board widget above the console — a list to act on, not a turn — and a

@@ -70,19 +70,22 @@ then offers Clean up beside its findings. Cleanup retains preview, Stop, Apply a
 its result panel now shares the board-agent area with the format findings. Performance keeps
 its four targets, with updated pane titles and notices. Card-page Check and wire/settings keys
 are unchanged. Parent #74Y5 driver changes were excluded from the landing diff.
+Follow-up updates the existing board-model cleanup tests to enter through Hygiene and registers
+the stable `profile` pane type with the visible title Performance.
 
 ## Tests
+- `ctest -R board --test-dir build` — tests/boardmodel_test.cpp
+- `ctest -R panestatus --test-dir build` — tests/panestatus_test.cpp
 - `QT_QPA_PLATFORM=offscreen build/relay-boardpane-tests hygieneChecksBeforeCleanup` — passed; order, deterministic request, preview, cancel, and explicit Apply.
 - `ctest -R profilepane --test-dir build --output-on-failure` — tests/profilepane_test.cpp
 - `scripts/relay-build --target relay relay-boardpane-tests relay-profilepane-tests` — passed.
 - manual: docs/qa_evidence/2026-09-21-sw1d/README.md
 - `python3 scripts/relay-board.py check` — no SW1D findings; existing board-wide errors remain outside this change.
 
-### Check 2026-09-21 21:31
-- passed · ctest:profilepane — ctest -R profilepane passed for this revision on spark-dcc9, 2026-09-22T01:31:25Z
+### Check 2026-09-21 21:37
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+- passed · ctest:panestatus — ctest -R panestatus passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+- passed · ctest:profilepane — ctest -R profilepane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
 - not-applicable · manual:docs/qa_evidence/2026-09-21-sw1d/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-sw1d/README.md
+- notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
 history: thread
-
-The isolated landing tree also passes both complete CTest suites (`boardpane`, `profilepane`).
-`TestsCommands.check_card("SW1D")` returns no findings after recorded profilepane run
-`20260922T013125Z-cf42` (one pass, no failures, no signals opened).

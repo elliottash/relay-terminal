@@ -289,6 +289,7 @@ const QList<Kind> &kinds() {
         // the Board and answered by the same worker. A tool surface, like the board it
         // hangs off; no glyph of its own yet, so the generic tool mark.
         {QStringLiteral("testsuites"), QStringLiteral("Test suites"), QStringLiteral("tools"), Glyph::Tool},
+        {QStringLiteral("profile"), QStringLiteral("Performance"), QStringLiteral("tools"), Glyph::Tool},
         // The Settings pane splits into Options and Actions (2026-09-18); "settings" is styled as
         // Options until nothing sets it any more.
         {QStringLiteral("options"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},

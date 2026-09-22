@@ -22,3 +22,14 @@ Landed e325845d59af145ea6b692d38e7c526ad48b9f2e after exact-tree build gate. Bot
 boardpane and profilepane suites pass in the isolated landing tree (2/2, 0.25 seconds).
 Recorded profilepane run 20260922T013125Z-cf42 passes and tests_check returns no findings.
 Parent driver changes remain uncommitted by this delivery. Card stays needs-verification.
+
+<!-- relay:entry 20260922T030002Z-s4 author=agent kind=evidence -->
+Check · 1 not-applicable, 3 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T030003Z-s1 author=codex kind=evidence -->
+### Codex · 2026-09-22 03:00
+Follow-up fixes existing board-model tests for Hygiene-first cleanup and the visible Performance
+pane chrome title. All 87 board cases and all four targeted CTest suites pass; recorded run
+20260922T013718Z-2031 opens no signals. GUI screenshot 04-performance-pane.png confirms the
+actual pane title. Tests check retains only an advisory historical board-suite speed notice.
+Preserved parent verify-brief assertions; card remains needs-verification.

@@ -392,6 +392,7 @@ private Q_SLOTS:
         QCOMPARE(tests.label, QStringLiteral("Test suites"));
         QCOMPARE(tests.group, QStringLiteral("tools"));
         QCOMPARE(tests.fill, typeStyle(QStringLiteral("board"), ColourMode::ByGroup, t).fill);
+        QCOMPARE(typeStyle(QStringLiteral("profile"), ColourMode::ByGroup, t).label, QStringLiteral("Performance"));
     }
 
     void byTypeDiffersByGroupShares() {

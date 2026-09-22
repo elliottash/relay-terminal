@@ -36,3 +36,13 @@ Both complete suites pass (2/2, 0.25 seconds), including all existing card navig
 The parent named-driver test is absent from this isolated delivery tree. The recorded
 profilepane run `20260922T013125Z-cf42` passed without opening a signal; subsequent
 `TestsCommands.check_card("SW1D")` returned no findings.
+
+Follow-up: registered the `profile` pane type as **Performance**, including its outer chrome
+band (`04-performance-pane.png`, real isolated Xvfb application, first menu target opened).
+Existing board-model cleanup scenarios now drive Hygiene, receive the format result, then
+exercise stage two. All 87 board-model cases pass. Combined `board`, `boardpane`, `profilepane`
+and `panestatus` CTest run passes 4/4 (2.69 seconds); recorded run
+`20260922T013718Z-2031` also passes all four with no signals opened. `tests_check` has only the
+historical board-suite speed advisory (p95 2.58 s versus p50 0.93 s), no missing/failing test.
+The parent verification-brief assertions were present in the snapshot and excluded from this
+follow-up's own hunks.

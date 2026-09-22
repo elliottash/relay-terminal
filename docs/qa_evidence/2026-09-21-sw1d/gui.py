@@ -11,6 +11,7 @@ BIN = "/home/elliott/repos/relay-terminal/build/relay"
 WORK = "/tmp/claude-1000/sw1d-gui"
 OUT = sys.argv[1]
 W, H = 1600, 1000
+os.environ.pop("RELAY_OPEN_SOCKET", None)
 
 os.makedirs(OUT, exist_ok=True)
 
@@ -144,7 +145,12 @@ try:
     click(find(ws, "Performance"))
     ws = words(shot("03-performance"))
     assert find(ws, "machine") and find(ws, "Python") and find(ws, "app"), ws
-    print("PASS: real application row, Hygiene findings/cleanup stage, four-target Performance menu")
+    keyfocus("Down", 0.2)
+    keyfocus("Return", 1)
+    time.sleep(12)
+    ws = words(shot("04-performance-pane"))
+    assert sum("performance" in w[0].lower() for w in ws) >= 2, ws
+    print("PASS: real application row, Hygiene findings/cleanup stage, four-target Performance menu and pane title")
 finally:
     relay.terminate()
     xvfb.terminate()
