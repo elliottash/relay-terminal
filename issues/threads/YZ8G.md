@@ -144,3 +144,14 @@ Owner: "for apps, the agents should: 1) run tests 2) verify with an AI simulator
 <!-- relay:entry 20260922T003829Z-dj author=claude-code kind=decision -->
 ### Claude Code · 2026-09-22 00:38
 Owner: "how do i test out the new QA approach. is the agent going to design simulation? i think the QA agent should also always think about each step of the user experience , and apps should be built for live simulated drives by agents and humans -- the QA agent tries to optimize this to conserve scarce human tester time". Recorded; #74Y5 filed with its expectations.
+<!-- relay:entry 20260922T010022Z-hx author=claude-code kind=note -->
+### Claude Code · 2026-09-22 01:00
+**Handoff for a new session** (owner: "freshen up the cards with what you have done so i can carry on in another session, give me the list of cards i should continue with"). Five subagents died to a platform-wide API overload (HTTP 529) in the same few minutes; work stopped here rather than retrying blind into it. Full state:
+
+- **#PR4Q** (the gate) — verified, no findings, landed. In `needs-qa-llm`.
+- **#WC3E** (expectations + verification record) — verified, no findings, landed. In `needs-qa-llm`.
+- **#JNYN** (Try it) — implementer landed (`needs-verification`); its independent verifier died to the 529 storm mid-run, after producing real evidence (`docs/qa_evidence/2026-09-21-verify-JNYN/`, untracked) but before writing the `## QA checklist` record or moving the card. **Needs a fresh verifier session** — the evidence dir is a head start, not a substitute.
+- **#1CXD** (Switchboard → Board rename) — see its own thread; mostly landed, Area B1 (the folder in the GUI) is the one real piece of unfinished work, sitting uncommitted under land session `1cxd-b`.
+- **#74Y5** (built to be driven) — status `planned`, not started; correctly waits on #1CXD landing (it touches the same briefs and `BoardPane.cpp`).
+- **#7BM4** — still `needs-verification`. A live end-to-end run (Verify → Try it → answer, on `glm-coding`, a clean build of main) was attempted to give the owner a proven recipe; it died to the same 529 storm right after Verify started (`docs/qa_evidence/2026-09-21-e2e-7BM4/`, 13 screenshots, untracked, incomplete — do not read this as "Verify works", only as "Verify started and rendered its disabled/enabled state and note correctly"). #7BM4's own `## QA checklist` on disk still predates the #WC3E rule change (the implementer wrote it, when today the verifier would) — that's stale content, not a bug; whoever verifies #7BM4 next should follow the new brief, not the old checklist's instructions.
+- **#561P** (main crashes at startup on a fresh profile, model catalog) — still `inbox`, untouched, still blocks any clean-export QA that isn't on the build-gate binary.
