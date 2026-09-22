@@ -27,7 +27,9 @@ import uuid
 BOARD_ALLOW = frozenset(('board_list', 'board_read', 'board_comment',
                    'board_update_card', 'board_move_card'))
 DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_todos'))
-ALLOW = BOARD_ALLOW | DELEGATION_ALLOW
+REMOTE_ALLOW = frozenset(("run_command", "read_file", "list_directory", "write_file", "edit_file"))
+EXEC_ALLOW = REMOTE_ALLOW | frozenset(("run_in_terminal", "command_output", "stop_command"))
+ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW
 WAIT_SECONDS = 10
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
@@ -102,6 +104,21 @@ class Bridge:
             specs = (list(TOOL_SPECS) if self.available else [])
             if self.delegation:
                 specs += delegation_tool_specs() + [TODO_SPEC]
+        # Guest clients cache discovery before a turn has remote context. Keep the remote
+        # schemas stable, but require an explicit host and validate capabilities on every call.
+        from relay_core.tools import TOOLS, JOB_TOOLS, with_host
+        from relay_core.terminal_handoff import SPEC as TERMINAL_SPEC
+        remote = [copy.deepcopy(with_host(s)) for s in TOOLS
+                  if s['function']['name'] in REMOTE_ALLOW]
+        for spec in remote:
+            f = spec['function']
+            f['description'] = ("Operate on the active Relay SSH host over its existing connection. "
+                                "An explicit host is required; this tool never runs locally. " + f['description'])
+            f['parameters']['required'] = [*f['parameters']['required'], 'host']
+            f['parameters']['properties']['host']['description'] = (
+                "Required: the active SSH host named by Relay context. Never omit or guess it.")
+        specs += remote + [TERMINAL_SPEC] + [s for s in JOB_TOOLS
+                    if s['function']['name'] in EXEC_ALLOW]
         specs = copy.deepcopy(specs)
         for spec in specs:
             f = spec['function']
@@ -173,6 +190,19 @@ class Bridge:
                 if not isinstance(args, dict):
                     raise ValueError('Tool arguments must be an object.')
                 args = dict(args)
+                if name in REMOTE_ALLOW and not args.get('host'):
+                    raise ValueError('An explicit active SSH host is required; nothing ran locally.')
+                # Return a job before the MCP transport's deadline, including slow commands.
+                if name == 'run_command':
+                    wait = args.get('timeout_seconds', WAIT_SECONDS)
+                    if isinstance(wait, bool) or not isinstance(wait, int) or wait < 1:
+                        raise ValueError('timeout_seconds must be a positive integer.')
+                    args['timeout_seconds'] = min(wait, WAIT_SECONDS)
+                elif name == 'command_output':
+                    wait = args.get('wait_seconds', 0)
+                    if isinstance(wait, bool) or not isinstance(wait, int) or wait < 0:
+                        raise ValueError('wait_seconds must be a nonnegative integer.')
+                    args['wait_seconds'] = min(wait, WAIT_SECONDS)
                 # Never hold the bridge for an entire model turn. Background children use
                 # Relay's normal manager, task links, transcripts, Stop and idle wake-ups.
                 if name == 'agent':
@@ -190,7 +220,12 @@ class Bridge:
                 # Claude reports its actual model in first-turn init, after Agent.ask
                 # initially signs the board. Refresh from the live worker configuration.
                 self.agent.sign_board()
+                remote_before = copy.deepcopy(self.agent.executor.remote_session) if name in REMOTE_ALLOW else None
                 prepared = self.agent._prepare(name, args)
+                if active[1].is_set():
+                    raise ValueError('Tool was cancelled before execution.')
+                if name in REMOTE_ALLOW and remote_before != self.agent.executor.remote_session:
+                    raise ValueError('The SSH session changed while preparing this tool; nothing was executed. Try again against the current host.')
                 result = self.agent._execute(prepared, getattr(self.agent, '_turn', None))
             except Exception as exc:
                 # Cache even an ambiguous dispatch failure: no automatic write replay.

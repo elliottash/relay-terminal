@@ -129,7 +129,7 @@ class RemoteContextTests(unittest.TestCase):
         self.assertIn("logged into elliott@filly (65.109.126.152) via ssh", note)
         self.assertIn("`/srv/archive/tracelaw`", note)
         self.assertIn("run_command and the file tools", note)
-        self.assertIn("work on this local machine, not on filly", note)
+        self.assertIn("guest bridge tools require host", note)
         self.assertIn('pass host: "filly" to run_command', note)
         self.assertIn('take the same host: "filly"', note)
         # The old line told the model its run_command "cannot interact with the program" — true of
@@ -182,9 +182,9 @@ class RemoteRunCommandTests(unittest.TestCase):
         result = self.run_remote(command="ls -la | head")
         self.assertEqual(result["exit_code"], 0)
         self.assertEqual(result["host"], "filly")
-        self.assertEqual(result["output"].splitlines()[:11],
+        self.assertEqual(result["output"].splitlines()[:13],
                          ["[-S]", f"[{self.socket_path}]", "[-o]", "[ControlMaster=no]", "[-o]", "[BatchMode=yes]",
-                          "[-o]", "[ConnectTimeout=10]", "[-T]", "[filly]", "[--]"])
+                          "[-o]", "[ProxyCommand=false]", "[-o]", "[ConnectTimeout=10]", "[-T]", "[filly]", "[--]"])
         self.assertTrue(result["output"].endswith("[cd /srv/archive/tracelaw || exit 1\nls -la | head]\n"))
 
     def test_cwd_is_quoted_and_defaults(self):
@@ -311,9 +311,9 @@ class RemoteFileToolTests(unittest.TestCase):
         self.fake_ssh("echo")
         result = self.call("read_file", path="notes.md")
         printed = result["content"]
-        self.assertEqual(printed.splitlines()[:11],
+        self.assertEqual(printed.splitlines()[:13],
                          ["[-S]", f"[{self.socket_path}]", "[-o]", "[ControlMaster=no]", "[-o]",
-                          "[BatchMode=yes]", "[-o]", "[ConnectTimeout=10]", "[-T]", "[filly]", "[--]"])
+                          "[BatchMode=yes]", "[-o]", "[ProxyCommand=false]", "[-o]", "[ConnectTimeout=10]", "[-T]", "[filly]", "[--]"])
         # A relative path: the script is run in the remote shell's directory, inside `sh -c`.
         self.assertIn(f"[cd {self.home} || exit 1\nsh -c '", printed)
         self.assertIn('cat -- "$p" | head -c 131073', printed)

@@ -89,8 +89,8 @@ def context_note(session: dict, *, delegated: bool = False) -> str:
         lines.append(f"The shell on {host} is at its prompt.")
     elif session.get("at_prompt") is False:
         lines.append(f"A program may be running in the session on {host}.")
-    lines.append(f"Without host, run_command and the file tools (read_file, list_directory, write_file, "
-                 f"edit_file) work on this local machine, not on {host}.")
+    lines.append(f"With Relay native tools, run_command and the file tools run locally when host is omitted; guest bridge tools require host. File tools (read_file, list_directory, write_file, "
+                 f"edit_file) also need host to reach {host}.")
     if usable(session):
         lines.append(
             f"To run a command on {host}, pass host: \"{host}\" to run_command. It runs over the user's own "
@@ -127,8 +127,7 @@ def check_host(session: dict | None, host: str) -> dict:
     """The session run_command may use for `host`, or a ValueError the model can act on."""
     if not session:
         raise ValueError(f"run_command host \"{host}\": the user's terminal is not logged into any host "
-                         "over ssh right now, so there is no connection to reuse. Omit host to run on this "
-                         "machine, or ask the user to ssh in first.")
+                         "over ssh right now, so there is no connection to reuse. Ask the user to ssh in first.")
     current = session.get("host", "")
     if host != current:
         raise ValueError(f"host \"{host}\" is not the host the user's terminal is logged into ({current}). "
@@ -172,5 +171,5 @@ def remote_script(command: str, cwd: str | None) -> str:
 def ssh_argv(session: dict, command: str, cwd: str | None) -> list[str]:
     """`ssh -S <socket> … -T <host> -- <script>`: the user's master connection, never a new login
     prompt (BatchMode), and no tty. ssh hands the script to the remote user's login shell."""
-    return ["ssh", "-S", session["control_path"], "-o", "ControlMaster=no", "-o", "BatchMode=yes",
+    return ["ssh", "-S", session["control_path"], "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-o", "ProxyCommand=false",
             "-o", f"ConnectTimeout={CONNECT_TIMEOUT}", "-T", session["host"], "--", remote_script(command, cwd)]

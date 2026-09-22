@@ -416,3 +416,35 @@ code with it.
 - **Claude Desktop, Codex, Zed, VS Code** run a server on the remote; the lighter pattern that fits
   Relay is kitty's and Warp's: reuse the user's authenticated connection with `ssh -S`.
 - **mosh** syncs the screen, not the byte stream: OSC 7/133/1337 never arrive; only titles and OSC 52.
+
+## SSH parity and guest tools (#S7GX, #S7KC, #S7CX)
+
+The SSH badge and host/cwd chip describe the connection. The command activity line describes only
+an actual remote command; an idle SSH shell has no running-command line. Composer commands enter
+the normal queue, not a busy program's stdin. Use Take control for raw program answers. Remote
+Bash/zsh hooks preserve status, insert the same prompt/output spacing as the local shell and mark
+echoed rows (character-count wrap estimate, as locally). Completion records, failure handling,
+watch/fix and terminal handoff finish at each remote command, rather than at disconnect.
+
+Relay confirms its own shell hooks with a per-login nonce, separately from third-party OSC 133
+marks. Each command suspends shared-host capabilities until that shell confirms its next prompt.
+A nested SSH/tmux shell cannot inherit that confirmation: host tools and remote completion are
+unavailable there, rather than accidentally using the outer connection. Take control still works.
+This is conservative: tools are also unavailable while the visible remote shell is busy or when
+Relay enhancement is off. Returning to the confirmed shell restores them. Context changes reach
+an active worker through `remote_session_update`, including revocation on exit.
+
+Tab and @ completion query the confirmed host using bounded asynchronous SSH processes. Replies
+are discarded after edits, cd or reconnect; local files and commands never supply fallback
+candidates in SSH. @ attachments carry an explicit host, are read on that connection, and identify
+their source in the prompt. Remote command suggestions are scoped to host/cwd. The local project
+and agent workspace remain local. Remote Bash is required for completion; unsupported hosts
+report unavailable/failure instead of silently listing local paths.
+
+The guest MCP bridge exposes run_command, read_file, list_directory, write_file and edit_file with
+**required host**, plus command_output, stop_command and the per-turn run_in_terminal handoff.
+Discovery is stable even before login; execution validates current capabilities on every call.
+Commands return jobs within ten seconds. Native preparation, approvals and cancellation still
+apply. A changed SSH context between preparation and execution refuses the call. Both GUI file
+operations and backend tools set ProxyCommand=false alongside ControlMaster=no: if the existing
+socket dies, OpenSSH cannot fall back to a fresh authenticated network connection.

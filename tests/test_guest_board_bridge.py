@@ -9,7 +9,7 @@ from unittest import mock
 
 from relay_core import board as B, board_tools as T
 from relay_core.agent import Agent
-from relay_core.guest_board_bridge import BOARD_ALLOW, Bridge, exchange
+from relay_core.guest_board_bridge import BOARD_ALLOW, EXEC_ALLOW, REMOTE_ALLOW, Bridge, exchange
 from relay_core import guest_harness_provider as P
 from relay_core.guest_harness import TurnResult
 from tests.test_board_tools import CONFIG
@@ -50,7 +50,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_discovery_allowlist_and_unavailable(self):
         specs = exchange(self.cap, 'tools/list')['tools']
-        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW)
+        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW | EXEC_ALLOW)
         self.assertTrue(all(s['inputSchema']['type']=='object' for s in specs))
         self.assertEqual(self.call()['code'], 'unavailable')
         self.active()
@@ -58,7 +58,7 @@ class BridgeTests(unittest.TestCase):
         self.assertNotIn('error', self.call(key='active'))
         self.assertEqual(self.call('board_create_card', key='2')['code'], 'unknown_tool')
         self.agent.board = None
-        self.assertEqual(exchange(self.cap, 'tools/list')['tools'], [])
+        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']}, EXEC_ALLOW)
 
     def test_capability_isolation(self):
         self.active()
@@ -121,7 +121,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(err,'')
         rows = sorted((json.loads(line) for line in out.splitlines()), key=lambda r: r['id'] if r['id'] is not None else 99)
         self.assertEqual(rows[0]['result']['protocolVersion'],'2025-03-26')
-        self.assertEqual(len(rows[1]['result']['tools']),5)
+        self.assertEqual(len(rows[1]['result']['tools']),len(BOARD_ALLOW | EXEC_ALLOW))
         self.assertFalse(rows[2]['result']['isError'])
         self.assertIn('error', rows[3])
 
@@ -196,3 +196,38 @@ class BridgeTests(unittest.TestCase):
         text = B.policy_text(self.board)
         self.assertIn('relay_board', text)
         self.assertIn('Without the board tools', text)
+
+    def test_remote_schemas_stable_and_never_fall_back_to_local(self):
+        self.active()
+        before = self.bridge.specs()
+        for spec in before:
+            if spec['name'] in REMOTE_ALLOW:
+                self.assertIn('host', spec['inputSchema']['required'])
+        result = self.call('run_command', {'command':'echo must-not-run'}, key='nohost')
+        self.assertIn('explicit active SSH host', result['error'])
+        result = self.call('run_command', {'command':'echo must-not-run','host':'box'}, key='noremote')
+        self.assertIn('not logged into any host', result['error'])
+        self.agent.executor.set_remote_session({'host':'box','reachable':False})
+        self.assertEqual(before, self.bridge.specs())
+        result = self.call('run_command', {'command':'echo must-not-run','host':'other'}, key='wrong')
+        self.assertIn('not the host', result['error'])
+        result = self.call('run_command', {'command':'echo must-not-run','host':'box'}, key='unshared')
+        self.assertIn("can't be shared", result['error'])
+
+    def test_terminal_capability_checked_per_turn(self):
+        self.active()
+        args={'command':'echo test','mode':'prefill','intent':'Test terminal bridge'}
+        result=self.call('run_in_terminal',args,key='not-offered')
+        self.assertIn('error',result)
+        self.agent.executor.terminal.begin_turn('prefill')
+        with mock.patch.object(self.agent.executor.terminal, 'execute', return_value={'ok':True,'action':'prefilled'}) as run:
+            result=self.call('run_in_terminal',args,key='offered')
+        self.assertTrue(result['ok']); run.assert_called_once()
+        self.agent.executor.terminal.end_turn()
+        self.assertIn('error',self.call('run_in_terminal',args,key='revoked'))
+
+    def test_both_adapter_names_preserve_remote_tool_and_host(self):
+        turn=P._Turn(self.provider,self.agent,None,self.events.append,threading.Event())
+        for source in ({'server':'relay_board','tool':'run_command','arguments':{'command':'pwd','host':'box'},'_guest_tool':'mcpToolCall'},
+                       {'command':'pwd','host':'box','_guest_tool':'mcp__relay_board__run_command'}):
+            self.assertEqual(turn._tool_name({'tool':'other','input':source})[0],'run_command')
