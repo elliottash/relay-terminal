@@ -8,7 +8,7 @@ implemented_by: openai/gpt-5.6-sol via codex
 rank: m7
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-phantom-plan-model-PMX7/README.md], related: [HR5E], github: null}
+links: {plans: [], commits: [e654c416f1e1db2c8c512a56bbdf812fc80a0143], evidence: [docs/qa_evidence/2026-09-21-phantom-plan-model-PMX7/README.md], related: [HR5E], github: null}
 ---
 # Plan mode still activates phantom model changes
 

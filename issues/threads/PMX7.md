@@ -19,3 +19,6 @@ Claimed this follow-up to #HR5E. Session `19a7fd1b741f433ab903e0aea3b65703` logg
 
 <!-- relay:entry 20260922T031500Z-pd author=agent kind=event model=gpt-5.6-sol pane=519487c9 turn=5f9e5852a0bf4f4a8a8ff81fc7e532c0/5def37ce41954c2ba3b9d98e6549c93f -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented the one-shot legacy planning-override migration; focused job settings, endpoint/guest plan routing, and the full Relay build pass. · evidence docs/qa_evidence/2026-09-21-phantom-plan-model-PMX7/README.md · implemented_by openai/gpt-5.6-sol via codex
+
+<!-- relay:entry 20260922T031500Z-pe author=agent kind=event model=gpt-5.6-sol pane=519487c9 turn=5f9e5852a0bf4f4a8a8ff81fc7e532c0/5def37ce41954c2ba3b9d98e6549c93f -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-phantom-p… → {"plans": [], "commits": ["e654c416f1e1db2c8c512a56bbdf812fc80a0143"], "evidence…
