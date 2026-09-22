@@ -8,8 +8,8 @@ waiting_on: owner
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzg
 created: '2026-09-21'
-source: 'owner, 2026-09-21'
-links: {plans: [], commits: [], evidence: [], related: [YZ8G, SW1D], github: null}
+source: owner, 2026-09-21
+links: {plans: [], commits: [], evidence: [reports/Relay QA attack system.md, research_notes/Relay QA attack system/], related: [YZ8G, SW1D], github: null}
 ---
 # Tests becomes the front door to a QA attack system: agents that try to break the project
 
@@ -73,3 +73,17 @@ idea needs (`docs/research/qa-across-fields/`, `docs/QA-ACROSS-FIELDS-RESEARCH.m
    something new like fuzzing? **Recommendation: code review first** — it needs no new
    infrastructure and gives an early read on the false-positive rate this whole idea lives or dies
    by.
+
+## Planning notes
+Research requested by owner, 2026-09-21; full synthesis: `reports/Relay QA attack system.md`, supporting notes: `research_notes/Relay QA attack system/`.
+
+Discussion recommendations, not approved implementation scope:
+- Keep Tests as entry point; distinguish known checks from advisory findings. Separate discovery, replay/adjudication, and repair.
+- Start with bounded, on-demand review of one frozen change and one executable attack harness; evaluate usefulness before recurring scheduling or gates.
+- Reuse Tests history/UI, jobs, generic agents and confirmed-failure signals. Attack/finding records, complete replay manifests, durable scheduling and filesystem/network containment are additional work.
+- Mutation tests test-suite sensitivity; Mull supports changed-line runs, so scheduling should follow measured cost rather than a categorical rule.
+- W7-CRITIC originals were found, but completed empirical results were not located. Adapt its matched controls and externally documented defects; do not describe it as validated deployment.
+- Different-family review is a recommendation/hypothesis, not proof of independence. Measure calibration and human triage cost.
+- Installed security-review / ultra cloud-review capability is unverified; generic agents are verified in local code.
+
+The earlier recommendation to hold research is superseded by the owner's request to research now. Feature remains discussing, waiting on owner; no attacks or implementation authorized by this research.
