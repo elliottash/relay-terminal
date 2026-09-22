@@ -63,7 +63,7 @@ class NativeTryItTests(unittest.TestCase):
                 self.assertEqual(TI._app_binary(root), built)
 
     def test_linux_defaults_are_unchanged(self):
-        with mock.patch.object(TI, 'WINDOWS', False):
+        with mock.patch.object(TI, 'WINDOWS', False), mock.patch.object(TI.sys, 'platform', 'linux'):
             self.assertEqual(TI._app_binary(Path('/project')), Path('/project/build/relay'))
             self.assertEqual(TI._stage_command('docs/stage.sh'), 'bash docs/stage.sh')
             self.assertIn('Xvfb', TI._platform_brief())

@@ -692,10 +692,18 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
 def _stage_command(path: str) -> str:
     if WINDOWS:
         return "pwsh -NoLogo -NoProfile -File '" + path.replace("'", "''") + "'"
-    return "bash " + shlex.quote(path)
+    interpreter = os.environ.get("RELAY_BASH") if sys.platform == "darwin" else None
+    return shlex.quote(interpreter or "bash") + " " + shlex.quote(path)
 
 
 def _app_binary(repo: Path) -> Path:
+    if not WINDOWS and sys.platform == "darwin":
+        candidates = [repo / "build" / "Relay.app" / "Contents" / "MacOS" / "relay",
+                      repo / "build" / "relay.app" / "Contents" / "MacOS" / "relay",
+                      repo / "build-macos" / "Relay.app" / "Contents" / "MacOS" / "relay",
+                      Path(sys.executable).parents[3] / "MacOS" / "relay",
+                      repo / "build" / "relay"]
+        return next((path for path in candidates if path.is_file()), candidates[0])
     if not WINDOWS:
         return repo / "build" / "relay"
     candidates = [repo / "build" / "Release" / "relay.exe", repo / "build" / "relay.exe",
@@ -708,6 +716,23 @@ def _app_binary(repo: Path) -> Path:
 
 def _platform_brief() -> str:
     brief = card_brief("tryit")
+    if not WINDOWS and sys.platform == "darwin":
+        brief = brief.replace("`build/relay`", "the app bundle executable named above")
+        start = brief.index("For the app:\n")
+        end = brief.index("For a backend behaviour", start)
+        return brief[:start] + """For the app on native macOS:
+
+- Use an isolated disposable profile: put HOME, TMPDIR, XDG_CONFIG_HOME,
+  XDG_DATA_HOME and XDG_CACHE_HOME under the fixture directory and set RELAY_KEYRING=off.
+  Do not touch the owner's real profile or login Keychain. Drive a separate test user/session;
+  if none is available, leave the human interaction as a manual verification step.
+- Use native macOS Accessibility automation or explicit mouse/key input in the test session.
+  If Accessibility or Screen Recording permission is unavailable, report the blocked check;
+  never claim screenshots or interactions that did not happen. Do not type into Relay's shell.
+- Save one screenshot per step under the evidence directory. Run stage.sh with the private
+  Bash interpreter named by RELAY_BASH, and launch the app bundle executable named above.
+
+""" + brief[end:]
     if not WINDOWS:
         return brief
     brief = brief.replace("stage.sh", "stage.ps1").replace("`build/relay`", "the binary named above")
