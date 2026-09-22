@@ -9,7 +9,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzf
 created: '2026-09-21'
 source: 'owner, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-sw1d/], related: [YZ8G, 1CXD, SJTR], github: null}
+links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e], evidence: [docs/qa_evidence/2026-09-21-sw1d/], related: [YZ8G, 1CXD, SJTR], github: null}
 ---
 # Hygiene and Performance: the board's tool row goes from four buttons to three
 
@@ -77,3 +77,12 @@ are unchanged. Parent #74Y5 driver changes were excluded from the landing diff.
 - `scripts/relay-build --target relay relay-boardpane-tests relay-profilepane-tests` — passed.
 - manual: docs/qa_evidence/2026-09-21-sw1d/README.md
 - `python3 scripts/relay-board.py check` — no SW1D findings; existing board-wide errors remain outside this change.
+
+### Check 2026-09-21 21:31
+- passed · ctest:profilepane — ctest -R profilepane passed for this revision on spark-dcc9, 2026-09-22T01:31:25Z
+- not-applicable · manual:docs/qa_evidence/2026-09-21-sw1d/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-sw1d/README.md
+history: thread
+
+The isolated landing tree also passes both complete CTest suites (`boardpane`, `profilepane`).
+`TestsCommands.check_card("SW1D")` returns no findings after recorded profilepane run
+`20260922T013125Z-cf42` (one pass, no failures, no signals opened).
