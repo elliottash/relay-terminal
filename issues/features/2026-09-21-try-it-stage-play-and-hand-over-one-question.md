@@ -1,14 +1,14 @@
 ---
 id: JNYN
 type: work
-status: planned
+status: needs-verification
 labels: [feature, switchboard, qa]
 component: [gui, worker]
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzc
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [], evidence: [], related: [YZ8G, 7BM4], github: null}
+links: {plans: [], commits: [03701acf, 79ef050e, bca9a82e], evidence: [docs/qa_evidence/2026-09-21-tryit/], related: [YZ8G, 7BM4, WC3E], github: null}
 ---
 # Try it: stage the situation, complete the mechanical pass, hand the person one task and one question
 
@@ -22,3 +22,43 @@ Step 3 of #YZ8G's plan and decision 1 of that card ("a button after verify … t
 - The person's answer goes in the thread as their verdict, and the expected result is revealed after it; the card's `## Human QA` is generated from `## Try it`, not typed twice.
 - It works for a card about the GUI (Xvfb-isolated app, xdotool), a backend behaviour (a request and a response or a failure reproduction), and a command-line tool (a before/after on a real file), on this repository's own board.
 Failure would show as: the brief containing the answer; a person asked to run tests or attach evidence by hand; a Try it that needs the owner to set up a display or a profile; a staging failure surfacing as a review request.
+
+## Execution Summary
+Try it is protocol § 31.10. Three commits:
+
+- **03701acf** — `backend/relay_core/tryit_protocol.py`: `try_run`, `try_stop` and `try_answer`
+  on the board worker, built like `board_cleanup` (a request, a tagged agent turn, streamed
+  `tryit` progress, one `finished {out, section_written}`). The turn's whole instruction is
+  `backend/relay_core/board_tryit_brief.md`, versioned beside `board_policy.md`. A turn that
+  could not stage leaves a `note` beginning `Try it could not be staged:` and **no** section, so
+  a card never asks for a review of something that was never staged. `try_answer` puts the
+  person's words on the thread as a `decision` that quotes them (policy rule 4 — there is no
+  `verdict` entry kind), breaks the seal on `expected.md` under `## Try it`, and generates
+  `## Human QA` from the section and the answer. `board_try` in `board_tools.py` hands a
+  terminal-pane agent the same brief, gated during a cleanup exactly as `board_claim` is.
+  Wired in `board_protocol.py` (`TRYIT_TYPES`, `_tryit`, one branch in `dispatch`, one in
+  `observe`).
+- **79ef050e** — the card page: **Try it (y)** on the action row beside Verify from
+  needs-verification on, saying "Trying…" while the turn runs; a `## Try it` strip over the
+  body with the unanswered question in amber, an **Open it** button for the one line the
+  section names, and a one-line answer box that sends `try_answer` on Enter; the run as one
+  line in the board's notice area, and the turn's own events swallowed so none of its
+  commentary reaches the card's thread. `BoardView::onRunCommand` is wired in `RelayWindow.h`
+  to `Pane::queueCommand`.
+- **bca9a82e** — § 31.10 in `docs/AGENT-SESSIONS-PROTOCOL.md`, and `## Human QA` generated in
+  the shape `docs/SWITCHBOARD-FORMAT.md` 2.8 fixes (a numbered question with an indented
+  `Answer:` line), so Try it and `board_tools.unanswered_human_qa`'s close gate interlock.
+
+Owner's three steps (2026-09-21): Try it is the third. When Verify (#WC3E) has left a `staged:`
+directory — `docs/qa_evidence/<date>-verify-<ID>/stage.sh` — `verify_staging` finds it and the
+turn reuses it instead of replaying the mechanical pass; the `started` event says `reusing`.
+
+## Tests
+- `tests/test_tryit_protocol.py` — 28 cases: the turn's started / progress / finished events,
+  the staging-failure path (a note and no section), `try_answer` writing the verdict, the
+  reveal and `## Human QA`, "already running", `try_stop`, reuse of a Verify staging, the
+  section parser, and `board_try`'s gate.
+- `ctest -R cardtests` — the card page's existing suite, for the `CardDetail` edits.
+- `manual: docs/qa_evidence/2026-09-21-tryit/` — Try it pressed for real on #7BM4, from a
+  Relay on an isolated Xvfb display and profile, with the Switchboard agent on its configured
+  model.
