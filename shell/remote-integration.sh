@@ -1,4 +1,4 @@
-# Relay's remote shell integration, typed once per login (docs/SSH-AND-MOSH.md §3). bash/zsh only.
+# Remote bash/zsh integration (docs/SSH-AND-MOSH.md).
 if [ -n "${BASH_VERSION-}${ZSH_VERSION-}" ]; then case $- in *i*)
 case ${RELAY_R-} in ''|0*|*[!0-9]*) ;; *) printf '\033[%sA\r\033[J' "$RELAY_R";; esac
 if [ -z "${__relay_r-}" ]; then
@@ -18,7 +18,7 @@ case $(tmux show -gv allow-passthrough 2>/dev/null) in on|all) ;;
 else case ${STY:+screen}${TERM-} in screen*) __relay_r_e='\033P' __relay_r_f='\033\\' __relay_r_l=200;; esac
 fi
 __relay_r_o() { printf "$__relay_r_e\033]%s\007$__relay_r_f" "$1"; }
-__relay_r_confirm() { [ -n "${__relay_r_token-}" ] && __relay_r_o "777;notify;relay-shell;$__relay_r_token"; return 0; }
+__relay_r_confirm() { [ -n "${__relay_r_token-}" ] && __relay_r_o "777;notify;relay-shell;$__relay_r_token;$(printf %s "$PATH" | base64 | tr -d '\n')"; return 0; }
 __relay_r_rows_for() {
 local text=$1 line width rows=0 cols=${COLUMNS:-80}
 set -- $(stty size 2>/dev/null); cols=${2:-$cols}
@@ -79,7 +79,7 @@ case $__relay_r_q in 'declare -a'*) eval 'PROMPT_COMMAND=(__relay_r_pc "${PROMPT
 *) PROMPT_COMMAND="__relay_r_pc
 ${PROMPT_COMMAND-}
 __relay_r_ps";; esac
-# Exported, it would reach a later tmux, whose shell has no __relay_r_pc: keep it, unexport it.
+# Don't export hooks to later shells.
 case ${__relay_r_q%% PROMPT_COMMAND*} in *x*) export -n PROMPT_COMMAND;; esac
 case :${HISTCONTROL-}: in *:ignorespace:*|*:ignoreboth:*) ;; *) HISTCONTROL=${HISTCONTROL:+$HISTCONTROL:}ignorespace;; esac
 __relay_r_n=$(HISTTIMEFORMAT= history 1)

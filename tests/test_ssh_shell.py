@@ -373,6 +373,15 @@ class RemoteScriptTests(unittest.TestCase):
         self.addCleanup(shell.close)
         return shell
 
+    def test_confirmation_carries_interactive_path(self):
+        shell = self.bash()
+        shell.run("RELAY_REMOTE_TOKEN=path-test")
+        shell.run(typed_line(1))
+        out = shell.run("export PATH='/tmp/remote bin:'\"$PATH\"")
+        prefix = b"\x1b]777;notify;relay-shell;path-test;"
+        payload = out.split(prefix)[-1].split(b"\x07")[0]
+        self.assertTrue(base64.b64decode(payload).startswith(b"/tmp/remote bin:"))
+
     def test_staged_multiline_marks_input_once(self):
         shell = self.bash()
         shell.run(typed_line(2))

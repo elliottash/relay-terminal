@@ -10871,8 +10871,9 @@ private:
         };
         // OSC 133 prompt marks: Relay keeps its own command state from the Bash bridge, so the
         // marks are only remembered here (engine panes use them to jump between prompts).
-        m_backend->onShellIntegration = [this](const QString &token) {
-            if (!m_login.active || token != m_login.token) return;
+        m_backend->onShellIntegration = [this](const QString &confirmation) {
+            if (!m_login.active || confirmation.section(';', 0, 0) != m_login.token) return;
+            m_login.path = QString::fromUtf8(QByteArray::fromBase64(confirmation.section(';', 1).toLatin1()));
             if (!m_login.enhanced) {
                 m_capture.clear(); // bootstrap bytes are presentation, not user output
                 finishCommandCapture(-1); // the outer transport is no longer the command unit
@@ -16496,6 +16497,7 @@ private:
         const bool commands = !attachment && range.commands && !prefix.contains('/') && !prefix.startsWith('~');
         // NUL separated records permit filenames containing spaces. Never eval user input.
         const QString body = QStringLiteral(R"SH(cd -- "$1" || exit
+if [ -n "$4" ]; then PATH=$4; export PATH; fi
 p=$2
 case "$p" in '~/'*) p=$HOME/${p:2};; esac
 n=0
@@ -16512,7 +16514,8 @@ fi
 )SH");
         const QString script = QStringLiteral("bash -c ") + relay::remote::shellQuote(body)
             + QStringLiteral(" -- ") + relay::remote::shellQuote(cwd.isEmpty() ? QStringLiteral(".") : cwd)
-            + ' ' + relay::remote::shellQuote(prefix) + ' ' + (commands ? QStringLiteral("command") : QStringLiteral("file"));
+            + ' ' + relay::remote::shellQuote(prefix) + ' ' + (commands ? QStringLiteral("command") : QStringLiteral("file"))
+            + ' ' + relay::remote::shellQuote(m_login.path);
         if (m_remoteCompletion) m_remoteCompletion->kill();
         auto *process = new QProcess(this);
         m_remoteCompletion = process;
@@ -18830,7 +18833,7 @@ private:
     bool m_altScreen = false, m_waiting = false, m_remoteHandled = false, m_remoteProgram = false;
     // An ssh or mosh login in the foreground (card #S5SH): see beginLogin().
     struct RemoteLogin {
-        QString token, observedHost, command, commandCwd;
+        QString token, observedHost, command, commandCwd, path;
         int pendingExit = -1;
         QElapsedTimer commandClock;
         bool enhanced = false, identityReady = false;
