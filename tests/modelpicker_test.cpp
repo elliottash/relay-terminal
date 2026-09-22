@@ -516,10 +516,18 @@ private Q_SLOTS:
         // Each header carries its class's "show this class in the box" switch and a one-line note.
         QTreeWidgetItem *mainHead = classHeader(picker.list(), QStringLiteral("main"));
         QVERIFY(mainHead != nullptr);
-        QVERIFY(mainHead->text(ColModel).startsWith(QStringLiteral("main")));
-        QVERIFY(mainHead->text(ColModel).contains(QStringLiteral("new panes start on rank 1")));
+        QCOMPARE(mainHead->text(ColModel), QStringLiteral("main"));
+        // The note goes in the wide column: the model column is the narrow one and elided it.
+        QCOMPARE(mainHead->text(ColVia), QStringLiteral("new panes start on rank 1"));
         QCOMPARE(mainHead->checkState(ColBox), Qt::Checked);
-        // …and rank 1 of main still says what it is, on the row rather than in a tab's tooltip.
+        // Rank 1 of main says what it is once, on the section's header: the row said it too until
+        // the two together cost the model column a third of its width and elided the name.
+        QVERIFY(!rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->text(ColModel)
+                     .contains(QStringLiteral("new panes start here")));
+        QVERIFY(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->toolTip(ColModel)
+                    .contains(QStringLiteral("rank 1 of main")));
+        // …and on a single-class page, which has no header, the row still carries it.
+        picker.setTier(QStringLiteral("main"));
         QVERIFY(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->text(ColModel)
                     .contains(QStringLiteral("new panes start here")));
     }

@@ -5,6 +5,7 @@
 
 #include <QAbstractItemView>
 #include <QCheckBox>
+#include <QColor>
 #include <QComboBox>
 #include <QCompleter>
 #include <QCoreApplication>
@@ -64,11 +65,13 @@ const QString kMain = QStringLiteral("main");
 // The one line under a class's name on the sectioned page: what running in that class means, so
 // the four headers are not four bare words (owner, 2026-09-21: "a header line … and a one-line
 // note such as 'new panes start on rank 1' for main").
+// Short enough to fit the column beside the model's name at pane width — the first run of the
+// evidence script drew "what /high runs on, and…" and said nothing.
 QString classNote(const QString &tier) {
-    if (tier == QStringLiteral("high")) return QStringLiteral("what /high runs on, and a plan turn");
+    if (tier == QStringLiteral("high")) return QStringLiteral("/high, and plan mode");
     if (tier == kMain) return QStringLiteral("new panes start on rank 1");
-    if (tier == QStringLiteral("flash")) return QStringLiteral("what /flash runs on, and the quick jobs");
-    if (tier == QStringLiteral("local")) return QStringLiteral("the model servers on this machine");
+    if (tier == QStringLiteral("flash")) return QStringLiteral("/flash, and quick jobs");
+    if (tier == QStringLiteral("local")) return QStringLiteral("this machine's own models");
     return QString();
 }
 
@@ -199,9 +202,16 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     m_list->setUniformRowHeights(true);
     m_list->setAllColumnsShowFocus(true);
     m_list->header()->setStretchLastSection(false);
+    // **Two** stretch columns, not one. `via` sized to its contents and the model column took what
+    // was left, which on a pane half a window wide was about 145 px — so the one thing rule 1 says
+    // every surface must print was drawn as "claude-opu…" while "anthropic (claude) · pay-as-you-go"
+    // had room to spare (docs/qa_evidence/2026-09-21-models-pane-review is the run that showed it).
+    // Sharing the space elides the provider first, which is the column whose text repeats down the
+    // page and whose tooltip says it in full.
     m_list->header()->setSectionResizeMode(ColModel, QHeaderView::Stretch);
+    m_list->header()->setSectionResizeMode(ColVia, QHeaderView::Stretch);
     for (int c = 0; c < ColCount; ++c)
-        if (c != ColModel) m_list->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
+        if (c != ColModel && c != ColVia) m_list->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     m_list->setTextElideMode(Qt::ElideRight);
     m_list->setDragDropOverwriteMode(false);
     m_list->setDefaultDropAction(Qt::MoveAction);
@@ -558,10 +568,11 @@ void ModelPicker::addSection(const QString &title, const QString &tier) {
 // (design 5.3), sitting directly above the cutoff ticks it governs — one column, one question,
 // read down. The class and its note go in the model column, which is the one that stretches.
 QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
+    // The class in the model column and its note in **via**: the note is a sentence and the model
+    // column is the narrow one, so a note written there was drawn as "main · new pane…" while the
+    // wide column beside it sat empty.
     const QString note = classNote(tier);
-    auto *item = new QTreeWidgetItem(m_list, QStringList{
-        QString(), QString(), QString(),
-        note.isEmpty() ? tier : tier + QStringLiteral("   · ") + note});
+    auto *item = new QTreeWidgetItem(m_list, QStringList{QString(), QString(), QString(), tier, note});
     item->setData(0, SectionRole, true);        // not a model: never selected, never used, never moved
     item->setData(0, ClassHeadRole, true);
     item->setData(0, TierRole, tier);
@@ -571,6 +582,13 @@ QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
     QFont font = item->font(ColModel);
     font.setBold(true);
     item->setFont(ColModel, font);
+    item->setFont(ColVia, font);
+    // "divided sections" (owner, 2026-09-21) — a band across the header row, a step off the list's
+    // own background rather than a colour of its own, so it follows a theme change and is visible
+    // in a light one and a dark one alike.
+    const QColor base = m_list->palette().color(QPalette::Base);
+    const QColor band = base.lightness() < 128 ? base.lighter(155) : base.darker(110);
+    for (int c = 0; c < ColCount; ++c) item->setBackground(c, band);
     const QString tip = boxClassTier(tier)
         ? QStringLiteral("%1 · %2. The tick is whether alt+m shows this class at all; the ticks below it "
                          "say how far down").arg(tier, note)
@@ -601,7 +619,9 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     const bool dead = !entry || !entry->usable || until >= 0;
     QString name = entry ? entry->name : item.key;
     if (curation::isFavorite(item.key)) name.prepend(QStringLiteral("★ "));
-    if (rank == 1 && tier == kMain) name += QStringLiteral("   · new panes start here");
+    // …and on the sectioned page main's own header already says it, so the row does not: the two
+    // together cost the model column a third of its width and elided the name (rule 1).
+    if (rank == 1 && tier == kMain && !sectionsPage()) name += QStringLiteral("   · new panes start here");
     QString left;
     if (!entry) left = QStringLiteral("unavailable");
     else if (!entry->usable) left = QStringLiteral("no key");
