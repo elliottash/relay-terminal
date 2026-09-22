@@ -126,7 +126,7 @@ KeysDialog::KeysDialog(QWidget *parent) : QDialog(parent) {
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item) {
         const QString id = item ? item->data(0, PresetRole).toString() : QString();
         // Relay Free has no key to type: a double click on its row is not a request for one.
-        if (!id.isEmpty() && !item->data(0, HostedRole).toBool()) addOrReplace(id, item->text(KeyProvider));
+        if (!id.isEmpty() && id != QStringLiteral("relay-free")) addOrReplace(id, item->text(KeyProvider));
     });
     connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { updateButtons(); });
 }

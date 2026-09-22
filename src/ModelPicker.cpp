@@ -628,7 +628,8 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     if (rank == 1 && tier == kMain && !sectionsPage()) name += QStringLiteral("   · new panes start here");
     QString left;
     if (!entry) left = QStringLiteral("unavailable");
-    else if (!entry->usable) left = QStringLiteral("no key");
+    else if (!entry->usable) left = entry->preset == QStringLiteral("relay-pro")
+        ? QStringLiteral("no access") : QStringLiteral("no key");
     else if (until >= 0) left = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
     else left = percent(percentLeft(m_context.catalog, entry->preset));
     QString level;
