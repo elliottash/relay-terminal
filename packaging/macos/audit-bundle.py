@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Audit and ad-hoc sign every native binary in a relocatable macOS application."""
 import argparse
+import plistlib
 from pathlib import Path
 import subprocess
 
@@ -20,6 +21,8 @@ def audit(bundle, arch, sign):
     binaries = list(native_files(bundle))
     if not binaries:
         raise RuntimeError('Bundle has no Mach-O binaries')
+    info = plistlib.loads((bundle/'Contents/Info.plist').read_bytes())
+    main_executable = bundle/'Contents/MacOS'/info['CFBundleExecutable']
     for path in binaries:
         arches = output('lipo','-archs',str(path)).strip().split()
         expected = 'x86_64' if arch == 'x64' else 'arm64'
@@ -45,7 +48,9 @@ def audit(bundle, arch, sign):
             if dep.startswith(('/usr/lib/','/System/Library/','@rpath/','@loader_path/','@executable_path/')):
                 continue
             raise RuntimeError(f'{path}: non-relocatable dependency {dep}')
-        if sign:
+        # Signing the main executable signs its enclosing app, which must wait until
+        # every nested native component and framework has its final signature.
+        if sign and path != main_executable:
             subprocess.run(['codesign','--force','--sign','-','--timestamp=none',str(path)],check=True)
     if sign:
         for framework in sorted(bundle.rglob('*.framework'),key=lambda p:len(p.parts),reverse=True):

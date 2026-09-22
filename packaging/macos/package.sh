@@ -42,7 +42,10 @@ for size in 16 32 128 256 512; do
   sips -z "$doubled" "$doubled" data/icons/hicolor/512x512/apps/org.relayterminal.Relay.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$resources/Relay.icns"
-# Build the independent shell before deploying frameworks. Relocation must not depend on PATH.
+# Deploy Qt before adding unrelated runtimes: macdeployqt otherwise mistakes Python
+# extension LC_ID_DYLIB names for missing Qt dependencies. Final signing covers all files.
+macdeployqt "$app" -always-overwrite
+# Build the independent shell. Relocation must not depend on PATH.
 /bin/bash packaging/macos/build-bash.sh "$resources/bash"
 python3 - "$arch" "$resources/python" <<'PY'
 import hashlib,io,json,sys,tarfile,urllib.request
@@ -64,9 +67,6 @@ export RELAY_BASH="$resources/bash/bin/bash"
 export PYTHONDONTWRITEBYTECODE=1
 "$python" -S -c 'import cryptography; from relay_core import agent, board, keystore; import remote.gui_host'
 "$python" -S tests/test_worker_encoding.py --worker "$resources/relay/backend/worker.py"
-# Qt6.8 supports -codesign but not the newer -no-codesign flag. Final signing below
-# covers all runtimes and notices after framework deployment.
-macdeployqt "$app" -always-overwrite
 qtroot=$(cd "$(dirname "$(command -v macdeployqt)")/.." && pwd)
 if [[ -d $qtroot/licenses ]]; then cp -R "$qtroot/licenses" "$resources/licenses/Qt"; fi
 cp LICENSE "$resources/licenses/Relay-AGPL-3.0.txt"
