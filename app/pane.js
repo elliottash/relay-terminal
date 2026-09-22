@@ -171,6 +171,7 @@ export function mountPane(container, options = {}) {
   let pendingTail = null;     // reasoning that arrived while text in the bubble was selected
   let staged = null;          // the three-step Enter: {text, stage, at, rowId, steerId, known}
   let typedAhead = '';        // keys typed on a selected row, for when its text comes back
+  let scrolledRow = '';       // the row renderRows last scrolled to, so it scrolls once per move
   let editRow = '';           // the row whose text is in the prompt box
   let idRequest = '';         // the conversation_id ask waiting for its answer or a refusal
   let idSession = '';         // the published token that ask is about
@@ -463,8 +464,17 @@ export function mountPane(container, options = {}) {
 
   function renderRows() {
     const list = rowList();
-    rows.textContent = '';
     if (selectedRow && !findRow(selectedRow)) selectedRow = '';
+    // Rebuilt only when the rows actually changed, the same rule the model menu and the
+    // conversations list already keep. A `pane_state` arrives up to ten times a second while a
+    // turn runs: a finger down on a row when one lands had its `pointerup` on a different node,
+    // so no `click` fired and the tap did nothing, and a keyboard's focus was thrown back to the
+    // body ten times a second (#PKT5).
+    const signature = JSON.stringify([selectedRow, list.map((row) =>
+      [str(row.id), str(row.kind), str(row.state), str(row.label), actionsOf(row)])]);
+    if (rows.dataset.signature === signature) return;
+    rows.dataset.signature = signature;
+    rows.textContent = '';
     let activeId = '';
     list.forEach((row, index) => {
       const item = el('li', 'rp-row');
@@ -495,8 +505,13 @@ export function mountPane(container, options = {}) {
     });
     if (activeId) rows.setAttribute('aria-activedescendant', activeId);
     else rows.removeAttribute('aria-activedescendant');
+    // Only when the selection moved. Called on every rebuild it scrolled the list out from under
+    // a reader who had scrolled it somewhere else (#PKT5).
     const current = rows.querySelector('[aria-selected="true"]');
-    if (current && current.scrollIntoView) current.scrollIntoView({ block: 'nearest' });
+    if (current && current.scrollIntoView && selectedRow !== scrolledRow) {
+      current.scrollIntoView({ block: 'nearest' });
+    }
+    scrolledRow = selectedRow;
   }
 
   function wireRowPointer(item, row) {
@@ -939,8 +954,17 @@ export function mountPane(container, options = {}) {
     const list = askList();
     const item = questionAt < list.length ? list[questionAt] : null;
     ask.hidden = !item;
+    if (!item) { askChoices.textContent = ''; ask.dataset.signature = ''; return; }
+    // Rebuilt only when the question changed, as the queue rows above are. Unguarded, the options
+    // were replaced ten times a second while the turn ran, so a finger down on one lifted onto a
+    // node that was no longer in the document and nothing happened (#PKT5).
+    const signature = JSON.stringify([str(question && question.id), questionAt, mayAct(),
+      str(item.header), str(item.question), list.length,
+      arr(item.options).filter(obj).map((o) => [str(o.label), str(o.description),
+                                                o.recommended === true])]);
+    if (ask.dataset.signature === signature) return;
+    ask.dataset.signature = signature;
     askChoices.textContent = '';
-    if (!item) return;
     // The worker's own words for the decision and the question (protocol 27.2), drawn as they
     // arrived. The step counter is this view's, because the desktop asks them one at a time and
     // a phone showing question 2 of 3 with no count would look like the whole ask.
@@ -1077,7 +1101,7 @@ export function mountPane(container, options = {}) {
     const runningRow = q && obj(q.running);
     const visible = !!q && (list.length > 0 || q.paused === true || !!(runningRow && str(runningRow.label)));
     queue.hidden = !visible;
-    if (!q) { rows.textContent = ''; return; }
+    if (!q) { rows.textContent = ''; rows.dataset.signature = ''; return; }
     queueTitle.textContent = q.paused === true ? 'QUEUE · PAUSED' : 'QUEUE';
     show(queueHint, str(q.hint));
     show(queueReason, q.paused === true ? str(q.pause_reason) : '');

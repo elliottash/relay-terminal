@@ -1024,6 +1024,101 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_a_finger_on_an_ask_option_or_a_queue_row_survives_the_states_under_it(self):
+        """#PKT5 item 4: `renderAsk` cleared `askChoices` and `renderRows` cleared `rows` on every
+        `draw()`, unguarded, while a `pane_state` arrives about ten times a second. A finger down
+        on an option when one landed lifted onto a node that was no longer in the document, so no
+        `click` fired and the tap did nothing."""
+        state = fixture("busy_queue")
+        wrapped = {"t": "agent", "pane": state["pane"], "event": self.QUESTION}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "busy_queue", query="&input=touch")
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.agentEvent(%s)" % json.dumps(wrapped)))
+                # The nodes a finger is already down on, marked so a rebuild can be seen.
+                await browser.evaluate("""
+                  (() => { window.paneDemo.held = {
+                    choice: document.querySelector('.rp-ask-choice'),
+                    row: document.querySelector('.rp-row') }; })()
+                """)
+                # Ten states, the way a running turn publishes them: the clock moves, nothing else.
+                for n in range(10):
+                    later = dict(state, seq=state["seq"] + 1 + n,
+                                 turn=dict(state["turn"], clock=f"0:{n:02d}"))
+                    self.assertTrue(await browser.evaluate(
+                        f"window.paneDemo.update({json.dumps(later)})"))
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.held.choice === document.querySelector('.rp-ask-choice')"
+                    " && window.paneDemo.held.choice.isConnected"),
+                    "the ask options were rebuilt under the finger")
+                self.assertTrue(await browser.evaluate(
+                    "window.paneDemo.held.row === document.querySelector('.rp-row')"
+                    " && window.paneDemo.held.row.isConnected"),
+                    "the queue rows were rebuilt under the finger")
+                # And the tap still does what it was going to do.
+                await browser.evaluate("window.paneDemo.held.choice.click()")
+                await browser.wait_for("window.paneDemo.sent.length > 0")
+                sent = (await self.sent(browser))[-1]
+                self.assertEqual([sent["t"], sent["text"]], ["compose", "This file only"])
+
+                # A queue that really moved is still redrawn.
+                moved = json.loads(json.dumps(state))
+                moved["seq"] += 20
+                moved["queue"]["rows"][0]["label"] = "✦ something else entirely"
+                self.assertTrue(await browser.evaluate(
+                    f"window.paneDemo.update({json.dumps(moved)})"))
+                self.assertFalse(await browser.evaluate(
+                    "window.paneDemo.held.row === document.querySelector('.rp-row')"))
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelector('.rp-row .rp-row-text').textContent"),
+                    " something else entirely")
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_the_queue_scrolls_to_a_row_when_the_selection_moves_and_not_otherwise(self):
+        """#PKT5 item 4: `scrollIntoView` ran on every rebuild, which at ten states a second is
+        the list scrolling itself out from under whoever is reading it."""
+        state = fixture("busy_queue")
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.open(browser, "busy_queue")
+                calls = """
+                  (() => { window.paneDemo.scrolls = 0;
+                    const proto = Element.prototype;
+                    const real = proto.scrollIntoView;
+                    proto.scrollIntoView = function (...args) {
+                      if (this.classList.contains('rp-row')) window.paneDemo.scrolls += 1;
+                      return real.apply(this, args); }; })()
+                """
+                await browser.evaluate(calls)
+                # A selection: one scroll.
+                await browser.evaluate("document.querySelector('.rp-rows').focus()")
+                await browser.evaluate(
+                    "document.querySelector('.rp-rows').dispatchEvent(new KeyboardEvent('keydown',"
+                    " {key: 'ArrowUp', bubbles: true, cancelable: true}))")
+                self.assertEqual(await browser.evaluate("window.paneDemo.scrolls"), 1)
+                # Ten states that change the clock and nothing else: no more.
+                for n in range(10):
+                    later = dict(state, seq=state["seq"] + 1 + n,
+                                 turn=dict(state["turn"], clock=f"0:{n:02d}"))
+                    await browser.evaluate(f"window.paneDemo.update({json.dumps(later)})")
+                self.assertEqual(await browser.evaluate("window.paneDemo.scrolls"), 1)
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_question_closed_and_the_end_of_the_turn_take_the_ask_away(self):
         state = fixture("busy_queue")
         wrapped = {"t": "agent", "pane": state["pane"], "event": self.QUESTION}
