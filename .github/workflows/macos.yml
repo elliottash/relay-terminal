@@ -52,6 +52,7 @@ jobs:
           python -m unittest discover -s tests -p test_platform_storage.py -v
           python -m unittest discover -s tests -p test_worker_encoding.py -v
       - name: Native process, crash and runtime-directory tests
+        if: ${{ !cancelled() }}
         run: |
           cmake -S packaging/macos -B build-macos-platform -G Ninja \
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/Qt/6.8.3/macos" \
@@ -59,25 +60,33 @@ jobs:
           cmake --build build-macos-platform --parallel 3
           ctest --test-dir build-macos-platform --output-on-failure
       - name: Configure native desktop and PTY tests
+        id: configure
+        if: ${{ !cancelled() }}
         run: |
           cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/Qt/6.8.3/macos" \
             -DRELAY_QT_MAJOR=6 -DBUILD_TESTING=ON \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
       - name: Build desktop and terminal tests
+        id: desktop
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
         run: cmake --build build-macos --target relay relay-engine-tests --parallel 3
       - name: Exercise native PTY lifecycle
+        if: ${{ !cancelled() && steps.desktop.outcome == 'success' }}
         env:
           RELAY_ENGINE_TEST: PtyTest
           QT_QPA_PLATFORM: offscreen
         run: build-macos/engine/relay-engine-tests
       - name: Bundle private runtimes and create DMG
+        id: package
+        if: ${{ !cancelled() && steps.desktop.outcome == 'success' }}
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
           version=${RELEASE_VERSION:-0.1.0-beta.3}
           /bin/bash packaging/macos/package.sh "$version"
       - name: Mount, install and run the native application
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: python packaging/macos/installed-smoke.py dist/*_macos_${{ matrix.arch }}.dmg macos-evidence
       - uses: actions/upload-artifact@v4
         if: always()
