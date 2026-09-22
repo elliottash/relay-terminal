@@ -13,3 +13,7 @@ Tests check has no findings; moved to needs-verification with implementer eviden
 <!-- relay:entry 20260922T015647Z-ld author=codex kind=evidence -->
 ### Codex · 2026-09-22 01:56
 Landed ca46089c302ba6d2f2b22563fdd695c999ed1f37 after the exact-tree relay build passed. Shared relay build also passed. Card links the implementation commit; independent visual verification remains pending.
+
+<!-- relay:entry 20260922T023153Z-tr author=codex kind=evidence -->
+### Codex · 2026-09-22 02:31
+Owner asked: "can you trace that regression". Traced missing coloring to the replacement prose painter introduced in 8147cc55 (September 19), completed under #R2WQ; 1f71d605 restored clicks but omitted coloring. Controlled pre-fix export passes at width 100 and fails link pixels at width 40; applying only the ca46089c renderer files passes all widths. Full history, test method and before/after logs: docs/qa_evidence/2026-09-21-hash-link-colors/trace.md.
