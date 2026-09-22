@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex in a Relay pane, 2026-09-21'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-hash-link-colors/README.md], related: [K9KC], github: null}
+links: {plans: [], commits: [ca46089c302ba6d2f2b22563fdd695c999ed1f37], evidence: [docs/qa_evidence/2026-09-21-hash-link-colors/README.md], related: [K9KC], github: null}
 ---
 # Color hash references in rewrapped replies
 
