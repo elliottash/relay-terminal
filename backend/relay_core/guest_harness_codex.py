@@ -1283,6 +1283,8 @@ def _tool_result(kind: str, item: dict, state: dict) -> dict:
         exit_code = item.get("exitCode")
         ok = status == "completed" and (exit_code in (0, None))
         data = {"output": output or "", "ok": bool(ok)}
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+            data["exit_code"] = exit_code
         if exit_code is not None:
             data["output"] = data["output"] if ok else f"{data['output']}\n(exit {exit_code})"
         return data

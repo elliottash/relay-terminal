@@ -1068,6 +1068,9 @@ class _Turn:
         ok = data.get("ok") is not False
         diff = data.get("diff") if isinstance(data.get("diff"), str) and data["diff"].strip() else ""
         result = tool_result(data.get("output"), ok, diff)
+        for key in ("exit_code", "timed_out", "refused", "error_code"):
+            if key in data:
+                result[key] = data[key]
         from .guest_board_bridge import ALLOW
         if call['name'] in ALLOW:
             # Preserve native result fields (child id, task state, errors) through

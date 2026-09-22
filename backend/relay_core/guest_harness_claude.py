@@ -788,6 +788,10 @@ class ClaudeHarness:
             data = {"call_id": call_id, "tool": map_tool_name(GUEST, name),
                     "output": _result_text(block.get("content")),
                     "ok": not bool(block.get("is_error"))}
+            if isinstance(meta, dict):
+                for key in ("exit_code", "timed_out", "refused", "error_code"):
+                    if key in meta:
+                        data[key] = meta[key]
             if call:
                 data["ms"] = int((time.monotonic() - call["started"]) * 1000)
                 diff = tool_diff(name, call["input"], meta)

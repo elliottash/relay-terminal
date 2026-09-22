@@ -10745,8 +10745,23 @@ private:
             // asking on behalf of a worker that is gone.
             closeQuestion(QStringLiteral("the agent worker stopped"));
             stopTurnClock();
-            relay::log::error(QStringLiteral("worker_exit pane=%1 code=%2 crashed=%3")
-                                  .arg(paneLogId()).arg(code).arg(exit == QProcess::CrashExit ? 1 : 0));
+            const bool expectedExit = m_closing || m_restartConfigure;
+            const QString exitReason = m_closing ? QStringLiteral("shutdown")
+                : m_restartConfigure ? QStringLiteral("reconfigure") : QStringLiteral("unexpected");
+            const auto logIdentity = [](const QString &value) {
+                return QRegularExpression(QStringLiteral("^[A-Za-z0-9_.-]{1,64}$")).match(value).hasMatch()
+                    ? value : QStringLiteral("unknown");
+            };
+            QString origin = qEnvironmentVariable("RELAY_LOG_ORIGIN", "interactive");
+            if (origin != QStringLiteral("interactive") && origin != QStringLiteral("test")
+                && origin != QStringLiteral("qa")) origin = QStringLiteral("unknown");
+            const QString exitRecord = QStringLiteral("worker_exit pane=%1 code=%2 crashed=%3 reason=%4 expected=%5 origin=%6 run_id=%7 build_id=%8")
+                .arg(paneLogId()).arg(code).arg(exit == QProcess::CrashExit ? 1 : 0)
+                .arg(exitReason).arg(expectedExit ? 1 : 0).arg(origin)
+                .arg(logIdentity(qEnvironmentVariable("RELAY_LOG_RUN_ID", QString::number(QCoreApplication::applicationPid()))))
+                .arg(logIdentity(relay::buildinfo::running().id));
+            if (expectedExit) relay::log::info(exitRecord);
+            else relay::log::error(exitRecord);
             if (m_closing) return;
             if (m_restartConfigure) {
                 QTimer::singleShot(250, this, [this] { if (!m_closing) startWorker(); });

@@ -1,0 +1,3 @@
+2026-09-22T16:58:02.418Z INFO relay.gui worker_exit pane=9ee1f8b0 code=9 crashed=1 reason=reconfigure expected=1 origin=qa run_id=hg26-lifecycle build_id=2026-09-22.12H.02
+2026-09-22T16:58:04.549Z ERROR relay.gui worker_exit pane=9ee1f8b0 code=0 crashed=0 reason=unexpected expected=0 origin=qa run_id=hg26-lifecycle build_id=2026-09-22.12H.02
+2026-09-22T16:58:07.228Z INFO relay.gui worker_exit pane=7bdfb870 code=0 crashed=0 reason=shutdown expected=1 origin=qa run_id=hg26-lifecycle build_id=2026-09-22.12H.02

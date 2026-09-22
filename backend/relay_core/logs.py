@@ -19,15 +19,59 @@ reopens the file when another process has rotated it.
 """
 from __future__ import annotations
 
+import atexit
 import faulthandler
+import hashlib
+from functools import lru_cache
 import logging
 import os
 import re
 import sys
+import tempfile
 import threading
+import uuid
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+# Test runners can inherit a live Relay pane's environment. Isolate before any worker is
+# spawned, so negative protocol tests cannot append to that pane's diagnostics.
+_test_data = None
+if ("unittest" in sys.modules or "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")):
+    if os.environ.get("RELAY_LOG_ORIGIN") != "test":
+        _test_data = tempfile.TemporaryDirectory(prefix="relay-test-data-")
+        atexit.register(_test_data.cleanup)
+        os.environ["XDG_DATA_HOME"] = _test_data.name
+        os.environ["RELAY_LOG_RUN_ID"] = uuid.uuid4().hex
+    os.environ["RELAY_LOG_ORIGIN"] = "test"
+
+_RUN_ID = uuid.uuid4().hex
+
+
+def _identity(value: str) -> str:
+    # Identity fields are labels, never paths, arbitrary messages or credentials.
+    return value if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value) else "unknown"
+
+
+@lru_cache(maxsize=1)
+def _build_id() -> str:
+    """Fingerprint the loaded backend source tree when no packaged build ID is supplied."""
+    try:
+        root = Path(__file__).resolve().parent
+        digest = hashlib.sha256()
+        for path in sorted(root.rglob("*.py")) + [root.parent / "worker.py"]:
+            digest.update(str(path.relative_to(root.parent)).encode())
+            digest.update(path.read_bytes())
+        return "source-" + digest.hexdigest()[:20]
+    except OSError:
+        return "unknown"
+
+
+def context() -> dict[str, str]:
+    origin = os.environ.get("RELAY_LOG_ORIGIN", "interactive")
+    return {"origin": origin if origin in ("interactive", "test", "qa") else "unknown",
+            "run_id": _identity(os.environ.get("RELAY_LOG_RUN_ID", _RUN_ID)),
+            "build_id": _identity(os.environ.get("RELAY_BUILD_ID") or _build_id())}
 
 MAX_BYTES = 5 * 1024 * 1024
 BACKUPS = 3
@@ -95,6 +139,8 @@ class _Formatter(logging.Formatter):
 
     def format(self, record):
         record.pane = getattr(record, "pane", None) or _state["pane"] or "-"
+        for key, value in context().items():
+            setattr(record, key, value)
         return scrub(super().format(record))
 
 
@@ -227,7 +273,7 @@ def configure(component: str = "worker", *, pane: str | None = None, level: str 
         except OSError:
             pass
         handler = _SharedRotatingHandler(directory / f"{component}.log")
-        handler.setFormatter(_Formatter("%(asctime)s %(levelname)s %(name)s pane=%(pane)s %(message)s"))
+        handler.setFormatter(_Formatter("%(asctime)s %(levelname)s %(name)s pane=%(pane)s %(message)s origin=%(origin)s run_id=%(run_id)s build_id=%(build_id)s"))
         logger.addHandler(handler)
         # Same directory, same choice: logging off means no files, this one included.
         enable_fault_reports(component)

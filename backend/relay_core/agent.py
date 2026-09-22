@@ -1733,12 +1733,14 @@ class Agent:
     def _record_tool(self, record: dict, call_id: str, name: str, preview: str, result,
                      ms: int | None = None, label: dict | None = None, args=None,
                      diff: str | None = None) -> None:
-        ok = isinstance(result, dict) and "error" not in result and result.get("exit_code") in (None, 0) \
-            and not result.get("timed_out")
+        from .tool_outcomes import classify
+        outcome, error_code = classify(name, result)
+        ok = outcome in ("success", "pending")
         # `ms` was logged and thrown away until protocol 30.5: `activity`'s "why was that turn
         # slow" is this number, and it is already measured by the caller.
         entry = {"call_id": call_id, "name": name, "preview": preview, "result": result, "ok": ok,
-                 "ms": int(ms) if isinstance(ms, (int, float)) else None}
+                 "ms": int(ms) if isinstance(ms, (int, float)) else None,
+                 "outcome": outcome, "error_code": error_code}
         if isinstance(result, dict) and isinstance(result.get("exit_code"), int):
             entry["exit_code"] = result["exit_code"]
         # The concise line (protocol 23) and what the fold behind it needs. In memory only, like
@@ -1751,7 +1753,8 @@ class Agent:
         record["tools"][call_id] = entry
         # The log gets the tool's name, outcome and duration. Never its arguments, preview or output.
         logs.event(_log, "tool", session=self.session_id, turn=record["turn_id"], call=call_id,
-                   tool=name, ok=ok, ms=ms, exit_code=entry.get("exit_code"))
+                   tool=name, ok=ok, ms=ms, exit_code=entry.get("exit_code"),
+                   outcome=outcome, error_code=error_code)
 
     def turn_summary(self, record: dict) -> dict:
         tools = []
