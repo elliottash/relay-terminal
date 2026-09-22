@@ -1,0 +1,17 @@
+EFT9 closed chip: {"value":"","shown":"high","opts":["high","low","medium","✓ high"]}
+EFT9 geometry: {"model":[17,154.5],"modelChevron":[140.2,147.5],"effort":[158.5,230.6],"effortChevron":[216.4,223.6]}
+EFT9 after effort=low (model unchanged): {"value":"","shown":"low","opts":["low","✓ low","medium","high"]}
+EFT9 effort_fixed: {"disabled":true,"chevron":"none"}
+KBD7 [touch] after Send: focus=demo-bare box=""
+KBD7 [mouse] after Send: focus=rp-input box=""
+CPY4 asked on the press: {"t": "conversation_id", "pane": "5d0c9a3e-8f21-4c55-b1d7-2f6f0e7c9a10", "session": "s1", "id": "ajL1HL4KosfX"}
+CPY4 clipboard before the tap: ""
+CPY4 clipboard written inside the tap: "9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60"
+CPY4 toast: "Conversation id 9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60 copied"
+CPY4 topmost at the toast's centre, sheet closed by the tap: {"toastHidden":false,"topmost":"the toast (rp-toast)","sheetOpen":false}
+CPY4 refused write, sheet open: {"toastHidden":false,"topmost":"the toast (rp-session-id)","sheetOpen":true}
+CPY4 the refusal carries the id: "Clipboard refused \u2014 long-press to copy: 9f2c7a1e-4b3d-4e5f-8a90-1b2c3d4e5f60" sheet lines: 0
+CPY4 a minute tick: scrollTop 1975 -> 1975, focus 'rp-sheet-item rp-new-conversation' -> 'rp-sheet-item rp-new-conversation', row node kept: true, when now "one minute later"
+PKT5 the ask button survived ten states: {"sameNode":true,"marked":true}
+PKT5 the tap still fires: [{"t": "compose", "pane": "5d0c9a3e-8f21-4c55-b1d7-2f6f0e7c9a10", "text": "main", "when": "queue", "msg_id": "i/ru1kl3CzQR"}]
+console: []
