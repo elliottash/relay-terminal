@@ -1,7 +1,7 @@
 ---
 id: SW1D
 type: work
-status: needs-verification
+status: needs-qa-llm
 labels: [feature, switchboard, qa]
 component: [gui]
 assignee: codex
@@ -9,7 +9,7 @@ parent: YZ8G
 rank: zzzzzzzzzzzzzzzzf
 created: '2026-09-21'
 source: owner, 2026-09-21
-links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e, 7133156a0d1955c4ecf35c68ac705b2cd4a218d0, a83e139f22c0], evidence: [docs/qa_evidence/2026-09-21-sw1d/, docs/qa_evidence/2026-09-21-verify-SW1D-a1/], related: [YZ8G, 1CXD, SJTR], github: null}
+links: {plans: [], commits: [e325845d59af145ea6b692d38e7c526ad48b9f2e, 7133156a0d1955c4ecf35c68ac705b2cd4a218d0, a83e139f22c0], evidence: [docs/qa_evidence/2026-09-22-hg26-verification/report.md, docs/qa_evidence/2026-09-21-sw1d/, docs/qa_evidence/2026-09-21-verify-SW1D-a1/], related: [YZ8G, 1CXD, SJTR], github: null}
 ---
 # Hygiene and Performance: the board's tool row goes from four buttons to three
 
@@ -90,3 +90,12 @@ Session handoff, 2026-09-21: added owner request delivered after #1CXD B1. Imple
 - not-applicable · manual:docs/qa_evidence/2026-09-21-sw1d/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-sw1d/README.md
 - notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
 history: thread
+
+## QA checklist
+- [x] Hygiene runs the deterministic format check before Clean up on a disposable board.
+- [x] Real Kimi kimi-k3 generates a preview with one proposed label correction and zero writes.
+- [x] Explicit GUI Apply produces one successful write; screenshot, changelog and changed card agree.
+- [x] Boardpane, profilepane and panestatus targeted suites pass (3/3).
+
+## Verdict
+PASS for the previously missing live-provider path, 2026-09-22. Combined with prior independent row/Performance checks, forwarded to QA. Current shared-build evidence, not an exact-commit release gate; no production board cleanup. Evidence: docs/qa_evidence/2026-09-22-hg26-verification/report.md

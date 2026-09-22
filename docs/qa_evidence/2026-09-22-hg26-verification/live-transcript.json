@@ -1,0 +1,500 @@
+{
+  "binary": "/home/elliott/repos/relay-terminal/build/relay",
+  "sha256": "54c61567740e0df87bc3dfc1e6127c0eaeca8c1662f2dc5e257b694d2887e454",
+  "root": "/tmp/hg26-v4-live-153tggt8",
+  "provider": "kimi",
+  "model": "kimi-k3",
+  "steps": [
+    {
+      "op": "action",
+      "name": "board.open",
+      "text": "",
+      "response": {
+        "id": "",
+        "ok": true,
+        "type": "app_command_result"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Hygiene (k)"
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "boardChatCheck",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardChatFindingsHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardChatFindingsHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Hygiene \u00b7 Format check: nothing to fix"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanup",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "Clean up"
+      },
+      "exit": 0
+    },
+    {
+      "op": "press",
+      "name": "boardCleanup",
+      "text": "",
+      "response": {
+        "ok": true
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup preview \u2014 nothing was written</b><br>2 cards before, 2 after \u00b7 1 proposed \u00b7 1 update \u00b7 0:32"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "error": "control_not_visible",
+        "ok": false
+      },
+      "exit": 1
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup \u2014 the board was rewritten</b><br>2 cards before, 2 after \u00b7 1 written \u00b7 1 update \u00b7 0:27"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup \u2014 the board was rewritten</b><br>2 cards before, 2 after \u00b7 1 written \u00b7 1 update \u00b7 0:27"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup \u2014 the board was rewritten</b><br>2 cards before, 2 after \u00b7 1 written \u00b7 1 update \u00b7 0:27"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup \u2014 the board was rewritten</b><br>2 cards before, 2 after \u00b7 1 written \u00b7 1 update \u00b7 0:27"
+      },
+      "exit": 0
+    },
+    {
+      "op": "read",
+      "name": "boardCleanupHead",
+      "text": "",
+      "response": {
+        "enabled": true,
+        "ok": true,
+        "text": "<b>Hygiene \u00b7 Cleanup \u2014 the board was rewritten</b><br>2 cards before, 2 after \u00b7 1 written \u00b7 1 update \u00b7 0:27"
+      },
+      "exit": 0
+    }
+  ]
+}

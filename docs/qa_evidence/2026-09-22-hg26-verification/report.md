@@ -1,0 +1,27 @@
+# Independent verification package 4 — #HG26
+
+2026-09-22, Codex verifier. No runtime source changes. Relay board MCP tools were not exposed; board writes use the documented file fallback. No further delegation.
+
+## Results
+
+- **WEVT: PASS.** The remote classification fix already landed in `e4bfa994`; independently reran all 48 `tests.test_remote_wire` cases, including `test_every_worker_event_is_classified`. No implementation duplicated. Card moved from inbox to done.
+- **40SN: PASS, forwarded to QA.** All four `tests.test_configure_recovery` cases pass, covering code diagnostics, fresh-process recovery, validation errors and redaction. Fresh GUI scenarios pass Plan before first prompt, Plan then Build, initial failure followed by automatic recovery, and repeated failure followed by explicit Retry after repair. Traces assert one queued ask, preserved mode/configuration, and exactly one/two/three worker processes respectively. Visually inspected `retry-button-blocked.png`: the NameError message and Retry agent shortcut are visible. These injected failure scenarios use the existing scripted worker; they do not claim real-model inference. The separate live Kimi scenario also demonstrates successful real-worker configuration and startup.
+- **SW1D: PASS for the previously missing live path, forwarded to QA.** On a new two-card disposable board, Hygiene displayed the format result before Clean up. Kimi `kimi-k3` on `api.moonshot.ai` read both cards and proposed one label correction. The preview changelog records `outcome done`, one proposed change, zero writes. Explicit GUI Apply started a second actual provider turn: the changelog records `outcome done`, one written update, with `bug` changed to `feature` on T9QA. Screenshots `live-preview.png` and `live-applied.png` were visually inspected. This is live provider inference, not a scripted model response. The real repository board was never the cleanup target.
+
+## Reproduction and provenance
+
+Targeted Python invocation: `RELAY_KEYRING=off PYTHONPATH=backend python3 -m relay_core.junit_runner --junit /tmp/targeted.xml tests.test_remote_wire tests.test_configure_recovery` — **52 passed**, XML/text attached. Results were ingested into local test history under `hg26-v4-targeted-20260922`; 54 history records include two module outcome records. Fresh `40SN-check.json` shows configure recovery passed, no failures/blocks, only the pre-existing session-protocol speed notice. `WEVT-check.json` shows a passing current run and historical skipped/orphaned advisories; this run skipped zero cases. The earlier `TestsCommands.run_and_wait` attempt returned zero results; it was not counted as a pass, and the direct JUnit run supplied the evidence instead.
+
+`ctest --test-dir build -R '^(boardpane|profilepane|panestatus)$' --output-on-failure` — **3/3 passed**, 0.34 seconds. These existing widget tests support the row and cleanup transitions; they do not substitute for the provider run.
+
+GUI binary: `/home/elliott/repos/relay-terminal/build/relay`, SHA256 `54c61567740e0df87bc3dfc1e6127c0eaeca8c1662f2dc5e257b694d2887e454`, build timestamp 2026-09-22 16:56:59 UTC. Live backend: shared checkout, worker build fingerprint `source-dfde85a9c01e2a169654`. Main advanced during verification; this is current shared-build evidence, not an isolated exact-commit build claim. No rebuild was needed. Concurrent model/logging changes are outside this package.
+
+Startup reproduction: import `docs/qa_evidence/2026-09-21-pane-startup-recovery/drive.py`, set its `OUT` to a fresh temporary directory, and run its four cases. Fresh screenshots and request traces here correspond to those exact cases, using Xvfb displays selected from 450–489 and isolated HOME/XDG paths.
+
+Live reproduction: `PYTHONPATH=backend python3 docs/qa_evidence/2026-09-22-hg26-verification/run.py`. It obtains the configured Kimi key without printing it, passes it only in the isolated child environment, and creates a fresh temporary workspace. This run used `/tmp/hg26-v4-live-153tggt8`, Xvfb `:400`, isolated HOME/config/data/cache/runtime/tmp and keyring-off workers. Provider keys and the user's settings were not copied into evidence. App and Xvfb were terminated after capture.
+
+The live driver initially waited for the wrong summary word and could not address Apply by a unique control name (`boardAddButton` is ambiguous). The observed successful run used the named driver for Hygiene/Clean up and reads, then a visually located mouse click at (1077,439) on Apply in the isolated 1600×1000 display. `live-transcript.json` records the automated reads; the explicit click and final read are additionally evidenced by both changelogs, `live-worker.log`, `live-applied-body.json`, the changed card and screenshots. The committed reproduction driver corrects the wait conditions and includes that fixed-layout click; re-check its screenshot if the layout changes. The corrected reproduction script itself was not rerun, avoiding two unnecessary live turns.
+
+## Remaining scope
+
+40SN and SW1D carry independent passing verification and are in needs-qa-llm, not silently closed as an exact-commit release gate. Startup fault injection remains deterministic; actual cleanup preview/apply used Kimi. No full suite, network remote-client GUI, exhaustive alternate-provider matrix, or production-board cleanup was run. Parent owns HG26 and the global board index.

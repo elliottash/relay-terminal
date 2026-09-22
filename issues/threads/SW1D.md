@@ -45,3 +45,11 @@ changes were preserved. Shared combined four-suite run and GUI evidence are reco
 
 <!-- relay:entry 20260922T030003Z-s4 author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/e17af86989a0419d9ff038915f2577f0 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["e325845d59af145ea6b692d38e7c526ad48b9f2e", "7133156a0… → {"plans": [], "commits": ["e325845d59af145ea6b692d38e7c526ad48b9f2e", "7133156a0…
+
+<!-- relay:entry 20260922T165737Z-v4 author=codex kind=progress -->
+### Codex · 2026-09-22 16:57
+Independent #HG26 verification package 4: fresh targeted tests and isolated GUI evidence; no runtime edits. Using file fallback because relay_board tools are unavailable. Existing implementation and attribution preserved.
+
+<!-- relay:entry 20260922T170207Z-v4 author=codex kind=evidence -->
+### Codex · 2026-09-22 17:02
+Independent verification passed; moved to needs-qa-llm. Added QA checklist/verdict and evidence link; preserved implementation sections. docs/qa_evidence/2026-09-22-hg26-verification/report.md. #WEVT: 48 tests. #40SN: 4 recovery tests and 4 fresh GUI fault-injection scenarios. #SW1D: real Kimi preview then explicit successful GUI Apply on disposable board, not fixture-only success.

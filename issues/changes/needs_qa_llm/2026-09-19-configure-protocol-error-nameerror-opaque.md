@@ -1,7 +1,7 @@
 ---
 id: 40SN
 type: work
-status: needs-verification
+status: needs-qa-llm
 labels: [bug]
 component: [worker, gui]
 milestone: desktop-alpha
@@ -11,7 +11,7 @@ rank: zzzz111
 created: '2026-09-19'
 acceptance: a pane whose configure dies on an unexpected worker exception shows the exception's own message (e.g. "name 'os' is not defined"), recovers without being closed once the backend file is repaired, and a test covers the reporting and the recovery
 source: 'conversation, 2026-09-19: "im getting this bug, protocol error (nameerror) when im trying to work in a new pane"'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-hg26-verification/report.md, docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md], related: [], github: null}
 ---
 # A failed configure shows only "Protocol error (NameError)." and the pane never recovers
 
@@ -93,13 +93,16 @@ The worker reports structured `configure_failed` diagnostics for NameError, Attr
 `tests/test_session_protocol.py`
 manual: docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md
 
-### Check 2026-09-21 22:15
-- missing-evidence · unittest:tests.test_configure_recovery — no run of tests/test_configure_recovery.py for this revision, from any host, and no attached result
+### Check 2026-09-22 12:58
+- passed · unittest:tests.test_configure_recovery — tests/test_configure_recovery.py passed for this revision on spark-dcc9, 2026-09-22T16:58:18Z
 - passed · unittest:tests.test_session_protocol — tests/test_session_protocol.py passed for this revision on spark-dcc9, 2026-09-22T02:15:37Z
 - not-applicable · manual:docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md
 - notice · unittest:tests.test_session_protocol — tests/test_session_protocol.py: 7 of 35 are slow (test_the_row_moves_while_nobody_is_typing, test_two_claudes_in_one_directory_tail_their_own_sessions, test_indexing_the_guests_off_means_no_tail…)
 history: thread
 ## QA checklist
-- [ ] Open a new Codex pane; select Plan before typing; the first prompt runs in Plan.
-- [ ] Inject an initial configure defect; verify its diagnostic is visible and a fresh process recovers without reopening the pane.
-- [ ] Repeated failure stops after one automatic retry; after repair, Retry agent (or Ctrl+Shift+R) submits the queued prompt once.
+- [x] Open a new Codex pane; select Plan before typing; the first prompt runs in Plan.
+- [x] Inject an initial configure defect; verify its diagnostic is visible and a fresh process recovers without reopening the pane.
+- [x] Repeated failure stops after one automatic retry; after repair, Retry agent (or Ctrl+Shift+R) submits the queued prompt once.
+
+## Verdict
+PASS independent verification, 2026-09-22: four recovery tests and four fresh Xvfb startup scenarios pass. Startup fault injection uses a scripted worker; real Kimi worker startup also succeeds in the separate cleanup scenario. Current shared-build evidence, not an exact-commit release gate. Forwarded to QA. Evidence: docs/qa_evidence/2026-09-22-hg26-verification/report.md
