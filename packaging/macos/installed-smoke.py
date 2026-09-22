@@ -112,9 +112,14 @@ def main():
         subprocess.run([str(python), '-S', 'tests/test_worker_encoding.py' , '--worker',
                         str(resources / 'relay/backend/worker.py')], env=env, check=True)
         check_shell(resources, env, work, evidence)
+        # Finder supplies no private-runtime overrides: app startup must discover
+        # the relocated bundle and protect its own signed resources from bytecode.
+        gui_env = env.copy()
+        for key in ('RELAY_BASH', 'RELAY_PYTHON', 'PYTHONPATH', 'PYTHONDONTWRITEBYTECODE'):
+            gui_env.pop(key, None)
         with (evidence / 'gui-stderr.txt').open('wb') as log:
             proc = subprocess.Popen([str(installed / 'Contents/MacOS/relay')],
-                                    env=env, cwd=work, stdout=log, stderr=log)
+                                    env=gui_env, cwd=work, stdout=log, stderr=log)
             try:
                 deadline = time.monotonic() + 60
                 state = None
