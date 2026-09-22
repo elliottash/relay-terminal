@@ -6,8 +6,8 @@ labels: [bug, skills, guest]
 assignee: codex
 rank: m
 created: '2026-09-22'
-source: 'Codex in a Relay pane, 2026-09-22'
-links: {plans: [], commits: [], evidence: [], related: [62M4], github: null}
+source: Codex in a Relay pane, 2026-09-22
+links: {plans: [], commits: [97b96861635151be9ee1533159a052f618431a8f], evidence: [], related: [62M4], github: null}
 ---
 # /deliver can reach the guest before Relay loads its skill catalog
 
@@ -29,8 +29,22 @@ bug: this threw an error:
 **Steps:**
 1. Queue unresolved slash commands while configuration is pending.
 2. Reclassify the queued command after `configured` supplies the skill catalog.
-3. Add and run a focused console-mode regression test.
+3. Add and run a focused slash-command regression test.
 
 **Risks:** Preserve built-in Relay commands and guest slash commands after the catalog arrives.
 
-**Verify:** Build and run `relay-consolemode-tests` through the documented build wrapper.
+**Verify:** Build `relay` through `scripts/relay-build`, then run `QT_QPA_PLATFORM=offscreen ./build/relay-slash-tests`.
+
+## Tasks
+
+- [x] Queue unresolved slash commands until configuration supplies the skill catalog <!-- t:r5 -->
+- [x] Reclassify queued commands as Relay skills, guest commands, or unknown commands <!-- t:nc -->
+- [x] Add a regression test and build the exact landed tree <!-- t:1t -->
+
+## Execution Summary
+Commit `97b96861635151be9ee1533159a052f618431a8f` queues name-shaped slash commands entered during deferred configuration, then resolves them after `configured.skill_commands` arrives. Relay skills start agent turns with their skill attachment; non-skills retain the guest or unknown-command path.
+
+## Tests
+- `QT_QPA_PLATFORM=offscreen ./build/relay-slash-tests` — 11 passed, including `/deliver #62M4` before catalog arrival.
+- `scripts/relay-build --target relay` — passed.
+- `scripts/land.py commit codex-deliver-startup …` exact-tree verification — passed.
