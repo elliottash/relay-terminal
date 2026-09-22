@@ -68,6 +68,11 @@
     <display_length compare="ge">768</display_length>
   </requires>
   <releases>
+    <release version="0.1.0~beta.4" date="2026-09-21" type="development">
+      <description>
+        <p>Native macOS bundles for Apple Silicon and Intel, with private Bash and Python runtimes and Keychain support; native Windows and Linux packages; clearer Board and sharing interfaces.</p>
+      </description>
+    </release>
     <release version="0.1.0~beta.3" date="2026-09-21" type="development">
       <description>
         <p>Agent consoles throughout the workspace, model switching and ranking, phone pairing and Switchboard access, configurable approvals, and the libghostty-vt terminal core.</p>
