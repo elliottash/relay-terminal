@@ -9181,6 +9181,12 @@ private:
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
         setActive(pane);
+        // Opening a pane is also a request to make room for it cleanly: once Qt has laid out a
+        // newly wrapped splitter, redistribute every splitter in this tab. Keep this out of
+        // insertBeside(), which also powers pane moves and drags and must preserve the sizes the
+        // person arranged by hand.
+        QPointer<QWidget> pageGuard(pageOf(pane));
+        QTimer::singleShot(0, pane, [this, pageGuard] { if (pageGuard) equalizePage(pageGuard); });
         // Take the keyboard now and again once the splitter, the engine view and the pane's own
         // startup have settled. A deferred focus on its own loses to anything that focuses while
         // the pane is being inserted, and the pane then has no keyboard at all: nothing typed
@@ -10682,8 +10688,7 @@ private:
     // entries, let Qt turn them into ratios of the real width" trick insertBeside's equal-shares
     // fallback and movePastPageEdge's outer wrapper use, just applied to every splitter in the
     // page rather than one.
-    void equalizeActivePage() {
-        QWidget *page = m_active ? pageOf(m_active) : (m_tabs ? m_tabs->currentWidget() : nullptr);
+    void equalizePage(QWidget *page) {
         const QList<QPointer<QSplitter>> splitters = relay::panes::splittersIn(page);
         for (const auto &splitter : splitters) {
             if (!splitter) continue;
@@ -10709,6 +10714,12 @@ private:
             for (int i = 0; i < splitter->count(); ++i) equal.append(1000);
             splitter->setSizes(equal);
         }
+    }
+
+    void equalizeActivePage() {
+        QWidget *page = m_active ? pageOf(m_active) : (m_tabs ? m_tabs->currentWidget() : nullptr);
+        const QList<QPointer<QSplitter>> splitters = relay::panes::splittersIn(page);
+        equalizePage(page);
         if (!splitters.isEmpty()) notice(QStringLiteral("Panes equalized"), 2000);
     }
 

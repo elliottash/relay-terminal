@@ -400,6 +400,29 @@ private Q_SLOTS:
         QVERIFY2(after.at(1) > 200, "and neither half is the equal share the splitter used to force");
     }
 
+    // Opening a pane deliberately differs from moving one: after the insertion, the new-pane
+    // path applies the same whole-splitter arithmetic as pane.equalize, so all panes spread out
+    // evenly even when the tab began with hand-adjusted widths.
+    void openingAPaneEvenlyRedistributesTheSplitter() {
+        std::unique_ptr<QSplitter> splitter(splitterOf(Qt::Horizontal, {QStringLiteral("A"), QStringLiteral("B"), QStringLiteral("C")}));
+        splitter->setHandleWidth(0);
+        splitter->setChildrenCollapsible(false);
+        splitter->resize(1000, 400);
+        splitter->setSizes({200, 500, 300});
+        splitter->show();
+        auto *opened = new QLabel(QStringLiteral("D"));
+        opened->setObjectName(QStringLiteral("D"));
+        splitter->insertWidget(2, opened);
+        const QList<int> even = sizesAfterEqualize(splitter->sizes(), {0, 0, 0, 0});
+        QCOMPARE(even.size(), splitter->count());
+        splitter->setSizes(even);
+        QCOMPARE(order(splitter.get()), QStringLiteral("A,B,D,C"));
+        const QList<int> after = splitter->sizes();
+        for (int i = 1; i < after.size(); ++i)
+            QVERIFY2(std::abs(after.at(i) - after.first()) <= 2,
+                     qPrintable(QStringLiteral("pane %1 is %2; first is %3").arg(i).arg(after.at(i)).arg(after.first())));
+    }
+
     // ----- moving a pane past the page's edge --------------------------------------------------
 
     // A pane that already spans the page across the direction of travel has that edge to
