@@ -161,6 +161,8 @@ public:
     // on the board goes on working.
     relay::agent::ConsoleFactory onCreateConsole;
 
+    // Named UI driver (#74Y5), using the same controls and signals as a person.
+    QJsonObject drive(const QJsonObject &request);
     void handleEvent(const QJsonObject &event);
     void focusInput();
     void reload();                                           // board_open

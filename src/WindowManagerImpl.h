@@ -482,3 +482,12 @@ inline bool WindowManager::restoreClosed(RelayWindow *requester, const QString &
     if (requester) requester->notice(QStringLiteral("That item is no longer in the list."));
     return false;
 }
+
+
+inline QJsonObject WindowManager::handleDrive(const QJsonObject &request) {
+    m_windows.removeAll(nullptr);
+    RelayWindow *target = dynamic_cast<RelayWindow *>(QApplication::activeWindow());
+    if (!target && !m_windows.isEmpty()) target = m_windows.last();
+    if (!target) return {{"ok", false}, {"error", "no_window"}};
+    return target->drive(request);
+}

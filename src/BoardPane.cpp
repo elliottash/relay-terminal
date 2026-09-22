@@ -9330,3 +9330,70 @@ void BoardView::showCleanupSummary(const QJsonObject &summary)
 }
 
 }  // namespace relay
+
+
+QJsonObject relay::BoardView::drive(const QJsonObject &request)
+{
+    const QString op = request.value(QStringLiteral("op")).toString();
+    const QString name = request.value(QStringLiteral("name")).toString();
+    const auto fail = [](const char *reason) {
+        return QJsonObject{{"ok", false}, {"error", QString::fromLatin1(reason)}};
+    };
+    if (op == QLatin1String("open")) {
+        const QString id = request.value(QStringLiteral("card")).toString().toUpper().remove(QLatin1Char('#'));
+        if (!m_model.card(id)) return fail("unknown_card");
+        openCard(id);
+        return {{"ok", true}, {"card", id}};
+    }
+    if (op == QLatin1String("read") && name == QLatin1String("notice"))
+        return {{"ok", true}, {"text", m_notice->isVisible() ? m_noticeText->text() : QString()}};
+    if (op == QLatin1String("read") && name == QLatin1String("sections")) {
+        if (!detailOpen()) return fail("card_not_open");
+        auto *doc = findChild<QTextBrowser *>(QStringLiteral("boardCardDocument"));
+        return {{"ok", true}, {"card", selectedCard()}, {"text", doc ? doc->toPlainText() : QString()}};
+    }
+    // Only uniquely named, visible Board controls. No terminal or agent console text input.
+    const QSet<QString> fields{QStringLiteral("boardFilter"), QStringLiteral("boardCardTitleEdit"),
+        QStringLiteral("boardIssueEditor"), QStringLiteral("boardTestsEditor"), QStringLiteral("boardQuickAdd")};
+    if (op == QLatin1String("type") && !fields.contains(name)) return fail("not_a_named_box");
+    QList<QWidget *> matches;
+    for (QWidget *widget : findChildren<QWidget *>(name))
+        if (widget->isVisible()) matches << widget;
+    if (matches.size() != 1) return fail(matches.isEmpty() ? "control_not_visible" : "ambiguous_control");
+    QWidget *widget = matches.first();
+    if (op == QLatin1String("read")) {
+        QString text;
+        if (auto *label = qobject_cast<QLabel *>(widget)) text = label->text();
+        else if (auto *line = qobject_cast<QLineEdit *>(widget)) text = line->text();
+        else if (auto *edit = qobject_cast<QPlainTextEdit *>(widget)) text = edit->toPlainText();
+        else if (auto *doc = qobject_cast<QTextBrowser *>(widget)) text = doc->toPlainText();
+        else if (auto *button = qobject_cast<QAbstractButton *>(widget)) text = button->text();
+        else if (name == QLatin1String("boardTestsFindings")) {
+            QStringList lines;
+            for (QLabel *label : widget->findChildren<QLabel *>())
+                if (label->isVisible()) lines << label->text();
+            text = lines.join(QLatin1Char('\n'));
+        } else return fail("control_not_readable");
+        return {{"ok", true}, {"text", text}, {"enabled", widget->isEnabled()}};
+    }
+    if (!widget->isEnabled()) return fail("control_disabled");
+    if (op == QLatin1String("press")) {
+        auto *button = qobject_cast<QAbstractButton *>(widget);
+        if (!button || !name.startsWith(QLatin1String("board"))) return fail("not_a_named_button");
+        // Queue a click: modal dialogs must not block the socket response.
+        QTimer::singleShot(0, button, [button] { button->click(); });
+        return {{"ok", true}};
+    }
+    if (op == QLatin1String("type")) {
+        const QString text = request.value(QStringLiteral("text")).toString();
+        if (auto *line = qobject_cast<QLineEdit *>(widget)) {
+            if (line->isReadOnly()) return fail("read_only");
+            line->setFocus(); line->selectAll(); line->insert(text);
+        } else if (auto *edit = qobject_cast<QPlainTextEdit *>(widget)) {
+            if (edit->isReadOnly()) return fail("read_only");
+            edit->setFocus(); edit->selectAll(); edit->insertPlainText(text);
+        } else return fail("not_a_named_box");
+        return {{"ok", true}};
+    }
+    return fail("unknown_operation");
+}

@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Drive a running Relay by stable control names over its private local socket."""
+import argparse
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--socket', default=os.environ.get('RELAY_OPEN_SOCKET'))
+    parser.add_argument('op', choices=['open', 'press', 'read', 'type', 'action', 'panes'])
+    parser.add_argument('name', nargs='?', default='')
+    parser.add_argument('text', nargs='?', default='')
+    parser.add_argument('--pane', default='')
+    args = parser.parse_args()
+    address = args.socket
+    if not address:
+        runtime = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
+        address = (runtime / 'relay/open-socket').read_text().strip()
+    request = dict(type='drive', op=args.op, name=args.name, text=args.text)
+    if args.op == 'open':
+        request['card'] = args.name.removeprefix('#').upper()
+    if args.pane:
+        request['pane'] = args.pane
+    payload = (json.dumps(request) + '\n').encode()
+    if len(payload) >= 65536:
+        raise ValueError('Request exceeds 64 KiB')
+    with socket.socket(socket.AF_UNIX) as conn:
+        conn.settimeout(10)
+        conn.connect(address)
+        conn.sendall(payload)
+        with conn.makefile('rb') as stream:
+            response = json.loads(stream.readline(4 * 1024 * 1024))
+    print(json.dumps(response, ensure_ascii=False))
+    return 0 if response.get('ok') else 1
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as error:
+        print(json.dumps(dict(ok=False, error=str(error))))
+        sys.exit(1)

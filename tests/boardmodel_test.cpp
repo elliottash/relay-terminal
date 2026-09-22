@@ -3132,6 +3132,9 @@ void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTraile
     QVERIFY(task.contains(QStringLiteral("staged: docs/qa_evidence/<today>-verify-T71W/")));
     QVERIFY(task.contains(QStringLiteral("no findings")));
     QVERIFY(task.contains(QStringLiteral("ai-pass.sh")));
+    QVERIFY(task.contains(QStringLiteral("Before staging")));
+    QVERIFY(task.contains(QStringLiteral("all three counts")));
+    QVERIFY(task.contains(QStringLiteral("docs/DRIVING-APPS.md")));
     QVERIFY(task.contains(QStringLiteral("`## Human QA`")));
     QVERIFY(task.contains(QStringLiteral("`## Verdict`")));
     QVERIFY(task.contains(QStringLiteral("board_update_card")));

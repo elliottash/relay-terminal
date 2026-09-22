@@ -7956,3 +7956,18 @@ included, with a shared 16 KiB UTF-8 budget. Project names shadow global names; 
 `supersedes` references remove old memories; retired and team-scoped memories do not
 load. Matching checks the absolute workspace, its basename, and its path relative to
 the project. Each block names its source and is explicitly lower-priority context.
+
+
+### Named local GUI drive (card #74Y5)
+
+The existing private `relay-open` socket also accepts `{type: "drive", op, name?, card?, text?,
+pane?}` and returns one newline-delimited JSON response, `{ok: true, ...}` or
+`{ok: false, error: ...}`. Existing file-open requests still return `ok` / `error` text.
+`open` reveals a Board card by id; `action` uses the same `run_action` executor as
+`app_action_run`; `panes` uses `list_panes`. `press`, `read`, and `type` address stable Board
+control names in the active tab. `read sections` returns the rendered card document and
+`read notice` the visible notice. Press schedules the same button click; type emits the normal
+text-change signals in named Board editors only. Missing/hidden/disabled/ambiguous controls
+are refused, and no terminal or agent prompt accepts driver input. `profileTarget:<id>` names
+an enabled entry in the open Performance menu. Operations may start asynchronous work; drivers
+must poll the resulting state. Full control names and fixture rules: [DRIVING-APPS.md](DRIVING-APPS.md).

@@ -181,8 +181,12 @@ public:
                         QObject::connect(socket, &QLocalSocket::readyRead, socket, [this, socket] {
                             if (!socket->canReadLine()) { if (socket->bytesAvailable() > 65536) socket->abort(); return; }
                             const auto request = QJsonDocument::fromJson(socket->readLine(65536)).object();
-                            const bool ok = handleOpen(request);
-                            socket->write(ok ? "ok\n" : "error\n");
+                            if (request.value(QStringLiteral("type")) == QLatin1String("drive"))
+                                socket->write(QJsonDocument(handleDrive(request)).toJson(QJsonDocument::Compact) + '\n');
+                            else {
+                                const bool ok = handleOpen(request);
+                                socket->write(ok ? "ok\n" : "error\n");
+                            }
                             socket->flush();
                             socket->disconnectFromServer();
                         });
@@ -192,6 +196,7 @@ public:
         }
     }
     bool handleOpen(const QJsonObject &request);
+    QJsonObject handleDrive(const QJsonObject &request);
     // Notifications: go back to the pane that posted one, wherever it ended up.
     void focusPane(const QString &token);
     // relay:// links launched by the desktop do not inherit RELAY_OPEN_SOCKET; relay-open reads
@@ -5093,6 +5098,37 @@ private:
     // ----- end subagents UI --------------------------------------------------------------------
 
 public:
+    QJsonObject drive(const QJsonObject &request) {
+        const QString op = request.value(QStringLiteral("op")).toString();
+        if (op == QLatin1String("action") || op == QLatin1String("panes")) {
+            QJsonObject command = request;
+            command.insert(QStringLiteral("command"), op == QLatin1String("panes")
+                           ? QStringLiteral("list_panes") : QStringLiteral("run_action"));
+            command.insert(QStringLiteral("action"), request.value(QStringLiteral("name")));
+            return executeAppCommand(command, QStringLiteral("named driver"));
+        }
+        if (op == QLatin1String("open")) {
+            QJsonObject command{{"command", "open"}, {"target", "switchboard"}, {"card", request.value("card")}};
+            return executeAppCommand(command, QStringLiteral("named driver"));
+        }
+        // Menu actions are explicitly named as well, and only run while their menu is open.
+        if (op == QLatin1String("press") && request.value("name").toString().startsWith("profileTarget:")) {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (menu) for (QAction *action : menu->actions())
+                if (action->objectName() == request.value("name").toString() && action->isEnabled()) {
+                    action->trigger(); menu->close(); return {{"ok", true}};
+                }
+            return {{"ok", false}, {"error", "control_not_visible"}};
+        }
+        ToolPane *tool = nullptr;
+        for (QWidget *leaf : leavesIn(m_tabs->currentWidget()))
+            if (auto *candidate = dynamic_cast<ToolPane *>(leaf); candidate && candidate->board()) {
+                if (tool) return {{"ok", false}, {"error", "ambiguous_board"}};
+                tool = candidate;
+            }
+        if (!tool || !tool->board()) return {{"ok", false}, {"error", "board_not_open"}};
+        return tool->board()->drive(request);
+    }
     // Opens `subagentId`'s tab in `ownerPane`'s subagent pane: splits the pane beside the owner if
     // it is not open, else brings it forward (its tab page, focus) and switches to the tab. The
     // strip, the palette's Agents list, /agents, ✦ links and Alt+A all come here (card #WD83).

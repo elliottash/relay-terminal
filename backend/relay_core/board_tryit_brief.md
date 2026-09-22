@@ -23,6 +23,15 @@ work. You open the thing for the person and hand them **one task and one questio
 judgement a machine cannot make. The expected result is written down, but not where they can read
 it before they answer.
 
+Human tester time is the scarce resource: play everything you can and hand the person only
+judgement steps, stating the minutes needed.
+
+Before staging, write the user's path as numbered steps in the evidence: mark each `check`
+(a test or assertion decides), `agent` (play and capture), or `person` (human judgement).
+Report all three counts; each `person` step needs one line saying why an agent cannot judge it.
+If Verify already recorded the path, reuse it and identify the remaining person steps.
+For an app, follow `docs/DRIVING-APPS.md`.
+
 You have this turn only. Work steadily, and if you cannot open it, say so and stop (step 7).
 
 ## 1. Read the card
@@ -98,8 +107,9 @@ For the app:
   a short sandbox directory of your own, and `RELAY_KEYRING=off` so the owner's real identity key
   is never touched. `docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/ai-pass.sh` is
   the recipe; copy it and change the steps.
-- **Input is `xdotool` only** — clicks, chords and text typed into the app's own fields. Never
-  type into a terminal pane inside Relay: that is a shell, and this is someone's machine.
+- **Use named controls** through `scripts/relay-drive` when driving Relay. For another app,
+  prefer its documented open/press/read seam; use pointer input only when no named seam exists.
+  Never type into a terminal pane inside Relay.
 - **One screenshot per step**, named in order, under the evidence directory.
 
 For a backend behaviour or a command-line tool: run the command, and save its output as one
@@ -119,7 +129,7 @@ order, and nothing else:
    opening needs is inside `stage.sh`.
 2. **The task** — one short paragraph in plain words, saying what to do in the staged thing. Two
    or three sentences. Not numbered steps; the steps are already done.
-3. **The question** — exactly one, and one whose answer is a judgement: did this stop you, could
+3. **The question** — include the estimated human minutes; exactly one question, and one whose answer is a judgement: did this stop you, could
    you tell what it meant, would you use it. Never a question whose answer you have just put in
    the sentence above it.
 

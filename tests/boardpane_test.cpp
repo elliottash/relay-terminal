@@ -70,6 +70,7 @@ class BoardPaneTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void namedDriverUsesControlsAndRefusesUnavailableTargets();
     void cleanupOperationsHaveTranscriptNotes();
     void tryItOpenKeepsWindowsPathsWithSpaces();
     void doneButtonAndKeyOfferUndo();
@@ -453,3 +454,29 @@ void BoardPaneTests::cleanupOperationsHaveTranscriptNotes()
 
 QTEST_MAIN(BoardPaneTests)
 #include "boardpane_test.moc"
+
+
+void BoardPaneTests::namedDriverUsesControlsAndRefusesUnavailableTargets()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(1200, 900); view.show();
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QVERIFY(view.drive({{"op", "type"}, {"name", "boardFilter"}, {"text", "K7Q2"}}).value("ok").toBool());
+    QCOMPARE(view.drive({{"op", "read"}, {"name", "boardFilter"}}).value("text").toString(), QStringLiteral("K7Q2"));
+    QVERIFY(!view.drive({{"op", "type"}, {"name", "composer"}, {"text", "echo bad"}}).value("ok").toBool());
+    QVERIFY(!view.drive({{"op", "press"}, {"name", "missing"}}).value("ok").toBool());
+    QVERIFY(!view.drive({{"op", "open"}, {"card", "NONE"}}).value("ok").toBool());
+    QVERIFY(view.drive({{"op", "open"}, {"card", "K7Q2"}}).value("ok").toBool());
+    auto arrived = cardArrived(QStringLiteral("K7Q2"));
+    arrived.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+    view.handleEvent(arrived);
+    QVERIFY(view.drive({{"op", "read"}, {"name", "sections"}}).value("text").toString().contains("the ask"));
+    auto *done = view.findChild<QAbstractButton *>(QStringLiteral("boardCardDone"));
+    QVERIFY(done); done->setEnabled(false);
+    QCOMPARE(view.drive({{"op", "press"}, {"name", "boardCardDone"}}).value("error").toString(), QStringLiteral("control_disabled"));
+    done->setEnabled(true);
+    QVERIFY(view.drive({{"op", "press"}, {"name", "boardCardDone"}}).value("ok").toBool());
+    QTRY_VERIFY(!sent.isEmpty() && sent.last().value("type").toString() == QStringLiteral("board_move"));
+}

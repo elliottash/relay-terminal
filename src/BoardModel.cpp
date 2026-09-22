@@ -663,6 +663,13 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
           << QStringLiteral("- Name the revision you checked: the newest hash in the card's "
                             "`links.commits`, or `git rev-parse --short HEAD` when it has none. "
                             "Everything you write is a claim about that revision and no other.")
+          << QStringLiteral("- Human tester time is the scarce resource: play everything you can "
+                            "and hand the person only judgement steps, stating the minutes needed.")
+          << QStringLiteral("- Before staging, write the user's path as numbered steps in your "
+                            "evidence: mark each `check` (test/assertion), `agent` (play and capture), "
+                            "or `person` (human judgement); report all three counts. Each person "
+                            "step needs one line explaining why an agent cannot judge it. For an "
+                            "app, follow `docs/DRIVING-APPS.md`.")
           // The owner, 2026-09-21: verifying a card about the app is two things, and the second
           // one is not optional. Tests say the code does what the tests say; the simulation is
           // the only part that says the person's situation actually works.
@@ -673,8 +680,9 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
           << QStringLiteral("- **The simulation, for a card about the app.** Stage a disposable "
                             "fixture project, start the built binary under its own Xvfb display "
                             "on an isolated profile (`HOME`, `XDG_*`, `TMPDIR` all inside a "
-                            "scratch directory, `RELAY_KEYRING=off`), and drive it with `xdotool` "
-                            "only — clicks, chords and typed text, never a terminal pane. Copy "
+                            "scratch directory, `RELAY_KEYRING=off`), and drive named controls "
+                            "through `scripts/relay-drive`; use pointer input only when no named seam "
+                            "exists, and never type into a terminal pane. Copy "
                             "the recipe rather than inventing one: "
                             "`docs/qa_evidence/2026-09-20-switchboard-tooling-hub/scenario/"
                             "ai-pass.sh`. Save one capture per step.")

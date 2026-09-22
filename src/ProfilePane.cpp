@@ -79,6 +79,7 @@ void showTargetMenu(QWidget *anchor, std::function<void(const QString &)> chosen
     menu->setToolTipsVisible(true);
     for (const ProfileTarget &target : profileTargets()) {
         auto *action = new QWidgetAction(menu);
+        action->setObjectName(QStringLiteral("profileTarget:") + target.id);
         auto *row = new QWidget;
         auto *layout = new QVBoxLayout(row);
         layout->setContentsMargins(12, 6, 12, 6);
