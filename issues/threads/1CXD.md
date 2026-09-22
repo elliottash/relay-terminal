@@ -45,3 +45,36 @@ Area C landed in two commits: `2c3ab286` (the five briefs plus `board_tryit_brie
 - **Uncommitted in the shared tree right now** (land.py snapshots, not lost, just not landed): session `1cxd-a` holds `backend/relay_core/signals.py` + `tests/test_board_chat.py` (a trailing fix, small). Session `1cxd-d` holds `docs/SIGNALS-RESEARCH.md` + `site/index.html` (ditto). Session `1cxd-b` holds the bulk of **Area B1, the folder in the GUI** — `src/BoardModel.cpp`, `BoardPane.cpp`, `BoardSections.{cpp,h}`, `BoardWorkspace.h`, `Pane.h`, `ProjectInit.{cpp,h}`, `Projects.{cpp,h}`, `RelayWindow.h` and five test files — this is the "Move this board to board/" action, the lookup order, and the folder question's wording; it is real, substantial, uncommitted work (~250 lines), not started-from-scratch.
 - **Next session:** resume each with `python3 scripts/land.py begin 1cxd-a --contact "..."` (etc.) on the same paths — the snapshot is still valid — and land what's there; or reclaim fresh if it looks wrong. Area B1 is the only one needing real subagent work; A/C/D are one small commit each from done.
 - **Area E (the three doc renames) has not started** — it waits on A/B/D landing cleanly, per the plan's own ordering.
+
+<!-- relay:entry 20260922T010932Z-wy author=agent kind=progress model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+Claimed by Codex at owner's explicit takeover request. Resuming #1CXD before dependent #74Y5; independently verifying #7BM4 with a real model and investigating #561P. Existing partial evidence is not a completed verification.
+
+<!-- relay:entry 20260922T011100Z-r6 author=codex kind=comment -->
+### Release verification · 2026-09-22 01:11
+#R6BS release gate is blocked by the partial folder transition: committed Python BOARD_FOLDERS
+has four entries including board/, while committed Projects.cpp still returns three. The exact
+release C++ suite passes 87/88 tests; projects fails its cross-language lookup assertion. The
+already committed backend creates board/, so the desktop must recognize it before publication.
+Your active takeover at 01:09 is respected: the release session has not edited or claimed your
+Projects sources/tests. Please prioritize landing the lookup order plus its regression test,
+or the complete coherent B1 change if ready. A narrow compatibility commit must preserve the
+currently committed newBoardFolder(bool) API until its callers change together; do not land its
+removal alone. Existing unfinished working-tree edits remain untouched.
+
+<!-- relay:entry 20260922T011354Z-er author=agent kind=progress model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+GUI folder changes landed as 82acbc04993a after exact-tree build gate; projects, boardworkspace, boardsections, projectinit, board and boardpane targeted tests pass (6/6). Existing Area A tail already landed in 42ca4995. Finishing three documentation renames with redirect stubs; unrelated shared-checkout hunks excluded.
+
+<!-- relay:entry 20260922T013033Z-jw author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+- ✦ agent updated this card · replaced `## Execution Summary`
+
+<!-- relay:entry 20260922T013033Z-jx author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260922T013054Z-4m author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["YZ8G"], "github": null… → {"plans": [], "commits": ["82acbc04993af406b9b091f659165e6ba356241c", "e4377755c…
+
+<!-- relay:entry 20260922T013250Z-9p author=agent kind=event model=gpt-6-astra pane=fe4e4144 turn=a8aa6eac04d048c7ba96c1232b953cda/dae58e875189402db525b64e48092820 -->
+- ✦ agent moved this card · Executing → Needs verification · GUI folder transition, doc renames and live wording landed; 1682 targeted Python tests and six GUI targets passed. Independent review should audit residual historical comments. · evidence docs/qa_evidence/2026-09-21-1CXD-delivery/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T013726Z-mf author=agent kind=evidence -->
+Check · 8 missing-evidence, 1 not-applicable, 2 passed; 11 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

@@ -1,14 +1,15 @@
 ---
 id: 1CXD
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, docs]
 component: [gui, worker]
-assignee: claude-code
+assignee: codex
+implemented_by: openai/gpt-6-astra via codex
 rank: zzzzzzzzzzzzzzzzd
 created: '2026-09-21'
-source: 'owner, 2026-09-21'
-links: {plans: [], commits: [], evidence: [], related: [YZ8G], github: null}
+source: owner, 2026-09-21
+links: {plans: [], commits: [82acbc04993af406b9b091f659165e6ba356241c, e4377755c8cbe4a393a91b0c1d0a66f0acff0822, fe82d4344e9892610ee59cfbf1a8d00bf2312263], evidence: [docs/qa_evidence/2026-09-21-1CXD-delivery/], related: [YZ8G], github: null}
 ---
 # "Switchboard" becomes "Board" in the product; the icon and aesthetic stay; the folder becomes `board/`
 
@@ -405,3 +406,44 @@ commit, and runs only its own tests.
    messages this plan must not touch. **`SWITCHBOARD-AESTHETIC.md` keeps its name**: it is the
    document about the switchboard aesthetic, which you are keeping, and it is what the theme files
    and `src/Theme.cpp` cite.
+
+## Execution Summary
+Resumed and landed GUI folder behavior (82acbc04993a), documentation renames/redirects (e4377755c8cb), and remaining live backend wording found by audit (fe82d4344e98). New boards use board/; all legacy spellings stay readable; issues/ unchanged. Targeted Python batches: 848 + 834 pass; initial six GUI test targets pass. Evidence: docs/qa_evidence/2026-09-21-1CXD-delivery/. Historical comments and evidence retain old wording; frozen identifiers/icon unchanged.
+
+## Tests
+`ctest -R projects`
+`ctest -R boardworkspace`
+`ctest -R boardsections`
+`ctest -R projectinit`
+`ctest -R board`
+`ctest -R boardpane`
+`tests/test_board.py`
+`tests/test_board_tools.py`
+`tests/test_board_protocol.py`
+`tests/test_tryit_protocol.py`
+manual: docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt
+
+### Check 2026-09-21 21:37
+- missing-evidence · ctest:projects — no run of ctest -R projects for this revision, from any host, and no attached result
+- missing-evidence · ctest:boardworkspace — no run of ctest -R boardworkspace for this revision, from any host, and no attached result
+- missing-evidence · ctest:boardsections — no run of ctest -R boardsections for this revision, from any host, and no attached result
+- missing-evidence · ctest:projectinit — no run of ctest -R projectinit for this revision, from any host, and no attached result
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+- passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+- missing-evidence · unittest:tests.test_board — no run of tests/test_board.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_board_tools — no run of tests/test_board_tools.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_board_protocol — no run of tests/test_board_protocol.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_tryit_protocol — no run of tests/test_tryit_protocol.py for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt
+- notice · ctest:projects — ctest -R projects has never run here
+- notice · ctest:boardworkspace — ctest -R boardworkspace has never run here
+- notice · ctest:boardsections — ctest -R boardsections has never run here
+- notice · ctest:projectinit — ctest -R projectinit has never run here
+- notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
+- notice · unittest:tests.test_board — tests/test_board.py: 114 of 129 never ran here (test_new_id_shape, test_all_digit_and_lowercase_ids_are_invalid, test_new_id_avoids_taken…)
+- notice · unittest:tests.test_board — tests/test_board.py: 2 of 129 are skipped for good (test_union_merge_keeps_both_sides_entries, test_check_flags_private_files_tracked_by_git)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 11 of 257 never ran here (test_a_card_turn_does_not_move_a_consoles_tool_list, test_the_new_sections_are_in_the_schema_and_agent_writable, test_check_no_longer_warns_on_them…)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 257 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
+- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 155 of 166 never ran here (test_board_open_answers_with_the_config_the_cards_and_the_problems, test_a_card_row_carries_what_the_pane_draws, test_a_row_says_when_the_card_last_changed…)
+- notice · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py: 34 of 34 never ran here (test_successful_retry_does_not_report_previous_failure, test_the_types_match_the_protocol_modules, test_it_starts_one_turn_with_the_brief_the_card_and_the_evidence_directory…)
+history: thread
