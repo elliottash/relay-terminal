@@ -179,14 +179,19 @@ def main():
                 # Verify desktop discovery and a real manager acknowledgement, not the
                 # helper's successful fallback to another application when no socket exists.
                 open_check = subprocess.run([str(python), '-S', '-c',
-                    "import json,pathlib,runpy,stat,sys; "
+                    "import json,os,pathlib,pwd,runpy,sys; "
                     "helper=runpy.run_path(sys.argv[1]); address=helper['socket_address'](); "
+                    "print(json.dumps({'HOME':os.environ.get('HOME'),'account_home':pwd.getpwuid(os.getuid()).pw_dir,"
+                    "'discovered_socket':address,'temporary_sockets':[str(p) for p in pathlib.Path(os.environ['TMPDIR']).glob('relay-*/open.sock')]}),file=sys.stderr,flush=True); "
                     "assert address and pathlib.Path(address).is_socket(), address; "
                     "assert len(address.encode()) < 104, address; "
                     "assert helper['send']({'path':sys.argv[2],'line':1}), 'Relay rejected open request'; "
                     "print(json.dumps({'socket':address,'acknowledged':True}))",
                     str(resources / 'relay/scripts/relay-open'), str(work / 'composer-result.txt')],
-                    env=env, check=True, capture_output=True, text=True)
+                    env=env, check=False, capture_output=True, text=True)
+                (evidence / 'relay-open-stderr.txt').write_text(open_check.stderr)
+                if open_check.returncode:
+                    raise RuntimeError(f'Installed relay-open failed ({open_check.returncode}): {open_check.stderr}')
                 (evidence / 'relay-open.json').write_text(open_check.stdout)
                 screenshot = subprocess.run(['/usr/sbin/screencapture', '-x', str(evidence / 'desktop.png')],
                                             capture_output=True, text=True)
