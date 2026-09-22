@@ -7,7 +7,7 @@ labels: [bug, appearance]
 rank: maip7
 created: '2026-09-22'
 source: 'User report in Relay; observed on sphinxpad, 2026-09-22'
-links: {plans: [], commits: [dcf941a726cdb35669aac435e4c0aa698c41d198], evidence: [docs/qa_evidence/2026-09-22-ATP7/], related: [], github: null}
+links: {plans: [], commits: [dcf941a726cdb35669aac435e4c0aa698c41d198, 2be99a0f125bca97534856dbf083fab24483d679], evidence: [docs/qa_evidence/2026-09-22-ATP7/], related: [], github: null}
 ---
 # Top-left app icon appears too large on sphinxpad
 
@@ -39,3 +39,4 @@ Only `src/WindowChrome.h` and the icon construction block in `src/RelayWindow.h`
 - `manual: docs/qa_evidence/2026-09-22-ATP7/qt6-compare-1.5.png` — inspected old/new rendering comparison.
 - `manual: docs/qa_evidence/2026-09-22-ATP7/qt6-compare-2.png` — inspected old/new rendering comparison.
 - `python3 scripts/relay-board.py check` — existing unrelated board diagnostics; none for ATP7. `tests_check` unavailable in exposed bridge.
+- `scripts/land.py commit atp7-dpi` — PASS exact-tree build before landing `2be99a0f` (final 22px implementation).

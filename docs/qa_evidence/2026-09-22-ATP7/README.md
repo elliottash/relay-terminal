@@ -32,3 +32,5 @@ Board check has existing unrelated failures (12 errors, 754 warnings at the init
 Initial implementation: `dcf941a726cdb35669aac435e4c0aa698c41d198`; its exact-tree build passed, and unrelated shared-header hunks were excluded. Follow-up restores 22px while retaining the DPI fix.
 
 The @2x probe uses 22px and 44px files with Qt's naming convention; Qt6 at DPR2 returns 44 physical pixels with DPR2 for a 22px request. `qt6-compare-1.5.png` and `qt6-compare-2.png` visually compare the exact old pixmap path with painting in a 22px box; both inspected.
+
+Final 22px implementation and DPR evidence: `2be99a0f125bca97534856dbf083fab24483d679`. Local Relay build `2026-09-22.19H.05`, live 1×/1.5×/2× geometry, and exact-tree landing build all passed.

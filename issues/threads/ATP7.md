@@ -21,3 +21,7 @@ Root requested direct Qt DPR investigation. Probe confirms Qt6 double scaling: o
 <!-- relay:entry 20260922T234043Z-a4 author=codex kind=evidence -->
 ### Codex · 2026-09-22 23:40
 Follow-up confirms Qt6 double scaling and @2x metadata behavior. Restored intended 22px size; live app geometry at 1/1.5/2 and direct Qt5/Qt6 probes pass. Inspected Qt6 before/after images at 1.5× and 2×. Updated Execution Summary and Tests; retains needs-verification.
+
+<!-- relay:entry 20260922T234206Z-a4 author=codex kind=evidence -->
+### Codex · 2026-09-22 23:42
+Linked final 22px implementation 2be99a0f125bca97534856dbf083fab24483d679 and recorded successful exact-tree build. Supersedes initial 18px size; all original artwork and scale-independent bounds retained. No further RelayWindow.h edits.
