@@ -527,7 +527,7 @@ class WorkerConsoleTest(unittest.TestCase):
             {"type": "ask", "id": "a1", "text": "what is on the board?", "surface": "switchboard"},
             {"type": "shutdown"}])
         error = [e for e in self.of(events, "error") if e.get("id") == "a1"][0]
-        self.assertIn("no Switchboard", error["text"])
+        self.assertIn("no board", error["text"])
         self.assertFalse(self.of(events, "agent_started"))
 
     def test_the_other_surfaces_answer_without_a_board(self):
