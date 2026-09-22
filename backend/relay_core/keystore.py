@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,14 @@ def _windows_keyring(action: str, preset_id: str, *args):
         raise KeystoreError("Windows Credential Manager could not complete the request.") from None
 
 
+def _mac_keyring(action: str, preset_id: str, *args):
+    from . import maccredentials
+    try:
+        return getattr(maccredentials, action)(SERVICE, preset_id, *args)
+    except OSError:
+        raise KeystoreError("macOS Keychain could not complete the request. Unlock your login keychain and try again.") from None
+
+
 def lookup(preset_id: str) -> str:
     """Return the stored key for a provider, or an empty string when none exists."""
     _check_id(preset_id)
@@ -76,6 +85,8 @@ def lookup(preset_id: str) -> str:
         return ""
     if os.name == "nt":
         return _windows_keyring("lookup", preset_id)
+    if sys.platform == "darwin":
+        return _mac_keyring("lookup", preset_id)
     if not shutil.which("secret-tool"):
         return ""
     result = _run(["lookup", "service", SERVICE, "provider", preset_id])
@@ -90,6 +101,9 @@ def store(preset_id: str, api_key: str) -> None:
     if os.name == "nt":
         _windows_keyring("store", preset_id, api_key)
         return
+    if sys.platform == "darwin":
+        _mac_keyring("store", preset_id, api_key)
+        return
     result = _run(["store", "--label", f"Relay API key ({preset_id})", "service", SERVICE, "provider", preset_id],
                   stdin=api_key)
     if result.returncode != 0:
@@ -103,6 +117,8 @@ def remove(preset_id: str) -> bool:
         return False
     if os.name == "nt":
         return _windows_keyring("remove", preset_id)
+    if sys.platform == "darwin":
+        return _mac_keyring("remove", preset_id)
     if not shutil.which("secret-tool"):
         return False
     result = _run(["clear", "service", SERVICE, "provider", preset_id])
@@ -205,8 +221,8 @@ def import_from_warp(settings_path: Path | None = None) -> tuple[list[ImportedEn
 
     Returns (imported, skipped-endpoint-descriptions). Never returns key material.
     """
-    if os.name == "nt":
-        raise KeystoreError("Importing Warp's keyring is currently supported on Linux. Add the API key directly on Windows.")
+    if os.name == "nt" or sys.platform == "darwin":
+        raise KeystoreError("Importing Warp's keyring is currently supported on Linux. Add the API key directly on this platform.")
     endpoints = read_warp_endpoints(settings_path)
     result = _run(["lookup", "service", WARP_SERVICE, "key", "AiCustomEndpointKeys"])
     if result.returncode != 0 or not result.stdout.strip():

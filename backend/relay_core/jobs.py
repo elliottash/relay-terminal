@@ -85,7 +85,7 @@ def _kill_group(process: subprocess.Popen) -> None:
 
 def shell_argv(command: str, env: dict) -> list[str]:
     if os.name != "nt":
-        return ["/bin/bash", "--noprofile", "--norc", "-c", command]
+        return [env.get("RELAY_BASH") or "/bin/bash", "--noprofile", "--norc", "-c", command]
     # EncodedCommand avoids Windows argv quoting corrupting quotes/newlines. Preserve native
     # exit codes; a failed cmdlet must also produce a nonzero result. Explicit exit still wins.
     script = ("[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); "

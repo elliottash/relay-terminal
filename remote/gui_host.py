@@ -528,7 +528,7 @@ class GuiPaneSource(panes_mod.PaneSource):
         return int(pane.get("shell_pid", 0)), int(pane.get("foreground_pid", 0))
 
     def secret_state(self, pane: str) -> dict | None:
-        if os.name == "nt":
+        if os.name == "nt" or sys.platform == "darwin":
             return None  # No password affordance without native password-state detection.
         shell_pid, foreground_pid = self._pids(pane)
         if not shell_pid or not terminal_mod.secret_prompt(shell_pid):
@@ -536,8 +536,8 @@ class GuiPaneSource(panes_mod.PaneSource):
         return {"shell_pid": shell_pid, "foreground_pid": foreground_pid}
 
     def secret_prompt(self, pane: str) -> bool:
-        if os.name == "nt":
-            raise wire.WireError("not_permitted", "Remote terminal input is not yet supported on Windows.")
+        if os.name == "nt" or sys.platform == "darwin":
+            raise wire.WireError("not_permitted", "Remote terminal input is not yet supported on this platform.")
         shell_pid, _ = self._pids(pane)
         return bool(shell_pid) and terminal_mod.secret_prompt(shell_pid)
 

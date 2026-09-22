@@ -23,6 +23,7 @@ def socket_address() -> str:
     # Launched by the desktop (link click) without Relay's environment: use the last address
     # Relay published for this user.
     runtime = (os.path.expanduser("~") if os.name == "nt" else
+               os.path.expanduser("~/Library/Application Support") if sys.platform == "darwin" else
                os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}")
     try:
         with open(os.path.join(runtime, "relay", "open-socket"), encoding="utf-8") as handle:
@@ -166,7 +167,7 @@ def main() -> int:
         if os.name == "nt":
             os.startfile(path)
         else:
-            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            subprocess.Popen(["/usr/bin/open" if sys.platform == "darwin" else "xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         return 0
     except OSError:
         print("relay-open: Relay is not reachable and the desktop could not open the file", file=sys.stderr)

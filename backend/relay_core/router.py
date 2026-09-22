@@ -81,7 +81,7 @@ def validate_input(text: str) -> str:
 
 def bash_syntax(text: str) -> tuple[bool, str]:
     try:
-        proc = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-n"], input=text,
+        proc = subprocess.run([os.environ.get("RELAY_BASH") or "/bin/bash", "--noprofile", "--norc", "-n"], input=text,
                               text=True, capture_output=True, timeout=2,
                               env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
     except (OSError, subprocess.TimeoutExpired) as exc:
