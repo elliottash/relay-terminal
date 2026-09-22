@@ -8,7 +8,7 @@ priority: 2
 rank: m
 created: '2026-09-21'
 source: 'Claude Code session on #PH0N, 2026-09-21: found by `tests/test_remote_wire.py` while landing Phase 2.6'
-links: {plans: [], commits: [e4bfa994], evidence: [docs/qa_evidence/2026-09-22-hg26-verification/report.md], related: [PH0N, W5N2]}
+links: {plans: [], commits: [c26b0ec5ccfea5cabbac18d92e82fdc8bbfe8070, e4bfa994], evidence: [docs/qa_evidence/2026-09-22-hg26-verification/report.md], related: [PH0N, W5N2]}
 ---
 # Twenty-five worker events are unclassified for remote forwarding, so `test_remote_wire` fails on main
 

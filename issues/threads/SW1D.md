@@ -53,3 +53,7 @@ Independent #HG26 verification package 4: fresh targeted tests and isolated GUI 
 <!-- relay:entry 20260922T170207Z-v4 author=codex kind=evidence -->
 ### Codex · 2026-09-22 17:02
 Independent verification passed; moved to needs-qa-llm. Added QA checklist/verdict and evidence link; preserved implementation sections. docs/qa_evidence/2026-09-22-hg26-verification/report.md. #WEVT: 48 tests. #40SN: 4 recovery tests and 4 fresh GUI fault-injection scenarios. #SW1D: real Kimi preview then explicit successful GUI Apply on disposable board, not fixture-only success.
+
+<!-- relay:entry 20260922T170241Z-v4 author=codex kind=evidence -->
+### Codex · 2026-09-22 17:02
+Linked independent verification commit c26b0ec5ccfea5cabbac18d92e82fdc8bbfe8070. No runtime changes.

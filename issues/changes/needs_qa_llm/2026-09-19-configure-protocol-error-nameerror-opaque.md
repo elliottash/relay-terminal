@@ -11,7 +11,7 @@ rank: zzzz111
 created: '2026-09-19'
 acceptance: a pane whose configure dies on an unexpected worker exception shows the exception's own message (e.g. "name 'os' is not defined"), recovers without being closed once the backend file is repaired, and a test covers the reporting and the recovery
 source: 'conversation, 2026-09-19: "im getting this bug, protocol error (nameerror) when im trying to work in a new pane"'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-hg26-verification/report.md, docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md], related: [], github: null}
+links: {plans: [], commits: [c26b0ec5ccfea5cabbac18d92e82fdc8bbfe8070], evidence: [docs/qa_evidence/2026-09-22-hg26-verification/report.md, docs/qa_evidence/2026-09-21-pane-startup-recovery/README.md], related: [], github: null}
 ---
 # A failed configure shows only "Protocol error (NameError)." and the pane never recovers
 
