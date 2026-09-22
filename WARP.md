@@ -1,6 +1,6 @@
 # Relay — project instructions for agents
 
-Relay is a Linux terminal (C++/Qt, with its own terminal engine) with a composer,
+Relay is a cross-platform C++/Qt workspace for terminal and agentic coding, with its own terminal engine, a composer,
 per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/README.md`
 (index), `docs/ARCHITECTURE.md` and `docs/ROADMAP.md` before large changes.
 
@@ -17,7 +17,8 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 - **Build:** `scripts/relay-build`, never `cmake --build` by hand: it locks `build/`
   against the other sessions and stamps the objects it made back to the build's start, so a
   header edited while a compile was running is recompiled instead of silently missed
-  (`CLAUDE.md`, "Build through `scripts/relay-build`").
+  (`CLAUDE.md`, "Build through `scripts/relay-build`"). Read `docs/BUILDING.md` before any
+  developer, package or release build; it is the canonical Linux, Windows and macOS build map.
 - **Tests:** do not run the full test suites unless the owner asks. Run targeted tests for the
   code you changed instead — a single `ctest --test-dir build -R <name>` case, or one
   `pytest`/`scripts/test.sh` subset. (`./scripts/test.sh` and a full `ctest --test-dir build`

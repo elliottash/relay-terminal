@@ -3,6 +3,10 @@
 The project's working rules live in `WARP.md` (issues, tests, protocol, shortcut hints) and the
 docs it points at. Read that first. What follows is specific to how sessions work in this repo.
 
+Before building Relay or producing an installer/package, read `docs/BUILDING.md`. It is the
+canonical cross-platform build map used by Codex, Claude and Relay agents. Keep platform commands
+there aligned with the native CI workflows rather than copying them into agent-specific notes.
+
 ## Work in this checkout, on main. No branches, no worktrees.
 
 Owner's rule, 2026-09-18: **do not create a branch or a git worktree for your work.** Edit

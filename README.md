@@ -1,13 +1,15 @@
 # Relay
 
-A Linux terminal with a rich prompt and bring-your-own-key agents.
+A cross-platform workspace for terminal and agentic coding, with a rich prompt and
+bring-your-own-key agents.
 
 Relay has its own terminal engine, and under it sits a normal text editor. Type a shell
 command and it runs in the terminal. Type a request in plain language and an agent, using
 your own API key, answers inline in the same terminal.
 
-**Status: Linux beta in preparation.** The app runs on Ubuntu 24.04 (Qt5). It has not had
-independent QA yet. See [docs/VALIDATION.md](docs/VALIDATION.md).
+**Status: public beta.** Native builds are available for Linux, Windows and macOS. See
+[GitHub Releases](https://github.com/elliottash/relay-terminal/releases) and
+[docs/VALIDATION.md](docs/VALIDATION.md).
 
 <!-- Screenshot placeholder: composer, an inline agent answer with a tool call, a split pane. -->
 
@@ -39,6 +41,10 @@ A fresh install runs on Relay Free with no key (see "Privacy and your keys"). Th
 [docs/RELEASING.md](docs/RELEASING.md).
 
 ### From source
+
+The canonical build guide is [docs/BUILDING.md](docs/BUILDING.md). It covers developer builds,
+Linux `.deb` packages, the native Windows installer, Apple Silicon and Intel Mac disk images, and
+the CI/release workflows that reproduce published artifacts.
 
 Ubuntu 24.04:
 
