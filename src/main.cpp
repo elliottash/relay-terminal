@@ -377,7 +377,12 @@ int main(int argc, char **argv) {
     }
     QCommandLineParser parser; parser.setApplicationDescription(QStringLiteral("Terminal with rich input and BYOK agents."));
     parser.addHelpOption(); parser.addVersionOption();
-    QCommandLineOption workspace(QStringList{QStringLiteral("w"), QStringLiteral("workspace")}, QStringLiteral("Initial terminal directory and agent workspace."), QStringLiteral("path"), QDir::currentPath());
+    QString initialDirectory = QDir::currentPath();
+#ifdef Q_OS_MACOS
+    // Launch Services starts apps in /; a Finder launch should begin in the user's home.
+    if (initialDirectory == QStringLiteral("/")) initialDirectory = QDir::homePath();
+#endif
+    QCommandLineOption workspace(QStringList{QStringLiteral("w"), QStringLiteral("workspace")}, QStringLiteral("Initial terminal directory and agent workspace."), QStringLiteral("path"), initialDirectory);
     QCommandLineOption clean(QStringLiteral("clean-shell"), QStringLiteral("Do not source ~/.bashrc; useful for incompatible DEBUG/preexec prompt hooks."));
     QCommandLineOption engineCore(QStringLiteral("engine-core"), QStringLiteral("Emulator core of Relay-engine panes: ghostty or libvterm. Also RELAY_ENGINE_CORE."), QStringLiteral("name"));
     // Saved window layout: --fresh ignores it this once (the file itself is kept).
