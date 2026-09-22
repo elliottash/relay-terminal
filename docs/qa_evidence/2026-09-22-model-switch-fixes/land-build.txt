@@ -1,0 +1,7 @@
+onto main (tip 7102b5071aae), 53 path(s), digest 7f8c940c5606:
+verify: tree 9d26f25065c9 materialised in /tmp/claude-1000/land/model-switch-fixes/verify/src (6 file(s) refreshed)
+verify: sh -c scripts/relay-build --target relay
+verify: the exact tree builds
+landed 552982fa58c6f82a0999452888e88f980b37c22e on main
+552982fa58c6f82a0999452888e88f980b37c22e
+Exit: 0

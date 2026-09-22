@@ -24,3 +24,9 @@ Claimed via file fallback as codex. Delivering model-switch fixes, picker loggin
 
 <!-- relay:entry 20260922T145831Z-v9 author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented and tested; live GUI drive and picker logs saved for independent verification. · evidence docs/qa_evidence/2026-09-22-model-switch-fixes/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T150313Z-06 author=agent kind=event model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-model-ses… → {"plans": [], "commits": ["552982fa58c6f82a0999452888e88f980b37c22e"], "evidence…
+
+<!-- relay:entry 20260922T150313Z-w8 author=agent kind=evidence model=gpt-6-astra pane=3064d543 turn=42374cc63a8340a9a03cd22ca3f514e3/3649adf8472b427f8ca50c556342b852 -->
+Landed implementation and live-drive evidence in 552982fa58c6f82a0999452888e88f980b37c22e. land.py built the exact committed tree successfully using scripts/relay-build --target relay, excluding concurrent sessions' uncommitted changes. Build-gate record: docs/qa_evidence/2026-09-22-model-switch-fixes/land-build.txt. Awaiting independent verification.
