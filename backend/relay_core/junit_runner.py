@@ -99,6 +99,20 @@ class JUnitResult(unittest.TextTestResult):
         case = {"classname": classname,
                 "name": getattr(test, "_testMethodName", "") or str(test),
                 "time": elapsed, "file": file, "line": line}
+        if type(test).__module__ == "unittest.loader" and type(test).__name__ == "_FailedTest":
+            scope = case["name"]
+            for requested in getattr(self, "requested_names", []):
+                if requested == scope or requested.endswith("." + scope) or requested.startswith(scope + "."):
+                    parts = requested.split(".")
+                    for end in range(len(parts), 0, -1):
+                        candidate = ".".join(parts[:end])
+                        if (self.root / (candidate.replace(".", "/") + ".py")).is_file():
+                            scope = candidate
+                            break
+                    break
+            if (self.root / "tests" / (scope.replace(".", "/") + ".py")).is_file():
+                scope = "tests." + scope
+            case["collection_scope"] = scope
         case.update(self._pending)
         self.cases.append(case)
         super().stopTest(test)
@@ -151,12 +165,16 @@ class JUnitResult(unittest.TextTestResult):
                 attrs["file"] = case["file"]
             if case["line"]:
                 attrs["line"] = str(case["line"])
+            if case.get("collection_scope"):
+                attrs["collection_scope"] = case["collection_scope"]
             node = ET.SubElement(suite, "testcase", attrs)
             tag = {"fail": "failure", "error": "error", "skip": "skipped"}.get(case["result"])
             if tag:
                 child = ET.SubElement(node, tag, {"message": case["message"] or tag})
                 if case["excerpt"]:
                     child.text = case["excerpt"]
+        for scope, outcome in getattr(self, "scope_results", {}).items():
+            ET.SubElement(suite, "collection", {"scope": scope, "result": outcome})
         return ET.ElementTree(suite)
 
     def write_xml(self, path: str | os.PathLike, name: str = "unittest") -> Path:
@@ -205,11 +223,24 @@ def main(argv: list[str] | None = None) -> int:
                         args.top_level_directory)
 
     def factory(stream, descriptions, verbosity, **kwargs):
-        return JUnitResult(stream, descriptions, verbosity, root=root, **kwargs)
+        result = JUnitResult(stream, descriptions, verbosity, root=root, **kwargs)
+        result.requested_names = args.names
+        return result
 
     runner = unittest.TextTestRunner(verbosity=0 if args.quiet else args.verbose,
                                      resultclass=factory)
     result = runner.run(suite)
+    # Only a full module invocation (or discovery) proves that scope passed. A green
+    # method/class subset must never heal an import incident for the whole module.
+    modules: dict[str, list[dict]] = {}
+    for case in result.cases:
+        module = _relative_module(str(root / case["file"]), root) if case["file"] else ""
+        if module and not case.get("collection_scope"):
+            modules.setdefault(module, []).append(case)
+    result.scope_results = {
+        module: ("fail" if any(c["result"] in ("fail", "error") for c in cases)
+                 else "pass" if all(c["result"] == "pass" for c in cases) else "skip")
+        for module, cases in modules.items() if not args.names or module in args.names}
     if args.junit and isinstance(result, JUnitResult):
         result.write_xml(args.junit, args.suite_name)
     return 0 if result.wasSuccessful() else 1

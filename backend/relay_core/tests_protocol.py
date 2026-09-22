@@ -1350,6 +1350,9 @@ class TestsCommands:
         """`(ctest ids, unittest ids, skipped ids)`, deduplicated and in the order given."""
         ctest, unittest_, skipped = [], [], []
         for value in dict.fromkeys(str(v).strip() for v in ids if str(v).strip()):
+            scope = H.collection_scope(value)
+            if scope:
+                value = "unittest:" + scope
             runner = value.split(":", 1)[0] if ":" in value else ""
             if runner not in RUNNABLE:
                 skipped.append(value)

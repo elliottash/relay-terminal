@@ -80,7 +80,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -101,7 +101,7 @@ OPEN_AFTER_FAILURES = 2         # R4: open on the second *consecutive* failing e
 #: — a first failure there is as likely to be another session's half-saved edit as a fault.  A
 #: build failure, a `check` problem, a fingerprint group of `GROUP_MIN_KEYS` keys and a red run
 #: are each complete evidence the moment they happen, so they open at once.
-DEBOUNCED_SOURCES = ("ctest", "unittest", "ci")
+DEBOUNCED_SOURCES = ("ctest", "unittest", "ci", "collection")
 RESOLVE_PASSES = {              # R5: consecutive passing executions that resolve a signal
     "broken": 2,                #   TestGrid's two green runs, right for the deterministic case
     "flaky": 20,                #   Datadog's number; cheap here because Relay can just re-run
@@ -443,7 +443,7 @@ def _collapse(rows: Sequence[H.Execution], containers: dict[str, _Container]) ->
     group — because each later rule would otherwise itemise what the earlier one explained.
     """
     builds = [r for r in rows if source_of(r.id) == "build" and _outcome(r.result) == "fail"]
-    tests = [r for r in rows if source_of(r.id) != "build"]
+    tests = [r for r in rows if source_of(r.id) not in ("build", "collection")]
     out = {"inhibited_by": builds[0].id if builds else "", "collapsed": {}, "touched": []}
     if builds:
         return out                                   # every test in this run is not evaluated
@@ -528,6 +528,18 @@ def fold(executions: Iterable, events: Iterable = (), now=None, *,
     # honest tiebreak (see `_run_order`).  `executions` is therefore expected in log order, which
     # is what `test_history.read` returns.
     rows.sort(key=lambda r: str(r.ts))
+    # Full-scope outcomes answer prior import incidents; ordinary failing tests do
+    # not themselves invent a second collection incident.
+    incidents: set[str] = set()
+    kept = []
+    for row in rows:
+        scope = H.collection_scope(row.id)
+        if scope and row.message != H.SCOPE_EXECUTION and row.result in FAILING:
+            incidents.add(scope)
+        if scope and row.message == H.SCOPE_EXECUTION and scope not in incidents:
+            continue
+        kept.append(row)
+    rows = kept
     actions = [dict(e) for e in (events or []) if isinstance(e, dict)]
     actions.sort(key=lambda e: str(e.get("ts") or ""))
     run_session = {str(e.get("run_id") or ""): str(e.get("session") or "")
@@ -537,8 +549,18 @@ def fold(executions: Iterable, events: Iterable = (), now=None, *,
     containers: dict[str, _Container] = {}
     steps: dict[str, list[_Step]] = {}
     container_runs: list[tuple[str, dict, list[H.Execution]]] = []
+    legacy = {row.id: H.collection_scope(row.id) for row in rows
+              if row.id.startswith(H.LEGACY_COLLECTION_PREFIX)}
     for run_key, run_rows in _run_order(rows):
+        # Preserve historical containers/claims, but never count repeated loader rows
+        # as separate executions. New reports use collection keys, outside R7.
         decision = _collapse(run_rows, containers)
+        run_rows = H.deduplicate_collection(run_rows)
+        observed = {row.id for row in run_rows}
+        for row in list(run_rows):
+            for old, scope in legacy.items():
+                if row.id == H.COLLECTION_PREFIX + scope and old not in observed:
+                    run_rows.append(replace(row, id=old))
         run_id = run_rows[0].run_id or run_key
         session = run_session.get(run_id, "")
         for row in run_rows:
@@ -570,13 +592,17 @@ def fold(executions: Iterable, events: Iterable = (), now=None, *,
             if key in decision["touched"] or not container.members:
                 continue
             asked = [seen.get(m, "") for m in container.members if seen.get(m, "")]
-            if asked and all(o == "pass" for o in asked):
+            collection_members = [m for m in container.members if H.collection_scope(m)]
+            if collection_members and not all(seen.get(m) for m in container.members):
+                continue
+            outcome = "pass" if asked and all(o == "pass" for o in asked) else "fail"
+            if asked and (outcome == "pass" or collection_members):
                 stamp = run_rows[-1].ts
                 steps.setdefault(key, []).append(_Step(
                     ts=stamp, when=_at(stamp), kind="exec",
-                    row=H.Execution(ts=stamp, id=key, result="pass", run_id=run_id,
+                    row=H.Execution(ts=stamp, id=key, result=outcome, run_id=run_id,
                                     commit=run_rows[-1].commit),
-                    outcome="pass", run_id=run_id))
+                    outcome=outcome, run_id=run_id))
 
     # ---- the actions, per key
     for action in actions:
@@ -616,7 +642,7 @@ def _walk(key: str, timeline: Sequence[_Step], container: _Container | None,
     if container is not None:
         signal.members = list(container.members)
         signal.fingerprint = container.fingerprint
-    fixed_kind = container is not None or signal.source == "build"
+    fixed_kind = container is not None or signal.source == "build" or bool(H.collection_scope(key))
     if signal.source == "build":
         signal.kind = "build"
     alive = False                      # is there a signal at all right now?
@@ -757,7 +783,8 @@ def _finish(signal: Signal, out: dict[str, Signal], known: set[str] | None,
             at: datetime) -> None:
     """`removed` and `stale`: the two verdicts that need the world outside the timeline."""
     if (known is not None and signal.state in ("pending", "open")
-            and signal.source in ("ctest", "unittest") and signal.key not in known):
+            and signal.source in ("ctest", "unittest") and signal.key not in known
+            and not H.collection_scope(signal.key)):
         signal.state = "removed"
         signal.resolved_at = signal.resolved_at or _iso(at)
         return
@@ -866,7 +893,9 @@ def rerun_keys(failed: Sequence[str], executions: Iterable, *,
     natural run.  Anything bigger stays `pending` and is answered by the next run, because a
     button that quietly re-runs six minutes of tests is the accident this refuses to have.
     """
-    keys = [str(k) for k in dict.fromkeys(failed) if str(k).strip()]
+    keys = list(dict.fromkeys(
+        H.COLLECTION_PREFIX + H.collection_scope(str(k)) if H.collection_scope(str(k)) else str(k)
+        for k in failed if str(k).strip()))
     if not keys or len(keys) > max_failures:
         return []
     rows = H._as_executions(executions)

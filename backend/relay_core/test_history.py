@@ -336,6 +336,37 @@ def _junit_result(case: ET.Element) -> tuple[str, str, str]:
     return "pass", "", ""
 
 
+COLLECTION_PREFIX = "collection:unittest:"
+SCOPE_EXECUTION = "scope execution"
+LEGACY_COLLECTION_PREFIX = "unittest:unittest.loader._FailedTest."
+
+
+def collection_scope(key: str) -> str:
+    """Runnable scope, including the old unittest loader wrapper's stored identity."""
+    if key.startswith(COLLECTION_PREFIX):
+        return key[len(COLLECTION_PREFIX):]
+    if key.startswith(LEGACY_COLLECTION_PREFIX):
+        scope = key[len(LEGACY_COLLECTION_PREFIX):]
+        return "tests." + scope if "." not in scope else scope
+    return ""
+
+
+def deduplicate_collection(rows: Sequence[Execution]) -> list[Execution]:
+    """One synthetic observation per scope/run; leave real repeated tests intact."""
+    out: list[Execution] = []
+    seen: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = (row.run_id, row.id)
+        if collection_scope(row.id) and key in seen:
+            if row.result in BAD_RESULTS:
+                out[seen[key]] = row
+            continue
+        if collection_scope(row.id):
+            seen[key] = len(out)
+        out.append(row)
+    return out
+
+
 def _junit_id(runner: str, case: ET.Element) -> str:
     """The wire id for a `<testcase>`.
 
@@ -343,6 +374,8 @@ def _junit_id(runner: str, case: ET.Element) -> str:
     other producer (including `relay_core.junit_runner`) writes the dotted module and class, so
     the id is `<runner>:<classname>.<name>`.
     """
+    if runner == P.RUNNER_UNITTEST and case.get("collection_scope"):
+        return COLLECTION_PREFIX + case.get("collection_scope")
     name = (case.get("name") or "").strip()
     classname = (case.get("classname") or "").strip()
     if runner == P.RUNNER_CTEST or not classname or classname == name:
@@ -399,7 +432,15 @@ def ingest_junit(path_or_bytes, runner: str = P.RUNNER_UNITTEST, commit: str = "
                                  message=message, excerpt=excerpt,
                                  source_hash=hashes.get(test_id, ""),
                                  tree_digest=str(tree_digest or "")))
-    return out
+        if runner == P.RUNNER_UNITTEST:
+            for collection in suite.findall("collection"):
+                scope = collection.get("scope", "")
+                if scope and collection.get("result") in ("pass", "fail", "skip"):
+                    out.append(Execution(ts=stamp, id=COLLECTION_PREFIX + scope,
+                                         runner=runner, run_id=run_id, commit=commit,
+                                         result=collection.get("result"), message=SCOPE_EXECUTION,
+                                         host=machine, tree_digest=tree_digest))
+    return deduplicate_collection(out)
 
 
 def ingest_ctest_cost(path: str | os.PathLike) -> dict[str, dict]:
