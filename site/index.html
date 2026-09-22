@@ -58,10 +58,10 @@
             the agent, and Relay shows you which before you press Enter. It works the moment it opens on an
             included allowance, and runs on your own API keys when you want them. No account, no telemetry.</p>
           <div class="cta">
-            <a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.3">Download the beta</a>
+            <a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.4">Download the beta</a>
             <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
           </div>
-          <p class="cta-note">Native Windows installer, Linux packages, or a source build.
+          <p class="cta-note">Native apps for macOS and Windows, Linux packages, or a source build.
             Agent commands run as your user; approval settings depend on your build —
             <a href="#privacy">read this first</a>.</p>
         </div>
@@ -186,10 +186,10 @@
           <li>
             <span class="num">02</span>
             <h3>A terminal engine Relay owns</h3>
-            <p>Relay renders the terminal itself, with libghostty-vt in Linux packages and libvterm in the native Windows beta. That is what
+            <p>Relay renders the terminal itself, with libghostty-vt in Linux packages and libvterm in the native Mac and Windows betas. That is what
               lets the agent see the screen and the scrollback, mask a password in the prompt box and fold a long
-              tool call. And it is fast: 200 MB of output in about 1.2 s where Konsole takes 3.6 s on the same
-              machine.</p>
+              tool call. In our Linux benchmark, libghostty-vt displays 200 MB of output in about 1.2 s,
+              compared with Konsole’s 3.6 s on the same machine.</p>
           </li>
           <li>
             <span class="num">03</span>
@@ -374,8 +374,8 @@
     <section id="install" aria-labelledby="install-title">
       <div class="wrap">
         <h2 id="install-title">Install</h2>
-        <p class="note" role="note"><strong>0.1.0 beta 3.</strong> Packages are built and tested by CI for every release and
-          published on <a href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.3">GitHub Releases</a>,
+        <p class="note" role="note"><strong>0.1.0 beta 4.</strong> Packages are built and tested by CI for every release and
+          published on <a href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.4">GitHub Releases</a>,
           with <code>SHA256SUMS</code> beside them. The AUR packages are prepared but
           not yet published.</p>
 
@@ -383,23 +383,31 @@
           <article>
             <h3>Windows x64</h3>
             <p>A native app with PowerShell 7 and Python included. No WSL or separate runtime setup.</p>
-            <p><a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_windows_x64_setup.exe">Download Windows installer</a></p>
+            <p><a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_windows_x64_setup.exe">Download Windows installer</a></p>
             <p>Install for your user, then open Relay from the Start menu. The first Windows beta is unsigned;
               Windows may show a publisher warning. See the release notes for platform limitations.</p>
+          </article>
+          <article>
+            <h3>macOS</h3>
+            <p>For macOS 13 Ventura or newer. Bash, Python and Qt are included; no Homebrew setup required.</p>
+            <p><a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_macos_arm64.dmg">Download for Apple Silicon</a></p>
+            <p><a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_macos_x64.dmg">Download for Intel Macs</a></p>
+            <p>Open the disk image and drag Relay into Applications. These betas are ad-hoc signed, not notarized.
+              If macOS blocks a trusted download, follow <a href="https://support.apple.com/en-us/102445">Apple’s Open Anyway instructions</a>.</p>
           </article>
           <article>
             <h3>Packaged: Ubuntu 24.04, 26.04, Debian 13</h3>
             <p>Choose your distribution and CPU: <strong>amd64</strong> for 64-bit Intel or AMD PCs,
               <strong>arm64</strong> for ARM systems.</p>
             <ul>
-              <li>Ubuntu 24.04: <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_ubuntu24.04_amd64.deb">amd64</a> · <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_ubuntu24.04_arm64.deb">arm64</a></li>
-              <li>Ubuntu 26.04: <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_ubuntu26.04_amd64.deb">amd64</a> · <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_ubuntu26.04_arm64.deb">arm64</a></li>
-              <li>Debian 13: <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_debian13_amd64.deb">amd64</a> · <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/relay_0.1.0-beta.3_debian13_arm64.deb">arm64</a></li>
+              <li>Ubuntu 24.04: <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu24.04_amd64.deb">amd64</a> · <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu24.04_arm64.deb">arm64</a></li>
+              <li>Ubuntu 26.04: <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu26.04_amd64.deb">amd64</a> · <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_ubuntu26.04_arm64.deb">arm64</a></li>
+              <li>Debian 13: <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_debian13_amd64.deb">amd64</a> · <a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/relay_0.1.0-beta.4_debian13_arm64.deb">arm64</a></li>
             </ul>
-            <p><a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.3/SHA256SUMS">SHA256 checksums</a> ·
-              <a href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.3">Release notes</a></p>
+            <p><a href="https://github.com/elliottash/relay-terminal/releases/download/v0.1.0-beta.4/SHA256SUMS">SHA256 checksums</a> ·
+              <a href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.4">Release notes</a></p>
             <p>Then install the downloaded package. For Ubuntu 24.04 on amd64:</p>
-            <pre><code>sudo apt install ./relay_0.1.0-beta.3_ubuntu24.04_amd64.deb
+            <pre><code>sudo apt install ./relay_0.1.0-beta.4_ubuntu24.04_amd64.deb
 relay --workspace ~/project</code></pre>
             <p>Open it, ask the agent something, and it answers: the included <a href="free.html">Relay Free</a>
               allowance needs no key.</p>
@@ -429,7 +437,7 @@ cmake --install build      # optional, installs to ~/.local</code></pre>
           </article>
           <article>
             <h3>Choosing a core</h3>
-            <p>Relay's engine runs every pane. Linux packages from 0.1.0-beta.3 on ship the libghostty-vt core as the default. The native Windows beta uses libvterm; a source
+            <p>Relay's engine runs every pane. Linux packages from 0.1.0-beta.3 on ship the libghostty-vt core as the default. The native Mac and Windows betas use libvterm; a source
               build gets the libvterm core, which needs nothing extra, unless you build the fast one with Zig
               (<code>engine/scripts/build-libghostty-vt.sh</code>).</p>
             <pre><code>relay                          # the default core
@@ -438,7 +446,7 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
           <article>
             <h3>Keys</h3>
             <p>None needed to start: a fresh install runs on <a href="free.html">Relay Free</a>. For your own
-              provider, add a key in Options › Models › API keys… (Ctrl+,). Keys use Windows Credential Manager on Windows. On Linux they go to the desktop keyring
+              provider, add a key in Options › Models › API keys… (Ctrl+,). Keys use Keychain on macOS and Credential Manager on Windows. On Linux they go to the desktop keyring
               through <code>secret-tool</code> — install <code>libsecret-tools</code> on Debian/Ubuntu or
               <code>libsecret</code> on Arch — or come from an environment variable such as
               <code>RELAY_OPENROUTER_API_KEY</code>.</p>
@@ -500,12 +508,12 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
             <p><strong>Beta, and not independently tested yet.</strong> Relay is usable day to day on Linux, but
               expect rough edges and changes between releases. Please report problems on
               <a href="https://github.com/elliottash/relay-terminal/issues">GitHub Issues</a>.</p>
-            <p>Terminal panes run Bash on Linux and PowerShell 7 on Windows. The composer and shell integration
+            <p>Terminal panes run Bash on Linux and macOS, and PowerShell 7 on Windows. The composer and shell integration
               track the working directory and command status.</p>
           </div>
           <div>
-            <p><strong>Platforms.</strong> Linux (Qt 5 or Qt 6) and native Windows x64 (Qt 6). macOS downloads are in preparation.
-              The first Windows beta does not include voice capture, SSH connection sharing or remote terminal typing. The phone view is a
+            <p><strong>Platforms.</strong> Linux (Qt 5 or Qt 6), native Windows x64 and macOS for Apple Silicon and Intel (Qt 6).
+              The first Mac and Windows betas do not include voice capture or remote terminal typing; Windows also lacks SSH connection sharing. The phone view is a
               web app that any recent browser opens; native apps are not started.</p>
             <p><strong>License.</strong> AGPL-3.0-or-later, all of it: the app, the engine, the phone app, the
               rendezvous and the Relay Free gateway are in the one repository. The Affero clause means anyone who
