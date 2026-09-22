@@ -1,14 +1,14 @@
 ---
 id: WC3E
 type: work
-status: planned
+status: needs-verification
 labels: [feature, switchboard, agent]
 component: [gui, worker]
 parent: YZ8G
 rank: zzzzzzzzzzzzzzzzb
 created: '2026-09-21'
 source: 'owner, 2026-09-21: "i agree with all, go ahead with it" (#YZ8G plan)'
-links: {plans: [], commits: [], evidence: [], related: [YZ8G, 7BM4], github: null}
+links: {plans: [], commits: [0ef3ee13], evidence: [], related: [YZ8G, 7BM4], github: null}
 ---
 # Expectations before implementation, and a verification record written by a separate session
 
@@ -22,3 +22,10 @@ Step 2 of #YZ8G's plan. Codex: "Also missing: acceptance expectations recorded b
 - The implementer moves its card to needs-verification with tests and evidence but no checklist; the policy text, POLICY.md, the plan/verify briefs and protocol §19/§31 say so and no longer contradict each other; the fixed heading list includes Done means, Human QA and Profile.
 - Agents move cards within that authority; a card whose `## Human QA` has an unanswered question stays out of done.
 Failure would show as: an implementer still writing its own checklist; a Verify record with no revision; a card reaching done with an open human question; POLICY.md disagreeing with board_policy.md.
+
+## Tests
+- `PYTHONPATH=backend:tests RELAY_KEYRING=off python3 -m unittest tests.test_board_tools.DoneMeansSectionTests` — tests/test_board_tools.py
+- `PYTHONPATH=backend:tests RELAY_KEYRING=off python3 -m unittest tests.test_board_protocol.DoneMeansAndHumanQATests` — tests/test_board_protocol.py
+- `PYTHONPATH=backend:tests RELAY_KEYRING=off python3 -m unittest tests.test_board.PolicyFileTests` — tests/test_board.py
+- `PYTHONPATH=backend:tests RELAY_KEYRING=off python3 -m unittest tests.test_system_prompt.SizeTests` — tests/test_system_prompt.py
+- `ctest --test-dir build -R '^(board|boardpane)$'` — tests/boardmodel_test.cpp
