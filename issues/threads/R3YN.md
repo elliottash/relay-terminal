@@ -12,3 +12,6 @@ Implementation checks passed: focused status/layout/pulse tests 3/3, full Relay 
 
 <!-- relay:entry 20260922T033810Z-m1 author=agent kind=event model=gpt-5.6-sol pane=38422f45 turn=19a7fd1b741f433ab903e0aea3b65703/7cce6f82910f4100a66f9ab9d20758c4 -->
 - ✦ agent moved this card · Executing → Needs verification · Implementation is complete; the focused status tests pass 3/3, the full Relay target builds, and live helper-console evidence is ready for separate UI verification. · evidence docs/qa_evidence/2026-09-21-r3yn-status-above-prompt/ · implemented_by openai/gpt-5.6-sol via codex
+
+<!-- relay:entry 20260922T033933Z-0m author=agent kind=event model=gpt-5.6-sol pane=38422f45 turn=19a7fd1b741f433ab903e0aea3b65703/7cce6f82910f4100a66f9ab9d20758c4 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-21-r3yn-stat… → {"plans": [], "commits": ["4b990ab7dcbfe597d186e4eb9d412fbee71e501f"], "evidence…

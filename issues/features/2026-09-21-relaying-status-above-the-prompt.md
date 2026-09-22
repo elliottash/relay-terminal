@@ -8,7 +8,7 @@ implemented_by: openai/gpt-5.6-sol via codex
 rank: zzzzzzzzzzzzzzzzz
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-21-r3yn-status-above-prompt/], related: [4E13, HQ2B, V7QD, KP4M, 4X53], github: null}
+links: {plans: [], commits: [4b990ab7dcbfe597d186e4eb9d412fbee71e501f], evidence: [docs/qa_evidence/2026-09-21-r3yn-status-above-prompt/], related: [4E13, HQ2B, V7QD, KP4M, 4X53], github: null}
 ---
 # Put the Relaying status above the prompt
 
