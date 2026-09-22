@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-22'
 source: 'Owner, Relay terminal conversation'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-board-model-selection/], related: [CTRN, MDL1, GH5T], github: null}
+links: {plans: [], commits: [86252f3ec00045d5437e708ca79870c0254a2948], evidence: [docs/qa_evidence/2026-09-22-board-model-selection/], related: [CTRN, MDL1, GH5T], github: null}
 ---
 # Board model selection agrees with the card agent
 
