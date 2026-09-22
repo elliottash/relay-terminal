@@ -271,3 +271,6 @@ person had just taken back sat on screen with its own words in the box under it)
 `consolemode` cases now say what `main` does. So ↑ on a card's queued prompt **takes it back**,
 and the drive checks that: the op names the card's queue, the whole prompt comes back and not the
 preview, and nothing is sent.
+
+<!-- relay:entry 20260922T000646Z-fm author=agent kind=note pane=switchboard -->
+The open QA question "a device's Stop pauses a card's queue and a device has no resume" is answered by the owner on #7JD1 (2026-09-21): Stop pauses the queue and **Enter resumes it**, on the pane, the consoles and a phone alike — a device's next send resumes, an empty send resumes. Nothing to decide here any more; QA can tick that item once #7JD1 lands.
