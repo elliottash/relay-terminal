@@ -25,6 +25,11 @@ never sees — the `switchboard` model role, `Glyph::Switchboard`, `kReasonSwitc
 `relay:switchboard-policy` pointer markers and the `switchboard` card label. It replaces owner
 decision 12.1 below, which kept the word "for now … revisit during QA".
 
+**Superseded folder choice, 2026-09-23 (#GRT2):** new project boards use `.board/` so Board files
+stay out of ordinary project listings. Existing `board/`, `.switchboard/`, `switchboard/` and
+`issues/` boards remain readable until explicitly migrated. Agent pointers name the hidden folder
+and explain how to search it with `rg --hidden` or an explicit path. The product word remains Board.
+
 ## 2. Storage: the board IS `issues/`, with a UI
 
 **Decision: unify.** `issues/` already has the lifecycle, QA lanes, evidence rules and the global `issue-tracking`

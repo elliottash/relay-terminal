@@ -1614,15 +1614,13 @@ to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's B
 ## 10a. The Board pane
 
 The Board **is** a folder in the project shown as a board: one card per issue, plan or
-memory, a thread per card, and an agent that writes to it. The folder is `board/` on a board made
-from 2026-09-21 on, `.switchboard/` on one made between 2026-09-19 and then (hidden, so the cards
-did not clutter the project's listing), `switchboard/` on one made between 2026-09-18 and
-2026-09-19, and `issues/` on one filed before any of them — `board.BOARD_FOLDERS` /
-`relay::projects::boardFolders()`, read in that order, and the only one a project ever keeps is the
-one it already has: nothing moves by itself, except the explicit "Move this board to `board/`"
-action (protocol 19.17). A visible `board/` is found by an ordinary `rg`, which is the point; the
-generated pointer block and `POLICY.md` teach `rg -g '!board/'` for the searches that do not want
-it. Its `board.yaml` is the marker, and that marker
+memory, a thread per card, and an agent that writes to it. New boards use `.board/` (card #GRT2).
+Boards created from 2026-09-21 until that change use `board/`; earlier boards may use
+`.switchboard/`, `switchboard/`, or `issues/`. `board.BOARD_FOLDERS` and
+`relay::projects::boardFolders()` read those names in that order after `.board/`. A project keeps the
+one it already has: nothing moves by itself, except the explicit "Move this board to `.board/`"
+action (protocol 19.17). The generated pointer block and `POLICY.md` name the hidden folder and
+teach explicit `rg --hidden` searches for cards. Its `board.yaml` is the marker, and that marker
 is the switch — everything here is inert without it. Design:
 `docs/BOARD-DESIGN.md`; bytes: `docs/BOARD-FORMAT.md`; protocol:
 `docs/AGENT-SESSIONS-PROTOCOL.md` section 19.

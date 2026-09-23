@@ -4,7 +4,7 @@ A project gets a Board only when the user answers one question, once:
 
 > **Initialize a project and create a Board here?**
 
-Owner's rule, 2026-09-18. Nothing creates `<project>/board/` before that yes — not an
+Owner's rule, 2026-09-18. Nothing creates `<project>/.board/` before that yes — not an
 agent, not opening the Board pane, not a `board_*` tool
 (`board_tools.BoardTools.create_board` is the only path, and every route into it goes through
 the `board_init_request` round trip).
