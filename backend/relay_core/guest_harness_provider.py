@@ -864,18 +864,11 @@ class HarnessProvider:
         turn = _Turn(self, agent, record, emit, cancel)
         if self.board_bridge is not None:
             self.board_bridge.begin(cancel)
-            prompt = ("Relay offers an MCP server named relay_board. If its tools are visible, "
-                      "use its board_list, board_read, board_comment, board_update_card and "
-                      "board_move_card tools in preference to file edits. Other board operations "
-                      "(including create/claim), or an unavailable connection, use POLICY.md's "
-                      "file fallback. Never claim connection success without discovery. "
-                      "Delegate only through this server's agent, agent_message and agent_wait; "
-                      "use update_todos and link delegated tasks with todo_id. Do not use native "
-                      "harness subagents or another agent CLI. If Relay delegation is unavailable, "
-                      "work locally and report that limitation.\n\n" + prompt)
             if agent is not None and agent._todos_enabled():
-                prompt += "\n\n[Relay tasks: current state, preserve when updating]\n" + json.dumps(
-                    agent.todos.snapshot(), ensure_ascii=False)
+                tasks = agent.todos.snapshot()
+                if tasks:
+                    prompt += "\n\n[Relay tasks: current state, preserve when updating]\n" + json.dumps(
+                        tasks, ensure_ascii=False)
         # Set before sending: a failed first turn on a live harness has still been given it.
         self.briefed = True
         try:

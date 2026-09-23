@@ -281,10 +281,8 @@ class StartTests(unittest.TestCase):
                             for prompt in ("hello", "next turn"):
                                 provider.complete([{"role": "user", "content": prompt}], [],
                                                   lambda event: None, threading.Event())
-                                # The existing bridge-discovery hint is separate; the session
-                                # supplement must never become user text on any turn.
                                 sent = harness.sent[-1]["prompt"]
-                                self.assertTrue(sent.endswith("\n\n" + prompt))
+                                self.assertEqual(sent, prompt)
                                 self.assertNotIn(GUEST_INSTRUCTIONS, sent)
                                 self.assertNotIn("[Relay guest context]", sent)
                             session = provider.session_id

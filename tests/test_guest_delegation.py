@@ -122,6 +122,8 @@ class DelegationTests(unittest.TestCase):
 
     def test_pending_child_result_does_not_replace_user_prompt(self):
         self.harness.script = [{'result': ('Compared', 'end', {})}]
+        self.agent.todos.replace({'items': [{'text': 'Compare the chapters',
+                                             'status': 'in_progress'}]}, [], 'turn')
         self.agent.messages += [{'role': 'assistant', 'content': 'Earlier reply'},
                                 {'role': 'user', 'content': 'Now compare the chapters'},
                                 {'role': 'user', 'relay_kind': 'note', 'content': 'Child A report'},
@@ -130,6 +132,13 @@ class DelegationTests(unittest.TestCase):
         prompt = self.harness.sent[-1]['prompt']
         for expected in ('Now compare the chapters', 'Child A report', 'Child B report', 'Relay tasks'):
             self.assertIn(expected, prompt)
+
+    def test_empty_tasks_do_not_add_a_guest_prompt_block(self):
+        self.harness.script = [{'result': ('Done', 'end', {})}]
+        self.agent.messages.append({'role': 'user', 'content': 'Review the change'})
+        self.provider.complete(self.agent.messages, [],
+                               self.events.append, self.agent.cancel_event)
+        self.assertEqual(self.harness.sent[-1]['prompt'], 'Review the change')
 
     def test_bridge_result_keeps_native_child_link(self):
         turn = P._Turn(self.provider, self.agent, None, self.events.append, self.agent.cancel_event)
