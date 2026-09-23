@@ -1696,6 +1696,8 @@ public:
         relay::models::Catalog catalog = relay::models::catalogFrom(m_presets);
         // The figures that arrived since the last `presets` answer are the fresher ones.
         for (auto it = m_limits.constBegin(); it != m_limits.constEnd(); ++it) catalog.limits.insert(it.key(), it.value());
+        for (auto it = m_limitUpdatedAt.constBegin(); it != m_limitUpdatedAt.constEnd(); ++it)
+            catalog.limitUpdatedAt.insert(it.key(), it.value());
         for (auto it = m_limitStatus.constBegin(); it != m_limitStatus.constEnd(); ++it) {
             if (it.value().isEmpty()) catalog.status.remove(it.key());
             else catalog.status.insert(it.key(), it.value());
@@ -1718,6 +1720,7 @@ public:
         if (preset.isEmpty()) return;
         const QStringList before = exhaustedPresets();
         m_limits.insert(preset, windows);
+        m_limitUpdatedAt.insert(preset, QDateTime::currentSecsSinceEpoch());
         m_limitStatus.insert(preset, status);
         limitsChanged(before != exhaustedPresets());
     }
@@ -2035,6 +2038,20 @@ public:
         QSettings settings;
         QJsonObject roles;
         for (const QString &role : roleIds()) {
+            if (relay::rolestore::rankedOverrideSet(role)) {
+                QJsonArray candidates;
+                for (const auto &item : relay::rolestore::rankedOverride(role)) {
+                    QString preset, model;
+                    if (!relay::models::Catalog::splitKey(item.key, &preset, &model)) continue;
+                    QJsonObject candidate{{QStringLiteral("preset"), preset},
+                                          {QStringLiteral("model"), model},
+                                          {QStringLiteral("rank"), item.rank}};
+                    if (!item.effort.isEmpty()) candidate.insert(QStringLiteral("effort"), item.effort);
+                    candidates.append(candidate);
+                }
+                if (!candidates.isEmpty()) roles.insert(role, QJsonObject{{QStringLiteral("candidates"), candidates}});
+                continue;
+            }
             const QString effort = settings.value(roleSetting(role, QStringLiteral("effort"))).toString();
             const QString tier = settings.value(roleSetting(role, QStringLiteral("tier"))).toString();
             if (relay::models::curation::tierIds().contains(tier)) {
@@ -2075,6 +2092,7 @@ public:
                     if (!relay::models::Catalog::splitKey(item.key, &preset, &model)) continue;
                     QJsonObject entry{{"preset", preset}, {"model", model}};
                     if (!item.effort.isEmpty()) entry.insert(QStringLiteral("effort"), item.effort);
+                    if (item.rank > 0) entry.insert(QStringLiteral("rank"), item.rank);
                     list.append(entry);
                 }
                 tiers.insert(tier, list);
@@ -2120,10 +2138,12 @@ public:
                       const relay::modelrows::ModePick &pick = {}) {
         const QString mode = relay::modelrows::roleTier(role);
         if (role == m_agentRole && pick.key.isEmpty()) return;
+        // A lifecycle draw is the concrete choice for this conversation. Persist it just like a
+        // manual mode pick so a restored pane resumes on the same model and effort.
+        if (!pick.key.isEmpty()) m_modePick.insert(mode, pick);
         // Allowed mid-turn (issue 3ES1): the worker applies it before the turn's next request.
         if (!m_configured) {
             m_agentRole = role;
-            if (!pick.key.isEmpty()) m_modePick.insert(mode, pick);
         }
         // The model this mode runs in this pane: the one just picked, else the one this pane last
         // picked for that mode. "Enter on a mode row switches the mode and keeps that mode's
@@ -4250,7 +4270,18 @@ public:
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         // Entering Plan selects the same role (and remembered model) as /high. Do not
         // toggle: a pane already on High must stay there, including on repeated Plan.
-        if (mode == QStringLiteral("plan")) setAgentRole(QStringLiteral("high"), false);
+        if (mode == QStringLiteral("plan") && m_agentMode != QStringLiteral("plan")
+            && relay::rolestore::rankedOverrideSet(QStringLiteral("planning"))) {
+            setAgentRole(QStringLiteral("high"), false);
+        } else if (mode == QStringLiteral("plan") && m_agentMode != QStringLiteral("plan")) {
+            const relay::models::Entry drawn = relay::models::drawTier(modelCatalog(), QStringLiteral("high"));
+            if (!drawn.key.isEmpty()) {
+                QString effort;
+                for (const auto &item : relay::models::curation::activeTierList(QStringLiteral("high")))
+                    if (item.key == drawn.key) { effort = item.effort; break; }
+                setAgentRole(QStringLiteral("high"), false, {drawn.key, effort});
+            } else setAgentRole(QStringLiteral("high"), false);
+        }
         send({{"type", "set_mode"}, {"mode", mode}});
     }
     void togglePlanMode() { setAgentMode(m_agentMode == QStringLiteral("plan") ? QStringLiteral("build") : QStringLiteral("plan")); }
@@ -11930,7 +11961,18 @@ private:
             if (!m_pendingAgentMode.isEmpty()) {
                 m_agentMode = m_pendingAgentMode;
                 m_pendingAgentMode.clear();
-                if (m_agentMode == QStringLiteral("plan")) setAgentRole(QStringLiteral("high"), false);
+                if (m_agentMode == QStringLiteral("plan")
+                    && relay::rolestore::rankedOverrideSet(QStringLiteral("planning"))) {
+                    setAgentRole(QStringLiteral("high"), false);
+                } else if (m_agentMode == QStringLiteral("plan")) {
+                    const relay::models::Entry drawn = relay::models::drawTier(modelCatalog(), QStringLiteral("high"));
+                    if (!drawn.key.isEmpty()) {
+                        QString effort;
+                        for (const auto &item : relay::models::curation::activeTierList(QStringLiteral("high")))
+                            if (item.key == drawn.key) { effort = item.effort; break; }
+                        setAgentRole(QStringLiteral("high"), false, {drawn.key, effort});
+                    } else setAgentRole(QStringLiteral("high"), false);
+                }
                 send({{"type", "set_mode"}, {"mode", m_agentMode}});
             }
             noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on
@@ -19567,6 +19609,7 @@ private:
     // `presets` answer. `m_turnSaw429`: the running turn's transport retried a 429 (protocol
     // 15.2.1); a failover or a failed turn right after it is the sign the provider is out.
     QHash<QString, QList<relay::models::LimitWindow>> m_limits;
+    QHash<QString, qint64> m_limitUpdatedAt;
     QHash<QString, QString> m_limitStatus;
     bool m_turnSaw429 = false;
     QString m_failoverTarget;   // the preset the last failover of this turn moved to
