@@ -1409,6 +1409,48 @@ private slots:
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
     }
 
+    void collapsedProjectStaysCollapsedAcrossResults() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.resize(900, 650);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        const QJsonObject alpha = sessionItem(QStringLiteral("a"), QStringLiteral("Alpha work"),
+                                              QStringLiteral("alpha"));
+        const QJsonObject beta = sessionItem(QStringLiteral("b"), QStringLiteral("Beta work"),
+                                             QStringLiteral("beta"));
+        const QJsonArray both{alpha, beta};
+        manager.setResults({{QStringLiteral("items"), both}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *alphaGroup = rowTitled(tree, QStringLiteral("alpha"));
+        QTreeWidgetItem *betaGroup = rowTitled(tree, QStringLiteral("beta"));
+        QVERIFY(alphaGroup && betaGroup);
+        QVERIFY(alphaGroup->isExpanded());
+        QVERIFY(betaGroup->isExpanded());
+
+        alphaGroup->setExpanded(false);           // same signal as the project's collapse arrow
+        QVERIFY(!alphaGroup->isExpanded());
+        manager.setResults({{QStringLiteral("items"), both}});   // delayed worker refresh
+        alphaGroup = rowTitled(tree, QStringLiteral("alpha"));
+        betaGroup = rowTitled(tree, QStringLiteral("beta"));
+        QVERIFY(alphaGroup && betaGroup);
+        QVERIFY(!alphaGroup->isExpanded());
+        QVERIFY(betaGroup->isExpanded());
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-project-collapsed.png")));
+
+        manager.setResults({{QStringLiteral("items"), QJsonArray{beta}}});
+        manager.setResults({{QStringLiteral("items"), both}});
+        alphaGroup = rowTitled(tree, QStringLiteral("alpha"));
+        QVERIFY(alphaGroup);
+        QVERIFY(!alphaGroup->isExpanded());       // a filtered-out group keeps its choice
+        alphaGroup->setExpanded(true);
+        manager.setResults({{QStringLiteral("items"), both}});
+        alphaGroup = rowTitled(tree, QStringLiteral("alpha"));
+        QVERIFY(alphaGroup->isExpanded());
+    }
+
     void mouseSelectionPreviewsBeforeExplicitResume() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};

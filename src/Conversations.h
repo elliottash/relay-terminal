@@ -414,6 +414,8 @@ private:
     QJsonArray m_items;
     // A conversation can have two rows (the "Continue" group and its own group), so both are kept.
     QMultiHash<QString, QTreeWidgetItem *> m_rows;
+    // User-collapsed group names by grouping mode; query refreshes recreate every tree item.
+    QHash<QString, QSet<QString>> m_collapsedGroups;
     QList<QTreeWidgetItem *> m_spanRows;       // rows waiting for their span (#MDSG)
     QHash<QString, QJsonObject> m_overviews;   // what an unfolded row shows, once fetched
     QSet<QString> m_summarising;

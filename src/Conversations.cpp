@@ -54,6 +54,7 @@ constexpr int kBadgeRole = Qt::UserRole + 5;
 constexpr int kHtmlRole = Qt::UserRole + 6;
 constexpr int kKindRole = Qt::UserRole + 7;
 constexpr int kLoadedRole = Qt::UserRole + 8;
+constexpr int kGroupNameRole = Qt::UserRole + 9;
 }  // namespace
 
 // ----- pure helpers ------------------------------------------------------------------------
@@ -841,6 +842,17 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_tree->header(), &QHeaderView::sectionResized, this,
             [this](int section, int, int) { if (section == 0) m_tree->doItemsLayout(); });
     connect(m_tree, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) { unfold(item); });
+    auto rememberGroup = [this](QTreeWidgetItem *item, bool expanded) {
+        if (m_filling || item->data(0, kKindRole).toString() != QLatin1String("group")) return;
+        QSet<QString> &collapsed = m_collapsedGroups[m_group->currentData().toString()];
+        const QString name = item->data(0, kGroupNameRole).toString();
+        if (expanded) collapsed.remove(name);
+        else collapsed.insert(name);
+    };
+    connect(m_tree, &QTreeWidget::itemCollapsed, this,
+            [rememberGroup](QTreeWidgetItem *item) { rememberGroup(item, false); });
+    connect(m_tree, &QTreeWidget::itemExpanded, this,
+            [rememberGroup](QTreeWidgetItem *item) { rememberGroup(item, true); });
     m_tree->installEventFilter(this);
 
     m_header = new QLabel;
@@ -1806,14 +1818,15 @@ void SessionManager::rebuildTree(const QString &keep) {
     const QDateTime now = QDateTime::currentDateTime();
     const QString grouping = m_group->currentData().toString();
     int matches = 0, sessions = 0, threads = 0;
-    auto groupFor = [this, &groups](const QString &name) -> QTreeWidgetItem * {
+    auto groupFor = [this, &groups, &grouping](const QString &name) -> QTreeWidgetItem * {
         QTreeWidgetItem *group = groups.value(name);
         if (!group) {
             group = new QTreeWidgetItem(m_tree, {name.isEmpty() ? QStringLiteral("(no project)") : name});
             spanFirstColumn(group);
             group->setFlags(Qt::ItemIsEnabled);
-            group->setExpanded(true);
             group->setData(0, kKindRole, QStringLiteral("group"));
+            group->setData(0, kGroupNameRole, name);
+            group->setExpanded(!m_collapsedGroups.value(grouping).contains(name));
             QFont font = group->font(0);
             font.setBold(true);
             group->setFont(0, font);
@@ -1961,10 +1974,15 @@ void SessionManager::rebuildTree(const QString &keep) {
     m_matches = matches;
     m_sessions = sessions;
     m_threadCount = threads;
+    const QSet<QString> collapsedGroups = m_collapsedGroups.value(grouping);
     m_filling = false;
     for (int column = 1; column < m_tree->columnCount(); ++column)
         header->setSectionResizeMode(column, QHeaderView::ResizeToContents);
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
+    // Selecting a session under a collapsed group can expand its parent in Qt. Restore the
+    // reader's group choice after restoring the current row, including when that row is hidden.
+    for (auto it = groups.cbegin(); it != groups.cend(); ++it)
+        if (collapsedGroups.contains(it.key())) it.value()->setExpanded(false);
     m_tree->verticalScrollBar()->setValue(std::min(scroll, m_tree->verticalScrollBar()->maximum()));
     updateStatus();
     updateEmptyState();
