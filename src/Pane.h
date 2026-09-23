@@ -1111,6 +1111,10 @@ public:
     // same model twice in models/recent and models/uses).
     QString paneModel() const { return m_paneModel.isEmpty() ? m_model : m_paneModel; }
     QString sessionId() const { return m_sessionId; }
+    // A restored pane can defer its guest harness until the first prompt. Keep the old session
+    // in the saved layout throughout that wait and the asynchronous resume, rather than saving
+    // the new worker's empty session over it after a crash restart.
+    QString sessionIdForLayout() const { return m_restoreSession.isEmpty() ? m_sessionId : m_restoreSession; }
     QString guestSessionId() const { return m_guestSession; }
     QString sessionDir() const { return m_sessionDir; }
 
@@ -6131,10 +6135,10 @@ private:
     // The worker replies with `state_loaded` (the "Session loaded: … · N turn(s)" line, plus the
     // open-task count) and a recap; a session whose file is gone starts fresh with one note.
     void resumeRestoredSession() {
-        if (m_restoreSession.isEmpty()) return;
+        if (m_restoreSession.isEmpty() || !m_restoreRequest.isEmpty()) return;
         const QString id = m_restoreSession;
-        m_restoreSession.clear();
         if (m_sessionDir.isEmpty() || !QFileInfo::exists(m_sessionDir + '/' + id + QStringLiteral(".json"))) {
+            m_restoreSession.clear();
             ensureLineStart();
             printInline(QStringLiteral("Previous conversation is no longer saved · starting a new one\n"), Ink::Note);
             return;
@@ -6261,6 +6265,7 @@ private:
             // reopened (deleted, or written by another Relay). Start fresh with one line.
             if (!id.isEmpty() && id == m_restoreRequest) {
                 m_restoreRequest.clear();
+                m_restoreSession.clear();
                 ensureLineStart();
                 printInline(QStringLiteral("Previous conversation could not be reopened (%1) · starting a new one\n")
                                 .arg(event.value(QStringLiteral("text")).toString()), Ink::Note);
@@ -8770,6 +8775,10 @@ private:
         }
         if (type == QStringLiteral("state_loaded")) {
             m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
+            if (!m_restoreRequest.isEmpty()) {
+                m_restoreRequest.clear();
+                m_restoreSession.clear();
+            }
             syncSessionText();   // the conversation this pane's text belongs to, from here on (#0TJ9)
             // A fork's id exists only now: the text its parent stashed is written under it and
             // replayed here, so the fork opens showing what it was forked from (#0TJ9).

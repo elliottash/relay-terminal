@@ -59,6 +59,11 @@ inline void WindowManager::setUpLayoutSaving() {
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(1000);   // a crash loses at most this much
     QObject::connect(&m_saveTimer, &QTimer::timeout, &m_context, [this] { saveLayoutNow(); });
+    // Layout saves are cheap and debounced; terminal text is larger, so checkpoint it on its own
+    // cadence. A fatal signal never runs aboutToQuit, the old sole scrollback save path.
+    m_scrollbackTimer.setInterval(30000);
+    QObject::connect(&m_scrollbackTimer, &QTimer::timeout, &m_context, [this] { saveScrollbacks(); });
+    if (restoreEnabled()) m_scrollbackTimer.start();
     m_closedPath = relay::closed::defaultPath();
     loadClosed();
     RelayWindow::registerClosedTab();

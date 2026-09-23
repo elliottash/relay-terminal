@@ -327,6 +327,7 @@ private:
     // saved window layout
     QObject m_context;                        // owns the debounce timer and queued callbacks
     QTimer m_saveTimer{&m_context};
+    QTimer m_scrollbackTimer{&m_context};
     QString m_statePath, m_restoreNote;
     std::unique_ptr<QLockFile> m_stateLock;
     bool m_owner = false, m_layoutLockAttempted = false, m_saveSuspended = false, m_cascadeActive = false;
@@ -9178,7 +9179,7 @@ private:
             // pane's own model; these are the modes it is not in but would come back to.
             if (const QJsonObject picks = pane->modePicks(); !picks.isEmpty())
                 leaf.insert(QStringLiteral("mode_picks"), picks);
-            if (!pane->sessionId().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionId());
+            if (!pane->sessionIdForLayout().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionIdForLayout());
             // Which file holds this pane's terminal text (src/WindowState.h). The id is in every
             // node, including "restore last closed": a reopened pane finds the text of the pane it
             // came from, and the ids in the saved layout are what keeps the store pruned.
