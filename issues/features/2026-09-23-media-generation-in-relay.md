@@ -7,8 +7,8 @@ assignee: codex
 waiting_on: owner
 rank: m
 created: '2026-09-23'
-source: 'Owner in a Relay pane, 2026-09-23; card written by Codex'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+source: Owner in a Relay pane, 2026-09-23; card written by Codex
+links: {plans: [], commits: [2b17ffb791e7a3da2c43a3521783e1c18e7a565f], evidence: [], related: [], github: null}
 ---
 # Give Relay agents image, sound, and video generation
 
