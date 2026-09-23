@@ -1215,8 +1215,20 @@ class Agent:
         # Checked against **this model's** levels, not Relay's old four: a client that still sends
         # `max` to a model whose top is `xhigh` gets `xhigh`, and that is what the pane then
         # reports as its level rather than a word the endpoint never saw.
-        effort = validate_effort(effort, self._effort_levels())
-        extra, applied = apply_effort(self.config.extra, self._effort_style(), effort)
+        levels = self._effort_levels()
+        effort = validate_effort(effort, levels)
+        if not levels:
+            # The pane carries its level through a model with no knob, but the
+            # provider must not receive an inherited effort from the previous model.
+            extra = copy.deepcopy(self.config.extra or {})
+            extra.pop("reasoning_effort", None)
+            if isinstance(extra.get("reasoning"), dict):
+                extra["reasoning"].pop("effort", None)
+                if not extra["reasoning"]:
+                    extra.pop("reasoning")
+            applied = {}
+        else:
+            extra, applied = apply_effort(self.config.extra, self._effort_style(), effort)
         self.config.extra = extra
         if getattr(self.provider, "config", None) is not None and self.provider.config is not self.config:
             self.provider.config.extra = copy.deepcopy(extra)

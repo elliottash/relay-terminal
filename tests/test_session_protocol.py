@@ -27,6 +27,44 @@ from test_queue import Recorder  # noqa: E402
 
 
 class PresetTests(unittest.TestCase):
+    def test_every_catalog_model_sends_only_its_supported_effort(self):
+        from relay_core import openrouter_catalog
+        # Deterministic representatives of the router's dynamic catalog, including
+        # a model with no knob. Built-in catalog rows are exercised in full.
+        dynamic = [{"id": "test/reasoning", "efforts": ["low", "medium", "high", "xhigh"]},
+                   {"id": "test/no-effort", "efforts": []}]
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(openrouter_catalog, "rows", return_value=dynamic):
+            for pid, preset in presets.PRESETS.items():
+                for row in presets.catalog_rows(pid):
+                    levels = row["efforts"]
+                    for level in levels or ["medium"]:
+                        with self.subTest(preset=pid, model=row["id"], level=level):
+                            config = ProviderConfig(preset.base_url, row["id"], "test",
+                                                    presets.model_extra(pid, row["id"]))
+                            agent = Agent(config, root, lambda e: None, provider=ScriptedProvider([]),
+                                          preset_id=pid, effort=level, track_requests=False)
+                            fields = session_protocol.configured_fields(agent)
+                            if levels:
+                                self.assertEqual(fields["effort"], level)
+                                self.assertEqual(presets.infer_effort(preset.effort_style, config.extra), level)
+                            else:
+                                self.assertNotIn("reasoning_effort", config.extra)
+                                self.assertNotIn("effort", config.extra.get("reasoning", {}))
+                            # A later choice follows the same model-specific rules.
+                            agent.set_effort(level)
+                            self.assertEqual(session_protocol.configured_fields(agent)["effort"], fields["effort"])
+                            if not levels:
+                                self.assertNotIn("reasoning_effort", config.extra)
+                                self.assertNotIn("effort", config.extra.get("reasoning", {}))
+                                # Switching from an effort-capable model must also
+                                # strip inherited provider fields, retaining other options.
+                                inherited = ProviderConfig(preset.base_url, row["id"], "test",
+                                                           {"reasoning_effort": "high",
+                                                            "reasoning": {"effort": "high"},
+                                                            "temperature": 0.2})
+                                agent.set_model(inherited, pid)
+                                self.assertEqual(inherited.extra, {"temperature": 0.2})
+
     def test_effort_table(self):
         self.assertEqual(presets.apply_effort({}, 'kimi', 'medium')[1], {'reasoning_effort': 'high'})
         self.assertEqual(presets.apply_effort({'temperature': 1}, 'glm', 'low'),

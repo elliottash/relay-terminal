@@ -19,3 +19,18 @@ Worker regression reproduces the report: configure starts FakeHarness at medium 
 
 <!-- relay:entry 20260922T235613Z-7p author=agent kind=event model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/66640360c94643b080b8ca3c8ce1fae6 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-EFM7/resu… → {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e"], "evidence…
+
+<!-- relay:entry 20260923T000929Z-n5 author=agent kind=event model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/ebe249905e354bad934e962dd302b5c7 -->
+- ✦ agent updated this card · appended to `## Issue`
+
+<!-- relay:entry 20260923T000940Z-bm author=agent kind=progress model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/ebe249905e354bad934e962dd302b5c7 -->
+Continuing this pane's implementation checks for the follow-up: expand the worker regression across bundled guest models and supported levels, plus all built-in API catalog rows. Also run the adapter, preset, roles, and model-switch targeted suites. This is extended implementer evidence, not independent QA.
+
+<!-- relay:entry 20260923T001129Z-aj author=agent kind=event model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/ebe249905e354bad934e962dd302b5c7 -->
+- ✦ agent updated this card · appended to `## Done means`
+
+<!-- relay:entry 20260923T001413Z-kv author=agent kind=event model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/ebe249905e354bad934e962dd302b5c7 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T001434Z-h4 author=agent kind=event model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/ebe249905e354bad934e962dd302b5c7 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e"], "evidence… → {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e"], "evidence…; appended to `## Tests`

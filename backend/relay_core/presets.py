@@ -825,6 +825,11 @@ def model_efforts(preset_id, model: str) -> list[str] | None:
     for row in MODEL_CATALOG.get(preset_id, []):
         if row["id"] == model:
             return list(effort_levels(preset.effort_style) if row["efforts"] is None else row["efforts"])
+    if preset_id == "openrouter":
+        from . import openrouter_catalog
+        for row in openrouter_catalog.rows():
+            if row["id"] == model:
+                return list(row["efforts"])
     return None
 
 

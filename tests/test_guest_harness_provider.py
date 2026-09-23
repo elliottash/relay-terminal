@@ -1177,19 +1177,35 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertEqual(changed[0]["model"], "m")
         self.assertTrue(harness.closed)
 
-    def test_codex_startup_reports_the_harness_effort_in_the_pane_field(self):
-        for level in ("medium", "xhigh", "ultra"):
-            with self.subTest(level=level):
-                harness = FakeHarness([], guest="codex", model="gpt-6-astra")
-                events = self.run_worker([
-                    {"type": "configure", "preset": "guest:codex", "workspace": str(ROOT),
-                     "effort": level, "guest": {"model": "gpt-6-astra", "effort": level}},
-                    {"type": "shutdown"}], harness)
-                configured = [e for e in events if e["event"] == "configured"]
-                self.assertTrue(configured, [e for e in events if e["event"] == "error"])
-                self.assertEqual(harness.starts[0]["effort"], level)
-                self.assertEqual(configured[0]["guest_effort"], level)
-                self.assertEqual(configured[0]["effort"], level)
+    def test_guest_startup_and_changes_report_each_models_supported_efforts(self):
+        rows = [("claude", row) for row in ghp.guest_models("claude")]
+        rows += [("codex", row) for row in ghp._CODEX_FALLBACK_MODELS]
+        for guest, row in rows:
+            levels = row["efforts"]
+            for level in levels:
+                with self.subTest(guest=guest, model=row["id"], level=level):
+                    self.check_guest_effort(guest, row["id"], levels, level)
+
+    def check_guest_effort(self, guest, model, levels, level):
+        harness = FakeHarness([], guest=guest, model=model, efforts=levels)
+        events = self.run_worker([
+            {"type": "configure", "preset": "guest:" + guest, "workspace": str(ROOT),
+             "effort": level, "guest": {"model": model, "effort": level}},
+            {"type": "set_effort", "effort": level},
+            {"type": "set_model", "preset": "guest:" + guest,
+             "guest": {"model": model, "effort": level}},
+            {"type": "shutdown"}], harness)
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(harness.starts[0]["effort"], level)
+        self.assertEqual(configured[0]["guest_effort"], level)
+        self.assertEqual(configured[0]["effort"], level)
+        for kind in ("effort_changed", "model_changed"):
+            changed = [e for e in events if e["event"] == kind]
+            self.assertTrue(changed, events)
+            self.assertEqual(changed[-1]["effort"], level)
+            self.assertEqual(changed[-1]["guest_effort"], level)
+        self.assertFalse([e for e in events if e["event"] == "error"])
 
     def test_the_pane_sets_the_guests_effort_and_the_event_carries_it(self):
         """The owner's ask (2026-09-19): pick the model *and* the reasoning effort for a guest.

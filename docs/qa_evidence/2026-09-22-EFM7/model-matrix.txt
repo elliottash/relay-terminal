@@ -1,0 +1,50 @@
+Follow-up: "was the error specific to codex? check all models work as intended"
+
+Reproduction of the old reporting behavior, using the real worker and FakeHarness:
+codex/gpt-6-astra: requested medium, harness medium, old display high
+claude/opus: requested medium, harness medium, old display high
+The original defect affected both guest harnesses, not just Codex.
+
+Permanent guest regression:
+4 Claude aliases x 5 supported levels + 4 Codex models x 6 supported levels
+= 44 cases, each checking configure, set_effort, and set_model responses.
+
+New API defect reproduced before the follow-up fix:
+Kimi kimi-k2.7-code-highspeed, kimi-code kimi-for-coding and
+kimi-for-coding-highspeed received reasoning_effort=high despite having no knob.
+An OpenRouter model whose catalog has no knob received reasoning.effort=medium.
+Agent.set_effort now strips inherited effort fields for models with no knob.
+model_efforts also reads cached dynamic OpenRouter capabilities, matching the picker.
+The regression additionally checks switching models strips inherited fields while
+retaining unrelated options such as temperature.
+
+PYTHONPATH=backend:tests python3 -m unittest test_guest_harness_provider test_session_protocol test_presets test_roles test_guest_harness_claude test_guest_harness_codex test_model_switch
+Ran 403 tests in 15.732s — OK.
+After adding the extra model-switch assertion:
+PYTHONPATH=backend:tests python3 -m unittest test_session_protocol.PresetTests.test_every_catalog_model_sends_only_its_supported_effort
+Ran 1 test in 0.027s — OK.
+The session protocol suite prints an unclosed-test-socket ResourceWarning.
+
+ctest --test-dir build -R '^(modelcatalog|modelrows)$' --output-on-failure
+2/2 passed. Existing build; no C++ files changed in this work.
+
+PYTHONPATH=backend:tests python3 docs/qa_evidence/2026-09-22-EFM7/audit_models.py
+relay-free: 3 models, 6 effort cases PASS
+relay-pro: 3 models, 9 effort cases PASS
+kimi: 2 models, 4 effort cases PASS
+kimi-code: 4 models, 8 effort cases PASS
+glm: 2 models, 6 effort cases PASS
+glm-coding: 2 models, 6 effort cases PASS
+minimax: 4 models, 4 effort cases PASS
+openrouter: 454 models, 1423 effort cases PASS
+openai: 4 models, 16 effort cases PASS
+anthropic: 4 models, 4 effort cases PASS
+gemini: 5 models, 15 effort cases PASS
+deepseek: 2 models, 6 effort cases PASS
+TOTAL: 489 API model entries; 1507 effort cases PASS
+
+Scope: Relay's configuration, event fields, outgoing provider parameters, and
+adapter fixture tests. No live inference or paid model calls. No assertion that
+every remote vendor accepts every request today; unknown custom/local models
+without capability metadata are not exhaustively covered. Independent GUI QA
+remains pending. Counts reflect the local cached OpenRouter catalog at audit time.
