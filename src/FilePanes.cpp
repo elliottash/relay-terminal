@@ -941,7 +941,14 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_edit = headerButton(QStringLiteral("✎ Edit"), QStringLiteral("Edit this file here"));
     m_edit->setObjectName(QStringLiteral("filePreviewEdit"));
     m_edit->hide();
-    m_wrap = headerButton(QStringLiteral("Word wrap"), QStringLiteral("Wrap long lines to the pane width"));
+    // The hover names the key (files.toggleWrap) through the Keymap, so a rebind keeps the
+    // tooltip honest; an unbound action names no key.
+    {
+        const QString wrapKeys = Keymap::instance().shortcutText(QStringLiteral("files.toggleWrap"));
+        m_wrap = headerButton(QStringLiteral("Word wrap"),
+                              wrapKeys.isEmpty() ? QStringLiteral("Wrap long lines to the pane width")
+                                                 : QStringLiteral("Wrap long lines to the pane width (%1)").arg(wrapKeys));
+    }
     m_wrap->setObjectName(QStringLiteral("filePreviewWrap"));
     m_wrap->setAccessibleName(QStringLiteral("Word wrap"));
     m_wrap->setCheckable(true);
