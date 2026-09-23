@@ -446,6 +446,7 @@ private:
     };
     struct MediaInfo {
         QString kind;
+        QString name;
         QString path;
         QString preview;
         QString url;

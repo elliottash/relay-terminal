@@ -828,6 +828,7 @@ QString MarkdownAnsi::renderTable() {
                 }
                 if (QFileInfo::exists(dataPath)) {
                     const QJsonObject object{{QStringLiteral("version"), 1}, {QStringLiteral("kind"), QStringLiteral("table")},
+                        {QStringLiteral("name"), QStringLiteral("Markdown table")},
                         {QStringLiteral("path"), dataPath}, {QStringLiteral("rows"), cells.size()},
                         {QStringLiteral("columns"), columns}, {QStringLiteral("delimiter"), QStringLiteral(",")}};
                     const QByteArray content = QJsonDocument(object).toJson(QJsonDocument::Compact);

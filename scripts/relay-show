@@ -222,7 +222,8 @@ def main(argv=None):
             parser.error("image needs a local file")
         emit_image(path)
         return 0
-    data = {"version": 1, "kind": kind, "path": str(path) if path else ""}
+    data = {"version": 1, "kind": kind, "path": str(path) if path else "",
+            "name": (args.name or (path.name if path else "Local chart"))[:100]}
     if kind in ("svg", "pdf", "video", "chart"):
         if kind == "chart":
             live = args.url or target or path.as_uri()

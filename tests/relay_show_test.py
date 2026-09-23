@@ -58,6 +58,7 @@ class RelayShowTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         item = self.manifest(result.stdout)
         self.assertEqual((item["kind"], item["rows"], item["columns"]), ("table", 3, 2))
+        self.assertEqual(item["name"], "numbers.csv")
         self.assertEqual(Path(item["path"]).read_bytes(), b"name,value\na,2\nb,10\n")
         self.assertEqual(result.stdout.count(b"\x1b]8;;relay-media:"), 1)
 

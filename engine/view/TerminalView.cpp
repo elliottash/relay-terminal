@@ -2512,8 +2512,11 @@ void TerminalView::paintImages(QPainter &p, int firstRow, int lastRow)
                    QStringLiteral("[image: %1]").arg(QFileInfo(image.ref.path).fileName()));
         p.restore();
     }
-    for (auto it = m_animatedImages.cbegin(); it != m_animatedImages.cend(); ++it)
-        if (!visibleAnimation.contains(it.key())) it.value()->stop();
+    // A paint can cover only the cursor or one text row. Prune movies only after a full viewport
+    // paint; stopping them on any unrelated partial update freezes an otherwise visible GIF.
+    if (firstRow == 0 && lastRow >= m_rows - 1)
+        for (auto it = m_animatedImages.cbegin(); it != m_animatedImages.cend(); ++it)
+            if (!visibleAnimation.contains(it.key())) it.value()->stop();
 }
 
 bool TerminalView::imageAt(const QPoint &pos, ImagePlacement *image, bool *missing)
@@ -2625,6 +2628,10 @@ TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
              kind == QStringLiteral("svg") || kind == QStringLiteral("pdf") ||
              kind == QStringLiteral("math"))) {
             info.kind = kind;
+            info.name = obj.value(QStringLiteral("name")).toString().left(100);
+            for (const QChar ch : info.name)
+                if (ch.isNull() || ch.isLowSurrogate() || ch.unicode() < 0x20 || ch.unicode() == 0x7f)
+                    info.name.clear();
             info.path = obj.value(QStringLiteral("path")).toString();
             info.preview = obj.value(QStringLiteral("preview")).toString();
             info.url = obj.value(QStringLiteral("url")).toString();
@@ -2806,7 +2813,8 @@ void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
             p.setPen(m_scheme.foreground);
             p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignVCenter,
                        tr("▦  %1  ·  %2 rows × %3 columns  ·  open sortable table")
-                           .arg(QFileInfo(info.path).fileName()).arg(info.rows).arg(info.columns));
+                           .arg(info.name.isEmpty() ? QFileInfo(info.path).fileName() : info.name)
+                           .arg(info.rows).arg(info.columns));
         } else {
             const QSize natural = m_images.naturalSize(info.preview);
             if (natural.isValid()) {
@@ -3015,7 +3023,7 @@ void TerminalView::openTable(const MediaInfo &info)
         return;
     auto *dialog = new QDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowTitle(QFileInfo(info.path).fileName());
+    dialog->setWindowTitle(info.name.isEmpty() ? QFileInfo(info.path).fileName() : info.name);
     dialog->resize(850, 520);
     auto *layout = new QVBoxLayout(dialog);
     auto *table = new QTableWidget(dialog);
