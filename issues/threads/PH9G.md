@@ -16,3 +16,6 @@ Plan now selects High using the existing /high role-selection path. Covers both 
 
 <!-- relay:entry 20260923T001948Z-9v author=agent kind=event model=gpt-6-astra pane=d7842bf4 turn=ce657bf0ce1c4ffdb058b09550fd57b7/622785c0555a4c9ca886a4e82b7a56c7 -->
 - ✦ agent moved this card · Executing → Needs verification · Relay build, real Pane regression tests under Xvfb, and 112 backend planning/role tests passed. · evidence docs/qa_evidence/2026-09-22-plan-high/README.md · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260923T002101Z-b8 author=agent kind=event model=gpt-6-astra pane=d7842bf4 turn=ce657bf0ce1c4ffdb058b09550fd57b7/622785c0555a4c9ca886a4e82b7a56c7 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-plan-high… → {"plans": [], "commits": ["1b05786b10754c5ffc81b8f7bcc47718b8965639"], "evidence…

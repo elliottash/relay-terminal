@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mph9g
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-plan-high/README.md], related: [PMX7], github: null}
+links: {plans: [], commits: [1b05786b10754c5ffc81b8f7bcc47718b8965639], evidence: [docs/qa_evidence/2026-09-22-plan-high/README.md], related: [PMX7], github: null}
 ---
 # Entering Plan activates High
 
