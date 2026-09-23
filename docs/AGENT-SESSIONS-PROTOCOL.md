@@ -2083,8 +2083,8 @@ runs off the turn thread (#TZWF).
   calls tools in a loop rewrites the file about every 10 s, not on every call). Without that, a
   long first turn — and any pane that never finished one — had no session file, so it was absent
   from this list and from search, and was lost when Relay stopped.
-- The index holds message text. It lives in the same 0700 directory as the sessions, is never
-  synced, and holds nothing the session files do not already hold. There is no telemetry.
+- The index holds message text. It lives in the same 0700 directory as the sessions and holds
+  nothing the session files do not already hold.
 - Since v2 the words of a query may sit in different turns (14.2); a quoted phrase still has to
   be in one entry. An excluded word (`-word`) is the same rule the other way: it must be in no
   entry of the conversation.
