@@ -42,6 +42,13 @@ private slots:
         QVERIFY(previewTail({QString(), QStringLiteral("   ")}).isEmpty());
     }
 
+    // The saved text carries SGR and image-row links (#1MGS); the preview shows what they draw.
+    void previewTailIsPlainText() {
+        const QString saved = QStringLiteral("\x1b[1;31mred\x1b[0m \x1b]8;;relay-image:0/2/4//tmp/a.png\x1b\\")
+                              + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\ done\x07");
+        QCOMPARE(previewTail({saved}), QStringList{QStringLiteral("red ") + QChar(0x2800) + QStringLiteral(" done")});
+    }
+
     void newestFirstAndFiltered() {
         ListView view;
         const Record older = paneRecord(QStringLiteral("/home/u/relay"), QStringLiteral("Fix the parser"), uuid(), 1000);

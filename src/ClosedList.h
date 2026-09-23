@@ -30,8 +30,9 @@ namespace closed {
 // How many lines of a pane's saved text the unfolded row shows.
 constexpr int kPreviewLines = 8;
 
-// The tail of a pane's saved terminal text that is worth showing: trailing blank lines dropped,
-// blank runs squeezed to one, the last `maxLines` kept, each cut to `maxChars`. Pure.
+// The tail of a pane's saved terminal text that is worth showing, as plain text: the saved SGR and
+// image-row links (src/WindowState.h) and any other escape or control stripped, trailing blank
+// lines dropped, blank runs squeezed to one, the last `maxLines` kept, each cut to `maxChars`. Pure.
 QStringList previewTail(const QStringList &lines, int maxLines = kPreviewLines, int maxChars = 160);
 
 class ListView : public QWidget {

@@ -42,13 +42,38 @@ QString paneLine(const PaneInfo &pane, const QString &home) {
     return parts.join(QStringLiteral(" · "));
 }
 
+// A saved line as the text it draws: CSI sequences (SGR) and OSC strings (image-row links, #1MGS)
+// dropped whole, any other escape with the character after it, and every other control.
+QString plainLine(const QString &text) {
+    QString out;
+    out.reserve(text.size());
+    for (int at = 0; at < text.size(); ++at) {
+        const ushort c = text.at(at).unicode();
+        if (c == 0x1b && at + 1 < text.size() && text.at(at + 1) == QLatin1Char('[')) {
+            at += 2;
+            while (at < text.size() && !(text.at(at).unicode() >= 0x40 && text.at(at).unicode() <= 0x7e)) ++at;
+        } else if (c == 0x1b && at + 1 < text.size() && text.at(at + 1) == QLatin1Char(']')) {
+            at += 2;   // to BEL or ST
+            while (at < text.size() && text.at(at).unicode() != 0x07
+                   && !(text.at(at).unicode() == 0x1b && at + 1 < text.size() && text.at(at + 1) == QLatin1Char('\\')))
+                ++at;
+            if (at < text.size() && text.at(at).unicode() == 0x1b) ++at;
+        } else if (c == 0x1b) {
+            ++at;
+        } else if (c == '\t' || (c >= 0x20 && c != 0x7f && !(c >= 0x80 && c < 0xa0))) {
+            out += text.at(at);
+        }
+    }
+    return out;
+}
+
 }  // namespace
 
 QStringList previewTail(const QStringList &lines, int maxLines, int maxChars) {
     QStringList kept;
     bool blank = false;
     for (const QString &raw : lines) {
-        QString line = raw;
+        QString line = plainLine(raw);
         while (!line.isEmpty() && line.at(line.size() - 1).isSpace()) line.chop(1);
         if (line.isEmpty()) { blank = !kept.isEmpty(); continue; }
         if (blank) kept << QString();
