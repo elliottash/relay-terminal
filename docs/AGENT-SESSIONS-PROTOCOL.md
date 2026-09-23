@@ -6391,7 +6391,13 @@ event whenever the guest reports fresh figures and the provider turns each one i
 
 so the model picker can show "5h: 62% left, resets 14:30 · weekly: 40% left, resets Tue" per
 provider. `windows` is in that order, at most one row per kind, and only the kinds the guest
-named. The last figures per guest are kept on the worker (`guest_harness_provider.last_limits`)
+named.
+
+The worker also emits `usage_limits` for Z.AI and Kimi Code subscription presets after each
+15-minute vendor quota poll. Those events use the same `windows` fields, with `preset` set to
+`glm-coding` or `kimi-code` and no `guest`; Kimi can include a `monthly` window.
+
+The last figures per guest are kept on the worker (`guest_harness_provider.last_limits`)
 and ride on the guest's `presets` row as `limits: {windows, status?, updated_at}`, so a picker
 opened in another pane has them without waiting for a turn; a limit belongs to the account, not
 to a pane. Where the numbers come from, verified against the installed binaries on 2026-09-20:

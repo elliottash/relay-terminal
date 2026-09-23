@@ -1748,8 +1748,8 @@ public:
         }
         if (soonest > 0) QTimer::singleShot(int(qMin<qint64>(soonest - now + 1, 24 * 3600) * 1000), this, [this] { limitsChanged(true); });
     }
-    // A provider with no quota endpoint (GLM, Kimi, MiniMax plans) said 429 until the transport's
-    // retries were spent: a cool-off keeps the priority off it. `until` 0 = no reset known.
+    // A 429 that survives the transport's retries adds a short cool-off until fresh quota data
+    // arrives. MiniMax has no quota poll; Z.AI/Kimi polling may still be unavailable or delayed.
     void markExhausted(const QString &preset, const QString &kind, qint64 until) {
         if (preset.isEmpty()) return;
         QList<relay::models::LimitWindow> windows = m_limits.value(preset);
@@ -12500,8 +12500,8 @@ private:
             // nothing here.
             if (reason == QStringLiteral("failover")) pushServingModel(reason, event);
             else if (reason == QStringLiteral("failover_ended")) popServingModel(QStringLiteral("failover"));
-            // A provider with no quota endpoint reports its exhaustion the only way it can: 429
-            // after 429 until the transport's retries are spent and the turn moves on (#YJG7 —
+            // A provider can report exhaustion through 429 even before its quota poll lands:
+            // repeated refusals until the transport's retries are spent and the turn moves on (#YJG7 —
             // fifteen hours of six retries a turn on a plan out of quota until Tuesday). Only that
             // shape — a 429 was retried on this turn, and now the turn is leaving the provider —
             // earns the cool-off; a stall, a 5xx or a single refusal that the retry cleared does not.

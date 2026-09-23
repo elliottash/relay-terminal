@@ -2394,9 +2394,9 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   `LimitWindow{kind, usedPercent, resetsAt}` per window, by preset) and `Catalog.status` come from
   the preset rows — a guest's `limits: {windows, status?}`, Relay Free's `quota` — and the pane
   overlays what arrived since (`Pane::m_limits`, `noteLimits`): the worker's `usage_limits` event
-  (29.3) the moment a guest reports, `hosted_quota` as one `daily` window, and a cool-off written by
-  the pane itself when a provider with no quota endpoint (a GLM, Kimi or MiniMax plan) answered 429
-  through the transport's retries and the turn then failed over or died on it — a `rate limit`
+  (29.3) the moment a guest reports or the worker polls a Z.AI/Kimi coding plan, `hosted_quota` as
+  one `daily` window, and a cool-off written by the pane itself when a provider answered 429 through
+  the transport's retries and the turn then failed over or died on it — a `rate limit`
   window at 100% for 30 minutes (`markExhausted`; a stall, a 5xx or a 429 the retry cleared earns
   nothing, #YJG7). `relay::models::exhausted(catalog, preset, now)` is a window at `used_percent >=
   100`, or `status: "rejected"`, while `resets_at` is ahead or unknown; once it has passed the row is
@@ -2409,6 +2409,9 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   redraws the box, notifies `SettingsWatch` (the providers' status line), re-sends the chain when
   the exhausted set changed, and arms a single-shot timer for the nearest reset so the row comes
   back by itself. `applyMainDefault` still writes rank 1 itself as the new-pane default.
+  The worker polls Z.AI's `api/monitor/usage/quota/limit` and Kimi Code's
+  `coding/v1/usages` every 15 minutes using their stored subscription keys; the latter endpoint
+  is on `api.kimi.com` even when model calls use `api.kimi.ai`. MiniMax has only the 429 cool-off.
 - **The pane's model box is a header per class and its top-ranked models** (`src/ModelRows.*`,
   `Pane::refreshPickers`; card #MDP1 design 5.3, the owner's own alternative to the mode rows and
   the Left/Right paging that landed a few hours earlier the same day, confirmed with four rulings).
