@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: m
 created: '2026-09-22'
 source: User request in Relay, 2026-09-22
-links: {plans: [], commits: [ddc207b0c4af7afac0bd112e7c7b49c5e801ea01], evidence: [docs/qa_evidence/2026-09-22-rewind/], related: [0TJ9], github: null}
+links: {plans: [], commits: [ddc207b0c4af7afac0bd112e7c7b49c5e801ea01, a4c7dbf6409bea1fa039c85877fe327d046c033f], evidence: [docs/qa_evidence/2026-09-22-rewind/], related: [0TJ9], github: null}
 ---
 # Collapse rewound terminal output into a saved-output link
 

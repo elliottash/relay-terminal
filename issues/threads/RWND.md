@@ -22,3 +22,6 @@ Confirmed that rewind already saves a sidecar but never removes terminal output.
 
 <!-- relay:entry 20260923T000704Z-44 author=agent kind=event model=gpt-6-astra pane=93e86c4a turn=01a30cda1178410a84924898ce3792f3/3b1ef1924d854563a65bccbc8c34b2e6 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-rewind/"]… → {"plans": [], "commits": ["ddc207b0c4af7afac0bd112e7c7b49c5e801ea01"], "evidence…
+
+<!-- relay:entry 20260923T001017Z-82 author=agent kind=event model=gpt-6-astra pane=93e86c4a turn=01a30cda1178410a84924898ce3792f3/3b1ef1924d854563a65bccbc8c34b2e6 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["ddc207b0c4af7afac0bd112e7c7b49c5e801ea01"], "evidence… → {"plans": [], "commits": ["ddc207b0c4af7afac0bd112e7c7b49c5e801ea01", "a4c7dbf64…
