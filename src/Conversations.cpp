@@ -741,6 +741,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_ignored->setVisible(false);
 
     m_scope = new QComboBox;
+    m_scope->setObjectName(QStringLiteral("sessionsScope"));
     m_scope->addItem(QStringLiteral("This project"), QStringLiteral("project"));
     m_scope->addItem(QStringLiteral("All projects"), QStringLiteral("all"));
     m_kind = new QComboBox;
@@ -1095,6 +1096,21 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
             }
         }
         scheduleQuery();
+    });
+    // The Project chooser narrows the results to one folder (or no known folder). An explicit
+    // scope choice starts from that whole scope, so clear the narrower filter before querying.
+    auto clearProjectFilter = [this] {
+        if (m_projectFilter->currentIndex() == 0) return false;
+        const QSignalBlocker quiet(m_projectFilter);
+        m_projectFilter->setCurrentIndex(0);
+        return true;
+    };
+    connect(m_scope, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [clearProjectFilter] { clearProjectFilter(); });
+    // Choosing the already-selected scope is still an explicit request to drop a narrower
+    // Project filter; currentIndexChanged does not fire for that choice.
+    connect(m_scope, QOverload<int>::of(&QComboBox::activated), this, [this, clearProjectFilter] {
+        if (clearProjectFilter()) requery();
     });
     for (QComboBox *combo : {m_scope, m_kind, m_projectFilter, m_model, m_date, m_sort, m_branch})
         connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &SessionManager::requery);

@@ -1654,6 +1654,58 @@ private slots:
         QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/srv/relay"));
     }
 
+    void scopeChoiceClearsConflictingProjectFilter() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.setKnownProjects({{QStringLiteral("relay"), QStringLiteral("/srv/relay")},
+                                  {QStringLiteral("notes"), QStringLiteral("/srv/notes")}});
+        manager.resize(900, 650);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        auto *scope = manager.findChild<QComboBox *>(QStringLiteral("sessionsScope"));
+        auto *project = manager.findChild<QComboBox *>(QStringLiteral("sessionsProject"));
+        QVERIFY(scope && project);
+        QCOMPARE(scope->currentData().toString(), QStringLiteral("project"));
+        project->setCurrentIndex(project->findData(QStringLiteral("/srv/notes")));
+        QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/srv/notes"));
+        // A named project makes the worker search globally, and its reply reflects that.
+        manager.setResults({{QStringLiteral("items"), QJsonArray{}},
+                            {QStringLiteral("scope"), QStringLiteral("all")}});
+        QCOMPARE(scope->currentData().toString(), QStringLiteral("all"));
+
+        scope->setCurrentIndex(scope->findData(QStringLiteral("project")));
+        QCOMPARE(project->currentData().toString(), QString());
+        QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("project"));
+        QVERIFY(!asked.last().contains(QStringLiteral("project")));
+        QVERIFY(!asked.last().contains(QStringLiteral("outside_projects")));
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+                                sessionItem(QStringLiteral("a"), QStringLiteral("Relay work"), QStringLiteral("relay"))}},
+                            {QStringLiteral("scope"), QStringLiteral("project")}});
+        QCOMPARE(scope->currentData().toString(), QStringLiteral("project"));
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-this-project.png")));
+
+        project->setCurrentIndex(project->findData(QStringLiteral("/srv/notes")));
+        scope->setCurrentIndex(scope->findData(QStringLiteral("all")));
+        QCOMPARE(project->currentData().toString(), QString());
+        QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("all"));
+        QVERIFY(!asked.last().contains(QStringLiteral("project")));
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+                                sessionItem(QStringLiteral("a"), QStringLiteral("Relay work"), QStringLiteral("relay")),
+                                sessionItem(QStringLiteral("b"), QStringLiteral("Notes work"), QStringLiteral("notes"))}},
+                            {QStringLiteral("scope"), QStringLiteral("all")}});
+        QCOMPARE(scope->currentData().toString(), QStringLiteral("all"));
+        QCOMPARE(manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"))->topLevelItemCount(), 2);
+        project->setCurrentIndex(project->findData(QStringLiteral("/srv/notes")));
+        QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/srv/notes"));
+        emit scope->activated(scope->currentIndex());   // reselect All projects from its menu
+        QCOMPARE(project->currentData().toString(), QString());
+        QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("all"));
+        QVERIFY(!asked.last().contains(QStringLiteral("project")));
+    }
+
     void aGuestRowResumesForksAndSaysWhoseItIs() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};
