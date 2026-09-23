@@ -6,6 +6,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
+#include <QTimer>
 
 #ifdef RELAY_HAVE_QTTEXTTOSPEECH
 #include <QTextToSpeech>
@@ -14,6 +15,9 @@
 namespace relay::speech {
 
 namespace {
+
+// How long `spd-say -S` may take before it is killed.
+constexpr int kStopDeadlineMs = 2000;
 
 // Punctuation a block may already end in; anything else gets a full stop.
 bool endsInPunctuation(const QString &text) {
@@ -406,7 +410,20 @@ void Speaker::stop() {
         m_process->kill();
         m_process = nullptr;
         const QStringList stopping = stopArguments(m_tool);
-        if (!stopping.isEmpty()) QProcess::startDetached(m_tool, stopping);
+        if (!stopping.isEmpty()) {
+            // A child with a deadline, not startDetached(): `spd-say -S` waits on the daemon, and
+            // one that hangs (seen with a daemon left behind by a removed runtime directory) would
+            // otherwise outlive every utterance.
+            auto *stopper = new QProcess(this);
+            stopper->setStandardOutputFile(QProcess::nullDevice());
+            stopper->setStandardErrorFile(QProcess::nullDevice());
+            connect(stopper, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), stopper, &QObject::deleteLater);
+            connect(stopper, &QProcess::errorOccurred, stopper, [stopper](QProcess::ProcessError code) {
+                if (code == QProcess::FailedToStart) stopper->deleteLater();
+            });
+            QTimer::singleShot(kStopDeadlineMs, stopper, [stopper] { stopper->kill(); });
+            stopper->start(m_tool, stopping);
+        }
     }
 #ifdef RELAY_HAVE_QTTEXTTOSPEECH
     if (m_tts) m_tts->stop();

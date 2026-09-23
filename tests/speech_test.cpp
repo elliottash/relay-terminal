@@ -260,6 +260,33 @@ private Q_SLOTS:
         speaker.setToolForTesting(QString());
 #endif
     }
+
+    void aHungStopHelperIsKilled() {
+#ifdef Q_OS_WIN
+        QSKIP("shell-script fakes");
+#else
+        // A fake spd-say: speaking is a long sleep, and `-S` records its pid and hangs, the way a
+        // real one did against a daemon whose runtime directory had been removed.
+        QTemporaryDir dir;
+        const QString stopPid = dir.filePath(QStringLiteral("stop-pid"));
+        writeTool(dir.path(), QStringLiteral("spd-say"),
+                  "if [ \"$1\" = -S ]; then echo $$ > '" + stopPid.toUtf8() + "'; exec /bin/sleep 30; fi\n"
+                  "exec /bin/sleep 30\n");
+        FakePath path(dir.path());
+        Speaker &speaker = Speaker::instance();
+        speaker.setToolForTesting(QStringLiteral("spd-say"));
+        QObject owner;
+        QVERIFY(speaker.speak(QStringLiteral("Hello."), &owner));
+        QTest::qWait(300);
+        speaker.stop();
+        QVERIFY(!speaker.speaking());
+        pid_t helper = 0;
+        QTRY_VERIFY_WITH_TIMEOUT((helper = pid_t(readPid(stopPid))) > 0, 5000);
+        QVERIFY(::kill(helper, 0) == 0);                              // told to stop, and hanging
+        QTRY_VERIFY_WITH_TIMEOUT(::kill(helper, 0) != 0, 5000);       // killed at the deadline
+        speaker.setToolForTesting(QString());
+#endif
+    }
 };
 
 QTEST_GUILESS_MAIN(SpeechTests)
