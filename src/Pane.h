@@ -283,7 +283,7 @@ inline Reading read(const QString &text, const QStringList &labels, bool multipl
 // work, the terminal's blue while a program runs, amber when the turn is blocked on your answer
 // (#MQ9C). A spaced middle dot stands between the verb and what is being done (owner, 2026-09-19:
 // 'add a " -- " after "Relaying"', later 'replace " - " after relaying with cdot'), in every spelling the line has: "Relaying · thinking… · 5 s ·
-// step 1/256 · Esc stops", "Relaying · waiting for 1 subagent…", "Relaying · sleep…".
+// Esc stops", "Relaying · waiting for 1 subagent…", "Relaying · sleep…".
 // Left-aligned with the prompt text and in the normal weight, the caption Warp and Claude carry
 // above their composers (owner, 2026-09-19: "should be at the left and above the prompt box,
 // more like how warp . claude does it. and not in bold."): the row sits immediately before the
@@ -11977,10 +11977,9 @@ private:
             }
         } else if (type == QStringLiteral("status")) {
             const QString text = event.value(QStringLiteral("text")).toString();
-            // While a turn runs the clock owns the status line; a step note rides along with it
-            // instead of replacing the elapsed time.
+            // While a turn runs the clock owns the status line; model-request updates refresh
+            // it without displaying their step count.
             if (m_agentBusy && text.startsWith(QStringLiteral("Requesting model · "))) {
-                m_turnStep = text.mid(QStringLiteral("Requesting model · ").size());
                 tickTurnClock();
             } else {
                 status(text);
@@ -12882,7 +12881,6 @@ private:
     // clock that re-toasted every second covered every real toast in a turn.
     void startTurnClock() {
         m_turnElapsed.start();
-        m_turnStep.clear();
         m_waitCall.clear();      // a new turn is not blocked on an agent_wait (#V7QD)
         m_jobWaitCall.clear();   // nor on a command_output (#KP4M)
         refreshBackgroundWait();
@@ -12899,7 +12897,6 @@ private:
         m_paneState.changed();   // pane_state (relay-terminal-71)
         clearServingModels();    // no turn, nothing serving it but the pane's own model (C5)
         if (m_turnClock) m_turnClock->stop();
-        m_turnStep.clear();
         m_waitCall.clear();      // no turn, no agent_wait (#V7QD)
         m_jobWaitCall.clear();   // and no command_output (#KP4M)
         m_turnClockText.clear();
@@ -12931,10 +12928,9 @@ private:
         // offers the key that is actually live and the tooltip says where Stop went.
         const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
         const QString action = waiting.isEmpty() || asked ? what + QStringLiteral("…") : what;
-        const QString label = QStringLiteral("Relaying · %1 · %2 s%3 · %4")
+        const QString label = QStringLiteral("Relaying · %1 · %2 s · %3")
                                   .arg(action)
                                   .arg(seconds)
-                                  .arg(m_turnStep.isEmpty() ? QString() : QStringLiteral(" · ") + m_turnStep)
                                   .arg(keyHint);
         m_turnClockText = label;   // pane_state's clock, for a paired phone (relay-terminal-71)
         if (m_busyLine)
@@ -19063,7 +19059,6 @@ private:
     // above the prompt box (m_busyLine) rather than a label in the strip under it.
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
-    QString m_turnStep;
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
     PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G, #R3YN)
     // "Relaying · waiting for 2 subagents, 1 job . . ." above the prompt (#V7QD, #KP4M, #R3YN): the call_ids
