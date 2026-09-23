@@ -844,6 +844,29 @@ class QuestionTests(unittest.TestCase):
 
 
 class AgentWiringTests(unittest.TestCase):
+    def test_a_model_picked_after_the_stand_in_replaces_it(self):
+        """Found on #MH7P (2026-09-22): Main was Claude Code with nothing else usable, so the helper
+        was built on the stand-in that only refuses. Picking glm in its model box was applied —
+        and every turn still said "The helper agent cannot run on Claude Code", because
+        `set_model` kept any injected provider, the stand-in included. The pick is what the next
+        turn runs on."""
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        stand_in = ghp.UnavailableProvider(guest_config(), ghp.helper_refusal("Claude Code"))
+        agent = Agent(guest_config(), temp.name, lambda event: None, provider=stand_in,
+                      session_dir=str(Path(temp.name) / "sessions"), track_requests=False)
+        self.assertIs(agent.provider, stand_in)
+        agent.set_model(ProviderConfig(base_url="http://127.0.0.1:1/v1", model="m", api_key=""))
+        self.assertFalse(getattr(agent.provider, "stand_in", False))
+        self.assertFalse(agent._injected_provider)
+        self.assertEqual(agent.config.model, "m")
+        # A real injected provider — a guest harness — is still kept by a plain config swap.
+        harness, provider = build([])
+        guest = Agent(guest_config(), temp.name, lambda event: None, provider=provider,
+                      session_dir=str(Path(temp.name) / "sessions2"), track_requests=False)
+        guest.set_model(guest_config())
+        self.assertIs(guest.provider, provider)
+
     def test_configured_fields_and_session_data(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

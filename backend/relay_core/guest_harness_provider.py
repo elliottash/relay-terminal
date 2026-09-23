@@ -139,6 +139,10 @@ class UnavailableProvider:
     """
 
     serves_side_calls = False       # a side call would be a model call too
+    # Not a provider anybody chose: a model picked afterwards replaces it (`Agent.set_model`).
+    # Kept as an injected one it outlived the pick, and every turn after choosing glm in the
+    # helper's model box still said this refusal (found on #MH7P, 2026-09-22).
+    stand_in = True
 
     def __init__(self, config: ProviderConfig, text: str):
         self.config = config

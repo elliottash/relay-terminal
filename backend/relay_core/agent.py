@@ -1274,9 +1274,12 @@ class Agent:
         preset = resolve_preset(preset_id, config.base_url, config.model)
         if provider is not None:
             self.provider, self._injected_provider = provider, True
-        elif not self._injected_provider:
+        elif not self._injected_provider or getattr(self.provider, "stand_in", False):
+            # A stand-in (`guest_harness_provider.UnavailableProvider`) is what a helper had when
+            # it had no model; a model picked now is one, so it gets a real provider.
             self.provider = self._hook_preempt(_with_first_token(_provider_for(config, self.stall_timeout_s),
                                                                  self.first_token_timeout_s))
+            self._injected_provider = False
         self._adopt_model(config, preset, context_window)
 
     def _adopt_model(self, config: ProviderConfig, preset, context_window: int | None = None) -> None:
