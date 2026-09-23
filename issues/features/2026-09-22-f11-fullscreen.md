@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mf11s
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-f11-fullscreen/results.md], related: [], github: null}
+links: {plans: [], commits: [f71fe850400a3f20b03537d9e8ee66c437ad6cbc], evidence: [docs/qa_evidence/2026-09-22-f11-fullscreen/results.md], related: [], github: null}
 ---
 # F11 toggles fullscreen
 
