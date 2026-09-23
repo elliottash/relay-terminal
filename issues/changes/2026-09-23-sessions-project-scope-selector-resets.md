@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-scope/], related: [916B], github: null}
+links: {plans: [], commits: [25ff8fc0eedda500710b0c2f3076b8880dcf5531], evidence: [docs/qa_evidence/2026-09-23-sessions-scope/], related: [916B], github: null}
 ---
 # Make the Sessions project scope selector effective
 

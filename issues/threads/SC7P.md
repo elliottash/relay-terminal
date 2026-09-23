@@ -10,3 +10,6 @@ Claimed the scope selector issue. The explicit Project filter overrides This pro
 
 <!-- relay:entry 20260923T114629Z-0g author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/e598e24f6e0f4b1a8314a0086270776b -->
 - ✦ agent moved this card · Executing → Needs verification · Explicit scope choices clear a conflicting Project filter; focused GUI and backend scope tests pass. · evidence docs/qa_evidence/2026-09-23-sessions-scope/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T114723Z-10 author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/e598e24f6e0f4b1a8314a0086270776b -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-sessions-… → {"plans": [], "commits": ["25ff8fc0eedda500710b0c2f3076b8880dcf5531"], "evidence…
