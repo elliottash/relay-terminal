@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-newest-first-N8F4/], related: [EV45], github: null}
+links: {plans: [], commits: [56db2ed6e62570f7018d06ead0caf51182badfcf], evidence: [docs/qa_evidence/2026-09-23-newest-first-N8F4/], related: [EV45], github: null}
 ---
 # Keep the session manager newest first by default
 
