@@ -232,6 +232,7 @@ TerminalView::TerminalView(TerminalSession *session, QWidget *parent)
     setAttribute(Qt::WA_InputMethodEnabled);
     setMouseTracking(true);
     setCursor(Qt::IBeamCursor);
+    m_images.onReady = [this] { update(); };
 
     QFont f = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     if (QFontDatabase().families().contains(QStringLiteral("DejaVu Sans Mono")))
@@ -576,6 +577,7 @@ void TerminalView::pullFrame()
     // one frame; a `cd` shows up on the next one, 4-16 ms later.
     m_frameCwdValid = false;
     m_frameProse.clear();
+    m_frameImages.clear();
     // Anchors are re-read before the frame, so the rows the fold layer works
     // with belong to the same content the frame will show. The heartbeat only
     // has something to find when content has moved under the anchors since the
@@ -614,6 +616,11 @@ void TerminalView::pullFrame()
         m_hoverRow = m_hoverStart = m_hoverEnd = -1;
         m_hoverCellRow = m_hoverCellCol = -2;
         setCursor(Qt::IBeamCursor);
+    }
+    // A picture under a pointer that has not moved may have scrolled away (#1MGS).
+    if (m_hoverImage && (m_frame.full || force || m_visualTopMoved) && underMouse()) {
+        m_hoverCellRow = m_hoverCellCol = -2;
+        updateHover(mapFromGlobal(QCursor::pos()), Qt::NoModifier);
     }
 
     const bool folds = foldsVisible();
@@ -743,6 +750,7 @@ void TerminalView::paintEvent(QPaintEvent *e)
         if (frameRow >= 0 && frameRow < int(m_frame.lines.size()))
             paintRow(p, row, m_frame.lines[size_t(frameRow)], v.realRow);
     }
+    paintImages(p, firstRow, lastRow);
     paintCursor(p);
 }
 
@@ -895,6 +903,9 @@ void TerminalView::paintRow(QPainter &p, int row, const Line &line, int realRow)
             cc.fg = m_scheme.link;
         const int x = m_padding + col * m_cw;
         const int variant = ((c.attrs & AttrBold) ? 1 : 0) | ((c.attrs & AttrItalic) ? 2 : 0);
+        // An image row's one cell (#1MGS): the picture is painted over it, with no link underline.
+        if (c.link && c.ch == char32_t(inlineimage::kRowCell))
+            continue;
 
         // Decorations.
         const bool linkHover = linkHovered(row, col);
@@ -1617,9 +1628,20 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
                 m_pressedRow = pos.row;
             }
         }
+        // A picture opens on a plain click's release, or at once with Ctrl (#1MGS).
+        m_pressedImage.clear();
+        ImagePlacement image;
+        bool imageMissing = false;
+        const bool onImage = foldUri.isEmpty() && imageAt(e->pos(), &image, &imageMissing) && !imageMissing;
+        if (onImage && e->modifiers() == Qt::ControlModifier) {
+            openImage(image.ref.path);
+            return;
+        }
+        if (onImage && e->modifiers() == Qt::NoModifier && m_plainClickOpens)
+            m_pressedImage = image.ref.path;
         Link link;
         int s = 0, en = 0;
-        const bool onLink = foldUri.isEmpty() && linkAt(pos, &link, &s, &en);
+        const bool onLink = foldUri.isEmpty() && !onImage && linkAt(pos, &link, &s, &en);
         if (onLink && (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
             emit linkActivated(link.target, link.line, link.column, e->modifiers());
             return;
@@ -1736,6 +1758,14 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
                 toggleFold(uri);
             return;
         }
+        // A click that neither dragged nor left the picture opens it.
+        if (!m_pressedImage.isEmpty() && e->button() == Qt::LeftButton) {
+            const QString path = m_pressedImage;
+            m_pressedImage.clear();
+            if (imagePathAt(e->pos()) == path)
+                openImage(path);
+            return;
+        }
         // A click that neither dragged nor left the link follows it.
         if (m_pressedLink.valid() && e->button() == Qt::LeftButton) {
             const CellPos pos = cellAt(e->pos());
@@ -1748,6 +1778,7 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
     }
     m_pressedLink = Link();
     m_pressedFold.clear();
+    m_pressedImage.clear();
     if (m_copyOnSelect && QApplication::clipboard()->supportsSelection()) {
         const QString text = selectedText();
         if (copyOnSelectWorthCopying(text))
@@ -1826,7 +1857,11 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
     int newRow = -1, newStart = -1, newEnd = -1;
     Link link;
     QVector<QRect> segments;
-    if (inside) {
+    // A picture is not a link: it names its file in the tooltip and opens on a click (#1MGS).
+    ImagePlacement image;
+    bool imageMissing = false;
+    const bool onImage = inside && imageAt(pos, &image, &imageMissing);
+    if (inside && !onImage) {
         int s = -1, en = -1;
         if (linkAt(c, &link, &s, &en, &segments)) {
             newRow = c.row;
@@ -1837,7 +1872,9 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
         }
     }
     QString tip;
-    if (!link.card.isEmpty()) {
+    if (onImage) {
+        tip = imageMissing ? tr("%1 (missing)").arg(image.ref.path) : image.ref.path;
+    } else if (!link.card.isEmpty()) {
         // A card reference says which card it opens, not the relay://card/<id> behind it.
         tip = QStringLiteral("#") + link.card;
         if (!link.cardTitle.isEmpty())
@@ -1853,9 +1890,14 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
         setToolTip(tip);
     if (segments.isEmpty() && newRow >= 0)
         segments.append(QRect(newStart, newRow, newEnd - newStart + 1, 1));
+    const bool handChanged = m_hoverImage != (onImage && !imageMissing);
+    m_hoverImage = onImage && !imageMissing;
     if (newRow == m_hoverRow && newStart == m_hoverStart && newEnd == m_hoverEnd
-        && segments == m_hoverSegments)
+        && segments == m_hoverSegments) {
+        if (handChanged)
+            setCursor(m_hoverRow >= 0 || m_hoverImage ? Qt::PointingHandCursor : Qt::IBeamCursor);
         return;
+    }
     const auto repaintSegments = [this](const QVector<QRect> &ranges) {
         for (const QRect &range : ranges)
             update(QRect(0, m_padding + range.y() * m_ch, width(), m_ch));
@@ -1866,7 +1908,7 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
     m_hoverEnd = newEnd;
     m_hoverSegments = segments;
     repaintSegments(m_hoverSegments);
-    setCursor(m_hoverRow >= 0 ? Qt::PointingHandCursor : Qt::IBeamCursor);
+    setCursor(m_hoverRow >= 0 || m_hoverImage ? Qt::PointingHandCursor : Qt::IBeamCursor);
 }
 
 // The directory this frame's rows are scanned against. One resolution per
@@ -2126,6 +2168,9 @@ bool TerminalView::linkAt(const CellPos &c, Link *link, int *startCol, int *endC
     // fragment is the exception: that is a markdown link's label, and the
     // fragment is what it opens (#MDKN).
     const QString uri = m_session->withCore([&](VtCore &core) { CoreRow at(core, m_frame.viewportTop + row); return core.hyperlinkAt(at.row, c.col); });
+    // An image row's cell (#1MGS) is a picture, never a URL to open: imageAt() answers for it.
+    if (uri.startsWith(QLatin1String(inlineimage::kImagePrefix)))
+        return false;
     const bool labelHere = relay::labellink::isLabelUri(uri) && c.col < int(l.cells.size());
     // The cells of the run under the pointer, whichever kind it is.
     const auto runOf = [&](int *from, int *to) {
@@ -2273,6 +2318,167 @@ bool TerminalView::proseLink(uint32_t link, int frameRow, int col)
         m_session->withCore([&](VtCore &core) { CoreRow at(core, m_frame.viewportTop + frameRow); return core.hyperlinkUri(link, at.row, col); }));
     m_frameProse.push_back({link, prose});
     return prose;
+}
+
+// ---------------------------------------------------------------- inline images (#1MGS)
+//
+// An image is a column of rows, each holding one linked U+2800 cell whose URI says which row of
+// which picture it is (core/InlineImage.h). Nothing is asked of the core unless a painted cell is
+// exactly that — a linked U+2800 — so a frame with no pictures costs one compare per cell.
+
+bool TerminalView::imageRefOf(uint32_t link, int frameRow, int col, inlineimage::ImageRef *ref)
+{
+    auto it = m_frameImages.find(link);
+    if (it == m_frameImages.end()) {
+        const QString uri = m_session->withCore([&](VtCore &core) {
+            CoreRow at(core, m_frame.viewportTop + frameRow);
+            return core.hyperlinkUri(link, at.row, col);
+        });
+        FrameImageLink known;
+        if (uri.startsWith(QLatin1String(inlineimage::kImagePrefix))) {
+            auto parsed = m_imageUris.constFind(uri);
+            if (parsed == m_imageUris.constEnd()) {
+                if (m_imageUris.size() > 2048)
+                    m_imageUris.clear();
+                inlineimage::ImageRef r;
+                if (!inlineimage::parseImageUri(uri, &r))
+                    r.path.clear();
+                parsed = m_imageUris.insert(uri, r);
+            }
+            known.ref = *parsed;
+            known.image = !known.ref.path.isEmpty();
+        }
+        it = m_frameImages.emplace(link, known).first;
+    }
+    if (!it->second.image)
+        return false;
+    *ref = it->second.ref;
+    return true;
+}
+
+void TerminalView::imagesOnRows(int first, int last, std::vector<ImagePlacement> *out)
+{
+    out->clear();
+    const char32_t rowCell = char32_t(inlineimage::kRowCell);
+    for (int row = std::max(0, first); row <= last; ++row) {
+        const int frameRow = frameRowOf(row);
+        if (frameRow < 0 || frameRow >= int(m_frame.lines.size()))
+            continue;
+        const Line &line = m_frame.lines[size_t(frameRow)];
+        const int cols = std::min<int>(int(line.cells.size()), m_frame.columns);
+        for (int col = 0; col < cols; ++col) {
+            const Cell &c = line.cells[size_t(col)];
+            if (c.ch != rowCell || !c.link)
+                continue;
+            inlineimage::ImageRef ref;
+            if (!imageRefOf(c.link, frameRow, col, &ref))
+                continue;
+            // The row above on screen was this picture's previous row: the same picture. A fold
+            // opened between two of its rows starts a second entry, which paints its own part.
+            const int top = row - ref.row;
+            const auto same = std::find_if(out->begin(), out->end(), [&](const ImagePlacement &p) {
+                return p.col == col && p.top == top && p.lastRow == row - 1 && p.ref.rows == ref.rows
+                    && p.ref.cols == ref.cols && p.ref.path == ref.path;
+            });
+            if (same != out->end())
+                same->lastRow = row;
+            else
+                out->push_back(ImagePlacement{ref, col, top, row, row});
+        }
+    }
+}
+
+QRect TerminalView::imageRect(const ImagePlacement &image, QSize natural) const
+{
+    const QSize box(image.ref.cols * m_cw, image.ref.rows * m_ch);
+    QSize size = natural.isEmpty() ? box : natural.scaled(box, Qt::KeepAspectRatio);
+    // A pane narrower than the picture was placed for scales it down rather than cutting it off.
+    const int room = std::max(1, (m_cols - image.col) * m_cw);
+    if (size.width() > room)
+        size = QSize(room, int(qint64(size.height()) * room / std::max(1, size.width())));
+    size = size.expandedTo(QSize(1, 1));
+    return QRect(m_padding + image.col * m_cw, m_padding + image.top * m_ch, size.width(), size.height());
+}
+
+void TerminalView::paintImages(QPainter &p, int firstRow, int lastRow)
+{
+    imagesOnRows(firstRow, lastRow, &m_imagePlacements);
+    if (m_imagePlacements.empty())
+        return;
+    const qreal dpr = devicePixelRatioF();
+    for (const ImagePlacement &image : m_imagePlacements) {
+        // Only the rows that carry the picture's cells, and only the grid: a picture scrolled half
+        // off the top paints its lower half, one running past the bottom is cut at the last row.
+        const QRect band(m_padding, m_padding + image.firstRow * m_ch, m_cols * m_cw,
+                         (image.lastRow - image.firstRow + 1) * m_ch);
+        const QSize natural = m_images.naturalSize(image.ref.path);
+        ImageCache::State state = ImageCache::State::Missing;
+        QImage picture;
+        QRect r;
+        if (natural.isValid()) {
+            r = imageRect(image, natural);
+            picture = m_images.picture(image.ref.path, r.size(), dpr, &state);
+        }
+        if (!picture.isNull()) {
+            p.save();
+            p.setClipRect(band.intersected(r));
+            p.drawImage(r, picture);
+            p.restore();
+            continue;
+        }
+        // A picture whose file is gone (a restored session, a cleaned cache) says what was there,
+        // on its first row; the rest of its rows stay blank.
+        if (state != ImageCache::State::Missing || image.firstRow != image.top)
+            continue;
+        const int y = m_padding + image.top * m_ch;
+        p.save();
+        p.setClipRect(QRect(m_padding, y, m_cols * m_cw, m_ch));
+        p.setFont(m_fonts[0]);
+        p.setPen(faintInk(m_scheme.foreground, groundAt(y)));
+        p.drawText(QPointF(m_padding + image.col * m_cw, y + m_ascent),
+                   QStringLiteral("[image: %1]").arg(QFileInfo(image.ref.path).fileName()));
+        p.restore();
+    }
+}
+
+bool TerminalView::imageAt(const QPoint &pos, ImagePlacement *image, bool *missing)
+{
+    const CellPos c = cellAt(pos, false);
+    if (c.row < 0 || c.row >= m_rows || pos.x() < m_padding || pos.x() >= m_padding + m_cols * m_cw)
+        return false;
+    std::vector<ImagePlacement> here;
+    imagesOnRows(c.row, c.row, &here);
+    for (const ImagePlacement &candidate : here) {
+        const QSize natural = m_images.naturalSize(candidate.ref.path);
+        QRect r;
+        if (natural.isValid()) {
+            r = imageRect(candidate, natural);
+        } else if (candidate.top == c.row) {
+            const QString text = QStringLiteral("[image: %1]").arg(QFileInfo(candidate.ref.path).fileName());
+            r = QRect(m_padding + candidate.col * m_cw, m_padding + c.row * m_ch, int(text.size()) * m_cw, m_ch);
+        }
+        if (r.contains(pos)) {
+            *image = candidate;
+            *missing = !natural.isValid();
+            return true;
+        }
+    }
+    return false;
+}
+
+QString TerminalView::imagePathAt(const QPoint &pos)
+{
+    ImagePlacement image;
+    bool missing = false;
+    return imageAt(pos, &image, &missing) && !missing ? image.ref.path : QString();
+}
+
+void TerminalView::openImage(const QString &path)
+{
+    if (m_imageOpener)
+        m_imageOpener(path);
+    else
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)
@@ -3322,6 +3528,15 @@ void TerminalView::contextMenuEvent(QContextMenuEvent *e)
     // A right click on a path offers the two things a click cannot do (issue YZTK); on a card
     // reference, the card. (Relay's own panes replace this menu — src/main.cpp's
     // showTerminalMenu() — so this is what the engine offers on its own.)
+    ImagePlacement image;
+    bool imageMissing = false;
+    if (imageAt(e->pos(), &image, &imageMissing)) {
+        const QString path = image.ref.path;
+        if (!imageMissing)
+            menu->addAction(tr("Open image"), this, [this, path] { openImage(path); });
+        menu->addAction(tr("Copy image path"), this, [path] { QApplication::clipboard()->setText(path); });
+        menu->addSeparator();
+    }
     const Link link = linkAtPoint(e->pos());
     if (!link.card.isEmpty()) {
         const QString reference = QStringLiteral("#") + link.card;

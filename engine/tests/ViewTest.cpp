@@ -10,6 +10,7 @@
 #include "MarkdownAnsi.h"
 #include "InlineInk.h"
 #include "view/ProseSpans.h"
+#include "core/InlineImage.h"
 
 #include <QAccessible>
 #include <QFontDatabase>
@@ -169,6 +170,29 @@ QVector<FoldLine> proseLines(const QStringList &texts)
         out << l;
     }
     return out;
+}
+
+// ---- inline images (#1MGS) ----
+
+// A PNG whose top half is `upper` and bottom half `lower`.
+bool bandedPng(const QString &path, QSize size, const QColor &upper, const QColor &lower)
+{
+    QImage img(size, QImage::Format_RGB32);
+    img.fill(lower);
+    for (int y = 0; y < size.height() / 2; ++y)
+        for (int x = 0; x < size.width(); ++x)
+            img.setPixelColor(x, y, upper);
+    return img.save(path, "PNG");
+}
+
+// The first screen row holding an image row's cell (U+2800), or -1.
+int imageTopRow(const Term &t)
+{
+    const QStringList rows = t.view->visibleRowsText();
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows.at(i).contains(QChar(0x2800)))
+            return i;
+    return -1;
 }
 
 } // namespace
@@ -2235,6 +2259,247 @@ private slots:
         QCOMPARE(t.view->linkAtPoint(QPoint(2 + (col + 3) * t.view->cellWidth(),
                                             2 + row * t.view->cellHeight() + t.view->cellHeight() / 2)).target,
                  QStringLiteral("relay://option/general/theme"));
+    }
+
+    // ---- inline images (card #1MGS): the view paints the picture over its relay-image: rows ----
+    //
+    // Each test writes a solid (or two-band) PNG to a temp dir, places it with the contract's own
+    // placementBytes(), and reads the pixels back off a grab of the offscreen view.
+
+    void anInlineImagePaintsOverItsRowsAndOpensOnClick()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QTemporaryDir dir;
+        const QColor green(18, 192, 64);
+        const QString path = dir.filePath(QStringLiteral("pic one.png"));
+        QVERIFY(bandedPng(path, QSize(8 * cw, 4 * ch), green, green));
+        t.backend->writeToDisplay("\x1b[2J\x1b[Hbefore\r\nab");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(8, 4)));
+        t.backend->writeToDisplay("\r\nafter\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        QTRY_COMPARE(imageTopRow(t), 1);   // once the view has pulled the frame
+        const int top = 1;
+        const QImage img = t.grab();
+        const QRect r(2 + 2 * cw, 2 + top * ch, 8 * cw, 4 * ch);
+        QCOMPARE(img.pixelColor(r.center()), green);
+        QCOMPARE(img.pixelColor(r.left() + 1, r.top() + 1), green);
+        QCOMPARE(img.pixelColor(r.right() - 1, r.bottom() - 1), green);
+        const QColor bg = t.view->colorScheme().background;
+        QCOMPARE(img.pixelColor(r.right() + cw, r.center().y()), bg);   // nothing past its width
+        QVERIFY(img.pixelColor(r.center().x(), r.bottom() + ch + ch / 2) != green);   // "after" row
+
+        // Hover: a pointing hand and the path; the cell's relay-image: URI is no link to follow.
+        QTest::mouseMove(t.view, r.center());
+        QTRY_COMPARE(t.view->cursor().shape(), Qt::PointingHandCursor);
+        QCOMPARE(t.view->toolTip(), path);
+        QVERIFY(!t.view->linkAtPoint(QPoint(r.left() + cw / 2, r.center().y())).valid());
+        QCOMPARE(t.view->imagePathAt(r.center()), path);
+        QCOMPARE(t.view->imagePathAt(QPoint(r.right() + cw, r.center().y())), QString());
+        QTest::mouseMove(t.view, t.cellPoint(0, 1));
+        QTRY_COMPARE(t.view->cursor().shape(), Qt::IBeamCursor);
+
+        // A plain click opens the file; the opener gets the path, linkActivated stays quiet.
+        QStringList opened;
+        t.view->setImageOpener([&opened](const QString &p) { opened << p; });
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, r.center());
+        QCOMPARE(opened, QStringList{path});
+        QVERIFY(t.links.isEmpty());
+        QTest::qWait(QApplication::doubleClickInterval() + 20);
+
+        // A drag that starts on the picture selects instead, across its rows and the text after.
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::NoModifier, QPoint(r.left() + cw / 2, r.center().y()));
+        QMouseEvent move(QEvent::MouseMove, t.cellPoint(top + 5, 5), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(t.view, &move);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(top + 5, 5));
+        QCOMPARE(opened.size(), 1);
+        QVERIFY2(t.backend->selectedText().contains(QStringLiteral("after")), qPrintable(t.backend->selectedText()));
+        QVERIFY(t.links.isEmpty());
+
+        if (qEnvironmentVariableIsSet("RELAY_IMAGE_EVIDENCE"))
+            QVERIFY(img.save(qEnvironmentVariable("RELAY_IMAGE_EVIDENCE")));
+    }
+
+    void anImageScrolledHalfOffTheTopPaintsItsLowerHalf()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QTemporaryDir dir;
+        const QColor upper(220, 40, 40), lower(40, 60, 230);
+        const QString path = dir.filePath(QStringLiteral("bands.png"));
+        QVERIFY(bandedPng(path, QSize(6 * cw, 4 * ch), upper, lower));
+        for (int i = 0; i < 20; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(6, 4)));
+        // The cursor is on the picture's last row; ten more lines put that row on screen row 1.
+        for (int i = 0; i < 10; ++i)
+            t.backend->writeToDisplay(QByteArray("\r\nline ") + QByteArray::number(i));
+        QVERIFY(t.waitScreen(QStringLiteral("line 9")));
+        QTest::qWait(60);
+        QCOMPARE(imageTopRow(t), 0);   // its third row is the screen's first
+        QImage img = t.grab();
+        for (int row = 0; row < 2; ++row) {
+            QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + row * ch + ch / 2), lower);
+            QVERIFY(!rowHasColor(img, row, ch, upper));
+        }
+        QVERIFY(!rowHasColor(img, 2, ch, lower));   // cut at its last row
+
+        // One row back in the history: the picture's second row is on top, and it is the upper band.
+        t.view->scrollLines(-1);
+        img = t.grab();
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + ch / 2), upper);
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + ch + ch / 2), lower);
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + 2 * ch + ch / 2), lower);
+        QVERIFY(!rowHasColor(img, 3, ch, lower) && !rowHasColor(img, 3, ch, upper));
+
+        // Further back, until its top row is the screen's second last: its lower rows are below
+        // the view, and it is cut at the grid's last row, never painted into the margin under it.
+        t.view->scrollLines(-11);
+        img = t.grab();
+        const int rows = t.view->rows();
+        QCOMPARE(imageTopRow(t), rows - 2);
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + (rows - 2) * ch + ch / 2), upper);
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + (rows - 1) * ch + ch / 2), upper);
+        for (int y = 2 + rows * ch; y < img.height(); ++y) {
+            QVERIFY(img.pixelColor(2 + 3 * cw, y) != upper);
+            QVERIFY(img.pixelColor(2 + 3 * cw, y) != lower);
+        }
+    }
+
+    void aMissingImageLeavesItsRowsBlankAndSaysWhatWasThere()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("gone.png"));
+        t.backend->writeToDisplay("\x1b[2J\x1b[H");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(10, 3)));
+        t.backend->writeToDisplay("\r\nafter\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        const QImage img = t.grab();
+        const QColor bg = t.view->colorScheme().background;
+        QVERIFY(countNonBackground(img, QRect(2, 2, 16 * cw, ch), bg) > 20);   // "[image: gone.png]"
+        QCOMPARE(countNonBackground(img, QRect(2, 2 + ch, 20 * cw, 2 * ch), bg), 0);
+        QCOMPARE(t.view->imagePathAt(t.cellPoint(0, 2)), QString());
+        QTest::mouseMove(t.view, t.cellPoint(0, 2));
+        QTRY_VERIFY(t.view->toolTip().startsWith(path));
+        QCOMPARE(t.view->cursor().shape(), Qt::IBeamCursor);
+        QStringList opened;
+        t.view->setImageOpener([&opened](const QString &p) { opened << p; });
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(0, 2));
+        QVERIFY(opened.isEmpty() && t.links.isEmpty());
+
+        // The file turns up (a restored session whose cache was refilled): after the re-check
+        // interval the picture paints where the placeholder was.
+        const QColor teal(20, 160, 160);
+        QVERIFY(bandedPng(path, QSize(10 * cw, 3 * ch), teal, teal));
+        QTest::qWait(2100);
+        t.view->update();
+        QTRY_COMPARE(t.grab().pixelColor(2 + 5 * cw, 2 + ch + ch / 2), teal);
+    }
+
+    void aNarrowPaneScalesTheImageDown()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QTemporaryDir dir;
+        const QColor gold(230, 180, 20);
+        const QString path = dir.filePath(QStringLiteral("wide.png"));
+        QVERIFY(bandedPng(path, QSize(40 * cw, 4 * ch), gold, gold));
+        t.backend->writeToDisplay("\x1b[2J\x1b[H");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(40, 4)));
+        t.backend->writeToDisplay("\r\nafter\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        int top = -1;
+        QTRY_VERIFY((top = imageTopRow(t)) >= 0);
+        QImage img = t.grab();
+        QCOMPARE(img.pixelColor(2 + 35 * cw, 2 + top * ch + 3 * ch + ch / 2), gold);   // full size at 50 columns
+
+        t.backend->resizeTerminal(12, 20);
+        QTRY_COMPARE(t.view->columns(), 20);
+        QTest::qWait(100);
+        top = imageTopRow(t);
+        QVERIFY(top >= 0);
+        img = t.grab();
+        // Half the width, so half the height: two rows of gold, then nothing.
+        QCOMPARE(img.pixelColor(2 + 10 * cw, 2 + top * ch + ch / 2), gold);
+        QCOMPARE(img.pixelColor(2 + 19 * cw + cw / 2, 2 + top * ch + ch / 2), gold);
+        QVERIFY(!rowHasColor(img, top + 2, ch, gold));
+        QVERIFY(!rowHasColor(img, top + 3, ch, gold));
+        // And it never paints into the right margin.
+        for (int y = 2 + top * ch; y < 2 + (top + 2) * ch; ++y)
+            QVERIFY(img.pixelColor(img.width() - 1, y) != gold);
+    }
+
+    void aBigImageDecodesOffTheGuiThreadOnce()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        t.view->imageCache().setSyncBytes(0);   // everything is "big"
+        QTemporaryDir dir;
+        const QColor plum(140, 60, 150);
+        const QString path = dir.filePath(QStringLiteral("big.png"));
+        QVERIFY(bandedPng(path, QSize(600, 300), plum, plum));
+        t.backend->writeToDisplay("\x1b[2J\x1b[H");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(12, 3)));
+        t.backend->writeToDisplay("\r\nafter\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        QTRY_COMPARE(t.grab().pixelColor(2 + 2 * cw, 2 + ch), plum);
+        for (int i = 0; i < 5; ++i)
+            t.grab();
+        QCOMPARE(t.view->imageCache().decodeCount(), quint64(1));
+    }
+
+    void imageRowsSurviveAProseTakeover()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        t.backend->resizeTerminal(12, 40);
+        QTemporaryDir dir;
+        const QColor green(18, 192, 64);
+        const QString path = dir.filePath(QStringLiteral("after-prose.png"));
+        QVERIFY(bandedPng(path, QSize(6 * cw, 2 * ch), green, green));
+        const QString uri = QStringLiteral("relay://prose/img/1");
+        t.backend->writeToDisplay("\x1b[2J\x1b[H\x1b]8;;relay://prose/img/1\x1b\\");
+        for (int i = 0; i < 4; ++i)
+            t.backend->writeToDisplay("one two\r\n");
+        t.backend->writeToDisplay("\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(6, 2)));
+        t.backend->writeToDisplay("\r\nafter\r\n");
+        t.backend->setProseBlock(uri, proseLines({QStringLiteral("one two ").repeated(4).trimmed()}), 8);
+        QTest::qWait(400);
+        // The block is re-wrapped into one row; the picture's rows are not prose and move up with it.
+        const QStringList rows = t.view->visibleRowsText();
+        QVERIFY2(rows.contains(QStringLiteral("after")), qPrintable(rows.join(QLatin1Char('|'))));
+        const int top = imageTopRow(t);
+        QVERIFY2(top >= 1 && top < rows.indexOf(QStringLiteral("after")), qPrintable(rows.join(QLatin1Char('|'))));
+        const QImage img = t.grab();
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + top * ch + ch / 2), green);
+        QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + (top + 1) * ch + ch / 2), green);
+        QVERIFY(!rowHasColor(img, top - 1, ch, green));
+        QCOMPARE(t.view->imagePathAt(QPoint(2 + 3 * cw, 2 + top * ch + ch / 2)), path);
+    }
+
+    void aLinkedBrailleBlankThatIsNoImageIsLeftAlone()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        // A hand-written OSC 8 link over U+2800, and a relay-image: URI with a relative path:
+        // neither is a picture, nothing is decoded, and the second is not a URL to open either.
+        t.backend->writeToDisplay("\x1b[2J\x1b[H\x1b]8;;https://example.com/x\x1b\\\xe2\xa0\x80\x1b]8;;\x1b\\ one\r\n"
+                                  "\x1b]8;;relay-image:0/1/4/rel.png\x1b\\\xe2\xa0\x80\x1b]8;;\x1b\\ two\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("two")));
+        t.grab();
+        QCOMPARE(t.view->imageCache().decodeCount(), quint64(0));
+        QCOMPARE(t.view->imagePathAt(t.cellPoint(1, 0)), QString());
+        QCOMPARE(t.view->linkAtPoint(t.cellPoint(0, 0)).target, QStringLiteral("https://example.com/x"));
+        QVERIFY(!t.view->linkAtPoint(t.cellPoint(1, 0)).valid());
     }
 };
 

@@ -5,9 +5,11 @@
 #include "ColorScheme.h"
 #include "FoldLayer.h"
 #include "FoldSearch.h"
+#include "ImageCache.h"
 #include "KeyMapper.h"
 #include "OutputLinks.h"
 #include "core/CellTypes.h"
+#include "core/InlineImage.h"
 
 #include <QElapsedTimer>
 #include <QFont>
@@ -152,6 +154,14 @@ public:
     // A plain left click opens a link; Ctrl+click always does. Hosts that use the first
     // click of an inactive pane to move the focus disarm it until the pane is active.
     void setPlainClickOpensLinks(bool on) { m_plainClickOpens = on; }
+
+    // ---- inline images (card #1MGS, core/InlineImage.h)
+    // The file of the picture painted under a point, or empty (also for a picture whose file is
+    // gone). A plain left click there opens it full size, as does Ctrl+click.
+    QString imagePathAt(const QPoint &pos);
+    // What opening a picture does; by default QDesktopServices opens the file. Tests replace it.
+    void setImageOpener(std::function<void(const QString &path)> open) { m_imageOpener = std::move(open); }
+    ImageCache &imageCache() { return m_images; }
     // Every path, URL and card reference that resolves wears ColorScheme::link at rest, not only
     // under the pointer (owner, 2026-09-19: "clickable things need to be understood from colors").
     // Only a cell whose foreground is plain — the default, or an achromatic colour: white, bright
@@ -395,6 +405,29 @@ private:
     const QString &frameDirectory();
     // Whether an OSC 8 link id is a prose anchor, memoised for the frame.
     bool proseLink(uint32_t link, int frameRow, int col);
+
+    // Inline images (#1MGS). One picture as the rows on screen show it: its top-left cell is
+    // (top, col) in screen rows, which may be above the view, and its rows from firstRow to
+    // lastRow are the ones found on screen.
+    struct ImagePlacement {
+        inlineimage::ImageRef ref;
+        int col = 0;
+        int top = 0;
+        int firstRow = 0;
+        int lastRow = 0;
+    };
+    // The image row a link id names, memoised for the frame; false for any other link.
+    bool imageRefOf(uint32_t link, int frameRow, int col, inlineimage::ImageRef *ref);
+    // The pictures with a row among screen rows [first, last], one entry per picture.
+    void imagesOnRows(int first, int last, std::vector<ImagePlacement> *out);
+    // Where a picture of `natural` pixels is painted: fitted into its cells, then narrowed to the
+    // grid's right edge. Not clipped to the view.
+    QRect imageRect(const ImagePlacement &image, QSize natural) const;
+    void paintImages(QPainter &p, int firstRow, int lastRow);
+    // The picture under a point; `missing` says its file could not be read (only the one-line
+    // placeholder on its first row is then under the pointer).
+    bool imageAt(const QPoint &pos, ImagePlacement *image, bool *missing);
+    void openImage(const QString &path);
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -501,6 +534,19 @@ private:
     QString m_frameCwd;
     bool m_frameCwdValid = false;
     std::vector<std::pair<uint32_t, bool>> m_frameProse;
+    // Inline images (#1MGS): which link ids of this frame are image rows (thrown away with the
+    // frame, like m_frameProse), the parsed URIs across frames, and the decoded pictures.
+    struct FrameImageLink {
+        bool image = false;
+        inlineimage::ImageRef ref;
+    };
+    std::unordered_map<uint32_t, FrameImageLink> m_frameImages;
+    QHash<QString, inlineimage::ImageRef> m_imageUris;   // an empty path: not a well-formed image URI
+    std::vector<ImagePlacement> m_imagePlacements;
+    ImageCache m_images;
+    std::function<void(const QString &)> m_imageOpener;
+    QString m_pressedImage;    // the picture a plain left press landed on
+    bool m_hoverImage = false; // the pointer is over a picture (pointing hand)
     // How many times the directory was really resolved (tests: it is once per
     // frame, whatever the row count).
     mutable quint64 m_cwdResolves = 0;
