@@ -49,7 +49,8 @@ namespace relay::modelrows {
 //     local                               only where this machine serves one
 //       bonsai-2-27b       spark
 //     ───────────────────────
-//     more models…
+//     all models                          the box again, on every model (card #BXMS)
+//     model settings                      the models pane
 //
 // So a class is a **header row** — a label, not a choice: "the class header rows are not selectable
 // in the picker. thats redundant." — followed by that class's list, in list order, one row per
@@ -104,7 +105,8 @@ QHash<QString, ModePick> usableModePicks(const models::Catalog &catalog,
 //   role:<role>                           put this pane on that mode; the phone's menu still sends it
 //   entry:<preset>|<model>                that provider and that model, on the pane's own mode
 //   guest:<id>                            Claude Code or Codex as a TUI in this pane's shell
-//   gear:picker                           "more models…" — the relay::ModelPicker dialog
+//   gear:all                              "all models" — the box again, on every model (`filtered`)
+//   gear:picker                           "model settings" — the models pane
 //   gear:modelOptions                     Options › Models (no longer a row of the box)
 struct Row {
     QString text;
@@ -157,8 +159,8 @@ struct Context {
     qint64 now = 0;                      // unix seconds for `exhausted`; 0 means the clock
 };
 
-// The whole box: every class's header and rows, the guest rows, the separator and "more models…",
-// and which row opens highlighted.
+// The whole box: every class's header and rows, the guest rows, the separator, "all models" and
+// "model settings", and which row opens highlighted.
 struct Box {
     QList<Row> rows;
     int current = -1;            // an index into `rows`; -1 when nothing there is the pane's
@@ -178,11 +180,14 @@ Box box(const Context &context);
 //     its main mode, and the level comes from the Levels rule as it stands in the lists.
 //
 // Nothing is filtered here — the caller's popup does that, with the same rule it applies to every
-// other row, so this hands over rows and not matches.
+// other row, so this hands over rows and not matches. It is also what "all models" opens (card
+// #BXMS), so it leaves that row out: there is nothing wider for it to open.
 Box filtered(const Context &context);
 // The group id `other models`' header and rows carry. It is not a class: it has no list, no
 // cutoff and no switch, Right does not expand it, and it exists only while the filter has text.
 QString otherGroup();
+// The data of the "all models" row, `gear:all`.
+QString allModelsData();
 // Its rows alone — what the phone's menu and the tests read.
 QList<Row> build(const Context &context);
 

@@ -202,6 +202,7 @@ public:
     QString selectedEffort() const;   // the level list's pick; empty = the model's own default
     void selectKey(const QString &key);
     // Enter, a double click or the "use" button: the highlighted row and its level go to `onUse`.
+    // Hosted in the models pane (card #BXMS) there is no button and Enter only highlights.
     void use();
 
     // The list edits, as the keys above do them. Public because they are the dialog's second job

@@ -131,10 +131,9 @@ QStringList listKeys(const QString &tier) {
 
 void setList(const QString &tier, const QList<curation::TierEntry> &entries) { curation::setTierList(tier, entries); }
 
-// What a served pane hands over, with the switch recorded rather than made.
+// What the pane the models pane was opened from hears back. There is no "switch" to record: the
+// models pane picks no pane's model (card #BXMS).
 struct Served {
-    QString key, effort;
-    int uses = 0;
     int focusBacks = 0;
     int listEdits = 0;
 };
@@ -149,11 +148,6 @@ ModelsPane::Target targetFor(Served *served, const QString &tier = QStringLitera
     target.currentEffort = QStringLiteral("high");
     target.tier = tier;
     target.now = 1;
-    target.use = [served](const QString &key, const QString &effort) {
-        served->key = key;
-        served->effort = effort;
-        ++served->uses;
-    };
     target.listsChanged = [served] { ++served->listEdits; };
     target.focusBack = [served] { ++served->focusBacks; };
     return target;
@@ -266,11 +260,15 @@ private Q_SLOTS:
         QVERIFY(!pane.jobs()->list()->isColumnHidden(3));
     }
 
-    void theHeaderNamesThePaneItServes() {
+    // Owner, 2026-09-23 (card #BXMS): "the models pane should not select models for specific
+    // panes. that should be done with the box picker." The header says so instead of naming one.
+    void theHeaderSaysTheSettingsAreForEveryPane() {
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served, QStringLiteral("main"), QStringLiteral("~/src/relay")));
-        QCOMPARE(pane.header()->text(), QStringLiteral("for: ~/src/relay"));
+        QVERIFY2(!pane.header()->text().contains(QStringLiteral("for: ")), qPrintable(pane.header()->text()));
+        QVERIFY(pane.header()->text().contains(QStringLiteral("every pane")));
+        QVERIFY(pane.header()->text().contains(QStringLiteral("model box")));
         QCOMPARE(pane.servedTitle(), QStringLiteral("~/src/relay"));
     }
 
@@ -470,23 +468,29 @@ private Q_SLOTS:
 
     // ----- what Enter does, and where ---------------------------------------------------------
 
-    void enterUsesTheRowInTheServedPane() {
+    // Enter, a double click and the old "use" button pick nothing here (card #BXMS): the pane's
+    // own model box is the one place a pane's model is chosen.
+    void enterPicksNoPanesModel() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
                                          {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         Served served;
         ModelsPane pane(providerSections());
+        pane.resize(900, 600);
+        pane.show();
         pane.setTarget(targetFor(&served));
-        pane.showTab(ModelsPane::prioritiesTab());
-        pane.picker()->selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
-        QTest::keyClick(pane.picker()->list(), Qt::Key_Return);
-        QCOMPARE(served.uses, 1);
-        QCOMPARE(served.key, QStringLiteral("anthropic|claude-opus-5-5"));
-        // The "use" button is the same door, and so is Enter in the filter line.
-        pane.picker()->selectKey(QStringLiteral("glm-coding|glm-5.3"));
-        QTest::keyClick(pane.picker()->filter(), Qt::Key_Return);
-        QCOMPARE(served.uses, 2);
-        QCOMPARE(served.key, QStringLiteral("glm-coding|glm-5.3"));
-        QCOMPARE(served.effort, QStringLiteral("max"));   // the level the list carries, with it
+        for (const QString &tab : {ModelsPane::availableTab(), ModelsPane::prioritiesTab()}) {
+            pane.showTab(tab);
+            for (auto *button : pane.picker()->findChildren<QPushButton *>())
+                QVERIFY2(button->text() != QStringLiteral("use") || !button->isVisible(), qPrintable(tab));
+            pane.picker()->selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
+            QTest::keyClick(pane.picker()->list(), Qt::Key_Return);
+            QTest::keyClick(pane.picker()->filter(), Qt::Key_Return);
+            QVERIFY(!pane.picker()->pick().accepted);
+            QCOMPARE(pane.picker()->selectedKey(), QStringLiteral("anthropic|claude-opus-5-5"));
+            QVERIFY2(!pane.picker()->filter()->placeholderText().contains(QStringLiteral("enter use")),
+                     qPrintable(pane.picker()->filter()->placeholderText()));
+        }
+        QCOMPARE(served.focusBacks, 0);   // Enter did not hand the focus away either
     }
 
     void aClickOnlyHighlights() {
@@ -504,7 +508,7 @@ private Q_SLOTS:
         QVERIFY(opus != nullptr);
         emit list->itemClicked(opus, ColModel);
         list->setCurrentItem(opus);
-        QCOMPARE(served.uses, 0);
+        QVERIFY(!pane.picker()->pick().accepted);
         QCOMPARE(pane.picker()->selectedKey(), QStringLiteral("anthropic|claude-opus-5-5"));
     }
 
@@ -516,7 +520,6 @@ private Q_SLOTS:
         pane.showTab(ModelsPane::prioritiesTab());
         QTest::keyClick(pane.picker()->filter(), Qt::Key_Escape);
         QCOMPARE(served.focusBacks, 1);
-        QCOMPARE(served.uses, 0);
         QVERIFY(pane.picker() != nullptr);              // nothing closed, nothing rebuilt
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
         // …from the providers tab too, where the settings pane's own Esc is the same exit.
@@ -546,7 +549,7 @@ private Q_SLOTS:
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         // Every one of those is a list edit the window has to hear about.
         QVERIFY(served.listEdits >= 3);
-        QCOMPARE(served.uses, 0);   // and none of them switched the served pane
+        QVERIFY(!picker->pick().accepted);   // and none of them picked a model for a pane
     }
 
     // ----- serving, re-serving and re-reading ---------------------------------------------------
@@ -564,17 +567,16 @@ private Q_SLOTS:
         ModelsPane::Target again = targetFor(&first, QStringLiteral("main"), QStringLiteral("pane one"));
         pane.setTarget(again);
         QCOMPARE(pane.tier(), QStringLiteral("flash"));
-        // Another pane: it is served instead, on *its* class, and Enter now lands there.
+        // Another pane: the pane opens on *its* class. It still picks nothing for it (#BXMS).
         ModelsPane::Target other = targetFor(&second, QStringLiteral("high"), QStringLiteral("pane two"));
         other.token = QStringLiteral("pane-2");
         pane.setTarget(other);
         QCOMPARE(pane.servedToken(), QStringLiteral("pane-2"));
-        QCOMPARE(pane.header()->text(), QStringLiteral("for: pane two"));
+        QCOMPARE(pane.servedTitle(), QStringLiteral("pane two"));
         QCOMPARE(pane.tier(), QStringLiteral("high"));
         pane.picker()->selectKey(QStringLiteral("glm-coding|glm-5.3"));
         pane.picker()->use();
-        QCOMPARE(first.uses, 0);
-        QCOMPARE(second.uses, 1);
+        QVERIFY(!pane.picker()->pick().accepted);
     }
 
     // ----- the fourth tab: what each job runs on (card #MDL1, design 5.9) ---------------------
@@ -712,7 +714,8 @@ private Q_SLOTS:
         QCOMPARE(pane.agentContext()->placeholder(), QStringLiteral("Ask the Models helper…"));
         // And what is on screen: the tab, the pane it serves, the filter, the class in focus.
         QVERIFY2(spec.screen.contains(QStringLiteral("Models › priorities")), qPrintable(spec.screen));
-        QVERIFY2(spec.screen.contains(QStringLiteral("Serving: relay-terminal")), qPrintable(spec.screen));
+        QVERIFY2(spec.screen.contains(QStringLiteral("Opened from: relay-terminal")), qPrintable(spec.screen));
+        QVERIFY2(!spec.screen.contains(QStringLiteral("Serving")), qPrintable(spec.screen));
         QVERIFY2(spec.screen.contains(QStringLiteral("Filter: glm")), qPrintable(spec.screen));
         QVERIFY2(spec.screen.contains(QStringLiteral("Class in focus: ")), qPrintable(spec.screen));
         pane.showTab(ModelsPane::effortTab());
@@ -732,7 +735,7 @@ private Q_SLOTS:
 
     void withNoTargetItSaysSoRatherThanPretending() {
         ModelsPane pane(providerSections());
-        QVERIFY(pane.header()->text().contains(QStringLiteral("no pane")));
+        QVERIFY(pane.header()->text().contains(QStringLiteral("every pane")));
         pane.showTab(ModelsPane::prioritiesTab());
         pane.picker()->use();   // nothing to switch, and nothing crashes
         QVERIFY(pane.servedToken().isEmpty());

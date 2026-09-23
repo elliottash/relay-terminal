@@ -1836,6 +1836,7 @@ public:
         // "the expansion lasts while the box is open" (design 5.3): every Alt+M starts from the
         // cutoffs again, so the box is the same short list every time it is reached for.
         m_boxExpanded.clear();
+        m_boxAllPending = false;
         m_modelBox->setFocus(Qt::ShortcutFocusReason);
         m_modelBox->showPopup();
     }
@@ -1878,7 +1879,7 @@ public:
         m_effortBox->showPopup();
     }
     // Ctrl+Shift+M (agent.modelOptions), /model and /models with no argument, and the box's
-    // "more models…" row: the **models pane** beside this one, serving this one (card #MDL1 t:a11,
+    // "model settings" row: the **models pane** beside this one, serving this one (card #MDL1 t:a11,
     // design 5.8). It was a modal dialog until 2026-09-21; the name stays because every door into
     // model picking has always been this call.
     //
@@ -1926,10 +1927,8 @@ public:
             if (onProfileApplied) onProfileApplied();
             else { modelsCurationChanged(); agentOptionsChanged(QStringLiteral("models/fallback")); }
         };
-        target.use = [this](const QString &key, const QString &effort) {
-            hintSwapForPick(key);
-            selectEntry(key, effort);
-        };
+        // No `use`: a pane's model is picked in its own box, never from the models pane (owner,
+        // 2026-09-23, card #BXMS: "the models pane should not select models for specific panes").
         // The jobs tab (design 5.9): its "runs on" column is this pane's worker's last report and
         // nothing else, and an override there is the same live `roles`/`tiers` re-send the retired
         // roles modal made — the worker's next `model_roles` is what repaints the column.
@@ -13554,6 +13553,19 @@ private:
             hint(QStringLiteral("model.options.mouse"), QStringLiteral("Tip: /models opens the models pane's providers tab from the prompt box"));
             return;
         }
+        // "all models" (owner, 2026-09-23, card #BXMS: "all models -> opens the full scrollable
+        // list"): the same box again, open on every class whole and every other available model —
+        // the list a typed filter searches. Picking there is an ordinary box pick.
+        if (data == relay::modelrows::allModelsData()) {
+            refreshPickers();
+            m_boxAllPending = true;
+            QTimer::singleShot(0, this, [this] {
+                if (!m_modelBox) return;
+                m_modelBox->setFocus(Qt::ShortcutFocusReason);
+                m_modelBox->showPopup();
+            });
+            return;
+        }
         if (data == QStringLiteral("gear:picker")) {
             refreshPickers();
             openModelPicker();
@@ -13811,9 +13823,11 @@ private:
     }
 
     // The rows the list drops open with (card #MDL1, design 5.3): every class's header and its
-    // models, the guest rows, then "more models…". `current` comes back as the index of the row
-    // this pane is on, which is the one the box opens highlighted.
+    // models, the guest rows, then "all models" and "model settings". `current` comes back as the
+    // index of the row this pane is on, which is the one the box opens highlighted. Opened from
+    // "all models" (card #BXMS) it is the whole list instead.
     QList<relay::FilterRow> modelBoxRows(int *current) const {
+        if (m_boxAll) return filterRowsOf(relay::modelrows::filtered(modelRowsContext()), current);
         return filterRowsOf(relay::modelrows::box(modelRowsContext()), current);
     }
     // The rows a typed filter searches: every class whole and every **available** model that no
@@ -13851,7 +13865,7 @@ private:
     // is this pane's, it lasts only while the box is open (openModelBox clears it), and it never
     // reaches the settings: what the box shows *by default* is the dialog's cutoff.
     bool expandModelClass(const QString &klass, int delta) {
-        if (klass.isEmpty() || !m_modelBox) return false;
+        if (klass.isEmpty() || !m_modelBox || m_boxAll) return false;   // "all models" is already whole
         const bool open = delta > 0;
         if (open == m_boxExpanded.contains(klass)) return false;
         // Nothing to open: a class the box is already showing whole. Saying so rather than
@@ -13898,7 +13912,7 @@ private:
                                             m_routeLabel ? m_routeLabel->toolTip() : QString()).trimmed());
         }
         // The rows are relay::modelrows' (src/ModelRows.h, cards #PK5Q and #MDL1): the modes, then
-        // the models of the mode this pane is in, then "more models…" and the gear. Every console's
+        // the models of the mode this pane is in, then "all models" and "model settings". Every console's
         // box draws the same list from the same builder, because the owner asked for exactly that
         // on 2026-09-20 — "can you have the picker be the same as in the main terminal". What is
         // decided here is only what this pane alone knows: which mode it is in, what it picked for
@@ -13909,6 +13923,9 @@ private:
         // The rows are read again the moment the list is about to be drawn, so the box always
         // opens on this pane's own model with no class expanded (card #MDL1, design 5.3).
         m_modelBox->onRows = [this](int *current) {
+            // Every opening is the short list again unless it is the one "all models" asked for.
+            m_boxAll = m_boxAllPending;
+            m_boxAllPending = false;
             const auto rows = modelBoxRows(current);
             QJsonArray logged;
             for (const auto &row : rows)
@@ -19676,6 +19693,8 @@ private:
     // The classes Right has opened to their whole list while the model box is open (design 5.3).
     // Not a setting and not saved: openModelBox empties it.
     QSet<QString> m_boxExpanded;
+    bool m_boxAll = false;          // the open list is "all models" (card #BXMS)
+    bool m_boxAllPending = false;   // "all models" was picked: the next opening is the whole list
     // Whether the restored picks have been checked against a catalog yet. One check, at the first
     // refresh that has one: a pick whose entry has left the catalog or lost its key is dropped
     // silently, and the mode reads rank 1 of its list again.

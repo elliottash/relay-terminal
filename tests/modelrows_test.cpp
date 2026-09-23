@@ -162,8 +162,8 @@ private slots:
     void cleanup() { resetBox(); }
 
     // The shape the owner confirmed (design 5.3): a header per class, that class's list under it
-    // down to the cutoff, then a separator and "more models…". "customize…" is gone — the dialog
-    // has the Options button.
+    // down to the cutoff, then a separator, "all models" and "model settings" (card #BXMS).
+    // "customize…" is gone — the models pane has the Options button.
     void classesWithTheirTopModelsUnderThem()
     {
         const modelrows::Box shown = modelrows::box(paneContext());
@@ -171,9 +171,11 @@ private slots:
                  QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra"),
                               QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
                               QStringLiteral("flash"), QStringLiteral("  glm-5.3-flash"),
-                              QStringLiteral("  more models…")}));
+                              QStringLiteral("  all models"), QStringLiteral("  model settings")}));
         QCOMPARE(dataOf(shown.rows).last(), QStringLiteral("gear:picker"));
-        QVERIFY(shown.rows.last().separatorBefore);
+        QCOMPARE(dataOf(shown.rows).at(shown.rows.size() - 2), modelrows::allModelsData());
+        QVERIFY(shown.rows.at(shown.rows.size() - 2).separatorBefore);
+        QVERIFY(!shown.rows.last().separatorBefore);
         QVERIFY2(modelrows::indexOf(shown.rows, QStringLiteral("gear:modelOptions")) < 0,
                  "customize… is no longer a row of the box");
         // A model row carries the class it belongs to and, in list order, what it would spend.
@@ -546,6 +548,9 @@ private slots:
         QVERIFY(!wide.rows.at(head).enabled);
         // The section sits with the models, above the action rows, never below them.
         QVERIFY(head < modelrows::indexOf(wide.rows, QStringLiteral("gear:picker")));
+        // "all models" opens this list, so it is not a row of it; "model settings" takes its rule.
+        QVERIFY(modelrows::indexOf(wide.rows, modelrows::allModelsData()) < 0);
+        QVERIFY(wide.rows.last().separatorBefore);
         const int at = modelrows::indexOf(wide.rows, QStringLiteral("pick:main|kimi-code|kimi-k2-turbo"));
         QVERIFY2(at > head, qPrintable(shapeOf(wide.rows).join(QLatin1Char('|'))));
         QCOMPARE(wide.rows.at(at).group, modelrows::otherGroup());
@@ -569,7 +574,7 @@ private slots:
                  QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra"),
                               QStringLiteral("main"), QStringLiteral("  kimi-k3"), QStringLiteral("  glm-5.3"),
                               QStringLiteral("flash"), QStringLiteral("  glm-5.3-flash"),
-                              QStringLiteral("  more models…")}));
+                              QStringLiteral("  all models"), QStringLiteral("  model settings")}));
     }
 };
 

@@ -78,15 +78,15 @@ class ModelsContext final : public agent::Context {
 
   private:
     // What is being read right now, for the "On screen now:" line above the prompt (§33). A hint,
-    // not a dump: the tab, the pane a pick would switch, the filter and the class or job the
+    // not a dump: the tab, the pane it was opened from, the filter and the class or job the
     // highlight is on. The lists themselves are never pasted in.
     QString screen() const {
         QStringList lines;
         const QString tab = m_pane->currentTab();
         lines << QStringLiteral("Models › %1").arg(tab);
         const QString served = m_pane->servedTitle().trimmed();
-        lines << (served.isEmpty() ? QStringLiteral("Serving: no pane — a pick would switch nothing")
-                                   : QStringLiteral("Serving: %1").arg(served));
+        // Opened from, not served: this pane switches no pane's model (card #BXMS).
+        if (!served.isEmpty()) lines << QStringLiteral("Opened from: %1").arg(served);
         const QString filter = m_pane->filterText().trimmed();
         if (!filter.isEmpty()) lines << QStringLiteral("Filter: %1").arg(filter);
         if (tab == ModelsPane::prioritiesTab() || tab == ModelsPane::effortTab()) {
@@ -147,9 +147,8 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     layout->setContentsMargins(12, 10, 12, 8);
     layout->setSpacing(6);
 
-    // "a header line naming the pane it serves" (design 5.8). One pane is served at a time and
-    // which one is the whole reason Enter here changes something over there, so it is said in
-    // words rather than left to the splitter's geometry.
+    // One quiet line saying what this pane is for. It named the pane it served until card #BXMS,
+    // when picking a pane's model left this pane for the pane's own box.
     m_header = new QLabel;
     m_header->setObjectName(QStringLiteral("modelsPaneFor"));
     m_header->setTextFormat(Qt::PlainText);
@@ -251,10 +250,7 @@ void ModelsPane::buildPicker() {
     // Set before setHosted(), which redraws the footer: the footer only offers "esc back to the
     // pane" where Escape has somewhere to go.
     m_picker->onEscape = [this] { if (m_target.focusBack) m_target.focusBack(); };
-    m_picker->onUse = [this](const ModelPick &pick) {
-        if (!pick.accepted || !m_target.use) return;
-        m_target.use(pick.key, pick.effort);
-    };
+    // No `onUse`: the picker then offers no "use" and Enter picks nothing (card #BXMS).
     m_picker->onListsChanged = [this] { if (m_target.listsChanged) m_target.listsChanged(); };
     m_picker->openModelsPage = [this] { showTab(providersTab()); };
     m_picker->setHosted(true);
@@ -303,13 +299,11 @@ void ModelsPane::setTarget(const Target &target) {
 }
 
 void ModelsPane::updateHeader() {
-    const QString who = m_target.title.trimmed();
-    m_header->setText(who.isEmpty()
-        ? QStringLiteral("for: no pane — enter would switch nothing")
-        : QStringLiteral("for: %1").arg(who));
-    m_header->setToolTip(who.isEmpty()
-        ? QStringLiteral("This pane is not serving anything. Focus a pane and press the models key again.")
-        : QStringLiteral("Enter, “use” or a double click switches %1 to the highlighted model and level.").arg(who));
+    // Settings for every pane, said once (card #BXMS): a pane's own model is its box's to pick.
+    m_header->setText(QStringLiteral("settings for every pane · a pane's own model is picked in its model box"));
+    m_header->setToolTip(QStringLiteral("These lists, levels and providers apply to every pane. This pane does not switch "
+                                        "any pane's model: use the model box in the pane's status line, "
+                                        "and “all models” there for the whole list."));
 }
 
 QString ModelsPane::currentTab() const {

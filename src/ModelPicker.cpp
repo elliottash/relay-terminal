@@ -185,7 +185,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     auto *top = new QHBoxLayout;
     m_filter = new QLineEdit;
     m_filter->setObjectName(QStringLiteral("modelFilter"));
-    m_filter->setPlaceholderText(QStringLiteral("filter every model · ↑↓ select · enter uses it · ctrl+enter adds it here"));
+    m_filter->setPlaceholderText(QStringLiteral("filter every model · ↑↓ select · ctrl+enter adds it here"));
     m_filter->setClearButtonEnabled(true);
     top->addWidget(m_filter, 1);
     m_sortLabel = new QLabel(QStringLiteral("sort"));
@@ -1202,7 +1202,7 @@ void ModelPicker::rebuild() {
     m_sortLabel->setVisible(all);
     m_sort->setVisible(all);
     m_favorite->setVisible(!effortPage());
-    m_use->setVisible(!effortPage());
+    m_use->setVisible(!effortPage() && !m_hosted);
     syncClassSwitch();
     m_list->setColumnHidden(ColBox, effortPage() || !(sectionsPage() || boxClassTier(m_tier)));
     // The ▲▼ belong where an order is written down; the flat tab has none (same rule as the drag
@@ -1467,10 +1467,13 @@ void ModelPicker::updateFooter() {
     // everywhere. (It used to say alt+1… — those digits are the window's, and the lie sent the
     // owner hunting for a key that did nothing, card #RKP3.)
     const QString tabs = m_hosted ? QStringLiteral("tab / shift+tab: the pane's tabs · ") : QStringLiteral("←→ tab · ");
+    // "enter uses it" only where Enter picks: never in the models pane (card #BXMS).
+    const bool picks = !m_hosted;
+    const QString enterUses = picks ? QStringLiteral(" · enter uses it") : QString();
     QString text;
     if (m_tier == kAll) {
-        text = tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
-                                     "long tail included · tab, then → : the providers of a folded row · "
+        text = tabs + QStringLiteral("↑↓ row") + (picks ? QStringLiteral(" · enter uses it in the pane") : QString())
+             + QStringLiteral(" · type to search every model, openrouter's long tail included · tab, then → : the providers of a folded row · "
                                      "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
                                      "to take it out everywhere, tick a row under “more from…” to bring one in");
     } else if (effortPage()) {
@@ -1497,14 +1500,14 @@ void ModelPicker::updateFooter() {
     m_footer->setToolTip(text);
     if (m_compact)
         text = m_tier == kAll
-            ? QStringLiteral("search · tick available · enter use · tab / shift+tab switch page")
+            ? QStringLiteral("search · tick available%1 · tab / shift+tab switch page").arg(picks ? QStringLiteral(" · enter use") : QString())
             : effortPage() ? QStringLiteral("choose a ranked model, then its reasoning level · ctrl+z undo")
-            : QStringLiteral("ctrl+enter add · del remove · alt+↑/↓ move · ctrl+z undo · enter use");
+            : QStringLiteral("ctrl+enter add · del remove · alt+↑/↓ move · ctrl+z undo%1").arg(picks ? QStringLiteral(" · enter use") : QString());
     m_footer->setText(text);
     // Only available searches the whole catalog (#AVR8); a list page filters what it draws.
     m_filter->setPlaceholderText(effortPage() ? QStringLiteral("filter ranked models") : m_tier == kAll
-        ? QStringLiteral("search every model · ↑↓ select · enter uses it")
-        : QStringLiteral("filter this page · ↑↓ select · enter uses it · ctrl+enter adds it here"));
+        ? QStringLiteral("search every model · ↑↓ select") + enterUses
+        : QStringLiteral("filter this page · ↑↓ select%1 · ctrl+enter adds it here").arg(enterUses));
 }
 
 // ----- the list edits ----------------------------------------------------------------------------
@@ -1758,6 +1761,9 @@ void ModelPicker::use() {
         promptAddModelById(row->data(0, AddByIdPresetRole).toString());
         return;
     }
+    // Hosted in the models pane there is nothing to pick for: that pane picks no pane's model
+    // (card #BXMS) — the pane's own model box does. Enter and a double click only highlight.
+    if (m_hosted) return;
     const QString key = selectedKey();
     if (key.isEmpty()) return;
     m_pick.accepted = true;

@@ -33,10 +33,11 @@
 // own guts, now a plain widget — put on the flat tab or on a class tab by this pane's tab bar. The
 // providers tab is one `relay::SettingsPane`. Nothing about either was reimplemented here.
 //
-// **It serves a pane and switches nothing itself.** `Target` says which pane that is: its title
-// for the header line, its catalog, its model, its level, its mode, and the `use` callback that
-// switches it (`Pane::selectEntry` — the one door every pick takes). Enter or "use" on a row calls
-// it; a click only highlights. Escape hands the focus back and leaves the pane open. The window
+// **It edits settings and never picks a pane's model** (owner, 2026-09-23, card #BXMS: "the
+// models pane should not select models for specific panes. that should be done with the box
+// picker"). `Target` is the pane it was opened from — its catalog, its model (highlighted), its
+// mode (the class tab it opens on) and where Escape hands the focus back — and there is no callback
+// that switches it: Enter and a double click do nothing but highlight. Escape leaves the pane open. The window
 // opens one per window, re-targets it when Ctrl+Shift+M is pressed from another pane, and closes
 // it when the key is pressed while it has the focus.
 //
@@ -89,16 +90,13 @@ public:
     // The pane this one serves. Everything that would need a `Pane` is a callback, and every
     // callback is optional: a target with none is a readable pane that changes nothing.
     struct Target {
-        QString title;             // what the header says after "for: " — the pane's title or cwd
+        QString title;             // the pane it was opened from, for the helper; never a pick target
         QString token;             // the served pane's session token; how a re-target is told from a refresh
         models::Catalog catalog;
         QString currentKey;        // the served pane's model now
         QString currentEffort;     // its level now
         QString tier = QStringLiteral("main");   // its mode, which is the class tab priorities opens on
         qint64 now = 0;            // unix seconds, for the limits line
-        // Enter, "use" or a double click: the model and the level, for the served pane. This is
-        // `Pane::selectEntry`; the pane never switches anything itself.
-        std::function<void(const QString &key, const QString &effort)> use;
         // "fill from defaults" — only a pane's worker knows what it computed (design 5.5).
         std::function<bool(bool withOpenrouter)> fillFromDefaults;
         // A list edit landed: the window redraws Options and re-sends every worker its tiers.

@@ -356,14 +356,20 @@ Box box(const Context &context)
         firstGuest = false;
         out.rows << row;
     }
-    // 3. The dialog (every model, with the lists, the levels and the providers). "customize…" is
-    //    gone from the box with this design: the dialog has the Options button (design 5.3, 5.5).
-    Row more;
-    more.text = QStringLiteral("more models…");
-    more.data = QStringLiteral("gear:picker");
-    more.separatorBefore = true;
-    more.enabled = true;
-    out.rows << more;
+    // 3. Two ways out of the short list (owner, 2026-09-23, card #BXMS: "all models -> opens the
+    //    full scrollable list / model settings -> opens the models pane"). The box is the one
+    //    place a pane's model is picked; the models pane only edits the lists.
+    Row all;
+    all.text = QStringLiteral("all models");
+    all.data = allModelsData();
+    all.separatorBefore = true;
+    all.enabled = true;
+    out.rows << all;
+    Row settings;
+    settings.text = QStringLiteral("model settings");
+    settings.data = QStringLiteral("gear:picker");
+    settings.enabled = true;
+    out.rows << settings;
     // The caller's own current row wins where it has one (a guest in the pane's foreground).
     if (!context.current.isEmpty())
         if (const int at = indexOf(out.rows, context.current); at >= 0) out.current = at;
@@ -371,6 +377,8 @@ Box box(const Context &context)
 }
 
 QString otherGroup() { return QStringLiteral("other"); }
+
+QString allModelsData() { return QStringLiteral("gear:all"); }
 
 Box filtered(const Context &context)
 {
@@ -380,6 +388,13 @@ Box filtered(const Context &context)
     Context wide = context;
     for (const QString &klass : wide.classes) wide.expanded.insert(klass);
     Box out = box(wide);
+    // This *is* the whole list, so "all models" has nothing left to open; "model settings" takes
+    // over its rule.
+    if (const int all = indexOf(out.rows, allModelsData()); all >= 0) {
+        if (all + 1 < out.rows.size()) out.rows[all + 1].separatorBefore = out.rows.at(all).separatorBefore;
+        out.rows.removeAt(all);
+        if (out.current > all) --out.current;
+    }
     // Where the classes end: the guest rows and "more models…" carry no group, and `other models`
     // belongs with the models, above them.
     int at = out.rows.size();
