@@ -11101,8 +11101,8 @@ private:
                 updateLoginPrompt();
             }
         };
-        // Output of the commands Relay itself ran, for the conversation index (protocol 14).
-        // Only enabled between "command loaded" and "shell ready", so it costs nothing otherwise.
+        // Every PTY chunk: the pane's terminal records (#TCXT) need native commands' output and
+        // their authenticated boundaries, and the conversation index (protocol 14) Relay-run output.
         m_backend->setOutputCallbackEnabled(true);
         m_backend->onOutput = [this](const QByteArray &bytes) {
             captureTerminalBytes(bytes);
@@ -11114,8 +11114,9 @@ private:
                     else if (m_login.line.size() < 8192) m_login.line += c;
                 }
             }
-            if (m_terminalRecords.active()) {
-                // captureTerminalBytes handles authenticated shell boundaries below.
+            // Live output only matters to a turn in flight (a `fresh` terminal_read): submission
+            // and command completion sync on their own, so an idle pane resends nothing (#TCXT).
+            if (m_terminalRecords.active() && (m_agentBusy || m_guestBusy)) {
                 if (!m_terminalSyncPending) {
                     m_terminalSyncPending = true;
                     QTimer::singleShot(250, this, [this] { m_terminalSyncPending = false; syncTerminalContext(); });
