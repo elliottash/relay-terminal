@@ -165,6 +165,41 @@ private Q_SLOTS:
                                          QStringLiteral("anthropic|claude-opus-5-5")});
     }
 
+    void tiedRanksAndPlanningListAreVisible() {
+        const QString glm = QStringLiteral("glm-coding|glm-5.3");
+        const QString opus = QStringLiteral("anthropic|claude-opus-5-5");
+        setList(QStringLiteral("main"), {{glm, QStringLiteral("max"), 1}, {opus, QString(), 1}});
+        rolestore::setRankedOverride(QStringLiteral("planning"),
+                                     {{glm, QStringLiteral("max"), 1}, {opus, QString(), 1}});
+        Served served;
+        ModelsPane pane(providerSections());
+        pane.setTarget(targetFor(&served));
+        pane.resize(1100, 720);
+        pane.show();
+        pane.showTab(ModelsPane::prioritiesTab());
+        QTest::qWait(80);
+        int tied = 0;
+        for (int i = 0; i < pane.picker()->list()->topLevelItemCount(); ++i) {
+            auto *row = pane.picker()->list()->topLevelItem(i);
+            if (row->data(0, Qt::UserRole + 8).toString() != QStringLiteral("main")) continue;
+            if (row->data(0, Qt::UserRole).toString() != glm &&
+                row->data(0, Qt::UserRole).toString() != opus) continue;
+            QCOMPARE(row->text(ColRank), QStringLiteral("1"));
+            ++tied;
+        }
+        QCOMPARE(tied, 2);
+        const QString evidence = qEnvironmentVariable("RELAY_RND7_EVIDENCE");
+        if (!evidence.isEmpty()) {
+            QVERIFY(QDir().mkpath(evidence));
+            QVERIFY(pane.grab().save(evidence + QStringLiteral("/01-priorities.png")));
+        }
+        pane.showTab(ModelsPane::jobsTab());
+        QTest::qWait(40);
+        QVERIFY(pane.jobs()->overrideText(QStringLiteral("planning")).contains(QStringLiteral("random at rank 1")));
+        if (!evidence.isEmpty())
+            QVERIFY(pane.grab().save(evidence + QStringLiteral("/02-jobs.png")));
+    }
+
     // ----- the Models tabs ------------------------------------------------------------------
 
     void theTabsSeparateAvailabilityPrioritiesEffortAndJobs() {
