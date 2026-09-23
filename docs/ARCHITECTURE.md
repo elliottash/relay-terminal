@@ -2509,7 +2509,7 @@ provider's own documentation on 2026-09-17, and the doc URL sits beside the entr
 | `openrouter` | aggregator | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` | `openrouter` |
 | `glm` | pay-as-you-go | `https://api.z.ai/api/paas/v4` | `glm-5.3` | `glm` |
 | `kimi` | pay-as-you-go | `https://api.moonshot.ai/v1` | `kimi-k3` | `kimi` |
-| `openai` | pay-as-you-go | `https://api.openai.com/v1` | `gpt-6-astra` | `openai` |
+| `openai` | pay-as-you-go | `https://api.openai.com/v1` | `gpt-6-sol` | `openai` |
 | `anthropic` | pay-as-you-go | `https://api.anthropic.com/v1` | `claude-opus-5-5` | `none` |
 | `gemini` | pay-as-you-go | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.1-pro-preview` | `gemini` |
 

@@ -1580,7 +1580,7 @@ and the model-switch ceiling all read the same value.
 | Kimi K3 (`kimi`, `kimi-code`) | 131,072 | https://platform.kimi.ai/docs/guide/kimi-k3-quickstart |
 | Claude Opus 5.5 (`anthropic`) | 131,072 | https://platform.claude.com/docs/en/models/opus-5-5/overview |
 | MiniMax M3 (`minimax`) | 131,072 | https://platform.minimax.io/docs/guides/text-generation |
-| GPT-6 Astra (`openai`) | 128,000 | https://developers.openai.com/api/docs/models/gpt-6-astra |
+| GPT-6 Sol (`openai`) | 128,000 | https://developers.openai.com/api/docs/models/gpt-6-sol |
 | Gemini 3.1 Pro (`gemini`) | **65,536** | https://ai.google.dev/gemini-api/docs/gemini-3 |
 | `openrouter`, and any endpoint Relay cannot name | 32,768 | route caps differ per request and are not published |
 | a model server on this machine | a quarter of its served window | `localmodels.clamp_max_tokens` |

@@ -37,7 +37,7 @@ class PresetTableTests(unittest.TestCase):
         expected = {
             # Verified 2026-09-17; the doc URL for each sits next to the entry in presets.py.
             "minimax": ("https://api.minimax.io/v1", "MiniMax-M3"),
-            "openai": ("https://api.openai.com/v1", "gpt-6-astra"),
+            "openai": ("https://api.openai.com/v1", "gpt-6-sol"),
             "anthropic": ("https://api.anthropic.com/v1", "claude-opus-5-5"),
             "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.1-pro-preview"),
         }

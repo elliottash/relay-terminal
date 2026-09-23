@@ -322,10 +322,12 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            # one keeps the conservative fallback rather than a number one route may refuse.
            provider="openrouter", max_output=DEFAULT_MAX_OUTPUT),
     # https://developers.openai.com/api/docs/api-reference/chat/create
-    Preset("openai", "openai · gpt-6 astra", "https://api.openai.com/v1", "gpt-6-astra",
+    # The preset's model is its main model, gpt-6-sol (owner, 2026-09-22); its requests carry the
+    # main tier's `medium`. These extras are what a model no tier names runs with (astra, terra).
+    Preset("openai", "openai · gpt-6 sol", "https://api.openai.com/v1", "gpt-6-sol",
            {"reasoning_effort": "high"}, 1_050_000, "openai", "payg",
            "https://platform.openai.com/api-keys", "Pay-as-you-go OpenAI API key (not a ChatGPT login).",
-           # 1,050,000 context, 128,000 output (https://developers.openai.com/api/docs/models/gpt-6-astra).
+           # 1,050,000 context, 128,000 output (owner, 2026-09-22; gpt-6-astra has the same).
            provider="openai (chatgpt)", plan="pay-as-you-go", max_output=128_000),
     # https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk — the OpenAI-compatible
     # layer lives at https://api.anthropic.com/v1 and accepts the key as an Authorization: Bearer header.
