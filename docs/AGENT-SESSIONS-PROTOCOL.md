@@ -1669,18 +1669,18 @@ entry — or pinned onto a tier whose first usable entry is one — and the pane
 provider, `Agent._begin_plan_turn` starts that guest's harness for the turn (`guest_harness_provider.start_provider`, the same start a guest pane
 gets): a **fresh session** in the pane's workspace, on the entry's model (none named: the guest's own
 default) and at the entry's `effort` in the guest's own words (`xhigh` to codex, `max` to claude), with
-the **read-only posture** `agent.PLAN_GUEST_PERMISSIONS` (`"deny"`: codex's read-only sandbox, claude's
-permission prompts declined) — plan mode writes nothing, and a guest has no tool of Relay's for
-`_prepare` to refuse a write through. The harness takes a prompt, not a conversation, so it is handed
+the ordinary posture `agent.PLAN_GUEST_PERMISSIONS` (`"bypass"`): Plan is an instruction, not a
+permission boundary (#PLDG), and the guest can implement after `exit_plan_mode` in the same turn.
+The harness takes a prompt, not a conversation, so it is handed
 **one opening prompt** in place of the last user message (`HarnessProvider.opening`, built when the
-turn's first call is made): `planning.GUEST_PLAN_NOTE` — the plan rules in the guest's own terms (no
-`ask_user`, no `write_plan`: state assumptions, reply with the plan) — then **the transcript so far**
+turn's first call is made): `planning.GUEST_PLAN_NOTE` — the plan rules in the guest's own terms
+(state assumptions, call Relay's bridged `write_plan`, then `exit_plan_mode` when ready) — then **the transcript so far**
 (`planning.guest_plan_prompt`: the user's words with Relay's context notes stripped, the assistant's
 text and the tools it called, tool results cut to 1,500 characters, the whole capped at 48,000
 characters from the front), then the request. Its tool calls stream into the fold as a guest pane's do
-(29.1), and **its reply is the plan**: the agent saves it exactly as `write_plan` would — the first
-`# ` line the title, the file in the plans directory, the same `plan_written` event, plus `guest` — so
-Execute works on it as on any plan; an empty reply writes none. The turn is a plan route like any
+(29.1). The guest's `write_plan` call saves the plan and emits `plan_written`; `exit_plan_mode` emits
+`mode_changed` and leaves Build active. If the bridge is unavailable, a final Markdown plan reply is
+saved as before; an empty reply writes none. A reply after exit is never saved as a plan. The turn is a plan route like any
 other: `plan_route` carries `preset: "guest:<id>"`, `base_url: "harness://<id>"`, `guest` and
 `guest_session`, both notes name the model plus the guest ("gpt-5.5-codex (Codex)"), and
 `plan_route_ended` — the harness ended with it — puts the pane back. A guest that **will not start**

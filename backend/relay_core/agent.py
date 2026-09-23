@@ -100,11 +100,9 @@ MAX_STALL_RETRIES = 1
 # reached the user. A reasoning model can spend the whole budget thinking and deliver neither text
 # nor a tool call; failing the turn there throws away every tool result already in it.
 MAX_TRUNCATION_RETRIES = 1
-# The posture a guest harness is started with for a plan turn (protocol 13.7): plan mode writes
-# nothing, and a guest has no tool of Relay's to refuse a write through, so the refusal is the
-# guest's own — codex's read-only sandbox, claude's permission prompts declined
-# (guest_harness.PERMISSIONS "deny"). Reads and read-only commands within it are the investigation.
-PLAN_GUEST_PERMISSIONS = "deny"
+# Plan mode is an instruction rather than a permission boundary (#PLDG). A routed guest needs
+# its ordinary posture so it can continue implementing after exit_plan_mode in the same turn.
+PLAN_GUEST_PERMISSIONS = "bypass"
 
 _log = logs.get("agent")
 
@@ -2617,11 +2615,13 @@ class Agent:
         return provider
 
     def _save_guest_plan(self, record: dict, text) -> None:
-        """A plan turn served by a guest ended with its reply: that reply is the plan, saved
-        exactly as `write_plan` saves one (the same file, the same `plan_written`), because the
-        guest has no such tool to call. Nothing is saved from an empty reply."""
+        """Save a guest's final Markdown plan when it could not use the bridged tool.
+
+        A guest that already called write_plan or exited Plan has no plan reply to save.
+        Nothing is saved from an empty reply.
+        """
         swap = self._planning
-        if swap is None or swap.get("guest") is None:
+        if swap is None or swap.get("guest") is None or self.mode != "plan" or swap.get("plan_written"):
             return
         plan = plan_from_reply(text)
         if plan is None:
@@ -3594,6 +3594,8 @@ class Agent:
                 raise Cancelled("Stopped.")
             path = write_plan(self.plans_dir, prepared.arguments["title"], prepared.arguments["content"])
             self.plan_path = str(path)
+            if self._planning is not None and self._planning.get("guest") is not None:
+                self._planning["plan_written"] = True
             self.emit({"event": "plan_written", "path": str(path), "title": prepared.arguments["title"]})
             return {"path": str(path), "written": True}
         if prepared.name in ("write_file", "edit_file") and prepared.path is not None:

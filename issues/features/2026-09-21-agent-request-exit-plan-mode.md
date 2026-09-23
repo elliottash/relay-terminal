@@ -3,13 +3,13 @@ id: XP7N
 type: work
 status: needs-verification
 labels: [feature, agent]
-assignee: agent
-implemented_by: kimi/kimi-k3
+assignee: codex
+implemented_by: openai/gpt-6-sol via codex
 session: 8d16eb6c-8bf3-4b06-acab-9e886d6621bd
 rank: mpx
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [97add146dbe8ce0877e31ad533ea21775860874e], evidence: [docs/qa_evidence/2026-09-21-plan-exit/verification.md], related: [], github: null}
+links: {plans: [], commits: [97add146dbe8ce0877e31ad533ea21775860874e], evidence: [docs/qa_evidence/2026-09-21-plan-exit/verification.md, docs/qa_evidence/2026-09-23-guest-plan-exit-XP7N/verification.md], related: [], github: null}
 ---
 # Let the agent request to exit planning mode
 
@@ -29,6 +29,8 @@ bug / feature request -- the agent needs to be able to request to exit planning 
 **Risks:** A missing answer must never authorize execution. Reuse existing UI/protocol events and keep the planning provider for the current turn, as existing routing does.
 
 **Verify:** Targeted PlanModeTests and question/plan-turn tests; inspect existing GUI event handlers; manual QA of the ask and PLAN indicator.
+
+**Guest follow-up (2026-09-23).** Goal: let a guest pane or guest planning route call Relay's `exit_plan_mode` and continue in Build within the same turn. Findings: `guest_board_bridge.py` exposes a limited tool set; `guest_harness_provider.py` ignores Relay's native schemas; `planning.GUEST_PLAN_NOTE` asks for a final plan reply; routed guests start with deny permissions even though current Plan mode locks nothing. Steps: (1) expose `write_plan` and `exit_plan_mode` through the guest bridge and existing Agent policy path; (2) align guest Plan instructions and posture with the current native Plan behavior, and avoid saving an implementation reply as a plan; (3) test bridge calls, routed guest transition, and native regressions. Risk: ensure a readonly turn still rejects exit and a guest can write after the mode change. Verify: targeted bridge and plan-turn tests plus a live guest check if the harness is available.
 
 ## Tests
 `tests/test_sessions.py::PlanModeTests`
@@ -53,3 +55,8 @@ Evidence: docs/qa_evidence/2026-09-21-plan-exit/verification.md
 
 ## Tasks
 
+
+## Done means
+- In a guest agent pane, `exit_plan_mode` is discoverable and changes Relay from Plan to Build, with `mode_changed` emitted.
+- A guest selected for a Plan turn can save its plan, exit Plan, and continue implementation in the same turn; its final implementation reply is not saved as a plan.
+- Readonly turns and Build-mode calls remain refused, and targeted native Plan behavior still passes.

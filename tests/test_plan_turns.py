@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from relay_core import agent as agent_module                                    # noqa: E402
 from relay_core import guest_harness_provider as ghp                            # noqa: E402
+from relay_core.guest_board_bridge import exchange                             # noqa: E402
+from relay_core.guest_harness import TurnResult                                  # noqa: E402
 from relay_core.agent import Agent                                             # noqa: E402
 from relay_core.guest_harness import HarnessNotAvailable                       # noqa: E402
 from relay_core.presets import PRESETS                                         # noqa: E402
@@ -374,11 +376,11 @@ class GuestPlanTurnTests(PlanTurnTests):
         own = agent.provider
         agent.ask("plan splitting the widget")
         self.assertEqual(self.events[-1]["event"], "done")
-        # Started for the turn: in the pane's workspace, read-only, at the entry's level in codex's
+        # Started for the turn: in the pane's workspace, at the entry's level in codex's
         # own word, on the guest's own model (the entry named none).
         self.assertEqual(harness.starts, [{"cwd": self.temp.name, "model": None, "resume": None, "fork": False,
                                            "permissions": agent_module.PLAN_GUEST_PERMISSIONS, "effort": "xhigh"}])
-        self.assertEqual(agent_module.PLAN_GUEST_PERMISSIONS, "deny")
+        self.assertEqual(agent_module.PLAN_GUEST_PERMISSIONS, "bypass")
         # The route says where the turn went and where it comes back to, guest and all.
         route = self.event("plan_route")
         self.assertEqual((route["model"], route["preset"], route["base_url"], route["effort"], route["guest"],
@@ -396,13 +398,13 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertIn("PLAN MODE.", sent)
         self.assertLess(sent.index("PLAN MODE."), sent.index("The request to plan:"))
         self.assertIn("do not modify the workspace", sent)
-        self.assertIn("reply with the complete implementation plan as Markdown", sent)
+        self.assertIn("call Relay's write_plan tool", sent)
+        self.assertIn("call Relay's exit_plan_mode tool", sent)
         self.assertIn("User:\nearlier: look at widget.py", sent)
         self.assertIn("(called read_file {\"path\": \"widget.py\"})", sent)
         self.assertIn("Tool result:\ndef widget(): pass", sent)
         self.assertIn("Assistant:\nIt is one function.", sent)
         self.assertTrue(sent.endswith("The request to plan:\n\nplan splitting the widget"), sent[-120:])
-        self.assertNotIn("write_plan", sent)              # Relay's plan note is not the guest's
         self.assertNotIn("[Relay context", sent)
         # Its reply is the plan: saved exactly as write_plan saves one, and said so.
         written = self.event("plan_written")
@@ -440,6 +442,34 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertEqual(self.events[-1]["event"], "done")
         self.assertEqual(harness.starts, [])
         self.assertEqual(self.served_configs()[-1][0], "glm-5.3")
+
+    def test_routed_guest_writes_plan_exits_and_finishes_build_in_same_turn(self):
+        def turn(prompt, attachments, emit, cancel, harness):
+            bridge = agent.provider.board_bridge
+            cap = {'socket': bridge.path, 'token': bridge.token}
+            def call(name, args, key):
+                return exchange(cap, 'tools/call', {'name': name, 'arguments': args}, key)
+            self.assertIn('exit_plan_mode', {s['name'] for s in exchange(cap, 'tools/list')['tools']})
+            planned = call('write_plan', {'title': 'Guest implementation', 'content': PLAN_TEXT}, 'plan')
+            self.assertTrue(planned['written'])
+            self.assertEqual(agent.mode, 'plan')
+            exited = call('exit_plan_mode', {'reason': 'The plan is ready to implement.'}, 'exit')
+            self.assertEqual(exited['mode'], 'build')
+            # The guest harness started with ordinary permissions, so it can keep working.
+            self.assertEqual(harness.starts[0]['permissions'], 'bypass')
+            (Path(self.temp.name) / 'implemented.txt').write_text('done')
+            return TurnResult(text='Implemented the plan.', stop_reason='end', usage={})
+
+        harness = self.harness([turn])
+        agent = self.glm_planner()
+        agent.ask('plan and implement the widget')
+        self.assertEqual(agent.mode, 'build')
+        self.assertEqual((Path(self.temp.name) / 'implemented.txt').read_text(), 'done')
+        self.assertEqual(Path(agent.plan_path).read_text(), PLAN_TEXT)
+        self.assertEqual(self.kinds().count('plan_written'), 1)
+        self.assertEqual(self.event('mode_changed')['mode'], 'build')
+        self.assertEqual(agent.messages[-1]['content'], 'Implemented the plan.')
+        self.assertTrue(harness.closed)
 
     def test_a_guest_that_will_not_start_is_said_and_the_turn_plans_without_it(self):
         harness = self.harness(start_error=HarnessNotAvailable("codex is not installed."))

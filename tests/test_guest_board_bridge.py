@@ -9,7 +9,7 @@ from unittest import mock
 
 from relay_core import board as B, board_tools as T
 from relay_core.agent import Agent
-from relay_core.guest_board_bridge import BOARD_ALLOW, EXEC_ALLOW, REMOTE_ALLOW, TERMINAL_CONTEXT_ALLOW, Bridge, exchange
+from relay_core.guest_board_bridge import BOARD_ALLOW, EXEC_ALLOW, PLAN_ALLOW, REMOTE_ALLOW, TERMINAL_CONTEXT_ALLOW, Bridge, exchange
 from relay_core import guest_harness_provider as P
 from relay_core.guest_harness import TurnResult
 from tests.test_board_tools import CONFIG
@@ -50,7 +50,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_discovery_allowlist_and_unavailable(self):
         specs = exchange(self.cap, 'tools/list')['tools']
-        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW)
+        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW)
         self.assertTrue(all(s['inputSchema']['type']=='object' for s in specs))
         self.assertEqual(self.call()['code'], 'unavailable')
         self.active()
@@ -58,7 +58,22 @@ class BridgeTests(unittest.TestCase):
         self.assertNotIn('error', self.call(key='active'))
         self.assertEqual(self.call('board_create_card', key='2')['code'], 'unknown_tool')
         self.agent.board = None
-        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']}, EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW)
+        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']}, EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW)
+
+    def test_guest_can_write_plan_and_exit_in_same_turn(self):
+        self.active()
+        self.agent.set_mode('plan')
+        planned = self.call('write_plan', {'title': 'Guest plan', 'content': '# Guest plan\n\nDo it.\n'}, key='plan')
+        self.assertTrue(planned['written'])
+        self.assertEqual(Path(planned['path']).read_text(), '# Guest plan\n\nDo it.\n')
+        exited = self.call('exit_plan_mode', {'reason': 'The plan is ready.'}, key='exit')
+        self.assertEqual((exited['ok'], exited['mode']), (True, 'build'))
+        self.assertEqual(self.agent.mode, 'build')
+        self.assertIn({'event': 'mode_changed', 'mode': 'build'}, self.events)
+        self.assertIn('only available in plan mode', self.call('exit_plan_mode', {'reason': 'Again'}, key='again')['error'])
+        self.agent.set_mode('plan')
+        self.agent.set_readonly(True)
+        self.assertIn('writes nothing', self.call('exit_plan_mode', {'reason': 'No'}, key='readonly')['error'])
 
     def test_capability_isolation(self):
         self.active()
@@ -144,7 +159,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(err,'')
         rows = sorted((json.loads(line) for line in out.splitlines()), key=lambda r: r['id'] if r['id'] is not None else 99)
         self.assertEqual(rows[0]['result']['protocolVersion'],'2025-03-26')
-        self.assertEqual(len(rows[1]['result']['tools']),len(BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW))
+        self.assertEqual(len(rows[1]['result']['tools']),len(BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW))
         self.assertFalse(rows[2]['result']['isError'])
         self.assertIn('error', rows[3])
 

@@ -34,7 +34,8 @@ TERMINAL_CONTEXT_ALLOW = frozenset(("terminal_history", "terminal_read"))
 # `suggest`), in place of its own memory. The only app tool a guest gets: it runs in the pane's
 # worker exactly as it does for Relay's own agent, write gate included.
 APP_ALLOW = frozenset(("app_user_memory",))
-ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | APP_ALLOW
+PLAN_ALLOW = frozenset(("write_plan", "exit_plan_mode"))
+ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | APP_ALLOW | PLAN_ALLOW
 WAIT_SECONDS = 10
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
@@ -132,6 +133,8 @@ class Bridge:
                     if s['function']['name'] in EXEC_ALLOW]
         from relay_core.terminal_context import TOOL_SPECS as CONTEXT_SPECS
         specs += CONTEXT_SPECS
+        from relay_core.planning import WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC
+        specs += [WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC]
         specs = copy.deepcopy(specs)
         for spec in specs:
             f = spec['function']

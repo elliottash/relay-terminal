@@ -48,13 +48,11 @@ WRITE_PLAN_SPEC = {"type": "function", "function": {
 
 
 # ----- a plan turn on a guest harness (protocol 13.7, owner 2026-09-20) --------------------------
-# A `guest:` entry of the High list (Claude Code, Codex) serves a plan turn by starting the guest's
-# harness for that one turn. The guest has none of Relay's tools — no `ask_user`, no `write_plan` —
-# and none of the conversation, so its first prompt carries the rules in its own terms, the
-# transcript so far, and the request; its reply *is* the plan, and the agent saves it exactly as
-# `write_plan` would have (`Agent._save_guest_plan`).
-GUEST_PLAN_NOTE = """PLAN MODE. You are joining this conversation for one planning turn. Investigate before proposing changes: read files, list directories and run read-only commands, but do not modify the workspace (no edits, installs, git commits, deletions, or writes of any kind), and do not ask questions — where something is genuinely ambiguous, state the assumption you are making in the plan.
-When you understand the task, reply with the complete implementation plan as Markdown and nothing else: a first line `# <short title>`, then the goal, findings with exact file paths, numbered steps, risks, and how to verify. The user reviews and edits the plan before anything is executed."""
+# A `guest:` entry of the High list serves a plan turn in a fresh guest harness. Relay's
+# planning tools arrive through the guest bridge; the final-reply fallback remains useful if
+# the bridge was not discovered.
+GUEST_PLAN_NOTE = """PLAN MODE. You are joining this conversation for a planning turn. Investigate before proposing changes: read files, list directories and run read-only commands, but do not modify the workspace while planning. Where something is genuinely ambiguous, state the assumption you are making in the plan.
+When you understand the task, call Relay's write_plan tool with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. When the plan is ready to implement, call Relay's exit_plan_mode tool with a concise reason. It switches this pane to Build mode; continue implementation in this same turn. If those Relay tools are unavailable, reply with the complete implementation plan as Markdown and nothing else, starting with `# <short title>`."""
 # How much of the transcript the guest is shown, most recent first to be kept: enough for a plan
 # to know what was already tried, and far below any guest's first-prompt limit.
 MAX_GUEST_TRANSCRIPT_CHARS = 48_000
