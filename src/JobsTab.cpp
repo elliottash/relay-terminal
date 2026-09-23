@@ -316,7 +316,7 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     // run had "runs on" and the override behind a horizontal scrollbar with Options open beside it.
     m_list->setColumnWidth(ColJob, 130);
     m_list->setColumnWidth(ColRuns, 165);
-    m_list->setColumnWidth(ColOverride, 175);
+    m_list->setColumnWidth(ColOverride, 300);
     m_list->header()->setStretchLastSection(false);
     m_list->header()->setSectionResizeMode(ColJob, QHeaderView::Interactive);
     m_list->header()->setSectionResizeMode(ColWhat, QHeaderView::Stretch);
@@ -382,7 +382,7 @@ void JobsTab::updateColumns() {
         m_list->setColumnWidth(ColJob, qBound(130, room * 45 / 100, 200));
     } else {
         m_list->setColumnWidth(ColJob, 130);
-        m_list->setColumnWidth(ColOverride, 175);
+        m_list->setColumnWidth(ColOverride, 300);
         m_list->setColumnWidth(ColRuns, 165);
     }
     updateCompactDetails();
