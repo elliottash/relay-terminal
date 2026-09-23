@@ -1108,7 +1108,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
         requery();
     });
     connect(m_tree, &QTreeWidget::currentItemChanged, this, &SessionManager::selectionChanged);
-    connect(m_tree, &QTreeWidget::itemActivated, this, [this] { activate(true); });
+    // Mouse activation varies by platform (single or double click). Both should only select a
+    // row and show its preview; Enter and the Resume button explicitly open the session.
     connect(m_resume, &QPushButton::clicked, this, [this] {
         if (onResumeHint) onResumeHint();
         activate(true);

@@ -1409,6 +1409,55 @@ private slots:
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
     }
 
+    void mouseSelectionPreviewsBeforeExplicitResume() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        QStringList previews;
+        manager.onPreview = [&previews](const QString &id, const QString &) { previews << id; };
+        QStringList resumed;
+        manager.onResume = [&resumed](const QJsonObject &item, bool) {
+            resumed << item.value(QStringLiteral("session_id")).toString();
+        };
+        manager.resize(900, 650);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+            sessionItem(QStringLiteral("a"), QStringLiteral("First")),
+            sessionItem(QStringLiteral("b"), QStringLiteral("Second"))}}});
+
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        auto *preview = manager.findChild<QTextBrowser *>(QStringLiteral("conversationPreview"));
+        QVERIFY(tree && preview);
+        QTreeWidgetItem *second = rowTitled(tree, QStringLiteral("Second"));
+        QVERIFY(second);
+        tree->scrollToItem(second);
+        const QPoint point = tree->visualItemRect(second).center();
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        QCOMPARE(tree->currentItem(), second);
+        QCOMPARE(previews.last(), QStringLiteral("b"));
+        QCOMPARE(resumed.size(), 0);
+        const QJsonObject previewTurn{{QStringLiteral("turn"), 1},
+                                      {QStringLiteral("kind"), QStringLiteral("prompt")},
+                                      {QStringLiteral("text"), QStringLiteral("Read this before resuming")}};
+        manager.setPreview({{QStringLiteral("session_id"), QStringLiteral("b")},
+                            {QStringLiteral("title"), QStringLiteral("Second")},
+                            {QStringLiteral("overview"), QJsonObject{{QStringLiteral("summary"),
+                                                                         QStringLiteral("Preview summary")}}},
+                            {QStringLiteral("items"), QJsonArray{previewTurn}}});
+        QVERIFY(preview->toPlainText().contains(QStringLiteral("Read this before resuming")));
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        QCOMPARE(resumed.size(), 0);
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-click-preview.png")));
+
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(resumed, QStringList{QStringLiteral("b")});
+        for (auto *button : manager.findChildren<QPushButton *>())
+            if (button->text() == QStringLiteral("Resume")) { button->click(); break; }
+        QCOMPARE(resumed, (QStringList{QStringLiteral("b"), QStringLiteral("b")}));
+    }
+
     void keysReachEveryAction() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};
