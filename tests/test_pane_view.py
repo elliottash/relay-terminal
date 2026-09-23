@@ -360,6 +360,54 @@ class PaneViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_a_phones_strip_is_two_rows_whatever_the_turn_is_doing(self):
+        """At 390 px a running turn wrapped the strip onto four rows of bordered 44 px chips. A
+        phone lays it out on purpose: the conversation, the model and the level on one row; the
+        turn's readings as plain words, then ⋯, Stop and Send on the other. Neither row wraps."""
+        state = fixture("busy_queue")
+        busy = {**state, "seq": state["seq"] + 1,
+                "turn": {**state.get("turn", {}),
+                         "clock": "running · 1 min 12 s · step 4/256 · Esc stops"},
+                "model": {**state["model"], "effort": "high", "efforts": ["low", "medium", "high"]}}
+
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await browser.call("Emulation.setDeviceMetricsOverride",
+                                   {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True})
+                await self.open(browser, "busy_queue")
+                self.assertTrue(await browser.evaluate(f"window.paneDemo.update({json.dumps(busy)})"))
+                seen = json.loads(await browser.evaluate("""JSON.stringify((() => {
+                  const mid = e => (r => Math.round((r.top + r.bottom) / 2))(e.getBoundingClientRect());
+                  const top = q => mid(document.querySelector(q));
+                  const strip = document.querySelector('.rp-strip');
+                  const shown = [...strip.children].filter(e => e.getBoundingClientRect().height);
+                  return {rows: new Set(shown.map(mid)).size,
+                          sessions: top('.rp-sessions-button'), model: top('.rp-model'),
+                          effort: top('.rp-effort'), clock: top('.rp-clock'), more: top('.rp-more'),
+                          stop: top('.rp-stop'), send: top('.rp-send'),
+                          overflows: strip.scrollWidth > strip.clientWidth + 1,
+                          sendRight: document.querySelector('.rp-send-group').getBoundingClientRect().right,
+                          stripRight: strip.getBoundingClientRect().right,
+                          clockBorder: getComputedStyle(document.querySelector('.rp-clock')).borderTopWidth,
+                          clockText: document.querySelector('.rp-clock').textContent};
+                })())"""))
+                self.assertEqual(seen["rows"], 2, seen)
+                self.assertEqual({seen["sessions"], seen["model"], seen["effort"]}, {seen["sessions"]})
+                self.assertEqual({seen["clock"], seen["more"], seen["stop"]}, {seen["send"]})
+                self.assertGreater(seen["send"], seen["sessions"], "Send is not on the second row")
+                self.assertFalse(seen["overflows"])
+                self.assertLessEqual(seen["sendRight"], seen["stripRight"] + 1)
+                self.assertEqual(seen["clockBorder"], "0px", "a reading is drawn as a button")
+                # The desktop's words, whole, even where the row ends them in an ellipsis.
+                self.assertEqual(seen["clockText"], busy["turn"]["clock"])
+                self.assertEqual(browser.console, [])
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_a_refused_edit_drops_what_was_typed_on_the_row_and_says_so(self):
         """`queue_edit` carries an id, and the desktop's refusal comes back with it (§6.1).
 

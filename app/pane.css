@@ -598,6 +598,39 @@ button.rp-chip:hover { color: var(--qss-stripChip-hover-color); border-color: va
 .relay-pane[data-device="phone"] .rp-strip { gap: 4px 6px; }
 .relay-pane[data-device="phone"] .rp-folder { display: none; }
 .relay-pane[data-device="phone"] .rp-model-wrap { max-width: 60%; }
+/* A phone's strip is two rows laid out on purpose rather than however the chips happened to
+   wrap: at 390 px a running turn put them on four, a bordered 44 px box each. The first row is
+   what the prompt goes to — the conversation, the model, the level — and the second is the turn's
+   readings as plain words, then ⋯, Stop and Send at the right. Neither row wraps: the flexible
+   items start from a basis of 0 and grow to their own width, so what does not fit ends in an
+   ellipsis instead of pushing a control down. The readings are not buttons, so they drop the
+   chip's box and its 44 px height. `.tiny-viewport` below keeps its one row. */
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-strip::before {
+  content: ""; order: 3; flex: 0 0 100%; height: 0;
+}
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-spacer { display: none; }
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-sessions-button { order: 1; }
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-model-wrap { order: 2; }
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-sessions-button,
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-model-wrap,
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-clock {
+  flex: 1 1 0; min-width: 0; max-width: max-content;
+}
+/* The model is what a reader checks before sending; the title is also on the Conversations sheet. */
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-model-wrap { flex-grow: 2; }
+.relay-pane[data-device="phone"] .rp-model { min-width: 0; }
+.relay-pane[data-device="phone"] .rp-effort-box { flex: none; }
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] :is(.rp-clock, .rp-context, .rp-allowance) {
+  order: 4; min-height: 0; padding: 0; border: 0; background: none;
+  color: var(--rt-muted); font-size: var(--rt-floor-size);
+}
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-context,
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-allowance { flex: none; }
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] :is(.rp-context, .rp-allowance)[data-warn="true"] {
+  color: var(--qss-stripChipLabel-warn-true-color);
+}
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] :is(.rp-more, .rp-host-slot, .rp-stop, .rp-send-group) { order: 5; }
+html:not(.tiny-viewport) .relay-pane[data-device="phone"] .rp-more { margin-left: auto; }
 
 @media (prefers-reduced-motion: no-preference) {
   .relay-pane[data-device="phone"] .rp-sheet { animation: rp-sheet-in 140ms ease-out; }
