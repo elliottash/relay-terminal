@@ -44,6 +44,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [BOARD-FORMAT.md](BOARD-FORMAT.md) | The Board file format reference: the board folder (`board/`, or the `.switchboard/`, `switchboard/` or `issues/` a project already has), card front matter per type, task markers and their `blocked_by=`, threads, ids, ranks, board.yaml, `relay-board.py` check/index/migrate |
 | [TERMINAL-ENGINE-OPTIONS.md](TERMINAL-ENGINE-OPTIONS.md) | Permissively licensed, cross-platform terminal cores and widgets compared (libghostty-vt, Contour, alacritty_terminal, xterm.js, libvterm, GPL references) |
 | [AGENT-FEATURES-RESEARCH.md](AGENT-FEATURES-RESEARCH.md) | Session, planning, model/effort, command and subagent UX in Warp, opencode, Claude Code and Codex; recommendations and a subagent design for Relay |
+| [TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md](TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md) | Codex, OpenCode V2 and Claude Code context/cost controls compared with Relay; measured usage spike and prioritized token-efficiency proposals |
 | [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette, since 2026-09-18 the Actions tab and search of the Settings pane |
 | [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md) | Warp Remote Control, Blink, sshx and others compared; the phone-first design, phases, threat model and owner decisions behind `#W5N2` |
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
