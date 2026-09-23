@@ -6428,107 +6428,97 @@ public:
         if (board && m_active) afterProjectPicked(m_active, QString());
     }
 
-    void openSessionsFor(Pane *owner, const QString &query, const QString &tab = QString()) {
-        QWidget *page = pageOf(owner);
-        if (!page) return;
-        ToolPane *tool = sessionsPaneIn(page);
-        relay::conversations::SessionManager *view = sessionsViewOf(tool);
-        const bool fresh = !tool;
-        if (!tool) {
-            view = new relay::conversations::SessionManager;
-            tool = new ToolPane(ToolPane::Kind::Sessions, view, view, owner->cwd());
-            tool->setProperty("paneType", QStringLiteral("sessions"));
-            relay::theme::polishWindow(tool);
-            auto *projects = new relay::projects::ProjectsPane;
-            projects->setObjectName(QStringLiteral("workspaceProjects"));
-            auto *globals = new relay::globals::GlobalsPane;
-            globals->setObjectName(QStringLiteral("workspaceGlobals"));
-            view->addTab(QStringLiteral("projects"), QStringLiteral("Projects"), projects);
-            view->addTab(QStringLiteral("globals"), QStringLiteral("Globals"), globals);
-            QPointer<ToolPane> toolGuard(tool);
-            QPointer<relay::globals::GlobalsPane> globalGuard(globals);
-            globals->onRequest = [toolGuard, globalGuard](const QJsonObject &request) {
-                auto *window = windowOf(toolGuard);
-                if (!window || !globalGuard) return;
-                QWidget *currentPage = window->pageOf(toolGuard);
-                // A leaf can move to another tab/window. Rebind its worker subscription before
-                // each request, dropping the former one so only this page receives the reply.
-                for (QWidget *top : QApplication::topLevelWidgets())
-                    if (auto *w = dynamic_cast<RelayWindow *>(top))
-                        for (int i = w->m_helperListeners.size() - 1; i >= 0; --i)
-                            if (w->m_helperListeners.at(i).owner == globalGuard)
-                                w->m_helperListeners.removeAt(i);
-                window->listenToHelper(currentPage, globalGuard, [globalGuard](const QJsonObject &event) {
-                    if (globalGuard) globalGuard->handleEvent(event);
-                });
-                QJsonObject currentRequest = request;
-                const QString project = window->boardWorkspaceOfTab(currentPage);
-                Pane *currentOwner = window->workspaceOwner(toolGuard);
-                currentRequest.insert(QStringLiteral("workspace"), project.isEmpty() && currentOwner
-                    ? currentOwner->workspace() : project);
-                window->sendToHelper(currentPage, currentRequest);
-            };
-            QPointer<relay::projects::ProjectsPane> projectGuard(projects);
-            QPointer<relay::conversations::SessionManager> sessionsGuard(view);
-            auto *refresh = new QTimer(projects);
-            refresh->setInterval(2000);
-            connect(refresh, &QTimer::timeout, projects, [toolGuard, projectGuard, sessionsGuard] {
-                auto *window = windowOf(toolGuard);
-                if (window && projectGuard && sessionsGuard && projectGuard->isVisible())
-                    window->feedProjects(projectGuard, sessionsGuard);
+    // The Sessions & Projects pane itself, with no owner pane yet: the SessionManager, its
+    // Projects and Globals tabs and every callback that does not need an owner — they all resolve
+    // it dynamically through workspaceOwner(guard) at the moment they run, the way Options/Actions
+    // and Models already do. `linkSessionsPane` does the rest once an owner is known: a fresh pane
+    // bound on the spot by `openSessionsFor`, or a saved layout finding a neighbour to serve
+    // (card #8EXS, `linkRestoredSessionsPane`).
+    ToolPane *createSessionsPane(const QString &cwd) {
+        auto *view = new relay::conversations::SessionManager;
+        auto *tool = new ToolPane(ToolPane::Kind::Sessions, view, view, cwd);
+        tool->setProperty("paneType", QStringLiteral("sessions"));
+        relay::theme::polishWindow(tool);
+        auto *projects = new relay::projects::ProjectsPane;
+        projects->setObjectName(QStringLiteral("workspaceProjects"));
+        auto *globals = new relay::globals::GlobalsPane;
+        globals->setObjectName(QStringLiteral("workspaceGlobals"));
+        view->addTab(QStringLiteral("projects"), QStringLiteral("Projects"), projects);
+        view->addTab(QStringLiteral("globals"), QStringLiteral("Globals"), globals);
+        QPointer<ToolPane> toolGuard(tool);
+        QPointer<relay::globals::GlobalsPane> globalGuard(globals);
+        globals->onRequest = [toolGuard, globalGuard](const QJsonObject &request) {
+            auto *window = windowOf(toolGuard);
+            if (!window || !globalGuard) return;
+            QWidget *currentPage = window->pageOf(toolGuard);
+            // A leaf can move to another tab/window. Rebind its worker subscription before
+            // each request, dropping the former one so only this page receives the reply.
+            for (QWidget *top : QApplication::topLevelWidgets())
+                if (auto *w = dynamic_cast<RelayWindow *>(top))
+                    for (int i = w->m_helperListeners.size() - 1; i >= 0; --i)
+                        if (w->m_helperListeners.at(i).owner == globalGuard)
+                            w->m_helperListeners.removeAt(i);
+            window->listenToHelper(currentPage, globalGuard, [globalGuard](const QJsonObject &event) {
+                if (globalGuard) globalGuard->handleEvent(event);
             });
-            refresh->start();
-            for (const SessionsTab &extra : sessionsTabs())
-                if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
-            // The agent console at the foot of the pane (#AGNT step 5, replacing #FEJQ's panel):
-            // the window makes it on first expand, the row stays this pane's. A `session:` link is
-            // the manager's own business; an `option:` one is the console's, which opens Options
-            // on the row exactly as a terminal pane's transcript does.
-            wireConsoleHost(view, tool, QStringLiteral("sessions.ask"));
-            globals->onInterview = [globalGuard, sessionsGuard] {
-                if (!globalGuard || !sessionsGuard) return;
-                sessionsGuard->focusHelper();
-                if (auto *console = dynamic_cast<Pane *>(sessionsGuard->agentConsole().widget)) {
-                    // createAgentConsole attaches to the tab on the next event-loop turn.
-                    // Submit after that attachment, including on the first interview click.
-                    QTimer::singleShot(0, console, [console] {
-                        // The ordinary agent queue preserves an existing composer draft.
-                        console->askAgent(QStringLiteral(
-                            "Interview me to help Relay learn useful things about me. Review my saved user memories first, "
-                            "then ask one Relay-relevant question at a time, starting with my work and goals. "
-                            "Let me skip or stop. Before saving, show the proposed facts and let me choose what to remember "
-                            "in Globals > User memory. Do not save guesses or secrets."));
-                    });
-                    if (sessionsGuard->onHelperHint) sessionsGuard->onHelperHint();
-                }
-            };
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
-        }
-        tool->setProperty("workspaceOwner", QVariant::fromValue<QObject *>(owner));
-        QPointer<ToolPane> ownerTool(tool);
-        connect(owner, &QObject::destroyed, tool, [ownerTool, owner] {
-            if (ownerTool && ownerTool->property("workspaceOwner").value<QObject *>() == owner)
-                ownerTool->setProperty("workspaceOwner", QVariant());
+            QJsonObject currentRequest = request;
+            const QString project = window->boardWorkspaceOfTab(currentPage);
+            Pane *currentOwner = window->workspaceOwner(toolGuard);
+            currentRequest.insert(QStringLiteral("workspace"), project.isEmpty() && currentOwner
+                ? currentOwner->workspace() : project);
+            window->sendToHelper(currentPage, currentRequest);
+        };
+        QPointer<relay::projects::ProjectsPane> projectGuard(projects);
+        QPointer<relay::conversations::SessionManager> sessionsGuard(view);
+        auto *refresh = new QTimer(projects);
+        refresh->setInterval(2000);
+        connect(refresh, &QTimer::timeout, projects, [toolGuard, projectGuard, sessionsGuard] {
+            auto *window = windowOf(toolGuard);
+            if (window && projectGuard && sessionsGuard && projectGuard->isVisible())
+                window->feedProjects(projectGuard, sessionsGuard);
         });
+        refresh->start();
+        for (const SessionsTab &extra : sessionsTabs())
+            if (QWidget *widget = extra.make ? extra.make(this) : nullptr) view->addTab(extra.id, extra.label, widget);
+        // The agent console at the foot of the pane (#AGNT step 5, replacing #FEJQ's panel):
+        // the window makes it on first expand, the row stays this pane's. A `session:` link is
+        // the manager's own business; an `option:` one is the console's, which opens Options
+        // on the row exactly as a terminal pane's transcript does.
+        wireConsoleHost(view, tool, QStringLiteral("sessions.ask"));
+        globals->onInterview = [globalGuard, sessionsGuard] {
+            if (!globalGuard || !sessionsGuard) return;
+            sessionsGuard->focusHelper();
+            if (auto *console = dynamic_cast<Pane *>(sessionsGuard->agentConsole().widget)) {
+                // createAgentConsole attaches to the tab on the next event-loop turn.
+                // Submit after that attachment, including on the first interview click.
+                QTimer::singleShot(0, console, [console] {
+                    // The ordinary agent queue preserves an existing composer draft.
+                    console->askAgent(QStringLiteral(
+                        "Interview me to help Relay learn useful things about me. Review my saved user memories first, "
+                        "then ask one Relay-relevant question at a time, starting with my work and goals. "
+                        "Let me skip or stop. Before saving, show the proposed facts and let me choose what to remember "
+                        "in Globals > User memory. Do not save guesses or secrets."));
+                });
+                if (sessionsGuard->onHelperHint) sessionsGuard->onHelperHint();
+            }
+        };
         // What is open and what was closed is the window's knowledge, not the list's: it is pushed
         // in here, and again whenever the recently-closed list changes, so the "open" and
         // "closed 5 min ago" tags on the rows stay true (card #R6J0).
-        QPointer<relay::conversations::SessionManager> viewGuard(view);
         QPointer<RelayWindow> windowGuard(this);
-        auto feed = [viewGuard, windowGuard] {
-            if (!viewGuard || !windowGuard) return;
-            viewGuard->setOpenSessions(windowGuard->openSessionIds());
+        auto feed = [sessionsGuard, windowGuard] {
+            if (!sessionsGuard || !windowGuard) return;
+            sessionsGuard->setOpenSessions(windowGuard->openSessionIds());
             QHash<QString, QPair<QString, qint64>> closed;
             const QList<relay::closed::Record> records = windowGuard->m_manager->closedRecords();
             for (const relay::closed::Record &record : records)
                 for (const QString &sessionId : relay::closed::sessionIds(record))
                     if (!closed.contains(sessionId) || closed.value(sessionId).second < record.closedAt)
                         closed.insert(sessionId, {record.id, record.closedAt});
-            viewGuard->setClosedSessions(closed);
+            sessionsGuard->setClosedSessions(closed);
         };
-        if (fresh) m_manager->watchClosed(view, feed);
+        m_manager->watchClosed(view, feed);
         feed();
-        view->setProject(QFileInfo(owner->workspace().isEmpty() ? owner->cwd() : owner->workspace()).fileName());
         // The "Project" chooser (#916B): the projects Relay knows, most recently attached first.
         {
             QList<QPair<QString, QString>> known;
@@ -6539,41 +6529,11 @@ public:
         view->onReopenClosed = [windowGuard](const QString &closedId) {
             if (windowGuard) windowGuard->m_manager->restoreClosed(windowGuard, closedId);
         };
-        // Bind requests to the initiating pane; Resume resolves its destination below.
-        owner->bindSessionManager(view);
         QPointer<ToolPane> guard(tool);
-        QPointer<Pane> ownerGuard(owner);
-        auto close = [guard] {
+        view->onClose = [guard] {
             auto *w = windowOf(guard);
             if (!w) return;
             w->closeSessionsPane(guard, w->workspaceOwner(guard));
-        };
-        view->onClose = close;
-        auto resume = view->onResume;
-        // Close first: a resume may focus another pane (the one that already has the session),
-        // and closing afterwards would take the focus back.
-        view->onResume = [resume, close, ownerGuard](const QJsonObject &item, bool) {
-            close();
-            const QString id = item.value(QStringLiteral("session_id")).toString();
-            if (id.isEmpty()) return;
-            Pane *existing = nullptr;
-            if (relay::conversations::isGuestItem(item)) {
-                const QString source = item.value(QStringLiteral("source")).toString();
-                for (QWidget *top : QApplication::topLevelWidgets())
-                    if (auto *w = dynamic_cast<RelayWindow *>(top))
-                        for (Pane *pane : w->allPanes())
-                            if (pane->sessionTextSource() == source && pane->guestSessionId() == id)
-                                existing = pane;
-            } else {
-                QString dir = item.value(QStringLiteral("session_dir")).toString();
-                if (dir.isEmpty() && ownerGuard) dir = ownerGuard->sessionDir();
-                existing = paneWithSession(id, dir, nullptr);
-            }
-            if (existing) {
-                if (auto *w = windowOf(existing)) w->revealPane(existing);
-                return;
-            }
-            if (resume) resume(item, true);
         };
         view->onResumeHint = [windowGuard] {
             if (windowGuard) windowGuard->hint(QStringLiteral("sessions.resume"),
@@ -6584,79 +6544,67 @@ public:
             if (windowGuard) windowGuard->hint(QStringLiteral("sessions.preview"),
                 relay::ShortcutHints::nextTime(QStringLiteral("P"), QStringLiteral("preview selected session")));
         };
-        view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
+        auto refreshProjects = [guard, projectGuard, sessionsGuard] {
             auto *w = windowOf(guard);
-            if (!w || !ownerGuard) return;
-            w->openInfoPane(ownerGuard, item.value(QStringLiteral("session_id")).toString(),
-                            item.value(QStringLiteral("session_dir")).toString());
+            if (w && projectGuard && sessionsGuard) w->feedProjects(projectGuard, sessionsGuard);
         };
-        auto *projects = dynamic_cast<relay::projects::ProjectsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceProjects")));
-        auto *globals = dynamic_cast<relay::globals::GlobalsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceGlobals")));
-        QPointer<relay::projects::ProjectsPane> projectGuard(projects);
-        QPointer<relay::globals::GlobalsPane> globalGuard(globals);
-        auto refreshProjects = [guard, projectGuard, viewGuard] {
-            auto *windowGuard = windowOf(guard);
-            if (windowGuard && projectGuard && viewGuard) windowGuard->feedProjects(projectGuard, viewGuard);
+        projects->onOpenProject = [guard](const QString &path) { auto *w = windowOf(guard); if (w) w->openProjectTab(path); };
+        projects->onAttachProject = [guard, refreshProjects](const QString &path) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            if (!QFileInfo(path).isDir()) { w->notice(QStringLiteral("That project folder is no longer available.")); return; }
+            w->attachTab(w->pageOf(guard), path, QString::fromLatin1(relay::projects::kReasonPicker));
+            refreshProjects();
+            const QString card = guard->property("pendingProjectCard").toString();
+            if (!card.isEmpty()) if (auto *owner = w->workspaceOwner(guard)) {
+                guard->setProperty("pendingProjectCard", QVariant());
+                owner->fileCard(card);
+            }
         };
-        if (projects) {
-            projects->onOpenProject = [guard](const QString &path) { auto *windowGuard = windowOf(guard); if (windowGuard) windowGuard->openProjectTab(path); };
-            projects->onAttachProject = [guard, refreshProjects](const QString &path) {
-                auto *windowGuard = windowOf(guard);
-                if (!windowGuard) return;
-                if (!QFileInfo(path).isDir()) { windowGuard->notice(QStringLiteral("That project folder is no longer available.")); return; }
-                windowGuard->attachTab(windowGuard->pageOf(guard), path, QString::fromLatin1(relay::projects::kReasonPicker));
-                refreshProjects();
-                const QString card = guard->property("pendingProjectCard").toString();
-                if (!card.isEmpty()) if (auto *owner = windowGuard->workspaceOwner(guard)) {
-                    guard->setProperty("pendingProjectCard", QVariant());
-                    owner->fileCard(card);
-                }
-            };
-            projects->onOpenBoard = [guard](const QString &path) { auto *windowGuard = windowOf(guard); if (windowGuard) windowGuard->openProjectTab(path, true); };
-            projects->onShowSessions = [viewGuard](const QString &path) {
-                if (viewGuard) { viewGuard->selectProject(path); viewGuard->showTab(QStringLiteral("sessions")); viewGuard->focusSearch(); }
-            };
-            projects->onForget = [guard, refreshProjects](const QString &path) {
-                auto *windowGuard = windowOf(guard);
-                if (!windowGuard) return;
-                QString error;
-                if (!windowGuard->m_manager->projects().forget(path, &error)) windowGuard->notice(error);
-                else windowGuard->notice(QStringLiteral("Forgot the project; its files and open tabs are unchanged."));
-                refreshProjects();
-            };
-            projects->onUndecline = [guard, refreshProjects](const QString &path) {
-                auto *windowGuard = windowOf(guard);
-                if (!windowGuard) return;
-                QString error;
-                if (!windowGuard->m_manager->projects().undecline(path, &error)) windowGuard->notice(error);
-                refreshProjects();
-            };
-            projects->onResume = [viewGuard](const QJsonObject &row) {
-                for (QWidget *top : QApplication::topLevelWidgets())
-                    if (auto *window = dynamic_cast<RelayWindow *>(top))
-                        if (Pane *pane = window->findPaneByToken(row.value(QStringLiteral("pane_token")).toString())) {
-                            window->revealPane(pane); return;
-                        }
-                if (viewGuard && viewGuard->onResume && !row.value(QStringLiteral("session_id")).toString().isEmpty())
-                    viewGuard->onResume(row, false);
-            };
-            projects->onBrowse = [guard] {
-                auto *windowGuard = windowOf(guard);
-                if (!windowGuard) return;
-                const QString folder = QFileDialog::getExistingDirectory(windowGuard, QStringLiteral("Open project"));
-                if (!folder.isEmpty()) windowGuard->openProjectTab(folder);
-            };
-            projects->onInit = [guard] {
-                if (auto *w = windowOf(guard)) {
-                    if (auto *owner = w->workspaceOwner(guard)) {
-                        const QString card = guard->property("pendingProjectCard").toString();
-                        guard->setProperty("pendingProjectCard", QVariant());
-                        owner->initProjectHere(card);
+        projects->onOpenBoard = [guard](const QString &path) { auto *w = windowOf(guard); if (w) w->openProjectTab(path, true); };
+        projects->onShowSessions = [sessionsGuard](const QString &path) {
+            if (sessionsGuard) { sessionsGuard->selectProject(path); sessionsGuard->showTab(QStringLiteral("sessions")); sessionsGuard->focusSearch(); }
+        };
+        projects->onForget = [guard, refreshProjects](const QString &path) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            QString error;
+            if (!w->m_manager->projects().forget(path, &error)) w->notice(error);
+            else w->notice(QStringLiteral("Forgot the project; its files and open tabs are unchanged."));
+            refreshProjects();
+        };
+        projects->onUndecline = [guard, refreshProjects](const QString &path) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            QString error;
+            if (!w->m_manager->projects().undecline(path, &error)) w->notice(error);
+            refreshProjects();
+        };
+        projects->onResume = [sessionsGuard](const QJsonObject &row) {
+            for (QWidget *top : QApplication::topLevelWidgets())
+                if (auto *window = dynamic_cast<RelayWindow *>(top))
+                    if (Pane *pane = window->findPaneByToken(row.value(QStringLiteral("pane_token")).toString())) {
+                        window->revealPane(pane); return;
                     }
-                    else w->notice(QStringLiteral("Open a terminal in the folder you want to initialize."));
+            if (sessionsGuard && sessionsGuard->onResume && !row.value(QStringLiteral("session_id")).toString().isEmpty())
+                sessionsGuard->onResume(row, false, false);
+        };
+        projects->onBrowse = [guard] {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            const QString folder = QFileDialog::getExistingDirectory(w, QStringLiteral("Open project"));
+            if (!folder.isEmpty()) w->openProjectTab(folder);
+        };
+        projects->onInit = [guard] {
+            if (auto *w = windowOf(guard)) {
+                if (auto *owner = w->workspaceOwner(guard)) {
+                    const QString card = guard->property("pendingProjectCard").toString();
+                    guard->setProperty("pendingProjectCard", QVariant());
+                    owner->initProjectHere(card);
                 }
-            };
-        }
+                else w->notice(QStringLiteral("Open a terminal in the folder you want to initialize."));
+            }
+        };
         view->onTabScreen = [projectGuard, globalGuard](const QString &id) {
             if (id == QStringLiteral("projects") && projectGuard) return projectGuard->agentScreen();
             if (id == QStringLiteral("globals") && globalGuard) return globalGuard->agentScreen();
@@ -6681,23 +6629,114 @@ public:
             w->updateTitles();
         };
         view->onTabSelectedByUser = [guard](const QString &id) {
-            auto *windowGuard = windowOf(guard);
-            if (!windowGuard) return;
+            auto *w = windowOf(guard);
+            if (!w) return;
             const QString action = id == QStringLiteral("projects") ? QStringLiteral("projects.open")
                 : id == QStringLiteral("globals") ? QStringLiteral("globals.open")
                 : QStringLiteral("sessions.open");
-            windowGuard->hint(QStringLiteral("workspace.tab.") + id,
+            w->hint(QStringLiteral("workspace.tab.") + id,
                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(action)));
         };
         refreshProjects();
+        return tool;
+    }
+
+    // Bind `tool` to `owner`: its requests go to that pane's worker, Resume resolves its
+    // destination through it, and the ⓘ info button opens beside it. Called once for a fresh pane
+    // (`openSessionsFor`) and once for a saved one finding a neighbour to serve (card #8EXS,
+    // `linkRestoredSessionsPane`) — the parts that need an owner, split out of what used to be one
+    // inline block in `openSessionsFor`.
+    void linkSessionsPane(ToolPane *tool, Pane *owner) {
+        relay::conversations::SessionManager *view = sessionsViewOf(tool);
+        if (!view || !owner) return;
+        tool->setProperty("workspaceOwner", QVariant::fromValue<QObject *>(owner));
+        QPointer<ToolPane> ownerTool(tool);
+        connect(owner, &QObject::destroyed, tool, [ownerTool, owner] {
+            if (ownerTool && ownerTool->property("workspaceOwner").value<QObject *>() == owner)
+                ownerTool->setProperty("workspaceOwner", QVariant());
+        });
+        view->setProject(QFileInfo(owner->workspace().isEmpty() ? owner->cwd() : owner->workspace()).fileName());
+        // Bind requests to the initiating pane; Resume resolves its destination below.
+        owner->bindSessionManager(view);
+        QPointer<ToolPane> guard(tool);
+        QPointer<Pane> ownerGuard(owner);
+        auto resume = view->onResume;
+        auto close = view->onClose;
+        // Close first: a resume may focus another pane (the one that already has the session),
+        // and closing afterwards would take the focus back. Shift+Enter (`keepOpen`) skips this,
+        // so several conversations can be reattached from the same list in a row (#R6J0 follow-up).
+        view->onResume = [resume, close, ownerGuard](const QJsonObject &item, bool, bool keepOpen) {
+            if (!keepOpen && close) close();
+            const QString id = item.value(QStringLiteral("session_id")).toString();
+            if (id.isEmpty()) return;
+            Pane *existing = nullptr;
+            if (relay::conversations::isGuestItem(item)) {
+                const QString source = item.value(QStringLiteral("source")).toString();
+                for (QWidget *top : QApplication::topLevelWidgets())
+                    if (auto *w = dynamic_cast<RelayWindow *>(top))
+                        for (Pane *pane : w->allPanes())
+                            if (pane->sessionTextSource() == source && pane->guestSessionId() == id)
+                                existing = pane;
+            } else {
+                QString dir = item.value(QStringLiteral("session_dir")).toString();
+                if (dir.isEmpty() && ownerGuard) dir = ownerGuard->sessionDir();
+                existing = paneWithSession(id, dir, nullptr);
+            }
+            if (existing) {
+                if (auto *w = windowOf(existing)) w->revealPane(existing);
+                return;
+            }
+            if (resume) resume(item, true, keepOpen);
+        };
+        view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
+            auto *w = windowOf(guard);
+            if (!w || !ownerGuard) return;
+            w->openInfoPane(ownerGuard, item.value(QStringLiteral("session_id")).toString(),
+                            item.value(QStringLiteral("session_dir")).toString());
+        };
+    }
+
+    // The tail of opening Sessions & Projects, shared by a fresh open (`openSessionsFor`) and a
+    // restored one (`linkRestoredSessionsPane`): refresh Projects, show the tab that was asked
+    // for, restore a search and re-run it.
+    void finishSessionsTab(ToolPane *tool, const QString &tab, const QString &query) {
+        relay::conversations::SessionManager *view = sessionsViewOf(tool);
+        if (!view) return;
+        if (auto *projects = dynamic_cast<relay::projects::ProjectsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceProjects"))))
+            feedProjects(projects, view);
         view->showTab(tab);
         if (view->currentTab() == QStringLiteral("globals") && view->onTabActivated)
             view->onTabActivated(QStringLiteral("globals"));
         if (!query.isEmpty()) view->setQuery(query);
         if (view->currentTab() == QStringLiteral("sessions")) view->refresh();
+    }
+
+    void openSessionsFor(Pane *owner, const QString &query, const QString &tab = QString()) {
+        QWidget *page = pageOf(owner);
+        if (!page) return;
+        ToolPane *tool = sessionsPaneIn(page);
+        if (!tool) {
+            tool = createSessionsPane(owner->cwd());
+            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        }
+        linkSessionsPane(tool, owner);
+        finishSessionsTab(tool, tab, query);
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
+    }
+
+    // A saved Sessions & Projects pane (buildNode, card #8EXS) comes back beside the first
+    // terminal pane of the tab it landed in — the same rule the models pane uses (`linkRestoredModelsPane`)
+    // — and is dropped if there is none, the way a saved Activity pane is (`linkRestoredInternalsPane`).
+    // Queued, because `buildNode()` runs before the page the pane will live in exists.
+    void linkRestoredSessionsPane(ToolPane *tool, const QString &tab, const QString &query) {
+        if (!tool) return;
+        const QList<Pane *> panes = panesIn(pageOf(tool));
+        Pane *owner = panes.isEmpty() ? nullptr : panes.first();
+        if (!owner) { closePane(tool, false); return; }
+        linkSessionsPane(tool, owner);
+        finishSessionsTab(tool, tab, query);
     }
 
     // Globals › Suggestions, on one suggestion when `id` is set (#MEMS): a transcript's Edit, and
@@ -9031,6 +9070,15 @@ private:
             QPointer<ToolPane> guard(tool);
             const QString tab = saved.value(QStringLiteral("tab")).toString();
             QTimer::singleShot(0, tool, [guard, tab] { if (auto *w = windowOf(guard)) w->linkRestoredModelsPane(guard, tab); });
+            return tool;
+        }
+        if (node.contains(QStringLiteral("sessions"))) {   // card #8EXS: beside the pane it served
+            const QJsonObject saved = node.value(QStringLiteral("sessions")).toObject();
+            ToolPane *tool = createSessionsPane(saved.value(QStringLiteral("cwd")).toString());
+            QPointer<ToolPane> guard(tool);
+            const QString tab = saved.value(QStringLiteral("tab")).toString();
+            const QString query = saved.value(QStringLiteral("query")).toString();
+            QTimer::singleShot(0, tool, [guard, tab, query] { if (auto *w = windowOf(guard)) w->linkRestoredSessionsPane(guard, tab, query); });
             return tool;
         }
         if (node.contains(QStringLiteral("settings"))) {   // card #XAME: Options or Actions, back where it was read

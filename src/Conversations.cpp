@@ -2342,7 +2342,7 @@ void SessionManager::updateButtons() {
                                             guestLabel(item.value(QStringLiteral("source")).toString()))
                          : m_openSessions.contains(selectedId())
                              ? QStringLiteral("This conversation is already open: Relay goes to that pane rather than loading it twice.")
-                             : QStringLiteral("Open this conversation in a new pane (Enter)."));
+                             : QStringLiteral("Open this conversation in a new pane (Enter) · Shift+Enter keeps this list open."));
     const QString sessionId = item.value(QStringLiteral("session_id")).toString();
     m_reopen->setVisible(m_closed.contains(sessionId));
     const bool summarisable = has && !thread && !terminal && !guest && bool(onSummarise);
@@ -2352,7 +2352,7 @@ void SessionManager::updateButtons() {
     m_summarise->setText(waiting ? QStringLiteral("Summarising…") : QStringLiteral("Summarise"));
 }
 
-void SessionManager::activate(bool newPane) {
+void SessionManager::activate(bool newPane, bool keepOpen) {
     const QJsonObject item = selectedItem();
     if (item.isEmpty()) return;
     if (isTerminal(item)) {
@@ -2364,7 +2364,7 @@ void SessionManager::activate(bool newPane) {
         if (onOpenThread) onOpenThread(item);
         return;
     }
-    if (onResume) onResume(item, newPane);
+    if (onResume) onResume(item, newPane, keepOpen);
 }
 
 // Ctrl+Enter. The worker can only fork the conversation it is holding, so a saved one that nobody
@@ -2725,6 +2725,9 @@ bool SessionManager::eventFilter(QObject *object, QEvent *event) {
     if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
         if (key->modifiers() & Qt::ControlModifier) fork();
         else if (key->modifiers() & Qt::AltModifier) reopenClosed();
+        // Shift+Enter: resume without closing this list, so several conversations can be
+        // reattached one after another (card #R6J0 follow-up).
+        else if (key->modifiers() & Qt::ShiftModifier) activate(true, true);
         else activate(true);
         return true;
     }

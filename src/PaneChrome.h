@@ -547,6 +547,21 @@ public:
                 saved.insert(QStringLiteral("tab"), models->currentTab());
             return {{QStringLiteral("models"), saved}};
         }
+        // Sessions & Projects (card #8EXS): the cwd it was opened over, the tab it was left on
+        // (omitted for the default "sessions" list) and its search text. It comes back beside a
+        // terminal pane (RelayWindow::linkRestoredSessionsPane), so nothing about that pane is
+        // saved here. The ⓘ Info pane shares this constructor but stays transient: it is about
+        // one pane's own live session, not something a reopened window can put back.
+        if (m_kind == Kind::Sessions) {
+            QJsonObject saved{{QStringLiteral("cwd"), m_subagentCwd}};
+            if (auto *sessions = dynamic_cast<relay::conversations::SessionManager *>(m_hosted)) {
+                const QString tab = sessions->currentTab();
+                if (!tab.isEmpty() && tab != QStringLiteral("sessions")) saved.insert(QStringLiteral("tab"), tab);
+                const QString query = sessions->query();
+                if (!query.isEmpty()) saved.insert(QStringLiteral("query"), query);
+            }
+            return {{QStringLiteral("sessions"), saved}};
+        }
         if (m_turn || m_diff || m_hosted) return {};
         if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
         return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};

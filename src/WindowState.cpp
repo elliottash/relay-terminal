@@ -183,6 +183,10 @@ bool isUsableNode(const QJsonObject &node, int depth) {
     // not know makes its whole **split** unusable, and with it the tab: a driven quit-and-reopen
     // came back with no models pane *and no terminal*, because the pair was one split.
     if (node.contains(QStringLiteral("models"))) return node.value(QStringLiteral("models")).isObject();
+    // The Sessions & Projects pane (card #8EXS): like the models pane, it comes back serving the
+    // first terminal pane of its tab and re-reads its tab and search text from the object, so
+    // there is nothing in it that can go stale either.
+    if (node.contains(QStringLiteral("sessions"))) return node.value(QStringLiteral("sessions")).isObject();
     // The Activity pane (card #QT8C) is saved beside its owner (PaneChrome::serialize writes
     // `internals`) and buildNode() restores it empty until the next event — but this gate did not
     // know it, so a tab holding a terminal *and* an Activity pane came back as nothing (card #ACT1,

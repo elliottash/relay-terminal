@@ -17,11 +17,15 @@
 // together.
 //         | {"explorer"|"preview"|"plan": {"path": "..."}}
 //         | {"settings": {"mode": "options"|"actions", "tab"?, "search"?, "row"?}}
+//         | {"sessions": {"cwd": "...", "tab"?, "query"?}}
 //
 // The `settings` node is the Actions pane or the Options pane (card #XAME): which it was, the
 // section tab it was reading, its search text and its highlighted row, so a reopened window puts
-// the pane back where it was. The Switchboard's `board` node and the subagent pane's `subagents`
-// node are declared where they are restored (RelayWindow::buildNode).
+// the pane back where it was. The `sessions` node is the Sessions & Projects pane (card #8EXS):
+// the tab it was left on ("projects"|"globals"; omitted for the default "sessions" list) and its
+// search text; it comes back beside the first terminal pane of the tab it lands in, the way the
+// models pane does. The Switchboard's `board` node and the subagent pane's `subagents` node are
+// declared where they are restored (RelayWindow::buildNode).
 //
 // This header holds the parts that do not need a window: reading and writing the file, clamping a
 // window onto a screen that still exists, falling back when a directory is gone, and dropping

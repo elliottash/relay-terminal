@@ -203,7 +203,9 @@ public:
     std::function<void(const QJsonObject &request)> onQuery;
     std::function<void(const QString &sessionId, const QString &query)> onPreview;
     // The whole result row; Resume requests a new pane unless the window finds it open already.
-    std::function<void(const QJsonObject &item, bool newPane)> onResume;
+    // `keepOpen` is Shift+Enter (card #R6J0 follow-up): resume without closing this list, so
+    // several conversations can be reattached in a row.
+    std::function<void(const QJsonObject &item, bool newPane, bool keepOpen)> onResume;
     // Enter on a subagent thread row: open its history (the ⓘ view).
     std::function<void(const QJsonObject &item)> onOpenThread;
     // Info (Ctrl+I) on a session row: its ⓘ view without resuming it.
@@ -337,7 +339,7 @@ private:
     void requestPreview(const QString &sessionId);
     void unfold(QTreeWidgetItem *row);
     void fillUnfolded(QTreeWidgetItem *row, const QJsonObject &overview);
-    void activate(bool newPane);
+    void activate(bool newPane, bool keepOpen = false);
     void fork();
     void reopenClosed();
     void summariseSelected();

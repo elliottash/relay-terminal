@@ -225,6 +225,11 @@ private slots:
         QVERIFY(isUsableNode(QJsonObject{{"models", QJsonObject{{"cwd", "/repo"}, {"tab", "available"}}}}));
         QVERIFY(isUsableNode(QJsonObject{{"models", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"models", "available"}}));
+        // The Sessions & Projects pane (card #8EXS): like the models pane, it comes back beside
+        // the first terminal pane of its tab and re-reads its tab/search text from the object.
+        QVERIFY(isUsableNode(QJsonObject{{"sessions", QJsonObject{{"cwd", "/repo"}, {"tab", "projects"}, {"query", "foo"}}}}));
+        QVERIFY(isUsableNode(QJsonObject{{"sessions", QJsonObject{}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"sessions", "projects"}}));
         // The Activity pane (card #QT8C) is written by PaneChrome::serialize as `internals` and was
         // never listed here, so a terminal beside it was dropped with its tab on reopen (card #ACT1).
         QVERIFY(isUsableNode(QJsonObject{{"internals", QJsonObject{{"cwd", "/repo"}, {"owner", "abc"}}}}));
@@ -233,6 +238,8 @@ private slots:
                                                                    QJsonObject{{"internals", QJsonObject{{"cwd", "/repo"}}}}})));
         QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{pane(QStringLiteral("/repo")),
                                                                    QJsonObject{{"models", QJsonObject{{"cwd", "/repo"}}}}})));
+        QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{pane(QStringLiteral("/repo")),
+                                                                   QJsonObject{{"sessions", QJsonObject{{"cwd", "/repo"}}}}})));
         QVERIFY(!isUsableNode(QJsonObject{}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagent", QJsonObject{}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"explorer", QJsonObject{}}}));   // no path
