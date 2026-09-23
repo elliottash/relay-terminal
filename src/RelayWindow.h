@@ -1213,6 +1213,7 @@ private:
         // chord's window; any other action closes it, so a stale chord never grabs a later one.
         if (id != QStringLiteral("pane.moveDown")) endBeneathDock();
         if (id == QStringLiteral("window.new")) m_manager->newWindowAt(activeCwd());
+        else if (id == QStringLiteral("window.fullscreen")) toggleFullscreen();
         else if (id == QStringLiteral("window.next")) m_manager->cycle(this, 1);
         else if (id == QStringLiteral("window.previous")) m_manager->cycle(this, -1);
         else if (id == QStringLiteral("windows.fresh")) startFreshWindowSet();
@@ -4700,6 +4701,7 @@ private:
         }
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
         items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
+        items << actionItem(panes, QStringLiteral("Toggle fullscreen"), QStringLiteral("Hide the desktop taskbar and window borders"), QStringLiteral("window.fullscreen"));
         items << actionItem(panes, QStringLiteral("Dim this pane"), QStringLiteral("Toggle manual dimming; Alt+wheel adjusts strength"), QStringLiteral("pane.dimToggle"));
         items << actionItem(panes, QStringLiteral("Brighten pane"), QStringLiteral("Reduce dimming by 5%"), QStringLiteral("pane.brighten"));
         items << actionItem(panes, QStringLiteral("Dim pane more"), QStringLiteral("Increase dimming by 5%"), QStringLiteral("pane.darken"));
@@ -9804,6 +9806,12 @@ private:
         relay::NotificationCenter::instance().markSeen(note.id);
         ++m_notificationJumpIndex;
         m_notificationJumpReset.start();
+    }
+
+    void toggleFullscreen() {
+        // Keep WindowMaximized so exiting fullscreen restores the previous window mode.
+        setWindowState(windowState() ^ Qt::WindowFullScreen);
+        updateChromeState();
     }
 
     void toggleMaximize() {

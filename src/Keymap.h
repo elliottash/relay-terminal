@@ -203,6 +203,7 @@ private:
             m_actions.append({QString::fromLatin1(id), QString::fromUtf8(description), QString::fromLatin1(category), std::move(keys)});
         };
         add("window.new", "window", "New window", {QStringLiteral("Ctrl+N"), QStringLiteral("Ctrl+Shift+N")});
+        add("window.fullscreen", "window", "Toggle fullscreen", {QStringLiteral("F11")});
         add("window.next", "window", "Next Relay window", {QStringLiteral("Alt+Tab")});
         add("window.previous", "window", "Previous Relay window", {QStringLiteral("Alt+Shift+Tab")});
         add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T"), QStringLiteral("Ctrl+Shift+T")});
