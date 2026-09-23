@@ -99,6 +99,12 @@ QStringList tabs(QTabBar *bar) {
     return out;
 }
 
+QStringList tabLabels(QTabBar *bar) {
+    QStringList out;
+    for (int i = 0; i < bar->count(); ++i) out << bar->tabText(i);
+    return out;
+}
+
 // The rows drawn, without a class's "+ add" pool (#AVR8) — `poolKeys` reads that.
 QStringList rowKeys(QTreeWidget *list) {
     QStringList out;
@@ -204,9 +210,12 @@ private Q_SLOTS:
 
     void theTabsSeparateAvailabilityPrioritiesEffortAndJobs() {
         ModelsPane pane(providerSections());
+        QCOMPARE(tabLabels(pane.tabBar()), (QStringList{QStringLiteral("Sources"), QStringLiteral("Enabled"),
+                                                   QStringLiteral("Pick order"), QStringLiteral("Effort"),
+                                                   QStringLiteral("Agent jobs")}));
         QCOMPARE(tabs(pane.tabBar()), (QStringList{QStringLiteral("providers"), QStringLiteral("available"),
-                                                   QStringLiteral("priorities"), QStringLiteral("effort"),
-                                                   QStringLiteral("jobs")}));
+                                                      QStringLiteral("priorities"), QStringLiteral("effort"),
+                                                      QStringLiteral("jobs")}));
         QVERIFY(pane.providers() != nullptr);
         QVERIFY(pane.picker() != nullptr);
         // The providers tab is Options' own renderer, drawing the section it was handed.
@@ -232,6 +241,9 @@ private Q_SLOTS:
         pane.show();
         QTest::qWait(40);
         QVERIFY(pane.width() <= 420);
+        QCOMPARE(tabLabels(pane.tabBar()), (QStringList{QStringLiteral("Sources"), QStringLiteral("Enabled"),
+                                                   QStringLiteral("Order"), QStringLiteral("Effort"),
+                                                   QStringLiteral("Roles")}));
         QVERIFY(pane.tabBar()->tabRect(4).right() <= pane.tabBar()->width());
         const QString evidence = qEnvironmentVariable("RELAY_N4PW_EVIDENCE");
         if (!evidence.isEmpty()) QDir().mkpath(evidence);

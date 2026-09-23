@@ -144,7 +144,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     setAttribute(Qt::WA_StyledBackground);
     setFocusPolicy(Qt::StrongFocus);
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(12, 10, 12, 8);
+    layout->setContentsMargins(10, 10, 10, 8);
     layout->setSpacing(6);
 
     // One quiet line saying what this pane is for. It named the pane it served until card #BXMS,
@@ -165,15 +165,20 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_tabs->setExpanding(false);
     m_tabs->setDrawBase(true);
     m_tabs->setFocusPolicy(Qt::StrongFocus);
-    for (const QString &id : tabIds()) {
-        const int index = m_tabs->addTab(id);
+    const QStringList labels = {QStringLiteral("Sources"), QStringLiteral("Enabled"),
+                                QStringLiteral("Pick order"), QStringLiteral("Effort"),
+                                QStringLiteral("Agent jobs")};
+    const QStringList ids = tabIds();
+    for (int i = 0; i < ids.size(); ++i) {
+        const QString &id = ids.at(i);
+        const int index = m_tabs->addTab(labels.at(i));
         m_tabs->setTabData(index, id);
     }
-    m_tabs->setTabToolTip(0, QStringLiteral("Step 1 — the providers this machine can reach, and their keys"));
-    m_tabs->setTabToolTip(1, QStringLiteral("Step 2 — which models exist for the lists, the box and its filter"));
-    m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — one section per class: its order and box cutoffs"));
-    m_tabs->setTabToolTip(3, QStringLiteral("Reasoning levels for models ranked in each class"));
-    m_tabs->setTabToolTip(4, QStringLiteral("What each job relay does runs on right now, and a model of its own for one"));
+    m_tabs->setTabToolTip(0, QStringLiteral("Manage model providers and their keys"));
+    m_tabs->setTabToolTip(1, QStringLiteral("Choose which models are enabled"));
+    m_tabs->setTabToolTip(2, QStringLiteral("Set the model pick order, fallbacks, ties, and box cutoff"));
+    m_tabs->setTabToolTip(3, QStringLiteral("Set reasoning effort for each model"));
+    m_tabs->setTabToolTip(4, QStringLiteral("Choose what Planning, Subagents, and Helper run on"));
     layout->addWidget(m_tabs);
     relay::paneTabs::registerTabs(this, m_tabs);
 
@@ -436,7 +441,12 @@ void ModelsPane::showEvent(QShowEvent *event) {
 
 void ModelsPane::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
-    m_tabs->setTabText(0, width() < 500 ? QStringLiteral("keys") : QStringLiteral("providers"));
+    const bool narrow = width() < 500;
+    m_tabs->setTabText(0, QStringLiteral("Sources"));
+    m_tabs->setTabText(1, QStringLiteral("Enabled"));
+    m_tabs->setTabText(2, narrow ? QStringLiteral("Order") : QStringLiteral("Pick order"));
+    m_tabs->setTabText(3, QStringLiteral("Effort"));
+    m_tabs->setTabText(4, narrow ? QStringLiteral("Roles") : QStringLiteral("Agent jobs"));
     updateConsoleHeight();
 }
 
