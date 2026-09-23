@@ -10995,18 +10995,10 @@ private:
         if (type == QStringLiteral("memory_import")) {
             // Protocol 34: this worker's startup import left facts from Claude Code or Codex
             // waiting. One entry in the bell, whose button opens the review list.
-            const int claude = event.value(QStringLiteral("claude")).toInt();
-            const int codex = event.value(QStringLiteral("codex")).toInt();
-            const int total = claude + codex;
-            if (total <= 0) return true;
-            const QString from = claude && codex ? QStringLiteral("Claude Code and Codex")
-                               : claude ? QStringLiteral("Claude Code") : QStringLiteral("Codex");
-            relay::NotificationCenter::instance().postWithAction(
-                total == 1 ? QStringLiteral("1 memory from %1 to review").arg(from)
-                           : QStringLiteral("%1 memories from %2 to review").arg(total).arg(from),
-                QStringLiteral("Nothing is remembered until you keep it · Globals › Suggestions"),
-                relay::NotificationCenter::kindInfo, sessionToken(), QStringLiteral("Review"),
-                QStringLiteral("memory.review"));
+            QString title, body;
+            if (relay::globals::memoryImportNotice(event, &title, &body))
+                relay::NotificationCenter::instance().postWithAction(title, body, relay::NotificationCenter::kindInfo,
+                    sessionToken(), QStringLiteral("Review"), QStringLiteral("memory.review"));
             return true;
         }
         if (type != QStringLiteral("globals_suggestion_accepted") && type != QStringLiteral("globals_suggestion_rejected")

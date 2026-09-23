@@ -4271,6 +4271,10 @@ private:
             row.aliases = QStringLiteral("claude codex guest memory remember auto-memory memories user facts");
             privacy.rows << row;
         }
+        // #MEMS, protocol 34: read by every worker's `configure`, so it applies from the next start.
+        privacy.rows << toggleRow(QStringLiteral("memory/import_guests"), QStringLiteral("Offer Claude Code and Codex memories"),
+                                  QStringLiteral("At start, facts about you in ~/.claude and ~/.codex become suggestions in "
+                                                 "Globals › Suggestions; nothing is remembered until you keep it"), true);
         sections << privacy;
 
         relay::SettingsSection shortcuts;
@@ -7456,6 +7460,14 @@ public:
     // One tab-worker event to the panes of that tab that asked for them (`listenToHelper`),
     // dropping the ones that have closed.
     void deliverToHelperPanels(QWidget *page, const QJsonObject &event) {
+        // "3 memories from Claude Code to review · Review" (#MEMS): the same bell entry a pane's
+        // worker posts, since only the one worker whose import found something says so.
+        if (event.value(QStringLiteral("event")).toString() == QStringLiteral("memory_import")) {
+            QString title, body;
+            if (relay::globals::memoryImportNotice(event, &title, &body))
+                relay::NotificationCenter::instance().postWithAction(title, body, relay::NotificationCenter::kindInfo,
+                    QString(), QStringLiteral("Review"), QStringLiteral("memory.review"));
+        }
         for (int i = int(m_helperListeners.size()) - 1; i >= 0; --i)
             if (!m_helperListeners.at(i).owner || !m_helperListeners.at(i).page)
                 m_helperListeners.removeAt(i);
@@ -7643,6 +7655,9 @@ public:
         // at all, which is how this configure read before card #AGNT.
         if (Pane *console = m_tabConsole.value(tabIdOf(page)).data(); console && console->context())
             configure.insert(QStringLiteral("context"), console->contextBlock());
+        // Protocol 34 (#MEMS): the tab's worker may be the first process to start, so it imports
+        // Claude Code and Codex memories too, and says how many (deliverToHelperPanels).
+        configure.insert(QStringLiteral("memory_import"), settings.value(QStringLiteral("memory/import_guests"), true).toBool());
         // Only this tab's helper: another tab, even on the same project, keeps its own.
         if (relay::BoardWorker *worker = boardWorker(page)) worker->start(configure);
     }

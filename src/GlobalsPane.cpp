@@ -124,6 +124,7 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     connect(m_search, &QLineEdit::textChanged, this, [this] { rebuild(); });
     connect(m_section, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] {
         m_getRequest.clear();
+        m_notice->setText(m_section->currentIndex() == kSuggestions && m_pending.isEmpty() ? tr("No suggestions waiting.") : QString());
         display({});
         rebuild(); updateButtons();
     });
@@ -311,6 +312,11 @@ void GlobalsPane::display(const QJsonObject &record) {
     const QSignalBlocker blocker(m_editor);
     m_editor->setPlainText(m_original);
     m_selected = identity(record);
+    if (record.isEmpty() && m_section->currentIndex() == kSuggestions) {
+        m_source->setText(tr("Select a suggestion to keep, edit or reject it."));
+        updateButtons();
+        return;
+    }
     if (suggestion) {
         const QString date = record.value("date").toString();
         QString source = sourceWord(record.value("source").toString()) + (date.isEmpty() ? QString() : " · " + date);
@@ -374,6 +380,7 @@ void GlobalsPane::updateButtons() {
     m_reject->setEnabled(ready && deciding);
     m_save->setVisible(!suggestions); m_retire->setVisible(!suggestions);
     m_editor->setReadOnly(!ready || m_record.isEmpty());
+    m_editor->setPlaceholderText(suggestions ? tr("The fact, as it will be remembered") : tr("Record source (Markdown)"));
     m_save->setEnabled(ready && m_dirty);
     m_cancel->setEnabled(ready && m_dirty);
     m_newMemory->setEnabled(ready); m_newAlias->setEnabled(ready);
@@ -412,6 +419,9 @@ void GlobalsPane::handleEvent(const QJsonObject &event) {
                 break;
             }
         }
+    } else if (type == "memory_import") {
+        // This tab's worker offered new facts from Claude Code or Codex: fetch the list again.
+        m_suggestRequest = request({{"type", "globals_suggestions"}});
     } else if (type == "globals_suggestions") {
         // The whole list each time, so a reply to anyone's request on this worker is current.
         if (id == m_suggestRequest) m_suggestRequest.clear();

@@ -58,6 +58,19 @@ inline QString suggestionLine(const SuggestionNote &note) {
     const QString what = note.fact.isEmpty() ? QString() : QStringLiteral(": ") + note.fact;
     return note.kind == SuggestionNote::None ? QString() : QStringLiteral("Not suggested%1 · %2").arg(what, note.detail);
 }
+// The bell entry for protocol 34's `memory_import {claude, codex}`: false when nothing is new.
+inline bool memoryImportNotice(const QJsonObject &event, QString *title, QString *body) {
+    const int claude = event.value(QStringLiteral("claude")).toInt();
+    const int codex = event.value(QStringLiteral("codex")).toInt();
+    const int total = claude + codex;
+    if (total <= 0) return false;
+    const QString from = claude && codex ? QStringLiteral("Claude Code and Codex")
+                       : claude ? QStringLiteral("Claude Code") : QStringLiteral("Codex");
+    *title = total == 1 ? QStringLiteral("1 memory from %1 to review").arg(from)
+                        : QStringLiteral("%1 memories from %2 to review").arg(total).arg(from);
+    *body = QStringLiteral("Nothing is remembered until you keep it · Globals › Suggestions");
+    return true;
+}
 inline QString suggestionOutcome(bool kept, const QString &fact) {
     return kept ? QStringLiteral("Kept: %1 · Globals › User memory").arg(fact)
                 : QStringLiteral("Rejected — won't be suggested again: %1").arg(fact);

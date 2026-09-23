@@ -246,6 +246,22 @@ private slots:
                  SuggestionNote::None);
         QVERIFY(relay::globals::suggestionOutcome(false, "x").startsWith("Rejected — won't be suggested again"));
     }
+    void importedMemoriesRefreshTheList() {
+        GlobalsPane pane;
+        QList<QJsonObject> requests;
+        pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
+        pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(4);
+        QCOMPARE(pane.findChild<QLabel *>("globalsNotice")->text(), QString("No suggestions waiting."));
+        QVERIFY(pane.findChild<QLabel *>("globalsSource")->text().startsWith("Select a suggestion"));
+        pane.handleEvent({{"event", "memory_import"}, {"claude", 2}, {"codex", 0}});
+        QCOMPARE(requests.last().value("type").toString(), QString("globals_suggestions"));
+        QString title, body;
+        QVERIFY(relay::globals::memoryImportNotice({{"claude", 2}, {"codex", 1}}, &title, &body));
+        QCOMPARE(title, QString("3 memories from Claude Code and Codex to review"));
+        QVERIFY(relay::globals::memoryImportNotice({{"codex", 1}}, &title, &body));
+        QCOMPARE(title, QString("1 memory from Codex to review"));
+        QVERIFY(!relay::globals::memoryImportNotice({{"claude", 0}, {"codex", 0}}, &title, &body));
+    }
     void staleRepliesCannotReplaceCurrentSelection() {
         GlobalsPane pane;
         QList<QJsonObject> requests;
