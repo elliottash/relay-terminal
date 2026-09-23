@@ -296,8 +296,8 @@ private:
         // to the editor or the program, so these have no plain twin: Ctrl+P is VS Code's quick
         // open and a shell's previous-history, Ctrl+D is end-of-input, Ctrl+A line-start, Ctrl+S
         // save or XOFF. No action may hold Ctrl+<L> while another holds Ctrl+Shift+<L>, in any
-        // preset (tests/test_keybindings.py checks it). P is the palette, as in VS Code.
-        add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {QStringLiteral("Ctrl+Shift+P")});
+        // preset (tests/test_keybindings.py checks it). Ctrl+? opens Actions/help.
+        add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {});
         // One key opens and closes the explorer (issue #D60R). D for directory (#QWAS); it was
         // Ctrl+B and Ctrl+Shift+B until 2026-09-22. Ctrl+D is never bound: it is end-of-input.
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
@@ -311,11 +311,10 @@ private:
         // A for the Board, S for Sessions, D for files: the left hand's home row (#QWAS). The Board
         // was Ctrl+Shift+S until 2026-09-22.
         add("board.open", "pane", "Board: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
-        // One entry for the shared Sessions & Projects pane (#SPSG): sessions, projects, recently
-        // closed and globals are its tabs. agent.resume, conversations.open, projects.open and
-        // globals.open stay registered, with no default keys, because slash commands and a user's
-        // keybindings.json may name them; each opens the same pane on its own tab.
-        add("sessions.open", "pane", "Sessions & Projects: sessions, projects, recently closed and globals (again to close it)",
+        // Sessions and Projects have direct keys into the shared pane (#SPSG); recently closed
+        // and background are nested under Sessions. agent.resume and conversations.open remain
+        // registered for slash commands and user keybindings.json overrides.
+        add("sessions.open", "pane", "Sessions: saved sessions, background work and recently closed (again to close it)",
             {QStringLiteral("Ctrl+Shift+S")});
         // The Test suites pane (card #7BM4): the project's tests, their history and the runs, in a
         // pane beside the Board. **No default key.** The obvious one, Ctrl+Shift+T, is New
@@ -331,10 +330,9 @@ private:
         // the three panes it works in hold none — and the panes' own search boxes swallow letters.
         add("helper.ask", "agent", "Ask the helper agent about this pane (Options, Actions, Sessions)",
             {QStringLiteral("Alt+Q")});
-        // Compatibility actions: the Projects and Globals tabs of the Sessions & Projects pane
-        // (#P7SJ). Projects stays unbound: Ctrl+Shift+S opens the shared pane. Globals keeps its
-        // familiar direct key, Ctrl+Shift+G (#QWAS); Ctrl+G remains the editor/program's.
-        add("projects.open", "pane", "Projects: manage projects and their active sessions", {});
+        // Direct keys for the Projects and Globals tabs of the shared pane (#P7SJ).
+        // Plain Ctrl+P and Ctrl+G remain the editor/program's.
+        add("projects.open", "pane", "Projects: manage projects and their active sessions", {QStringLiteral("Ctrl+Shift+P")});
         add("globals.open", "pane", "Globals: global memories, aliases and instructions", {QStringLiteral("Ctrl+Shift+G")});
         add("project.pick", "pane", "Projects: attach this tab to a project Relay knows, or initialize one here", {});
         // One key both ways (#QWAS): Ctrl+H takes control of the terminal and, pressed again, hands
@@ -566,7 +564,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"agent.resume":["Ctrl+Shift+Y"],"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"input.toggle":["Ctrl+I","Ctrl+Shift+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[],"files.explorer":["Ctrl+Shift+B"]},"vscode":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":["Ctrl+Esc"],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[],"files.explorer":["Ctrl+Shift+E"]},"konsole":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I","Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"agent.resume":["Ctrl+Shift+Y"],"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":[],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"input.toggle":["Ctrl+I","Ctrl+Shift+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[],"files.explorer":["Ctrl+Shift+B"]},"vscode":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":[],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":["Ctrl+Esc"],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[],"files.explorer":["Ctrl+Shift+E"]},"konsole":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":[],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;

@@ -47,6 +47,10 @@ private slots:
         keymap.clearOverrides();
         for (const auto &preset : Keymap::presets()) {
             keymap.setPreset(preset.first);
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+S")), QStringLiteral("sessions.open"));
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+P")), QStringLiteral("projects.open"));
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+?")), QStringLiteral("help.shortcuts"));
+            QVERIFY(keymap.keysFor(QStringLiteral("palette.open")).isEmpty());
             for (char letter = 'A'; letter <= 'Z'; ++letter) {
                 const QString plain = keymap.actionForKey(QStringLiteral("Ctrl+%1").arg(QLatin1Char(letter)));
                 const QString shifted = keymap.actionForKey(QStringLiteral("Ctrl+Shift+%1").arg(QLatin1Char(letter)));

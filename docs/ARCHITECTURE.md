@@ -883,22 +883,20 @@ Default window shortcuts:
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
 | Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+Z |
-| New tab | Ctrl+T | Actions palette / Options pane | Ctrl+Shift+P (and Ctrl+?) / Ctrl+Shift+O |
+| New tab | Ctrl+T | Actions/help / Options pane | Ctrl+? / Ctrl+Shift+O |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control, or back to the prompt (a toggle) | Ctrl+H (composer), Ctrl+Shift+H |
 | Split right | Ctrl+E | Clear the prompt box (Ctrl+Z undoes) | Ctrl+Q (composer), Ctrl+Shift+Q |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
-| Toggle terminal/agent input | Ctrl+I | Board / Sessions & Projects / Globals / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+G / Ctrl+Shift+D |
+| Toggle terminal/agent input | Ctrl+I | Board / Sessions / Projects / Globals / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+P / Ctrl+Shift+G / Ctrl+Shift+D |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
 
-Sessions & Projects (`sessions.open`) is Ctrl+Shift+S (#SPSG, #QWAS, 2026-09-22): one pane and one
-key for sessions, projects, background work, recently closed and globals, opened on the tab it was
-last on. It was Ctrl+Shift+Y (sessions), Ctrl+Shift+P (projects) and Ctrl+Shift+G (globals) until
-the owner called them "a single function". `agent.resume`, `conversations.open` and `projects.open`
-stay registered with no default key and open the same pane on their tab; `globals.open` retains
-Ctrl+Shift+G as a direct shortcut to its tab. In the palette these ids are the children of the one
-"Sessions & Projects" row. The key is a
+Sessions & Projects is one pane (#SPSG, #QWAS). Sessions is the first tab and opens with
+Ctrl+Shift+S (`sessions.open`); Projects opens with Ctrl+Shift+P (`projects.open`), and Globals
+with Ctrl+Shift+G (`globals.open`). Background and Recently closed are buttons inside Sessions.
+`agent.resume` and `conversations.open` remain registered without default keys. In the palette these ids are the children of the one
+"Sessions & Projects" row. Each tab key is a
 **toggle** (owner, 2026-09-20): pressed again with the pane focused it closes the pane, as Esc
 does; pressed while the focus is elsewhere it brings the open pane forward instead, so the key
 never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). A per-tab id
@@ -911,7 +909,7 @@ preset's Ctrl+Alt+I and VS Code's Ctrl+Shift+Alt+I are different combinations), 
 M-i unbound, so a shell keeps the key. Like Alt+A and Alt+R it steps aside for a program that owns
 the keyboard.
 
-Unbound by default: `agent.resume`, `conversations.open`, `projects.open`, `globals.open`,
+Unbound by default: `agent.resume`, `conversations.open`, `palette.open`,
 `control.prompt`, `pane.restartShell` (the stopped-pane banner and the palette), `agent.stopAllSubagents`
 (the subagents UI and the palette), `agent.screenshotPane`, `files.open`, `terminal.interrupt`,
 `agent.newChat`, `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `input.mode*`,
@@ -919,7 +917,7 @@ Unbound by default: `agent.resume`, `conversations.open`, `projects.open`, `glob
 provider settings" dialog, and card #MDP1 retired the action with it — providers, keys and custom
 endpoints are the models pane's first tab, on `agent.modelOptions`.)
 
-**Actions** (Ctrl+Shift+P or Ctrl+?; #MAGP). The action catalog (`rootItems()` in
+**Actions** (Ctrl+?; #MAGP). The action catalog (`rootItems()` in
 `src/RelayWindow.h`) is items with a stable key and either a run function or a submenu (Model,
 Input mode, Reasoning effort, Aliases, Agents, Sessions & Projects). It covers every registered
 action (#ACDG): after the hand-made rows, `appendRegisteredActions()` adds a plain row, labelled
@@ -3104,8 +3102,8 @@ opens the editor of something that persists (API keys, Model roles, Instructions
 keybindings.json).
 
 - **Actions** — the palette's "Shortcut list" row (`help.shortcutList`). A search box over one
-  filterable list, no tabs: `rootItems()` as described in section 5. Ctrl+Shift+P (`palette.open`)
-  and Ctrl+? (`help.shortcuts`) open the Actions palette over the same catalog instead (#MAGP).
+  filterable list, no tabs: `rootItems()` as described in section 5. Ctrl+? (`help.shortcuts`)
+  opens the Actions palette over the same catalog (#MAGP).
 - **Options** — Ctrl+Shift+O and Ctrl+, (`app.settings`), and the gear in the title bar. One sub-tab
   per section (General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard) and the rows as
   real controls.

@@ -204,10 +204,12 @@ private slots:
 
     void sessionsActivationRefreshesAndClosedIsNested() {
         SessionManager manager;
-        manager.insertTab(0, QStringLiteral("projects"), QStringLiteral("Projects"), new QWidget);
+        manager.addTab(QStringLiteral("projects"), QStringLiteral("Projects"), new QWidget);
         manager.addTab(QStringLiteral("globals"), QStringLiteral("Globals"), new QWidget);
         auto *closedContent = new QLabel(QStringLiteral("Closed items"));
         manager.addTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), closedContent);
+        auto *backgroundContent = new QLabel(QStringLiteral("Background items"));
+        manager.addTab(QStringLiteral("background"), QStringLiteral("Background"), backgroundContent);
         manager.setKnownProjects({{QStringLiteral("demo"), QStringLiteral("/tmp/demo")}});
         manager.selectProject(QStringLiteral("/tmp/demo"));
         manager.setQuery(QStringLiteral("retained search"));
@@ -219,7 +221,9 @@ private slots:
         manager.onQuery = [&](const QJsonObject &r) { request = r; };
         auto *bar = manager.findChild<QTabBar *>();
         QCOMPARE(bar->count(), 3);
-        QTest::mouseClick(bar, Qt::LeftButton, Qt::NoModifier, bar->tabRect(1).center());
+        QCOMPARE(bar->tabText(0), QStringLiteral("Sessions"));
+        QCOMPARE(bar->tabText(1), QStringLiteral("Projects"));
+        QTest::mouseClick(bar, Qt::LeftButton, Qt::NoModifier, bar->tabRect(0).center());
         QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
         QCOMPARE(request.value(QStringLiteral("query")).toString(), QStringLiteral("retained search"));
         QCOMPARE(request.value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/demo"));
@@ -227,7 +231,7 @@ private slots:
         QVERIFY(closed->isVisible());
         closed->click();
         QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
-        QCOMPARE(bar->currentIndex(), 1);
+        QCOMPARE(bar->currentIndex(), 0);
         QVERIFY(closedContent->isVisible());
         QVERIFY(manager.agentContext()->spec().screen.contains(QStringLiteral("Recently closed")));
         request = {};
@@ -236,6 +240,21 @@ private slots:
         QVERIFY(closed->isVisible());
         QCOMPARE(request.value(QStringLiteral("query")).toString(), QStringLiteral("retained search"));
         QCOMPARE(request.value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/demo"));
+        auto *background = manager.findChild<QPushButton *>(QStringLiteral("sessionsBackground"));
+        QVERIFY(background->isVisible());
+        background->click();
+        QCOMPARE(manager.currentTab(), QStringLiteral("sessions"));
+        QCOMPARE(bar->currentIndex(), 0);
+        QVERIFY(backgroundContent->isVisible());
+        QVERIFY(manager.agentContext()->spec().screen.contains(QStringLiteral("Background sessions")));
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-background.png")));
+        manager.findChild<QPushButton *>(QStringLiteral("sessionsBackgroundBack"))->click();
+        QVERIFY(!backgroundContent->isVisible());
+        QVERIFY(background->isVisible());
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-first.png")));
     }
 
     void kindLabels() {

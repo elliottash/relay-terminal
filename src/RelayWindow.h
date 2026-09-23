@@ -72,7 +72,7 @@
 #include "RemotePane.h"   // Relay-to-Relay: a pane another desktop shares, opened here
 #include "TestSuitesPane.h"   // the Test suites pane, beside the Switchboard (card #7BM4)
 #include "ProfilePane.h"      // the Profile result pane, ditto (card #7BM4 phase 5)
-#include "ActionPalette.h"    // the Actions palette, Ctrl+Shift+P (card #MAGP)
+#include "ActionPalette.h"    // the Actions palette, Ctrl+? (card #MAGP)
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -405,7 +405,7 @@ public:
             });
             registerBoardRemote();   // this window can serve its boards to the owner's devices (#SWPH)
         }
-        // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+P).
+        // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+?).
         Keymap::instance().listen(this, [this] { syncChromeButtons(); });
         // The status bar stays out of the layout until something transient needs it, so the
         // window has no permanent strip under the composer and the terminal never resizes for one.
@@ -1312,8 +1312,8 @@ private:
         else if (id == QStringLiteral("tests.open")) openTestSuitesPane();   // card #7BM4
         else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();
         else if (id == QStringLiteral("notifications.jump")) jumpToNotification();   // #NQP9
-        // Sessions & Projects is one pane with one key (#SPSG); the per-tab ids open it on their tab.
-        else if (id == QStringLiteral("sessions.open")) toggleSessionsPane(pane);
+        // Sessions and Projects share a pane, with direct keys for their tabs.
+        else if (id == QStringLiteral("sessions.open")) toggleSessionsPane(pane, QStringLiteral("sessions"));
         else if (id == QStringLiteral("projects.open")) toggleSessionsPane(pane, QStringLiteral("projects"));
         else if (id == QStringLiteral("globals.open")) toggleSessionsPane(pane, QStringLiteral("globals"));
         else if (id == QStringLiteral("agent.resume") || id == QStringLiteral("conversations.open"))
@@ -1457,7 +1457,7 @@ private:
     // ----- Actions pane and Options pane (src/SettingsPane.h) -----------------------------------
     // Two panes, beside the focused pane (owner, 2026-09-18: a full pane, not a strip over the
     // right edge). Actions is the shortcut list since #MAGP (the palette's "Shortcut list" row;
-    // Ctrl+Shift+P opens the palette instead): one filterable list of everything you can do now, with
+    // Ctrl+? opens the palette instead): one filterable list of everything you can do now, with
     // its keys — resume, the Switchboard, the model, a new pane, rewind, Options itself.
     // Ctrl+Shift+O, Ctrl+, and the gear are Options: what persists, every setting as a real
     // control, one tab per section. Either search reaches both catalogs, so "open it, type,
@@ -2133,7 +2133,7 @@ private:
     }
 
     // ----- the Actions palette (#MAGP) ---------------------------------------------------------
-    // Ctrl+Shift+P and Ctrl+? open it over the window; the same chord, Esc or a click outside
+    // Ctrl+? opens it over the window; the same chord, Esc or a click outside
     // closes it. It reads the catalog afresh on every open, and actions run against the pane that
     // was focused before it opened (the palette is not a leaf, so opening it moves no pane). The
     // Actions pane is still there as the shortcut list: the palette's "Shortcut list" row.
@@ -4350,7 +4350,7 @@ private:
         shortcuts.title = QStringLiteral("Keyboard");
         shortcuts.blurb = QStringLiteral("Keys are read from keybindings.json, and your own overrides sit on top of the "
                                          "preset. Every action and the keys it answers to: %1.")
-                              .arg(Keymap::instance().shortcutText(QStringLiteral("palette.open")));
+                              .arg(Keymap::instance().shortcutText(QStringLiteral("help.shortcuts")));
         {
             const QString presetId = Keymap::instance().preset();
             QStringList values, labels;
@@ -4644,8 +4644,8 @@ private:
         items << actionItem(agent, QStringLiteral("Rewind code…"), QStringLiteral("Restore files the agent changed since a turn · /rewind-code"), QStringLiteral("agent.rewindCode"));
         items << actionItem(agent, QStringLiteral("Fork conversation"), QStringLiteral("Continue this conversation in a new pane"), QStringLiteral("agent.fork"));
         {
-            // One row for the one pane (#SPSG, after #R6J0): Sessions, Projects, Background and
-            // Globals are its tabs, so they are this row's children and never rows of their own.
+            // One row for the shared pane (#SPSG): Background and Recently closed are pages
+            // inside Sessions; Projects and Globals are tabs with their own direct keys.
             PaletteItem sessions = submenu(QStringLiteral("sessions.open"), agent, QStringLiteral("Sessions & Projects"),
                                            QStringLiteral("Find and resume a session, open a project, reopen background work, "
                                                           "global memories · /resume"),
@@ -6259,9 +6259,10 @@ public:
             ToolPane *existing = sessionsPaneIn(m_tabs->currentWidget());
             if (!existing) return;
             auto *view = sessionsViewOf(existing);
-            if (tab == QStringLiteral("projects") || tab == QStringLiteral("globals")) {
+            if (tab == QStringLiteral("projects") || tab == QStringLiteral("globals")
+                || tab == QStringLiteral("closed") || tab == QStringLiteral("background")) {
                 view->showTab(tab);
-                if (view->onTabActivated) view->onTabActivated(tab);
+                if (view->onTabActivated) view->onTabActivated(view->currentTab());
                 setActiveLeaf(existing); focusLeaf(existing); updateTitles();
                 return;
             }
@@ -6273,8 +6274,8 @@ public:
         openSessionsFor(owner, query, tab);
     }
 
-    // Sessions & Projects is one pane and one key (#SPSG; Ctrl+Shift+S, `sessions.open`). The key
-    // is a toggle: it opens the pane on the tab last used, and pressing it again with the pane
+    // Sessions & Projects is one pane with direct keys for its Sessions, Projects and Globals tabs.
+    // Each key is a toggle: it opens its tab, and pressing it again with that tab focused
     // focused closes it, the way Esc does (owner, 2026-09-20). Pressed while the focus is elsewhere
     // it brings the open pane forward and rebinds it to the pane that asked, rather than closing a
     // pane the user is not looking at. The per-tab ids (`projects.open`, `globals.open`,
@@ -6343,7 +6344,7 @@ public:
             projects->setObjectName(QStringLiteral("workspaceProjects"));
             auto *globals = new relay::globals::GlobalsPane;
             globals->setObjectName(QStringLiteral("workspaceGlobals"));
-            view->insertTab(0, QStringLiteral("projects"), QStringLiteral("Projects"), projects);
+            view->addTab(QStringLiteral("projects"), QStringLiteral("Projects"), projects);
             view->addTab(QStringLiteral("globals"), QStringLiteral("Globals"), globals);
             QPointer<ToolPane> toolGuard(tool);
             QPointer<relay::globals::GlobalsPane> globalGuard(globals);
@@ -6579,10 +6580,11 @@ public:
         view->onTabSelectedByUser = [guard](const QString &id) {
             auto *windowGuard = windowOf(guard);
             if (!windowGuard) return;
-            // One key opens the pane, and it comes back on the tab last used (#SPSG).
+            const QString action = id == QStringLiteral("projects") ? QStringLiteral("projects.open")
+                : id == QStringLiteral("globals") ? QStringLiteral("globals.open")
+                : QStringLiteral("sessions.open");
             windowGuard->hint(QStringLiteral("workspace.tab.") + id,
-                relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("sessions.open")),
-                                               QStringLiteral("Sessions & Projects, on the tab you left it")));
+                relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(action)));
         };
         refreshProjects();
         view->showTab(tab);
@@ -11558,7 +11560,7 @@ private:
     bool m_updateInstalled = false;
     QTabWidget *m_tabs = nullptr;
     QPointer<Pane> m_returnPane;        // where focus was when the Settings pane opened
-    QPointer<relay::ActionPalette> m_palette;   // Ctrl+Shift+P, made on first use (#MAGP)
+    QPointer<relay::ActionPalette> m_palette;   // Ctrl+?, made on first use (#MAGP)
     QPointer<QWidget> m_returnFocus;
     // True while toggleBoardPane is closing the Switchboard with its own key, so closePane does
     // not hint that key to the person who has just used it.
