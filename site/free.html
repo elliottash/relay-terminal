@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
   <meta property="og:title" content="Relay Free — the agent works the moment Relay opens">
-  <meta property="og:description" content="An included allowance for a fresh install. No key, no account, metadata-only logs.">
+  <meta property="og:description" content="An included allowance for a fresh install, served through Relay's gateway.">
   <meta property="og:type" content="website">
   <link rel="icon" href="assets/relay.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
@@ -73,11 +73,10 @@
                 (command output, file contents it reads) go to Relay's gateway at
                 <code>api.relay-terminal.ai</code> and on to the provider serving that tier. Their privacy
                 policy applies to what they receive.</li>
-              <li>The gateway logs one line of metadata per request: time, a hash of the installation id, the
-                tier, the provider, the status, timings and token counts. Never the text, never file
-                contents, never terminal output. Metadata is kept for seven days.</li>
-              <li>Relay itself still has no telemetry: no analytics, no crash reporting. Shell commands you
-                run, and terminal output, are never sent on their own.</li>
+              <li>The gateway processes the request and records usage for service operation.
+                See the privacy information for current data-handling details.</li>
+              <li>Agent requests can include prompts, conversation history, and tool results.
+                Shell commands you run and terminal output are not sent on their own.</li>
             </ul>
           </div>
         </div>
