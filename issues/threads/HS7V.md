@@ -29,3 +29,6 @@ Owner: “we shouldnt use .warp as the default place for skills or anything else
 
 <!-- relay:entry 20260923T224149Z-95 author=agent kind=event model=gpt-6-sol pane=e0e12343 turn=57fbc290e77c491b8c6cfbfb7fffa484/729ceae32f284ab3a5447a965c0f762e -->
 - ✦ agent moved this card · Executing → Needs verification · Relay-owned paths and external-source fallback implemented; focused skill, instruction and Board-pointer tests pass. · evidence tests/test_skills.py · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T224206Z-gm author=agent kind=event model=gpt-6-sol pane=e0e12343 turn=57fbc290e77c491b8c6cfbfb7fffa484/729ceae32f284ab3a5447a965c0f762e -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["tests/test_skills.py"], "related": ["… → {"plans": [], "commits": ["c09365ee25140c0185ac91263391689d19e00185"], "evidence…

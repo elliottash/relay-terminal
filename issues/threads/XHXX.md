@@ -32,3 +32,6 @@ Compare current official extension catalogs and the local inventory, then turn t
 
 <!-- relay:entry 20260923T223048Z-1t author=agent kind=event model=gpt-6-sol pane=e0e12343 turn=57fbc290e77c491b8c6cfbfb7fffa484/8bcb7efa3e2b4131ad41523d61a84895 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["reports/Plugin ecosystems for Relay.m… → {"plans": [], "commits": ["02c408cd916ca6d05de9d9a0a2dc8fb49af3c269"], "evidence…
+
+<!-- relay:entry 20260923T224003Z-qw author=agent kind=decision model=gpt-6-sol pane=e0e12343 turn=57fbc290e77c491b8c6cfbfb7fffa484/729ceae32f284ab3a5447a965c0f762e -->
+Owner corrected the plugin strategy: “we shouldnt use .warp as the default place for skills or anything else. we should centralize in .relay and route to existing skill / instruction surfaces from there.” Implementation tracked in #HS7V; research report updated accordingly.

@@ -9,7 +9,7 @@ session: e0e12343-9768-4af9-a4ee-96b00ae19807
 rank: zzzzzzzzzzzzzzzzzw
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [tests/test_skills.py], related: [XHXX, MEPR], github: null}
+links: {plans: [], commits: [c09365ee25140c0185ac91263391689d19e00185], evidence: [tests/test_skills.py], related: [XHXX, MEPR], github: null}
 ---
 # Make .relay the canonical home for skills and instructions
 

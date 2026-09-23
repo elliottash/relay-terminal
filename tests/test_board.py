@@ -1360,8 +1360,8 @@ class PolicyFileTests(unittest.TestCase):
             self.assertIn(B.POINTER_START, (self.dir / name).read_text())
 
     def test_warp_md_is_never_touched(self):
-        # WARP.md is first in PROJECT_ORDER: it is what Relay's own agent reads, and that agent
-        # has the policy in its system prompt already.
+        # WARP.md remains a compatible instruction source, but Board scaffolding writes its
+        # pointer only to AGENTS.md and CLAUDE.md; Relay's agent has the policy in its prompt.
         (self.dir / "WARP.md").write_text("# Warp\n")
         (self.dir / "CLAUDE.md").write_text("# Project\n")
         files = B.scaffold(self.board())
