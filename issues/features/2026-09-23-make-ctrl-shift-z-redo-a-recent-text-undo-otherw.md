@@ -9,7 +9,7 @@ session: a28c246c-e7f1-4701-8c1b-3e850015f76f
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-redo-shortcut/], related: [QWAS, RC7Z], github: null}
+links: {plans: [], commits: [011c83e975a27aa77203eb57658c70805c8e253b], evidence: [docs/qa_evidence/2026-09-23-redo-shortcut/, docs/qa_evidence/2026-09-23-tryit-BKMC/], related: [QWAS, RC7Z], github: null}
 ---
 # Make Ctrl+Shift+Z redo a recent text undo, otherwise restore closed
 
@@ -48,3 +48,12 @@ manual: `docs/qa_evidence/2026-09-23-redo-shortcut/`
 
 ## Execution Summary
 Added `src/TextRedoShortcut.h` and routed Ctrl+Z/Ctrl+Shift+Z in `src/RelayWindowCore.cpp`. For editable QLineEdit, QPlainTextEdit and QTextEdit widgets, a successful Ctrl+Z arms redo in that field; text changes and focus exit clear it. Ctrl+Shift+Z uses redo only while armed; otherwise Relay's `closed.restore` keeps the key. Other keymap actions keep precedence. Updated README and architecture shortcut text. The focused Qt test checks redo, restore fallback, no-op undo, edits, focus switching, and stale redo in an unbound preset. Evidence: `docs/qa_evidence/2026-09-23-redo-shortcut/`.
+
+## Try it
+`./docs/qa_evidence/2026-09-23-tryit-BKMC/stage.sh`
+
+In the disposable Relay window, type a short draft in the prompt, undo it with Ctrl+Z, then press Ctrl+Shift+Z. Close a spare pane and try that shortcut again when no redo is pending.
+
+Does the shortcut’s behavior feel predictable in those two situations? (About 2 minutes.)
+
+Expected: docs/qa_evidence/2026-09-23-tryit-BKMC/expected.md (sealed until you answer)

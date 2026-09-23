@@ -43,3 +43,9 @@ Owner: "any text field, where redo is active from an immediate ctrl z, the hotke
 
 <!-- relay:entry 20260923T220433Z-dc author=agent kind=progress model=gpt-6-sol pane=a28c246c turn=39546a75e3fc4affa20794b8ca94797c/78d497cfd1344dccbdd6eee5dda5595a -->
 - ✦ agent is preparing Try it for this card
+
+<!-- relay:entry 20260923T220914Z-mv author=agent kind=event model=gpt-6-sol pane=a28c246c turn=39546a75e3fc4affa20794b8ca94797c/78d497cfd1344dccbdd6eee5dda5595a -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-redo-shor… → {"plans": [], "commits": ["011c83e975a27aa77203eb57658c70805c8e253b"], "evidence…; replaced `## Try it`
+
+<!-- relay:entry 20260923T220920Z-56 author=agent kind=evidence model=gpt-6-sol pane=a28c246c turn=39546a75e3fc4affa20794b8ca94797c/78d497cfd1344dccbdd6eee5dda5595a -->
+Prepared a disposable Relay profile and workspace with `docs/qa_evidence/2026-09-23-tryit-BKMC/stage.sh`. The fast binary opened under Xvfb; `relay-drive --socket … panes` reported one focused pane in `/tmp/claude-1000/tryit/BKMC/project`. I inspected the initial-window capture: ![Isolated Relay prompt ready for the human shortcut check](docs/qa_evidence/2026-09-23-tryit-BKMC/01-opened.png). The prompt's keystrokes have no named relay-drive input seam, so the separate human task covers the in-app feel of the shortcut.
