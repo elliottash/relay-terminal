@@ -1000,7 +1000,7 @@ class AgentWiringTests(unittest.TestCase):
         agent = self.agent(None)
         self.assertEqual([t for t in agent.tools()
                           if t["function"]["name"].startswith(("board_", "tests_"))], [])
-        self.assertNotIn("Board", agent.system_prompt())
+        self.assertNotIn("board_rate_limited", agent.system_prompt())
 
     def test_with_a_board_every_tool_and_the_policy_reach_the_model(self):
         tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
@@ -1027,9 +1027,12 @@ class AgentWiringTests(unittest.TestCase):
         agent.set_mode("plan")
         names = {t["function"]["name"] for t in agent.tools()}
         self.assertIn("board_list", names)
-        with self.assertRaises(ValueError):
-            agent._prepare("board_create_card", {"tab": "features", "status": "inbox",
-                                                 "title": "T", "request": "r"})
+        # Generic Plan mode is an instruction, not a permission boundary (#PLDG): its stable
+        # tool list still permits this call. Card Plan turns have their own stricter scope.
+        self.assertIn("board_create_card", names)
+        prepared = agent._prepare("board_create_card", {"tab": "features", "status": "inbox",
+                                                       "title": "T", "request": "r"})
+        self.assertIn("BOARD CREATE CARD", prepared.preview)
 
     def test_a_turn_resets_the_per_turn_budget_and_stamps_the_model(self):
         tools = T.BoardTools.for_workspace(self.repo, state_path=self.repo / ".relay" / "r.json")
@@ -1429,7 +1432,7 @@ class CardScopeAgentTests(unittest.TestCase):
                            ("edit_file", {"path": "x", "old": "a", "new": "b"})):
             with self.assertRaises(ValueError) as refused:
                 agent._prepare(name, args)
-            self.assertIn("Execute", str(refused.exception))
+            self.assertIn("Run's job", str(refused.exception))
             self.assertIn("#ABCD", str(refused.exception))
         # What a card turn reads is not refused, and the board's own rule is the board's.
         prepared = agent._prepare("search_files", {"pattern": "x"})
@@ -1708,7 +1711,7 @@ class SetBoardTests(AttachTest):
         agent.messages.append({"role": "user", "content": "a question from before"})
         identity = (id(agent), id(agent.messages), len(agent.messages), agent.session_id)
         self.assertEqual(self.board_tools(agent), [])
-        self.assertNotIn("Board", agent.system_prompt())
+        self.assertNotIn("board_rate_limited", agent.system_prompt())
 
         self.events.clear()
         self.commands.set_board({"type": "set_board", "id": "s1", "board": {"dir": str(there)}})
@@ -1758,7 +1761,7 @@ class SetBoardTests(AttachTest):
         self.assertEqual(self.of("board_state")[0], {"event": "board_state", "id": "s2",
                                                      "board": None, "applies": "now"})
         self.assertEqual(self.board_tools(agent), [])
-        self.assertNotIn("Board", agent.system_prompt())
+        self.assertNotIn("board_rate_limited", agent.system_prompt())
         self.assertEqual((id(agent.messages), len(agent.messages)), identity)
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_open"})
@@ -1769,7 +1772,7 @@ class SetBoardTests(AttachTest):
         self.assertIsNone(self.commands.agent_tools(str(there), {"board": {"attach": False}}))
         agent = self.agent(there, {"board": {"attach": False}})
         self.assertEqual(self.board_tools(agent), [])
-        self.assertNotIn("Board", agent.system_prompt())
+        self.assertNotIn("board_rate_limited", agent.system_prompt())
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_open"})
 
