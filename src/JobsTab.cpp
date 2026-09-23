@@ -452,8 +452,8 @@ QString JobsTab::overrideText(const QString &role) const {
                 [](const auto &a, const auto &b) { return a.rank < b.rank; })->rank;
             const int peers = std::count_if(entries.begin(), entries.end(),
                 [firstRank](const auto &entry) { return entry.rank == firstRank; });
-            return QStringLiteral("%1 ranked models%2").arg(entries.size())
-                .arg(peers > 1 ? QStringLiteral(" · random among %1 at rank 1").arg(peers) : QString());
+            return QStringLiteral("%1 models%2").arg(entries.size())
+                .arg(peers > 1 ? QStringLiteral(" · random at rank 1") : QString());
         }
     }
     const QString key = rolestore::overrideKey(role);

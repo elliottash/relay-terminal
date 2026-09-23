@@ -377,7 +377,7 @@ private Q_SLOTS:
         Served served;
         JobsTab tab;
         tab.setData(dataFor(&served));
-        QVERIFY(tab.overrideText(QStringLiteral("planning")).contains(QStringLiteral("random among 2")));
+        QVERIFY(tab.overrideText(QStringLiteral("planning")).contains(QStringLiteral("random at rank 1")));
         QVERIFY(tab.selectRole(QStringLiteral("planning")));
         QVERIFY(tab.clearOverride());
         QVERIFY(!rolestore::rankedOverrideSet(QStringLiteral("planning")));
