@@ -9,7 +9,7 @@ session: 8d16eb6c-8bf3-4b06-acab-9e886d6621bd
 rank: mpx
 created: '2026-09-21'
 source: Codex in a Relay pane, 2026-09-21
-links: {plans: [], commits: [97add146dbe8ce0877e31ad533ea21775860874e], evidence: [docs/qa_evidence/2026-09-21-plan-exit/verification.md, docs/qa_evidence/2026-09-23-guest-plan-exit-XP7N/verification.md], related: [], github: null}
+links: {plans: [], commits: [97add146dbe8ce0877e31ad533ea21775860874e, 9dc211b4995aad98cb38269a3bfceb864c79f59a], evidence: [docs/qa_evidence/2026-09-21-plan-exit/verification.md, docs/qa_evidence/2026-09-23-guest-plan-exit-XP7N/verification.md], related: [], github: null}
 ---
 # Let the agent request to exit planning mode
 
