@@ -247,8 +247,11 @@ def problems() -> list[str]:
         if adapters and tuple(MR._GUEST_MODEL_IDS.get(short, ())) != adapters:
             out.append(f"model_ranking._GUEST_MODEL_IDS[{short!r}] is "
                        f"{list(MR._GUEST_MODEL_IDS.get(short, ()))}, the adapter names {list(adapters)}")
-    # A Models row classed for something that nobody serves by that name decides nothing.
+    # A Models row classed for something that nobody serves by that name decides nothing. The
+    # ranking file names its rows by id, and a catalog row's display name is not always that id
+    # (relay-free shows "relay free · main" for relay-main), so an id counts as served too.
     served = {name_of(p, row["id"]) for p, rows in P.MODEL_CATALOG.items() for row in rows}
+    served |= {row["id"] for rows in P.MODEL_CATALOG.values() for row in rows}
     served |= {name_of("openrouter", slug) for slug in P.OPENROUTER_TWINS.values()}
     for guest in GUESTS:
         served |= {name_of(guest, m) for m in guest_model_ids(guest)}
