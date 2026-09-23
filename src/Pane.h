@@ -2662,7 +2662,7 @@ private:
                                                        : QStringLiteral("rejected"));
                           });
         const QString where = m_workspace.isEmpty() ? name : QStringLiteral("%1 · %2").arg(name, m_workspace);
-        // A pointer, not a decision: no action button, so Ctrl+Shift+R still means "restart what
+        // A pointer, not a decision: no action button, so pane.restartShell still means "restart what
         // stopped here" and any other banner may take this one's place.
         m_guestDiff.banner = QStringLiteral("claude proposes changes to %1 · Accept or Reject in the diff pane")
                                  .arg(where);
@@ -16371,7 +16371,7 @@ private:
         if (m_editor->ghost().size()) m_editor->setGhost(QString());
     }
 
-    // "Next time: Ctrl+Shift+S" after the slow path (WARP.md's standing rule). A pane whose tab
+    // "Next time: <the board.open key>" after the slow path (WARP.md's standing rule). A pane whose tab
     // is attached to nothing has no Switchboard to open, so it teaches no shortcut for one.
     void boardShortcutHint(const QString &id) {
         if (!hasBoard()) return;
@@ -17199,7 +17199,7 @@ public:
         cursor.insertText(lead + relay::images::composerToken(path) + QLatin1Char(' '));
         m_editor->setTextCursor(cursor);
         // Reached from the palette, the palette's own shortcut hint follows this line (see
-        // RelayWindow::activateSelected), so Ctrl+Shift+G is what stays on screen.
+        // RelayWindow::activateSelected), so agent.screenshotPane's key, when one is bound, is what stays on screen.
         status(QStringLiteral("Pane screenshot attached · describe what you want done with it"));
         focusInput();
     }

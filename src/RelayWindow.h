@@ -402,7 +402,7 @@ public:
             });
             registerBoardRemote();   // this window can serve its boards to the owner's devices (#SWPH)
         }
-        // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+A).
+        // No toolbar: the tab bar starts at the top. Its actions live in the palette (Ctrl+Shift+P).
         Keymap::instance().listen(this, [this] { syncChromeButtons(); });
         // The status bar stays out of the layout until something transient needs it, so the
         // window has no permanent strip under the composer and the terminal never resizes for one.
@@ -1452,10 +1452,11 @@ private:
 
     // ----- Actions pane and Options pane (src/SettingsPane.h) -----------------------------------
     // Two panes, beside the focused pane (owner, 2026-09-18: a full pane, not a strip over the
-    // right edge). Ctrl+Shift+A is Actions: one filterable list of everything you can do now, with
+    // right edge). Actions is the shortcut list since #MAGP (the palette's "Shortcut list" row;
+    // Ctrl+Shift+P opens the palette instead): one filterable list of everything you can do now, with
     // its keys — resume, the Switchboard, the model, a new pane, rewind, Options itself.
     // Ctrl+Shift+O, Ctrl+, and the gear are Options: what persists, every setting as a real
-    // control, one tab per section. Either search reaches both catalogs, so "Ctrl+Shift+A, type,
+    // control, one tab per section. Either search reaches both catalogs, so "open it, type,
     // Enter" always lands somewhere. The panes are transient: they are not saved with the layout,
     // and closing one returns focus to the widget that had it (vim in the terminal, or the prompt).
     //
@@ -2115,7 +2116,7 @@ private:
         return pane->takeAgentRename(name, previous, error);
     }
 
-    // Two keys, a pane each: Ctrl+Shift+A is Actions (things to do now), Ctrl+Shift+O and the gear
+    // Two panes: Actions (things to do now; the palette's "Shortcut list" row), Ctrl+Shift+O and the gear
     // are Options (what persists). Each opens its own pane, or focuses it if this tab already has
     // one; pressed while that pane has the focus, it closes it. Neither key touches the other's
     // pane, so both can be on screen at once.
@@ -6134,7 +6135,7 @@ public:
     }
     // ----- the session manager pane and the ⓘ pane (cards #R6J0, #Y63Z) ------------------------
     // One session manager per tab, bound to the pane that opened it: its queries go to that pane's
-    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+Y (agent.resume) and
+    // worker and Enter resumes there. /resume, /conversations, Ctrl+Shift+S (sessions.open), agent.resume and
     // conversations.open all come here through Pane::openConversations.
     using SessionsTabFactory = std::function<QWidget *(RelayWindow *window)>;
     struct SessionsTab { QString id, label; SessionsTabFactory make; };
@@ -7052,7 +7053,7 @@ public:
     }
 
     // ----- Switchboard (docs/BOARD-DESIGN.md 4, protocol 17) -----------------------------
-    // Ctrl+Shift+S: open the Switchboard beside the anchor, focus the one this tab already has,
+    // Ctrl+Shift+A: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
     void toggleBoardPane() {
         QWidget *page = m_tabs->currentWidget();
@@ -7732,7 +7733,7 @@ public:
     // The tab whose board a device sees: the current tab when it has one, else the first that has.
     // `adopt` is the bridge's second question, asked only when no window answered the first: the
     // active pane stands in a project that has a Switchboard nobody has opened, and opening it
-    // from a device attaches the tab exactly as Ctrl+Shift+S does (toggleBoardPane) — minus the
+    // from a device attaches the tab exactly as Ctrl+Shift+A does (toggleBoardPane) — minus the
     // pane, which a phone has no use for.
     QString remoteBoardTab(bool adopt) {
         QWidget *current = m_tabs->currentWidget();
@@ -11241,7 +11242,7 @@ public:
             // A save that failed (or could not start) keeps the pane, so the edits stay put.
             if (choice == QMessageBox::Save && !tool->preview()->save()) return;
         }
-        // The Switchboard's own key (Ctrl+Shift+S) closes it too; a board pane closed any other
+        // The Switchboard's own key (Ctrl+Shift+A) closes it too; a board pane closed any other
         // way — the pane's ×, Ctrl+W — is the slow path that hint names, once.
         if (!m_boardClosedByToggle)
             if (auto *closedBoard = dynamic_cast<ToolPane *>(pane); closedBoard && closedBoard->board()) {
