@@ -49,3 +49,6 @@ Owner: "any text field, where redo is active from an immediate ctrl z, the hotke
 
 <!-- relay:entry 20260923T220920Z-56 author=agent kind=evidence model=gpt-6-sol pane=a28c246c turn=39546a75e3fc4affa20794b8ca94797c/78d497cfd1344dccbdd6eee5dda5595a -->
 Prepared a disposable Relay profile and workspace with `docs/qa_evidence/2026-09-23-tryit-BKMC/stage.sh`. The fast binary opened under Xvfb; `relay-drive --socket … panes` reported one focused pane in `/tmp/claude-1000/tryit/BKMC/project`. I inspected the initial-window capture: ![Isolated Relay prompt ready for the human shortcut check](docs/qa_evidence/2026-09-23-tryit-BKMC/01-opened.png). The prompt's keystrokes have no named relay-drive input seam, so the separate human task covers the in-app feel of the shortcut.
+
+<!-- relay:entry 20260923T221248Z-xb author=agent kind=evidence model=gpt-6-sol pane=a28c246c turn=39546a75e3fc4affa20794b8ca94797c/78d497cfd1344dccbdd6eee5dda5595a -->
+Updated the staged fixture to open two panes through `relay-drive action pane.splitRight`, so a spare pane is ready to close. Re-ran `stage.sh` under Xvfb and inspected the new two-pane capture: ![Disposable Relay with two panes ready for the shortcut task](docs/qa_evidence/2026-09-23-tryit-BKMC/01-opened.png). The earlier one-pane capture has been replaced.
