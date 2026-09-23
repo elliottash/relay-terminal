@@ -629,7 +629,10 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     // Unusable and exhausted rows are greyed *in place*, with the reason where the figure goes —
     // never hidden. A list is an order the user wrote down; silently dropping a rank from it is
     // how "which model is selected first" stopped being answerable (design 1.3).
-    const bool dead = !entry || !entry->usable || until >= 0;
+    // Un-ticked on Available (#AVR8) is the same: greyed where it is ranked, so ticking it again
+    // puts it back at this rank, and "not available" where the figure goes.
+    const bool unticked = !curation::isAvailableKey(item.key, curation::availableKeys());
+    const bool dead = !entry || !entry->usable || until >= 0 || unticked;
     QString name = entry ? entry->name : item.key;
     if (curation::isFavorite(item.key)) name.prepend(QStringLiteral("★ "));
     // …and on the sectioned page main's own header already says it, so the row does not: the two
@@ -637,6 +640,7 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     if (rank == 1 && tier == kMain && !sectionsPage()) name += QStringLiteral("   · new panes start here");
     QString left;
     if (!entry) left = QStringLiteral("unavailable");
+    else if (unticked) left = QStringLiteral("not available");
     else if (!entry->usable) left = entry->preset == QStringLiteral("relay-pro")
         ? QStringLiteral("no access") : QStringLiteral("no key");
     else if (until >= 0) left = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
@@ -1135,8 +1139,10 @@ void ModelPicker::refreshAvailability() {
 void ModelPicker::applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason) {
     row->setCheckState(ColAvail, available ? Qt::Checked : Qt::Unchecked);
     const QString tip = !reason.isEmpty()
-        ? QStringLiteral("Available: your high, main, flash or local list names it, which keeps it available "
-                         "whatever this box says. The lite list does not: those are chores, not panes")
+        ? (available ? QStringLiteral("Available: ranked in your priorities. Un-ticking greys it there and "
+                                      "nothing runs it, but it keeps its place for when you tick it again")
+                     : QStringLiteral("Not available: still ranked in your priorities, greyed and skipped. "
+                                      "Tick it to put it back at its place"))
         : available
             ? QStringLiteral("Available: this model is in the lists, the alt+m box and its filter")
             : QStringLiteral("Not available: it is in no list, not in the box, and not in the box's filter. "

@@ -324,27 +324,29 @@ private Q_SLOTS:
         QVERIFY(available(QStringLiteral("openrouter|vendor/hand-typed")));
     }
 
-    // A model a tier list names is available whatever the checkbox says: a rank the user wrote
-    // down that the failover would step over is a list that lies.
-    void aModelATierListNamesStaysAvailable() {
+    // A tier list no longer overrules the tick (#AVR8, owner 2026-09-22): ranking an un-ticked
+    // model keeps it un-ticked, and the list as it runs (`activeTierList`) leaves it out while the
+    // stored list keeps its rank.
+    void aTierListKeepsAnUntickedModelsRankButDoesNotRunIt() {
         const Catalog catalog = catalogFrom(presets());
         const QString sonnet = QStringLiteral("guest:claude|sonnet");
         curation::setAvailable(sonnet, false, catalog);
         QVERIFY(!curation::isAvailable(*catalog.find(sonnet)));
         curation::addToTier(QStringLiteral("flash"), sonnet);
-        QVERIFY(curation::isAvailable(*catalog.find(sonnet)));
-        bool listed = false;
-        for (const Entry &entry : shown(catalog)) listed = listed || entry.key == sonnet;
-        QVERIFY(listed);
-        curation::removeFromTier(QStringLiteral("flash"), sonnet);
         QVERIFY(!curation::isAvailable(*catalog.find(sonnet)));
+        for (const Entry &entry : shown(catalog)) QVERIFY(entry.key != sonnet);
+        QCOMPARE(curation::tierList(QStringLiteral("flash")).last().key, sonnet);
+        for (const curation::TierEntry &item : curation::activeTierList(QStringLiteral("flash")))
+            QVERIFY(item.key != sonnet);
+        curation::setAvailable(sonnet, true, catalog);
+        QCOMPARE(curation::activeTierList(QStringLiteral("flash")).last().key, sonnet);
     }
 
     // …but the **lite** list does not pin, because lite is not a pane mode (card #MDL1,
     // owner 2026-09-21: "it seems like i cant disable gemini flash lite. just to say -- this tab
     // is only for terminal agents, so gemini flash lite should be optional"). The lite list was
     // the reason the one model the built-in list names could never be un-ticked.
-    void theLiteListDoesNotPinButTheTerminalClassesDo() {
+    void theLiteListRunsAnUntickedModelTheTerminalClassesDoNot() {
         const Catalog catalog = catalogFrom(presets());
         const QString flashLite = QStringLiteral("glm-coding|glm-5.3-flash");
         curation::addToTier(QStringLiteral("lite"), flashLite);
@@ -362,13 +364,15 @@ private Q_SLOTS:
         // untouched by the tick.
         QCOMPARE(curation::tierList(QStringLiteral("lite")).size(), 1);
         QCOMPARE(curation::tierList(QStringLiteral("lite")).first().key, flashLite);
-        // Each of the four terminal classes does pin, one at a time.
+        // The lite list runs it un-ticked; the four terminal classes skip it (#AVR8).
+        QCOMPARE(curation::activeTierList(QStringLiteral("lite")).size(), 1);
         for (const QString &tier : curation::boxClasses()) {
             curation::addToTier(tier, flashLite);
             QVERIFY2(curation::inTerminalList(flashLite), qPrintable(tier));
-            QVERIFY2(curation::isAvailable(*catalog.find(flashLite)), qPrintable(tier));
-            curation::removeFromTier(tier, flashLite);
             QVERIFY2(!curation::isAvailable(*catalog.find(flashLite)), qPrintable(tier));
+            for (const curation::TierEntry &item : curation::activeTierList(tier))
+                QVERIFY2(item.key != flashLite, qPrintable(tier));
+            curation::removeFromTier(tier, flashLite);
         }
     }
 

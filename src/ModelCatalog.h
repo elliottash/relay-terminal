@@ -228,9 +228,9 @@ void removeCustom(const QString &key);
 // below): which models this machine can reach is not a thing to swap between "AI work" and "admin
 // work", and a profile that hid half a provider would read as the provider being broken.
 //
-// A model one of the **terminal** lists names is available whatever the checkbox says — a list
-// entry that cannot be picked is a list that lies — and the tooltip says so on the pinned
-// checkbox. `lite` is not one of them: see `inTerminalList` below.
+// The tick is the user's even for a model a list ranks (#AVR8, 2026-09-22): an un-ticked ranked
+// model keeps its rank, is drawn greyed on Priorities, and is skipped by everything that runs a
+// list — `activeTierList` below. It used to pin the tick on, so an un-tick never took.
 QStringList availableKeys();
 // The list read once, for a caller walking a whole catalog (the same trap as `shown`, #PPR4).
 bool isAvailable(const Entry &entry, const QStringList &available);
@@ -280,6 +280,13 @@ QStringList tierIds();                                   // main, high, flash, l
 QString tierLabel(const QString &tier);                  // "main models"
 bool tierListsSet();                                     // whether any list has been stored
 QList<TierEntry> tierList(const QString &tier);
+// The list as it runs: `tierList` without the models un-ticked on Available (#AVR8). What the
+// worker, the box and the defaults read; `tierList` stays the stored order that edits rewrite, so
+// a model ticked again comes back at the rank it had. Lite is returned whole: the tick is about
+// terminal agents, not chores.
+QList<TierEntry> activeTierList(const QString &tier);
+// `isAvailable` for a key some list names, without a catalog (exact for those keys).
+bool isAvailableKey(const QString &key, const QStringList &available);
 void setTierList(const QString &tier, const QList<TierEntry> &entries);
 void addToTier(const QString &tier, const QString &key, const QString &effort = QString());
 void removeFromTier(const QString &tier, const QString &key);

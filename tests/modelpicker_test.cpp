@@ -1329,21 +1329,50 @@ private Q_SLOTS:
         QVERIFY(!rowKeys(again.list()).contains(QStringLiteral("openrouter|vendor/tail-3")));
     }
 
-    // A model one of the **terminal** lists names is available whatever the box says: a rank the
-    // user wrote down that the box would not offer is a list that lies, and the tooltip says so.
-    void aModelATerminalListNamesStaysTicked() {
+    // Available governs a ranked model too, and Priorities shows it (#AVR8, owner 2026-09-22: "the
+    // model priorities page needs to refresh when changing available"). The un-tick sticks; on the
+    // priorities page the row is still at its rank, greyed and "not available"; nothing that runs
+    // a list sees it; ticking it again puts it back where it was.
+    void unTickingARankedModelGreysItOnPrioritiesAndKeepsItsRank() {
+        const QString glm = QStringLiteral("glm-coding|glm-5.3");
         const QString flash = QStringLiteral("glm-coding|glm-5.3-flash");
-        setList(QStringLiteral("flash"), {{flash, QString()}});
+        setList(QStringLiteral("main"), {{glm, QString()}, {flash, QString()}});
         ModelPicker::Context ctx = context();
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
         picker.selectKey(flash);
         QTreeWidgetItem *row = picker.list()->currentItem();
-        QVERIFY(row->toolTip(ColAvail).contains(QStringLiteral("high, main, flash or local list names it")));
+        QVERIFY(row->toolTip(ColAvail).contains(QStringLiteral("ranked in your priorities")));
         row->setCheckState(ColAvail, Qt::Unchecked);
-        // The setting took the un-tick; the list overrules it, and the box goes straight back on.
-        QVERIFY(curation::isAvailable(*ctx.catalog.find(flash)));
-        QCOMPARE(row->checkState(ColAvail), Qt::Checked);
+        QVERIFY(!curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(picker.list()->currentItem()->checkState(ColAvail), Qt::Unchecked);
+        // Stored order untouched; the running order skips it.
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
+        const QList<curation::TierEntry> active = curation::activeTierList(QStringLiteral("main"));
+        QCOMPARE(active.size(), 1);
+        QCOMPARE(active.first().key, glm);
+        QCOMPARE(fallbacks(ctx.catalog, 1).size(), 0);
+        // The same widget, switched to the priorities page the way the models pane does it.
+        picker.setTier(ModelPicker::classesTier());
+        QTreeWidgetItem *ranked = nullptr;
+        for (int i = 0; i < picker.list()->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = picker.list()->topLevelItem(i);
+            if (item->data(0, Qt::UserRole).toString() == flash && item->text(ColRank) == QStringLiteral("2")) ranked = item;
+        }
+        QVERIFY2(ranked, qPrintable(rowKeys(picker.list()).join(QLatin1Char(' '))));
+        QCOMPARE(ranked->text(ColLeft), QStringLiteral("not available"));
+        QCOMPARE(ranked->foreground(ColModel).color(), picker.palette().color(QPalette::Disabled, QPalette::Text));
+        // Ticked again: back at rank 2, running.
+        picker.setTier(QStringLiteral("all"));
+        picker.selectKey(flash);
+        picker.list()->currentItem()->setCheckState(ColAvail, Qt::Checked);
+        QCOMPARE(curation::activeTierList(QStringLiteral("main")).size(), 2);
+        picker.setTier(ModelPicker::classesTier());
+        for (int i = 0; i < picker.list()->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = picker.list()->topLevelItem(i);
+            if (item->data(0, Qt::UserRole).toString() == flash && item->text(ColRank) == QStringLiteral("2"))
+                QVERIFY(item->text(ColLeft) != QStringLiteral("not available"));
+        }
     }
 
     // …and the **lite** list does not pin (card #MDL1, owner 2026-09-21: "it seems like i cant

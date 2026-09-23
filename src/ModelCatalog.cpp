@@ -435,15 +435,37 @@ QStringList availableKeys() { return list(kAvailable); }
 bool isAvailable(const Entry &entry, const QStringList &available) {
     if (available.isEmpty()) return availableByDefault(entry);
     if (available.contains(entry.key)) return true;
-    // A model one of the **terminal** lists names is available whatever the checkbox says: a list
-    // entry that cannot be picked is a list that lies, and the failover would step over a rank the
-    // user wrote down. The lite list does not pin — see `inTerminalList`.
-    if (inTerminalList(entry.key)) return true;
+    // The tick is the user's, ranked or not (#AVR8, owner 2026-09-22: "the model priorities page
+    // needs to refresh when changing available"). A terminal list used to pin its models on, so an
+    // un-tick sprang straight back and Priorities never changed. Now an un-ticked ranked model
+    // keeps its place in the list — greyed there, `activeTierList` — and nothing runs it until it
+    // is ticked again.
     if (!presetNamedIn(available, entry.preset)) return availableByDefault(entry);
     return false;
 }
 
 bool isAvailable(const Entry &entry) { return isAvailable(entry, availableKeys()); }
+
+// The same answer from the key alone, for a key a list names. That is exact without a catalog: a
+// listed key is available by default whatever its provider (`availableByDefault` answers true for
+// anything `inTerminalList` names), so only the stored ticks can say no.
+bool isAvailableKey(const QString &key, const QStringList &available) {
+    if (available.isEmpty() || available.contains(key)) return true;
+    QString preset, model;
+    if (!Catalog::splitKey(key, &preset, &model)) return true;
+    return !presetNamedIn(available, preset);
+}
+
+QList<TierEntry> activeTierList(const QString &tier) {
+    QList<TierEntry> list = tierList(tier);
+    // Lite is the chores' list, which the tick never governs (`inTerminalList`).
+    if (!boxClasses().contains(tier)) return list;
+    const QStringList available = availableKeys();
+    list.erase(std::remove_if(list.begin(), list.end(),
+                              [&available](const TierEntry &item) { return !isAvailableKey(item.key, available); }),
+               list.end());
+    return list;
+}
 
 void setAvailable(const QString &key, bool on, const Catalog &catalog) {
     QStringList keys = availableKeys();
@@ -1128,7 +1150,7 @@ QList<Entry> live(const Catalog &catalog, qint64 now) {
 QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
     if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
     QList<Entry> out;
-    for (const curation::TierEntry &item : curation::tierList(tier)) {
+    for (const curation::TierEntry &item : curation::activeTierList(tier)) {
         const Entry *entry = catalog.find(item.key);
         if (entry && entry->usable && !exhausted(catalog, entry->preset, now)) out << *entry;
     }

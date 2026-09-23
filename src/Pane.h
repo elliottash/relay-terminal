@@ -2018,7 +2018,7 @@ public:
         if (relay::models::curation::tierListsSet()) {
             for (const QString &tier : relay::models::curation::tierIds()) {
                 QJsonArray list;
-                for (const relay::models::curation::TierEntry &item : relay::models::curation::tierList(tier)) {
+                for (const relay::models::curation::TierEntry &item : relay::models::curation::activeTierList(tier)) {
                     QString preset, model;
                     if (!relay::models::Catalog::splitKey(item.key, &preset, &model)) continue;
                     QJsonObject entry{{"preset", preset}, {"model", model}};

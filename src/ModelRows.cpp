@@ -152,7 +152,7 @@ QHash<QString, ModePick> usableModePicks(const models::Catalog &catalog,
 static QList<models::Entry> tierEntriesOf(const Context &context, const QString &mode)
 {
     QList<models::Entry> out;
-    for (const models::curation::TierEntry &item : models::curation::tierList(mode))
+    for (const models::curation::TierEntry &item : models::curation::activeTierList(mode))
         if (const models::Entry *entry = context.catalog.find(item.key)) out << *entry;
     return out;
 }
