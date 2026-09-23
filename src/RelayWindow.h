@@ -2155,12 +2155,75 @@ private:
     // closes it. It reads the catalog afresh on every open, and actions run against the pane that
     // was focused before it opened (the palette is not a leaf, so opening it moves no pane). The
     // Actions pane is still there as the shortcut list: the palette's "Shortcut list" row.
+    static Pane *paneForPaletteConversation(const QString &id) {
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *window = dynamic_cast<RelayWindow *>(top))
+                for (Pane *pane : window->allPanes()) {
+                    if (pane->sessionId() == id) return pane;
+                    const QString source = pane->sessionTextSource();
+                    if (relay::conversations::isGuestSource(source)
+                        && source + QLatin1Char(':') + pane->guestSessionId() == id) return pane;
+                }
+        return nullptr;
+    }
+
+    void searchPaletteConversations(const QString &query) {
+        Pane *owner = m_active;
+        if (!owner) {
+            const QList<Pane *> panes = allPanes();
+            owner = panes.isEmpty() ? nullptr : panes.first();
+        }
+        if (!owner) return;
+        QPointer<relay::ActionPalette> palette = m_palette;
+        owner->onPaletteConversations = [palette](const QJsonObject &event) {
+            if (!palette) return;
+            struct Match { int rank; relay::ActionItem item; };
+            QList<Match> matches;
+            for (const QJsonValue &value : event.value(QStringLiteral("items")).toArray()) {
+                const QJsonObject row = value.toObject();
+                const QString id = row.value(QStringLiteral("session_id")).toString();
+                if (id.isEmpty() || !paneForPaletteConversation(id)) continue;
+                const QString best = row.value(QStringLiteral("best_match_kind")).toString();
+                int rank = best == QStringLiteral("title") ? 0 : best == QStringLiteral("summary") ? 1 : 2;
+                QString detail = row.value(QStringLiteral("summary")).toString();
+                bool bodyDetailSet = false;
+                for (const QJsonValue &matchValue : row.value(QStringLiteral("matches")).toArray()) {
+                    const QJsonObject match = matchValue.toObject();
+                    const QString kind = match.value(QStringLiteral("kind")).toString();
+                    if (rank == 2 && !bodyDetailSet
+                        && kind != QStringLiteral("title") && kind != QStringLiteral("summary")) {
+                        detail = match.value(QStringLiteral("line")).toString();
+                        bodyDetailSet = true;
+                    } else if (detail.isEmpty()) detail = match.value(QStringLiteral("line")).toString();
+                }
+                relay::ActionItem item;
+                item.key = QStringLiteral("conversation:") + id;
+                item.section = QStringLiteral("Conversations");
+                item.label = row.value(QStringLiteral("title")).toString();
+                item.detail = detail.simplified().left(180);
+                item.run = [id] {
+                    if (Pane *pane = paneForPaletteConversation(id))
+                        if (auto *window = dynamic_cast<RelayWindow *>(pane->window())) window->revealPane(pane);
+                };
+                matches.append({rank, item});
+            }
+            std::stable_sort(matches.begin(), matches.end(), [](const Match &a, const Match &b) {
+                return a.rank < b.rank;
+            });
+            QList<relay::ActionItem> items;
+            for (const Match &match : std::as_const(matches).mid(0, 12)) items.append(match.item);
+            palette->setConversationResults(event.value(QStringLiteral("query")).toString(), items);
+        };
+        owner->searchPaletteConversations(query, openSessionIds());
+    }
+
     void togglePalette() {
         if (!m_palette)
             m_palette = new relay::ActionPalette(this, [this] { return searchableActions(); },
                                                  [this] { return paletteForThisPane(); },
                                                  [] { return QSettings().value(QStringLiteral("palette/recent")).toStringList(); },
                                                  [this](const QString &key) { rememberPaletteChoice(key); });
+        m_palette->setConversationSearch([this](const QString &query) { searchPaletteConversations(query); });
         m_palette->setEditShortcut([this](const QString &key) { editShortcutOf(key); });
         QList<QKeySequence> chords;
         for (const QString &id : {QStringLiteral("palette.open"), QStringLiteral("help.shortcuts")})

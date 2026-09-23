@@ -8905,6 +8905,10 @@ private:
         // ----- conversation list and search (protocol section 14) -----------------------------
         if (type == QStringLiteral("conversations")) {
             noteRemoteSessions(event);   // pane_state (relay-terminal-71)
+            if (event.value(QStringLiteral("id")).toString() == QStringLiteral("palette-conversations")) {
+                if (onPaletteConversations) onPaletteConversations(event);
+                return true;
+            }
             // Only the manager's own queries (another client may ask this worker too).
             if (m_conversations && event.value(QStringLiteral("id")).toString() == QStringLiteral("conv-list"))
                 m_conversations->setResults(event);
@@ -9184,6 +9188,25 @@ public:
     void openConversations(const QString &initialQuery = QString()) {
         if (!m_workerReady) { status(QStringLiteral("The agent worker is still starting.")); return; }
         if (onOpenSessions) onOpenSessions(initialQuery);
+    }
+
+    // The Actions palette searches only the open session ids supplied by the window.
+    std::function<void(const QJsonObject &)> onPaletteConversations;
+    bool searchPaletteConversations(const QString &query, const QStringList &sessionIds) {
+        if (!m_workerReady || query.isEmpty() || sessionIds.isEmpty()) return false;
+        const bool indexGuests = QSettings().value(QStringLiteral("sessions/index_guests"), true).toBool();
+        QJsonArray sources{QStringLiteral("agent"), QStringLiteral("terminal")};
+        if (indexGuests) {
+            sources.append(QStringLiteral("claude"));
+            sources.append(QStringLiteral("codex"));
+        }
+        send({{"type", "conversations"}, {"id", "palette-conversations"},
+              {"query", query}, {"scope", "all"}, {"sort", "relevance"},
+              {"sources", sources},
+              {"session_ids", QJsonArray::fromStringList(sessionIds)}, {"limit", 200},
+              {"matches_per_item", 3},
+              {"index_guests", indexGuests}});
+        return true;
     }
 
     void bindSessionManager(relay::conversations::SessionManager *view) {

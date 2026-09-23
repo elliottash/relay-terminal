@@ -704,6 +704,18 @@ class RankingTests(unittest.TestCase):
         order = [i["session_id"] for i in self.index.search("wombat", scope="all", sort="relevance")["items"]]
         self.assertEqual(order, ["2" * 32, "1" * 32])
 
+    def test_active_session_filter_keeps_ranked_header_and_body_matches(self):
+        self.build("1" * 32, title="wombat plan")
+        self.build("2" * 32, summary="wombat recap")
+        self.build("3" * 32, reply="wombat in the transcript")
+        self.build("4" * 32, title="wombat closed")
+        active = ["1" * 32, "2" * 32, "3" * 32]
+        result = self.index.search("wombat", scope="all", sort="relevance", session_ids=active)
+        self.assertEqual([item["session_id"] for item in result["items"]], active)
+        self.assertEqual([item["best_match_kind"] for item in result["items"]],
+                         ["title", "summary", "reply"])
+        self.assertEqual(self.index.search("wombat", scope="all", session_ids=[])["items"], [])
+
     def test_a_title_or_summary_hit_is_a_match_line_of_its_own_kind(self):
         self.build("1" * 32, title="wombat plan", summary="the wombat summary")
         matches = self.index.search("wombat", scope="all")["items"][0]["matches"]

@@ -2224,7 +2224,7 @@ class ConversationIndex:
     def _filters(self, *, scope: str, workspace: str | None, model: str | None, has_open: bool,
                  since, until, kinds, has_edits=None, unfinished=None, pinned=None, file=None,
                  branch=None, has_summary=None, operators=(), now=None, project=None,
-                 outside_projects=()) -> tuple[str, list]:
+                 outside_projects=(), session_ids=None) -> tuple[str, list]:
         """The WHERE clause of the explicit filter arguments and the query's operators.
 
         Everything the user typed arrives as a bound parameter; LIKE patterns have their own
@@ -2238,6 +2238,11 @@ class ConversationIndex:
 
         if scope == "project":
             add("c.workspace = ?", normalize_workspace(str(workspace or "")))
+        if session_ids is not None:
+            if not session_ids:
+                add("0")
+            else:
+                add("c.session_id IN (%s)" % ",".join("?" * len(session_ids)), *session_ids)
         # The Sessions pane's "Project" chooser (card #916B). A row belongs to a project when its
         # workspace *is* that folder or lies below it — a pane opened in a subdirectory of a
         # checkout is that checkout's — so this is an equality-or-prefix test on the canonical
@@ -2339,7 +2344,8 @@ class ConversationIndex:
                has_edits: bool | None = None, unfinished: bool | None = None,
                pinned: bool | None = None, file: str | None = None, branch: str | None = None,
                has_summary: bool | None = None, now: float | None = None,
-               project: str | None = None, outside_projects: list[str] | None = None) -> dict:
+               project: str | None = None, outside_projects: list[str] | None = None,
+               session_ids: list[str] | None = None) -> dict:
         """Conversations matching `query`, each with its matching turns.
 
         The query may carry operators (`project:`, `file:`, `model:`, `branch:`, `before:`,
@@ -2385,7 +2391,7 @@ class ConversationIndex:
             scope=scope, workspace=workspace, model=model, has_open=has_open, since=since, until=until,
             kinds=kinds, has_edits=has_edits, unfinished=unfinished, pinned=pinned, file=file,
             branch=branch, has_summary=has_summary, operators=operators, now=now, project=project,
-            outside_projects=outside_projects or ())
+            outside_projects=outside_projects or (), session_ids=session_ids)
         started = time.time()
         parts = fts_parts(parsed["text"])
         terms = query_terms(parsed["text"])
@@ -2438,6 +2444,8 @@ class ConversationIndex:
                 for row in rows[:limit]:
                     item = _item(row)
                     item["match_count"] = row["hits"]
+                    item["best_match_kind"] = next(
+                        (kind for kind, weight in RANK_WEIGHTS.items() if weight == row["best"]), "")
                     out.append(item)
                 by_id = {item["session_id"]: item for item in out}
                 if by_id:

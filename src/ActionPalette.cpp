@@ -20,6 +20,7 @@
 #include <QSet>
 #include <QStyledItemDelegate>
 #include <QToolButton>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -247,7 +248,7 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
 
     m_search = new QLineEdit(m_buttonRow);
     m_search->setObjectName(QStringLiteral("actionPaletteSearch"));
-    m_search->setPlaceholderText(QStringLiteral("Search actions…"));
+    m_search->setPlaceholderText(QStringLiteral("Search actions and conversations…"));
     m_search->setClearButtonEnabled(false);
     m_search->installEventFilter(this);
     m_buttonGrid->addWidget(m_search, 3, 3, 1, 3);
@@ -284,7 +285,20 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
     m_list->setItemDelegate(m_delegate);
     layout->addWidget(m_list, 1);
 
-    connect(m_search, &QLineEdit::textChanged, this, [this] { m_inResults = false; rebuild(); });
+    m_searchTimer = new QTimer(this);
+    m_searchTimer->setSingleShot(true);
+    m_searchTimer->setInterval(120);
+    connect(m_searchTimer, &QTimer::timeout, this, [this] {
+        if (m_open && !m_submenu && m_conversationSearch)
+            m_conversationSearch(m_search->text().trimmed());
+    });
+    connect(m_search, &QLineEdit::textChanged, this, [this] {
+        m_inResults = false;
+        m_conversations.clear();
+        m_searchTimer->stop();
+        if (m_open && !m_submenu && !m_search->text().trimmed().isEmpty()) m_searchTimer->start();
+        rebuild();
+    });
     connect(m_list, &QListWidget::itemEntered, this, [this](QListWidgetItem *item) {
         if (item != nullptr && item->flags().testFlag(Qt::ItemIsSelectable)) m_list->setCurrentItem(item);
     });
@@ -315,6 +329,18 @@ void ActionPalette::setToggleKeys(const QList<QKeySequence> &keys)
 void ActionPalette::setEditShortcut(std::function<void(const QString &key)> edit)
 {
     m_editShortcut = std::move(edit);
+}
+
+void ActionPalette::setConversationSearch(std::function<void(const QString &query)> search)
+{
+    m_conversationSearch = std::move(search);
+}
+
+void ActionPalette::setConversationResults(const QString &query, const QList<ActionItem> &items)
+{
+    if (!m_open || m_submenu || query != m_search->text().trimmed()) return;
+    m_conversations = items;
+    rebuild();
 }
 
 QMenu *ActionPalette::shortcutMenu() const
@@ -362,6 +388,8 @@ void ActionPalette::open()
     m_items = m_catalog ? m_catalog() : QList<ActionItem>();
     m_flat.reset();
     m_submenu.reset();
+    m_conversations.clear();
+    m_searchTimer->stop();
     m_inResults = false;
     applyPalette();
     rebuildButtons();
@@ -380,6 +408,7 @@ void ActionPalette::open()
 void ActionPalette::close()
 {
     if (!m_open) return;
+    m_searchTimer->stop();
     hide();   // hideEvent does the rest, so a plain hide() from elsewhere closes it just as well
     if (m_returnFocus && m_returnFocus->isVisible()) m_returnFocus->setFocus(Qt::OtherFocusReason);
     m_returnFocus = nullptr;
@@ -703,6 +732,11 @@ void ActionPalette::rebuild()
                 if (compassGroup(item) == m_groupIds.at(group)) rows.append({item, QString(), QString()});
         }
     } else {
+        if (!m_conversations.isEmpty()) {
+            header(QStringLiteral("Conversations"));
+            for (const ActionItem &item : std::as_const(m_conversations))
+                rows.append({item, QString(), QString()});
+        }
         for (const ActionItem &item : std::as_const(m_items)) rows += typedRows(item);
         rows += scored(flatCatalog(), true);
     }

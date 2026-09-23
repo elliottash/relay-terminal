@@ -1254,6 +1254,11 @@ class SessionCommands:
         if sources is not None and (not isinstance(sources, list)
                                     or not all(isinstance(s, str) and s in conv_index.SOURCES for s in sources)):
             raise ValueError("sources must be a list of " + LISTABLE_SOURCES + ".")
+        session_ids = request.get("session_ids")
+        if session_ids is not None and (not isinstance(session_ids, list)
+                                        or len(session_ids) > 200
+                                        or not all(isinstance(s, str) and s for s in session_ids)):
+            raise ValueError("session_ids must be a list of up to 200 nonempty ids.")
         for name in ("offset", "matches_per_item", "limit"):
             value = request.get(name)
             if value is not None and type(value) is not int:
@@ -1291,7 +1296,8 @@ class SessionCommands:
             matches_per_item=request.get("matches_per_item") or conv_index.MAX_MATCHES_PER_ITEM,
             file=request.get("file") or None, branch=request.get("branch") or None,
             project=request.get("project") or None,
-            outside_projects=request.get("outside_projects") or None, **flags)
+            outside_projects=request.get("outside_projects") or None,
+            session_ids=request.get("session_ids"), **flags)
         # A guest row carries what it takes to resume it: the tool's own argv and the directory it
         # must be run in (protocol 26.7). `fork_command` is the same argv with the guest's fork
         # flag, so Ctrl+Enter on a guest row is one message rather than a rule spelled twice.

@@ -44,6 +44,7 @@ class QMenu;
 class QStyledItemDelegate;
 class QToolButton;
 class QGridLayout;
+class QTimer;
 
 namespace relay {
 
@@ -71,6 +72,9 @@ public:
     // "Change shortcut…", which closes the palette and calls `edit` with the item's key. Unset,
     // there is no such menu and a right-click in a dropdown behaves as Qt's own.
     void setEditShortcut(std::function<void(const QString &key)> edit);
+    // The window supplies indexed matches for the typed query; replies may arrive out of order.
+    void setConversationSearch(std::function<void(const QString &query)> search);
+    void setConversationResults(const QString &query, const QList<ActionItem> &items);
 
     // Parts, for tests and for a caller that wants to drive or inspect them.
     QLineEdit *searchBox() const { return m_search; }
@@ -124,6 +128,9 @@ private:
     std::function<QStringList()> m_recentKeys;
     std::function<void(const QString &)> m_chosen;
     std::function<void(const QString &)> m_editShortcut;
+    std::function<void(const QString &)> m_conversationSearch;
+    QList<ActionItem> m_conversations;
+    QTimer *m_searchTimer = nullptr;
 
     QLineEdit *m_search = nullptr;
     QWidget *m_buttonRow = nullptr;

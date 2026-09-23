@@ -233,6 +233,29 @@ private slots:
         QCOMPARE(m_palette->list()->currentItem()->text(), QStringLiteral("Restart shell"));
     }
 
+    void conversationResultsPrecedeActionsAndIgnoreStaleReplies()
+    {
+        QString requested;
+        m_palette->setConversationSearch([&requested](const QString &query) { requested = query; });
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("rest"));
+        QTRY_COMPARE(requested, QStringLiteral("rest"));
+        ActionItem conversation = item(QStringLiteral("conversation:one"), QStringLiteral("Conversations"),
+                                       QStringLiteral("Restore session"));
+        conversation.run = [this] { m_ran << QStringLiteral("conversation:one"); };
+        m_palette->setConversationResults(QStringLiteral("old"), {conversation});
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("pane.restart"));
+        m_palette->setConversationResults(QStringLiteral("rest"), {conversation});
+        QCOMPARE(rowsOf(m_palette->list()).mid(0, 3),
+                 (QStringList{QStringLiteral("# Conversations"), QStringLiteral("Restore session"),
+                              QStringLiteral("Restart shell")}));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("conversation:one"));
+        const QString capture = qEnvironmentVariable("RELAY_PALETTE_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(m_palette->grab().save(capture));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QCOMPARE(m_ran, QStringList{QStringLiteral("conversation:one")});
+    }
+
     void typingFindsBySlashAlias()
     {
         m_palette->open();
