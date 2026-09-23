@@ -8114,6 +8114,34 @@ included, with a shared 16 KiB UTF-8 budget. Project names shadow global names; 
 load. Matching checks the absolute workspace, its basename, and its path relative to
 the project. Each block names its source and is explicitly lower-priority context.
 
+**Import from Claude Code and Codex (#MEMS).** Owner, 2026-09-22: "on startup, relay can get
+the memories from claude and codex and import them." A worker's first `configure` starts
+`relay_core.memory_import` once for the life of the process, on a daemon thread; a failure is one
+log line and never delays the answer. `configure` takes an optional `memory_import` boolean:
+`false` skips the import (the GUI's option to turn it off), `true` runs it and asks for the event
+below, and absent runs it without the event. `RELAY_MEMORY_IMPORT=off` (also `0`, `false`, `no`)
+in the worker's environment skips it whatever `configure` says. It reads `~/.claude/CLAUDE.md`
+and `~/.codex/AGENTS.md` / `AGENTS.override.md` (one fact per top-level bullet or plain paragraph;
+headings, code, tables, `@` imports, lead-ins ending in `:` and anything over 400 characters are
+left out), `~/.claude/projects/*/memory/*.md` whose front matter `type` or `metadata.type` is
+`user` or `feedback` (the `description`, else the first body paragraph, with the first sentence of
+its `**Why:**` folded in when it fits; `project` and `reference` memories and `MEMORY.md` are not
+read), and the `## User Profile` and `## User preferences` sections of Codex's consolidated
+`~/.codex/memories/memory_summary.md` (not its `MEMORY.md` task blocks, `raw_memories.md`,
+`rollout_summaries/` or the `memories_1.sqlite` queue). `CLAUDE_CONFIG_DIR` and `CODEX_HOME` move
+the two roots. A line that reads as a credential is dropped before splitting. Each fact goes
+through `suggest(fact, name, title, source: "claude"|"codex", origin: <file path>)`, so it lands
+as a pending suggestion, a `declined` repeat of a rejection or a `duplicate` — never as a memory.
+`memory/imported.json` in the global root records, per source path, the file's `sha256`, the date
+and the hashes of the facts already offered: an unchanged file is not re-read, a changed one offers
+only facts it has not offered before, and the run holds `memory/.import.lock` so the workers of
+several panes starting together import once between them. When this worker's import left anything
+new pending and a `configure` has said `memory_import: true`, the worker emits
+`memory_import {claude, codex}` (the counts of new suggestions from each) once, unrequested,
+whenever both have happened; the GUI may then point the person at Globals › User memory, where the
+batch is one review list. Nothing is emitted when nothing is new, and only the one worker whose
+import found something emits it.
+
 
 ### Named local GUI drive (card #74Y5)
 

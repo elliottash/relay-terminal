@@ -23,6 +23,8 @@ export RELAY_LOG_RUN_ID="test-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 export RELAY_KEYRING=off
 # Nor the user's saved local model servers: a loopback URL in a test must not match a real endpoint.
 export RELAY_LOCAL_MODELS="$XDG_DATA_HOME/local-models.json"
+# Nor import the user's Claude Code / Codex memories into their real global Board (#MEMS).
+export RELAY_MEMORY_IMPORT=off
 trap 'rm -rf "$XDG_DATA_HOME"' EXIT
 if [[ -n "$junit" ]]; then
     PYTHONPATH="$PWD/backend${PYTHONPATH:+:$PYTHONPATH}" \

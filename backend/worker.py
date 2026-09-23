@@ -15,7 +15,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
-from relay_core import openrouter_catalog
+from relay_core import memory_import, openrouter_catalog
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
@@ -203,6 +203,10 @@ def main():
     customproviders.set_listener(lambda: emit_presets())
     relay_pro.set_listener(lambda: emit_presets())
 
+    # Protocol 34 (#MEMS): Claude Code / Codex memories offered as suggestions, once per process,
+    # on a thread begun by the first `configure`; RELAY_MEMORY_IMPORT=off skips it.
+    memory_startup = memory_import.StartupImport(emit)
+
     emit({"event": "ready", "version": __version__})
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
@@ -248,6 +252,7 @@ def main():
                 # so a missing key still lets the pane open and browse the cards (only board_ask
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
                 board_summary = board.configure(board_workspace, request)
+                memory_startup.configure(request.get("memory_import"))
                 # Protocol 33 (card #AGNT): what this agent is *about*. One `configure` builds a
                 # terminal pane's agent or an agent console's, and the difference is this block —
                 # the surface's name, the role, the brief, where the conversation is kept, the
