@@ -1112,6 +1112,41 @@ private slots:
         QVERIFY(isOpen(QStringLiteral("Codex session")));
     }
 
+    void sessionRowsExposeFullIds() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.setProject(QStringLiteral("relay"));
+        manager.show();
+        const QString id = QStringLiteral("01a0ce9a-41c6-75a2-9ffc-1036534eafd3");
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+            sessionItem(id, QStringLiteral("Index work"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        auto *row = rowTitled(tree, QStringLiteral("Index work"));
+        QVERIFY(row);
+        QCOMPARE(row->data(0, Qt::UserRole + 1).toString(), id);
+        QVERIFY(row->toolTip(0).contains(QStringLiteral("Session ID: ") + id));
+        QApplication::clipboard()->clear();
+        bool offeredCopy = false;
+        QTimer::singleShot(0, [&] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (!menu) return;
+            for (QAction *action : menu->actions()) {
+                if (action->text() == QStringLiteral("Copy session ID")) {
+                    offeredCopy = true;
+                    action->trigger();
+                }
+            }
+            menu->close();
+        });
+        const QPoint point = tree->visualItemRect(row).center();
+        QVERIFY(QMetaObject::invokeMethod(tree, "customContextMenuRequested", Q_ARG(QPoint, point)));
+        QVERIFY(offeredCopy);
+        QCOMPARE(QApplication::clipboard()->text(), id);
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-with-ids.png")));
+    }
+
     // "closed N min ago" is a clock. It has to keep up while the pane sits open, and go when the
     // item is reopened or falls off the end of the list — without asking the worker again.
     void theClosedTagAgesAndThenGoes() {

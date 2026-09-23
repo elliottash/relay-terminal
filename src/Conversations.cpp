@@ -544,7 +544,8 @@ public:
             if (!index.data(kTitleRole).toString().isEmpty()) {
                 const QFontMetrics metrics(option.font);
                 const bool two = !index.data(kSubRole).toString().isEmpty() || !index.data(kBadgeRole).toStringList().isEmpty();
-                return QSize(160, metrics.height() * (two ? 2 : 1) + 8);
+                const bool id = !index.data(kIdRole).toString().isEmpty();
+                return QSize(160, metrics.height() * (1 + int(two) + int(id)) + 8);
             }
         }
         return QStyledItemDelegate::sizeHint(option, index);
@@ -590,7 +591,8 @@ public:
                           Qt::AlignLeft | Qt::AlignVCenter, metrics.elidedText(title, Qt::ElideRight, rect.width()));
         const QStringList tags = index.data(kBadgeRole).toStringList();
         const QString sub = index.data(kSubRole).toString();
-        if (tags.isEmpty() && sub.isEmpty()) { painter->restore(); return; }
+        const QString sessionId = index.data(kIdRole).toString();
+        if (tags.isEmpty() && sub.isEmpty() && sessionId.isEmpty()) { painter->restore(); return; }
         const int lineTop = rect.top() + metrics.height() + 2;
         int x = rect.left();
         painter->setPen(muted);
@@ -606,6 +608,12 @@ public:
             painter->drawText(QRect(x, lineTop, rect.right() - x, metrics.height()),
                               Qt::AlignLeft | Qt::AlignVCenter,
                               metrics.elidedText(sub, Qt::ElideRight, rect.right() - x));
+        if (!sessionId.isEmpty()) {
+            const int idTop = (tags.isEmpty() && sub.isEmpty()) ? lineTop : lineTop + metrics.height() + 2;
+            painter->drawText(QRect(rect.left(), idTop, rect.width(), metrics.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter,
+                              metrics.elidedText(QStringLiteral("ID: ") + sessionId, Qt::ElideMiddle, rect.width()));
+        }
         painter->restore();
     }
 
@@ -880,6 +888,17 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
             if (onPreviewHint) onPreviewHint();
             openPreview();
         }
+    });
+    m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint &point) {
+        QTreeWidgetItem *row = m_tree->itemAt(point);
+        if (!row) return;
+        const QString id = row->data(0, kIdRole).toString();
+        if (id.isEmpty()) return;
+        QMenu menu(m_tree);
+        connect(menu.addAction(QStringLiteral("Copy session ID")), &QAction::triggered,
+                this, [id] { QApplication::clipboard()->setText(id); });
+        menu.exec(m_tree->viewport()->mapToGlobal(point));
     });
 
     m_header = new QLabel;
@@ -1838,6 +1857,7 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
                        item.value(QStringLiteral("spawn_turn")).isDouble()
                            ? QStringLiteral(", started in turn %1").arg(item.value(QStringLiteral("spawn_turn")).toInt()) : QString(),
                        tip);
+    tip.prepend(QStringLiteral("Session ID: %1\n").arg(sessionId));
     const QJsonArray rowMatches = item.value(QStringLiteral("matches")).toArray();
     if (!rowMatches.isEmpty()) {
         const QJsonObject match = rowMatches.first().toObject();
