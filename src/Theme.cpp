@@ -419,7 +419,7 @@ QLabel#opaqueHint[state="agent"] { color: @agent; }
 QLabel#opaqueHint[state="running"] { color: @shell; }
 /* Agent sessions: plan chip, context indicator, plan editor */)");
     css += QStringLiteral(R"(
-QLabel#planChip { color: @onAgent; background: @agent; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 9pt; }
+QToolButton#planChip { color: @onAgent; background: @agent; border: none; border-radius: 4px; padding: 1px 6px; font-weight: 700; letter-spacing: 1px; font-size: 9pt; }
 QLabel#contextLabel { color: @muted; font-family: "@mono"; font-size: 9pt; padding: 0 4px; }
 QLabel#contextLabel[warn="true"] { color: @warning; }
 QToolButton#workChip { color: @muted; border: 1px solid @border; border-radius: 6px; padding: 2px 8px; font-size: 9pt; background: @raised; min-height: 17px; }

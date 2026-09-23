@@ -898,6 +898,45 @@ void enteringPlanSelectsHigh()
     CHECK_EQ(console.paneMode(), QStringLiteral("high"));
 }
 
+void clickingPlanLeavesModeAndPreservesDraft()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+    auto *chip = console.findChild<QToolButton *>(QStringLiteral("planChip"));
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(chip != nullptr && editor != nullptr);
+    if (!chip || !editor) return;
+    CHECK(chip->isHidden());
+    console.resize(900, 600);
+    console.show();
+    console.activateWindow();
+    console.deliverWorkerEvent(QJsonObject{{"event", "mode_changed"}, {"mode", "plan"}});
+    QApplication::processEvents();
+    CHECK(chip->isVisible());
+    editor->setPlainText(QStringLiteral("Keep this draft"));
+    sent.clear();
+    const QPointF point = chip->rect().center();
+    QMouseEvent press(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(chip, &press);
+    QApplication::sendEvent(chip, &release);
+    CHECK_EQ(sent.size(), 1);
+    if (!sent.isEmpty()) {
+        CHECK_EQ(sent.last().value("type").toString(), QStringLiteral("set_mode"));
+        CHECK_EQ(sent.last().value("mode").toString(), QStringLiteral("build"));
+    }
+    console.deliverWorkerEvent(QJsonObject{{"event", "mode_changed"}, {"mode", "build"}});
+    QApplication::processEvents();
+    CHECK(chip->isHidden());
+    CHECK_EQ(console.agentMode(), QStringLiteral("build"));
+    CHECK_EQ(editor->toPlainText(), QStringLiteral("Keep this draft"));
+    CHECK(editor->hasFocus());
+}
+
 void planWhileConfiguringSelectsHighBeforeMode()
 {
     StubContext context;
@@ -1164,6 +1203,13 @@ int main(int argc, char **argv)
     qputenv("HOME", scratch.path().toUtf8());
     home = &scratch;
 
+    if (app.arguments().contains(QStringLiteral("--plan-click-only"))) {
+        cases::enteringPlanSelectsHigh();
+        cases::clickingPlanLeavesModeAndPreservesDraft();
+        cases::planWhileConfiguringSelectsHighBeforeMode();
+        return failures ? 1 : 0;
+    }
+
     cases::aContextWithoutAShellStartsNoProgram();
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
@@ -1190,6 +1236,7 @@ int main(int argc, char **argv)
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
     cases::enteringPlanSelectsHigh();
+    cases::clickingPlanLeavesModeAndPreservesDraft();
     cases::planWhileConfiguringSelectsHighBeforeMode();
     cases::answersBypassQueuedPrompts();
     cases::proseQuestionHoldsTheQueueForItsReply();

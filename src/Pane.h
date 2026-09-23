@@ -5523,9 +5523,20 @@ private:
     }
 
     void buildSessionControls(QHBoxLayout *row) {
-        m_planChip = new QLabel(QStringLiteral("PLAN"));
+        m_planChip = new QToolButton;
+        m_planChip->setText(QStringLiteral("PLAN"));
         m_planChip->setObjectName(QStringLiteral("planChip"));
-        m_planChip->setToolTip(QStringLiteral("Plan mode: the agent investigates and writes a plan (Shift+Tab to leave)"));
+        m_planChip->setToolTip(QStringLiteral("Leave plan mode"));
+        m_planChip->setAccessibleName(QStringLiteral("Leave plan mode"));
+        m_planChip->setCursor(Qt::PointingHandCursor);
+        m_planChip->setFocusPolicy(Qt::NoFocus);
+        connect(m_planChip, &QToolButton::clicked, this, [this] {
+            setAgentMode(QStringLiteral("build"));
+            focusInput();
+            hint(QStringLiteral("plan.mouse"), relay::ShortcutHints::nextTime(
+                Keymap::instance().shortcutText(QStringLiteral("agent.planToggle")),
+                QStringLiteral("toggle plan mode")));
+        });
         m_planChip->hide();
         // Plan mode is the pane's state: keep its indicator at the strip's left.
         row->insertWidget(0, m_planChip);
@@ -18977,7 +18988,8 @@ private:
     QString m_pendingAgentMode;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
     // agent sessions UI
-    QLabel *m_planChip = nullptr, *m_ctxLabel = nullptr;
+    QToolButton *m_planChip = nullptr;
+    QLabel *m_ctxLabel = nullptr;
     // Relay Free (protocol 13.8/13.9): the allowance chip and the last quota the worker reported.
     // m_hostedOfferShown: the add-a-key dialog went up for the current exhaustion (once per pane).
     QLabel *m_quotaLabel = nullptr;
