@@ -9,12 +9,14 @@
 // For this pane; Enter runs the row, reports its key and closes, Ctrl+Enter runs it and stays;
 // each group button's menu holds exactly its section's items with their shortcuts; the keyboard
 // walks from the search box into the button row and back; Esc, the opening chord and a click
-// elsewhere close it. The window's catalog, recent store and contextual rows are the caller's,
+// elsewhere close it; with an editor installed, a right-click on a row or a dropdown entry offers
+// "Change shortcut…" and hands over the item's key. The window's catalog, recent store and contextual rows are the caller's,
 // and are faked here.
 #include "ActionPalette.h"
 
 #include <QAbstractButton>
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
@@ -355,6 +357,80 @@ private slots:
         QTRY_VERIFY(menu->isVisible());
         QCOMPARE(labelOf(menu->activeAction()), QStringLiteral("Restart shell"));
         menu->hide();
+    }
+
+    // Right-click on a row: "Change shortcut…" closes the palette and hands the row's key to the
+    // caller, which opens Options › Keyboard at that action. Nothing runs.
+    void rightClickOnARowOffersChangeShortcut()
+    {
+        QStringList edited;
+        m_palette->setEditShortcut([&edited](const QString &key) { edited << key; });
+        m_palette->open();
+        QListWidget *list = m_palette->list();
+        const QPoint header = list->visualItemRect(list->item(0)).center();   // "Recent": no offer
+        QContextMenuEvent onHeader(QContextMenuEvent::Mouse, header, list->viewport()->mapToGlobal(header));
+        QApplication::sendEvent(list->viewport(), &onHeader);
+        QVERIFY(m_palette->shortcutMenu() == nullptr);
+        const QPoint row = list->visualItemRect(list->item(2)).center();      // "Board"
+        QContextMenuEvent onRow(QContextMenuEvent::Mouse, row, list->viewport()->mapToGlobal(row));
+        QApplication::sendEvent(list->viewport(), &onRow);
+        QMenu *menu = m_palette->shortcutMenu();
+        QVERIFY(menu != nullptr);
+        QTRY_VERIFY(menu->isVisible());
+        QCOMPARE(menu->actions().size(), 1);
+        QCOMPARE(menu->actions().at(0)->text(), QStringLiteral("Change shortcut…"));
+        QVERIFY(m_palette->isOpen());
+        menu->actions().at(0)->trigger();
+        QCOMPARE(edited, QStringList{QStringLiteral("board.open")});
+        QVERIFY(!m_palette->isOpen());
+        QVERIFY(m_ran.isEmpty());
+        QVERIFY(m_chosen.isEmpty());
+        // The Menu key offers the same for the highlighted row.
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("rest"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Menu);
+        QTRY_VERIFY(m_palette->shortcutMenu() != nullptr && m_palette->shortcutMenu()->isVisible());
+        m_palette->shortcutMenu()->actions().at(0)->trigger();
+        QCOMPARE(edited.last(), QStringLiteral("pane.restart"));
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    // The same on a dropdown entry, where a right *release* would otherwise run the entry.
+    void rightClickInADropdownOffersChangeShortcut()
+    {
+        QStringList edited;
+        m_palette->setEditShortcut([&edited](const QString &key) { edited << key; });
+        m_palette->open();
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);
+        QTRY_VERIFY(m_palette->groupButtons().at(0)->hasFocus());
+        QTest::keyClick(m_palette->groupButtons().at(0), Qt::Key_Down);
+        QMenu *dropdown = m_palette->findChild<QMenu *>(QStringLiteral("actionPaletteMenu"));
+        QVERIFY(dropdown != nullptr);
+        QTRY_VERIFY(dropdown->isVisible());
+        const QRect entry = dropdown->actionGeometry(dropdown->actions().at(1));   // "Split right"
+        QTest::mouseClick(dropdown, Qt::RightButton, {}, entry.center());
+        QVERIFY(m_ran.isEmpty());   // the release did not run it
+        QMenu *menu = m_palette->shortcutMenu();
+        QVERIFY(menu != nullptr);
+        QTRY_VERIFY(menu->isVisible());
+        menu->actions().at(0)->trigger();
+        QCOMPARE(edited, QStringList{QStringLiteral("pane.split")});
+        QVERIFY(!m_palette->isOpen());
+        QVERIFY(!dropdown->isVisible());
+        QVERIFY(m_ran.isEmpty());
+    }
+
+    // With no editor installed there is no offer: a right-click on a row does nothing at all.
+    void noEditorNoOffer()
+    {
+        m_palette->open();
+        QListWidget *list = m_palette->list();
+        const QPoint row = list->visualItemRect(list->item(2)).center();
+        QContextMenuEvent onRow(QContextMenuEvent::Mouse, row, list->viewport()->mapToGlobal(row));
+        QApplication::sendEvent(list->viewport(), &onRow);
+        QVERIFY(m_palette->shortcutMenu() == nullptr);
+        QVERIFY(m_palette->isOpen());
+        QVERIFY(m_ran.isEmpty());
     }
 
     // What ran may change what the rows say, so a Ctrl+Enter reads the catalog again.

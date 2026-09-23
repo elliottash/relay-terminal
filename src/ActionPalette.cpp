@@ -28,6 +28,8 @@ namespace {
 constexpr int kWidth = 640;
 constexpr int kRecentRows = 8;
 constexpr int kMaxResults = 80;
+// Set on a group dropdown and its submenus: their entries carry an item key in QAction::data().
+constexpr const char *kEntriesProperty = "actionPaletteEntries";
 
 // The label is the item's text, so a test or a screen reader reads a row the ordinary way.
 enum Role {
@@ -214,6 +216,13 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
     m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_list->setUniformItemSizes(false);
     m_list->setMouseTracking(true);
+    m_list->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_list, &QListWidget::customContextMenuRequested, this, [this](const QPoint &pos) {
+        const int row = m_list->row(m_list->itemAt(pos));
+        if (row < 0 || row >= m_rows.size() || !m_rows.at(row).header.isEmpty()) return;
+        m_list->setCurrentRow(row);
+        showShortcutMenu(m_rows.at(row).item.key, m_list->viewport()->mapToGlobal(pos));
+    });
     m_list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_delegate = new RowDelegate(m_list);
     m_list->setItemDelegate(m_delegate);
@@ -245,6 +254,35 @@ bool ActionPalette::isOpen() const
 void ActionPalette::setToggleKeys(const QList<QKeySequence> &keys)
 {
     m_toggleKeys = keys;
+}
+
+void ActionPalette::setEditShortcut(std::function<void(const QString &key)> edit)
+{
+    m_editShortcut = std::move(edit);
+}
+
+QMenu *ActionPalette::shortcutMenu() const
+{
+    return m_shortcutMenu;
+}
+
+void ActionPalette::showShortcutMenu(const QString &key, const QPoint &globalPos)
+{
+    if (!m_editShortcut || key.isEmpty()) return;
+    if (m_shortcutMenu) {
+        m_shortcutMenu->hide();
+        m_shortcutMenu->deleteLater();
+    }
+    m_shortcutMenu = new QMenu(this);
+    m_shortcutMenu->setObjectName(QStringLiteral("actionPaletteShortcutMenu"));
+    QAction *change = m_shortcutMenu->addAction(QStringLiteral("Change shortcut…"));
+    connect(change, &QAction::triggered, this, [this, key] {
+        // Copied first: closing hands focus back, and the editor the caller opens should keep it.
+        const auto edit = m_editShortcut;
+        close();
+        if (edit) edit(key);
+    });
+    m_shortcutMenu->popup(globalPos);
 }
 
 void ActionPalette::toggle()
@@ -294,7 +332,8 @@ void ActionPalette::hideEvent(QHideEvent *event)
     if (event->spontaneous()) return;
     m_open = false;
     qApp->removeEventFilter(this);
-    if (m_menu) m_menu->hide();
+    // Every dropdown, its open submenus and a right-click menu: all are the palette's children.
+    for (QMenu *menu : findChildren<QMenu *>()) menu->hide();
 }
 
 // ----- the parts ----------------------------------------------------------------------------------
@@ -389,6 +428,7 @@ QMenu *ActionPalette::groupMenu(int index)
     m_menu = new QMenu(this);
     m_menu->setObjectName(QStringLiteral("actionPaletteMenu"));
     m_menu->setToolTipsVisible(true);
+    m_menu->setProperty(kEntriesProperty, true);
     QList<ActionItem> items;
     for (const ActionItem &item : std::as_const(m_items))
         if (sectionOf(item) == m_sections.at(index)) items << item;
@@ -403,6 +443,8 @@ void ActionPalette::populateMenu(QMenu *menu, const QList<ActionItem> &items)
             // Filled when it is first shown: a submenu's children may cost something to list.
             QMenu *sub = menu->addMenu(menuText(item));
             sub->setToolTipsVisible(true);
+            sub->setProperty(kEntriesProperty, true);
+            sub->menuAction()->setData(item.key);
             connect(sub, &QMenu::aboutToShow, this, [this, sub, item] {
                 if (sub->property("filled").toBool()) return;
                 sub->setProperty("filled", true);
@@ -411,6 +453,7 @@ void ActionPalette::populateMenu(QMenu *menu, const QList<ActionItem> &items)
             continue;
         }
         QAction *action = menu->addAction(menuText(item));
+        action->setData(item.key);
         action->setToolTip(item.detail);
         if (item.checked) {
             action->setCheckable(true);
@@ -704,6 +747,32 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
     }
     if (!m_open) return false;
 
+    // A right-click on a dropdown's entry offers to change its shortcut. QMenu runs an entry on
+    // the release of *any* button, so both halves of the click are taken, and the context-menu
+    // event the press also produces is dropped, so the offer is made once.
+    if (m_editShortcut && watched->property(kEntriesProperty).toBool()
+        && (type == QEvent::MouseButtonPress || type == QEvent::MouseButtonRelease || type == QEvent::ContextMenu
+            || type == QEvent::KeyPress)) {
+        auto *menu = static_cast<QMenu *>(watched);
+        if (type == QEvent::KeyPress) {
+            const int key = static_cast<QKeyEvent *>(event)->key();
+            const bool menuKey = key == Qt::Key_Menu
+                                 || (key == Qt::Key_F10 && static_cast<QKeyEvent *>(event)->modifiers() == Qt::ShiftModifier);
+            if (!menuKey || menu->activeAction() == nullptr) return false;
+            QAction *action = menu->activeAction();
+            showShortcutMenu(action->data().toString(), menu->mapToGlobal(menu->actionGeometry(action).center()));
+            return true;
+        }
+        if (type == QEvent::ContextMenu) return true;
+        auto *mouse = static_cast<QMouseEvent *>(event);
+        if (mouse->button() != Qt::RightButton) return false;
+        if (type == QEvent::MouseButtonRelease) {
+            const QPoint at = mouse->pos();
+            if (QAction *action = menu->actionAt(at)) showShortcutMenu(action->data().toString(), menu->mapToGlobal(at));
+        }
+        return true;
+    }
+
     // A press anywhere else in the window closes the palette and still reaches what was clicked.
     // A dropdown is its own window, so a press in one is not "elsewhere".
     if (type == QEvent::MouseButtonPress) {
@@ -748,6 +817,15 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
         case Qt::Key_Escape:
             if (!leaveSubmenu()) close();
             return true;
+        case Qt::Key_Menu:
+        case Qt::Key_F10: {
+            if (!m_editShortcut || (key->key() == Qt::Key_F10 && key->modifiers() != Qt::ShiftModifier)) return false;
+            QListWidgetItem *current = m_list->currentItem();
+            if (current == nullptr || currentKey().isEmpty()) return true;
+            const QRect rect = m_list->visualItemRect(current);
+            showShortcutMenu(currentKey(), m_list->viewport()->mapToGlobal(QPoint(rect.left() + 24, rect.bottom())));
+            return true;
+        }
         case Qt::Key_Backspace:
             if (m_search->text().isEmpty() && leaveSubmenu()) return true;
             return false;

@@ -17,7 +17,8 @@
 // drop its menu, Esc goes back to the search box. Esc in the search box leaves a submenu first,
 // then closes. A click anywhere else in the window closes it, and so does `toggle()` — the
 // opening chord. An item with `children` is a submenu: choosing it lists its children in place.
-// An item with `stayOpen` behaves as Ctrl+Enter always.
+// An item with `stayOpen` behaves as Ctrl+Enter always. With `setEditShortcut`, a right-click on
+// a row or a dropdown entry offers "Change shortcut…".
 //
 // It knows nothing about the window: items come in through the callbacks on every open (so
 // shortcuts and contextual rows are read live), and a run is reported back through `chosen`, which
@@ -64,6 +65,12 @@ public:
     // dispatcher does not see keys while the search box has focus. Empty by default.
     void setToggleKeys(const QList<QKeySequence> &keys);
 
+    // Where a shortcut is changed (Options › Keyboard at that action). Set, a right-click on a
+    // result row or a dropdown entry — or the Menu key / Shift+F10 on the highlighted one — offers
+    // "Change shortcut…", which closes the palette and calls `edit` with the item's key. Unset,
+    // there is no such menu and a right-click in a dropdown behaves as Qt's own.
+    void setEditShortcut(std::function<void(const QString &key)> edit);
+
     // Parts, for tests and for a caller that wants to drive or inspect them.
     QLineEdit *searchBox() const { return m_search; }
     QListWidget *list() const { return m_list; }
@@ -73,6 +80,8 @@ public:
     QMenu *groupMenu(int index);
     // The key of the highlighted row, or empty when the highlight is on no action.
     QString currentKey() const;
+    // The "Change shortcut…" menu last offered, while it exists.
+    QMenu *shortcutMenu() const;
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -103,12 +112,14 @@ private:
     bool isToggleKey(const QKeyEvent *event) const;
     QList<ActionItem> flatCatalog();
     void populateMenu(QMenu *menu, const QList<ActionItem> &items);
+    void showShortcutMenu(const QString &key, const QPoint &globalPos);
 
     QPointer<QWidget> m_window;
     std::function<QList<ActionItem>()> m_catalog;
     std::function<QList<ActionItem>()> m_forThisPane;
     std::function<QStringList()> m_recentKeys;
     std::function<void(const QString &)> m_chosen;
+    std::function<void(const QString &)> m_editShortcut;
 
     QLineEdit *m_search = nullptr;
     QWidget *m_buttonRow = nullptr;
@@ -119,6 +130,7 @@ private:
     QListWidget *m_list = nullptr;
     QStyledItemDelegate *m_delegate = nullptr;   // the list's row painter; it holds the window's colours
     QPointer<QMenu> m_menu;
+    QPointer<QMenu> m_shortcutMenu;
     QList<QKeySequence> m_toggleKeys;
 
     QList<ActionItem> m_items;              // the catalog as read on open
