@@ -37,7 +37,7 @@ Research is in `reports/Editable workspaces for Relay.md` (commit d1249048) with
 
 The per-task packaging of 2–5 (TeX workspace, Python/Stata kernel IDE, and the others) is scoped in the design card on task plugins; this card owns 1 and the pane-group/layout work everything else sits on.
 
-## Open questions (owner)
+### Decisions to settle
 1. Agent edits: applied live into the open buffer as marked undo steps (Claude Docs style), or shown as a patch to accept first (Cursor/Zed style)? Recommendation: live by default, with a per-workspace "review before apply" toggle.
 2. When the agent and the user change the same lines: three-way merge with the conflict shown inline under a chip (recommended), or last writer wins?
 3. Qt PDF in the `.deb` and AUR packages? It is off today, so those builds have no in-Relay PDF pane.

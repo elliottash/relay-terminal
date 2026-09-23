@@ -34,7 +34,7 @@ can you also scope "plugins" for tasks? an "overleaf for pdfs" is one i can imag
 
 **Packaging.** Built-in plugins first, under `backend/relay_core/plugins/<name>/` with a `plugin.yaml` manifest from day one (router, runner, tools, layout, skill, activation). Third-party plugins later through the same manifest, with tools supplied by an MCP server the worker launches; Relay has no MCP client today, so that is its own card, and Provenance's `provenance-kernel` server is the first candidate.
 
-## Open questions (owner)
+### Decisions to settle
 1. Kernel or REPL-in-the-pty for the IDE plugin? Recommendation: Phase 0 REPL routing now; a kernel for the real plugin, because it gives shared state with the agent, structured output and interrupt.
 2. Stata bridge: `stata_kernel` (Jupyter kernel driving a licensed Stata), `pystata` (Stata 17 and later only), or console `stata -q` in the pty? Which Stata is installed on the machines you work on?
 3. First document runner: latexmk, Typst or Quarto? Recommendation: latexmk first, Typst second, because its compile speed makes the live preview shine.
