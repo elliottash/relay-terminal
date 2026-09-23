@@ -6,8 +6,14 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QFile>
+#include <QCryptographicHash>
 #include <QImageReader>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QVector>
 
@@ -108,6 +114,7 @@ QString bareTarget(QString target) {
 
 const QSize MarkdownAnsi::kImageCellPixels(8, 16);
 const QString MarkdownAnsi::kImageEscapeStart = QStringLiteral("\x1b_G");
+const QString MarkdownAnsi::kMediaEscapeStart = QStringLiteral("\x1b]8;;relay-media:");
 
 QString MarkdownAnsi::resolveImageTarget(const QString &target, const QString &baseDir) {
     QString path = bareTarget(target);
@@ -150,6 +157,39 @@ QString MarkdownAnsi::imageEscape(const QString &absolutePath, int maxColumns, i
         .arg(cells.width())
         .arg(cells.height())
         .arg(QString::fromLatin1(absolutePath.toUtf8().toBase64()));
+}
+
+QString MarkdownAnsi::mediaEscape(const QString &absolutePath, int maxColumns) {
+    QFile source(absolutePath);
+    if (!source.open(QIODevice::ReadOnly)) return {};
+    const QByteArray head = source.read(16);
+    const QString ext = QFileInfo(absolutePath).suffix().toLower();
+    const bool audio = (head.startsWith("RIFF") && head.mid(8, 4) == "WAVE") ||
+                       head.startsWith("ID3") || head.startsWith("OggS") || head.startsWith("fLaC") ||
+                       ext == QStringLiteral("mp3") || ext == QStringLiteral("m4a") ||
+                       ext == QStringLiteral("aac") || ext == QStringLiteral("opus");
+    if (!audio) return {};
+    const QString base = qEnvironmentVariable("XDG_CACHE_HOME");
+    const QString cache = (base.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
+                                          : base) + QStringLiteral("/relay/media");
+    if (cache.isEmpty() || !QDir().mkpath(cache)) return {};
+    QFile::setPermissions(cache, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    const QJsonObject object{{QStringLiteral("version"), 1}, {QStringLiteral("kind"), QStringLiteral("audio")},
+                             {QStringLiteral("path"), QFileInfo(absolutePath).absoluteFilePath()}};
+    const QByteArray content = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    const QString name = QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex())
+                         + QStringLiteral(".json");
+    const QString manifest = QDir(cache).filePath(name);
+    if (!QFileInfo::exists(manifest)) {
+        QSaveFile file(manifest);
+        if (!file.open(QIODevice::WriteOnly)) return {};
+        file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+        if (file.write(content) != content.size() || !file.commit()) return {};
+    }
+    const int cols = std::clamp(maxColumns, 1, 120);
+    const QString uri = QStringLiteral("relay-media:0/1/%1/%2")
+        .arg(cols).arg(QString::fromLatin1(QUrl::toPercentEncoding(manifest)));
+    return osc8(uri) + QChar(0x2800) + osc8(QString());
 }
 
 MarkdownAnsi::MarkdownAnsi(const QString &baseSgr) { m_palette.base = baseSgr; }
@@ -532,6 +572,18 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
                     // clicking, and text is what survives a restore from saved bytes, where OSC 8
                     // is stripped. It scans as a link of its own exactly as it did before.
                     if (!url.isEmpty() && url != label) out += sgr(m_palette.dim) + QStringLiteral(" (") + url + QLatin1Char(')') + style();
+                    // A local audio link also gets a player row; ordinary web and file links
+                    // remain clickable prose. The one linked cell is emitted outside the prose
+                    // run by Pane::agentProse, just like an inline picture.
+                    if (m_images && !m_inlineOnly && !isForeignUrl(url)) {
+                        const QString path = resolveImageTarget(url, m_imageBase);
+                        const QString media = path.isEmpty() ? QString() :
+                            mediaEscape(path, m_imageColumns > 0 ? m_imageColumns : 60);
+                        if (!media.isEmpty()) {
+                            out += kReset + QLatin1Char('\n') + media;
+                            m_afterImage = true;
+                        }
+                    }
                     m_prev = QLatin1Char(')');
                     i = paren + 1;
                     return true;

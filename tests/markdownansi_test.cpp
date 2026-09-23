@@ -7,6 +7,8 @@
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTest>
@@ -449,6 +451,38 @@ private slots:
         // A table cell is inline content: an image there stays text.
         const QString table = QStringLiteral("| a |\n|---|\n| ![a](a.png) |\n");
         QCOMPARE(renderImages(table, dir.path()), render(table));
+    }
+
+    void localAudioLinkBecomesOneMediaRow()
+    {
+        QTemporaryDir dir;
+        const QString wav = dir.filePath(QStringLiteral("clip.wav"));
+        QFile file(wav);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("RIFFtestWAVE");
+        file.close();
+        const QByteArray oldCache = qgetenv("XDG_CACHE_HOME");
+        qputenv("XDG_CACHE_HOME", dir.path().toUtf8());
+        struct RestoreCache {
+            QByteArray old;
+            ~RestoreCache() { qputenv("XDG_CACHE_HOME", old); }
+        } restore{oldCache};
+        const QString text = QStringLiteral("[Play clip](clip.wav)\n");
+        const QString whole = renderImages(text, dir.path());
+        QCOMPARE(renderImages(text, dir.path(), true), whole);
+        QVERIFY(whole.contains(MarkdownAnsi::kMediaEscapeStart));
+        QCOMPARE(whole.count(MarkdownAnsi::kMediaEscapeStart), 1);
+        const int at = whole.indexOf(MarkdownAnsi::kMediaEscapeStart);
+        const int end = whole.indexOf(QStringLiteral("\x1b\\"), at);
+        QVERIFY(end > at);
+        const QString uri = whole.mid(at + 5, end - at - 5);
+        const QString encoded = uri.section(QLatin1Char('/'), 3);
+        const QString manifest = QUrl::fromPercentEncoding(encoded.toLatin1());
+        QFile saved(manifest);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(saved.readAll()).object().value(QStringLiteral("path")).toString(), wav);
+        QVERIFY(!renderImages(QStringLiteral("[Play](https://example.com/clip.wav)\n"))
+                     .contains(MarkdownAnsi::kMediaEscapeStart));
     }
 
     void imageCellsFitAndKeepTheAspect() {

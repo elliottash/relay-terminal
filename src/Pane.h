@@ -11577,8 +11577,15 @@ private:
     QByteArray agentProse(const QString &rendered) {
         QByteArray out;
         QString rest = rendered;
-        for (int at; (at = rest.indexOf(relay::MarkdownAnsi::kImageEscapeStart)) >= 0;) {
-            const int end = rest.indexOf(QStringLiteral("\x1b\\"), at);
+        for (;;) {
+            const int imageAt = rest.indexOf(relay::MarkdownAnsi::kImageEscapeStart);
+            const int mediaAt = rest.indexOf(relay::MarkdownAnsi::kMediaEscapeStart);
+            const bool media = mediaAt >= 0 && (imageAt < 0 || mediaAt < imageAt);
+            const int at = media ? mediaAt : imageAt;
+            if (at < 0) break;
+            int end = rest.indexOf(QStringLiteral("\x1b\\"), at);
+            if (end < 0) break;
+            if (media) end = rest.indexOf(QStringLiteral("\x1b\\"), end + 2); // the OSC 8 close
             if (end < 0) break;
             const QString before = rest.left(at);
             if (!before.isEmpty()) out += proseStart(Ink::Agent, before) + wrapped(before);
@@ -11604,8 +11611,9 @@ private:
         const int columns = std::min(m_backend->columns() - 2, int(relay::MarkdownAnsi::kImageMaxColumns));
         QByteArray out;
         for (const QJsonValue &value : attachmentsFor(prompt)) {
-            const QString escape = relay::MarkdownAnsi::imageEscape(value.toObject().value(QStringLiteral("path")).toString(),
-                                                                    columns, relay::MarkdownAnsi::kThumbnailRows);
+            const QString path = value.toObject().value(QStringLiteral("path")).toString();
+            QString escape = relay::MarkdownAnsi::imageEscape(path, columns, relay::MarkdownAnsi::kThumbnailRows);
+            if (escape.isEmpty()) escape = relay::MarkdownAnsi::mediaEscape(path, columns);
             if (!escape.isEmpty()) out += "\x1b[2C" + escape.toUtf8() + "\r\n";
         }
         if (out.isEmpty()) return;

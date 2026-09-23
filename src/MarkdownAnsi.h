@@ -106,6 +106,7 @@ public:
     static constexpr int kThumbnailRows = 6;       // a prompt's attachment, a tool's image
     static const QSize kImageCellPixels;           // 8 x 16: the 1:2 cell of a terminal font
     static const QString kImageEscapeStart;        // "\x1b_G": the head of imageEscape()'s output
+    static const QString kMediaEscapeStart;        // OSC 8 relay-media:, one local audio row
 
     // The file a Markdown image target names, made absolute, or an empty string when the target
     // is a URL other than file:// or names nothing on this machine that is a file.
@@ -118,6 +119,9 @@ public:
     // Its size is read from the file's header. Empty when the file is not an image.
     static QString imageEscape(const QString &absolutePath, int maxColumns, int maxRows,
                                QSize cellPixels = QSize());
+    // A local audio file as one linked media row. Empty for other files. The row's manifest is
+    // content-addressed in the private cache, and the view fills duration/waveform asynchronously.
+    static QString mediaEscape(const QString &absolutePath, int maxColumns);
 
     QString feed(const QString &text);
     // Emits whatever is held back, closes open styles and a pending table, and resets all state
