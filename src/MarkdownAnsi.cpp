@@ -192,6 +192,34 @@ QString MarkdownAnsi::mediaEscape(const QString &absolutePath, int maxColumns) {
     return osc8(uri) + QChar(0x2800) + osc8(QString());
 }
 
+static QString mathMediaEscape(const QString &expression, int columns, int rows) {
+    const QString base = qEnvironmentVariable("XDG_CACHE_HOME");
+    const QString cache = (base.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
+                                          : base) + QStringLiteral("/relay/media");
+    if (cache.isEmpty() || !QDir().mkpath(cache)) return {};
+    QFile::setPermissions(cache, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    const QJsonObject object{{QStringLiteral("version"), 1}, {QStringLiteral("kind"), QStringLiteral("math")},
+                             {QStringLiteral("latex"), expression}};
+    const QByteArray content = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    const QString key = QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex());
+    const QString manifest = QDir(cache).filePath(key + QStringLiteral(".json"));
+    if (!QFileInfo::exists(manifest)) {
+        QSaveFile file(manifest);
+        if (!file.open(QIODevice::WriteOnly)) return {};
+        file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+        if (file.write(content) != content.size() || !file.commit()) return {};
+    }
+    QString out;
+    for (int row = 0; row < rows; ++row) {
+        const QString uri = QStringLiteral("relay-media:%1/%2/%3/%4")
+            .arg(row).arg(rows).arg(std::clamp(columns, 1, 120))
+            .arg(QString::fromLatin1(QUrl::toPercentEncoding(manifest)));
+        if (row) out += QLatin1Char('\n');
+        out += osc8(uri) + QChar(0x2800) + osc8(QString());
+    }
+    return out;
+}
+
 MarkdownAnsi::MarkdownAnsi(const QString &baseSgr) { m_palette.base = baseSgr; }
 MarkdownAnsi::MarkdownAnsi(const Palette &palette) : m_palette(palette) {}
 void MarkdownAnsi::setPalette(const Palette &palette) { m_palette = palette; }
@@ -494,6 +522,28 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
         return true;
     }
     if (m_codeRun > 0) { out += c; m_prev = c; ++i; return true; }
+
+    if (c == QLatin1Char('$') && m_images && !m_inlineOnly) {
+        const int markers = next(i + 1) == QLatin1Char('$') ? 2 : 1;
+        const QString closing(markers, QLatin1Char('$'));
+        const int end = text.indexOf(closing, i + markers);
+        const int newline = text.indexOf(QLatin1Char('\n'), i + markers);
+        const bool withinLine = markers == 2 || newline < 0 || (end >= 0 && end < newline);
+        if (end < 0 || !withinLine) {
+            if (!m_final && withinLine && text.size() - i < 4096) return false;
+        } else if (end > i + markers && end - i < 4096) {
+            const QString math = mathMediaEscape(text.mid(i + markers, end - i - markers),
+                                                 m_imageColumns > 0 ? m_imageColumns : 60,
+                                                 markers == 2 ? 5 : 3);
+            if (!math.isEmpty()) {
+                out += kReset + QLatin1Char('\n') + math;
+                m_afterImage = true;
+                m_prev = QLatin1Char('$');
+                i = end + markers;
+                return true;
+            }
+        }
+    }
 
     if (c == QLatin1Char('!') && m_images && !m_inlineOnly) {
         const int at = i;

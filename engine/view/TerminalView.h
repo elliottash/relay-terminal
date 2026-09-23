@@ -468,6 +468,7 @@ private:
     void stopAudio(bool preservePosition = false);
     qint64 audioPositionMs() const;
     void probeAudio(const QString &manifest, const QString &path);
+    void renderMath(const QString &manifest);
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -588,6 +589,7 @@ private:
     std::unordered_map<uint32_t, inlinemedia::MediaRef> m_frameMedia;
     QHash<QString, MediaInfo> m_mediaInfo;
     QSet<QString> m_audioProbes;
+    QSet<QString> m_mathRenders;
     std::vector<MediaPlacement> m_mediaPlacements;
     QProcess *m_audioProcess = nullptr;
     QMediaPlayer *m_qtPlayer = nullptr;  // Qt 6 Multimedia, when built

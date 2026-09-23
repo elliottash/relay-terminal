@@ -160,6 +160,16 @@ private slots:
         QCOMPARE(renderImages(md, QString(), true), out);
     }
 
+    void latexMathBecomesRestorableMediaRows() {
+        const QString md = QStringLiteral("Result: $x^2+y^2$ done\n$$\\frac{a}{b}$$\n");
+        const QString out = renderImages(md);
+        QVERIFY(out.contains(QStringLiteral("Result:")));
+        QVERIFY(out.contains(MarkdownAnsi::kMediaEscapeStart));
+        QCOMPARE(renderImages(md, QString(), true), out);
+        QVERIFY(!renderImages(QStringLiteral("`$x^2$`\n")).contains(MarkdownAnsi::kMediaEscapeStart));
+        QVERIFY(!renderImages(QStringLiteral("Price is $5 today\n")).contains(MarkdownAnsi::kMediaEscapeStart));
+    }
+
     // A row that is not a table used to kill the process. renderTable() decided "not a table after
     // all" and sent the row back through renderInline(); the inner renderer saw a line starting
     // with `|`, collected it as a table of its own, and called renderTable() again when it

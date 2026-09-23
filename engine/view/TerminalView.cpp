@@ -2622,14 +2622,15 @@ TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
         if (obj.value(QStringLiteral("version")).toInt() == 1 &&
             (kind == QStringLiteral("audio") || kind == QStringLiteral("table") ||
              kind == QStringLiteral("video") || kind == QStringLiteral("chart") ||
-             kind == QStringLiteral("svg") || kind == QStringLiteral("pdf"))) {
+             kind == QStringLiteral("svg") || kind == QStringLiteral("pdf") ||
+             kind == QStringLiteral("math"))) {
             info.kind = kind;
             info.path = obj.value(QStringLiteral("path")).toString();
             info.preview = obj.value(QStringLiteral("preview")).toString();
             info.url = obj.value(QStringLiteral("url")).toString();
             info.valid = (info.path.isEmpty() || QFileInfo(info.path).isAbsolute()) &&
                          (info.preview.isEmpty() || QFileInfo(info.preview).isAbsolute());
-            if (kind != QStringLiteral("chart") && info.path.isEmpty())
+            if (kind != QStringLiteral("chart") && kind != QStringLiteral("math") && info.path.isEmpty())
                 info.valid = false;
             if (kind == QStringLiteral("chart")) {
                 const QUrl url(info.url);
@@ -2654,7 +2655,29 @@ TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
     if (info.valid && info.kind == QStringLiteral("audio") &&
         (info.durationMs == 0 || info.waveform.isEmpty()) && !m_audioProbes.contains(manifest))
         probeAudio(manifest, info.path);
+    if (info.valid && info.kind == QStringLiteral("math") &&
+        info.preview.isEmpty() && !m_mathRenders.contains(manifest))
+        renderMath(manifest);
     return info;
+}
+
+void TerminalView::renderMath(const QString &manifest)
+{
+    m_mathRenders.insert(manifest);
+    const QString helper = QStandardPaths::findExecutable(QStringLiteral("relay-render-math"));
+    if (helper.isEmpty()) return;
+    auto *process = new QProcess(this);
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process, manifest](int code, QProcess::ExitStatus) {
+        const QString image = QString::fromUtf8(process->readAllStandardOutput()).trimmed();
+        if (code == 0 && QFileInfo(image).isAbsolute() && QFileInfo(image).isFile() &&
+            m_mediaInfo.contains(manifest)) {
+            m_mediaInfo[manifest].preview = image;
+            update();
+        }
+        process->deleteLater();
+    });
+    process->start(helper, {manifest});
 }
 
 void TerminalView::probeAudio(const QString &manifest, const QString &path)
@@ -2800,7 +2823,7 @@ void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
             const QString label = info.kind == QStringLiteral("chart") ? tr("Chart · open live page") :
                 info.kind == QStringLiteral("video") ? tr("▶ Video · open player") :
                 info.kind == QStringLiteral("pdf") ? tr("PDF · open document") :
-                tr("SVG · open image");
+                info.kind == QStringLiteral("math") ? tr("Math") : tr("SVG · open image");
             p.drawText(box.adjusted(6, 0, -4, -(box.height() - m_ch)), Qt::AlignVCenter, label);
         }
         p.restore();
@@ -3038,6 +3061,8 @@ void TerminalView::activateMedia(const MediaPlacement &media, const QPoint &pos)
         openTable(info);
     } else if (info.kind == QStringLiteral("chart")) {
         QDesktopServices::openUrl(QUrl(info.url));
+    } else if (info.kind == QStringLiteral("math") && QFileInfo(info.preview).isFile()) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.preview));
     } else if (QFileInfo(info.path).isFile()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(info.path));
     }
