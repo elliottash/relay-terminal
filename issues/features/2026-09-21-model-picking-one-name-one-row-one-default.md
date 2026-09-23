@@ -103,13 +103,13 @@ never returns to the model the owner was using, and its own sentence is overwrit
 - [x] the Ctrl+Alt+M dialog is where models are picked AND prioritized: tier tabs, reorder, add, remove, level, profile, "via" <!-- t:a7 -->
 - [x] the box as classes: top-N per class, Right expands, headers not selectable, exhausted hidden, model alone in the chip <!-- t:a8 -->
 - [x] defaults from a ranking file in the repo: 0 providers → Relay Free's three; 1 → one per class; 2+ → two per class, one per provider per class <!-- t:a9 -->
-- [x] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:a10 -->
-- [x] the models pane: providers / available / priorities tabs, opened by Ctrl+Shift+M beside the active pane (again closes; Esc returns focus), first run opens with it at the right; Ctrl+Alt+M and the modal go <!-- t:a11 -->
-- [x] the ranking file's Levels and Provider picks tables; the harness in flash with background jobs stepping past it to relay free; lite on relay free; gemini `-latest`; deepseek on flash <!-- t:a12 -->
-- [x] the effort box offers the model's own levels (xhigh, ultra) and greys where there is no knob or relay free clamps <!-- t:a13 -->
-- [x] step 2 of four: `models/available`, the tick column, the box filter searching every available model <!-- t:a14 -->
-- [x] the owner's review of the pane: provider dividers, the advanced dialog retired, available alphabetical with no recent, lite unpinned and relay-lite hidden, priorities as sections with no lite <!-- t:a15 -->
-- [x] the per-job models as a fourth tab, with what each job runs on right now <!-- t:a16 -->
+- [x] Options › Models: the tier lists and the checklist leave the page for the dialog <!-- t:aa -->
+- [x] the models pane: providers / available / priorities tabs, opened by Ctrl+Shift+M beside the active pane (again closes; Esc returns focus), first run opens with it at the right; Ctrl+Alt+M and the modal go <!-- t:ab -->
+- [x] the ranking file's Levels and Provider picks tables; the harness in flash with background jobs stepping past it to relay free; lite on relay free; gemini `-latest`; deepseek on flash <!-- t:ac -->
+- [x] the effort box offers the model's own levels (xhigh, ultra) and greys where there is no knob or relay free clamps <!-- t:ad -->
+- [x] step 2 of four: `models/available`, the tick column, the box filter searching every available model <!-- t:ae -->
+- [x] the owner's review of the pane: provider dividers, the advanced dialog retired, available alphabetical with no recent, lite unpinned and relay-lite hidden, priorities as sections with no lite <!-- t:af -->
+- [x] the per-job models as a fourth tab, with what each job runs on right now <!-- t:ag -->
 
 ## Execution Summary
 Startup follow-up (#40SN): Plan/Build selection works before deferred guest startup, is applied before the first queued prompt, and survives configuration recovery. Verified by the isolated GUI drive in `docs/qa_evidence/2026-09-21-pane-startup-recovery/`.
@@ -139,7 +139,7 @@ Seven tasks, each by an Opus subagent in a named area of the code, each landed t
 - Found on the way and fixed: `Ctrl++` in the keybinding catalogue stopped every `configure`
   (#Z00M's default; `4d540c0e`); the old level box hid a level behind its scrollbar.
 
-Then the owner reviewed it and it went further (t:a12-a16):
+Then the owner reviewed it and it went further (t:ac-ag):
 
 - **The ranking file is the source.** `backend/relay_core/model-ranking.md` — four tables the owner
   edits: Providers (`provider | kind | order`, the preference order), Models (`name | classes |

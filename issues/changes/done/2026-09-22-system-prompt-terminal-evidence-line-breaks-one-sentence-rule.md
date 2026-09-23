@@ -9,7 +9,7 @@ verified_by: glm/glm-5.3
 rank: m
 created: '2026-09-22'
 source: 'Claude Code in a Relay pane, 2026-09-22 (found while testing #1MGS)'
-links: {commits: [da8d7ff8a94747444b122322dcbbf448fbf4fe50], evidence: [], plans: [], related: [PLDG], github: null}
+links: {commits: [da8d7ff8a94747444b122322dcbbf448fbf4fe50], evidence: [], plans: [], related: [P1DG], github: null}
 ---
 # SYSTEM prompt's terminal-evidence line is five sentences on one line
 

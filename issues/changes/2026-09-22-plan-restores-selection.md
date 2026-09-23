@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mpbkr
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [ef706804189730e9dd413c9a7e98d99e47add544], evidence: [docs/qa_evidence/2026-09-22-plan-restore/README.md], related: [PH9G, PLDG], github: null}
+links: {plans: [], commits: [ef706804189730e9dd413c9a7e98d99e47add544], evidence: [docs/qa_evidence/2026-09-22-plan-restore/README.md], related: [PH9G, P1DG], github: null}
 ---
 # Leaving Plan restores the previous model selection
 

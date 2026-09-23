@@ -6,7 +6,7 @@ implemented_by: anthropic/claude-opus-5-5 via claude-code
 assignee: claude-code
 rank: zzzzzzzzzzzzzzzi
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-no-context-lost-on-switch/], related: [4NXH, PLDG, PH9G], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-no-context-lost-on-switch/], related: [4NXH, P1DG, PH9G], github: null}
 ---
 # codex bugs
 

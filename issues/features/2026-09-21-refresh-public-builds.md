@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-21'
 source: 'Codex user request, 2026-09-21'
-links: {plans: [], commits: [aa104e92, 92563ceb, ff18787e, f2216313, 2cfcb3f0, bb769e98, a5535f4c, 460e8063, fcf44e13, df9ea698, 5c4a321b, f2888f05, e1000574, 82b837c5, 7d59e967, d4854390, 06418a97, 7d0f1718, 8e6094d9], evidence: [docs/qa_evidence/2026-09-21-refresh-public-builds/README.md], related: [W9ST, P4GP, 3AZG, YJK8, PF14, LSP1], github: null}
+links: {plans: [], commits: [aa104e92, 92563ceb, ff18787e, f2216313, 2cfcb3f0, bb769e98, a5535f4c, 460e8063, fcf44e13, df9ea698, 5c4a321b, f2888f05, e1000574, 82b837c5, 7d59e967, d4854390, 06418a97, 7d0f1718, 8e6094d9], evidence: [docs/qa_evidence/2026-09-21-refresh-public-builds/README.md], related: [W9ST, P4GP, 3AZG, YJK8, PF14, 1SP1], github: null}
 ---
 # Publish refreshed builds and website downloads
 
