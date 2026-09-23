@@ -2704,8 +2704,12 @@ public:
             // draft over to the next card.
             if (m_reply != nullptr && !m_id.isEmpty())
                 m_drafts.insert(m_id, m_reply->toPlainText());
-            if (m_reply != nullptr)
+            if (m_reply != nullptr) {
+                // The console changes its disk draft key when the card context changes below.
+                // Do not write this card's text under the previous card's key in the meantime.
+                const QSignalBlocker blocker(m_reply);
                 m_reply->setPlainText(m_drafts.take(id));
+            }
             else
                 m_drafts.remove(id);
             m_error->hide();
@@ -6769,6 +6773,7 @@ void BoardView::handleEvent(const QJsonObject &event)
             m_cardConsoleHandle.clearTranscript && m_detail->cardId() != showing)
             m_cardConsoleHandle.clearTranscript(QStringLiteral("card:") + showing);
         m_detail->show(event);
+        refreshContexts();   // switch the console's draft key to the card just opened
         watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
         // Turns run per card (19.16), so the card you open may already be working: give it back
         // its strip. What it has said so far is in that card's own console and was never lost —

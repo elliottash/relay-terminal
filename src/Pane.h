@@ -19,6 +19,7 @@
 
 #include "RichEditor.h"
 #include "PromptHistory.h"
+#include "PromptDraft.h"
 #include "Theme.h"
 #include "BoardPane.h"
 #include "BoardWorkspace.h"
@@ -690,7 +691,7 @@ public:
         m_assistHold.setSingleShot(true); m_assistHold.setInterval(400);
         connect(&m_assistHold, &QTimer::timeout, this, [this] { releaseHeldDecision(); });
         connect(&m_debounce, &QTimer::timeout, this, [this] { requestRoute(false, QStringLiteral("auto")); });
-        connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); onComposerEdited(); });
+        connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); onComposerEdited(); saveComposerDraft(); });
         connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, [this] { updateGhost(); });
         // While a command runs: password prompts, answered passwords, and programs waiting for input.
         m_programPoll.setInterval(250);
@@ -1149,6 +1150,7 @@ public:
             // token in buildUi(), before there was a saved spec to read. Nothing has been typed
             // yet, so re-pointing simply loads the pane's own history instead.
             m_editor->useHistoryFile(promptHistoryPath());
+            updateComposerDraftKey();
         }
         changed();
     }
@@ -3714,6 +3716,7 @@ public:
     void contextChanged() {
         const relay::agent::ContextSpec spec = contextSpec();
         m_hasShell = !m_context || spec.shell;
+        updateComposerDraftKey();
         applyContextRouting(spec);
         applyContextHeader();
         rebuildActionRow();
@@ -16331,6 +16334,35 @@ private:
         updateGhost();
     }
 
+    void updateComposerDraftKey() {
+        if (!m_editor) return;   // the first contextChanged() runs before buildUi()
+        const relay::agent::ContextSpec spec = contextSpec();
+        QString surface = spec.surface;
+        // These are views of one hosted prompt box. Switching a page or mode keeps its live
+        // draft, so it must keep the same disk key too.
+        if (surface == QStringLiteral("projects") || surface == QStringLiteral("sessions")
+            || surface == QStringLiteral("globals")) surface = QStringLiteral("sessions-pane");
+        else if (surface == QStringLiteral("options") || surface == QStringLiteral("actions"))
+            surface = QStringLiteral("settings-pane");
+        const QString key = spec.shell
+            ? QStringLiteral("pane/") + m_scrollbackId
+            : (spec.persistKey.isEmpty() ? QString()
+                                         : QStringLiteral("console/") + spec.persistScope + QLatin1Char('/')
+                                               + spec.persistKey + QLatin1Char('/') + surface);
+        if (key == m_draftKey) return;
+        m_draftKey = key;
+        // A card page may already have put its in-memory draft in this editor while switching
+        // cards. In that case its text wins; an empty editor gets this context's disk draft.
+        if (m_editor->toPlainText().isEmpty() && !key.isEmpty()) {
+            const QString saved = relay::promptdraft::read(key);
+            if (!saved.isEmpty()) m_editor->setPlainText(saved);
+        }
+    }
+
+    void saveComposerDraft() {
+        if (!m_draftKey.isEmpty()) relay::promptdraft::write(m_draftKey, m_editor->toPlainText());
+    }
+
     // ----- history suggestions (ghost text) ---------------------------------------------------
     void updateGhost() {
         if (!m_editor) return;
@@ -19140,6 +19172,7 @@ private:
     // Terminal scrollback across a restart: the file this pane's text is saved in, the lines a
     // restore handed it, and whether they have been replayed (once per pane, at the first prompt).
     QString m_scrollbackId;
+    QString m_draftKey;
     QStringList m_restoredScrollback;
     bool m_scrollbackReplayed = false;
     // Which conversation the text in this pane belongs to, and the line it started at (#0TJ9).

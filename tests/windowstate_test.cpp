@@ -4,6 +4,7 @@
 // screen that still exists, the cwd/workspace/$HOME fallback, and the per-pane scrollback store
 // a restored pane refills itself from.
 #include "WindowState.h"
+#include "PromptDraft.h"
 #include "core/AnsiSerializer.h"
 #include "core/InlineImage.h"
 
@@ -59,6 +60,27 @@ class WindowStateTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void promptDraftsArePrivateAndIndependent() {
+        DataHome home;
+        QVERIFY(home.valid());
+        const QString first = QStringLiteral("pane/first");
+        const QString second = QStringLiteral("console/tab/card:ABCD");
+        const QString draft = QString::fromUtf8("first line\nsecond line π");
+        QVERIFY(relay::promptdraft::write(first, draft));
+        QVERIFY(relay::promptdraft::write(second, QStringLiteral("another card")));
+        QCOMPARE(relay::promptdraft::read(first), draft);
+        QCOMPARE(relay::promptdraft::read(second), QStringLiteral("another card"));
+        const QFileInfo stored(relay::promptdraft::pathFor(first));
+        QVERIFY(stored.exists());
+        QCOMPARE(stored.permissions() & (QFile::ReadGroup | QFile::WriteGroup | QFile::ReadOther | QFile::WriteOther),
+                 QFile::Permissions());
+        QVERIFY(relay::promptdraft::write(first, QString()));
+        QCOMPARE(relay::promptdraft::read(first), QString());
+        QCOMPARE(relay::promptdraft::read(second), QStringLiteral("another card"));
+        QVERIFY(relay::promptdraft::clearAll());
+        QCOMPARE(relay::promptdraft::read(second), QString());
+    }
+
     void documentRoundTrip() {
         const QJsonArray tabs{pane(QStringLiteral("/tmp")), pane(QStringLiteral("/usr"))};
         const QJsonObject window = windowRecord(QRect(10, 20, 800, 600), QStringLiteral("DP-1"), tabs, 1,

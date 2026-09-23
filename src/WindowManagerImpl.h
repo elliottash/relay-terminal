@@ -203,6 +203,7 @@ inline void WindowManager::forgetSavedLayout(bool suspend) {
     // coming back to claim its file.
     relay::windowstate::removeAllScrollback();
     relay::prompthistory::clearAll();
+    relay::promptdraft::clearAll();
     // The recently-closed list goes the same way on disk: it names that text and those
     // conversations. It stays in memory, so what was closed in this run can still be reopened.
     if (!m_closedPath.isEmpty()) QFile::remove(m_closedPath);
