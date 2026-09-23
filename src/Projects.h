@@ -13,15 +13,15 @@
 //   * Attaching is always an explicit action (opening the Board, `/card`, the `#` picker,
 //     executing a card, …). Each of those is one of the closed set of reasons below, and it is the
 //     reason a project is written into the registry.
-//   * **A project's board lives in the project**, in a folder called `board/` whose marker is
-//     `board/board.yaml` — the owner's decision of 2026-09-21 (#1CXD). Relay never creates it
+//   * **A project's board lives in the project**, in a folder called `.board/` whose marker is
+//     `.board/board.yaml`. Relay never creates it
 //     behind the user's back: the folder appears only after they answer the one-time "Initialize a
 //     project and create a Board here?" question. That is what `Board::Uninitialized` and
 //     `Board::needsConsent` say.
-//   * Boards that already live at `.switchboard/board.yaml`, `switchboard/board.yaml` or
+//   * Boards that already live at `board/board.yaml`, `.switchboard/board.yaml`, `switchboard/board.yaml` or
 //     `issues/board.yaml` keep working exactly as they are; they are found by the same walk and
 //     used where they are. Nothing moves by itself: `boardFolders()` is the one precedence order,
-//     and the one action that renames a folder is the user's own "Move this board to board/"
+//     and the one action that renames a folder is the user's own "Move this board to .board/"
 //     (backend `board_folder`, protocol 19.17).
 //   * The registry of known projects is removable: every record carries why it became known and
 //     when. A "no, do not make a Board here" answer is remembered too (`decline()`), so the
@@ -51,22 +51,23 @@ constexpr int kSchemaVersion = 1;
 // ----- where a board is kept ---------------------------------------------------------------------
 
 // The folders a board may be kept in, and the marker file that makes one a board.
-// `board/` is what Relay creates since 2026-09-21 (owner, card #1CXD); `.switchboard/` is what it
+// `.board/` is what Relay creates now; `board/` was created from 2026-09-21; `.switchboard/` is what it
 // created between 2026-09-19 and then, `switchboard/` between 2026-09-18 and 2026-09-19, and
 // `issues/` is the original spelling, including this repository's own.
-inline constexpr const char *kNewBoardFolder = "board";
+inline constexpr const char *kNewBoardFolder = ".board";
+inline constexpr const char *kPreviousBoardFolder = "board";
 inline constexpr const char *kHiddenBoardFolder = ".switchboard";
 inline constexpr const char *kBoardFolder = "switchboard";
 inline constexpr const char *kLegacyBoardFolder = "issues";
 inline constexpr const char *kBoardMarkerFile = "board.yaml";
 
-// The four above, in precedence order: `board`, `.switchboard`, `switchboard`, `issues`. **Reading
+// The five above, in precedence order: `.board`, `board`, `.switchboard`, `switchboard`, `issues`. **Reading
 // is tolerant and ordered**: every lookup walks this one list and the first folder that holds
 // `board.yaml` is the board. It mirrors `BOARD_FOLDERS` in backend/relay_core/board.py exactly, in
 // the same order, and tests/projects_test.cpp reads that file to keep the two from drifting.
 QStringList boardFolders();
 
-// The folder a *new* board goes in: `board`, whatever a project already on disk is called. Pure.
+// The folder a *new* board goes in: `.board`, whatever a project already on disk is called. Pure.
 // There is no setting: the "Hidden Switchboard folder" toggle went with the decision of
 // 2026-09-21, and a board that already exists moves only through the explicit "Move this board to
 // board/" action (protocol 19.17).

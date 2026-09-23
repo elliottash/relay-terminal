@@ -40,7 +40,8 @@ bool touch(const QString &path)
 }
 
 // A project whose board is in the folder Relay creates today: `board/` (owner, 2026-09-21, #1CXD).
-bool makeNewBoard(const QString &dir) { return touch(dir + QStringLiteral("/board/board.yaml")); }
+bool makeNewBoard(const QString &dir) { return touch(dir + QStringLiteral("/.board/board.yaml")); }
+bool makePreviousBoard(const QString &dir) { return touch(dir + QStringLiteral("/board/board.yaml")); }
 // A project whose board was made between 2026-09-19 and 2026-09-21, when the folder was hidden.
 bool makeHiddenBoard(const QString &dir) { return touch(dir + QStringLiteral("/.switchboard/board.yaml")); }
 // A project whose board was made between 2026-09-18 and 2026-09-19, when the folder was shown.
@@ -250,7 +251,7 @@ private slots:
     {
         // The order both languages walk. `BOARD_FOLDERS` in backend/relay_core/board.py is read
         // here rather than repeated, so the two cannot drift.
-        QCOMPARE(boardFolders(), (QStringList{QStringLiteral("board"), QStringLiteral(".switchboard"),
+        QCOMPARE(boardFolders(), (QStringList{QStringLiteral(".board"), QStringLiteral("board"), QStringLiteral(".switchboard"),
                                               QStringLiteral("switchboard"), QStringLiteral("issues")}));
         QFile python(QStringLiteral(RELAY_SOURCE_DIR "/backend/relay_core/board.py"));
         QVERIFY(python.open(QIODevice::ReadOnly | QIODevice::Text));
@@ -275,7 +276,7 @@ private slots:
         // `board/` is the folder a board is created in, and nothing changes that: the "Hidden
         // Switchboard folder" option went with the owner's decision of 2026-09-21 (#1CXD). It
         // never changed what is *read*, and the three older spellings are read for ever.
-        QCOMPARE(newBoardFolder(), QStringLiteral("board"));
+        QCOMPARE(newBoardFolder(), QStringLiteral(".board"));
         QCOMPARE(boardFolders().first(), newBoardFolder());
     }
 
@@ -286,7 +287,10 @@ private slots:
 
         const QString made = root.path() + QStringLiteral("/made");
         QVERIFY(makeNewBoard(made));
-        QCOMPARE(boardDirOf(made), made + QStringLiteral("/board"));
+        QCOMPARE(boardDirOf(made), made + QStringLiteral("/.board"));
+        const QString previous = root.path() + QStringLiteral("/previous");
+        QVERIFY(makePreviousBoard(previous));
+        QCOMPARE(boardDirOf(previous), previous + QStringLiteral("/board"));
 
         const QString hidden = root.path() + QStringLiteral("/hidden");
         QVERIFY(makeHiddenBoard(hidden));
@@ -309,7 +313,7 @@ private slots:
         QVERIFY(makeHiddenBoard(both));
         QCOMPARE(boardDirOf(both), both + QStringLiteral("/.switchboard"));
         QVERIFY(makeNewBoard(both));
-        QCOMPARE(boardDirOf(both), both + QStringLiteral("/board"));
+        QCOMPARE(boardDirOf(both), both + QStringLiteral("/.board"));
 
         // A folder with no marker in it is not a board.
         const QString bare = root.path() + QStringLiteral("/bare");
@@ -423,7 +427,7 @@ private slots:
         // board being pointed at, say — reaches a pure function.
         const Board uninitialized = chooseBoard(project, QString(), nullptr);
         QCOMPARE(uninitialized.kind, Board::Uninitialized);
-        QCOMPARE(uninitialized.dir, QStringLiteral("/srv/alpha/board"));
+        QCOMPARE(uninitialized.dir, QStringLiteral("/srv/alpha/.board"));
         QCOMPARE(chooseBoard(project, QString(), nullptr, QStringLiteral("switchboard")).dir,
                  QStringLiteral("/srv/alpha/switchboard"));
         QCOMPARE(chooseBoard(project, QString(), nullptr, newBoardFolder()).dir,
@@ -473,13 +477,13 @@ private slots:
     // ever turned it off — gets `board/` like everyone else, with nothing to migrate.
     void aNewBoardIsAlwaysTheBoardFolder()
     {
-        QCOMPARE(newBoardFolder(), QStringLiteral("board"));
+        QCOMPARE(newBoardFolder(), QStringLiteral(".board"));
         QSettings().setValue(QStringLiteral("board/hidden_folder"), false);
-        QCOMPARE(newBoardFolder(), QStringLiteral("board"));
+        QCOMPARE(newBoardFolder(), QStringLiteral(".board"));
         QSettings().setValue(QStringLiteral("board/hidden_folder"), true);
-        QCOMPARE(newBoardFolder(), QStringLiteral("board"));
+        QCOMPARE(newBoardFolder(), QStringLiteral(".board"));
         QSettings().remove(QStringLiteral("board/hidden_folder"));
-        QCOMPARE(newBoardFolder(), QStringLiteral("board"));
+        QCOMPARE(newBoardFolder(), QStringLiteral(".board"));
     }
 
     void theDefaultProjectIsEmptyUntilTheUserChoosesOne()

@@ -1993,7 +1993,7 @@ class NewBoardFolderTests(AttachTest):
 
     def test_the_option_chooses_the_folder_a_new_board_would_go_in(self):
         project = self.project("fresh")
-        for folder, expected in ((None, "board"), ("board", "board"),
+        for folder, expected in ((None, ".board"), (".board", ".board"), ("board", "board"),
                                  (".switchboard", ".switchboard"), ("switchboard", "switchboard")):
             block = self.commands.configure(str(project), {"board": {
                 "project": str(project), "state": "uninitialized",
@@ -2031,8 +2031,8 @@ class InitTests(AttachTest):
     def test_an_uninitialized_project_attaches_but_nothing_is_on_disk(self):
         project, request, block = self.uninitialized()
         # Hidden by default (owner, 2026-09-19); nothing on disk either way.
-        self.assertEqual(block["root"], str(project / "board"))
-        self.assertEqual(block["folder"], "board")
+        self.assertEqual(block["root"], str(project / ".board"))
+        self.assertEqual(block["folder"], ".board")
         self.assertEqual(block["state"], "uninitialized")
         self.assertFalse(block["exists"])
         self.assertEqual(block["cards"], 0)
@@ -2083,9 +2083,9 @@ class InitTests(AttachTest):
         self.assertEqual(created[0]["project"], str(project))
         # POLICY.md and AGENTS.md are the guest path's half of #R9G7: the rules as a file in the
         # board, and the instruction file that points at them (`board.policy_files`).
-        self.assertEqual(created[0]["files"], ["board/board.yaml", "board/.gitignore",
-                                               "board/threads/.gitkeep", ".gitattributes",
-                                               "board/POLICY.md", "AGENTS.md"])
+        self.assertEqual(created[0]["files"], [".board/board.yaml", ".board/.gitignore",
+                                               ".board/threads/.gitkeep", ".gitattributes",
+                                               ".board/POLICY.md", "AGENTS.md"])
         # The card the user typed is not lost: the parked write is replayed.
         written = self.of("board_written")
         self.assertEqual(written[0]["id"], "w1")

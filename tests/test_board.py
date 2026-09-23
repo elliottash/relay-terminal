@@ -1002,9 +1002,9 @@ class BoardFolderTests(unittest.TestCase):
         # Owner, 2026-09-21 (#1CXD): a new board is `<project>/board/`, plain and visible.
         # Reading is tolerant and ordered, and this tuple is the only definition of that order
         # in the backend.
-        self.assertEqual(B.DEFAULT_BOARD_FOLDER, "board")
-        self.assertEqual(B.BOARD_FOLDERS, ("board", ".switchboard", "switchboard", "issues"))
-        self.assertEqual(B.new_board_folder(), "board")
+        self.assertEqual(B.DEFAULT_BOARD_FOLDER, ".board")
+        self.assertEqual(B.BOARD_FOLDERS, (".board", "board", ".switchboard", "switchboard", "issues"))
+        self.assertEqual(B.new_board_folder(), ".board")
         self.assertIsNone(B.board_folder(self.dir))
         issues = self.make("issues")
         self.assertEqual(B.board_folder(self.dir), issues)
@@ -1015,18 +1015,19 @@ class BoardFolderTests(unittest.TestCase):
         self.assertEqual(B.board_folder(self.dir), shown)
         hidden = self.make(".switchboard")
         self.assertEqual(B.board_folder(self.dir), hidden)
-        # `board/` is first in the list, so it wins over every older spelling.
-        current = self.make("board")
+        old = self.make("board")
+        self.assertEqual(B.board_folder(self.dir), old)
+        current = self.make(".board")
         self.assertEqual(B.board_folder(self.dir), current)
 
     def test_a_new_board_scaffolds_into_board_and_names_it_in_gitattributes(self):
         board = B.Board(self.dir / B.DEFAULT_BOARD_FOLDER, self.dir)
         files = B.scaffold(board)
-        self.assertEqual(files, ["board/board.yaml", "board/.gitignore",
-                                 "board/threads/.gitkeep", ".gitattributes",
-                                 "board/POLICY.md", "AGENTS.md"])
+        self.assertEqual(files, [".board/board.yaml", ".board/.gitignore",
+                                 ".board/threads/.gitkeep", ".gitattributes",
+                                 ".board/POLICY.md", "AGENTS.md"])
         self.assertEqual(B.board_folder(self.dir), board.root)
-        self.assertIn("board/threads/*.md merge=union",
+        self.assertIn(".board/threads/*.md merge=union",
                       (self.dir / ".gitattributes").read_text())
 
     def test_a_hidden_board_is_found_and_names_itself_in_gitattributes(self):
@@ -1098,22 +1099,23 @@ class MoveTheFolderTests(unittest.TestCase):
         board = self.make(".switchboard", git=True, commit=True)
         move = B.rename_board_folder(board)
         self.assertEqual((move.old, move.new, move.method, move.hidden),
-                         (".switchboard", "board", "git mv", False))
-        self.assertEqual(board.root, self.dir / "board")
+                         (".switchboard", ".board", "git mv", True))
+        self.assertEqual(board.root, self.dir / ".board")
         self.assertFalse((self.dir / ".switchboard").exists())
-        self.assertEqual(B.board_folder(self.dir), self.dir / "board")
+        self.assertEqual(B.board_folder(self.dir), self.dir / ".board")
         self.assertIsNotNone(board.card_by_id("K7Q2"))
-        self.assertIn("board/threads/*.md merge=union",
+        self.assertIn(".board/threads/*.md merge=union",
                       (self.dir / ".gitattributes").read_text())
-        self.assertEqual(move.files, [".gitattributes"])
+        self.assertIn(".gitattributes", move.files)
+        self.assertIn(".board/POLICY.md", move.files)
         # git knows it as a rename, so the card's history is not broken.
         staged = self.git("diff", "--cached", "--name-status", "-M").stdout
-        self.assertIn("board/features/", staged)
+        self.assertIn(".board/features/", staged)
 
     def test_every_older_spelling_moves_to_board(self):
         # The two Relay created itself; `issues/` has its own refusal below.  One project each,
         # so the moves cannot shadow one another.
-        for index, name in enumerate((".switchboard", "switchboard")):
+        for index, name in enumerate(("board", ".switchboard", "switchboard")):
             with self.subTest(name):
                 project = self.dir / f"p{index}"
                 project.mkdir()
@@ -1122,8 +1124,8 @@ class MoveTheFolderTests(unittest.TestCase):
                 B.write_new_card(board, B.new_card("work", "A card", "inbox", card_id="K7Q2",
                                                    rank="m"), "features")
                 move = B.rename_board_folder(board)
-                self.assertEqual((move.old, move.new), (name, "board"))
-                self.assertEqual(B.board_folder(project), project / "board")
+                self.assertEqual((move.old, move.new), (name, ".board"))
+                self.assertEqual(B.board_folder(project), project / ".board")
                 self.assertIsNotNone(board.card_by_id("K7Q2"))
 
     def test_the_older_spellings_are_still_reachable_as_a_target(self):
@@ -1139,8 +1141,8 @@ class MoveTheFolderTests(unittest.TestCase):
         board = self.make("switchboard")
         move = B.rename_board_folder(board)
         self.assertEqual(move.method, "rename")
-        self.assertEqual(B.board_folder(self.dir), self.dir / "board")
-        self.assertIn("is now board/", move.summary())
+        self.assertEqual(B.board_folder(self.dir), self.dir / ".board")
+        self.assertIn("is now .board/", move.summary())
 
     def test_a_board_git_has_never_seen_is_renamed_in_place(self):
         # Initialised but not committed: there is nothing for `git mv` to record, and it would
@@ -1148,7 +1150,7 @@ class MoveTheFolderTests(unittest.TestCase):
         board = self.make("switchboard", git=True)
         move = B.rename_board_folder(board)
         self.assertEqual(move.method, "rename")
-        self.assertEqual(B.board_folder(self.dir), self.dir / "board")
+        self.assertEqual(B.board_folder(self.dir), self.dir / ".board")
 
     def test_uncommitted_changes_refuse_the_move_and_change_nothing(self):
         board = self.make("switchboard", git=True, commit=True)
@@ -1158,11 +1160,11 @@ class MoveTheFolderTests(unittest.TestCase):
             B.rename_board_folder(board)
         self.assertIn("uncommitted", str(caught.exception))
         self.assertTrue((self.dir / "switchboard").is_dir())
-        self.assertFalse((self.dir / "board").exists())
+        self.assertFalse((self.dir / ".board").exists())
 
     def test_an_existing_target_refuses_the_move(self):
         board = self.make("switchboard")
-        (self.dir / "board").mkdir()
+        (self.dir / ".board").mkdir()
         with self.assertRaises(B.BoardError) as caught:
             B.rename_board_folder(board)
         self.assertIn("already exists", str(caught.exception))
@@ -1176,7 +1178,7 @@ class MoveTheFolderTests(unittest.TestCase):
         self.assertIn("issues/", str(caught.exception))
         self.assertEqual(board.root, self.dir / "issues")
         self.assertTrue((self.dir / "issues" / B.BOARD_CONFIG).is_file())
-        self.assertFalse((self.dir / "board").exists())
+        self.assertFalse((self.dir / ".board").exists())
 
     def test_issues_is_never_a_target_either(self):
         board = self.make("switchboard")
@@ -1186,7 +1188,7 @@ class MoveTheFolderTests(unittest.TestCase):
         self.assertEqual(board.root, self.dir / "switchboard")
 
     def test_a_board_that_is_already_there_is_refused(self):
-        board = self.make("board")
+        board = self.make(".board")
         with self.assertRaises(B.BoardError) as caught:
             B.rename_board_folder(board)
         self.assertIn("already", str(caught.exception))
@@ -1236,14 +1238,14 @@ class PolicyFileTests(unittest.TestCase):
 
     def test_the_board_folder_is_substituted_throughout(self):
         current = B.policy_text(self.board())
-        self.assertIn("# Board policy — `board/`", current)
-        self.assertIn("board/threads/<ID>.md", current)
-        self.assertIn("the repository's `board/` tracker", current)
+        self.assertIn("# Board policy — `.board/`", current)
+        self.assertIn(".board/threads/<ID>.md", current)
+        self.assertIn("the repository's `.board/` tracker", current)
         self.assertNotIn("issues/", current)
+        self.assertIn("rg --hidden", current)
         # `board/` is visible, so it is in an ordinary `rg`'s way: the file says how to
         # leave it out of a code search (owner, 2026-09-21, #1CXD).
-        self.assertIn("rg -g '!board/'", current)
-        self.assertNotIn("rg --hidden", current)
+        self.assertNotIn("rg -g '!", current)
 
         hidden = B.policy_text(self.board(".switchboard"))
         self.assertIn("# Board policy", hidden)
@@ -1271,12 +1273,12 @@ class PolicyFileTests(unittest.TestCase):
     def test_scaffold_writes_it_and_rewrites_a_stale_one(self):
         board = self.board()
         files = B.scaffold(board)
-        self.assertIn("board/POLICY.md", files)
+        self.assertIn(".board/POLICY.md", files)
         path = board.root / B.POLICY_FILE
         self.assertEqual(path.read_text(encoding="utf-8"), B.policy_text(board))
         self.assertEqual(B.scaffold(board), [])            # generated, and already current
         path.write_text("an old version\n", encoding="utf-8")
-        self.assertEqual(B.scaffold(board), ["board/POLICY.md"])
+        self.assertEqual(B.scaffold(board), [".board/POLICY.md"])
         self.assertEqual(path.read_text(encoding="utf-8"), B.policy_text(board))
 
     def test_write_index_refreshes_an_existing_policy_but_never_creates_one(self):
@@ -1321,11 +1323,11 @@ class PolicyFileTests(unittest.TestCase):
         self.assertTrue(text.startswith("# Project\n\nThe project's own rules.\n"))
         self.assertIn(B.POINTER_START, text)
         self.assertIn(B.POINTER_END, text)
-        self.assertIn("board/POLICY.md", text)
+        self.assertIn(".board/POLICY.md", text)
         self.assertIn("needs-verification", text)
         # The one sentence that tells an agent where the cards are and how to keep them out of
         # a code search (owner, 2026-09-21, #1CXD).
-        self.assertIn("rg -g '!board/'", text)
+        self.assertIn("rg --hidden", text)
 
     def test_an_agents_md_is_created_with_an_import_when_only_claude_md_exists(self):
         # instructions.py loads the FIRST hit per directory in PROJECT_ORDER, so a new AGENTS.md
@@ -1408,15 +1410,15 @@ class PolicyFileTests(unittest.TestCase):
         (self.dir / "scripts").mkdir()
         (self.dir / "scripts" / "relay-board.py").write_text("#!/usr/bin/env python3\n")
         text = B.policy_text(board)
-        self.assertIn("python3 scripts/relay-board.py --board board check", text)
-        self.assertIn("python3 scripts/relay-board.py --board board index", text)
+        self.assertIn("python3 scripts/relay-board.py --board .board check", text)
+        self.assertIn("python3 scripts/relay-board.py --board .board index", text)
 
     def test_write_policy_regenerates_both_on_an_existing_board(self):
         board = self.board()
         B.scaffold(board)
         (board.root / B.POLICY_FILE).unlink()
         (self.dir / "AGENTS.md").unlink()
-        self.assertEqual(sorted(B.write_policy(board)), ["AGENTS.md", "board/POLICY.md"])
+        self.assertEqual(sorted(B.write_policy(board)), [".board/POLICY.md", "AGENTS.md"])
         self.assertTrue((board.root / B.POLICY_FILE).is_file())
         self.assertTrue((self.dir / "AGENTS.md").is_file())
         self.assertEqual(B.write_policy(board), [])

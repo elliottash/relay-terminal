@@ -4821,7 +4821,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // handleEvent) or a refusal, which the notice line shows like any other error.
     m_sections->onFolder = [this] {
         send({{QStringLiteral("type"), QStringLiteral("board_folder")},
-              {QStringLiteral("folder"), QStringLiteral("board")}});
+              {QStringLiteral("folder"), relay::projects::newBoardFolder()}});
         closeSections();
     };
     layout->addWidget(m_sections, 1);

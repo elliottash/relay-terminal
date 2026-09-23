@@ -101,7 +101,7 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_triage", "board
 
 #: What every message here says when the pane has no board at all (protocol 19.1).  The current
 #: folder and the original one, because a project may carry either and neither is wrong.
-NO_BOARD_ERROR = ("This project has no board (no board/board.yaml, and no "
+NO_BOARD_ERROR = ("This project has no board (no .board/board.yaml, and no "
                   "issues/board.yaml).")
 
 #: What a *board* ask gets when this tab has no board (protocol 30.7).  The console itself
@@ -966,7 +966,7 @@ class BoardCommands:
 
     # ---- moving the board's folder (protocol 19.17) ----------------------------
     def _folder(self, request: dict, rid) -> None:
-        """`board_folder {folder}`: move this board to `board/`, from any older spelling.
+        """`board_folder {folder}`: move this board to `.board/`, from any older spelling.
 
         The one thing that moves an existing board, and only because the user asked for it: reading
         is tolerant of every spelling (`B.BOARD_FOLDERS`) and nothing migrates by itself.  `git mv`

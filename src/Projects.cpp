@@ -114,7 +114,7 @@ QStringList boardFolders()
     // Precedence order, the same order as `BOARD_FOLDERS` in backend/relay_core/board.py: the first
     // of these that holds a `board.yaml` is the board. `board/` first, because that is what Relay
     // creates since 2026-09-21; the three older spellings are read for ever and never moved.
-    return {QString::fromLatin1(kNewBoardFolder), QString::fromLatin1(kHiddenBoardFolder),
+    return {QString::fromLatin1(kNewBoardFolder), QString::fromLatin1(kPreviousBoardFolder), QString::fromLatin1(kHiddenBoardFolder),
             QString::fromLatin1(kBoardFolder), QString::fromLatin1(kLegacyBoardFolder)};
 }
 

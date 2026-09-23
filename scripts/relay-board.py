@@ -24,8 +24,8 @@ from relay_core import qa_verifiers as qa
 
 
 def default_board_dir() -> Path:
-    """The board of the checkout this is run in: `board/`, else `.switchboard/`, `switchboard/`
-    or `issues/`.
+    """The board of the checkout this is run in: `.board/`, else `board/`,
+    `.switchboard/`, `switchboard/` or `issues/`.
 
     `board.BOARD_FOLDERS` is the one list of spellings, in precedence order, and this walks it in
     the same order as the worker, so the command line and Relay agree about which board a project
@@ -245,7 +245,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--issues', '--board', dest='issues', type=Path, default=None,
-                        help='the board directory: board/, .switchboard/, switchboard/ or '
+                        help='the board directory: .board/, board/, .switchboard/, switchboard/ or '
                              'issues/ (default: the board of the git checkout it is run in)')
     sub = parser.add_subparsers(dest='command', required=True)
 

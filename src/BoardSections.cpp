@@ -600,17 +600,18 @@ void SectionEditor::setFolder(const QString &folderName)
     // Offered on the two older spellings and on nothing else: `board/` is already where the move
     // would take it, and `issues/` — this repository's own, and every other project that names it
     // in its scripts and hooks — is never moved (the worker refuses it too).
-    const bool movable = m_folder == QLatin1String(".switchboard") || m_folder == QLatin1String("switchboard");
+    const bool movable = m_folder == QLatin1String("board") ||
+                         m_folder == QLatin1String(".switchboard") ||
+                         m_folder == QLatin1String("switchboard");
     if (!movable) {
         // `board/`, `issues/`, or a folder the worker has not named yet: nothing to offer.
         m_folderRow->hide();
         return;
     }
-    m_folderLabel->setText(
-        QStringLiteral("This board is kept in %1/, the folder Relay used before 2026-09-21.").arg(m_folder));
-    m_folderButton->setText(QStringLiteral("Move this board to board/"));
+    m_folderLabel->setText(QStringLiteral("This board is kept in %1/.").arg(m_folder));
+    m_folderButton->setText(QStringLiteral("Move this board to .board/"));
     m_folderButton->setToolTip(
-        QStringLiteral("Rename %1/ to board/ — git mv in a checkout, a plain rename otherwise; "
+        QStringLiteral("Rename %1/ to .board/ — git mv in a checkout, a plain rename otherwise; "
                        "refused while a turn runs or a card has uncommitted text").arg(m_folder));
     m_folderRow->show();
 }

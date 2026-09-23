@@ -271,12 +271,12 @@ void ProjectInitTests::theQuestionNamesTheFolderItWouldCreate()
     QCOMPARE(titleLine(), QStringLiteral("Initialize a project and create a Board here?"));
     // `board/` since the owner's decision of 2026-09-21 (#1CXD), and there is no setting that
     // changes it: that is what the question offers to create, on every machine.
-    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/board"));
-    QCOMPARE(boardFolderFor(kProject + QStringLiteral("/")), kProject + QStringLiteral("/board"));
+    QCOMPARE(boardFolderFor(kProject), kProject + QStringLiteral("/.board"));
+    QCOMPARE(boardFolderFor(kProject + QStringLiteral("/")), kProject + QStringLiteral("/.board"));
     QCOMPARE(boardFolderFor(QString()), QString());
     // One folder, named, and the sentence says nothing else is written.
     const QString line = folderLineFor(kProject);
-    QVERIFY(line.contains(kProject + QStringLiteral("/board/")));
+    QVERIFY(line.contains(kProject + QStringLiteral("/.board/")));
     QVERIFY(line.contains(QStringLiteral("nothing else")));
     QVERIFY(!line.contains(QStringLiteral("issues")));
     // It is the one folder `relay::projects::newBoardFolder()` names, not a second opinion.
@@ -289,7 +289,7 @@ void ProjectInitTests::theProbeBecomesCheckboxesAndNotes()
     const Question question = questionFrom(probeFixture());
     QVERIFY(question.isValid());
     QCOMPARE(question.project, kProject);
-    QCOMPARE(question.folder, kProject + QStringLiteral("/board"));
+    QCOMPARE(question.folder, kProject + QStringLiteral("/.board"));
     QCOMPARE(question.items, 30);
 
     // One checkbox per tracker, in the probe's order, labelled with the probe's own summary.
@@ -323,7 +323,7 @@ void ProjectInitTests::anEmptyProbeIsAQuestionWithNoFindings()
     QVERIFY(question.imports.isEmpty());
     QVERIFY(question.notes.isEmpty());
     QCOMPARE(question.title, titleLine());
-    QCOMPARE(question.folder, kProject + QStringLiteral("/board"));
+    QCOMPARE(question.folder, kProject + QStringLiteral("/.board"));
     QVERIFY(!questionFrom(QJsonObject{}).isValid());
 }
 
@@ -368,8 +368,8 @@ void ProjectInitTests::tickedBoxesBecomeImportKinds()
 void ProjectInitTests::theOneQuietLineAfterAYes()
 {
     QCOMPARE(createdLine(kProject, -1),
-             QStringLiteral("Board created in /home/e/src/widgetworks/board/"));
-    QVERIFY(createdLine(kProject, 23).endsWith(QStringLiteral("board/ · 23 card(s) imported")));
+             QStringLiteral("Board created in /home/e/src/widgetworks/.board/"));
+    QVERIFY(createdLine(kProject, 23).endsWith(QStringLiteral(".board/ · 23 card(s) imported")));
     QVERIFY(createdLine(kProject, 0).endsWith(QStringLiteral("nothing left to import")));
     QCOMPARE(createdLine(QString(), 3), QString());
     // A no says what was remembered and how to undo it; "not now" says only how to come back.

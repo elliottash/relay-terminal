@@ -562,21 +562,25 @@ void BoardSectionsTests::theFolderRowOffersToMoveTheBoardToBoard()
 
     editor.setFolder(QStringLiteral("switchboard"));
     QVERIFY(row->isVisibleTo(&editor));
-    QCOMPARE(button->text(), QStringLiteral("Move this board to board/"));
-    QVERIFY(button->toolTip().contains(QStringLiteral("Rename switchboard/ to board/")));
+    QCOMPARE(button->text(), QStringLiteral("Move this board to .board/"));
+    QVERIFY(button->toolTip().contains(QStringLiteral("Rename switchboard/ to .board/")));
     button->click();
     QCOMPARE(asked, 1);
 
     editor.setFolder(QStringLiteral(".switchboard"));
     QVERIFY(row->isVisibleTo(&editor));
-    QCOMPARE(button->text(), QStringLiteral("Move this board to board/"));   // the same move
-    QVERIFY(button->toolTip().contains(QStringLiteral("Rename .switchboard/ to board/")));
+    QCOMPARE(button->text(), QStringLiteral("Move this board to .board/"));   // the same move
+    QVERIFY(button->toolTip().contains(QStringLiteral("Rename .switchboard/ to .board/")));
     button->click();
     QCOMPARE(asked, 2);
 
-    editor.setFolder(QStringLiteral("board"));                 // already there: nothing to offer
+    editor.setFolder(QStringLiteral("board"));
+    QVERIFY(row->isVisibleTo(&editor));
+    QVERIFY(button->toolTip().contains(QStringLiteral("Rename board/ to .board/")));
+
+    editor.setFolder(QStringLiteral(".board"));                 // already there: nothing to offer
     QVERIFY(!row->isVisibleTo(&editor));
-    QCOMPARE(editor.folder(), QStringLiteral("board"));
+    QCOMPARE(editor.folder(), QStringLiteral(".board"));
 
     editor.setFolder(QStringLiteral("issues"));                // the original spelling: never moved
     QVERIFY(!row->isVisibleTo(&editor));

@@ -1074,26 +1074,25 @@ signals: {auto_work: true}
 """
 
 #: The folder a board is kept in, newest spelling first.  Owner's decision, 2026-09-21 (#1CXD):
-#: a new board is created as `<project>/board/` — plain and visible, so an agent reaching for the
-#: cards with a bare `rg` finds them instead of concluding the project has no board.  The other
-#: half of that trade is taught rather than enforced: the generated pointer block and `POLICY.md`
-#: say to exclude the folder from code searches (`rg -g '!board/'`), which is the job the hidden
-#: spelling used to do by itself.  `.switchboard/` is what Relay created between 2026-09-19 and
+#: a new board is created as `<project>/.board/`; the generated pointer and policy name the
+#: hidden folder and teach explicit `rg` searches. `board/` remains readable for boards created
+#: since 2026-09-21. `.switchboard/` is what Relay created between 2026-09-19 and
 #: that decision, `switchboard/` between 2026-09-18 and 2026-09-19, and `issues/` is the original
 #: spelling — including this repository's own.  **Nothing moves a board that already exists.**
-NEW_BOARD_FOLDER = "board"
+NEW_BOARD_FOLDER = ".board"
+PREVIOUS_BOARD_FOLDER = "board"
 HIDDEN_BOARD_FOLDER = ".switchboard"
 VISIBLE_BOARD_FOLDER = "switchboard"
 LEGACY_BOARD_FOLDER = "issues"
 
-#: Where a project keeps its board, in precedence order: `board/board.yaml` first, then
-#: `.switchboard/board.yaml`, then `switchboard/board.yaml`, then `issues/board.yaml`, and the
+#: Where a project keeps its board, in precedence order: `.board/board.yaml` first, then
+#: `board/board.yaml`, `.switchboard/board.yaml`, `switchboard/board.yaml`, and `issues/board.yaml`; the
 #: **first that exists wins**.
 #: Reading is always tolerant — a board is used wherever it is found and nothing moves by itself —
 #: so this one list, walked in this one order, is the only definition of "which folder is the
 #: board" in the backend.  The C++ side repeats it once, in `relay::projects::boardFolders()`
 #: (src/Projects.h), and `tests/projects_test.cpp` pins the two to the same order.
-BOARD_FOLDERS = (NEW_BOARD_FOLDER, HIDDEN_BOARD_FOLDER, VISIBLE_BOARD_FOLDER, LEGACY_BOARD_FOLDER)
+BOARD_FOLDERS = (NEW_BOARD_FOLDER, PREVIOUS_BOARD_FOLDER, HIDDEN_BOARD_FOLDER, VISIBLE_BOARD_FOLDER, LEGACY_BOARD_FOLDER)
 
 #: The folder a *new* board is created in.  A `configure` may still name one of the older
 #: spellings in `board.folder` (protocol 19.1) for a project that wants it; nothing creates
@@ -1102,15 +1101,15 @@ DEFAULT_BOARD_FOLDER = NEW_BOARD_FOLDER
 
 
 def new_board_folder() -> str:
-    """The folder name a board created now gets: `board`."""
+    """The folder name a board created now gets: `.board`."""
     return NEW_BOARD_FOLDER
 
 
 def board_folder(directory: str | os.PathLike) -> Path | None:
     """The board directory inside `directory`, or None.
 
-    `BOARD_FOLDERS` order: `board/board.yaml`, then `.switchboard/board.yaml`, then
-    `switchboard/board.yaml`, then `issues/board.yaml`.  The first that exists wins, so a project
+    `BOARD_FOLDERS` order: `.board/board.yaml`, then `board/board.yaml`, then
+    `.switchboard/board.yaml`, `switchboard/board.yaml`, and `issues/board.yaml`. The first that exists wins, so a project
     that somehow has two is read as the first of them and the others are left where they are.
     """
     here = Path(directory)
@@ -1996,7 +1995,7 @@ class FolderMove:
 
 
 def rename_board_folder(board: Board, to: str = DEFAULT_BOARD_FOLDER) -> FolderMove:
-    """Move a board to `board/` (owner, 2026-09-21, #1CXD), from any of the older spellings.
+    """Move a board to `.board/`, from any of the older supported spellings.
 
     The one explicit action that moves an existing board: reading is tolerant and nothing moves by
     itself, so this runs only when the user asks for it.  `git mv` in a checkout, a plain rename
@@ -2087,6 +2086,7 @@ def rename_board_folder(board: Board, to: str = DEFAULT_BOARD_FOLDER) -> FolderM
             _atomic_write(attributes, after)
             files.append(".gitattributes")
     board.root = destination
+    files.extend(write_policy(board))
     return FolderMove(old=old, new=target, root=str(destination), method=method, files=files)
 
 
@@ -2402,7 +2402,8 @@ def policy_text(board: "Board") -> str:
     # The visible `board/` is in ordinary `rg` range (owner, 2026-09-21), which is how an agent
     # finds the cards at all -- and why it has to be told, once, to leave them out of a code
     # search.  A hidden board has the opposite problem, and the appendix covers that one.
-    search = ("" if folder.startswith(".") else
+    search = (f" A plain project-wide `rg` skips this hidden folder; use `rg --hidden` or "
+              f"search `{folder}/` explicitly for cards." if folder.startswith(".") else
               f" A code search over this project matches card text too, so leave the board out of "
               f"one: `rg -g '!{folder}/'`.")
     where = _wrap(f"The board is `{folder}/`: plain Markdown in git, one file per card, one "
@@ -2434,12 +2435,15 @@ def policy_text(board: "Board") -> str:
 def pointer_text(board: "Board") -> str:
     """The marked block that points an instruction file at `POLICY.md`."""
     folder = board.root.name
+    search = (f"To search its cards with `rg`, name `{folder}/` explicitly or use `rg --hidden`; "
+              "a plain project-wide `rg` skips hidden folders."
+              if folder.startswith(".") else
+              f"Leave the folder out of code searches with `rg -g '!{folder}/'`.")
     return f"""{POINTER_START}
 ## Board (Relay)
 
 This project has a Relay board in `{folder}/`: its cards are the record of what was asked and
-what was done, in plain Markdown in git. Read them there or in `{folder}/BOARD.md`, and leave the
-folder out of code searches with `rg -g '!{folder}/'`.
+what was done, in plain Markdown in git. Read them there or in `{folder}/BOARD.md`. {search}
 
 **Before doing work, read `{folder}/POLICY.md`** and follow it: check whether the request is already
 done, find the card that asks for it or file one, claim it, plan on it if it needs a plan, do the
