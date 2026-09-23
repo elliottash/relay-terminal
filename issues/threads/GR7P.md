@@ -10,3 +10,6 @@ Claimed the Sessions dropdown audit. I will exercise each popup with mouse event
 
 <!-- relay:entry 20260923T115811Z-fb author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/3c33628a431e4a12998fe39f50906b3c -->
 - ✦ agent moved this card · Executing → Needs verification · Dropdown mouse audit and screenshots complete; current build behaves correctly. Live verification remains because running Relay instances use an older replaced executable. · evidence docs/qa_evidence/2026-09-23-sessions-dropdown-audit/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T115859Z-br author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/3c33628a431e4a12998fe39f50906b3c -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-sessions-… → {"plans": [], "commits": ["b020c68361f07f1a811025540e938fdc884e917d"], "evidence…

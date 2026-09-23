@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-dropdown-audit/], related: [SC7P, P4C7], github: null}
+links: {plans: [], commits: [b020c68361f07f1a811025540e938fdc884e917d], evidence: [docs/qa_evidence/2026-09-23-sessions-dropdown-audit/], related: [SC7P, P4C7], github: null}
 ---
 # Make every Sessions dropdown visibly effective
 
