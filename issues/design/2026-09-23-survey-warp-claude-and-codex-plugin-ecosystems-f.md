@@ -9,7 +9,7 @@ session: e0e12343-9768-4af9-a4ee-96b00ae19807
 rank: zzzzzzzzzzzzzzzzzzw
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [reports/Plugin ecosystems for Relay.md], related: [MEPR, P2W8], github: null}
+links: {plans: [], commits: [02c408cd916ca6d05de9d9a0a2dc8fb49af3c269], evidence: [reports/Plugin ecosystems for Relay.md], related: [MEPR, P2W8], github: null}
 ---
 # Survey Warp, Claude, and Codex plugin ecosystems for Relay
 
