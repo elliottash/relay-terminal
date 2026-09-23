@@ -10,12 +10,15 @@
 #include "OutputLinks.h"
 #include "core/CellTypes.h"
 #include "core/InlineImage.h"
+#include "core/InlineMedia.h"
 
 #include <QElapsedTimer>
 #include <QFont>
 #include <QHash>
+#include <QPointer>
 #include <QRawFont>
 #include <QTimer>
+#include <QVector>
 #include <QWidget>
 
 #include <algorithm>
@@ -25,6 +28,7 @@
 
 class QLabel;
 class QLineEdit;
+class QProcess;
 
 namespace relay {
 
@@ -428,6 +432,37 @@ private:
     // placeholder on its first row is then under the pointer).
     bool imageAt(const QPoint &pos, ImagePlacement *image, bool *missing);
     void openImage(const QString &path);
+    // Media rows (#MDA7) use the same linked-cell placement as images.
+    struct MediaPlacement {
+        inlinemedia::MediaRef ref;
+        int col = 0;
+        int top = 0;
+        int firstRow = 0;
+        int lastRow = 0;
+    };
+    struct MediaInfo {
+        QString kind;
+        QString path;
+        QString preview;
+        QString url;
+        QVector<qreal> waveform;
+        qint64 durationMs = 0;
+        int rows = 0;
+        int columns = 0;
+        QChar delimiter = QLatin1Char(',');
+        bool valid = false;
+    };
+    bool mediaRefOf(uint32_t link, int frameRow, int col, inlinemedia::MediaRef *ref);
+    void mediaOnRows(int first, int last, std::vector<MediaPlacement> *out);
+    MediaInfo mediaInfo(const QString &manifest);
+    QRect mediaRect(const MediaPlacement &media) const;
+    void paintMedia(QPainter &p, int firstRow, int lastRow);
+    bool mediaAt(const QPoint &pos, MediaPlacement *media);
+    void activateMedia(const MediaPlacement &media, const QPoint &pos);
+    void openTable(const MediaInfo &info);
+    void playAudio(const MediaInfo &info, qint64 fromMs);
+    void stopAudio(bool preservePosition = false);
+    qint64 audioPositionMs() const;
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -544,6 +579,15 @@ private:
     QHash<QString, inlineimage::ImageRef> m_imageUris;   // an empty path: not a well-formed image URI
     std::vector<ImagePlacement> m_imagePlacements;
     ImageCache m_images;
+    std::unordered_map<uint32_t, inlinemedia::MediaRef> m_frameMedia;
+    QHash<QString, MediaInfo> m_mediaInfo;
+    std::vector<MediaPlacement> m_mediaPlacements;
+    QProcess *m_audioProcess = nullptr;
+    QTimer m_audioTimer;
+    QString m_audioPath;
+    qint64 m_audioPositionMs = 0;
+    qint64 m_audioDurationMs = 0;
+    QElapsedTimer m_audioClock;
     std::function<void(const QString &)> m_imageOpener;
     QString m_pressedImage;    // the picture a plain left press landed on
     bool m_hoverImage = false; // the pointer is over a picture (pointing hand)

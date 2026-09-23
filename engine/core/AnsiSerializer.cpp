@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AnsiSerializer.h"
 #include "InlineImage.h"
+#include "InlineMedia.h"
 
 #include <QStringList>
 
@@ -160,7 +161,8 @@ QString lineToSavedAnsi(const Line &line, const std::function<QString(uint32_t, 
 {
     return lineToAnsi(line, [&](uint32_t id, int col) {
         const QString uri = linkUri ? linkUri(id, col) : QString();
-        return uri.startsWith(QLatin1String(inlineimage::kImagePrefix)) ? uri : QString();
+        return uri.startsWith(QLatin1String(inlineimage::kImagePrefix)) ||
+                       uri.startsWith(QLatin1String(inlinemedia::kPrefix)) ? uri : QString();
     });
 }
 
@@ -207,7 +209,7 @@ QString restorableAnsi(const QString &text)
                 i = end;
                 continue;
             }
-            if (inlineimage::parseImageUri(uri, nullptr)) {
+            if (inlineimage::parseImageUri(uri, nullptr) || inlinemedia::parseMediaUri(uri)) {
                 clean += text.mid(i, end - i + 1);
                 inImage = true;
                 i = end;

@@ -29,7 +29,11 @@ class RelayShowTest(unittest.TestCase):
         prefix = b"\x1b]8;;relay-media:"
         self.assertTrue(output.startswith(prefix), output)
         end = output.index(b"\x1b\\", len(prefix))
-        path = Path(unquote(output[len(prefix):end].decode()))
+        row, rows, cols, encoded = output[len(prefix):end].decode().split("/", 3)
+        self.assertEqual(row, "0")
+        self.assertGreaterEqual(int(rows), 1)
+        self.assertEqual(cols, "60")
+        path = Path(unquote(encoded))
         self.assertTrue(path.is_file())
         self.assertIn("⠀".encode("utf-8") + b"\x1b]8;;\x1b\\", output)
         return json.loads(path.read_text())
@@ -48,6 +52,7 @@ class RelayShowTest(unittest.TestCase):
         item = self.manifest(result.stdout)
         self.assertEqual((item["kind"], item["rows"], item["columns"]), ("table", 3, 2))
         self.assertEqual(Path(item["path"]).read_bytes(), b"name,value\na,2\nb,10\n")
+        self.assertEqual(result.stdout.count(b"\x1b]8;;relay-media:"), 1)
 
     def test_wave_audio_has_duration(self):
         sound = self.root / "tone.wav"

@@ -3,6 +3,7 @@
 // assert cells, text, modes and events.
 #include "core/AnsiSerializer.h"
 #include "core/InlineImage.h"
+#include "core/InlineMedia.h"
 #include "core/LibVtermCore.h"
 #include "core/SequenceScanner.h"
 #include "core/VtCore.h"
@@ -156,6 +157,28 @@ private slots:
         // An image link left open (a truncated file) is closed at the end of its line.
         QCOMPARE(restorableAnsi(QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800)),
                  QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\"));
+    }
+
+    void mediaRowsKeepOnlyValidatedLinksThroughRestore()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        const QString uri = inlinemedia::mediaUri({QStringLiteral("/tmp/relay media.json"), 0, 1, 60});
+        QVERIFY(inlinemedia::parseMediaUri(uri));
+        QVERIFY(!inlinemedia::parseMediaUri(QStringLiteral("relay-media:0/1/60/relative.json")));
+        QVERIFY(!inlinemedia::parseMediaUri(QStringLiteral("relay-media:1/1/60/%2Ftmp%2Fa.json")));
+        QVERIFY(!inlinemedia::parseMediaUri(QStringLiteral("relay-media:0/21/60/%2Ftmp%2Fa.json")));
+        const QByteArray media = (QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") +
+                                  QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\")).toUtf8();
+        h.feed(QByteArrayLiteral("\x1b]8;;file:///tmp/no.txt\x1b\\x\x1b]8;;\x1b\\") + media);
+        const QString saved = lineToSavedAnsi(h.frame().lines[0],
+            [&](uint32_t id, int col) { return h.vt->hyperlinkUri(id, 0, col); });
+        QVERIFY(saved.contains(uri));
+        QVERIFY(!saved.contains(QStringLiteral("file:///tmp/no.txt")));
+        QCOMPARE(restorableAnsi(saved), saved);
+        Harness replay(core);
+        replay.feed(restorableAnsi(saved).toUtf8());
+        QCOMPARE(replay.vt->hyperlinkAt(0, 1), uri);
     }
 
     void ansiSerializerHandlesWideCharactersAndClusters()

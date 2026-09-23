@@ -13,7 +13,9 @@
 #include <QCursor>
 #include <QDesktopServices>
 #include <QDir>
+#include <QDialog>
 #include <QFileInfo>
+#include <QFile>
 #include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QGlyphRun>
@@ -24,13 +26,21 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QPointer>
+#include <QProcess>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QStyle>
+#include <QStandardPaths>
+#include <QTableWidget>
 #include <QToolButton>
 #include <QUrl>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QtMath>
 
@@ -39,6 +49,22 @@
 namespace relay {
 
 namespace {
+
+QPointer<TerminalView> activeAudioView;
+
+class SortableTableItem : public QTableWidgetItem {
+public:
+    using QTableWidgetItem::QTableWidgetItem;
+    bool operator<(const QTableWidgetItem &other) const override
+    {
+        bool aOk = false, bOk = false;
+        const double a = text().toDouble(&aOk);
+        const double b = other.text().toDouble(&bOk);
+        if (aOk && bOk)
+            return a < b;
+        return text().localeAwareCompare(other.text()) < 0;
+    }
+};
 
 // A compressed visual window can contain a real row beyond the core's current
 // viewport. Core hit tests and selections still take viewport coordinates;
@@ -233,6 +259,8 @@ TerminalView::TerminalView(TerminalSession *session, QWidget *parent)
     setMouseTracking(true);
     setCursor(Qt::IBeamCursor);
     m_images.onReady = [this] { update(); };
+    m_audioTimer.setInterval(100);
+    connect(&m_audioTimer, &QTimer::timeout, this, [this] { update(); });
 
     QFont f = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     if (QFontDatabase().families().contains(QStringLiteral("DejaVu Sans Mono")))
@@ -286,7 +314,10 @@ TerminalView::TerminalView(TerminalSession *session, QWidget *parent)
     m_foldResolveAt.start();
 }
 
-TerminalView::~TerminalView() = default;
+TerminalView::~TerminalView()
+{
+    stopAudio();
+}
 
 // ---------------------------------------------------------------- appearance
 
@@ -578,6 +609,7 @@ void TerminalView::pullFrame()
     m_frameCwdValid = false;
     m_frameProse.clear();
     m_frameImages.clear();
+    m_frameMedia.clear();
     // Anchors are re-read before the frame, so the rows the fold layer works
     // with belong to the same content the frame will show. The heartbeat only
     // has something to find when content has moved under the anchors since the
@@ -751,6 +783,7 @@ void TerminalView::paintEvent(QPaintEvent *e)
             paintRow(p, row, m_frame.lines[size_t(frameRow)], v.realRow);
     }
     paintImages(p, firstRow, lastRow);
+    paintMedia(p, firstRow, lastRow);
     paintCursor(p);
 }
 
@@ -1639,9 +1672,16 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
         }
         if (onImage && e->modifiers() == Qt::NoModifier && m_plainClickOpens)
             m_pressedImage = image.ref.path;
+        MediaPlacement media;
+        const bool onMedia = foldUri.isEmpty() && !onImage && mediaAt(e->pos(), &media);
+        if (onMedia && ((e->modifiers() & Qt::ControlModifier) ||
+                        (e->modifiers() == Qt::NoModifier && m_plainClickOpens))) {
+            activateMedia(media, e->pos());
+            return;
+        }
         Link link;
         int s = 0, en = 0;
-        const bool onLink = foldUri.isEmpty() && !onImage && linkAt(pos, &link, &s, &en);
+        const bool onLink = foldUri.isEmpty() && !onImage && !onMedia && linkAt(pos, &link, &s, &en);
         if (onLink && (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
             emit linkActivated(link.target, link.line, link.column, e->modifiers());
             return;
@@ -1861,7 +1901,9 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
     ImagePlacement image;
     bool imageMissing = false;
     const bool onImage = inside && imageAt(pos, &image, &imageMissing);
-    if (inside && !onImage) {
+    MediaPlacement media;
+    const bool onMedia = inside && !onImage && mediaAt(pos, &media);
+    if (inside && !onImage && !onMedia) {
         int s = -1, en = -1;
         if (linkAt(c, &link, &s, &en, &segments)) {
             newRow = c.row;
@@ -1872,7 +1914,11 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
         }
     }
     QString tip;
-    if (onImage) {
+    if (onMedia) {
+        const MediaInfo info = mediaInfo(media.ref.manifest);
+        tip = info.valid ? (info.path.isEmpty() ? info.url : info.path)
+                         : tr("Media unavailable");
+    } else if (onImage) {
         tip = imageMissing ? tr("%1 (missing)").arg(image.ref.path) : image.ref.path;
     } else if (!link.card.isEmpty()) {
         // A card reference says which card it opens, not the relay://card/<id> behind it.
@@ -1890,8 +1936,8 @@ void TerminalView::updateHover(const QPoint &pos, Qt::KeyboardModifiers)
         setToolTip(tip);
     if (segments.isEmpty() && newRow >= 0)
         segments.append(QRect(newStart, newRow, newEnd - newStart + 1, 1));
-    const bool handChanged = m_hoverImage != (onImage && !imageMissing);
-    m_hoverImage = onImage && !imageMissing;
+    const bool handChanged = m_hoverImage != ((onImage && !imageMissing) || onMedia);
+    m_hoverImage = (onImage && !imageMissing) || onMedia;
     if (newRow == m_hoverRow && newStart == m_hoverStart && newEnd == m_hoverEnd
         && segments == m_hoverSegments) {
         if (handChanged)
@@ -2479,6 +2525,364 @@ void TerminalView::openImage(const QString &path)
         m_imageOpener(path);
     else
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+// ---------------------------------------------------------------- inline media (#MDA7)
+
+bool TerminalView::mediaRefOf(uint32_t link, int frameRow, int col, inlinemedia::MediaRef *ref)
+{
+    auto it = m_frameMedia.find(link);
+    if (it == m_frameMedia.end()) {
+        const QString uri = m_session->withCore([&](VtCore &core) {
+            CoreRow at(core, m_frame.viewportTop + frameRow);
+            return core.hyperlinkUri(link, at.row, col);
+        });
+        inlinemedia::MediaRef parsed;
+        if (!inlinemedia::parseMediaUri(uri, &parsed))
+            parsed.manifest.clear();
+        it = m_frameMedia.emplace(link, parsed).first;
+    }
+    if (it->second.manifest.isEmpty())
+        return false;
+    *ref = it->second;
+    return true;
+}
+
+void TerminalView::mediaOnRows(int first, int last, std::vector<MediaPlacement> *out)
+{
+    out->clear();
+    for (int row = std::max(0, first); row <= last; ++row) {
+        const int frameRow = frameRowOf(row);
+        if (frameRow < 0 || frameRow >= int(m_frame.lines.size()))
+            continue;
+        const Line &line = m_frame.lines[size_t(frameRow)];
+        const int cols = std::min<int>(int(line.cells.size()), m_frame.columns);
+        for (int col = 0; col < cols; ++col) {
+            const Cell &cell = line.cells[size_t(col)];
+            if (cell.ch != char32_t(inlinemedia::kRowCell) || !cell.link)
+                continue;
+            inlinemedia::MediaRef ref;
+            if (!mediaRefOf(cell.link, frameRow, col, &ref))
+                continue;
+            const int top = row - ref.row;
+            const auto same = std::find_if(out->begin(), out->end(), [&](const MediaPlacement &p) {
+                return p.col == col && p.top == top && p.lastRow == row - 1 &&
+                    p.ref.rows == ref.rows && p.ref.cols == ref.cols && p.ref.manifest == ref.manifest;
+            });
+            if (same != out->end())
+                same->lastRow = row;
+            else
+                out->push_back(MediaPlacement{ref, col, top, row, row});
+        }
+    }
+}
+
+TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
+{
+    auto found = m_mediaInfo.constFind(manifest);
+    if (found != m_mediaInfo.constEnd())
+        return *found;
+    if (m_mediaInfo.size() > 512)
+        m_mediaInfo.clear();
+    MediaInfo info;
+    QFile file(manifest);
+    if (file.size() > 0 && file.size() <= 65536 && file.open(QIODevice::ReadOnly)) {
+        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+        const QJsonObject obj = doc.object();
+        const QString kind = obj.value(QStringLiteral("kind")).toString();
+        if (obj.value(QStringLiteral("version")).toInt() == 1 &&
+            (kind == QStringLiteral("audio") || kind == QStringLiteral("table") ||
+             kind == QStringLiteral("video") || kind == QStringLiteral("chart") ||
+             kind == QStringLiteral("svg") || kind == QStringLiteral("pdf"))) {
+            info.kind = kind;
+            info.path = obj.value(QStringLiteral("path")).toString();
+            info.preview = obj.value(QStringLiteral("preview")).toString();
+            info.url = obj.value(QStringLiteral("url")).toString();
+            info.valid = (info.path.isEmpty() || QFileInfo(info.path).isAbsolute()) &&
+                         (info.preview.isEmpty() || QFileInfo(info.preview).isAbsolute());
+            if (kind != QStringLiteral("chart") && info.path.isEmpty())
+                info.valid = false;
+            if (kind == QStringLiteral("chart")) {
+                const QUrl url(info.url);
+                const bool local = url.isLocalFile() ||
+                    ((url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) &&
+                     (url.host() == QStringLiteral("localhost") || url.host() == QStringLiteral("127.0.0.1") ||
+                      url.host() == QStringLiteral("::1")));
+                info.valid = info.valid && local;
+            }
+            info.durationMs = std::clamp<qint64>(qRound64(obj.value(QStringLiteral("duration")).toDouble() * 1000),
+                                                0, qint64(7) * 24 * 3600 * 1000);
+            info.rows = std::clamp(obj.value(QStringLiteral("rows")).toInt(), 0, 5000);
+            info.columns = std::clamp(obj.value(QStringLiteral("columns")).toInt(), 0, 100);
+            info.delimiter = obj.value(QStringLiteral("delimiter")).toString() == QStringLiteral("\t")
+                ? QLatin1Char('\t') : QLatin1Char(',');
+            const QJsonArray wave = obj.value(QStringLiteral("waveform")).toArray();
+            for (int i = 0; i < std::min(128, wave.size()); ++i)
+                info.waveform.append(std::clamp<qreal>(wave.at(i).toDouble(), 0, 1));
+        }
+    }
+    m_mediaInfo.insert(manifest, info);
+    return info;
+}
+
+QRect TerminalView::mediaRect(const MediaPlacement &media) const
+{
+    const int width = std::max(1, std::min(media.ref.cols, m_cols - media.col)) * m_cw;
+    return QRect(m_padding + media.col * m_cw, m_padding + media.top * m_ch,
+                 width, media.ref.rows * m_ch);
+}
+
+qint64 TerminalView::audioPositionMs() const
+{
+    const qint64 running = m_audioProcess && m_audioProcess->state() != QProcess::NotRunning &&
+                           m_audioClock.isValid() ? m_audioClock.elapsed() : 0;
+    return m_audioDurationMs > 0 ? std::min(m_audioDurationMs, m_audioPositionMs + running)
+                                 : m_audioPositionMs + running;
+}
+
+void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
+{
+    mediaOnRows(firstRow, lastRow, &m_mediaPlacements);
+    for (const MediaPlacement &media : m_mediaPlacements) {
+        const QRect box = mediaRect(media);
+        const QRect band(m_padding, m_padding + media.firstRow * m_ch, m_cols * m_cw,
+                         (media.lastRow - media.firstRow + 1) * m_ch);
+        const MediaInfo info = mediaInfo(media.ref.manifest);
+        p.save();
+        p.setClipRect(band.intersected(box));
+        p.fillRect(box, mix(m_scheme.background, m_scheme.foreground, 0.09));
+        if (!info.valid) {
+            p.setPen(faintInk(m_scheme.foreground, m_scheme.background));
+            p.drawText(box.adjusted(6, 0, -4, 0), Qt::AlignVCenter,
+                       tr("[media unavailable]"));
+        } else if (info.kind == QStringLiteral("audio")) {
+            const bool playing = m_audioPath == info.path && m_audioProcess &&
+                                 m_audioProcess->state() != QProcess::NotRunning;
+            p.setPen(m_scheme.foreground);
+            p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignLeft | Qt::AlignVCenter,
+                       playing ? QStringLiteral("❚❚") : QStringLiteral("▶"));
+            const int left = box.left() + std::max(60, 7 * m_cw);
+            const int right = box.right() - std::max(80, 9 * m_cw);
+            if (right > left) {
+                const int mid = box.center().y();
+                p.setPen(mix(m_scheme.foreground, m_scheme.background, 0.35));
+                p.drawLine(left, mid, right, mid);
+                const int count = info.waveform.size();
+                for (int i = 0; i < count; ++i) {
+                    const int x = left + (right - left) * i / std::max(1, count - 1);
+                    const int half = std::max(1, int((m_ch - 4) * info.waveform.at(i) / 2));
+                    p.drawLine(x, mid - half, x, mid + half);
+                }
+                const qreal progress = info.durationMs > 0 && m_audioPath == info.path
+                    ? qreal(audioPositionMs()) / info.durationMs : 0;
+                p.setPen(m_scheme.foreground);
+                const int cursor = left + int((right - left) * std::clamp(progress, qreal(0), qreal(1)));
+                p.drawLine(cursor, box.top() + 2, cursor, box.bottom() - 2);
+            }
+            const qint64 at = m_audioPath == info.path ? audioPositionMs() : 0;
+            const auto clock = [](qint64 ms) {
+                return QStringLiteral("%1:%2").arg(ms / 60000).arg(ms / 1000 % 60, 2, 10, QLatin1Char('0'));
+            };
+            p.drawText(box.adjusted(0, 0, -6, 0), Qt::AlignRight | Qt::AlignVCenter,
+                       clock(at) + QLatin1Char('/') + clock(info.durationMs));
+        } else if (info.kind == QStringLiteral("table")) {
+            p.setPen(m_scheme.foreground);
+            p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignVCenter,
+                       tr("▦  %1  ·  %2 rows × %3 columns  ·  open sortable table")
+                           .arg(QFileInfo(info.path).fileName()).arg(info.rows).arg(info.columns));
+        } else {
+            const QSize natural = m_images.naturalSize(info.preview);
+            if (natural.isValid()) {
+                const QSize size = natural.scaled(box.size(), Qt::KeepAspectRatio);
+                const QRect imageRect(box.topLeft(), size);
+                ImageCache::State state;
+                const QImage preview = m_images.picture(info.preview, size, devicePixelRatioF(), &state);
+                if (!preview.isNull())
+                    p.drawImage(imageRect, preview);
+            }
+            p.fillRect(QRect(box.left(), box.top(), box.width(), m_ch),
+                       QColor(0, 0, 0, 150));
+            p.setPen(Qt::white);
+            const QString label = info.kind == QStringLiteral("chart") ? tr("Chart · open live page") :
+                info.kind == QStringLiteral("video") ? tr("▶ Video · open player") :
+                info.kind == QStringLiteral("pdf") ? tr("PDF · open document") :
+                tr("SVG · open image");
+            p.drawText(box.adjusted(6, 0, -4, -(box.height() - m_ch)), Qt::AlignVCenter, label);
+        }
+        p.restore();
+    }
+}
+
+bool TerminalView::mediaAt(const QPoint &pos, MediaPlacement *media)
+{
+    const CellPos cell = cellAt(pos, false);
+    if (cell.row < 0 || cell.row >= m_rows)
+        return false;
+    std::vector<MediaPlacement> here;
+    mediaOnRows(cell.row, cell.row, &here);
+    for (const MediaPlacement &candidate : here) {
+        if (mediaRect(candidate).contains(pos)) {
+            *media = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+void TerminalView::stopAudio(bool preservePosition)
+{
+    if (preservePosition)
+        m_audioPositionMs = audioPositionMs();
+    else {
+        m_audioPositionMs = 0;
+        m_audioPath.clear();
+    }
+    m_audioTimer.stop();
+    if (m_audioProcess) {
+        QProcess *process = m_audioProcess;
+        m_audioProcess = nullptr;
+        process->disconnect(this);
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+            process->waitForFinished(200);
+        }
+        process->deleteLater();
+    }
+    if (activeAudioView == this)
+        activeAudioView.clear();
+    update();
+}
+
+void TerminalView::playAudio(const MediaInfo &info, qint64 fromMs)
+{
+    if (!QFileInfo(info.path).isFile())
+        return;
+    if (activeAudioView && activeAudioView != this)
+        activeAudioView->stopAudio();
+    stopAudio();
+    const QString ffplay = QStandardPaths::findExecutable(QStringLiteral("ffplay"));
+    QString tool = ffplay;
+    QStringList args;
+    if (!tool.isEmpty()) {
+        args = QStringList{QStringLiteral("-nodisp"), QStringLiteral("-autoexit"),
+                           QStringLiteral("-loglevel"), QStringLiteral("error")};
+        if (fromMs > 0)
+            args << QStringLiteral("-ss") << QString::number(double(fromMs) / 1000, 'f', 3);
+        args << info.path;
+    } else {
+        for (const QString &name : {QStringLiteral("pw-play"), QStringLiteral("paplay"),
+                                    QStringLiteral("aplay")}) {
+            tool = QStandardPaths::findExecutable(name);
+            if (!tool.isEmpty())
+                break;
+        }
+        if (tool.isEmpty())
+            return;
+        args << info.path;
+        fromMs = 0; // these simple CLI players cannot seek
+    }
+    m_audioPath = info.path;
+    m_audioDurationMs = info.durationMs;
+    m_audioPositionMs = fromMs;
+    m_audioProcess = new QProcess(this);
+    QProcess *process = m_audioProcess;
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, process](int, QProcess::ExitStatus) {
+                if (m_audioProcess == process)
+                    stopAudio();
+            });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
+        if (m_audioProcess == process)
+            stopAudio();
+    });
+    process->start(tool, args);
+    m_audioClock.start();
+    m_audioTimer.start();
+    activeAudioView = this;
+    update();
+}
+
+void TerminalView::openTable(const MediaInfo &info)
+{
+    QFile file(info.path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() > (qint64(16) << 20))
+        return;
+    const QString text = QString::fromUtf8(file.readAll());
+    QVector<QStringList> rows;
+    QStringList row;
+    QString cell;
+    bool quoted = false;
+    for (int i = 0; i < text.size() && rows.size() < 5001; ++i) {
+        const QChar ch = text.at(i);
+        if (ch == QLatin1Char('"')) {
+            if (quoted && i + 1 < text.size() && text.at(i + 1) == QLatin1Char('"')) {
+                cell += QLatin1Char('"');
+                ++i;
+            } else {
+                quoted = !quoted;
+            }
+        } else if (ch == info.delimiter && !quoted) {
+            row << cell;
+            cell.clear();
+        } else if ((ch == QLatin1Char('\n') || ch == QLatin1Char('\r')) && !quoted) {
+            row << cell;
+            cell.clear();
+            rows << row;
+            row.clear();
+            if (ch == QLatin1Char('\r') && i + 1 < text.size() && text.at(i + 1) == QLatin1Char('\n'))
+                ++i;
+        } else {
+            cell += ch;
+        }
+    }
+    if (!cell.isEmpty() || !row.isEmpty()) {
+        row << cell;
+        rows << row;
+    }
+    if (rows.isEmpty())
+        return;
+    auto *dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(QFileInfo(info.path).fileName());
+    dialog->resize(850, 520);
+    auto *layout = new QVBoxLayout(dialog);
+    auto *table = new QTableWidget(dialog);
+    const int columns = std::min(100, rows.first().size());
+    table->setColumnCount(columns);
+    table->setHorizontalHeaderLabels(rows.first().mid(0, columns));
+    table->setRowCount(rows.size() - 1);
+    for (int r = 1; r < rows.size(); ++r)
+        for (int c = 0; c < std::min(columns, rows.at(r).size()); ++c)
+            table->setItem(r - 1, c, new SortableTableItem(rows.at(r).at(c)));
+    table->setSortingEnabled(true);
+    layout->addWidget(table);
+    dialog->show();
+}
+
+void TerminalView::activateMedia(const MediaPlacement &media, const QPoint &pos)
+{
+    const MediaInfo info = mediaInfo(media.ref.manifest);
+    if (!info.valid)
+        return;
+    if (info.kind == QStringLiteral("audio")) {
+        const QRect box = mediaRect(media);
+        const int left = box.left() + std::max(60, 7 * m_cw);
+        const int right = box.right() - std::max(80, 9 * m_cw);
+        if (right > left && pos.x() >= left && pos.x() <= right && info.durationMs > 0) {
+            playAudio(info, info.durationMs * (pos.x() - left) / (right - left));
+        } else if (m_audioPath == info.path && m_audioProcess &&
+                   m_audioProcess->state() != QProcess::NotRunning) {
+            stopAudio(true);
+        } else {
+            playAudio(info, m_audioPath == info.path ? m_audioPositionMs : 0);
+        }
+    } else if (info.kind == QStringLiteral("table")) {
+        openTable(info);
+    } else if (info.kind == QStringLiteral("chart")) {
+        QDesktopServices::openUrl(QUrl(info.url));
+    } else if (QFileInfo(info.path).isFile()) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(info.path));
+    }
 }
 
 void TerminalView::restLinkColumns(int frameRow, std::vector<char> *cols)

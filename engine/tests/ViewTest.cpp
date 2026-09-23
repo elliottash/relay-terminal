@@ -12,15 +12,23 @@
 #include "view/ProseSpans.h"
 #include "core/AnsiSerializer.h"
 #include "core/InlineImage.h"
+#include "core/InlineMedia.h"
 
 #include <QAccessible>
 #include <QFontDatabase>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QPointer>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSignalSpy>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QWheelEvent>
 #include <QtTest>
+#include <algorithm>
 
 using namespace relay;
 
@@ -2550,6 +2558,101 @@ private slots:
         QCOMPARE(t.view->imagePathAt(t.cellPoint(1, 0)), QString());
         QCOMPARE(t.view->linkAtPoint(t.cellPoint(0, 0)).target, QStringLiteral("https://example.com/x"));
         QVERIFY(!t.view->linkAtPoint(t.cellPoint(1, 0)).valid());
+    }
+
+    void mediaTableRowPaintsAndOpensSortableTable()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QTemporaryDir dir;
+        const QString tablePath = dir.filePath(QStringLiteral("numbers.csv"));
+        QFile csv(tablePath);
+        QVERIFY(csv.open(QIODevice::WriteOnly));
+        csv.write("name,value\nsmall,2\nlarge,10\n");
+        csv.close();
+        const QString manifestPath = dir.filePath(QStringLiteral("table.json"));
+        QFile manifest(manifestPath);
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QJsonDocument(QJsonObject{
+            {QStringLiteral("version"), 1}, {QStringLiteral("kind"), QStringLiteral("table")},
+            {QStringLiteral("path"), tablePath}, {QStringLiteral("rows"), 3},
+            {QStringLiteral("columns"), 2}, {QStringLiteral("delimiter"), QStringLiteral(",")}
+        }).toJson(QJsonDocument::Compact));
+        manifest.close();
+        const QString uri = inlinemedia::mediaUri({manifestPath, 0, 1, 40});
+        t.backend->writeToDisplay("\x1b[2J\x1b[Hbefore\r\n");
+        t.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") +
+                                   QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\\r\nafter\r\n")).toUtf8());
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        const QPoint onRow = t.cellPoint(1, 2);
+        const QImage picture = t.grab();
+        QVERIFY(picture.pixelColor(onRow) != t.view->colorScheme().background);
+        QTest::mouseMove(t.view, onRow);
+        QTRY_COMPARE(t.view->cursor().shape(), Qt::PointingHandCursor);
+        t.view->setPlainClickOpensLinks(true);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, onRow);
+        QTRY_VERIFY(t.view->findChild<QTableWidget *>() != nullptr);
+        QTableWidget *table = t.view->findChild<QTableWidget *>();
+        QCOMPARE(table->rowCount(), 2);
+        QCOMPARE(table->columnCount(), 2);
+        QCOMPARE(table->horizontalHeaderItem(1)->text(), QStringLiteral("value"));
+        table->sortItems(1, Qt::AscendingOrder);
+        QCOMPARE(table->item(0, 1)->text(), QStringLiteral("2"));
+        QCOMPARE(table->item(1, 1)->text(), QStringLiteral("10"));
+    }
+
+    void audioRowPlaysPausesAndSeeksWithCliPlayer()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QTemporaryDir dir;
+        const QString audioPath = dir.filePath(QStringLiteral("clip.wav"));
+        QFile audio(audioPath);
+        QVERIFY(audio.open(QIODevice::WriteOnly));
+        audio.write("RIFFtestWAVE");
+        audio.close();
+        const QString player = dir.filePath(QStringLiteral("ffplay"));
+        QFile fake(player);
+        QVERIFY(fake.open(QIODevice::WriteOnly));
+        fake.write("#!/bin/sh\nexec sleep 10\n");
+        fake.close();
+        QVERIFY(QFile::setPermissions(player, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const QByteArray oldPath = qgetenv("PATH");
+        qputenv("PATH", (dir.path().toUtf8() + ':' + oldPath));
+        struct RestorePath {
+            QByteArray path;
+            ~RestorePath() { qputenv("PATH", path); }
+        } restore{oldPath};
+        const QString manifestPath = dir.filePath(QStringLiteral("audio.json"));
+        QFile manifest(manifestPath);
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QJsonDocument(QJsonObject{
+            {QStringLiteral("version"), 1}, {QStringLiteral("kind"), QStringLiteral("audio")},
+            {QStringLiteral("path"), audioPath}, {QStringLiteral("duration"), 10.0},
+            {QStringLiteral("waveform"), QJsonArray{0.1, 0.6, 0.9, 0.3}}
+        }).toJson(QJsonDocument::Compact));
+        manifest.close();
+        const QString uri = inlinemedia::mediaUri({manifestPath, 0, 1, 40});
+        t.backend->writeToDisplay("\x1b[2J\x1b[Hbefore\r\n");
+        t.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") +
+                                   QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\\r\nafter\r\n")).toUtf8());
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        t.grab();
+        t.view->setPlainClickOpensLinks(true);
+        const QPoint button = t.cellPoint(1, 2);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, button);
+        QTRY_VERIFY(t.view->findChild<QProcess *>() != nullptr);
+        QPointer<QProcess> process = t.view->findChild<QProcess *>();
+        QTRY_COMPARE(process->state(), QProcess::Running);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, button);
+        QTRY_VERIFY(!process || process->state() == QProcess::NotRunning);
+        const QPoint seek(t.cellPoint(1, 20).x(), button.y());
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::NoModifier, seek);
+        QTRY_VERIFY([&] {
+            const auto players = t.view->findChildren<QProcess *>();
+            return std::any_of(players.cbegin(), players.cend(),
+                               [](QProcess *p) { return p->state() == QProcess::Running; });
+        }());
     }
 };
 

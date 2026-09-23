@@ -173,8 +173,11 @@ def emit_media(data):
     manifest = cache_dir() / (key + ".json")
     if not manifest.exists():
         manifest.write_bytes(encoded)
-    uri = "relay-media:" + quote(str(manifest), safe="")
-    sys.stdout.buffer.write(("\x1b]8;;" + uri + "\x1b\\⠀\x1b]8;;\x1b\\\n").encode("utf-8"))
+    rows = 12 if data["kind"] in ("svg", "pdf", "video", "chart") else 1
+    cols = 60
+    for row in range(rows):
+        uri = "relay-media:" + str(row) + "/" + str(rows) + "/" + str(cols) + "/" + quote(str(manifest), safe="")
+        sys.stdout.buffer.write(("\x1b]8;;" + uri + "\x1b\\⠀\x1b]8;;\x1b\\\r\n").encode("utf-8"))
 
 
 def main(argv=None):
