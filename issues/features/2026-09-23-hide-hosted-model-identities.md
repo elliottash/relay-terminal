@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-hosted-names/], related: [P3KD], github: null}
+links: {plans: [], commits: [00872ae49dbe618f33cd9fa656059fcd92b67dc5], evidence: [docs/qa_evidence/2026-09-23-hosted-names/], related: [P3KD], github: null}
 ---
 # Hide hosted model identities in Relay
 
