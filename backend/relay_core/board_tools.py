@@ -899,7 +899,9 @@ def cleanup_brief() -> str:
 # left to the brief: a card turn runs on the Board worker, whose executor would otherwise
 # offer the whole pane tool set (commands, file writes, subagents).
 
-CARD_MODES = ("discuss", "plan")
+# Refine (#6W9X) is the third: it checks the *request* before anyone plans it — the whole board,
+# closed cards too — and writes only related links, labels, a missing `## Done means` and a note.
+CARD_MODES = ("discuss", "plan", "refine")
 
 #: The worker's own tools a card turn keeps: reading, never writing or running anything.
 CARD_READ_TOOLS = ("read_file", "list_directory", "load_skill", "read_skill_file")
@@ -910,7 +912,11 @@ CARD_MODE_BOARD_TOOLS = {
     "discuss": ("board_list", "board_read", "board_create_card", "board_update_card",
                 "board_move_card", "board_comment"),
     "plan": ("board_list", "board_read", "board_update_card", "board_comment"),
+    "refine": ("board_list", "board_read", "board_update_card", "board_comment"),
 }
+
+#: What each mode is called in a sentence (the refusals, the prompt's head).
+CARD_MODE_TITLES = {"discuss": "Discuss", "plan": "Plan", "refine": "Refine"}
 
 #: An agent console's board tools (protocol 33; 19.18 before it): the ordinary set plus merge
 #: and split — merging duplicates is that conversation's headline job — plus the import.
@@ -1058,7 +1064,7 @@ class CardScope:
                 or name in CARD_MODE_BOARD_TOOLS.get(self.mode, ()))
 
     def refusal(self, name: str) -> str:
-        what = "Plan" if self.mode == "plan" else "Discuss"
+        what = CARD_MODE_TITLES.get(self.mode, "Discuss")
         return (f"{name} is not available in a {what} turn on #{self.card_id}: it reads the "
                 "repository (read_file, list_directory, search_files) and writes only through the "
                 "board tools. Writing code is Run's job — the owner hands the card to a "
@@ -1588,7 +1594,7 @@ class BoardTools:
         return name in ALL_TOOL_NAMES or (name == "search_files" and self.card_scope is not None)
 
     def begin_card_turn(self, mode: str, card_id: str) -> CardScope:
-        """A Discuss or Plan turn on one card starts: narrow the tools to what the mode offers."""
+        """A Discuss, Plan or Refine turn on one card starts: narrow the tools to what the mode offers."""
         if mode not in CARD_MODES:
             raise BoardToolError(f"mode must be one of {', '.join(CARD_MODES)}.")
         self.card_scope = CardScope(mode, normalize_id(card_id))
@@ -1639,9 +1645,19 @@ class BoardTools:
             return
         if not scope.allows(name):
             raise BoardToolError(scope.refusal(name), code="board_mode_refused", mode=scope.mode)
-        if scope.mode != "plan" or name not in WRITE_TOOLS:
+        if scope.mode not in ("plan", "refine") or name not in WRITE_TOOLS:
             return
+        what = CARD_MODE_TITLES[scope.mode]
         target = normalize_id(args.get("id")) if args.get("id") else ""
+        if scope.mode == "refine":
+            if target != scope.card_id:
+                raise BoardToolError(
+                    f"A Refine turn writes only to #{scope.card_id}, the card being refined. Name "
+                    f"#{target or '?'} in your note and add it to this card's links.related instead.",
+                    code="board_mode_refused", mode="refine")
+            if name == "board_update_card":
+                self._check_refine_update(scope.card_id, args)
+            return
         if target != scope.card_id:
             raise BoardToolError(
                 f"A Plan turn writes only to #{scope.card_id}, the card being planned. Mention "
@@ -1660,6 +1676,60 @@ class BoardTools:
                     f"{{heading: \"{PLAN_HEADING}\", text}}. The title, the issue, labels and "
                     "status are Discuss's to change.",
                     code="board_mode_refused", mode="plan")
+
+    def _check_refine_update(self, card_id: str, args: dict) -> None:
+        """What a Refine turn may change on its own card (#6W9X), and nothing else.
+
+        `## Done means` only when the card has none; `labels` only with words the board already
+        carries; `links` only in `related` — `links` is one front-matter object, so a partial one
+        would silently drop the card's commits and evidence. The issue, the plan and the title are
+        the owner's and Plan's, and the refusal says which button writes them.
+        """
+        def refuse(text: str):
+            raise BoardToolError(text + " A Refine turn writes this card's links.related, its labels "
+                                 f"and a missing `## {DONE_MEANS_HEADING}`, and comments; the issue "
+                                 "is Discuss's to change and the plan is Plan's.",
+                                 code="board_mode_refused", mode="refine")
+        extra = set(args) - {"id", "base_hash", "replace_section", "append_section", "fields"}
+        if extra:
+            refuse(f"{', '.join(sorted(extra))} is not a Refine turn's to change.")
+        card = self.board.card_by_id(card_id)
+        if card is None:
+            return                                   # the write itself says the card is gone
+        blocks = [args.get(k) for k in ("replace_section", "append_section") if args.get(k) is not None]
+        for block in blocks:
+            heading = str((block or {}).get("heading") if isinstance(block, dict) else "")
+            heading = heading.strip().lstrip("#").strip()
+            if heading.lower() != DONE_MEANS_HEADING.lower():
+                refuse(f"`## {heading or '?'}` is not a Refine turn's section.")
+            if _section_span(card.body, DONE_MEANS_HEADING):
+                refuse(f"#{card_id} already has a `## {DONE_MEANS_HEADING}`; Refine leaves it alone.")
+        fields = args.get("fields")
+        if fields is None:
+            if not blocks:
+                refuse("Nothing to write.")
+            return
+        if not isinstance(fields, dict) or set(fields) - {"labels", "links"}:
+            keys = ", ".join(sorted(set(fields) - {"labels", "links"})) if isinstance(fields, dict) else "fields"
+            refuse(f"{keys} is not a Refine turn's to change.")
+        if "links" in fields:
+            new, old = fields["links"], dict(card.front.get("links") or {})
+            if not isinstance(new, dict) or \
+                    {k: v for k, v in new.items() if k != "related"} != \
+                    {k: v for k, v in old.items() if k != "related"}:
+                refuse("links may change only in `related`: send the card's whole links object "
+                       "with ids added to related, and every other key exactly as it is.")
+        if "labels" in fields:
+            labels = fields["labels"]
+            if not isinstance(labels, list):
+                refuse("labels must be a list.")
+            own = {str(l) for l in (card.front.get("labels") or [])}
+            known = {str(l) for other in self.board.cards() if other.id != card_id
+                     for l in (other.front.get("labels") or [])}
+            new_words = sorted({str(l) for l in labels} - own - known)
+            if new_words:
+                refuse(f"{', '.join(new_words)} is not a label this board uses yet: suggest it in "
+                       "your note and the owner decides.")
 
     # ---- dispatch -------------------------------------------------------------
     def preview(self, name: str, args: dict) -> str:
@@ -2638,7 +2708,10 @@ class BoardTools:
         write_id = self._record("comment", card, f"{kind}: {text.splitlines()[0][:120]}", before, size)
         # The stage move the comment makes (#3XZV): the thread's first non-event entry moves an
         # inbox card to discussing. Relay's own move — inside, it is another write like this one.
-        self.stage_advance(card.id, "discussed")
+        # A Refine turn's note is the exception (#6W9X): Refine checks the request before anything
+        # is decided, so the card stays in whatever stage it was.
+        if not (isinstance(self.card_scope, CardScope) and self.card_scope.mode == "refine"):
+            self.stage_advance(card.id, "discussed")
         return {"id": card.id, "entry_id": entry.entry_id, "kind": kind, "write_id": write_id}
 
     def _claim(self, args: dict) -> dict:

@@ -340,6 +340,8 @@ QString modeTitle(const QString &mode)
         return QStringLiteral("Discuss");
     if (mode == QStringLiteral("plan"))
         return QStringLiteral("Plan");
+    if (mode == QStringLiteral("refine"))
+        return QStringLiteral("Refine");
     if (mode == QStringLiteral("execute"))
         return QStringLiteral("Run");
     return {};

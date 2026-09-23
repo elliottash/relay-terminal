@@ -2593,6 +2593,17 @@ public:
         onReply(text, QStringLiteral("plan"));
     }
 
+    // Refine (#6W9X): one `board_ask` of mode "refine". Like a Plan it needs no words, and a
+    // press during a running turn queues behind it.
+    void refine()
+    {
+        if (m_id.isEmpty() || m_editing || !onReply)
+            return;
+        const QString text = takeReply();
+        m_error->hide();
+        onReply(text, QStringLiteral("refine"));
+    }
+
     // Execute: hand the card to a terminal pane's agent. A card with neither a plan nor an
     // acceptance line asks once, here on the card rather than in a dialog: the pane's agent would
     // be working from the issue text alone. The second press (or `r`) goes ahead.
@@ -3014,6 +3025,10 @@ protected:
                     plan();
                     return true;
                 }
+                if (key->text() == QStringLiteral("f")) {   // #6W9X
+                    refine();
+                    return true;
+                }
                 if (key->text() == QStringLiteral("r")) {
                     execute();
                     return true;
@@ -3136,6 +3151,26 @@ public:
             self->plan();
         };
         actions << plan;
+
+        // Refine (#6W9X): the agent checks the *request* before anyone plans it — the same or a
+        // fixed-before card anywhere on the board, closed ones too, a sharper statement of the
+        // ask, related links and a missing Done means. It writes no issue text, no plan and no
+        // code; the worker refuses the call if it tries. Queues behind a running turn, like Plan.
+        relay::agent::Action refine;
+        refine.key = QStringLiteral("boardRefine");
+        refine.letter = QStringLiteral("f");
+        refine.label = QStringLiteral("Refine");
+        refine.tooltip = QStringLiteral("The agent checks the request: finds the same or a fixed-before "
+                                        "card, sharpens the ask, fills related links and Done means. "
+                                        "It changes no issue text, no plan and no code. Anything typed "
+                                        "goes with it (f)");
+        refine.run = [self] {
+            const ActionGuard guard;
+            if (self->onModeHint)
+                self->onModeHint(QStringLiteral("refine"));
+            self->refine();
+        };
+        actions << refine;
 
         relay::agent::Action execute;
         execute.key = QStringLiteral("boardExecute");
@@ -3269,10 +3304,13 @@ public:
     {
         m_delete->setEnabled(!m_busy);
         const bool planning = m_busyMode == QStringLiteral("plan");
-        m_busyLabel->setText(planning ? QStringLiteral("✦ Switchboarding · planning…")
-                                      : QStringLiteral("✦ Switchboarding · discussing…"));
-        m_stop->setText(planning ? QStringLiteral("✕ Stop planning")
-                                 : QStringLiteral("✕ Stop discussing"));
+        const bool refining = m_busyMode == QStringLiteral("refine");   // #6W9X
+        m_busyLabel->setText(planning   ? QStringLiteral("✦ Switchboarding · planning…")
+                             : refining ? QStringLiteral("✦ Switchboarding · refining…")
+                                        : QStringLiteral("✦ Switchboarding · discussing…"));
+        m_stop->setText(planning   ? QStringLiteral("✕ Stop planning")
+                        : refining ? QStringLiteral("✕ Stop refining")
+                                   : QStringLiteral("✕ Stop discussing"));
         m_stop->setToolTip(planning
                                ? QStringLiteral("Stop the agent before it finishes the plan. "
                                                 "Anything it has already written to the card stays.")
@@ -4050,6 +4088,7 @@ private:
         if (m_entries.isEmpty() && !m_busy)
             insertLine(cursor, QStringLiteral("No replies yet. Enter in the box below discusses the "
                                               "card with the agent, Ctrl+Enter has it Plan the work, "
+                                              "f has it Refine the request first, "
                                               "and Ctrl+Shift+Enter leaves a comment for whoever "
                                               "picks it up."), muted, 4);
 
@@ -4987,6 +5026,8 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("board.done"), QStringLiteral("d"));
         else if (mode == QStringLiteral("verify"))
             onHint(QStringLiteral("board.verify"), QStringLiteral("v"));
+        else if (mode == QStringLiteral("refine"))
+            onHint(QStringLiteral("board.refine"), QStringLiteral("f"));
     };
     m_detail->onMove = [this](const QString &what, const QString &value) {
         const QString card = m_detail->cardId();
@@ -8479,6 +8520,8 @@ void BoardView::cardAction(const QString &action)
     }
     if (action == QStringLiteral("plan"))
         m_detail->plan();
+    else if (action == QStringLiteral("refine"))
+        m_detail->refine();
     else if (action == QStringLiteral("verify"))
         m_detail->verify();
     else
@@ -9013,9 +9056,11 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
     }
     // `p` plans, `r` runs and `v` verifies the open card, or the selected one (opening it
     // first) (#XS6Q; `v` is #T71W).
-    if ((text == QStringLiteral("p") || text == QStringLiteral("r") || text == QStringLiteral("v"))
+    if ((text == QStringLiteral("p") || text == QStringLiteral("r") || text == QStringLiteral("v")
+         || text == QStringLiteral("f"))
         && (detailOpen() || !m_selected.isEmpty())) {
         cardAction(text == QStringLiteral("p") ? QStringLiteral("plan")
+                   : text == QStringLiteral("f") ? QStringLiteral("refine")   // #6W9X
                    : text == QStringLiteral("v") ? QStringLiteral("verify")
                                                  : QStringLiteral("execute"));
         return true;

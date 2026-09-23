@@ -3411,11 +3411,21 @@ card conversation that goes Discuss → Plan → Discuss must not move it. What 
 executor's writers. So the table below is the rule that is **enforced at call time**, not the list
 that is offered:
 
-| | Discuss | Plan |
-|---|---|---|
-| repository | `read_file`, `list_directory`, `search_files`, skills (read) | the same |
-| board | `board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card`, `board_comment` | `board_list`, `board_read`; `board_update_card` **only this card's `## Plan`** (`replace_section`/`append_section` with heading `Plan`, nothing else in the patch); `board_comment` **only on this card** |
-| never | `run_command` and the job tools, `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same |
+| | Discuss | Plan | Refine (#6W9X) |
+|---|---|---|---|
+| repository | `read_file`, `list_directory`, `search_files`, skills (read) | the same | the same |
+| board | `board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card`, `board_comment` | `board_list`, `board_read`; `board_update_card` **only this card's `## Plan`** (`replace_section`/`append_section` with heading `Plan`, nothing else in the patch); `board_comment` **only on this card** | `board_list`, `board_read`; `board_update_card` **only this card**, and only `fields.links` with nothing but `related` changed, `fields.labels` with words another card already carries, and a `## Done means` the card does not have yet; `board_comment` **only on this card** |
+| never | `run_command` and the job tools, `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same | the same |
+
+**Refine** (`mode: "refine"`, v1, card #6W9X, 2026-09-23) checks the *request* before anyone plans
+it: the brief, `board_refine_brief.md`, has it search the whole board, done and dropped cards
+included, and the code for a fix already on main, then write related links, a plainly wrong label,
+a missing `## Done means`, and one `note` comment (same as / fixed before, the ask stated more
+sharply, up to three questions). Like a Plan it may be wordless (the thread records "Refine this
+card.") and it queues behind a running turn. Unlike both other modes it **makes no stage move**:
+neither `board_ask` nor its own comment advances the card, because Refine runs before anything is
+decided and an inbox card stays in the inbox. A phone may send it too (`BoardRemote` accepts
+`discuss`, `plan` and `refine`).
 
 A call outside the mode is refused with `code: "board_mode_refused"` (board tools) or an ordinary
 tool error (the rest); both sentences name **Execute** as where that work belongs, and the turn

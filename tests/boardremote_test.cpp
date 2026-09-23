@@ -99,6 +99,7 @@ private slots:
     void executeGoesThroughTheWindowsHookAndClaimsTheCard();
     void verifyGoesThroughTheWindowsHookOnTheRecommendedRunner();
     void executeIsRefusedMidTurnAndRevealsAPaneThatHasTheCard();
+    void aPhonesRefineIsSaidAsARefine();
     void aCardTurnsFailureReachesTheDeviceThatAsked();
     void everythingIsRefusedWhileRemoteControlIsOff();
     void noBoardOnTheDesktopIsSaid();
@@ -200,6 +201,8 @@ void BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage_data()
                                        << QJsonObject{{"type", "board_ask"}, {"card", "K7Q2"}, {"text", "why?"}, {"mode", "discuss"}};
     QTest::newRow("board_ask plan, no words") << QJsonObject{{"type", "board_ask"}, {"id", "K7Q2"}, {"mode", "plan"}}
                                               << QJsonObject{{"type", "board_ask"}, {"card", "K7Q2"}, {"text", ""}, {"mode", "plan"}};
+    QTest::newRow("board_ask refine, no words") << QJsonObject{{"type", "board_ask"}, {"id", "K7Q2"}, {"mode", "refine"}}
+                                                << QJsonObject{{"type", "board_ask"}, {"card", "K7Q2"}, {"text", ""}, {"mode", "refine"}};
     QTest::newRow("board_cancel") << QJsonObject{{"type", "board_cancel"}, {"id", "K7Q2"}}
                                   << QJsonObject{{"type", "board_cancel"}, {"card", "K7Q2"}};
     // The empty send from a card view: the queue that Stop paused runs again (#7JD1).
@@ -481,6 +484,17 @@ void BoardRemoteTests::executeIsRefusedMidTurnAndRevealsAPaneThatHasTheCard()
     QVERIFY(rig.executed.isEmpty());                      // no second pane (#48S3)
     QCOMPARE(rig.toHub.last().event.value("ok").toBool(), true);
     QCOMPARE(rig.toHub.last().event.value("pane").toString(), QStringLiteral("live-pane-token"));
+}
+
+void BoardRemoteTests::aPhonesRefineIsSaidAsARefine()
+{
+    // #6W9X: the status line names the mode the phone asked for, not "Discuss" for anything
+    // that is not a Plan.
+    Rig rig;
+    rig.request(1, {{"type", "board_open"}});
+    rig.request(2, {{"type", "board_ask"}, {"id", "K7Q2"}, {"mode", "refine"}});
+    QCOMPARE(rig.status, (QStringList{"Refine on #K7Q2 from iPhone"}));
+    QCOMPARE(rig.toWorker.last().value("mode").toString(), QStringLiteral("refine"));
 }
 
 void BoardRemoteTests::aCardTurnsFailureReachesTheDeviceThatAsked()

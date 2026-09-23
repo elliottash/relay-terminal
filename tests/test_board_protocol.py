@@ -1315,6 +1315,30 @@ class ModeTests(ProtocolTest):
         # And it is closed again once the turn's thread unwinds.
         self.assertIsNone(self.cards.tools[card_id].card_scope)
 
+    def test_a_refine_needs_no_words_carries_its_brief_and_moves_nothing(self):
+        # #6W9X: Refine checks the request before anything is decided, so the card stays in the
+        # inbox through the start and the end of the turn — a Plan would have moved it twice.
+        card_id = self.make_card()
+        self.send(type="board_ask", id="f1", card=card_id, mode="refine")
+        entry = self.asked(card_id)
+        self.assertEqual((entry.author, entry.attrs.get("mode"), entry.text),
+                         ("owner", "refine", "Refine this card."))
+        prompt = self.cards.prompts[-1]["prompt"]
+        self.assertIn(f"[Refine · #{card_id}]", prompt)
+        self.assertIn("Search the whole board", prompt)
+        self.assertIn(f"[Board card #{card_id}", prompt)      # seeded first
+        self.assertEqual(self.scope(card_id).mode, "refine")
+        self.assertIsNone(self.cards.tools[card_id].card_scope)
+        self.assertEqual(self.board.card_by_id(card_id).status, "inbox")
+        appended = self.of("board_thread_appended")[0]
+        self.assertEqual(appended["mode"], "refine")
+
+    def test_a_refine_with_a_note_passes_it_verbatim(self):
+        card_id = self.make_card()
+        self.send(type="board_ask", card=card_id, mode="refine", text="is this the same as the voice card?")
+        self.assertEqual(self.asked(card_id).text, "is this the same as the voice card?")
+        self.assertTrue(self.cards.prompts[-1]["prompt"].endswith("is this the same as the voice card?"))
+
     def test_a_plan_with_a_note_passes_it_verbatim(self):
         card_id = self.make_card()
         self.send(type="board_ask", card=card_id, mode="plan", text="keep it to the backend")

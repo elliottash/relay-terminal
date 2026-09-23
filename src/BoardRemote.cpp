@@ -218,8 +218,9 @@ Translated toWorker(const QJsonObject &request, const QString &workerId, const Q
     const QString mode = request.value(QStringLiteral("mode")).toString().isEmpty()
                              ? QStringLiteral("discuss")
                              : request.value(QStringLiteral("mode")).toString();
-    if (mode != QStringLiteral("discuss") && mode != QStringLiteral("plan"))
-        return refused(QStringLiteral("board_ask mode is discuss or plan."));
+    if (mode != QStringLiteral("discuss") && mode != QStringLiteral("plan")
+        && mode != QStringLiteral("refine"))                            // #6W9X
+        return refused(QStringLiteral("board_ask mode is discuss, plan or refine."));
     const QString text = request.value(QStringLiteral("text")).toString().left(kMaxText);
     if (mode == QStringLiteral("discuss") && text.trimmed().isEmpty())
         return refused(QStringLiteral("A Discuss needs some words."));
@@ -543,11 +544,13 @@ void BoardRemote::handleRequest(const QJsonObject &line)
         watchBoard();
     // Said when it is asked, for the requests that start something rather than write a line: the
     // writes are said when they land (workerEvent), with the id the worker gave the card.
-    if (type == QStringLiteral("board_ask") && entry->host.status)
+    if (type == QStringLiteral("board_ask") && entry->host.status) {
+        // Plan, Refine (#6W9X) or Discuss: a `board_ask` with no mode is a Discuss (19.10).
+        const QString mode = board::modeTitle(message.value(QStringLiteral("mode")).toString());
         entry->host.status(QStringLiteral("%1 on #%2 from %3")
-                               .arg(message.value(QStringLiteral("mode")).toString() == QStringLiteral("plan")
-                                        ? QStringLiteral("Plan") : QStringLiteral("Discuss"),
+                               .arg(mode.isEmpty() ? QStringLiteral("Discuss") : mode,
                                     pending.card, who(device)));
+    }
 }
 
 void BoardRemote::workerEvent(QObject *owner, const QString &tab, const QJsonObject &event)

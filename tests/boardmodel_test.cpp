@@ -2807,6 +2807,21 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QCOMPARE(sent.last().value("text").toString(), QStringLiteral("keep it to the backend"));
     view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}});
 
+    // `f` refines (#6W9X): its own button on the row, a wordless `board_ask` of mode "refine",
+    // and a strip that names it.
+    QVERIFY(button(view, QStringLiteral("Refine")));
+    sent.clear();
+    view.cardAction(QStringLiteral("refine"));
+    QCOMPARE(sent.size(), 1);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_ask"));
+    QCOMPARE(sent.last().value("mode").toString(), QStringLiteral("refine"));
+    QVERIFY(!sent.last().contains("text"));
+    QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · refining…"));
+    QCOMPARE(stop->text(), QStringLiteral("✕ Stop refining"));
+    view.handleEvent(QJsonObject{{"event", "done"}, {"card_id", "K7Q2"}, {"mode", "refine"}});
+    QVERIFY(strip->isHidden());
+    QCOMPARE(relay::board::modeTitle(QStringLiteral("refine")), QStringLiteral("Refine"));
+
     // The thread says which mode each entry was.
     QJsonObject withThread = card("K7Q2", "K7Q2 card", "the issue", "h2");
     withThread.insert("thread", QJsonArray{
@@ -3923,10 +3938,11 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QStringList labels;
     for (const relay::agent::Action &action : console->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane")}));
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Refine (f)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane")}));
     // Execute and Verify hand the card to a pane, and that is what the accent outline means.
     QVERIFY(!console->actions().at(0).leaves);
-    QVERIFY(console->actions().at(1).leaves);
+    QVERIFY(!console->actions().at(1).leaves);   // Refine stays on the board (#6W9X)
+    QVERIFY(console->actions().at(2).leaves);
 
     // What is typed in the console's composer is Execute's note: the box is the reply box.
     QString handedCard, handedTask;
@@ -4033,10 +4049,10 @@ void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
     QStringList labels;
     for (const relay::agent::Action &action : consoles.card()->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane"),
-                                  QStringLiteral("Verify (v)"), QStringLiteral("Try it (y)")}));
-    QVERIFY(consoles.card()->actions().at(3).leaves);
-    QVERIFY(!consoles.card()->actions().at(4).leaves);
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Refine (f)"), QStringLiteral("Run (r)"),
+                                  QStringLiteral("Run in pane"), QStringLiteral("Verify (v)"), QStringLiteral("Try it (y)")}));
+    QVERIFY(consoles.card()->actions().at(4).leaves);
+    QVERIFY(!consoles.card()->actions().at(5).leaves);
 
     // Back on an ordinary card the action is gone from the list, not merely greyed out.
     QJsonObject plain = card("M3XJ", "M3XJ card", "the issue", "h2");
@@ -4045,7 +4061,7 @@ void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
     labels.clear();
     for (const relay::agent::Action &action : consoles.card()->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane")}));
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Refine (f)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane")}));
 }
 
 // A link in an answer is offered to the context before the console opens it the ordinary way

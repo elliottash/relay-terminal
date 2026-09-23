@@ -511,7 +511,7 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
 - **The thread names the mode** on every entry that has one: "owner  Plan · 2 min ago",
   "✦ agent  Discuss · glm-5". Entries from before carry no mode and read as they did.
 - **Keys** (card view): `e` edit, `d` or Tab to the reply box, Enter discuss, `p` / Ctrl+Enter plan,
-  `r` run, Ctrl+Shift+Enter comment only. On the list, `p` and `r` open the selected card and
+  `f` refine (4.15), `r` run, Ctrl+Shift+Enter comment only. On the list, `p`, `f` and `r` open the selected card and
   do the same. A click on a button shows its key once (WARP.md hint rule; hint ids `board.plan`,
   `board.execute`, `board.verify`, and `board.edit` for the pencil. `board.discuss` went with the
   Discuss button in 4.12: Enter *is* the fast path, so there is no slow path left to teach).
@@ -980,6 +980,31 @@ own and close when they recover; a Renovate-shaped `dependencies.md` where a che
 verb; release notes from cards; churn hotspots; TODO mining with the card id written back.
 Evidence: `docs/qa_evidence/2026-09-20-test-suites-pane/`, `…-card-tests-check/`,
 `…-profile-button/`.
+
+### 4.15 Refine: check the request before the plan (#6W9X, owner 2026-09-23)
+
+Owner: *"in the switchboard, add a feedback buttton along with plan, where relay will analyze the
+card or the plan and see if there are ways to improve it, eg for bugs, find similar bugs, for
+features, try to imptove them"*, then *"actually call it "refine" rather than "feedback""*.
+
+Plan answers "how do we do this"; **Refine** answers "is this the right card". It is the fourth
+button on the card's action row, after Plan: **Refine (f)**, not outlined, because it stays on
+the board. `f` does it from the card or from the list (hint id `board.refine`), and anything typed
+in the box goes with it as the owner's note, exactly as with Plan. The strip reads
+`✦ Switchboarding · refining…` with `✕ Stop refining`.
+
+- **What it reads.** The whole board, done and dropped cards and the QA lanes included — the
+  create-time duplicate check skips closed cards, and a bug that repeats a fixed one is the most
+  useful thing Refine can say — and the code, for a fix already on main.
+- **What it writes, and nothing else** (enforced by the worker, protocol 19.10): `links.related`
+  for real siblings and fixed-before cards; a plainly wrong or missing label, from words the board
+  already uses; `## Done means`, only when the card has none; and one thread note in three parts —
+  *Same as / fixed before*, *The ask, sharper* (for the owner to paste into the issue if they
+  agree), *Questions* (up to three).
+- **What it never touches:** `## Issue` (the owner's words are the record; Discuss changes it on
+  request), `## Plan` (Plan's), the title, the status and other cards.
+- **It moves nothing.** A Refine on an inbox card leaves it in the inbox — its own note included,
+  which would otherwise count as the first comment and move the card to Discussing.
 
 ## 5. Referencing cards from the terminal
 

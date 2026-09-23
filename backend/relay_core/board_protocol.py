@@ -33,7 +33,7 @@ from . import roles as model_roles
 # and the new-board survey), not here: importing them at module level cost every worker
 # 5.5 ms of start-up for code most workers never reach (#TZWF item 4). `sys.modules` makes
 # every call after the first a dict lookup.
-from .board_tools import (BOARD_STATES, CARD_MODES, DONE_MEANS_HEADING, PLAN_HEADING, BoardInit,
+from .board_tools import (BOARD_STATES, CARD_MODE_TITLES, CARD_MODES, DONE_MEANS_HEADING, PLAN_HEADING, BoardInit,
                           BoardTools, BoardToolError, ToolContext, board_at, board_for,
                           card_brief, check_pane_token, cleanup_brief, find_board_root,
                           named_board_root, normalize_id, section_headings)
@@ -245,7 +245,7 @@ def _row_batches(rows: list[dict]) -> list[list[dict]]:
 
 def _turn_phrase(mode: str | None) -> str:
     """What a running card turn is called in a refusal: "a plan", "a question", "a turn"."""
-    return {"plan": "a plan", "discuss": "a question"}.get(mode or "", "a turn")
+    return {"plan": "a plan", "discuss": "a question", "refine": "a refinement"}.get(mode or "", "a turn")
 
 
 def _cards_phrase(cards: list[str]) -> str:
@@ -2070,14 +2070,14 @@ class BoardCommands:
         if mode not in CARD_MODES:
             raise ValueError(f"board_ask mode must be one of {', '.join(CARD_MODES)}.")
         text = request.get("text")
-        if text is None and mode == "plan":
-            text = ""                       # Plan needs no words: the card is the brief
+        if text is None and mode in ("plan", "refine"):
+            text = ""                       # Plan and Refine need no words: the card is the brief
         if not isinstance(text, str) or len(text) > MAX_ASK_TEXT or (mode == "discuss" and not text.strip()):
             raise ValueError(f"board_ask text must be 1-{MAX_ASK_TEXT} characters"
-                             + (" (it may be empty for a plan)." if mode == "discuss" else "."))
+                             + (" (it may be empty for a plan or a refine)." if mode == "discuss" else "."))
         text = text.strip()
         # Checked before the question is appended, so a refused ask leaves no trace on the card.
-        if self._busy_error(rid, "the plan" if mode == "plan" else "the question",
+        if self._busy_error(rid, {"plan": "the plan", "refine": "the refinement"}.get(mode, "the question"),
                             card_id=card_id, queues=True):
             return
         card = tools.board.card_by_id(card_id)
@@ -2086,14 +2086,17 @@ class BoardCommands:
         card_hash = B.file_hash(card.path)
         # The owner's message is part of the record before the agent ever sees it. The mode goes
         # with it, so the thread reads "Plan ·" / "Discuss ·" in Relay and `mode=plan` in the file.
-        said = text or "Plan this card."
+        said = text or ("Refine this card." if mode == "refine" else "Plan this card.")
         entry = tools.board.append_thread(card_id, said, author=str(request.get("author") or "owner"),
                                           kind="comment", private=card.private, mode=mode)
         # The stage move the event makes (#3XZV): starting a Plan is `planning`, and any other
         # first thread entry is `discussing`. The board's own bookkeeping must never block the
         # ask, so a refusal here is swallowed and the turn runs from wherever the card is.
+        # Refine makes no move at all (#6W9X): it checks the request before anything is decided,
+        # so an inbox card stays in the inbox.
         try:
-            tools.stage_advance(card_id, "plan-started" if mode == "plan" else "discussed")
+            if mode != "refine":
+                tools.stage_advance(card_id, "plan-started" if mode == "plan" else "discussed")
         except (BoardToolError, B.BoardError, OSError):
             pass
         card = tools.board.card_by_id(card_id) or card
@@ -2420,9 +2423,9 @@ def mode_prompt(mode: str, card_id: str, text: str) -> str:
     mode changes and on every Plan; a Discuss after a Discuss is the owner's words alone.
     """
     brief = card_brief(mode).replace("{card}", card_id).replace("{plan_heading}", PLAN_HEADING)
-    label = "Plan" if mode == "plan" else "Discuss"
+    label = CARD_MODE_TITLES.get(mode, "Discuss")
     head = f"[{label} · #{card_id}]\n{brief}"
-    if mode == "plan":
+    if mode in ("plan", "refine"):
         return head + ("\n\nThe owner adds, verbatim:\n" + text if text else "")
     return head + "\n\nThe owner says:\n" + text
 

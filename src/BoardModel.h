@@ -190,7 +190,7 @@ int badgeDropOrder(Badge::Kind kind);
 QList<Badge> fitBadges(const QList<QPair<Badge, int>> &measured, int available, int gap);
 
 // A card turn's mode as the thread shows it (protocol 19.10, #XS6Q): "discuss" -> "Discuss",
-// "plan" -> "Plan", "execute" -> "Execute"; empty for anything else, so an entry written before
+// "plan" -> "Plan", "refine" -> "Refine" (#6W9X), "execute" -> "Execute"; empty for anything else, so an entry written before
 // the modes existed reads as it always did.
 QString modeTitle(const QString &mode);
 

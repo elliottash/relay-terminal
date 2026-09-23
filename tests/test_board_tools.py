@@ -2382,6 +2382,111 @@ class CardTurnScopeTests(BoardToolsTest):
         self.assertFalse(hasattr(T.CardScope("plan", card_id), "tool_specs"))
 
 
+class RefineTurnScopeTests(BoardToolsTest):
+    """#6W9X: a Refine turn writes links.related, known labels, a missing `## Done means` and a
+    note on its own card, and nothing else — and it moves nothing, not even by commenting."""
+
+    def read_hash(self, card_id):
+        return self.tools.run("board_read", {"id": card_id})["hash"]
+
+    def links(self, card_id):
+        return dict(self.board.card_by_id(card_id).front.get("links") or {})
+
+    def test_refine_writes_related_links_known_labels_and_a_missing_done_means(self):
+        other = self.create(title="Clickable paths", request="clicking a path opens a pane",
+                            labels=["feature", "gui"])
+        mine = self.create(not_duplicate_of=[other])
+        self.tools.begin_card_turn("refine", mine)
+        links = self.links(mine)
+        links["related"] = [other]
+        result = self.tools.run("board_update_card", {
+            "id": mine, "base_hash": self.read_hash(mine),
+            "fields": {"links": links, "labels": ["feature", "gui"]}})
+        self.assertNotIn("error", result, result)
+        result = self.tools.run("board_update_card", {
+            "id": mine, "base_hash": self.read_hash(mine),
+            "replace_section": {"heading": "Done means", "text": "Voice is typed into the box."}})
+        self.assertNotIn("error", result, result)
+        card = self.board.card_by_id(mine)
+        self.assertEqual(card.front["links"]["related"], [other])
+        self.assertEqual(card.front["labels"], ["feature", "gui"])
+        self.assertIn("## Done means\nVoice is typed into the box.", card.body)
+
+    def test_refine_leaves_an_existing_done_means_alone(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("plan", card_id)
+        self.tools.run("board_update_card", {"id": card_id, "base_hash": self.read_hash(card_id),
+                                             "replace_section": {"heading": "Done means", "text": "x"}})
+        self.tools.begin_card_turn("refine", card_id)
+        refused = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": self.read_hash(card_id),
+            "replace_section": {"heading": "Done means", "text": "mine instead"}})
+        self.assertEqual(refused["code"], "board_mode_refused")
+
+    def test_refine_cannot_touch_the_issue_the_plan_the_title_or_invent_a_label(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("refine", card_id)
+        for patch in ({"title": "Something else"},
+                      {"replace_section": {"heading": "Issue", "text": "new words"}},
+                      {"replace_section": {"heading": "Plan", "text": "1. do it"}},
+                      {"append_section": {"heading": "Plan", "text": "1. do it"}},
+                      {"fields": {"labels": ["feature", "brandnewword"]}},
+                      {"fields": {"assignee": "me"}}):
+            result = self.tools.run("board_update_card",
+                                    {"id": card_id, "base_hash": self.read_hash(card_id), **patch})
+            self.assertEqual(result.get("code"), "board_mode_refused", patch)
+        card = self.board.card_by_id(card_id)
+        self.assertEqual(card.title, "Voice transcription mode")
+        self.assertNotIn("## Plan", card.body)
+        self.assertIn("add voice transcribe mode", card.body)
+
+    def test_refine_may_change_only_the_related_key_of_links(self):
+        card_id = self.create()
+        self.tools.begin_card_turn("refine", card_id)
+        partial = {"related": []}                       # would drop commits, evidence, plans
+        changed = dict(self.links(card_id), commits=["abc1234"])
+        for links in (partial, changed):
+            refused = self.tools.run("board_update_card", {
+                "id": card_id, "base_hash": self.read_hash(card_id), "fields": {"links": links}})
+            self.assertEqual(refused.get("code"), "board_mode_refused", links)
+            self.assertIn("related", refused["error"])
+
+    def test_refine_touches_no_other_card_and_moves_nothing(self):
+        mine = self.create()
+        other = self.create(title="Clickable paths", request="clicking a path opens a pane",
+                            not_duplicate_of=[mine])
+        self.tools.begin_card_turn("refine", mine)
+        self.assertEqual(self.tools.run("board_comment", {"id": other, "kind": "note", "text": "hi"})["code"],
+                         "board_mode_refused")
+        self.assertEqual(self.tools.run("board_update_card", {
+            "id": other, "base_hash": self.read_hash(other),
+            "replace_section": {"heading": "Done means", "text": "x"}})["code"], "board_mode_refused")
+        self.assertEqual(self.tools.run("board_move_card", {"id": mine, "status": "ready", "reason": "r"})["code"],
+                         "board_mode_refused")
+        self.assertEqual(self.tools.run("board_create_card", {
+            "tab": "features", "status": "inbox", "title": "T", "request": "r"})["code"], "board_mode_refused")
+        # Its note lands, and — unlike any other first comment — leaves the inbox card in the inbox.
+        noted = self.tools.run("board_comment", {"id": mine, "kind": "note", "text": "Same as: none found."})
+        self.assertNotIn("error", noted, noted)
+        self.assertEqual(self.board.card_by_id(mine).status, "inbox")
+
+    def test_refine_refusals_name_the_mode_and_the_right_buttons(self):
+        card_id = self.create()
+        scope = self.tools.begin_card_turn("refine", card_id)
+        self.assertIn("Refine turn", scope.refusal("write_file"))
+        refused = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": self.read_hash(card_id),
+            "replace_section": {"heading": "Issue", "text": "x"}})
+        self.assertIn("Discuss", refused["error"])
+        self.assertIn("Plan", refused["error"])
+
+    def test_the_refine_brief_searches_closed_cards_and_never_touches_the_issue(self):
+        brief = T.card_brief("refine")
+        for word in ("done", "dropped", "Done means", "links.related", "## Issue", "## Plan"):
+            self.assertIn(word, brief)
+        self.assertLess(brief.index("Search the whole board"), brief.index("Write, in this order"))
+
+
 class SearchFilesTests(BoardToolsTest):
     def setUp(self):
         super().setUp()
