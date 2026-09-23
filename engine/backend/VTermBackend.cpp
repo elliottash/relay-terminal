@@ -3,11 +3,13 @@
 
 #include "core/AnsiSerializer.h"
 #include "core/CellTypes.h"
+#include "core/InlineImage.h"
 #include "session/TerminalSession.h"
 #include "view/TerminalView.h"
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QHBoxLayout>
 #include <QScrollBar>
 
@@ -260,13 +262,41 @@ void VTermBackend::linkProbeAnswered()
 
 QString VTermBackend::screenText() const { return m_session->screenText(); }
 
+namespace {
+
+// `lines`, whose first is absolute row `first`, in the saved form (lineToSavedAnsi): the image
+// rows' links come from the core's own walk for them, in absolute rows, so no viewport has to
+// be scrolled to ask for a URI and every other link is never looked up (#1MGS).
+QStringList savedLines(VtCore &core, const std::vector<Line> &lines, int first)
+{
+    QMultiHash<int, VtCore::HyperlinkRun> byRow;
+    for (const VtCore::HyperlinkRun &run : core.hyperlinkRuns(QLatin1String(inlineimage::kImagePrefix)))
+        for (int row = run.startRow; row <= run.endRow; ++row)
+            byRow.insert(row, run);
+    QStringList out;
+    out.reserve(int(lines.size()));
+    for (int i = 0; i < int(lines.size()); ++i) {
+        const int row = first + i;
+        out << lineToSavedAnsi(lines[size_t(i)], [&](uint32_t, int col) {
+            for (auto it = byRow.constFind(row); it != byRow.cend() && it.key() == row; ++it) {
+                const VtCore::HyperlinkRun &run = it.value();
+                if ((row > run.startRow || col >= run.startCol) && (row < run.endRow || col <= run.endCol))
+                    return run.uri;
+            }
+            return QString();
+        });
+    }
+    return out;
+}
+
+} // namespace
+
 QString VTermBackend::formattedScreenText() const
 {
     return m_session->withCore([](VtCore &core) {
         ViewportFrame frame;
         core.updateFrame(&frame, true);
-        const QStringList lines = linesToAnsi(frame.lines);
-        return lines.join(QLatin1Char('\n'));
+        return savedLines(core, frame.lines, core.viewportTop()).join(QLatin1Char('\n'));
     });
 }
 
@@ -281,7 +311,7 @@ QStringList VTermBackend::formattedScrollbackText(int maxLines) const
         std::vector<Line> lines;
         if (want > 0)
             core.historyLines(total - want, want, &lines);
-        return linesToAnsi(lines);
+        return savedLines(core, lines, total - want);
     });
 }
 QStringList VTermBackend::replayableText(int maxLines) const

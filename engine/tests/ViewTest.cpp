@@ -10,6 +10,7 @@
 #include "MarkdownAnsi.h"
 #include "InlineInk.h"
 #include "view/ProseSpans.h"
+#include "core/AnsiSerializer.h"
 #include "core/InlineImage.h"
 
 #include <QAccessible>
@@ -2484,6 +2485,55 @@ private slots:
         QCOMPARE(img.pixelColor(2 + 3 * cw, 2 + (top + 1) * ch + ch / 2), green);
         QVERIFY(!rowHasColor(img, top - 1, ch, green));
         QCOMPARE(t.view->imagePathAt(QPoint(2 + 3 * cw, 2 + top * ch + ch / 2)), path);
+    }
+
+    // Quit and restart (#1MGS): the saved text keeps each image row's link and no other, and
+    // replaying it through the restore filter draws the picture again, across history and screen.
+    void anImageSurvivesTheSavedTextAndItsReplay()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        const int cw = t.view->cellWidth(), ch = t.view->cellHeight();
+        QTemporaryDir dir;
+        const QColor green(18, 192, 64);
+        const QString path = dir.filePath(QStringLiteral("saved pic.png"));
+        QVERIFY(bandedPng(path, QSize(6 * cw, 3 * ch), green, green));
+        for (int i = 0; i < 20; ++i)
+            t.backend->writeToDisplay(QByteArray("filler ") + QByteArray::number(i) + "\r\n");
+        t.backend->writeToDisplay("\x1b]8;;file:///tmp/other.txt\x1b\\ab\x1b]8;;\x1b\\");
+        t.backend->writeToDisplay(inlineimage::placementBytes(path, QSize(6, 3)));
+        // Enough after it that its top row has scrolled into history.
+        for (int i = 0; i < 10; ++i)
+            t.backend->writeToDisplay(QByteArray("tail ") + QByteArray::number(i) + "\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("tail 9")));
+        const QStringList saved = t.backend->formattedScrollbackText(5000)
+                                  + t.backend->formattedScreenText().split(QLatin1Char('\n'));
+        const QString all = saved.join(QLatin1Char('\n'));
+        for (int row = 0; row < 3; ++row) {
+            const QString uri = inlineimage::imageUri({path, row, 3, 6});
+            QVERIFY2(all.contains(QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800)
+                                  + QStringLiteral("\x1b]8;;\x1b\\")),
+                     qPrintable(all));
+        }
+        QVERIFY(!all.contains(QStringLiteral("file:///tmp/other.txt")));
+        QVERIFY(saved.contains(QStringLiteral("ab\x1b]8;;") + inlineimage::imageUri({path, 0, 3, 6})
+                               + QStringLiteral("\x1b\\") + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\")));
+
+        Term back(core, QStringLiteral("/bin/cat"));
+        back.backend->writeToDisplay("\x1b[2J\x1b[H");
+        for (const QString &line : saved) {
+            if (line.startsWith(QStringLiteral("filler")) || line.startsWith(QStringLiteral("tail")))
+                continue;   // keep the replayed picture on the 12-row screen
+            back.backend->writeToDisplay(restorableAnsi(line).toUtf8() + "\r\n");
+        }
+        QVERIFY(back.waitScreen(QStringLiteral("tail 0")));
+        QTRY_VERIFY(imageTopRow(back) >= 0);
+        const int top = imageTopRow(back);
+        const QImage img = back.grab();
+        QCOMPARE(img.pixelColor(2 + 5 * cw, 2 + top * ch + ch / 2), green);
+        QCOMPARE(img.pixelColor(2 + 5 * cw, 2 + (top + 2) * ch + ch / 2), green);
+        QCOMPARE(back.view->imagePathAt(QPoint(2 + 5 * cw, 2 + (top + 1) * ch + ch / 2)), path);
+        QVERIFY(!back.view->linkAtPoint(back.cellPoint(top, 0)).valid());   // the file link stayed dropped
     }
 
     void aLinkedBrailleBlankThatIsNoImageIsLeftAlone()

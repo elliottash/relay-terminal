@@ -127,6 +127,37 @@ private slots:
         QCOMPARE(replay.frame().lines[0].text(), line.text());
     }
 
+    // The saved form (#1MGS) keeps an image row's link and drops every other one; the restore
+    // filter passes it through byte for byte and still strips every other escape.
+    void ansiSerializerSavesOnlyImageLinks()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        const QString uri = inlineimage::imageUri({QStringLiteral("/tmp/a b.png"), 0, 2, 4});
+        h.feed("\x1b]8;;file:///tmp/x.txt\x1b\\\x1b[1mab\x1b[0m\x1b]8;;\x1b\\"
+               + (QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800)).toUtf8()
+               + "\x1b]8;;\x1b\\ cd");
+        const Line line = h.frame().lines[0];
+        const QString saved = lineToSavedAnsi(line, [&](uint32_t id, int col) { return h.vt->hyperlinkUri(id, 0, col); });
+        QCOMPARE(saved, QStringLiteral("\x1b[1mab\x1b]8;;") + uri + QStringLiteral("\x1b\\\x1b[0m") + QChar(0x2800)
+                            + QStringLiteral("\x1b]8;;\x1b\\ cd"));
+        QCOMPARE(restorableAnsi(saved), saved);
+        Harness replay(core);
+        replay.feed(restorableAnsi(saved).toUtf8());
+        QCOMPARE(replay.vt->hyperlinkAt(0, 2), uri);
+        QVERIFY(replay.vt->hyperlinkAt(0, 0).isEmpty());
+        QCOMPARE(replay.frame().lines[0].text(), line.text());
+
+        // Everything else that is not SGR loses its escape, and so cannot drive the terminal.
+        const QString hostile = QStringLiteral("\x1b]8;;file:///etc/passwd\x1b\\x\x1b]8;;\x1b\\"
+                                               "\x1b]52;c;aGk=\x07\x1b[5Ay\x1b]8;;relay-image:0/1/1/rel.png\x1b\\z");
+        const QString clean = restorableAnsi(hostile);
+        QVERIFY2(!clean.contains(QLatin1Char('\x1b')) && !clean.contains(QLatin1Char('\x07')), qPrintable(clean));
+        // An image link left open (a truncated file) is closed at the end of its line.
+        QCOMPARE(restorableAnsi(QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800)),
+                 QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\"));
+    }
+
     void ansiSerializerHandlesWideCharactersAndClusters()
     {
         QFETCH_GLOBAL(QString, core);

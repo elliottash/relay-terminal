@@ -4,6 +4,8 @@
 // screen that still exists, the cwd/workspace/$HOME fallback, and the per-pane scrollback store
 // a restored pane refills itself from.
 #include "WindowState.h"
+#include "core/AnsiSerializer.h"
+#include "core/InlineImage.h"
 
 #include <QDir>
 #include <QFile>
@@ -431,6 +433,30 @@ private slots:
                                 QStringLiteral("plain")};
         QVERIFY(writeScrollback(id, lines));
         QCOMPARE(readScrollback(id), lines);
+    }
+
+    // Pictures come back after a restart (#1MGS): an image row's link survives the file, the
+    // per-pane one and the conversation's alike, and the replay filter, byte for byte; any other
+    // OSC, and cursor movement, still lose their escape on the way back in.
+    void anImageRowSurvivesSaveReadAndReplay() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString uri = relay::inlineimage::imageUri({QStringLiteral("/tmp/pic one.png"), 1, 3, 12});
+        const QString image = QStringLiteral("\x1b[1mab\x1b[0m\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800)
+                              + QStringLiteral("\x1b]8;;\x1b\\ after");
+        const QString hostile = QStringLiteral("\x1b]8;;https://example.com\x1b\\x\x1b]8;;\x1b\\\x1b]52;c;aGk=\x07\x1b[3Ay");
+        const QStringList lines{image, hostile};
+        const QString id = QStringLiteral("2f9a7d41-0000-4000-8000-abcdefabcdef");
+        QVERIFY(writeScrollback(id, lines));
+        QTemporaryDir sessions;
+        const QString sessionFile = sessions.filePath(QStringLiteral("conversation.scrollback.txt"));
+        QVERIFY(relay::sessiontext::write(sessionFile, lines));
+        for (const QStringList &back : {readScrollback(id), relay::sessiontext::read(sessionFile)}) {
+            QCOMPARE(back, lines);
+            QCOMPARE(relay::restorableAnsi(back.at(0)), image);
+            const QString clean = relay::restorableAnsi(back.at(1));
+            QVERIFY2(!clean.contains(QLatin1Char('\x1b')) && !clean.contains(QLatin1Char('\x07')), qPrintable(clean));
+        }
     }
 
     void scrollbackIsBoundedByLinesAndBytes() {

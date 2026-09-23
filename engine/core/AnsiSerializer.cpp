@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AnsiSerializer.h"
+#include "InlineImage.h"
 
 #include <QStringList>
 
@@ -153,6 +154,90 @@ QString lineToAnsi(const Line &line, const std::function<QString(uint32_t, int)>
         out.append(QLatin1String("\x1b[0m"));
     }
     return out;
+}
+
+QString lineToSavedAnsi(const Line &line, const std::function<QString(uint32_t, int)> &linkUri)
+{
+    return lineToAnsi(line, [&](uint32_t id, int col) {
+        const QString uri = linkUri ? linkUri(id, col) : QString();
+        return uri.startsWith(QLatin1String(inlineimage::kImagePrefix)) ? uri : QString();
+    });
+}
+
+namespace {
+
+// The OSC 8 link that starts at `at` in the exact form lineToAnsi() writes it,
+// ESC ] 8 ; ; <uri> ESC \, with a URI of printable ASCII (imageUri() percent-encodes the
+// path). Sets *uri and *end (the index of the terminating backslash); false for anything else.
+bool savedLinkAt(const QString &text, int at, QString *uri, int *end)
+{
+    static const QString open = QStringLiteral("\x1b]8;;");
+    if (!QStringView(text).mid(at).startsWith(open)) return false;
+    const int from = at + open.size();
+    for (int k = from; k < text.size(); ++k) {
+        const ushort u = text.at(k).unicode();
+        if (u == 0x1b) {
+            if (k + 1 >= text.size() || text.at(k + 1) != QLatin1Char('\\')) return false;
+            *uri = text.mid(from, k - from);
+            *end = k + 1;
+            return true;
+        }
+        if (u < 0x21 || u > 0x7e) return false;
+    }
+    return false;
+}
+
+}  // namespace
+
+QString restorableAnsi(const QString &text)
+{
+    static const QString close = QStringLiteral("\x1b]8;;\x1b\\");
+    QString clean;
+    clean.reserve(text.size());
+    bool inImage = false;
+    for (int i = 0; i < text.size(); ++i) {
+        const QChar c = text.at(i);
+        const ushort u = c.unicode();
+        QString uri;
+        int end = 0;
+        if (u == 0x1b && savedLinkAt(text, i, &uri, &end)) {
+            if (uri.isEmpty()) {
+                if (inImage) clean += close;
+                inImage = false;
+                i = end;
+                continue;
+            }
+            if (inlineimage::parseImageUri(uri, nullptr)) {
+                clean += text.mid(i, end - i + 1);
+                inImage = true;
+                i = end;
+                continue;
+            }
+            // Any other link: the escape is dropped below, as every other one is.
+        }
+        // Start of a CSI sequence?
+        if (u == 0x1b && i + 1 < text.size() && text.at(i + 1).unicode() == '[') {
+            int j = i + 2;
+            while (j < text.size()) {
+                const ushort p = text.at(j).unicode();
+                // parameter bytes (0x30-0x3f) plus the separators SGR uses
+                if ((p >= 0x30 && p <= 0x3f) || p == ';' || p == ':') { ++j; continue; }
+                // final byte: 0x40-0x7e
+                if (p >= 0x40 && p <= 0x7e) {
+                    if (p == 'm') {
+                        clean.append(text.mid(i, j - i + 1));
+                        i = j;
+                    }
+                    break;
+                }
+                break;
+            }
+            continue;
+        }
+        if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
+    }
+    if (inImage) clean += close;
+    return clean;
 }
 
 QStringList linesToAnsi(const std::vector<Line> &lines)

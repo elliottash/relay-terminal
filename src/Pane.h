@@ -92,6 +92,7 @@
 #include "SlashCommands.h"
 #include "view/TerminalView.h"
 #include "session/TerminalSession.h"
+#include "core/AnsiSerializer.h"
 
 #include <QAbstractButton>
 #include <QAbstractItemView>
@@ -14798,38 +14799,11 @@ private:
         }
         return clean;
     }
-    // Like sanitize(), but keeps CSI SGR sequences (ESC [ ... m). Used for restored scrollback
-    // that Relay itself serialized to ANSI, so formatting and colours survive replay while a
-    // hand-edited file still cannot drive the terminal with OSC, cursor movement, or other CSI.
-    static QString sanitizeSgrOnly(const QString &text) {
-        QString clean;
-        clean.reserve(text.size());
-        for (int i = 0; i < text.size(); ++i) {
-            const QChar c = text.at(i);
-            const ushort u = c.unicode();
-            // Start of a CSI sequence?
-            if (u == 0x1b && i + 1 < text.size() && text.at(i + 1).unicode() == '[') {
-                int j = i + 2;
-                while (j < text.size()) {
-                    const ushort p = text.at(j).unicode();
-                    // parameter bytes (0x30-0x3f) plus the separators SGR uses
-                    if ((p >= 0x30 && p <= 0x3f) || p == ';' || p == ':') { ++j; continue; }
-                    // final byte: 0x40-0x7e
-                    if (p >= 0x40 && p <= 0x7e) {
-                        if (p == 'm') {
-                            clean.append(text.mid(i, j - i + 1));
-                            i = j;
-                        }
-                        break;
-                    }
-                    break;
-                }
-                continue;
-            }
-            if (u == '\n' || u == '\t' || (u >= 0x20 && u != 0x7f && !(u >= 0x80 && u < 0xa0))) clean += c;
-        }
-        return clean;
-    }
+    // Like sanitize(), but keeps CSI SGR sequences (ESC [ ... m) and inline image rows' OSC 8
+    // links (#1MGS). Used for restored scrollback that Relay itself serialized to ANSI, so
+    // formatting, colours and pictures survive replay while a hand-edited file still cannot
+    // drive the terminal with other OSC, cursor movement, or other CSI (engine/core/AnsiSerializer.h).
+    static QString sanitizeSgrOnly(const QString &text) { return relay::restorableAnsi(text); }
 
     void buildTranscript() {
         m_transcript = new QFrame;
