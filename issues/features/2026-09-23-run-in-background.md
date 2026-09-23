@@ -5,7 +5,7 @@ status: planned
 labels: [feature, panes, switchboard, notifications]
 rank: m
 created: '2026-09-23'
-source: 'Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code'
+source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
 links: {plans: [], commits: [], evidence: [], related: [RG0Z], github: null}
 ---
 # Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done
@@ -42,6 +42,9 @@ links: {plans: [], commits: [], evidence: [], related: [RG0Z], github: null}
 
   **Deliver** stays the `/deliver` workflow (plan as needed, then implement and verify). It gets no button of its own until its completion promise is precise. Delivery and background visibility stay independent.
 - **First version:** background work lives as long as Relay stays open. After a restart, interrupted background work is listed as interrupted and can be recovered; it is not silently lost.
+- **Run's key is `r`; `x` is removed**, with no alias (owner: "1 yes, and you can go ahead and remove x.").
+- **Green done tasks clear once opened** (owner: "2 yes.").
+- **What "done" means, for built-in and guest agents alike:** a background task is green when every request in its request ledger (`backend/relay_core/requests.py`) is `done` (the turn ended normally and every linked todo is completed), no todo it owns is open, and no subagent it started is still running. A card-backed Run is green only when the card reaches `needs-verification` or `done`. Anything cancelled, blocked or deferred goes to amber with its reason.
 
 ## Done means
 - From a pane, Run in background on a ready task removes the pane from the layout (neighbours expand), the violet count goes up, and the agent keeps working. Move to background does the same for a running turn without losing its conversation or terminal.
@@ -58,26 +61,26 @@ links: {plans: [], commits: [], evidence: [], related: [RG0Z], github: null}
 - `src/RelayWindow.h:9936` builds `m_bell` in the right chrome row; the badge refresh is at `:10115`, and `NotificationsPopup` is in `src/WindowChrome.h:304`. The counts go in the same `rightRow`, before the bell.
 - `src/RelayWindow.h:7201` `detachTab` moves a live page out; its current path can close a window left empty, so it is not a background owner as it stands.
 - `src/Pane.h` posts completion and question notifications per turn. Those need to become per task for background work, deduplicated.
-- `backend/relay_core/requests.py` tracks requests and their linked tasks, which is the place to decide whether the *request* is complete.
+- **Completion already exists, and guests share it.** Every prompt becomes a request `R<n>` in `backend/relay_core/requests.py`. At a turn's final answer, `Agent._open_items` (`backend/relay_core/agent.py:3312`) lists requests with open linked todos. While any remain, Relay injects a `[Relay completion check n/2]` reminder and the turn continues (`agent.py:2194`, `MAX_COMPLETION_REMINDERS = 2`). Only then does `finish_turn` mark requests `done` (`requests.py:178`). Guests go through the same `Agent` loop (`guest_harness_provider.py` header), so Claude Code and Codex get the same ledger and checks.
+- **The gap for guests:** Relay only sees todos written through `relay_board`'s `update_todos` (`guest_board_bridge.py:29`). Claude Code's `TodoWrite` and Codex's plan updates are not mirrored (nothing in `guest_harness_claude.py` or `guest_harness_codex.py`), so a guest that keeps its list natively has no linked todos. Its request goes `done` as soon as the turn ends normally.
 - Board Execute: `src/BoardPane.cpp:2599` `execute()` (with the unplanned-card warning at `:2613`) and the action label at `:3152`; `src/BoardModel.cpp:344`; the plan pane's `Execute` and `Execute in fresh context` buttons at `src/FilePanes.cpp:1916`; `src/AgentContext.h:96,129` document the label.
 - #RG0Z ("dim while working") dims the pane in place. This card frees the layout space, and dimming stays as it is for panes left visible.
 
 **Steps:**
-1. **Lifecycle model.** Add a background-task record (pane id, title, card id if any, state working / needs-you / done / failed / stopped / interrupted, last reason) owned by `WindowManager`, with transitions driven by pane status and request completion, not turn ends. Unit-test the transitions, including subagent waits and verification-pending, which must not count as done.
+1. **Lifecycle model.** Add a background-task record (pane id, title, card id if any, request ids, state working / needs-you / done / failed / stopped / interrupted, last reason) owned by `WindowManager`. Transitions follow the done rule under Decisions, not turn ends. Unit-test the transitions, including subagent waits, cancelled, blocked or deferred todos, and card-backed tasks awaiting needs-verification.
 2. **Background ownership.** A hidden holder that keeps a `Pane` alive (pty, worker, project context) outside any layout, and a restore that reinserts it into the current window. Hiding the last pane in a window leaves the window open with an empty-state view; it never closes it.
 3. **Pane entry points.** A **Run in background** send variant in the composer and **Move to background** on the pane header, in Actions and as a keymap action with a shortcut hint. Both are gated by the readiness check (step 5).
-4. **Header counts and list.** Four count chips in `rightRow` before `m_bell`, with the owner's colours and animations (theme-aware, respecting reduced motion). Clicking one opens a popup like `NotificationsPopup`, filtered to that state, with Open and Stop per task. The chips are keyboard-reachable and appear in Actions.
+4. **Header counts and list.** Four count chips in `rightRow` before `m_bell`, with the owner's colours and animations (theme-aware, respecting reduced motion). Clicking one opens a popup like `NotificationsPopup`, filtered to that state, with Open and Stop per task. Opening a done task clears it. The chips are keyboard-reachable and appear in Actions.
 5. **Readiness check.** Before hiding, the agent must accept: no open question to the owner, a plan if the task needs one. Otherwise the pane stays and shows the reason and a **Plan** action. Share the logic with the Board's unplanned-card check.
-6. **Completion and notifications.** One notification per state change of a background task (needs you, done, failed), deduplicated against the per-turn notices, which are suppressed while the pane is in the background. A notification click opens the session.
-7. **Board Run.** Rename Execute to Run. Run backgrounds by default, **Run in pane** keeps the old behaviour, and a card with a background session shows its state and **Open session**.
-8. **Terminology sweep.** Rename Execute to Run in `BoardPane.cpp`, `BoardModel.cpp` (keeping the stored `execute` action key for old thread entries), `FilePanes.cpp` ("Run", "Run in fresh context"), tooltips, keymap descriptions, shortcut hints, `docs/` and `backend/relay_core` prompts and policy text. The internal names can stay.
-9. **Restart recovery.** Persist the background list with the session id; on launch, list tasks that were running as *interrupted*, with Open to resume.
+6. **Completion and notifications.** Worker: add a `background` flag on the request, and a request event that reports ledger status, open todos and running subagents per request so the GUI can apply the done rule. One notification per state change of a background task (needs you, done, failed), deduplicated against the per-turn notices, which are suppressed while the pane is in the background. A notification click opens the session.
+7. **Guests get the same completion signal.** (a) Mirror native lists into Relay todos linked to the current request: Claude Code's `TodoWrite` in `guest_harness_claude.py`, and Codex's plan updates in `guest_harness_codex.py`. (b) For a background request, the guest's turn context tells it to keep its task list in `update_todos` and not to end the turn with items open. The existing completion check then works unchanged.
+8. **Board Run.** Rename Execute to Run on key `r`, and remove `x`. Run backgrounds by default, **Run in pane** keeps the old behaviour, and a card with a background session shows its state and **Open session**. Check that `r` is not already taken on the card page, and that the shortcut hints change with it.
+9. **Terminology sweep.** Rename Execute to Run in `BoardPane.cpp`, `BoardModel.cpp` (keeping the stored `execute` action key for old thread entries), `FilePanes.cpp` ("Run", "Run in fresh context"), tooltips, keymap descriptions, shortcut hints, `docs/` and `backend/relay_core` prompts and policy text. The internal names can stay.
+10. **Restart recovery.** Persist the background list with the session id; on launch, list tasks that were running as *interrupted*, with Open to resume.
 
 **Risks:**
-- Owner decision: whether Run keeps the `x` key or moves to `r` (recommend `r`, with `x` as an alias for one release).
-- Owner decision: whether green done tasks clear themselves after opening, or stay until dismissed (recommend: clear after opening).
-- A guest agent (Claude Code, Codex) reports turns, not task completion. Done for guests needs the agent's own "done" signal or the card reaching needs-verification; until that exists, a guest can show amber "ready for review" but not green.
+- A guest that ignores its todo list still ends its request `done` when the turn ends. Mirroring (step 7a) covers Claude Code and Codex as they normally work. For a task with no todos at all, done means "the turn ended normally" for built-in and guest agents alike: the same promise Relay makes today.
 - A hidden pane must keep its pty draining. A stalled reader would freeze the agent's shell.
 - `Pane.h` and `RelayWindow.h` are heavily shared. Land through `scripts/land.py` in small commits, one step at a time.
 
-**Verify:** a `backgroundtasks` unit test for the lifecycle, dedup and readiness gate; targeted `panes` and `panestatus` tests; an Xvfb run with an isolated config showing hide, counts, a question going amber and being answered, done, failure, hiding the last pane, restore into a changed layout, a notification click, and Board Run versus Run in pane; one built-in and one guest agent live; `rg -g '!issues/' '"Execute'` finding no UI string.
+**Verify:** a `backgroundtasks` unit test for the lifecycle, dedup and readiness gate; pytest for the request event and the `TodoWrite` and Codex plan mirroring, with the fake harness; targeted `panes` and `panestatus` tests; an Xvfb run with an isolated config showing hide, counts, a question going amber and being answered, done then cleared on open, failure, hiding the last pane, restore into a changed layout, a notification click, and Board Run (`r`) versus Run in pane; one built-in and one guest agent live; `rg -g '!issues/' '"Execute'` finding no UI string.
