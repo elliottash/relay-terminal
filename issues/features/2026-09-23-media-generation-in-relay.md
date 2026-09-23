@@ -1,10 +1,9 @@
 ---
 id: 2GV0
 type: work
-status: discussing
+status: planning
 labels: [feature, agent-tools, media]
 assignee: codex
-waiting_on: owner
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23; card written by Codex
@@ -30,4 +29,7 @@ is gemini the best for that? check what openrouter has at low cost
 - **Decided (owner, 2026-09-23):** music uses Lyria (OpenRouter: 3 Clip at $0.04 per 30 s, 3 Pro at $0.08 per song) or ElevenLabs Music (about $0.80 per minute via fal, https://fal.ai/learn/devs/elevenlabs-music-user-guide ). Sound effects use ElevenLabs only. Both ElevenLabs capabilities require a fal.ai key or an ElevenLabs key. Without either, the SFX tool is unavailable and says which key to add, and music falls back to Lyria on the OpenRouter key.
 - Recommendation: make the SFX tool's interface the ElevenLabs one (prompt, duration, loop, prompt influence). Back it with fal.ai's ElevenLabs endpoint by default so a single fal key covers it, and allow a direct ElevenLabs key when the user has one. That keeps the model swappable (CassetteAI or MMAudio when cheaper) without changing the tool.
 - Video on OpenRouter (live catalog, 2026-09-23; all asynchronous, via one OpenRouter key). Cheapest per second: Veo 3.1 Lite at $0.03 (720p, silent) or $0.05 (720p, with audio), 4/6/8 s clips, first and last frame; Wan 2.6 at $0.04 (480p text-to-video); Wan 3.0 at $0.05 (480p) up to $0.20 (1080p), 2–30 s, audio; Grok Imagine Video at $0.05 (480p) or $0.07 (720p); Hailuo 3 Max at $0.05 (480p, silent); HeyGen Avatar IV at $0.05 for a talking head from one photo. Seedance 1.5 Pro is billed in video tokens; at the usual width × height × fps ÷ 1024 that is roughly $0.01–0.03/s at 480p–720p silent, but that figure is an estimate that has not been checked with a real request. Mid tier: Veo 3.1 Fast $0.08–0.12, Kling v3 Standard $0.084 (+audio $0.126). Top tier: Veo 3.1 $0.20–0.60, Sora 2 Pro $0.30–0.50. Source: https://openrouter.ai/api/v1/videos/models .
-- Recommendation for video: default to Veo 3.1 Lite, with audio off unless it is asked for (an 8 s 720p clip costs $0.24 silent or $0.40 with sound). Use Wan 3.0 when a clip must be longer than 8 s. Show the estimated cost before each generation, because video is the one medium where a single call costs dollars rather than cents.
+- Earlier video recommendation (Veo 3.1 Lite with Wan 3.0 for longer clips) is superseded by the owner's Seedance 2.0 and Veo 3.1 Lite selection below. Show an estimated cost before each generation.
+
+## Decisions
+- Owner, 2026-09-23: “i want seedance 2 and veo 3.1 lite”. Offer both OpenRouter video models: standard Seedance 2.0 (`bytedance/seedance-2.0`) and Veo 3.1 Lite (`google/veo-3.1-lite`). The earlier Wan 3.0 fallback recommendation is superseded; do not silently choose Seedance 2.0 Mini or Fast. Source for model identity: https://openrouter.ai/bytedance/seedance-2.0-20260414/api and https://openrouter.ai/google/veo-3.1-lite .
