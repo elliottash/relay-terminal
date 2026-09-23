@@ -2691,23 +2691,26 @@ stopped — written like a commit message ("Fix the FTS index going stale. Added
 use and an autosave hook; symlink digests unified. Left: backfill old summaries."). It is what the
 session list, the resume picker and the conversation search (section 14, `has:summary`) show under
 a session's title. Backend: `titles.clean_summary`/`digest`/`generate_summary` with the state on
-`Agent` and the handlers in `session_protocol.py`; tests: `tests/test_summaries.py`.
+`Agent`, the handlers in `session_protocol.py`, and the close job in `final_summary.py`;
+tests: `tests/test_summaries.py` and `tests/test_final_summary.py`.
 
-**Stored fields.** The session file gains four top-level fields, restored on resume and on
+**Stored fields.** The session file has these top-level fields, restored on resume and on
 `load_state`:
 
 | Field | Meaning |
 |---|---|
 | `summary` (str) | the standing summary, plain text, ≤ 320 characters |
 | `summary_turn` (int) | the turn it covers (0 while there is none) |
+| `summary_success_turn` (int) | the last turn a usable summary covered; a failed refresh never advances it |
 | `summary_time` (float) | when it was written |
 | `branch` (str) | the workspace's checked-out branch, re-read from `.git/HEAD` at each save (a worktree's `.git` file is followed; a detached HEAD gives the short commit; no repository gives `""`) |
 
-`<id>.meta.json` carries `summary`, `summary_turn` and `branch` too, so the listing and the picker
+`<id>.meta.json` carries `summary`, `summary_turn`, `summary_success_turn`, `summary_time` and `branch` too, so the listing and the picker
 never open a session file. `summary` is also a **user field** there (`conv_index.read_user_fields` /
 `write_user_fields`, beside `custom_title` and `pinned`): that is how a session summarised while
 nobody had it open keeps its summary, and why an autosave from a pane can never drop one. When a
-worker does hold the session, its own summary is the newer one and wins.
+worker does hold the session, the summary covering more turns wins. A final recap that arrives
+after the worker exits stays in metadata and is adopted on the next resume.
 
 `session_summary {summary, turn, session_id}` (event)
 
@@ -2728,7 +2731,7 @@ together and neither blocks the turn:
 | Five turns after the last summary (`titles.SUMMARY_REFRESH_TURNS`) | yes |
 | After a compaction | yes, at the end of the next turn |
 | Rewound to before the last summary | no |
-| Worker shutdown | **no** — see the note at the end |
+| Worker shutdown, if the saved recap is missing or predates the last turn | yes, in a separate process |
 
 The call is given a **bounded digest**, never the whole conversation: the first request, the most
 recent compaction summary (`relay_kind: "summary"`), the tail of the user prompts and assistant
@@ -2785,12 +2788,15 @@ while `conversation_summary` and the three batch events are withheld, like `conv
 and `conversation_pinned`: they answer a click on the desktop's session list and would otherwise
 hand a phone every other session's summary.
 
-**Shutdown.** A last summary for a stale session on the worker's exit path is **not** implemented:
-`backend/worker.py` breaks out of its loop straight into `subagents.shutdown()` /
-`observe.shutdown()` / `turns.shutdown(timeout=1)` with no hook for the session handlers, and a
-model call there would hold the exit open for as long as the provider takes. The summary the
-cadence already wrote at the last turn boundary is what a closed session keeps; anything staler
-than that is one `conversation_summarize` away.
+**Shutdown (card #RCP9).** Closing a pane saves its session and, when it has an assistant reply
+but no summary covering its final turn, launches `relay_core.final_summary` as a separate process.
+The pane does not wait for the model. The chosen chores provider config travels through a private
+pipe, never process arguments or a temporary file. The helper reads the saved session, generates
+the same bounded digest, and writes the result to metadata and the index; the session file stays
+owned by whichever pane might resume it. If the session advances or a newer summary lands while
+the helper runs, its result is discarded. If no chores provider is available, the helper cannot
+start, or the call fails, the prior recap remains. Closing a session can therefore spend one
+additional chores model call, while automatic backfill of older sessions remains off.
 
 ## 19. Board: cards, threads and the Board agent (v1.8, 2026-09-21)
 

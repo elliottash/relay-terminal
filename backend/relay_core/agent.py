@@ -780,6 +780,7 @@ class Agent:
         # branch, re-read from .git/HEAD at each autosave.
         self.summary = ""
         self.summary_turn = 0
+        self.summary_success_turn = 0
         self.summary_time = 0.0
         self._summary_stale = False
         self._summary_running = False
@@ -3696,6 +3697,7 @@ class Agent:
         with self._lock:
             self.summary = cleaned
             self.summary_turn = self.turns
+            self.summary_success_turn = self.turns
             self.summary_time = time.time()
             self._summary_stale = False
             paired = self._title_running
@@ -3980,18 +3982,28 @@ class Agent:
         self.summary = session_titles.clean_summary(data.get("summary"))
         summary_turn = data.get("summary_turn")
         self.summary_turn = summary_turn if type(summary_turn) is int and summary_turn >= 0 else 0
+        success_turn = data.get("summary_success_turn")
+        self.summary_success_turn = (success_turn if type(success_turn) is int and success_turn >= 0
+                                     else self.summary_turn if self.summary else 0)
         recap_turn = data.get("recap_turn")
         self.recap_turn = recap_turn if type(recap_turn) is int and recap_turn >= 0 else 0
         self.summary_time = float(data["summary_time"]) if isinstance(data.get("summary_time"), (int, float)) else 0.0
-        if not self.summary and keep_id and self.store is not None:
-            # Summarised on demand while nobody had it open: that summary lives in the meta file,
-            # so resuming picks it up instead of asking the model for it again.
+        if keep_id and self.store is not None:
+            # A final recap can finish after the pane closed. It lives in metadata because a
+            # second pane may already have resumed and own the session file.
             meta = sessions_usage.read_meta(self.store.directory, self.session_id)
-            self.summary = session_titles.clean_summary(meta.get("summary"))
-            if self.summary:
-                # It covered the session as it was saved, so the cadence starts from there.
-                turn = meta.get("summary_turn")
-                self.summary_turn = turn if type(turn) is int and turn > 0 else self.turns
+            meta_summary = session_titles.clean_summary(meta.get("summary"))
+            meta_success = meta.get("summary_success_turn")
+            if type(meta_success) is not int:
+                meta_success = meta.get("summary_turn")
+            if type(meta_success) is not int:
+                meta_success = self.turns if meta_summary and not self.summary else 0
+            if meta_summary and (not self.summary or meta_success > self.summary_success_turn):
+                self.summary = meta_summary
+                self.summary_success_turn = meta_success
+                self.summary_turn = max(self.summary_turn, meta_success)
+                if isinstance(meta.get("summary_time"), (int, float)):
+                    self.summary_time = float(meta["summary_time"])
         self.branch = str(data.get("branch") or "")[:200]
         if keep_id and isinstance(data.get("created"), (int, float)):
             self.created = data["created"]
@@ -4032,7 +4044,8 @@ class Agent:
         return {"version": STATE_VERSION, "kind": "relay_session", "id": self.session_id, "title": self.title,
                 "title_source": self.title_source, "title_turn": self.title_turn,
                 # The agent-written summary for the session list, and the branch it was written on.
-                "summary": self.summary, "summary_turn": self.summary_turn, "summary_time": self.summary_time,
+                "summary": self.summary, "summary_turn": self.summary_turn,
+                "summary_success_turn": self.summary_success_turn, "summary_time": self.summary_time,
                 "recap_turn": self.recap_turn,
                 "branch": self.refresh_branch(),
                 "created": self.created, "updated": time.time(), "workspace": str(self.executor.workspace.root),

@@ -28,6 +28,7 @@ from .filelock import chmod_fd
 import re
 import sqlite3
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -273,7 +274,8 @@ class SessionStore:
         meta = {key: data.get(key) for key in ("id", "title", "created", "updated", "turns", "model", "preset",
                                                "open_requests", "models", "usage",
                                                # the agent-written summary and the workspace's branch
-                                               "summary", "summary_turn", "branch")}
+                                               "summary", "summary_turn", "summary_success_turn",
+                                               "summary_time", "branch")}
         # The turn a summary written elsewhere covered; the summary itself comes back below.
         # A title or pin the user set in the session manager lives here, not in the index (a cache),
         # and so does a summary written while nobody had the session open; an autosave from the pane
@@ -285,14 +287,23 @@ class SessionStore:
         else:
             kept = read_meta(self.directory, session_id)
             user = conv_index.read_user_fields(self.directory, session_id)
-        for key in ("summary_turn", "branch"):
+        for key in ("summary_turn", "summary_success_turn", "summary_time", "branch"):
             if not meta.get(key) and kept.get(key):
                 meta[key] = kept[key]
         meta.update({k: v for k, v in user.items() if v})
-        # This worker holds the session, so its own summary is the newer one (conv_index's
-        # index_session_file merges in the same order).
-        if data.get("summary"):
+        # A final recap written after this pane last saved may cover more turns than the
+        # pane's in-memory text. Keep that metadata until load_state adopts it.
+        kept_success = kept.get("summary_success_turn") or kept.get("summary_turn") or 0
+        own_success = data.get("summary_success_turn") or data.get("summary_turn") or 0
+        if kept.get("summary") and kept_success > own_success:
+            meta["summary"] = kept["summary"]
+            meta["summary_turn"] = kept.get("summary_turn") or kept_success
+            meta["summary_success_turn"] = kept_success
+            meta["summary_time"] = kept.get("summary_time") or 0
+        elif data.get("summary"):
             meta["summary"] = data["summary"]
+            meta["summary_turn"] = data.get("summary_turn") or 0
+            meta["summary_success_turn"] = own_success
         if not (mine and _meta_unchanged(meta, wrote["meta"])):
             # Otherwise nothing the sessions list reads out of this file has changed since the last
             # save wrote it, and the only difference would be a newer `updated` — which the next
@@ -307,12 +318,14 @@ class SessionStore:
         if index is not None:
             # The index is a cache: a failure here must never lose the conversation.
             try:
-                index.update_session({**data, "custom_title": user.get("custom_title"),
+                index.update_session({**data, "summary": meta.get("summary") or data.get("summary"),
+                                      "custom_title": user.get("custom_title"),
                                       "pinned": bool(user.get("pinned"))}, self.directory)
             except (OSError, ValueError, sqlite3.Error):
                 log.exception("session index update failed for %s", session_id)
 
-    def note_summary(self, session_id: str, summary: str, *, meta: bool = True) -> bool:
+    def note_summary(self, session_id: str, summary: str, *, meta: bool = True,
+                     turn: int | None = None) -> bool:
         """Record a fresh agent-written summary for a saved session.
 
         It goes into ``<id>.meta.json`` as a user field and into the index, never into the session
@@ -324,7 +337,10 @@ class SessionStore:
         summary = " ".join(str(summary or "").split())[:MAX_SUMMARY]
         if not summary:
             return False
-        if meta and not conv_index.write_user_fields(self.directory, session_id, summary=summary):
+        fields = {"summary": summary}
+        if turn is not None:
+            fields.update(summary_turn=turn, summary_success_turn=turn, summary_time=time.time())
+        if meta and not conv_index.write_user_fields(self.directory, session_id, **fields):
             return False
         index = self.index()
         # conv_index owns the index schema; set_summary arrived with it, so ask before calling.

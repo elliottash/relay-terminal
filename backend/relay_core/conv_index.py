@@ -1884,9 +1884,11 @@ class ConversationIndex:
         if not isinstance(data, dict) or data.get("kind") != "relay_session" or not data.get("id"):
             return False
         merged = {**data, **read_user_fields(path.parent, str(data["id"]))}
-        # The session's own summary is the newer one; the meta file only carries one for a session
-        # summarised while nobody had it open.
-        if data.get("summary"):
+        # A close-time recap may finish after the last session-file save. Prefer whichever
+        # successful summary covers more turns when rebuilding the index.
+        meta_success = merged.get("summary_success_turn") or merged.get("summary_turn") or 0
+        data_success = data.get("summary_success_turn") or data.get("summary_turn") or 0
+        if data.get("summary") and data_success >= meta_success:
             merged["summary"] = data["summary"]
         self.update_session(merged, path.parent)
         return True
@@ -2652,11 +2654,11 @@ def _meta_path(directory: Path, session_id: str) -> Path:
 
 
 def read_user_fields(directory: str | Path, session_id: str) -> dict:
-    """{custom_title, pinned, summary} from `<id>.meta.json`; empty when the file has none of them.
+    """User fields and summary provenance from `<id>.meta.json`; empty when it has none.
 
     `summary` is there for a session summarised while it was not loaded: the session JSON has no
-    summary of its own then, so the meta file is what a rebuild reads it back from. A summary in
-    the session JSON is the newer one and wins (`update_session` merges in that order).
+    summary of its own then, so the meta file is what a rebuild reads it back from. A close-time
+    recap can also be newer than a session JSON that already has an older summary.
     """
     try:
         with open(_meta_path(Path(directory), session_id), encoding="utf-8") as handle:
@@ -2672,6 +2674,9 @@ def read_user_fields(directory: str | Path, session_id: str) -> dict:
         out["pinned"] = True
     if isinstance(meta.get("summary"), str) and meta["summary"].strip():
         out["summary"] = meta["summary"]
+        for name in ("summary_turn", "summary_success_turn"):
+            if type(meta.get(name)) is int and meta[name] >= 0:
+                out[name] = meta[name]
     if out:
         out.setdefault("custom_title", None)
         out.setdefault("pinned", False)
@@ -2706,6 +2711,11 @@ def write_user_fields(directory: Path, session_id: str, **fields) -> bool:
             meta["summary"] = summary
         else:
             meta.pop("summary", None)
+    for name in ("summary_turn", "summary_success_turn"):
+        if name in fields and type(fields[name]) is int and fields[name] >= 0:
+            meta[name] = fields[name]
+    if "summary_time" in fields and type(fields["summary_time"]) in (int, float) and fields["summary_time"] >= 0:
+        meta["summary_time"] = fields["summary_time"]
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".session-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:

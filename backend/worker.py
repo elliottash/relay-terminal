@@ -16,6 +16,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
 from relay_core import memory_import, openrouter_catalog
+from relay_core import final_summary
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
@@ -757,6 +758,9 @@ def main():
                 board.dispatch(request)
             elif kind == "shutdown":
                 # The pane is closing (`Pane::~Pane` sends `cancel` then this, and waits 1.5 s):
+                # a final recap has to outlive this worker. The helper reads the saved session
+                # and writes its metadata after this process has gone (#RCP9).
+                final_summary.start(turns.agent)
                 # the cards it claimed are nobody's, so its `session` comes off them before the
                 # loop ends (protocol 19.19, #R9G7). Bounded, never raises, and the cards stay in
                 # Executing — the work is in flight, only the pane that held it has gone.

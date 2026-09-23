@@ -701,7 +701,7 @@ class SessionCommands:
         if not text:
             return "", "The model did not return a usable summary."
         try:
-            if not store.note_summary(session_id, text):
+            if not store.note_summary(session_id, text, turn=data.get("turns") or 0):
                 return "", "That session has no metadata file to hold a summary."
         except (ValueError, OSError, sqlite3.Error) as exc:
             return "", str(exc)[:300]
