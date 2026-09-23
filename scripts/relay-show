@@ -34,6 +34,8 @@ def sniff(head):
         return "image"
     if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
         return "image"
+    if b"<html" in head[:1024].lower() or b"<!doctype html" in head[:1024].lower():
+        return "chart"
     if head.lstrip().startswith(b"<svg") or b"<svg" in head[:1024].lower():
         return "svg"
     if head.startswith(b"%PDF-"):
@@ -44,8 +46,6 @@ def sniff(head):
         return "audio"
     if head.startswith(b"\x1aE\xdf\xa3") or head[4:8] == b"ftyp":
         return "video"
-    if b"<html" in head[:1024].lower() or b"<!doctype html" in head[:1024].lower():
-        return "chart"
     return None
 
 
@@ -161,9 +161,8 @@ def table_shape(path, delimiter):
 def emit_image(path):
     payload = str(path).encode("utf-8")
     import base64
-    with path.open("rb") as source:
-        png = source.read(8).startswith(b"\x89PNG")
-    control = b"\x1b_Ga=T,t=f,q=2" + (b",f=100" if png else b"")
+    # Kitty f=100 means an encoded image. Without it, a GIF/JPEG/WebP file is treated as raw RGB.
+    control = b"\x1b_Ga=T,t=f,q=2,f=100"
     sys.stdout.buffer.write(control + b";" + base64.b64encode(payload) + b"\x1b\\\n")
 
 
@@ -209,6 +208,9 @@ def main(argv=None):
             parser.error("source is not a file")
     head = path.open("rb").read(1024) if path else b""
     kind = args.kind or ("chart" if target else sniff(head))
+    # Both MP4 video and M4A audio use an ftyp box; the suffix distinguishes M4A.
+    if not args.kind and path and path.suffix.lower() in (".m4a", ".m4b") and head[4:8] == b"ftyp":
+        kind = "audio"
     if not kind and path:
         suffix = path.suffix.lower()
         kind = {".mp3": "audio", ".m4a": "audio", ".aac": "audio", ".mp4": "video",
