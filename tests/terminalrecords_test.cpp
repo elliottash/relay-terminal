@@ -195,6 +195,36 @@ private Q_SLOTS:
         QCOMPARE(records.latestUser()["output"].toString(), QString("fresh\n"));
     }
 
+    void alternateScreenInOneBatch() {
+        for (const QByteArray &params : {QByteArray("47"), QByteArray("1047"), QByteArray("1049"),
+                                        QByteArray("25;1049;2004"), QByteArray("47;25")}) {
+            for (const QString &host : {QString(), QStringLiteral("ssh.example")}) {
+                const QByteArray body = "before UI\x1b[?" + params + "hSCREEN CONTENT\x1b[?" +
+                    params + "lafter UI\x1b]133;D;0\a";
+                const QByteArray bytes = commandMarker("vim") + body;
+                for (int split = 0; split <= bytes.size(); ++split) {
+                    Records records; Stream stream;
+                    stream.append(records, bytes.left(split), "secret", host);
+                    stream.append(records, bytes.mid(split), "secret", host);
+                    const auto result = records.latestUser();
+                    QCOMPARE(result["availability"].toString(), QString("unsupported"));
+                    QCOMPARE(result["output"].toString(), QString());
+                    QCOMPARE(result["state"].toString(), QString("completed"));
+                    QCOMPARE(result["exit_status"].toInt(), 0);
+                    QCOMPARE(result["host"].toString(), host);
+                }
+            }
+        }
+        Records records;
+        records.begin("test", "", "");
+        records.append("before\x1b[?25hvisible\x1b[?1049lstill visible");
+        QCOMPARE(records.latestUser()["availability"].toString(), QString("captured"));
+        QCOMPARE(records.latestUser()["output"].toString(), QString("beforevisiblestill visible"));
+        records.append(QByteArray::fromHex("9b") + "?1049hhidden");
+        QCOMPARE(records.latestUser()["availability"].toString(), QString("unsupported"));
+        QCOMPARE(records.latestUser()["output"].toString(), QString());
+    }
+
     void serializedBudgetAndMetadata() {
         Records records;
         const QString huge = QString::fromUtf8("🙂").repeated(6000);

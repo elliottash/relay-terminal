@@ -119,6 +119,8 @@ private:
     Parser m_parser = Parser::Text;
     QByteArray m_osc, m_utf8, m_echo, m_echoPending, m_batch;
     int m_utf8Length = 0, m_controlUtf8Remaining = 0;
+    int m_csiParam = 0;
+    bool m_csiFirst = true, m_csiPrivate = false, m_csiValid = true, m_csiAlt = false;
 
     static QString uuid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
     static bool continuation(unsigned char c) { return (c & 0xc0) == 0x80; }
@@ -233,6 +235,38 @@ private:
         m_osc.clear();
         m_parser = Parser::Text;
     }
+    void beginCsi() {
+        m_parser = Parser::Csi;
+        m_csiParam = 0;
+        m_csiFirst = m_csiValid = true;
+        m_csiPrivate = m_csiAlt = false;
+    }
+    bool alternateScreenParam() const {
+        return m_csiParam == 47 || m_csiParam == 1047 || m_csiParam == 1049;
+    }
+    void unsupportedOutput() {
+        Entry &entry = m_entries.first();
+        entry.json["availability"] = QStringLiteral("unsupported");
+        entry.head.clear(); entry.tail.clear(); entry.clean = 0;
+        entry.truncated = false;
+        m_batch.clear(); m_echoPending.clear(); m_utf8.clear();
+        m_checkEcho = false;
+        m_stopped = true;
+    }
+    void consumeCsi(unsigned char byte) {
+        if (byte >= 0x40 && byte <= 0x7e) {
+            if (byte == 'h' && m_csiPrivate && m_csiValid && (m_csiAlt || alternateScreenParam()))
+                unsupportedOutput();
+            m_parser = Parser::Text;
+        } else if (byte == 0x1b) m_parser = Parser::Escape;
+        else if (byte >= 0x20) {
+            if (byte == '?' && m_csiFirst) m_csiPrivate = true;
+            else if (byte >= '0' && byte <= '9') m_csiParam = qMin(100000, m_csiParam * 10 + byte - '0');
+            else if (byte == ';') { m_csiAlt = m_csiAlt || alternateScreenParam(); m_csiParam = 0; }
+            else m_csiValid = false;
+            m_csiFirst = false;
+        }
+    }
     void consume(unsigned char byte) {
         if (m_stopped) return;
         // A UTF-8 continuation byte can equal the legacy eight-bit ST control.
@@ -249,14 +283,14 @@ private:
         switch (m_parser) {
         case Parser::Text:
             if (byte == 0x1b) { flushUtf8(); m_parser = Parser::Escape; }
-            else if (m_utf8.isEmpty() && byte == 0x9b) m_parser = Parser::Csi;
+            else if (m_utf8.isEmpty() && byte == 0x9b) beginCsi();
             else if (m_utf8.isEmpty() && byte == 0x9d) { m_osc.clear(); m_parser = Parser::Osc; }
             else if (m_utf8.isEmpty() && (byte == 0x90 || byte == 0x98 || byte == 0x9e || byte == 0x9f)) m_parser = Parser::String;
             else if (m_utf8.isEmpty() && byte >= 0x80 && byte <= 0x9f) {}
             else textByte(byte);
             break;
         case Parser::Escape:
-            if (byte == '[') m_parser = Parser::Csi;
+            if (byte == '[') beginCsi();
             else if (byte == ']') { m_osc.clear(); m_parser = Parser::Osc; }
             else if (byte == 'P' || byte == 'X' || byte == '^' || byte == '_') m_parser = Parser::String;
             else if (byte >= 0x20 && byte <= 0x2f) m_parser = Parser::EscapeIntermediate;
@@ -267,8 +301,7 @@ private:
             else if (byte == 0x1b) m_parser = Parser::Escape;
             break;
         case Parser::Csi:
-            if (byte >= 0x40 && byte <= 0x7e) m_parser = Parser::Text;
-            else if (byte == 0x1b) m_parser = Parser::Escape;
+            consumeCsi(byte);
             break;
         case Parser::Osc:
             if (byte == 7 || (byte == 0x9c && !encodedControl)) endOsc();
