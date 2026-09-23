@@ -203,6 +203,65 @@ class PresetTests(unittest.TestCase):
 
 
 class StartTests(unittest.TestCase):
+    def test_session_replacement_preserves_bridge_and_instructions(self):
+        from relay_core.guest_board_bridge import exchange
+        from relay_core import board as B, board_tools as T
+        from tests.test_board_tools import CONFIG
+        for guest in ("claude", "codex"):
+            with self.subTest(guest=guest), tempfile.TemporaryDirectory() as cwd:
+                root = Path(cwd) / 'issues'
+                root.mkdir()
+                (root / B.BOARD_CONFIG).write_text(CONFIG)
+                board = T.BoardTools(B.Board(root, Path(cwd)), emit=lambda e: None,
+                                     state_path=Path(cwd) / 'rate.json')
+                board.begin_turn('resume-test')
+                first = FakeHarness([], guest=guest)
+                with mock.patch.object(ghp, "make_harness", return_value=first):
+                    provider = ghp.start_provider("guest:" + guest,
+                        {"skills": {"enabled": False}}, cwd,
+                        instruction_suffix="Keep this pane's assignment.")
+                try:
+                    agent = Agent(provider.config, cwd, lambda e: None,
+                                  provider=provider, board=board, track_requests=False)
+                    ghp.attach(agent, provider)
+                    original_bridge = provider.board_bridge
+                    expected = first.instructions
+                    for session in ("saved-one", "saved-two"):
+                        previous = provider.harness
+                        replacement = FakeHarness([], guest=guest)
+                        with mock.patch.object(ghp, "make_harness", return_value=replacement):
+                            ghp.resume_session(agent, {"guest": guest, "guest_session": session},
+                                               lambda e: None)
+                        self.assertEqual(replacement.board_bridge, original_bridge.descriptor)
+                        self.assertEqual(replacement.instructions, expected)
+                        self.assertIn("Keep this pane's assignment.", replacement.instructions)
+                        self.assertIs(provider.board_bridge, original_bridge)
+                        self.assertIs(original_bridge.agent, agent)
+                        cap = json.loads(Path(replacement.board_bridge['args'][-1]).read_text())
+                        names = {t['name'] for t in exchange(cap, 'tools/list')['tools']}
+                        self.assertIn('board_list', names)
+                        self.assertIn('run_in_terminal', names)
+                        original_bridge.begin(threading.Event())
+                        try:
+                            result = exchange(cap, 'tools/call',
+                                              {'name': 'board_list', 'arguments': {}}, session)
+                            self.assertIn('cards', result)
+                        finally:
+                            original_bridge.end()
+                        self.assertTrue(previous.closed)
+                    broken = FakeHarness([], guest=guest, start_error=HarnessError("resume failed"))
+                    previous = provider.harness
+                    with mock.patch.object(ghp, "make_harness", return_value=broken):
+                        ghp.resume_session(agent, {"guest": guest, "guest_session": "broken"},
+                                           lambda e: None)
+                    self.assertIs(provider.harness, previous)
+                    self.assertFalse(previous.closed)
+                    self.assertTrue(broken.closed)
+                    self.assertFalse(original_bridge.closed)
+                    self.assertIn('tools', exchange(cap, 'tools/list'))
+                finally:
+                    provider.close()
+
     def test_guest_instructions_survive_new_provider_resume_and_fork(self):
         from relay_core.guest_instructions import GUEST_INSTRUCTIONS
         for guest in ("claude", "codex"):

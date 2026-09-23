@@ -1,0 +1,21 @@
+FF
+======================================================================
+FAIL: test_session_replacement_preserves_bridge_and_instructions (tests.test_guest_harness_provider.StartTests.test_session_replacement_preserves_bridge_and_instructions) (guest='claude')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/relay-brs2-xyTqjh/tests/test_guest_harness_provider.py", line 227, in test_session_replacement_preserves_bridge_and_instructions
+    self.assertEqual(replacement.board_bridge, original_bridge.descriptor)
+AssertionError: None != {'command': '/usr/bin/python3', 'args': [[107 chars]on']}
+
+======================================================================
+FAIL: test_session_replacement_preserves_bridge_and_instructions (tests.test_guest_harness_provider.StartTests.test_session_replacement_preserves_bridge_and_instructions) (guest='codex')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/relay-brs2-xyTqjh/tests/test_guest_harness_provider.py", line 227, in test_session_replacement_preserves_bridge_and_instructions
+    self.assertEqual(replacement.board_bridge, original_bridge.descriptor)
+AssertionError: None != {'command': '/usr/bin/python3', 'args': [[107 chars]on']}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.106s
+
+FAILED (failures=2)

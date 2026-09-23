@@ -630,6 +630,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     config.model = started.model or options["model"] or guest_id
     provider = HarnessProvider(config, harness, guest_id, stall_timeout=stall_timeout)
     provider.board_bridge = bridge
+    provider.instructions = instructions
     provider.session_id = started.session_id or ""
     provider.permissions = options["permissions"]
     provider.effort = _harness_effort(harness) or options["effort"] or ""
@@ -699,6 +700,7 @@ class HarnessProvider:
         self.opening = None
         self._agent = None
         self.board_bridge = None
+        self.instructions: str | None = None
         self._asker = _Asker()
         self._closed = False
 
@@ -1676,13 +1678,19 @@ def resume_session(agent, data, emit) -> None:
     # guest session, and both adapters refuse a second start ("already started"). The old one is
     # only closed once the replacement is up, so a guest that will not resume leaves the pane with
     # the agent it had.
+    replacement = None
     try:
         replacement = make_harness(guest_id)
         started = replacement.start(cwd=str(agent.executor.workspace.root),
                                     model=provider.config.model or None, resume=session,
                                     fork=False, permissions=provider.permissions,
-                                    effort=provider.effort or None)
+                                    effort=provider.effort or None,
+                                    board_bridge=(provider.board_bridge.descriptor
+                                                  if provider.board_bridge is not None else None),
+                                    instructions=provider.instructions)
     except HarnessError as exc:
+        if replacement is not None:
+            _close_quietly(replacement)
         emit({"event": "status",
               "text": f"{guest.spec(guest_id).name} could not resume that session: {exc}"})
         return
