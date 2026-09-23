@@ -3,6 +3,9 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -70,6 +73,41 @@ traceback continuation
             self.assertEqual(data['affected_turns'], 1)
             self.assertEqual(data['retry_wait_seconds'], 0.5)
             self.assertNotIn('secret error body', json.dumps(data))
+
+    def test_protocol_exceptions_are_grouped_without_untrusted_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'worker.log'
+            path.write_text('''2026-09-23T12:00:00Z ERROR relay.worker pane=a protocol_error kind=configure error=AttributeError msg="private prompt"
+2026-09-23T12:00:01Z ERROR relay.worker pane=a protocol_error kind=configure error=ValueError msg="private prompt" origin=qa
+2026-09-23T12:00:02Z ERROR relay.worker pane=a protocol_error kind=secret_value error=SecretValue msg="private prompt" origin=interactive
+2026-09-23T12:00:03Z INFO relay.agent pane=a tool tool=agent_wait outcome=pending origin=interactive
+''')
+            data = report.summarize([path])
+            self.assertEqual(data['protocol_errors'], [
+                {'kind': 'configure', 'exception': 'AttributeError', 'origin': 'unknown', 'count': 1},
+                {'kind': 'configure', 'exception': 'ValueError', 'origin': 'qa', 'count': 1},
+                {'kind': 'unknown', 'exception': 'unknown', 'origin': 'interactive', 'count': 1},
+            ])
+            self.assertEqual(data['outcomes'], {'pending': 1})
+            self.assertNotIn('private prompt', json.dumps(data))
+            self.assertNotIn('secret_value', json.dumps(data))
+
+    def test_qa_launcher_isolates_child_diagnostics(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            normal = Path(directory) / 'normal'
+            normal.mkdir()
+            env = dict(os.environ, XDG_DATA_HOME=str(normal),
+                       PYTHONPATH=str(root / 'backend'))
+            code = ("import os; from relay_core import logs; "
+                    "log=logs.configure('worker'); "
+                    "logs.event(log, 'qa_probe', level_name='info'); "
+                    "print(os.environ['RELAY_LOG_ORIGIN'], os.environ['RELAY_LOG_RUN_ID'])")
+            result = subprocess.run([str(root / 'scripts/relay-qa-run'), sys.executable, '-c', code],
+                                    env=env, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertRegex(result.stdout.strip(), r'^qa qa-\d{8}T\d{6}Z-\d+$')
+            self.assertFalse((normal / 'relay/logs/worker.log').exists())
 
     def test_snapshot_retention_and_review_never_sum_overlapping_windows(self):
         now = datetime(2026, 9, 22, 12, tzinfo=timezone.utc)

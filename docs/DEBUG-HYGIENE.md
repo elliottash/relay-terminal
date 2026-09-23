@@ -24,6 +24,7 @@ Use `--origin interactive` for interactive sessions, `--origin test` or `--origi
 - `completed_classified` excludes pending, refused and unknown records. `unexpected_per_100_completed` counts transport/internal errors over that denominator; no denominator produces `null`, not zero. A command nonzero exit or timeout remains visible separately and is not automatically treated as a Relay bug.
 - p50/p95 use the nearest-rank method over records with nonnegative durations. Missing durations are excluded; inspect `duration_samples`.
 - `failure_reasons` contains only bounded machine codes, never exception text. A missing or unsafe code is `unknown`.
+- `protocol_errors` groups worker protocol exceptions by known request kind, exception class and origin. It is separate from tool outcome rates: a rejected invalid request can be a normal guard, while an `AttributeError` deserves a traceback and reproduction. Unknown or untrusted kind/class values remain `unknown`; messages and IDs are never copied into the aggregate.
 - Affected sessions/turns count distinct IDs associated with classified command/timeout/transport/internal failures. They exclude legacy unknown results and records without IDs.
 - Retry wait is the sum of requested backoff seconds in retry events, not measured wall time actually spent sleeping. Cancellation can shorten a wait.
 - Dated malformed lines are counted within the selected time window before origin filtering; undated lines are counted over all scanned files because they cannot be assigned to a window. Neither count is a failure count.
@@ -32,13 +33,13 @@ Use `--origin interactive` for interactive sessions, `--origin test` or `--origi
 
 New worker records append `origin`, `run_id` and `build_id` after the event fields. `RELAY_LOG_ORIGIN` accepts `interactive`, `test` or `qa`; invalid values become unknown. `RELAY_LOG_RUN_ID` supplies a run label, and `RELAY_BUILD_ID` supplies a package/QA build label. Identity values are bounded tokens, not arbitrary paths or messages. Without overrides the worker uses interactive origin, a process-run ID and a cached backend-source fingerprint. GUI worker exits record their running GUI build identity and lifecycle reason.
 
-For a bounded QA run, set a run label and disposable XDG directories before launching Relay:
+For a disposable worker or GUI probe, use the QA launcher:
 
 ```bash
-RELAY_LOG_ORIGIN=qa RELAY_LOG_RUN_ID=hg26-example ./build/relay --workspace /path/to/disposable/project
+scripts/relay-qa-run ./build/relay --workspace /path/to/disposable/project
 ```
 
-The example assumes the disposable HOME/XDG environment has already been set up by the QA driver. Origin alone does not isolate storage.
+It creates private XDG data/config/cache directories, sets a bounded QA run ID, disables the user's keyring and memory import, and removes the profile on exit. Use `scripts/relay-qa-run --keep …` to retain the profile and its logs for an incident; the launcher prints its path when the command ends. Use a disposable workspace too: the launcher isolates Relay's profile, not files passed as command arguments. Existing QA drivers that already isolate their profiles can set `RELAY_LOG_ORIGIN=qa` and `RELAY_LOG_RUN_ID` themselves.
 
 Use the supported targeted test runner to isolate logs and label test origin:
 

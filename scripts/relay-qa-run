@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Run a disposable Relay worker or GUI probe without touching the user's profile or logs.
+set -euo pipefail
+
+keep=0
+if [[ ${1:-} == --keep ]]; then keep=1; shift; fi
+if [[ $# -eq 0 ]]; then
+    echo 'usage: scripts/relay-qa-run [--keep] command [args...]' >&2
+    exit 2
+fi
+
+umask 077
+qa_dir=$(mktemp -d -t relay-qa.XXXXXXXX)
+if (( keep )); then
+    trap 'printf "QA profile retained at %s\n" "$qa_dir" >&2' EXIT
+else
+    trap 'rm -rf -- "$qa_dir"' EXIT
+fi
+mkdir -p "$qa_dir/data" "$qa_dir/config" "$qa_dir/cache"
+export XDG_DATA_HOME="$qa_dir/data"
+export XDG_CONFIG_HOME="$qa_dir/config"
+export XDG_CACHE_HOME="$qa_dir/cache"
+export RELAY_LOG_ORIGIN=qa
+export RELAY_LOG_RUN_ID="qa-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+export RELAY_KEYRING=off
+export RELAY_LOCAL_MODELS="$qa_dir/local-models.json"
+export RELAY_MEMORY_IMPORT=off
+
+"$@"

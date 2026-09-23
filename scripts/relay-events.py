@@ -23,6 +23,27 @@ OUTCOMES = {'success', 'pending', 'refused', 'command_nonzero', 'timed_out',
             'transport_error', 'internal_error', 'unknown'}
 COMPLETED = OUTCOMES - {'pending', 'refused', 'unknown'}
 ORIGINS = {'interactive', 'test', 'qa', 'unknown'}
+# Protocol kinds are request names, but a malformed request can supply arbitrary text.
+# Only these code-defined names may enter an aggregate snapshot.
+PROTOCOL_KINDS = {
+    'configure', 'route', 'set_model', 'set_board', 'keybindings', 'presets',
+    'hosted_quota', 'store_key', 'remove_key', 'test_key', 'transcribe',
+    'import_warp', 'import_agent_tools', 'import_opencode', 'ask',
+    'queue_steer', 'queue_unsteer', 'cancel', 'resume_queue', 'queue_remove',
+    'queue_move', 'queue_clear', 'reset', 'agents_list', 'agent_subscribe',
+    'agent_message', 'todo_subagent', 'agent_stop', 'agent_set_model',
+    'set_agent_options', 'set_agent_role', 'remote_session_update',
+    'program_state', 'program_input_result', 'question_answer',
+    'terminal_command_result', 'agents_status', 'memory_import', 'shutdown',
+    'board_refresh', 'board_open', 'board_card_get', 'tool_output_get',
+}
+PROTOCOL_EXCEPTIONS = {
+    'AssertionError', 'AttributeError', 'ConnectionError', 'FileNotFoundError',
+    'ImportError', 'IndexError', 'KeyError', 'KeybindingError', 'KeystoreError',
+    'LookupError', 'NameError', 'NotImplementedError', 'OSError',
+    'PermissionError', 'ProviderError', 'RuntimeError', 'SyntaxError',
+    'TimeoutError', 'TypeError', 'ValueError',
+}
 SNAPSHOT_KIND = 'relay-diagnostic-summary-v1'
 SNAPSHOT_NAME = re.compile(r'relay-events-\d{8}T\d{12}Z\.json')
 
@@ -43,9 +64,14 @@ def safe_code(value):
     return value if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,80}', value) else 'unknown'
 
 
+def safe_exception(value):
+    # Only an exception class name may cross from a raw protocol record to a snapshot.
+    return value if value in PROTOCOL_EXCEPTIONS else 'unknown'
+
+
 def summarize(paths, since=None, origin=None):
     paths = list(paths)
-    events, turns, origins, reasons, classifications = (Counter() for _ in range(5))
+    events, turns, origins, reasons, classifications, protocol_errors = (Counter() for _ in range(6))
     tools = defaultdict(lambda: {'calls': 0, 'failed': 0, 'duration_samples': 0, 'total_ms': 0,
                                  'outcomes': Counter(), 'origins': Counter(), '_ms': []})
     sessions, turn_ids = set(), set()
@@ -83,6 +109,10 @@ def summarize(paths, since=None, origin=None):
                 last = max(last, when) if last else when
                 events[(logger, event, level)] += 1
                 origins[source] += 1
+                if logger == 'relay.worker' and event == 'protocol_error':
+                    kind = values.get('kind')
+                    protocol_errors[(kind if kind in PROTOCOL_KINDS else 'unknown',
+                                     safe_exception(values.get('error')), source)] += 1
                 if event == 'provider_http_retry':
                     retry_events += 1
                     try:
@@ -141,6 +171,8 @@ def summarize(paths, since=None, origin=None):
         'affected_sessions': len(sessions), 'affected_turns': len(turn_ids),
         'retry_events': retry_events, 'retry_wait_seconds': round(retry_seconds, 3),
         'turn_outcomes': dict(sorted(turns.items())),
+        'protocol_errors': [{'kind': key[0], 'exception': key[1], 'origin': key[2], 'count': n}
+                            for key, n in sorted(protocol_errors.items(), key=lambda item: (-item[1], item[0]))],
         'events': [{'logger': key[0], 'event': key[1], 'level': key[2], 'count': n}
                    for key, n in sorted(events.items(), key=lambda item: (-item[1], item[0]))],
     }
@@ -266,6 +298,9 @@ def main():
               f"{str(row['unexpected_per_100_completed']):>15} {str(row['p50_ms']):>7} {str(row['p95_ms']):>7}")
     for key in ('outcomes', 'origins', 'turn_outcomes', 'failure_reasons'):
         print(f'\n{key}: ' + json.dumps(report[key], sort_keys=True))
+    print('\nProtocol exceptions (separate from tool outcomes):')
+    for row in report['protocol_errors']:
+        print(f"{row['count']:5}  {row['origin']:11} {row['kind']:25} {row['exception']}")
     print(f"\nRetries: {report['retry_events']}; requested wait: {report['retry_wait_seconds']} s")
     print(f"Affected sessions/turns (classified failures): {report['affected_sessions']}/{report['affected_turns']}")
     print('\nCount  Level  Logger / event')
