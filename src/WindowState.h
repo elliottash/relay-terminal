@@ -9,7 +9,9 @@
 //
 //   node := {"split": "h"|"v", "children": [node, ...], "sizes": [int, ...]}
 //         | {"pane": {cwd, workspace, engine, engine_core, agent_role, preset, model, effort,
-//                     agent_mode, input_mode, session_id, scrollback}}
+//                     agent_mode, input_mode, session_id, scrollback, queue?}}
+// `queue` is an ordered array of pending pane-side prompts/commands. Restored rows are paused
+// until the person resumes them; old layouts without it have an empty queue.
 //
 // The `scrollback` id is the pane's own id for what outlives a restart: it names both this pane's
 // saved terminal text (scrollback/<id>.txt below) and its prompt-box history

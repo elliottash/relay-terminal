@@ -816,6 +816,7 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
             auto *w = windowOf(guard);
             if (!w) return;
             w->updateTitles();
+            w->m_manager->scheduleSave();
         };
         // `exit` (or the shell dying) closes the pane the way × does, so it can be reopened too.
         pane->onShellExited = [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, true); };

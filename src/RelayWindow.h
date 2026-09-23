@@ -5693,6 +5693,8 @@ private:
             // node, including "restore last closed": a reopened pane finds the text of the pane it
             // came from, and the ids in the saved layout are what keeps the store pruned.
             leaf.insert(QStringLiteral("scrollback"), pane->scrollbackId());
+            if (const QJsonArray queue = pane->queueForRestore(); !queue.isEmpty())
+                leaf.insert(QStringLiteral("queue"), queue);
             return {{"pane", leaf}};
         }
         if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();

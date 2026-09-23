@@ -1184,6 +1184,27 @@ public:
     QString guestSessionId() const { return m_guestSession; }
     QString sessionDir() const { return m_sessionDir; }
 
+    // Pending pane-side work belongs to the saved pane, not to the worker process. Keep the
+    // full submitted text (including @file tokens) and its destination/order across a restart.
+    QJsonArray queueForRestore() const {
+        QJsonArray saved;
+        for (int i = 0; i < m_entries.size(); ++i) {
+            const QueueEntry &entry = m_entries.at(i);
+            if (entry.written()) continue; // Relay-generated follow-ups need their live turn.
+            const QString text = i == m_selected && m_editor && !m_editor->toPlainText().trimmed().isEmpty()
+                                     ? m_editor->toPlainText() : entry.text;
+            saved.append(QJsonObject{{"text", text}, {"agent", entry.agent}, {"guest", entry.guest},
+                                     {"watch", entry.watch}, {"natural", entry.natural},
+                                     {"handoff", entry.handoff}, {"no_handoff", entry.noHandoff},
+                                     {"awaiting_skill_catalog", entry.awaitingSkillCatalog},
+                                     {"board_task", entry.boardTask}, {"remote_token", entry.remoteToken},
+                                     {"author", entry.author}, {"attachments", entry.attachments},
+                                     {"cards", entry.cards}, {"why", entry.why},
+                                     {"shell_text", entry.shellText}});
+        }
+        return saved;
+    }
+
     // ----- saved window layout ("reopen where I left off", src/WindowState.h) ------------------
     // Values a restored pane starts with, taken from the saved layout before its first `configure`.
     // Nothing is re-run: the shell starts in the old directory and the conversation is reattached.
@@ -1209,6 +1230,37 @@ public:
         m_modePick = relay::modelrows::modePicksFromJson(spec.value(QStringLiteral("mode_picks")));
         m_modePicksChecked = m_modePick.isEmpty();
         m_restoreSession = spec.value(QStringLiteral("session_id")).toString();
+        // A restored queue waits for the person to resume it. A shell command from yesterday
+        // must not execute merely because the new shell reached its first prompt.
+        for (const QJsonValue &value : spec.value(QStringLiteral("queue")).toArray()) {
+            if (m_entries.size() >= 32 || !value.isObject()) break;
+            const QJsonObject row = value.toObject();
+            const QString text = row.value(QStringLiteral("text")).toString();
+            if (text.trimmed().isEmpty() || text.size() > 131072) continue;
+            QueueEntry entry;
+            entry.id = ++m_entrySerial;
+            entry.text = text;
+            entry.agent = row.value(QStringLiteral("agent")).toBool();
+            entry.guest = row.value(QStringLiteral("guest")).toString();
+            entry.watch = row.value(QStringLiteral("watch")).toBool();
+            entry.natural = row.value(QStringLiteral("natural")).toBool();
+            entry.handoff = row.value(QStringLiteral("handoff")).toBool();
+            entry.noHandoff = row.value(QStringLiteral("no_handoff")).toBool();
+            entry.awaitingSkillCatalog = row.value(QStringLiteral("awaiting_skill_catalog")).toBool();
+            entry.boardTask = row.value(QStringLiteral("board_task")).toBool();
+            entry.remoteToken = row.value(QStringLiteral("remote_token")).toString();
+            entry.author = row.value(QStringLiteral("author")).toString();
+            entry.attachments = row.value(QStringLiteral("attachments")).toArray();
+            entry.cards = row.value(QStringLiteral("cards")).toArray();
+            entry.why = row.value(QStringLiteral("why")).toString();
+            entry.shellText = row.value(QStringLiteral("shell_text")).toString();
+            m_entries.append(entry);
+        }
+        if (!m_entries.isEmpty()) {
+            m_entriesPaused = true;
+            m_pauseReason = QStringLiteral("Restored after exit");
+            rebuildQueueStrip();
+        }
         // The terminal text this pane had when Relay was last quit (src/WindowState.h). The pane
         // keeps the saved id, so the same file is rewritten instead of one per restart, and the
         // lines are replayed once the restarted shell reports its first prompt.

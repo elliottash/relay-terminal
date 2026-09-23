@@ -1110,6 +1110,47 @@ void repeatedEnterKeepsTheFirstQueuedPrompt()
     CHECK_EQ(console.queuedPrompts(), 1);
 }
 
+void pendingQueueSurvivesPaneRestorePaused()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane original(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    original.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+    original.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
+    auto *editor = original.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (!editor) return;
+    for (const QString &text : {QStringLiteral("first queued prompt"), QStringLiteral("second queued prompt")}) {
+        original.draftInComposer(text);
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(editor, &enter);
+    }
+    const QJsonArray saved = original.queueForRestore();
+    CHECK_EQ(saved.size(), 2);
+
+    Pane restored(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    restored.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    restored.initRestore(QJsonObject{{"queue", saved}});
+    sent.clear();
+    restored.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+    CHECK_EQ(restored.queuedPrompts(), 2);
+    CHECK(restored.queuePaused());
+    CHECK_EQ(restored.queueForRestore(), saved);
+    QStringList queued;
+    for (const Pane::QueueRow &row : restored.queueRows())
+        if (row.id.startsWith(QStringLiteral("entry:"))) queued.append(row.preview);
+    CHECK_EQ(queued, (QStringList{QStringLiteral("first queued prompt"), QStringLiteral("second queued prompt")}));
+    CHECK(std::none_of(sent.cbegin(), sent.cend(), [](const QJsonObject &message) {
+        return message.value(QStringLiteral("type")).toString() == QStringLiteral("ask");
+    })); // restoring and configuring must not start a saved prompt
+    restored.resumeAgentQueue();
+    CHECK(std::any_of(sent.cbegin(), sent.cend(), [](const QJsonObject &message) {
+        return message.value(QStringLiteral("type")).toString() == QStringLiteral("ask")
+               && message.value(QStringLiteral("text")).toString() == QStringLiteral("first queued prompt");
+    }));
+}
+
 void queueRowArrowSendsOnlyThatPrompt()
 {
     StubContext context;
@@ -1541,6 +1582,7 @@ int main(int argc, char **argv)
     cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
+    cases::pendingQueueSurvivesPaneRestorePaused();
     cases::enteringPlanSelectsHigh();
     cases::clickingPlanLeavesModeAndPreservesDraft();
     cases::planWhileConfiguringSelectsHighBeforeMode();
