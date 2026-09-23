@@ -2936,6 +2936,10 @@ Everything here is inert unless the pane has a board. `board/board.yaml`, else
 `.switchboard/board.yaml`, `switchboard/board.yaml` or `issues/board.yaml`, is the marker; its
 presence is the switch, and 19.12 is the one path that ever creates one.
 
+**Folder update, 2026-09-23 (#GRT2):** new boards use `.board/board.yaml`, which is checked before
+the older names above. The `board/` examples in this section describe boards created before this
+change; setup, discovery and the explicit folder-move action now target `.board/`.
+
 ### 19.1 `configure` additions
 
 `configure` gains an optional `board {dir?, project?, state?, attach?, autonomy?, limits?}`.
