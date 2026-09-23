@@ -8,7 +8,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from relay_core import skills
+from relay_core import skill_manage, skills
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
 from relay_core.skills import SkillError, SkillIndex, parse_frontmatter
@@ -210,9 +210,10 @@ class RequestTests(SkillFixture):
         self.assertIsNone(skills.from_request({'enabled': False}, self.temp.name))
         index = skills.from_request({'dirs': [str(self.base)]}, self.temp.name)
         self.assertEqual(len(index.skills), 3)
-        write(Path(self.temp.name) / '.warp' / 'skills' / 'proj' / 'SKILL.md', '---\ndescription: project skill\n---\n')
+        write(Path(self.temp.name) / '.relay' / 'skills' / 'proj' / 'SKILL.md', '---\ndescription: project skill\n---\n')
         self.assertNotIn('proj', skills.from_request({'dirs': [str(self.base)]}, self.temp.name).skills)
         self.assertIn('proj', skills.from_request({'dirs': [str(self.base)], 'project': True}, self.temp.name).skills)
+        self.assertIn('proj', skills.from_request(None, self.temp.name).skills)
         for bad in ({'dirs': 'x'}, {'dirs': ['relative']}, {'enabled': 'yes'}, {'other': 1}, []):
             with self.assertRaises(ValueError):
                 skills.from_request(bad, self.temp.name)
@@ -234,6 +235,25 @@ class RequestTests(SkillFixture):
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_relay_project_skill_wins_and_external_sources_remain_available(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as temp:
+            home, ws = Path(temp) / 'home', Path(temp) / 'ws'
+            skill = '---\nname: shared\ndescription: {}\n---\nbody\n'
+            write(ws / '.relay/skills/shared/SKILL.md', skill.format('Relay project'))
+            write(home / '.config/relay/skills/shared/SKILL.md', skill.format('Relay global'))
+            write(home / '.warp/skills/shared/SKILL.md', skill.format('Warp'))
+            write(home / '.codex/skills/codex-only/SKILL.md', skill.replace('shared', 'codex-only').format('Codex'))
+            with mock.patch.object(Path, 'home', staticmethod(lambda: home)), \
+                    mock.patch.dict(os.environ, {'XDG_CONFIG_HOME': str(home / '.config')}):
+                index = skills.from_request(None, str(ws))
+                listed = skill_manage.list_skills(skills.default_directories(str(ws)), workspace=str(ws))
+            self.assertEqual(index.skills['shared'].description, 'Relay project')
+            self.assertIn('codex-only', index.skills)
+            copies = [item for item in listed if item['name'] == 'shared']
+            self.assertEqual([item['source'] for item in copies[:3]], ['project-relay', 'relay-refined', 'warp'])
+            self.assertEqual(copies[1]['shadowed_by'], copies[0]['path'])
+
     def test_default_search_covers_warp_tree_claude_dirs_and_excludes(self):
         from unittest import mock
         with tempfile.TemporaryDirectory() as temp:

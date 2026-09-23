@@ -2757,10 +2757,13 @@ preview of every action. Stop does not undo completed actions.
 ### Skills
 
 `backend/relay_core/skills.py`. At configure time the worker indexes
-`<dir>/<name>/SKILL.md` files with `name`/`description` frontmatter. Default directory:
-`~/.warp/skills`; `configure.skills` can set `enabled`, up to 8 absolute `dirs`, and
-`project: true` for `<workspace>/.warp/skills`. The GUI does not send `skills` today, so the
-default applies. A list of skill ids and descriptions (6 KiB cap) is appended to the system
+`<dir>/<name>/SKILL.md` files with `name`/`description` frontmatter. Relay-owned project
+skills live in `<workspace>/.relay/skills`, ahead of global Relay skills in
+`~/.config/relay/skills` (or `XDG_CONFIG_HOME/relay/skills`). Existing project and global
+`.agents/skills`, Claude, Codex and Warp trees are read as compatible sources after those.
+`configure.skills` can set `enabled`, up to 8 absolute `dirs`, and `project: true` to add
+`<workspace>/.relay/skills` to an explicit directory list. The GUI does not send `skills`
+today, so the default applies. A list of skill ids and descriptions (6 KiB cap) is appended to the system
 prompt as lower-priority guidance. `load_skill` returns up to 64 KiB of `SKILL.md` plus the
 folder's file list; `read_skill_file` reads a text file inside the folder. Symlinks, `..` and
 binary files are refused. Skipped folders are reported in `configured.skills_skipped`.

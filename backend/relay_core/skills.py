@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Index and read Warp-style skills: <dir>/<name>/SKILL.md with YAML frontmatter.
+"""Index and read skills: <dir>/<name>/SKILL.md with YAML frontmatter.
 
-Skills are reusable instructions the user keeps in ~/.warp/skills (and Claude Code's ~/.claude/skills),
-plus the few Relay ships itself in relay_core/skills_bundled (see bundled_dir).
+Relay-owned skills live in <workspace>/.relay/skills and ~/.config/relay/skills. Existing
+Warp, Claude and Codex skills are read as compatible external sources, alongside the skills
+Relay ships in relay_core/skills_bundled (see bundled_dir).
 The agent sees a compact list of names and one trigger line each — the frontmatter's optional
 `short:`, or the opening of its `description:` — and loads a skill's full text with a tool before
-following it. Only the default locations (see default_directories; this includes the
-workspace's .claude/skills at the owner's request) or configured directories are read, and every
+following it. Only the default locations (see default_directories) or configured directories are read, and every
 path stays inside its skill folder, because agent tools run without a per-action approval.
 """
 from __future__ import annotations
@@ -419,20 +419,28 @@ def import_directories() -> list[Path]:
 def default_directories(workspace=None) -> list[Path]:
     """Default search order; for a duplicate name the earlier directory wins.
 
-    0. ~/.config/relay/skills (refined copies made by refine_skills win over their originals)
-    1. ~/.warp/skills (the user's Warp skills)  2. ~/.claude/skills  3. <workspace>/.claude/skills
-    4. every other folder under ~/.warp or ~/.claude (depth <= 6) holding <name>/SKILL.md: Warp's bundled
+    0. <workspace>/.relay/skills, then ~/.config/relay/skills (Relay-owned copies)
+    1. Project and global skills from other tools: .agents, Claude, Codex and Warp.
+    2. Other folders under ~/.warp or ~/.claude (depth <= 6) holding <name>/SKILL.md: Warp's bundled
        skills in ~/.warp/remote-server/bundled_resources/bundled/skills, and Claude Code's synced ones,
        which sit a level deeper than the folder above, in ~/.claude/skills/synced/<id>/<name>/SKILL.md
        (owner report, 2026-09-18: every skill under ~/.claude/skills was being skipped as "no SKILL.md",
        because the folder there holds more folders of skills rather than skills).
-    5. imported skills, ~/.local/share/relay/skill-imports/<repo>@<commit> (newest import first).
-    6. the skills Relay ships with (bundled_dir): last, so anything of the user's own wins.
+    3. Imported skills, ~/.local/share/relay/skill-imports/<repo>@<commit> (newest first).
+    4. The skills Relay ships with (bundled_dir): last, so anything of the user's own wins.
     """
     home = Path.home()
-    directories = [refined_dir(), home / ".warp" / "skills", home / ".claude" / "skills"]
+    directories = []
     if workspace is not None:
-        directories.append(Path(workspace) / ".claude" / "skills")
+        directories.append(Path(workspace) / ".relay" / "skills")
+    directories.append(refined_dir())
+    if workspace is not None:
+        directories += [Path(workspace) / ".agents" / "skills",
+                        Path(workspace) / ".claude" / "skills",
+                        Path(workspace) / ".codex" / "skills",
+                        Path(workspace) / ".warp" / "skills"]
+    directories += [home / ".agents" / "skills", home / ".claude" / "skills",
+                    home / ".codex" / "skills", home / ".warp" / "skills"]
     first = {d.resolve() for d in directories if d.is_dir()}
     for root in (home / ".warp", home / ".claude"):
         directories += [b for b in discover_bases(root) if b not in first and b not in directories]
@@ -462,8 +470,8 @@ def from_request(settings, workspace) -> SkillIndex | None:
         if any(not d.is_absolute() for d in directories):
             raise ValueError("skills.dirs must be absolute paths.")
         defaults = False
-    if settings.get("project"):
-        directories.append(Path(workspace) / ".warp" / "skills")
+    if settings.get("project") and not defaults:
+        directories.append(Path(workspace) / ".relay" / "skills")
     exclude = settings.get("exclude", DEFAULT_EXCLUDE)
     if not isinstance(exclude, (list, tuple)) or len(exclude) > 200 or not all(isinstance(x, str) for x in exclude):
         raise ValueError("skills.exclude must be a list of skill names.")

@@ -2113,9 +2113,8 @@ POINTER_START = "<!-- relay:switchboard-policy start -->"
 POINTER_END = "<!-- relay:switchboard-policy end -->"
 #: Where the pointer goes: the two instruction files the guest CLIs read.  `AGENTS.md` is created
 #: when it is missing (`_new_agents_text`); `CLAUDE.md` is only ever appended to.  **WARP.md is
-#: never touched.**  It is first in `instructions.PROJECT_ORDER`, so it is the file Relay's own
-#: agent loads -- and that agent already has the policy in its system prompt and the tools to go
-#: with it, so a block there would be the one edit that changes what Relay itself reads.
+#: never touched.**  Relay's project instruction file can import either target; its own agent
+#: already has the Board policy in its system prompt and the tools to go with it.
 POINTER_TARGETS = ("CLAUDE.md", "AGENTS.md")
 
 
@@ -2473,7 +2472,7 @@ def _with_pointer(text: str, block: str) -> str | None:
 def _new_agents_text(board: "Board", block: str) -> str:
     """A project's first `AGENTS.md`: the pointer, over an import of what it must not shadow.
 
-    `instructions.py` loads the **first** hit per directory in `PROJECT_ORDER` (WARP.md,
+    `instructions.py` loads the **first** hit per directory in `PROJECT_ORDER` (.relay/relay.md,
     AGENTS.override.md, AGENTS.md, CLAUDE.md, ...), so an `AGENTS.md` created beside a project's
     `CLAUDE.md` would stop Relay's own agent reading that CLAUDE.md.  A CLAUDE-style `@path` import
     on the first line is the fix: Relay resolves it (`instructions._imports`), and so do Claude Code

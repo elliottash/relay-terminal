@@ -54,9 +54,15 @@ def source_label(directory: Path, workspace=None) -> str:
     except OSError:
         resolved = directory
     known = [(refined_dir(), "relay-refined"), (bundled_dir(), "relay-bundled"),
-             (home / ".warp" / "skills", "warp"), (home / ".claude" / "skills", "claude")]
+             (home / ".agents" / "skills", "agents"),
+             (home / ".claude" / "skills", "claude"),
+             (home / ".codex" / "skills", "codex"),
+             (home / ".warp" / "skills", "warp")]
     if workspace:
-        known += [(Path(workspace) / ".claude" / "skills", "project-claude"),
+        known += [(Path(workspace) / ".relay" / "skills", "project-relay"),
+                  (Path(workspace) / ".agents" / "skills", "project-agents"),
+                  (Path(workspace) / ".claude" / "skills", "project-claude"),
+                  (Path(workspace) / ".codex" / "skills", "project-codex"),
                   (Path(workspace) / ".warp" / "skills", "project-warp")]
     for path, label in known:
         try:
@@ -79,8 +85,6 @@ def index_settings(index: SkillIndex | None, workspace=None) -> tuple[list[Path]
     from .skills import DEFAULT_EXCLUDE
     if index is not None and index.directories:
         directories = default_directories(index.workspace) if index.defaults else list(index.directories)
-        if index.defaults and index.project and index.workspace:
-            directories.append(Path(index.workspace) / ".warp" / "skills")
         return directories, index.exclude, index.workspace
     return default_directories(workspace), DEFAULT_EXCLUDE, workspace
 
@@ -507,4 +511,3 @@ def current_import(url: str) -> str | None:
             if best is None or stamp > best[0]:
                 best = (stamp, data["commit"])
     return best[1] if best else None
-

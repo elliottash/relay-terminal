@@ -366,9 +366,10 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   tool names and durations, event types, errors and retries. **No prompts, answers, tool output,
   file contents or keys.** Actions › Diagnostics › Open log folder, and Log detail to change the
   level — its opt-in "Verbose" level does add your prompt text to the file.
-- **Instruction files.** On first launch Relay lists instruction files from other tools
-  (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them into a global
-  `~/.config/relay/relay.md`. Change it later in Options › Agent › Instructions….
+- **Instruction files.** A project can put Relay's instructions in `.relay/relay.md` and use
+  `@AGENTS.md` or similar imports there to reuse existing instructions. On first launch Relay
+  lists other tools' files (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them
+  into global `~/.config/relay/relay.md`. Change the selection in Options › Agent › Instructions….
 - **AI suggestions (off by default).** Options › Privacy: a suggested next command after a
   command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).
 - **Reopen where you left off.** Quit Relay and start it again: your windows come back with their
@@ -431,8 +432,9 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   ("Next time: Ctrl+E · new pane"), at most 3 times per hint and not more than once
   every 20 s. After a finished agent turn, an idle empty prompt box shows a tip. Options ›
   General › Shortcut hints turns them off; Actions › Reset shortcut hints shows them again.
-- **Skills.** The agent sees your Warp-style skills (`~/.warp/skills`, `~/.claude/skills`,
-  refined copies and imports) and loads one before following it. `/skills` (or Actions ›
+- **Skills.** Relay reads project skills from `.relay/skills` first and global Relay skills from
+  `~/.config/relay/skills`; existing Warp, Claude and Codex skills remain available as sources.
+  It loads a skill before following it. `/skills` (or Actions ›
   Skills…) lists them: uncheck to exclude, **Refine selected** has the agent write an improved
   copy to `~/.config/relay/skills` and opens it for editing, **Import from repository…** clones a
   git URL, shows the skills and their files for review, and imports the checked ones pinned to

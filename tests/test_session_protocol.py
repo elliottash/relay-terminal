@@ -214,17 +214,32 @@ class InstructionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             instructions.load({'files': ['relative.md']}, self.ws)
 
-    def test_warp_files_preferred_and_cap_configurable(self):
+    def test_relay_project_instructions_route_to_existing_files(self):
+        relay = self.write(self.ws / '.relay/relay.md', 'Relay project rules. See @../AGENTS.md')
+        agents = self.write(self.ws / 'AGENTS.md', 'Existing agent rules')
+        self.write(self.ws / 'WARP.md', 'Warp project rules')
+        items = {i['path']: i for i in instructions.scan(self.ws)}
+        self.assertEqual(items[str(relay)]['tool'], 'Relay')
+        loaded = instructions.load({'project_auto': True}, self.ws)
+        self.assertEqual(loaded.loaded, [str(relay), str(agents.resolve())])
+        self.assertIn('Existing agent rules', loaded.section)
+        self.assertNotIn('Warp project rules', loaded.section)
+
+    def test_agents_preferred_to_warp_and_cap_configurable(self):
         self.write(self.ws / 'AGENTS.md', 'agents file')
         self.write(self.ws / 'WARP.md', 'warp file ' + 'w' * 5000)
         warp_global = self.write(self.home / '.warp/WARP.md', 'global warp rules')
         items = {i['path']: i for i in instructions.scan(self.ws)}
         self.assertEqual((items[str(warp_global)]['tool'], items[str(warp_global)]['scope']), ('Warp', 'global'))
         loaded = instructions.load({'files': [str(warp_global)], 'project_auto': True, 'max_bytes': 2048}, self.ws)
-        self.assertEqual(loaded.loaded, [str(warp_global), str(self.ws / 'WARP.md')])
-        self.assertEqual(loaded.truncated, [str(self.ws / 'WARP.md')])
+        self.assertEqual(loaded.loaded, [str(warp_global), str(self.ws / 'AGENTS.md')])
+        self.assertEqual(loaded.truncated, [])
         self.assertLessEqual(len(loaded.section.encode()), 2048)
         self.assertEqual(loaded.cap, 2048)
+        (self.ws / 'AGENTS.md').unlink()
+        fallback = instructions.load({'files': [], 'project_auto': True, 'max_bytes': 2048}, self.ws)
+        self.assertEqual(fallback.loaded, [str(self.ws / 'WARP.md')])
+        self.assertEqual(fallback.truncated, [str(self.ws / 'WARP.md')])
         with self.assertRaises(ValueError):
             instructions.load({'max_bytes': 10}, self.ws)
 
