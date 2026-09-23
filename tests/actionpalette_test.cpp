@@ -1,0 +1,388 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The command palette (card #MAGP): a modal over the window with one search box, a row of group
+// buttons that each drop a menu, and a result list that shows Recent and For this pane before
+// anything is typed.
+//
+// What is asserted is what the card's "Done means" asks of the widget itself: it opens, closes and
+// opens again every time (#XAME was a menu that would not reopen); typing finds an item by the
+// start of its label and by the `/slash` spelling in its aliases; the empty list is Recent then
+// For this pane; Enter runs the row, reports its key and closes, Ctrl+Enter runs it and stays;
+// each group button's menu holds exactly its section's items with their shortcuts; the keyboard
+// walks from the search box into the button row and back; Esc, the opening chord and a click
+// elsewhere close it. The window's catalog, recent store and contextual rows are the caller's,
+// and are faked here.
+#include "ActionPalette.h"
+
+#include <QAbstractButton>
+#include <QApplication>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMenu>
+#include <QTest>
+#include <QScrollBar>
+#include <QVBoxLayout>
+
+using namespace relay;
+
+namespace {
+
+ActionItem item(const QString &key, const QString &section, const QString &label, const QString &shortcut = {},
+                const QString &aliases = {})
+{
+    ActionItem out;
+    out.key = key;
+    out.section = section;
+    out.label = label;
+    out.shortcut = shortcut;
+    out.aliases = aliases;
+    return out;
+}
+
+// The labels in the list, top to bottom, with a header written as "# Header".
+QStringList rowsOf(const QListWidget *list)
+{
+    QStringList out;
+    for (int i = 0; i < list->count(); ++i) {
+        const QListWidgetItem *row = list->item(i);
+        out << (row->flags() == Qt::NoItemFlags ? QStringLiteral("# ") : QString()) + row->text();
+    }
+    return out;
+}
+
+// A menu entry's label without the shortcut after the tab, and a submenu's by its title.
+QString labelOf(const QAction *action)
+{
+    return action->text().section(QLatin1Char('\t'), 0, 0).replace(QStringLiteral("&&"), QStringLiteral("&"));
+}
+
+} // namespace
+
+class ActionPaletteTests : public QObject {
+    Q_OBJECT
+
+    QWidget *m_window = nullptr;
+    QLineEdit *m_elsewhere = nullptr;   // something else in the window, to click on and to hold focus
+    ActionPalette *m_palette = nullptr;
+    QStringList m_ran, m_chosen;
+
+    QList<ActionItem> catalog()
+    {
+        QList<ActionItem> out;
+        auto runs = [this](ActionItem it) {
+            const QString key = it.key;
+            it.run = [this, key] { m_ran << key; };
+            return it;
+        };
+        out << runs(item(QStringLiteral("pane.restart"), QStringLiteral("Panes & tabs"), QStringLiteral("Restart shell"),
+                         QStringLiteral("Ctrl+Shift+R")));
+        out << runs(item(QStringLiteral("pane.split"), QStringLiteral("Panes & tabs"), QStringLiteral("Split right"),
+                         QStringLiteral("Ctrl+Shift+D")));
+        out << runs(item(QStringLiteral("board.open"), QStringLiteral("Board"), QStringLiteral("Board"),
+                         QStringLiteral("Ctrl+Shift+B"), QStringLiteral("/board cards")));
+        out << runs(item(QStringLiteral("files.open"), QStringLiteral("Files"), QStringLiteral("Open file…"),
+                         QStringLiteral("Ctrl+O")));
+        out << runs(item(QStringLiteral("agent.stop"), QStringLiteral("Agent"), QStringLiteral("Stop the agent"),
+                         QStringLiteral("Esc")));
+        ActionItem models = item(QStringLiteral("agent.model"), QStringLiteral("Agent"), QStringLiteral("Model"));
+        models.children = [runs] {
+            return QList<ActionItem>{runs(item(QStringLiteral("agent.model.glm"), QStringLiteral("Agent"), QStringLiteral("glm-5.3"))),
+                                     runs(item(QStringLiteral("agent.model.opus"), QStringLiteral("Agent"), QStringLiteral("opus")))};
+        };
+        out << models;
+        return out;
+    }
+
+    QList<ActionItem> forThisPane()
+    {
+        QList<ActionItem> all = catalog();
+        return {all.at(4), all.at(0)};   // Stop the agent, Restart shell
+    }
+
+private slots:
+    void init()
+    {
+        m_ran.clear();
+        m_chosen.clear();
+        m_window = new QWidget;
+        m_window->resize(1000, 700);
+        auto *layout = new QVBoxLayout(m_window);
+        m_elsewhere = new QLineEdit(m_window);
+        layout->addWidget(m_elsewhere);
+        layout->addStretch(1);
+        m_palette = new ActionPalette(
+            m_window, [this] { return catalog(); }, [this] { return forThisPane(); },
+            [] { return QStringList{QStringLiteral("files.open"), QStringLiteral("board.open"), QStringLiteral("gone.away"),
+                                    QStringLiteral("agent.model.opus")}; },
+            [this](const QString &key) { m_chosen << key; });
+        m_window->show();
+        m_window->activateWindow();
+        QVERIFY(QTest::qWaitForWindowActive(m_window));
+        m_elsewhere->setFocus();
+    }
+
+    void cleanup()
+    {
+        delete m_window;
+        m_window = nullptr;
+        m_palette = nullptr;
+    }
+
+    // #XAME: a surface that would not open a second time. Three rounds, each closed a different way.
+    void opensClosesAndReopens()
+    {
+        for (int round = 0; round < 3; ++round) {
+            m_palette->open();
+            QVERIFY(m_palette->isOpen());
+            QVERIFY(m_palette->isVisible());
+            QTRY_VERIFY(m_palette->searchBox()->hasFocus());
+            QVERIFY(m_palette->width() <= 640);
+            QVERIFY(m_palette->height() <= m_window->height() * 6 / 10);
+            QCOMPARE(m_palette->x(), (m_window->width() - m_palette->width()) / 2);
+            QTest::keyClicks(m_palette->searchBox(), QStringLiteral("zz"));
+            if (round == 0) QTest::keyClick(m_palette->searchBox(), Qt::Key_Escape);
+            else if (round == 1) m_palette->toggle();
+            else m_palette->close();
+            QVERIFY(!m_palette->isOpen());
+            QVERIFY(!m_palette->isVisible());
+            QTRY_VERIFY(m_elsewhere->hasFocus());   // focus goes back where it was
+        }
+        // Opened again, it starts clean: no query left over from the last time.
+        m_palette->toggle();
+        QVERIFY(m_palette->isOpen());
+        QVERIFY(m_palette->searchBox()->text().isEmpty());
+    }
+
+    void clickElsewhereCloses()
+    {
+        m_palette->open();
+        // Opened scrolled to the top, so the first header shows; a click on it is inside and changes nothing.
+        QCOMPARE(m_palette->list()->verticalScrollBar()->value(), 0);
+        QCOMPARE(m_palette->list()->itemAt(2, 2)->text(), QStringLiteral("Recent"));
+        QTest::mouseClick(m_palette->list()->viewport(), Qt::LeftButton, {}, QPoint(2, 2));
+        QVERIFY(m_palette->isOpen());
+        QVERIFY(m_ran.isEmpty());
+        QTest::mouseClick(m_elsewhere, Qt::LeftButton);
+        QVERIFY(!m_palette->isOpen());
+        // A click on a row is Enter on it.
+        m_palette->open();
+        QVERIFY(m_palette->isOpen());
+        QListWidget *list = m_palette->list();
+        QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, list->visualItemRect(list->item(2)).center());
+        QCOMPARE(m_ran, QStringList{QStringLiteral("board.open")});
+        QCOMPARE(m_chosen, QStringList{QStringLiteral("board.open")});
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    void openingChordCloses()
+    {
+        m_palette->setToggleKeys({QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P)});
+        m_palette->open();
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_P, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    void emptyQueryShowsRecentThenForThisPane()
+    {
+        m_palette->open();
+        const QStringList rows = rowsOf(m_palette->list());
+        // A recent key the catalog no longer has is skipped; one inside a submenu is found there.
+        const QStringList head{QStringLiteral("# Recent"), QStringLiteral("Open file…"), QStringLiteral("Board"),
+                               QStringLiteral("Model › opus"), QStringLiteral("# For this pane"),
+                               QStringLiteral("Stop the agent"), QStringLiteral("Restart shell")};
+        QCOMPARE(rows.mid(0, head.size()), head);
+        // Then every group in catalog order, so the empty list reaches everything.
+        QVERIFY(rows.indexOf(QStringLiteral("# Panes & tabs")) > rows.indexOf(QStringLiteral("# For this pane")));
+        QVERIFY(rows.indexOf(QStringLiteral("# Board")) > rows.indexOf(QStringLiteral("# Panes & tabs")));
+        QVERIFY(rows.contains(QStringLiteral("Model  ›")));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("files.open"));   // the highlight skips the header
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("board.open"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("agent.stop"));   // over the "For this pane" header
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);   // one past the top wraps to the bottom
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("agent.model"));
+    }
+
+    void typingFindsByLabelStart()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("rest"));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("pane.restart"));
+        QCOMPARE(m_palette->list()->currentItem()->text(), QStringLiteral("Restart shell"));
+    }
+
+    void typingFindsBySlashAlias()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("/board"));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("board.open"));
+    }
+
+    void typingReachesIntoSubmenus()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("opus"));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("agent.model.opus"));
+        QCOMPARE(m_palette->list()->currentItem()->text(), QStringLiteral("Model › opus"));
+    }
+
+    void nothingMatchesSaysSo()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("qqqq"));
+        QCOMPARE(rowsOf(m_palette->list()), QStringList{QStringLiteral("# Nothing matches “qqqq”.")});
+        QVERIFY(m_palette->currentKey().isEmpty());
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);   // runs nothing, stays open
+        QVERIFY(m_ran.isEmpty());
+        QVERIFY(m_palette->isOpen());
+    }
+
+    void enterRunsReportsAndCloses()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("rest"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QCOMPARE(m_ran, QStringList{QStringLiteral("pane.restart")});
+        QCOMPARE(m_chosen, QStringList{QStringLiteral("pane.restart")});
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    void ctrlEnterRunsAndStaysOpen()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("split"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(m_ran, QStringList{QStringLiteral("pane.split")});
+        QCOMPARE(m_chosen, QStringList{QStringLiteral("pane.split")});
+        QVERIFY(m_palette->isOpen());
+        QCOMPARE(m_palette->searchBox()->text(), QStringLiteral("split"));   // the query stays too
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Enter, Qt::ControlModifier);   // the keypad's Enter too
+        QCOMPARE(m_ran.size(), 2);
+    }
+
+    void aSubmenuListsItsChildren()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("model"));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("agent.model"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QVERIFY(m_palette->isOpen());
+        QVERIFY(m_chosen.isEmpty());   // opening a submenu is not a choice
+        QCOMPARE(rowsOf(m_palette->list()), (QStringList{QStringLiteral("# Model"), QStringLiteral("glm-5.3"), QStringLiteral("opus")}));
+        QVERIFY(m_palette->searchBox()->text().isEmpty());
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Escape);   // Esc leaves the submenu first
+        QVERIFY(m_palette->isOpen());
+        QCOMPARE(rowsOf(m_palette->list()).value(0), QStringLiteral("# Recent"));
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("model"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QCOMPARE(m_chosen, QStringList{QStringLiteral("agent.model.opus")});
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    void eachGroupMenuHoldsItsSection()
+    {
+        m_palette->open();
+        const QList<QAbstractButton *> buttons = m_palette->groupButtons();
+        QCOMPARE(buttons.size(), 4);
+        const QStringList sections{QStringLiteral("Panes & tabs"), QStringLiteral("Board"), QStringLiteral("Files"), QStringLiteral("Agent")};
+        const QList<QStringList> expected{{QStringLiteral("Restart shell"), QStringLiteral("Split right")},
+                                          {QStringLiteral("Board")},
+                                          {QStringLiteral("Open file…")},
+                                          {QStringLiteral("Stop the agent"), QStringLiteral("Model")}};
+        for (int i = 0; i < buttons.size(); ++i) {
+            // `&` is drawn, not read as a mnemonic: "Panes & tabs", never "Panes _tabs".
+            QCOMPARE(buttons.at(i)->text().replace(QStringLiteral("&&"), QStringLiteral("&")), sections.at(i) + QStringLiteral(" ▾"));
+            QMenu *menu = m_palette->groupMenu(i);
+            QVERIFY(menu != nullptr);
+            QStringList labels;
+            for (const QAction *action : menu->actions()) labels << labelOf(action);
+            QCOMPARE(labels, expected.at(i));
+        }
+        // The shortcut rides on the right of the entry, and a submenu is a real submenu.
+        QMenu *panes = m_palette->groupMenu(0);
+        QCOMPARE(panes->actions().at(0)->text(), QStringLiteral("Restart shell\tCtrl+Shift+R"));
+        QMenu *agent = m_palette->groupMenu(3);
+        QMenu *models = agent->actions().at(1)->menu();
+        QVERIFY(models != nullptr);
+        emit models->aboutToShow();
+        QCOMPARE(models->actions().size(), 2);
+        // Choosing an entry runs it, reports it and closes the palette.
+        m_palette->groupMenu(1)->actions().at(0)->trigger();
+        QCOMPARE(m_ran, QStringList{QStringLiteral("board.open")});
+        QCOMPARE(m_chosen, QStringList{QStringLiteral("board.open")});
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    void tabWalksTheButtonRow()
+    {
+        m_palette->open();
+        QTRY_VERIFY(m_palette->searchBox()->hasFocus());
+        const QList<QAbstractButton *> buttons = m_palette->groupButtons();
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);
+        QTRY_VERIFY(buttons.at(0)->hasFocus());
+        QTest::keyClick(buttons.at(0), Qt::Key_Right);
+        QTRY_VERIFY(buttons.at(1)->hasFocus());
+        QTest::keyClick(buttons.at(1), Qt::Key_Left);
+        QTest::keyClick(buttons.at(0), Qt::Key_Left);   // wraps
+        QTRY_VERIFY(buttons.at(3)->hasFocus());
+        QTest::keyClick(buttons.at(3), Qt::Key_Escape);   // back to the search box, still open
+        QVERIFY(m_palette->isOpen());
+        QTRY_VERIFY(m_palette->searchBox()->hasFocus());
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);   // back to the button it left
+        QTRY_VERIFY(buttons.at(3)->hasFocus());
+        QTest::keyClicks(buttons.at(3), QStringLiteral("bo"));   // typing goes to the search box
+        QCOMPARE(m_palette->searchBox()->text(), QStringLiteral("bo"));
+        QTRY_VERIFY(m_palette->searchBox()->hasFocus());
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Escape);
+        QVERIFY(!m_palette->isOpen());
+    }
+
+    void downOnAButtonDropsItsMenu()
+    {
+        m_palette->open();
+        const QList<QAbstractButton *> buttons = m_palette->groupButtons();
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);
+        QTRY_VERIFY(buttons.at(0)->hasFocus());
+        QTest::keyClick(buttons.at(0), Qt::Key_Down);
+        QMenu *menu = m_palette->findChild<QMenu *>(QStringLiteral("actionPaletteMenu"));
+        QVERIFY(menu != nullptr);
+        QTRY_VERIFY(menu->isVisible());
+        QCOMPARE(labelOf(menu->activeAction()), QStringLiteral("Restart shell"));
+        menu->hide();
+    }
+
+    // What ran may change what the rows say, so a Ctrl+Enter reads the catalog again.
+    void stayOpenRereadsTheCatalog()
+    {
+        int reads = 0;
+        auto *palette = new ActionPalette(
+            m_window, [&reads] {
+                ++reads;
+                ActionItem it = item(QStringLiteral("x"), QStringLiteral("S"), QStringLiteral("Toggle x"));
+                it.checked = reads % 2 == 0;
+                it.run = [] {};
+                return QList<ActionItem>{it};
+            },
+            {}, {}, {});
+        palette->open();
+        QCOMPARE(palette->list()->item(1)->text(), QStringLiteral("Toggle x"));
+        QTest::keyClick(palette->searchBox(), Qt::Key_Return, Qt::ControlModifier);
+        QCOMPARE(palette->list()->item(1)->text(), QStringLiteral("✓  Toggle x"));
+        delete palette;
+    }
+};
+
+int main(int argc, char **argv)
+{
+    QApplication app(argc, argv);
+    ActionPaletteTests tests;
+    return QTest::qExec(&tests, argc, argv);
+}
+
+#include "actionpalette_test.moc"

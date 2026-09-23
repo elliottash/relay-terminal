@@ -176,6 +176,13 @@ target_include_directories(relay-settings PUBLIC src)
 # relay-settingscache: SettingsWatch::notify() is what drops the hot-path cache (#057J).
 target_link_libraries(relay-settings PUBLIC relay-agentcontext relay-settingscache ${RELAY_QT}::Widgets)
 target_compile_options(relay-settings PRIVATE ${RELAY_WARNINGS})
+# The command palette (card #MAGP): a modal over the window with one search box, a row of group
+# buttons that drop a menu each, and Recent / For this pane rows. It takes relay::ActionItem from
+# relay-settings and knows nothing of the window, so tests/actionpalette_test.cpp drives it alone.
+add_library(relay-actionpalette STATIC src/ActionPalette.cpp src/ActionPalette.h)
+target_include_directories(relay-actionpalette PUBLIC src)
+target_link_libraries(relay-actionpalette PUBLIC relay-settings ${RELAY_QT}::Widgets)
+target_compile_options(relay-actionpalette PRIVATE ${RELAY_WARNINGS})
 
 # The agent drives the app (card #FEJQ, protocol §30): the catalog the window sends its workers,
 # the executor for one `app_command`, and the change log that makes a write visible and undoable.
@@ -594,6 +601,7 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-agentcontext)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
+    target_link_libraries(relay PRIVATE relay-actionpalette)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -700,6 +708,12 @@ if(BUILD_TESTING)
     target_link_libraries(relay-filterpopup-tests PRIVATE relay-filterpopup relay-highlight ${RELAY_QT}::Test)
     add_test(NAME filterpopup COMMAND relay-filterpopup-tests)
     set_tests_properties(filterpopup PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The command palette (#MAGP): open, close and reopen; search by label, alias and `/slash`;
+    # Recent then For this pane; Enter and Ctrl+Enter; one menu per group button.
+    add_executable(relay-actionpalette-tests tests/actionpalette_test.cpp)
+    target_link_libraries(relay-actionpalette-tests PRIVATE relay-actionpalette ${RELAY_QT}::Test)
+    add_test(NAME actionpalette COMMAND relay-actionpalette-tests)
+    set_tests_properties(actionpalette PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The one list both model boxes draw (#PK5Q): the rows, their order and what a pick means.
     add_executable(relay-modelrows-tests tests/modelrows_test.cpp)
     target_link_libraries(relay-modelrows-tests PRIVATE relay-modelrows ${RELAY_QT}::Test)
@@ -891,7 +905,7 @@ if(BUILD_TESTING)
             relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands
             relay-agentcontext
             relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker
-            relay-modelspane relay-filterpopup
+            relay-modelspane relay-filterpopup relay-actionpalette
             relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor
             relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations
             relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate
