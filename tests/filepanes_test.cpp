@@ -454,6 +454,36 @@ private slots:
         QVERIFY(!preview.isDirty());
     }
 
+    // Alt+Z (files.toggleWrap) moves the same switch the button does; a rendered Markdown has no
+    // wrap, and the key says so instead of doing nothing silently.
+    void toggleWrapMatchesTheButtonAndRefusesARenderedMarkdown() {
+        QTemporaryDir temp;
+        const QString path = temp.filePath(QStringLiteral("wrap-altz.md"));
+        writeFile(path, "# Title\nplain source line\n");
+        FilePreview preview;
+        preview.resize(600, 300);
+        preview.show();
+        QVERIFY(preview.open(path));
+        auto *wrap = preview.findChild<QToolButton *>(QStringLiteral("filePreviewWrap"));
+        auto *edit = preview.findChild<QPlainTextEdit *>(QStringLiteral("filePreviewText"));
+        auto *mode = preview.findChild<QToolButton *>(QStringLiteral("filePreviewMode"));
+        QVERIFY(wrap && edit && mode);
+        preview.startEditing();
+        QVERIFY(wrap->isVisible());
+        QVERIFY(preview.toggleWrap());
+        QVERIFY(wrap->isChecked());
+        QCOMPARE(edit->lineWrapMode(), QPlainTextEdit::WidgetWidth);
+        QVERIFY(preview.toggleWrap());
+        QVERIFY(!wrap->isChecked());
+        QCOMPARE(edit->lineWrapMode(), QPlainTextEdit::NoWrap);
+        // Back to the rendered view, the key is a no-op that reports it did nothing.
+        QTest::mouseClick(mode, Qt::LeftButton);
+        QVERIFY(!preview.showingSource());
+        QVERIFY(!preview.toggleWrap());
+        QVERIFY(!wrap->isChecked());
+        QCOMPARE(edit->lineWrapMode(), QPlainTextEdit::NoWrap);
+    }
+
     // Card #SEJ2: a Markdown file is edited as source, so startEditing() leaves the render.
     void markdownEditingStartsInTheSourceView() {
         QTemporaryDir temp;
