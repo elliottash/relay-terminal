@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mefm7
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [c1e6ea7154accc193a00c7f915b44cf08522245e], evidence: [docs/qa_evidence/2026-09-22-EFM7/results.txt, docs/qa_evidence/2026-09-22-EFM7/model-matrix.txt], related: [], github: null}
+links: {plans: [], commits: [c1e6ea7154accc193a00c7f915b44cf08522245e, f4bde4dd39b05bcf008a7693637937c72e28d2f9], evidence: [docs/qa_evidence/2026-09-22-EFM7/results.txt, docs/qa_evidence/2026-09-22-EFM7/model-matrix.txt], related: [], github: null}
 ---
 # New pane changes its displayed effort on first submission
 
