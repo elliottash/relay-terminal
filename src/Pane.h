@@ -11064,6 +11064,14 @@ private:
     }
 
     bool handleMemorySuggestionEvent(const QString &type, const QJsonObject &event) {
+        // A guest's `suggest` through the Relay bridge, told directly: its own tool_result carries
+        // the guest's tool name and a trimmed result, so the line is drawn from this instead.
+        if (type == QStringLiteral("memory_suggested")) {
+            printMemorySuggestion(relay::globals::suggestionFromToolResult(
+                {{"tool", QStringLiteral("app_user_memory")}, {"result", event.value(QStringLiteral("result"))}}));
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            return true;
+        }
         if (type == QStringLiteral("memory_import")) {
             // Protocol 34: this worker's startup import left facts from Claude Code or Codex
             // waiting. One entry in the bell, whose button opens the review list.

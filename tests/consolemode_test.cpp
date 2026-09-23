@@ -1417,6 +1417,14 @@ void aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript()
     console.openOutputTarget(target(QStringLiteral("edit"), QStringLiteral("S2")), 0, true);
     CHECK(sent.isEmpty());
     CHECK_EQ(edited.size(), 1);
+    // A guest's suggestion arrives as `memory_suggested` from the Relay bridge, and draws the same line.
+    console.deliverWorkerEvent({{"event", "memory_suggested"}, {"result", QJsonObject{
+        {"status", "pending"}, {"id", "S3"}, {"fact", "Uses zsh on every machine"}, {"source", "agent"}}}});
+    { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+    CHECK(console.paneTextLines(2000).join('\n').contains(QStringLiteral("Remember: Uses zsh on every machine   Keep · Edit · No")));
+    console.openOutputTarget(target(QStringLiteral("keep"), QStringLiteral("S3")), 0, true);
+    CHECK_EQ(sent.size(), 1);
+    if (!sent.isEmpty()) CHECK_EQ(sent.first().value("sid").toString(), QStringLiteral("S3"));
     const QString after = qEnvironmentVariable("RELAY_MEMORY_OUTCOME_CAPTURE");
     if (!after.isEmpty()) CHECK(console.grab().save(after));
 }

@@ -93,6 +93,28 @@ class BridgeTests(unittest.TestCase):
         self.active()
         self.assertNotIn('error', self.call(key='next'))
 
+    def test_guest_memory_suggestion_reaches_the_pane(self):
+        # #MEMS: a guest's suggest is told to the pane as memory_suggested, so its transcript
+        # draws Keep / Edit / No; a declined repeat is told too, and a list is not.
+        from relay_core import app_tools as A
+        self.agent.app = A.AppTools(None, A.AppBridge(self.events.append), workspace=self.tmp.name)
+        self.active()
+        hq = Path(self.tmp.name) / 'hq'
+        with mock.patch.dict('os.environ', {'RELAY_GLOBAL_SWITCHBOARD': str(hq)}):
+            first = self.call('app_user_memory', {'action': 'suggest', 'fact': 'Prefers terse answers'}, key='s1')
+            self.assertEqual(first.get('status'), 'pending', first)
+            told = [e for e in self.events if e.get('event') == 'memory_suggested']
+            self.assertEqual(len(told), 1)
+            self.assertEqual(told[0]['result']['id'], first['id'])
+            self.assertEqual(told[0]['result']['fact'], 'Prefers terse answers')
+            self.assertNotIn('rejections', told[0]['result'])
+            self.call('app_user_memory', {'action': 'suggestions'}, key='s2')
+            self.assertEqual(len([e for e in self.events if e.get('event') == 'memory_suggested']), 1)
+            again = self.call('app_user_memory', {'action': 'suggest', 'fact': 'Prefers terse answers'}, key='s3')
+            self.assertEqual(again.get('status'), 'duplicate')
+            told = [e for e in self.events if e.get('event') == 'memory_suggested']
+            self.assertEqual([e['result']['status'] for e in told], ['pending', 'duplicate'])
+
     def test_provider_turn_binds_native_context_and_revokes_on_failure(self):
         def turn(prompt, attachments, emit, cancel, harness):
             self.assertIn('relay_board', prompt)

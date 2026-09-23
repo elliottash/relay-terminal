@@ -8130,7 +8130,10 @@ the same normalised fact (casefolded, punctuation stripped, whitespace collapsed
 Jaccard of at least 0.8 after dropping a short stopword list. A name derived from the fact is
 not compared, since it is only the fact's first words. The pane draws Keep / Edit / No from a
 completed `suggest` call whose result has `status: pending` and an `id`; `{action:
-suggestions}` returns `{pending, rejected}`. Writes to either folder hold the
+suggestions}` returns `{pending, rejected}`. A guest's `suggest` through the Relay bridge reaches
+the pane under the guest's own tool name with its result trimmed, so the bridge also emits
+`memory_suggested {result: {status, id, name, fact, source, matched}}` for a pending, declined or
+duplicate outcome, and the pane draws the same line from that. Writes to either folder hold the
 `memory/suggestions/` directory lock; Keep takes the Globals save lock inside it.
 
 Before each built-in agent prompt is refreshed, Relay reads active project and global

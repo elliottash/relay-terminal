@@ -242,6 +242,13 @@ class Bridge:
                 if name in REMOTE_ALLOW and remote_before != self.agent.executor.remote_session:
                     raise ValueError('The SSH session changed while preparing this tool; nothing was executed. Try again against the current host.')
                 result = self.agent._execute(prepared, getattr(self.agent, '_turn', None))
+                # #MEMS: the pane draws Keep / Edit / No from a Relay agent's own `suggest` call,
+                # but a guest's reaches it under the guest's tool name with its result trimmed to
+                # a count, so the outcome is told to the pane directly.
+                if (name == 'app_user_memory' and args.get('action') == 'suggest' and isinstance(result, dict)
+                        and result.get('status') in ('pending', 'declined', 'duplicate')):
+                    self.agent.emit({'event': 'memory_suggested', 'result': {
+                        key: result.get(key) for key in ('status', 'id', 'name', 'fact', 'source', 'matched')}})
             except Exception as exc:
                 # Cache even an ambiguous dispatch failure: no automatic write replay.
                 from .tool_outcomes import exception_code
