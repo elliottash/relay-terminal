@@ -375,6 +375,17 @@ private slots:
                  QStringLiteral("!the chart (") + png + QStringLiteral(")\n"));
     }
 
+    void gifIsSentAsAnEncodedImage() {
+        QTemporaryDir dir;
+        const QString gif = dir.filePath(QStringLiteral("animated.gif"));
+        QFile file(gif);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray::fromBase64("R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="));
+        file.close();
+        const QString escape = MarkdownAnsi::imageEscape(gif, 20, 5);
+        QVERIFY(escape.startsWith(QStringLiteral("\x1b_Ga=T,t=f,f=100,q=2,")));
+    }
+
     void aRelativePathResolvesAgainstTheBaseDir() {
         QTemporaryDir dir;
         QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("out")));

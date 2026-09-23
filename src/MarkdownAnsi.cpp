@@ -152,10 +152,8 @@ QString MarkdownAnsi::imageEscape(const QString &absolutePath, int maxColumns, i
     // square, as tall as it may be.
     if (!pixels.isValid() || pixels.isEmpty()) pixels = QSize(1024, 1024);
     const QSize cells = imageCells(pixels, cellPixels, maxColumns, maxRows);
-    return QStringLiteral("\x1b_Ga=T,t=f,%1q=2,c=%2,r=%3;%4\x1b\\")
-        .arg(type == QStringLiteral("image/png") ? QStringLiteral("f=100,") : QString())
-        .arg(cells.width())
-        .arg(cells.height())
+    return QStringLiteral("\x1b_Ga=T,t=f,f=100,q=2,c=%1,r=%2;%3\x1b\\")
+        .arg(cells.width()).arg(cells.height())
         .arg(QString::fromLatin1(absolutePath.toUtf8().toBase64()));
 }
 
