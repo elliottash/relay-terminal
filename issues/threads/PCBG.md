@@ -12,3 +12,18 @@ Picking up #PCBG after the previous turn died to a usage-limit failure. Implemen
 
 <!-- relay:entry 20260923T012638Z-jq author=agent kind=event model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": [], "github": null} → {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-PCBG"], "…; appended to `## Tests`; replaced `## Execution Summary`; tasks: 2/3 done
+
+<!-- relay:entry 20260923T013304Z-8h author=agent kind=event model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-PCBG"], "… → {"commits": ["30677e96"], "evidence": ["docs/qa_evidence/2026-09-22-PCBG"], "git…; tasks: 3/3 done
+
+<!-- relay:entry 20260923T013317Z-5g author=agent kind=event model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
+- ✦ agent moved this card · Executing → Needs verification · Landed 30677e96: active-pane close modal (stop / background / cancel) with background-session preservation and reopen. activepaneclose+neighbour ctests pass; 9 live Xvfb scenarios in evidence. · evidence docs/qa_evidence/2026-09-22-PCBG/ · implemented_by kimi/kimi-k3
+
+<!-- relay:entry 20260923T013329Z-bx author=agent kind=progress model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
+- ✦ agent is preparing Try it for this card
+
+<!-- relay:entry 20260923T014109Z-n7 author=agent kind=evidence model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
+Try it staged at docs/qa_evidence/2026-09-22-tryit-PCBG/ (own staging, not reused: the verifying session had none). stage.sh opens build/relay (landed tree 30677e96) on an isolated profile with one pane whose shell owns a live `sleep 600`. Played the mechanical path under Xvfb: 01-staged-job.png shows the pane and job, Ctrl+W opened the dialog (02-close-modal.png, "Work is still running", three buttons), Escape cancelled and the pane survived (1 pane after cancel). Background/stop process behaviour is already proven live in docs/qa_evidence/2026-09-22-PCBG/live-results.json (9 scenarios). User path: 4 check steps (staged by script, captured), 0 further agent steps, 1 person step — judging whether the dialog's wording makes the three choices clear.
+
+<!-- relay:entry 20260923T014113Z-6r author=agent kind=event model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
+- ✦ agent updated this card · replaced `## Try it`

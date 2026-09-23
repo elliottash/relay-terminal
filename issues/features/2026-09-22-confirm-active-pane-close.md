@@ -1,7 +1,7 @@
 ---
 id: PCBG
 type: work
-status: executing
+status: needs-verification
 labels: [feature, panes]
 assignee: agent
 implemented_by: kimi/kimi-k3
@@ -9,7 +9,7 @@ session: c14c34a7-957e-488f-8bbe-d5d50b181712
 rank: m
 created: '2026-09-22'
 source: Owner in Relay, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-PCBG], related: [], github: null}
+links: {commits: [30677e96], evidence: [docs/qa_evidence/2026-09-22-PCBG, docs/qa_evidence/2026-09-22-PCBG/], github: null, plans: [], related: []}
 ---
 # Confirm closing active panes and let work continue in the background
 
@@ -40,7 +40,7 @@ Verify: all choices via × and Ctrl+W, idle close, last pane, process identity/o
 ## Tasks
 - [x] Preserve and reopen background sessions. <!-- t:bg -->
 - [x] Implement activity detection and close choices. <!-- t:ee -->
-- [ ] Build, verify, and land with evidence. <!-- t:n0 s=in-progress -->
+- [x] Build, verify, and land with evidence. <!-- t:n0 -->
 
 ## Tests
 `ctest --test-dir build -R activepaneclose` — dialog choices, Escape/Enter cancel, window-dismiss cancel (pass 2026-09-23)
@@ -53,3 +53,12 @@ Closing a pane (× or Ctrl+W) with active work now opens a modal — Close and s
 Background moves the live `Pane` widget — shell, agent worker, subprocesses, scrollback — into a hidden managed window flagged `backgroundSession` (`src/WindowManagerImpl.h`: `newEmptyWindow(geometry, true)`, `backgroundPanes()`, `lastVisibleWindow()`). Reopening goes through the Sessions dialog's new Background tab (or the `sessions.background` palette action) and reveals the same live pane; window cycling clears the background flag. Backgrounding the very last pane first adds a fresh tab so a usable window stays; closing the final visible window while background sessions exist asks for confirmation first. Background work lives only as long as this Relay process, as the dialog's informative text says.
 
 Evidence: `docs/qa_evidence/2026-09-22-PCBG/` (modal.png, background.png, live-drive.py, live-results.json — 9 live Xvfb scenarios passed, including process-identity preservation across background/reopen and stop actually killing the shell child).
+
+## Try it
+Open: `bash docs/qa_evidence/2026-09-22-tryit-PCBG/stage.sh`
+
+A Relay window opens with one terminal pane whose shell is running `sleep 600` in the background. Close that pane with Ctrl+W (or its ×), read the dialog, and try *Close and continue in background* — then reopen the session from Sessions → Background and confirm it is the same live job. Escape and *Cancel* should leave the pane alone.
+
+Question (about 2 minutes): did the dialog's three choices read clearly enough that you were confident your job would survive backgrounding — is this how you'd want Relay to guard a real build?
+
+Expected: docs/qa_evidence/2026-09-22-tryit-PCBG/expected.md (sealed until you answer)
