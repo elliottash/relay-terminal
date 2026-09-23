@@ -258,9 +258,14 @@ class SubagentFactory:
         # presets are keyed and refuses every move, which is why a subagent never failed over.
         # An injected provider (the tests' factory, a guest harness) is still never replaced:
         # `Agent._injected_provider` refuses the swap, as it refuses `set_model`'s.
+        spec = (model or "inherit").strip().lower()
+        ranked = []
+        if spec in ("inherit", "subagent") and spec not in self.user_aliases and self.roles is not None:
+            ranked = (getattr(self.roles, "roles", {}).get("subagent") or {}).get("candidates") or []
         agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
                       max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False,
-                      preset_id=preset_id, roles=self.roles, **self.failover_options())
+                      preset_id=preset_id, roles=self.roles, ranked_failover=ranked,
+                      **self.failover_options())
         if isinstance(provider, GuestChildProvider):
             provider.agent = agent
         agent.executor = RestrictedExecutor(self.workspace, emit, agent.cancel_event, skills, definition.tools)

@@ -603,7 +603,7 @@ class Agent:
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
-                 fallbacks=None, failover_openrouter=None,
+                 fallbacks=None, failover_openrouter=None, ranked_failover=None,
                  roles=None, board=None, app=None, helper: bool = False,
                  tool_scope: str | None = None, context_spec=None,
                  security_options: dict | None = None,
@@ -631,6 +631,8 @@ class Agent:
         # singular is the one-entry shape from earlier the same day, kept for older callers, and
         # `failover_hosted` is accepted and ignored for the same reason.
         self.fallbacks = validate_fallbacks(fallbacks) or validate_fallbacks([fallback])
+        # A spawned subagent with a job-specific list walks that list after its draw.
+        self.ranked_failover = list(ranked_failover or [])
         # The model ids the user opted in to "the same model on OpenRouter" (owner, 2026-09-20),
         # tried after the list — but only when the model that failed is one of them. Empty by
         # default: it spends the OpenRouter key at pay-as-you-go rates, which is a per-model
@@ -2549,14 +2551,23 @@ class Agent:
             self._plan_choice_set = True
         target = self._plan_choice
         guest = None
-        if target is not None and is_guest_preset(target.preset_id) and not self._injected_provider:
+        skipped_guests = set()
+        while target is not None and is_guest_preset(target.preset_id) and not self._injected_provider:
             # A `guest:` entry of the High list (protocol 13.7): Claude Code or Codex plans this
             # turn through its own harness, started here for the turn. One that will not start
             # is said, and the turn goes where it would have gone without the guest entries.
             guest = self._start_plan_guest(turn_id, target)
             if guest is None:
-                target = (None if (planner.roles.get("planning") or {}).get("candidates")
-                          else planner.planning_target(guests=False))
+                custom = (planner.roles.get("planning") or {}).get("candidates")
+                if custom:
+                    skipped_guests.add(target.preset_id)
+                    target = planner.choose_role("planning", skip_presets=skipped_guests)
+                    if target.is_main:
+                        target = None
+                else:
+                    target = planner.planning_target(guests=False)
+        if skipped_guests:
+            self._plan_choice = target
         if target is None:
             return None
         if is_guest_preset(target.preset_id) and guest is None \
@@ -2805,8 +2816,9 @@ class Agent:
         chain = getattr(self.roles, "failover_chain", None)
         if not callable(chain):
             return [dict(entry) for entry in self.fallbacks]
-        return [dict(entry) for entry in
-                chain(tier, self.preset.id if self.preset else None, self.config.model, self.fallbacks)]
+        return [dict(entry) for entry in chain(
+            tier, self.preset.id if self.preset else None, self.config.model, self.fallbacks,
+            **({"entries": self.ranked_failover} if self.ranked_failover else {}))]
 
     def _next_plan_model(self, exc: Exception, record: dict, step: int) -> bool:
         """A plan turn whose model will not answer moves to the next entry of the High list.
@@ -2838,7 +2850,10 @@ class Agent:
                 # Read once per turn, like the Main walk: what is left of the High list below the
                 # entry the turn started on. The pane's own provider is not excluded - it has
                 # not been asked this turn, the plan model has.
-                swap["chain"] = [dict(entry) for entry in chain("high", failed_preset, self.config.model)]
+                custom = (self.roles.roles.get("planning") or {}).get("candidates")
+                swap["chain"] = [dict(entry) for entry in chain(
+                    "high", failed_preset, self.config.model,
+                    **({"entries": custom} if custom else {}))]
                 swap["tried"], swap["hosts"], swap["moves"] = set(), set(), 0
                 swap["max_moves"] = len(swap["chain"])
             if failed_preset:

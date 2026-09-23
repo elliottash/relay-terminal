@@ -357,6 +357,7 @@ class TiedRankTests(unittest.TestCase):
         with mock.patch.object(model_roles.random, "random", side_effect=[.99, 0]):
             self.assertEqual(made.choose_role("subagent").preset_id, "glm")
             self.assertEqual(made.choose_role("subagent").preset_id, "kimi")
+        self.assertEqual(made.choose_role("subagent", skip_presets={"kimi"}).preset_id, "glm")
         self.assertEqual(made.resolve("subagent").preset_id, "kimi")
 
     def test_selected_tie_fails_over_to_earlier_peer_before_lower_rank(self):
@@ -367,6 +368,8 @@ class TiedRankTests(unittest.TestCase):
                             key_lookup=lambda preset: "key")
         self.assertEqual([row["preset"] for row in made.failover_chain("main", "glm", "glm-5.3")],
                          ["kimi", "openrouter"])
+        self.assertEqual([row["preset"] for row in made.failover_chain(
+            "main", "glm", "glm-5.3", entries=rows)], ["kimi", "openrouter"])
 
 
 # ----- plan mode (owner, 2026-09-19) --------------------------------------------------------------

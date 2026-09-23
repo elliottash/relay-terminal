@@ -699,11 +699,14 @@ class RoleResolver:
         config.validate()
         return Resolved(role, config, preset_id, effort, source, tier=tier)
 
-    def _configured(self, role: str, entry: dict, *, choose: bool = False) -> Resolved:
+    def _configured(self, role: str, entry: dict, *, choose: bool = False,
+                    skip_presets=()) -> Resolved:
         if "candidates" in entry:
             tier = "high" if role == "planning" else "main"
             for candidate in ordered_candidates(entry["candidates"], choose=choose):
                 preset_id = candidate.get("preset")
+                if preset_id in skip_presets:
+                    continue
                 if is_guest_preset(preset_id):
                     if role == "switchboard" or not self.guest_check(guest_id_of(preset_id)):
                         continue
@@ -1071,7 +1074,7 @@ class RoleResolver:
             return None                 # a preset whose config will not validate: not a spare
         return None if resolved.source == "fallback" else resolved
 
-    def failover_chain(self, tier: str, preset_id, model, fallbacks=()) -> list[dict]:
+    def failover_chain(self, tier: str, preset_id, model, fallbacks=(), *, entries=None) -> list[dict]:
         """Where a failing turn may go next, in order: **the rest of the list the turn is on**
         (owner, 2026-09-20; protocol 15.2.2). Entries only — whether each can take the turn is
         `fallback_candidate`'s question, asked when its moment comes.
@@ -1090,10 +1093,13 @@ class RoleResolver:
         returns the turn to it).
         """
         tier = validate_tier(tier)
-        entries = list(self.tiers.get(tier) or [])
-        if not entries and tier != "high":
-            entries = list(self.tiers.get("main") or []) or [dict(e) for e in (fallbacks or [])
-                                                             if isinstance(e, dict)]
+        if entries is None:
+            entries = list(self.tiers.get(tier) or [])
+            if not entries and tier != "high":
+                entries = list(self.tiers.get("main") or []) or [dict(e) for e in (fallbacks or [])
+                                                                 if isinstance(e, dict)]
+        else:
+            entries = list(entries)
         ranked = sorted(((entry.get("rank", index), index, entry)
                          for index, entry in enumerate(entries, 1)),
                         key=lambda row: (row[0], row[1]))
@@ -1232,14 +1238,14 @@ class RoleResolver:
             self.warnings.append(resolved.warning)
         return resolved
 
-    def choose_role(self, role: str) -> Resolved:
+    def choose_role(self, role: str, *, skip_presets=()) -> Resolved:
         """One lifecycle draw; unlike resolve, never reads or writes the display cache."""
         role = validate_role(role)
         if role == "main":
             return self._main("main")
         entry = self.roles.get(role)
         if entry:
-            resolved = self._configured(role, entry, choose=True)
+            resolved = self._configured(role, entry, choose=True, skip_presets=skip_presets)
         else:
             tier = ROLE_TIERS.get(role)
             resolved = (self._tier(role, tier, "default", choose=True)
