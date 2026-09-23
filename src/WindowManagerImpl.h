@@ -52,6 +52,9 @@ inline void WindowManager::setUpLayoutSaving() {
         m_stateLock = std::make_unique<QLockFile>(lockPath);
         // Never steal a lock because it is old; QLockFile still clears one left by a dead process.
         m_stateLock->setStaleLockTime(0);
+        // Decide before making any window. A secondary instance must not acquire this lock later
+        // when the outgoing owner releases it during a restart (#K6KP).
+        if (restoreEnabled()) ownsLayout();
     }
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(1000);   // a crash loses at most this much
@@ -67,7 +70,8 @@ inline bool WindowManager::writesState() {
 }
 
 inline bool WindowManager::ownsLayout() {
-    if (m_owner) return true;
+    if (m_layoutLockAttempted) return m_owner;
+    m_layoutLockAttempted = true;
     if (!m_stateLock) return false;          // no lock file: fall back to last writer wins
     m_owner = m_stateLock->tryLock(0);
     return m_owner;

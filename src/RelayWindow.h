@@ -280,9 +280,10 @@ public:
     // therefore loses at most the debounce window.
     //
     // Two Relays at once: the file has one owner at a time, held as a lock file for the life of the
-    // process. Only the owner restores on start and only the owner saves, so a second Relay opens a
-    // plain window and leaves the layout alone; if the owner quits, the next save by a still-running
-    // Relay takes the lock over and that instance's windows become the saved set from then on.
+    // process. Ownership is decided once at startup. Only the owner restores and saves; a second
+    // Relay opens a plain window and leaves the layout alone for its entire lifetime. Retrying the
+    // lock after the owner quits would replace the old layout with that plain window on a fast
+    // restart, before the next launch can restore it.
     // Writes are atomic (temp file + rename, 0600), so the file is never seen half written.
     static bool restoreEnabled() { return QSettings().value(QStringLiteral("windows/restore"), true).toBool(); }
     void setUpLayoutSaving();
@@ -328,7 +329,7 @@ private:
     QTimer m_saveTimer{&m_context};
     QString m_statePath, m_restoreNote;
     std::unique_ptr<QLockFile> m_stateLock;
-    bool m_owner = false, m_saveSuspended = false, m_cascadeActive = false;
+    bool m_owner = false, m_layoutLockAttempted = false, m_saveSuspended = false, m_cascadeActive = false;
     QJsonArray m_cascadeSnapshot;
 };
 
