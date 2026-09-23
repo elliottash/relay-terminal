@@ -1150,7 +1150,9 @@ public:
     // them would stack one set per restore inside the history, and each run prints its own.
     static void dropRestoreMarks(QStringList *lines) {
         lines->erase(std::remove_if(lines->begin(), lines->end(), [](const QString &line) {
-                         const QString plain = stripSgr(line);
+                         QString plain = stripSgr(line);
+                         static const QRegularExpression osc8(QStringLiteral("\\x1b\\]8;[^\\x1b\\x07]*(?:\\x07|\\x1b\\\\)"));
+                         plain.remove(osc8);
                          return plain == scrollbackOpenMark() || plain == scrollbackLegacyOpenMark()
                                 || plain == scrollbackCloseMark() || plain == sessionTextOpenMark()
                                 || plain == sessionTextCloseMark() || plain == surfaceTextOpenMark()
@@ -1351,25 +1353,59 @@ public:
         queueTextReplay(stash.lines);
     }
 
-    // What a rewind undid, kept beside the conversation before the screen scrolls it away
-    // (protocol 5, `rewound_n`). A chat rewind unprints nothing, so the branch is still in the
-    // pane: it runs from the rewound turn's own first line to the end. `n` is the worker's record
-    // number and names the file; without one — an older worker, or a rewind that wrote no record —
-    // there is nothing to name a file after and nothing is written.
-    void saveRewoundText(int n, const QString &prompt) {
+    // Save before removing anything: a failed write or an unknown turn boundary must leave
+    // the terminal intact. Code-only rewind keeps the chat on screen.
+    bool saveRewoundText(int n, const QString &prompt, bool collapse) {
         const QString path = relay::sessiontext::rewoundPath(m_sessionTextDir, m_sessionTextId, n);
-        if (path.isEmpty()) return;
+        if (path.isEmpty() || !m_backend || m_backend->altScreen()) return false;
         const QStringList lines = sessionTextLines();
         const int from = relay::sessiontext::turnStart(lines, prompt);
-        // No anchor: the turn's prompt has scrolled out of the engine's history, or it was sent
-        // from a client with no terminal, and nothing in the text can say where the turn began.
-        // The conversation's whole text is kept instead — a superset of the branch — because the
-        // record this file belongs to already says which turn it was cut at.
         QStringList branch = lines;
-        if (from > 0) branch = branch.mid(from);
-        QString error;
-        if (!relay::sessiontext::write(path, branch, &error) && !error.isEmpty())
-            fprintf(stderr, "relay: could not save what the rewind undid: %s\n", qPrintable(error));
+        if (from >= 0) branch = lines.mid(from);
+        // Empty grid rows below the cursor are not output, and must not inflate the count.
+        while (!branch.isEmpty() && stripSgr(branch.last()).trimmed().isEmpty()) branch.removeLast();
+        if (branch.isEmpty()) return false;
+        QStringList plain;
+        for (const auto &line : branch) plain << stripSgr(line);
+        // The normal scrollback writer keeps only 5,000 lines. A rewind must save every line
+        // it removes, including a long branch, and the file pane needs text without SGR bytes.
+        const QByteArray bytes = plain.join(QLatin1Char('\n')).toUtf8() + '\n';
+        QSaveFile file(path);
+        if (!QDir().mkpath(QFileInfo(path).absolutePath()) || !file.open(QIODevice::WriteOnly)) {
+            status(QStringLiteral("Could not save rewound output; terminal text kept: ") + file.errorString());
+            return false;
+        }
+        file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+        if (file.write(bytes) != bytes.size() || !file.commit()) {
+            status(QStringLiteral("Could not save rewound output; terminal text kept: ") + file.errorString());
+            return false;
+        }
+        if (!collapse) return false;
+        if (from < 0) {
+            status(QStringLiteral("Rewound output saved, but its start is no longer in the terminal; text kept."));
+            return false;
+        }
+        // Preserve text belonging to earlier conversations in this pane as well as the kept
+        // turns. Both snapshots use the same filtering of restore markers and SGR formatting.
+        QStringList all = m_backend->replayableText(kSessionTextScan);
+        dropRestoreMarks(&all);
+        const int prefix = std::max(0, int(all.size() - lines.size()));
+        const QStringList kept = all.mid(0, prefix + from);
+        endCallRun();
+        writeTerminal(takeWrapped() + closeProseRun());
+        m_backend->clear();
+        m_lastBlock = relay::gaps::Block::None;
+        m_inlineOpen = true;
+        m_atLineStart = true;
+        holdShellResize(true);
+        QByteArray out;
+        for (const QString &line : kept) out += line.toUtf8() + "\r\n";
+        out += "\r\n\x1b]8;;" + QUrl::fromLocalFile(path).toEncoded() + "\x1b\\" + inkCode(Ink::Note) + "\x1b[3m";
+        out += QStringLiteral("%1 lines rewound -- click to view").arg(branch.size()).toUtf8();
+        out += "\x1b[0m\x1b]8;;\x1b\\\r\n\r\n";
+        writeTerminal(out);
+        scrollToBottom();
+        return true;
     }
 
     // No saved text: every conversation from before this store existed, one whose Relay was killed
@@ -8471,14 +8507,14 @@ private:
         if (type == QStringLiteral("rewound")) {
             // Before anything else prints: what the rewind undid is still on the screen, and the
             // lines below would land inside the block that is being kept (#0TJ9).
-            saveRewoundText(event.value(QStringLiteral("rewound_n")).toInt(),
-                            event.value(QStringLiteral("prompt")).toString());
+            const QString restore = event.value(QStringLiteral("restore")).toString();
+            const bool collapsed = saveRewoundText(event.value(QStringLiteral("rewound_n")).toInt(),
+                            event.value(QStringLiteral("prompt")).toString(), restore != QStringLiteral("files"));
             const QJsonArray restored = event.value(QStringLiteral("restored_files")).toArray();
             const QJsonArray conflicts = event.value(QStringLiteral("conflicts")).toArray();
             ensureLineStart();
-            const QString restore = event.value(QStringLiteral("restore")).toString();
             const QString what = restore == QStringLiteral("files") ? QStringLiteral("code") : restore == QStringLiteral("both") ? QStringLiteral("code and chat") : QStringLiteral("chat");
-            printInline(QStringLiteral("Rewound %1 to turn %2%3\n").arg(what).arg(event.value(QStringLiteral("turn")).toInt())
+            if (!collapsed || restore == QStringLiteral("both")) printInline(QStringLiteral("Rewound %1 to turn %2%3\n").arg(what).arg(event.value(QStringLiteral("turn")).toInt())
                 .arg(restore == QStringLiteral("conversation") ? QStringLiteral(" · files unchanged") : QStringLiteral(" · %1 file(s) restored").arg(restored.size())), Ink::Note);
             if (!conflicts.isEmpty()) {
                 QStringList names;

@@ -1009,6 +1009,90 @@ void proseQuestionHoldsTheQueueForItsReply()
     if (!asks.isEmpty()) CHECK_EQ(asks.first().value("text").toString(), QStringLiteral("Use the second option"));
 }
 
+
+void rewindRemovesOnlyTheBranchAndLinksItsCompleteText()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.resize(960, 640);
+    console.show();
+    { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+    const QString id(32, QLatin1Char('a'));
+    console.adoptSessionText(id, home->path(), QString(), QString());
+    relay::agent::Host &surface = console;
+    surface.writeTerminal(QStringLiteral("retained sentinel\r\n✦ discarded ask\r\n\x1b[32mdiscarded reply\x1b[0m\r\n").toUtf8());
+    console.deliverWorkerEvent({{"event", "rewound"}, {"turn", 2}, {"restore", "conversation"},
+                               {"prompt", "discarded ask"}, {"rewound_n", 1}});
+    { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+    const QString text = console.paneTextLines(200000).join('\n');
+    CHECK(text.contains(QStringLiteral("retained sentinel")));
+    CHECK(!text.contains(QStringLiteral("discarded reply")));
+    CHECK(!text.contains(QStringLiteral("✦ discarded ask")));
+    CHECK(text.contains(QStringLiteral("\n\n2 lines rewound -- click to view\n\n")));
+    CHECK_EQ(console.composerText(), QStringLiteral("discarded ask"));
+    const QString path = relay::sessiontext::rewoundPath(home->path(), id, 1);
+    QFile saved(path);
+    CHECK(saved.open(QIODevice::ReadOnly));
+    CHECK_EQ(saved.readAll(), QStringLiteral("✦ discarded ask\ndiscarded reply\n").toUtf8());
+    // The count is actual output, not empty grid rows; styles are held by the terminal.
+    const QString formatted = console.paneFormattedTextLines(200000).join('\n');
+    CHECK(formatted.contains(QRegularExpression(QStringLiteral("\\x1b\\[[0-9;]*3[;m]"))));
+    auto *backend = console.findChild<relay::EngineBackend *>();
+    CHECK(backend != nullptr);
+    if (backend) {
+        QString target;
+        auto *view = backend->view();
+        for (int y = 0; y < view->height() && target.isEmpty(); y += 4) {
+            const auto hit = view->linkAtPoint(QPoint(140, y));
+            if (hit.target == path) target = hit.target;
+        }
+        CHECK_EQ(target, path);
+        QString opened;
+        console.onOpenPath = [&](const QString &file, int) { opened = file; };
+        console.openOutputTarget(target, 0, true);
+        CHECK_EQ(opened, path);
+    }
+    const QByteArray screenshot = qgetenv("RELAY_REWIND_SCREENSHOT");
+    if (!screenshot.isEmpty()) CHECK(console.grab().save(QString::fromLocal8Bit(screenshot)));
+
+    // Code-only rewind and a missing anchor must not clear any output.
+    surface.writeTerminal(QStringLiteral("✦ keep this ask\r\nkeep this reply\r\n").toUtf8());
+    CHECK(!console.saveRewoundText(2, QStringLiteral("keep this ask"), false));
+    CHECK(console.paneTextLines(200000).join('\n').contains(QStringLiteral("keep this reply")));
+    CHECK(!console.saveRewoundText(3, QStringLiteral("absent prompt"), true));
+    CHECK(console.paneTextLines(200000).join('\n').contains(QStringLiteral("keep this reply")));
+
+    // More than the normal 5,000-line persistence cap: every removed line remains readable.
+    QByteArray longBranch = QStringLiteral("✦ long ask\r\n").toUtf8();
+    for (int i = 0; i < 5100; ++i) longBranch += "line " + QByteArray::number(i) + "\r\n";
+    surface.writeTerminal(longBranch);
+    CHECK(console.saveRewoundText(4, QStringLiteral("long ask"), true));
+    QFile longSaved(relay::sessiontext::rewoundPath(home->path(), id, 4));
+    CHECK(longSaved.open(QIODevice::ReadOnly));
+    const auto all = longSaved.readAll();
+    CHECK(all.startsWith(QStringLiteral("✦ long ask\nline 0\n").toUtf8()));
+    CHECK(all.endsWith("line 5099\n"));
+    CHECK_EQ(all.count('\n'), 5101);
+
+    // Earlier notices remain clickable after another rewind rebuilt their rows.
+    if (backend) {
+        { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+        const QString snapshot = backend->replayableText(200000).join('\n');
+        CHECK(snapshot.contains(QUrl::fromLocalFile(path).toString()));
+        CHECK(snapshot.contains(QUrl::fromLocalFile(longSaved.fileName()).toString()));
+    }
+
+    // A file occupying the save directory forces failure without permissions assumptions.
+    QFile obstacle(home->path() + QStringLiteral("/not-a-directory"));
+    CHECK(obstacle.open(QIODevice::WriteOnly));
+    obstacle.close();
+    console.adoptSessionText(id, obstacle.fileName(), QString(), QString());
+    surface.writeTerminal(QStringLiteral("✦ cannot save\r\nstill here\r\n").toUtf8());
+    CHECK(!console.saveRewoundText(1, QStringLiteral("cannot save"), true));
+    CHECK(console.paneTextLines(200000).join('\n').contains(QStringLiteral("still here")));
+}
+
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -1048,6 +1132,7 @@ int main(int argc, char **argv)
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
     cases::answersBypassQueuedPrompts();
     cases::proseQuestionHoldsTheQueueForItsReply();
+    cases::rewindRemovesOnlyTheBranchAndLinksItsCompleteText();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 20 cases, all passed\n");

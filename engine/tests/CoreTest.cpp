@@ -106,6 +106,26 @@ private slots:
         QVERIFY(ansi.endsWith(QLatin1String("\x1b[0m")));
     }
 
+    void ansiSerializerRetainsLinksOnlyForLiveReplay()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        h.feed("before \x1b]8;;file:///tmp/rewound.txt\x1b\\\x1b[3mview output\x1b[0m\x1b]8;;\x1b\\ after");
+        const Line line = h.frame().lines[0];
+        const QString saved = lineToAnsi(line);
+        QVERIFY(!saved.contains(QStringLiteral("\x1b]8;")));
+        const QString live = lineToAnsi(line, [&](uint32_t id, int col) {
+            return h.vt->hyperlinkUri(id, 0, col);
+        });
+        QVERIFY(live.contains(QStringLiteral("\x1b]8;;file:///tmp/rewound.txt\x1b\\")));
+        Harness replay(core);
+        replay.feed(live.toUtf8());
+        QCOMPARE(replay.vt->hyperlinkAt(0, 7), QStringLiteral("file:///tmp/rewound.txt"));
+        QVERIFY(replay.vt->hyperlinkAt(0, 19).isEmpty());
+        QVERIFY(replay.frame().lines[0].cells[7].attrs & AttrItalic);
+        QCOMPARE(replay.frame().lines[0].text(), line.text());
+    }
+
     void ansiSerializerHandlesWideCharactersAndClusters()
     {
         QFETCH_GLOBAL(QString, core);

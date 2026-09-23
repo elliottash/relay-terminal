@@ -113,16 +113,22 @@ QString sgrParams(const SgrState &state)
 
 }  // namespace
 
-QString lineToAnsi(const Line &line)
+QString lineToAnsi(const Line &line, const std::function<QString(uint32_t, int)> &linkUri)
 {
     QString out;
     SgrState current;
     bool emittedSgr = false;
+    QString activeLink;
 
     for (size_t i = 0; i < line.cells.size(); ++i) {
         const Cell &cell = line.cells[i];
         if (cell.ch == kWideTail) continue;
 
+        const QString uri = linkUri && cell.link ? linkUri(cell.link, int(i)) : QString();
+        if (uri != activeLink) {
+            out += QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\");
+            activeLink = uri;
+        }
         const SgrState next = stateForCell(cell);
         if (next != current) {
             out.append(QLatin1Char('\x1b'));
@@ -142,6 +148,7 @@ QString lineToAnsi(const Line &line)
     while (end > 0 && out.at(end - 1) == QLatin1Char(' ')) --end;
     if (end < out.size()) out.resize(end);
 
+    if (!activeLink.isEmpty()) out += QStringLiteral("\x1b]8;;\x1b\\");
     if (emittedSgr && !out.isEmpty() && !current.isDefault()) {
         out.append(QLatin1String("\x1b[0m"));
     }

@@ -296,6 +296,11 @@ public:
     // cannot reconstruct escape sequences fall back to the plain-text variants above.
     virtual QString formattedScreenText() const { return screenText(); }
     virtual QStringList formattedScrollbackText(int maxLines) const { return scrollbackText(maxLines); }
+    // Trusted live snapshot for replacing part of the display. Includes OSC 8 anchors so
+    // retained links and folds survive. Not a file format and never accepts external bytes.
+    virtual QStringList replayableText(int maxLines) const {
+        return formattedScrollbackText(maxLines) + formattedScreenText().split(QLatin1Char('\n'));
+    }
     virtual bool altScreen() const = 0;
     virtual int rows() const = 0;
     virtual int columns() const = 0;

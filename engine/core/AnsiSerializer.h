@@ -12,6 +12,7 @@
 #include <QString>
 #include <QStringList>
 #include <vector>
+#include <functional>
 
 namespace relay {
 
@@ -22,6 +23,8 @@ QStringList linesToAnsi(const std::vector<Line> &lines);
 // The ANSI representation of a single line. Cells with kWideTail are skipped; blanks
 // become spaces. The line is reset to default attributes at the end if any SGR was
 // emitted, so a following line starts from a known state.
-QString lineToAnsi(const Line &line);
+// A trusted live snapshot may supply a resolver to retain OSC 8 links as well. Persisted
+// scrollback uses the default (SGR only); never replay arbitrary file contents as OSC.
+QString lineToAnsi(const Line &line, const std::function<QString(uint32_t, int)> &linkUri = {});
 
 } // namespace relay

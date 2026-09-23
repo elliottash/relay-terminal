@@ -284,6 +284,36 @@ QStringList VTermBackend::formattedScrollbackText(int maxLines) const
         return linesToAnsi(lines);
     });
 }
+QStringList VTermBackend::replayableText(int maxLines) const
+{
+    return m_session->withCore([maxLines](VtCore &core) {
+        const int savedTop = core.viewportTop();
+        const int total = core.historyRows();
+        const int first = std::max(0, total - std::max(0, maxLines));
+        std::vector<Line> lines;
+        core.historyLines(first, total - first, &lines);
+        core.scrollViewportToBottom();
+        ViewportFrame frame;
+        core.updateFrame(&frame, true);
+        lines.insert(lines.end(), frame.lines.begin(), frame.lines.end());
+        QStringList result;
+        QHash<uint32_t, QString> links;
+        for (int i = 0; i < int(lines.size()); ++i) {
+            const int absolute = first + i;
+            result << lineToAnsi(lines[size_t(i)], [&](uint32_t id, int col) {
+                if (!links.contains(id)) {
+                    if (absolute < core.viewportTop() || absolute >= core.viewportTop() + core.rows())
+                        core.scrollViewportToRow(absolute);
+                    links.insert(id, core.hyperlinkUri(id, absolute - core.viewportTop(), col));
+                }
+                return links.value(id);
+            });
+        }
+        core.scrollViewportToRow(savedTop);
+        return result;
+    });
+}
+
 bool VTermBackend::altScreen() const { return m_session->altScreen(); }
 int VTermBackend::rows() const { return m_session->rows(); }
 int VTermBackend::columns() const { return m_session->columns(); }

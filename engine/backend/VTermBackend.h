@@ -44,6 +44,7 @@ public:
     QPoint cursorPosition() const override;
     QStringList scrollbackText(int maxLines) const override;
     QStringList formattedScrollbackText(int maxLines) const override;
+    QStringList replayableText(int maxLines) const override;
     bool altScreen() const override;
     int rows() const override;
     int columns() const override;

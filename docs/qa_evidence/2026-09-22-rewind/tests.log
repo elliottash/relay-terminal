@@ -1,0 +1,17 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 43: consolemode
+1/1 Test #43: consolemode ......................   Passed    1.48 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   1.49 sec
+********* Start testing of CoreTest *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : CoreTest::initTestCase()
+PASS   : CoreTest::ansiSerializerPreservesAttributesAndColours(libvterm)
+PASS   : CoreTest::ansiSerializerHandlesWideCharactersAndClusters(libvterm)
+PASS   : CoreTest::ansiSerializerRetainsLinksOnlyForLiveReplay(libvterm)
+PASS   : CoreTest::cleanupTestCase()
+Totals: 5 passed, 0 failed, 0 skipped, 0 blacklisted, 0ms
+********* Finished testing of CoreTest *********
