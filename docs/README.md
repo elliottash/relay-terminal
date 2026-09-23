@@ -20,6 +20,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [ENGINE.md](ENGINE.md) | Relay's own terminal engine: cores, PTY, view, `TerminalBackend`, status and plans (spike history folded in) |
 | [ENGINE-PERF.md](ENGINE-PERF.md) | Terminal engine and emulator-core benchmarks (2026-09-17 measurements) |
 | [AGENT-SESSIONS-PROTOCOL.md](AGENT-SESSIONS-PROTOCOL.md) | GUI ↔ worker message contract: sessions, planning, subagents, suggestions, model roles and tiers, the Board, SSH, guest agents, questions, local model servers |
+| [TASK-PLUGINS.md](TASK-PLUGINS.md) | Task plugins: the versioned `plugin.json` a workspace kind declares (router, runner, tools, skills, panes, preview, required programs), its three origins, and why a cloned project cannot enable its own code (`#C0Q8`) |
 | [LOCAL-MODELS.md](LOCAL-MODELS.md) | Running the agent on a model served on this machine: the endpoint registry, probing, the `local` tier and role, and the `local_*` messages (`#24XJ`) |
 | [SSH-AND-MOSH.md](SSH-AND-MOSH.md) | How Relay wraps `ssh` and `mosh` in its pane shells, per-host policy, connection sharing, and what a remote pane can do (`#S5SH`) |
 | [THEMES.md](THEMES.md) | Theme design rather than the theme system: the rules a theme must follow, how contrast is measured, and the Dark Copper / IBM Beige audition (`#0JA7`) |

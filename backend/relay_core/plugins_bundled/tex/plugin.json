@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "relay.tex",
+  "version": "0.1.0",
+  "name": "TeX document",
+  "description": "Edit a LaTeX source, build it with latexmk, and preview the PDF beside the console with clickable diagnostics and SyncTeX in both directions.",
+  "activation": {
+    "files": ["*.tex", "*.ltx"]
+  },
+  "router": {
+    "language": "tex"
+  },
+  "runner": {
+    "kind": "artifact_command",
+    "command": ["latexmk", "-pdf", "-interaction=nonstopmode", "-synctex=1", "-file-line-error", "{file}"],
+    "cwd": "file_dir",
+    "env": ["TEXINPUTS", "BIBINPUTS", "BSTINPUTS", "TEXMFHOME"]
+  },
+  "tools": {
+    "group": "tex",
+    "items": [
+      {"name": "tex_build", "description": "Build the workspace's main .tex with latexmk and report whether the PDF is current."},
+      {"name": "tex_diagnostics", "description": "List the last build's errors and warnings as file:line rows."},
+      {"name": "tex_synctex_lookup", "description": "Map a source line to a PDF page and position, or a PDF position back to a source line."}
+    ]
+  },
+  "skills": ["skills/tex-workspace"],
+  "panes": {
+    "roles": ["editor", "console", "preview"],
+    "layouts": ["1:1:1", "2:1"],
+    "default_layout": "1:1:1"
+  },
+  "preview": {
+    "adapter": "pdf",
+    "outputs": ["*.pdf"]
+  },
+  "requires": [
+    {"program": "latexmk", "version_arg": "-v", "install_hint": "install TeX Live (latexmk and texlive-latex-extra) or MacTeX"},
+    {"program": "synctex", "version_arg": "help", "optional": true, "install_hint": "ships with TeX Live; needed for source/PDF jumps"}
+  ]
+}
