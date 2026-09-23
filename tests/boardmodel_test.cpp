@@ -3325,7 +3325,7 @@ void BoardModelTests::aSignatureReadsAsItsModelAndItsHarness()
     QCOMPARE(label("anthropic/claude-opus-5-5"), QStringLiteral("Claude Opus 5.5"));
     // Anthropic writes the version's dot as a dash; a date suffix stays a separate word.
     QCOMPARE(label("anthropic/claude-haiku-4-5"), QStringLiteral("Claude Haiku 4.5"));
-    QCOMPARE(label("anthropic/claude-sonnet-6-20260514"), QStringLiteral("Claude Sonnet 6 20260514"));
+    QCOMPARE(label("anthropic/claude-sonnet-5-20260514"), QStringLiteral("Claude Sonnet 5 20260514"));
     QCOMPARE(label("deepseek/deepseek-v4.1-flash"), QStringLiteral("DeepSeek V4.1 Flash"));
     QCOMPARE(label("kimi/kimi-k3"), QStringLiteral("Kimi K3"));
     // The owner, 2026-09-19: "lets try to record the model used" — so a guest names the model

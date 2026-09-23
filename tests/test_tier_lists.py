@@ -570,7 +570,7 @@ class DefaultsTests(unittest.TestCase):
         self.assertEqual(P.GUEST_CLASSES, ('high', 'main', 'flash'))
         with_sonnet = [dict(GUESTS[0], models=[{'id': 'sonnet'}])]
         plain = self.defaults(['relay-free'], guests=with_sonnet)['plain']
-        # claude-sonnet-6 is the file's flash model for anthropic, and the guest serves it here.
+        # claude-sonnet-5 is the file's flash model for anthropic, and the guest serves it here.
         self.assertEqual(pairs(plain['flash']), [('guest:claude', 'sonnet', 'low')])
         self.assertEqual(pairs(plain['lite']), [('relay-free', 'relay-lite', 'low')])
 

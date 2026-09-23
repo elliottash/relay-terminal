@@ -60,7 +60,7 @@ QJsonArray presets() {
                       {QStringLiteral("provider"), QStringLiteral("Claude Code")}, {QStringLiteral("model"), QString()},
                       {QStringLiteral("harness"), true},
                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("opus"), QStringLiteral("claude-opus-5.5"), QString(), {QStringLiteral("low"), QStringLiteral("high")}),
-                                                            model(QStringLiteral("sonnet"), QStringLiteral("claude-sonnet-6"), QString(), {})}},
+                                                            model(QStringLiteral("sonnet"), QStringLiteral("claude-sonnet-5"), QString(), {})}},
                       {QStringLiteral("limits"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("5h")}, {QStringLiteral("used_percent"), 38.0}, {QStringLiteral("resets_at"), 0}},
                                                             QJsonObject{{QStringLiteral("kind"), QStringLiteral("weekly")}, {QStringLiteral("used_percent"), 60.0}, {QStringLiteral("resets_at"), 0}}}}};
     out << guest;
@@ -905,7 +905,7 @@ private Q_SLOTS:
         const Entry *sonnet = catalog.find(QStringLiteral("guest:claude|sonnet"));
         QVERIFY(sonnet && sonnet->efforts.isEmpty());
         QVERIFY(sonnet->effortFixed);
-        QCOMPARE(sonnet->effortFixedReason(), QStringLiteral("claude-sonnet-6 has no reasoning level"));
+        QCOMPARE(sonnet->effortFixedReason(), QStringLiteral("claude-sonnet-5 has no reasoning level"));
         // Relay Free has two levels and is still greyed: the gateway clamps them per role.
         const Entry *hosted = catalog.find(QStringLiteral("relay-free|relay-main"));
         QVERIFY(hosted && hosted->efforts.size() == 2);

@@ -124,7 +124,7 @@ the list, they run on Relay Free's role for the tier instead.
 | glm-5.3 | high, main | 45 | one row for `glm` and `glm-coding`; the coding plan wins the tie on `order` |
 | kimi-k3 | high, main | 44 | `kimi`'s main model; kimi code serves the same one as `k3` |
 | claude-haiku-4.5 | - | | `anthropic`'s lite (its own API spells the version with a hyphen) |
-| claude-sonnet-6 | flash | | `anthropic`'s flash |
+| claude-sonnet-5 | flash | | `anthropic`'s flash |
 | deepseek-v4-pro | - |  | `deepseek`'s pro model; the owner, 2026-09-21: "deepseek pro is never used" — DeepSeek runs high, main and flash on V4.1 Flash |
 | deepseek-v4.1-flash | high, main, flash | | openrouter's built-in main *and* flash: there is no non-flash DeepSeek V4.1 |
 | gemini-3.1-pro-preview | - | | the concrete version behind `gemini-pro-latest`; a default for nothing, so the defaults follow Google forward |
@@ -171,7 +171,7 @@ provider shows the level in its own vocabulary (codex says `xhigh` for max). Pre
 |---|---|---|---|---|---|
 | claude-fable-5.1 | high | low | low  |  | levels only through claude code; the anthropic API row has no knob |
 | claude-opus-5.5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
-| claude-sonnet-6 | max | high | low |  |  |
+| claude-sonnet-5 | max | high | low |  |  |
 | gpt-6-astra | xhigh | medium | low  |  | the API's default is high; codex's own is medium |
 | gpt-6-luna | max | high | low |  |  |
 | kimi-k3 | max | high | low |  |  |

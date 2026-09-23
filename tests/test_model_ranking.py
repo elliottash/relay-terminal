@@ -507,7 +507,7 @@ class DefaultRulesTests(unittest.TestCase):
         self.assertEqual(pairs(alone['high']), [('guest:claude', 'fable', 'high')])
         # A harness is offered for high, main and flash (owner, 2026-09-21: "the worker should
         # allow the harness for flash"), never for lite: lite is nothing but background jobs, and
-        # roles.py will not hand one to an agent of its own. `sonnet` is claude-sonnet-6, the
+        # roles.py will not hand one to an agent of its own. `sonnet` is claude-sonnet-5, the
         # file's flash model.
         self.assertEqual(P.GUEST_CLASSES, ('high', 'main', 'flash'))
         self.assertEqual(pairs(alone['flash']), [('guest:claude', 'sonnet', 'low')])

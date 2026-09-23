@@ -396,7 +396,7 @@ class TierTableTests(unittest.TestCase):
             "openrouter": ("deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash",
                            "google/gemini-3.5-flash-lite"),
             "minimax": ("MiniMax-M3", "MiniMax-M2.7-highspeed", "google/gemini-3.8-flash"),
-            "anthropic": ("claude-opus-5-5", "claude-sonnet-6", "claude-haiku-4-5"),
+            "anthropic": ("claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"),
             "gemini": ("gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"),
         }
         for provider, (main, flash, lite) in expected.items():
@@ -649,7 +649,7 @@ class ModelCatalogTests(unittest.TestCase):
         was = {("kimi-code", "k3"): 44, ("kimi", "kimi-k3"): 44, ("glm", "glm-5.3"): 45,
                ("glm-coding", "glm-5.3"): 45, ("openai", "gpt-6-astra"): 53,
                ("openai", "gpt-6-sol"): 47, ("anthropic", "claude-opus-5-5"): 51,
-               ("anthropic", "claude-fable-5-1"): 53, ("anthropic", "claude-sonnet-6"): None,
+               ("anthropic", "claude-fable-5-1"): 53, ("anthropic", "claude-sonnet-5"): None,
                ("relay-free", "relay-main"): None}
         for (preset_id, model_id), score in was.items():
             rows = {row["id"]: row for row in P.catalog_rows(preset_id)}
