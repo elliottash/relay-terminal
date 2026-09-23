@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay guest session, 2026-09-23
-links: {plans: [reports/Multiple subscription routing in Relay.md], commits: [], evidence: [reports/Multiple subscription routing in Relay.md], related: [RND7, XH4K], github: null}
+links: {plans: [reports/Multiple subscription routing in Relay.md], commits: [f41d4e2074cee16b7d7fbab84cf1db31bd39283f], evidence: [reports/Multiple subscription routing in Relay.md], related: [RND7, XH4K], github: null}
 ---
 # Scope simultaneous subscription accounts in Relay
 
