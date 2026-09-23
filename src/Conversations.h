@@ -434,7 +434,7 @@ private:
     int m_nextOffset = -1, m_matches = 0, m_sessions = 0, m_threadCount = 0;
     double m_elapsed = 0;
     QTimer *m_debounce = nullptr, *m_ages = nullptr;
-    bool m_filling = false, m_sortChosen = false, m_batchRunning = false;
+    bool m_filling = false, m_batchRunning = false;
 
     // The context reads the query, the filters and the selection through agentScreen(), and
     // reveals a `session:` link through revealSession(); both are the pane's own.

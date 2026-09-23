@@ -1327,20 +1327,38 @@ private slots:
         QCOMPARE(manager.findChildren<QToolButton *>(QStringLiteral("stripChip")).size(), 0);
     }
 
-    void searchingSortsByBestMatchUntilTheUserSaysOtherwise() {
+    void searchingKeepsNewestFirstUntilTheUserChoosesAnotherSort() {
         SessionManager manager;
         QList<QJsonObject> asked;
         manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.resize(900, 650);
         manager.show();
         QVERIFY(!asked.last().contains(QStringLiteral("sort")));         // listing: newest first
         manager.setQuery(QStringLiteral("pelican"));
         QTest::qWait(200);                                              // the box is debounced
-        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("relevance"));
+        QVERIFY(!asked.last().contains(QStringLiteral("sort")));
+        QJsonObject newer = sessionItem(QStringLiteral("newer"), QStringLiteral("Pelican: latest"));
+        QJsonObject older = sessionItem(QStringLiteral("older"), QStringLiteral("Pelican: earlier"));
+        const double now = double(QDateTime::currentSecsSinceEpoch());
+        newer.insert(QStringLiteral("updated"), now);
+        older.insert(QStringLiteral("updated"), now - 86400);
+        newer.insert(QStringLiteral("match_count"), 1);
+        older.insert(QStringLiteral("match_count"), 1);
+        manager.setResults({{QStringLiteral("items"), QJsonArray{newer, older}}});
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/newest-first-search.png")));
         manager.setQuery(QString());
         QTest::qWait(200);
         QVERIFY(!asked.last().contains(QStringLiteral("sort")));
-        // A sort the user picks by hand stands, whatever they type next.
+        // Best match is still available explicitly and stands as the query changes.
         auto *sort = manager.findChild<QComboBox *>(QStringLiteral("sessionsSort"));
+        QCOMPARE(sort->currentData().toString(), QStringLiteral("recent"));
+        sort->setCurrentIndex(sort->findData(QStringLiteral("relevance")));
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("relevance"));
+        manager.setQuery(QStringLiteral("otter"));
+        QTest::qWait(200);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("relevance"));
         sort->setCurrentIndex(sort->findData(QStringLiteral("longest")));
         emit sort->activated(sort->currentIndex());
         manager.setQuery(QStringLiteral("pelican"));
@@ -1382,13 +1400,15 @@ private slots:
         auto *sort = manager.findChild<QComboBox *>(QStringLiteral("sessionsSort"));
         QHeaderView *header = tree->header();
         QVERIFY(header->sectionsClickable());
-        // Newest-first listing carries the arrow on Updated; a search sort has no column.
+        // Newest-first listing carries the arrow on Updated, including while searching.
         QCOMPARE(header->sortIndicatorSection(), 1);
         QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::DescendingOrder));
         manager.setQuery(QStringLiteral("pelican"));
         QTest::qWait(200);                                              // the box is debounced
-        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("relevance"));
-        QVERIFY(!header->isSortIndicatorShown());
+        QVERIFY(!asked.last().contains(QStringLiteral("sort")));
+        QVERIFY(header->isSortIndicatorShown());
+        QCOMPARE(header->sortIndicatorSection(), 1);
+        QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::DescendingOrder));
         manager.setQuery(QString());
         QTest::qWait(200);
         QVERIFY(header->isSortIndicatorShown());

@@ -1153,18 +1153,9 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_ages->setInterval(20'000);
     connect(m_ages, &QTimer::timeout, this, &SessionManager::refreshClosedAges);
 
-    connect(m_search, &QLineEdit::textChanged, this, [this](const QString &text) {
-        // Searching wants the best match first, listing wants the newest — until the user picks a
-        // sort by hand, after which their choice stands whatever they type.
-        if (!m_sortChosen) {
-            const QString want = text.trimmed().isEmpty() ? QStringLiteral("recent") : QStringLiteral("relevance");
-            if (m_sort->currentData().toString() != want) {
-                const QSignalBlocker quiet(m_sort);
-                m_sort->setCurrentIndex(m_sort->findData(want));
-                // Blocked, so the currentIndexChanged wiring did not see this: the arrow moves here.
-                updateSortIndicator();
-            }
-        }
+    connect(m_search, &QLineEdit::textChanged, this, [this] {
+        // Search narrows the list without changing its sort. Newest first stays the default;
+        // a sort selected in the combo or by a header click stays selected as the query changes.
         scheduleQuery();
     });
     // The Project chooser narrows the results to one folder (or no known folder). An explicit
@@ -1187,10 +1178,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     // Grouping is drawn here, not asked of the worker.
     connect(m_group, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this] { rebuildTree(selectedId()); });
-    // A sort the user picked by hand is theirs: the query text stops changing it. The list's own
-    // switches happen under a QSignalBlocker, so any change that arrives here is the user's.
     connect(m_sort, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-            [this] { m_sortChosen = true; updateSortIndicator(); });
+            [this] { updateSortIndicator(); });
     // A header click sorts by that column through the combo's own chain: the combo follows (so it
     // never names an order the list is not in), the click counts as the user's own sort, and the
     // header shows the arrow. Qt's own tree sort is never used (see the tree's construction).
