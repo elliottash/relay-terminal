@@ -625,6 +625,13 @@ class FactoryTests(unittest.TestCase):
             factory.resolve('openrouter', warnings)
             factory.resolve('gpt-9', warnings)
             self.assertEqual(len(warnings), 2)
+            # Card #D09N: a tier model by name goes to the keyed preset that serves it.
+            for spec_ in ('glm-5.3-flash', 'glm-coding/glm-5.3-flash'):
+                config, preset = factory.resolve(spec_, warnings)
+                self.assertEqual((config.model, config.api_key, preset), ('glm-5.3-flash', 'zkey', 'glm-coding'))
+            self.assertEqual(len(warnings), 2)
+            factory.resolve('glm/glm-5.3-flash', warnings)          # z.ai has no key here
+            self.assertIn("no stored key for preset 'glm'", warnings[-1])
             agent, label, warns = factory(catalog.get('general'), None, 'low', lambda e: None, 'a1')
             self.assertEqual(agent.provider.extra['reasoning_effort'], 'low')
             self.assertEqual(label, 'kimi-k3')

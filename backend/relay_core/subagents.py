@@ -41,7 +41,7 @@ from typing import Callable
 from . import prompt_profiles
 from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
 from .agents_defs import DEFAULT_ALIASES, EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
-from .presets import PRESETS, apply_effort, match_preset
+from .presets import PRESETS, TIER_DEFAULTS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
 from .roles import ROLES, canonical_role
 from . import sessions as session_files
@@ -261,17 +261,32 @@ class SubagentFactory:
         if preset is None:
             preset = next((p for p in PRESETS.values()
                            if spec_ == p.model or spec_.endswith("/" + p.model) or spec_ == f"{p.id}/{p.model}"), None)
+        tier_model = None
+        if preset is None:
+            # A provider's other tier models ("glm-5.3-flash", "glm-coding/glm-5.3-flash") are not
+            # any preset's default model, but a delegating agent names them (card #D09N).
+            tier_model = self._tier_model(spec_)
+            preset = PRESETS.get(tier_model[0]) if tier_model else None
         if preset is None:
             warnings.append(f"model {spec_!r} is not a Relay preset; using the main model")
             return base
-        if preset.id == base_preset:
+        if preset.id == base_preset and tier_model is None:
             return base
         key = self.key_lookup(preset.id) if self.key_lookup else ""
         if not key:
             warnings.append(f"no stored key for preset {preset.id!r}; using the main model")
             return base
-        config = ProviderConfig(preset.base_url, preset.model, key, dict(preset.extra), self.config.max_tokens)
+        model_name, extra = (tier_model[1], {**preset.extra, **tier_model[2]}) if tier_model else (preset.model, preset.extra)
+        config = ProviderConfig(preset.base_url, model_name, key, dict(extra), self.config.max_tokens)
         return config, preset.id, self._named_tier(config, preset.id)
+
+    def _tier_model(self, spec_: str) -> tuple[str, str, dict] | None:
+        """(preset, model, extra) from the tier table for a model name, preferring a keyed preset."""
+        found = [(preset_id, model, extra) for tiers in TIER_DEFAULTS.values()
+                 for preset_id, model, extra in tiers.values()
+                 if preset_id in PRESETS and spec_ in (model, f"{preset_id}/{model}")]
+        keyed = [row for row in found if self.key_lookup and self.key_lookup(row[0])]
+        return (keyed or found or [None])[0]
 
     def _named_tier(self, config: ProviderConfig, preset_id: str | None) -> str | None:
         """The tier list that names (preset, model), "main" for the pane's own Main model."""
