@@ -778,6 +778,15 @@ void Pane::startTerminal(bool cleanShell) {
 #endif
         m_shellUnit.clear();
         bool started = false;
+        // A pane gets the inline pyplot backend unless its parent explicitly chose a backend.
+        // Use a child-only environment: other Relay processes and existing panes keep theirs.
+        QStringList shellEnvironment;
+        if (qEnvironmentVariableIsEmpty("MPLBACKEND"))
+            shellEnvironment << QStringLiteral("MPLBACKEND=module://relay_mpl_backend");
+        const QString scriptsPath = m_data + QStringLiteral("/scripts");
+        const QString parentPythonPath = qEnvironmentVariable("PYTHONPATH");
+        shellEnvironment << QStringLiteral("PYTHONPATH=") +
+            (parentPythonPath.isEmpty() ? scriptsPath : parentPythonPath + QDir::listSeparator() + scriptsPath);
         if (isolation::enabled() && isolation::available()) {
             // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
             // command and the shell keeps running; Relay reports the kill from memory.events.
@@ -792,13 +801,14 @@ void Pane::startTerminal(bool cleanShell) {
                  // Interactive bash ignores SIGTERM; SIGHUP ends it (and its jobs) when the scope stops.
                  QStringLiteral("KillSignal=SIGHUP"), QStringLiteral("TimeoutStopSec=5"),
                  QStringLiteral("OOMPolicy=") + (QSettings().value(QStringLiteral("isolation/shell_oom_policy")).toString() == QStringLiteral("stop")
-                                                     ? QStringLiteral("stop") : QStringLiteral("continue"))}, shell), m_cwd);
+                                                     ? QStringLiteral("stop") : QStringLiteral("continue"))}, shell), m_cwd,
+                shellEnvironment);
         } else {
             if (isolation::enabled() && !s_isolationNoticeShown) {
                 s_isolationNoticeShown = true;
                 QTimer::singleShot(1500, this, [this] { status(QStringLiteral("Per-pane memory isolation is unavailable (no systemd user session); panes run unisolated.")); });
             }
-            started = m_backend->startProgram(shell.first(), shell.mid(1), m_cwd);
+            started = m_backend->startProgram(shell.first(), shell.mid(1), m_cwd, shellEnvironment);
         }
         if (!started) throw std::runtime_error("The pane's shell could not be started.");
         m_oomKills = -1;
@@ -1954,4 +1964,3 @@ void Pane::pollShell() {
             status(QStringLiteral("Your shell already has a DEBUG hook. It was left untouched; use native mode or relaunch with --clean-shell."));
         }
     }
-
