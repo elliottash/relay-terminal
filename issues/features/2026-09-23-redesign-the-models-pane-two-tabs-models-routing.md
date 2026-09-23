@@ -1,7 +1,7 @@
 ---
 id: 00G1
 type: work
-status: executing
+status: planned
 labels: [feature, models, ui, design]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
