@@ -5404,15 +5404,9 @@ private:
         m_actionRowLayout->setSpacing(6);
         m_actionRow->hide();
         composerLayout->addWidget(m_actionRow);
-        m_terminalChip = new QToolButton(composer);
-        m_terminalChip->setObjectName(QStringLiteral("terminalContextChip"));
-        m_terminalChip->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        m_terminalChip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
-        m_terminalChip->setToolTip(QStringLiteral("Preview, attach or remove terminal output; choose sharing for this pane"));
-        connect(m_terminalChip, &QToolButton::clicked, this, [this] { terminalContextMenu(); });
-        composerLayout->addWidget(m_terminalChip);
+        // Terminal output rides along without anything in the prompt box (owner, 2026-09-22 #TCXT):
+        // previewing, attaching, removing it and the pane's sharing are `/terminal`'s menu.
         relay::SettingsWatch::instance().listen(this, [this] { syncTerminalContext(); });
-        refreshTerminalChip();
         m_busyLine = new PaneBusyLine(this);
         m_busyLine->setPromptEditor(m_editor);   // the row's left edge is the prompt text's (#HQ2B)
         // The relay mark at its left opens this pane's Activity pane (#4X53) — the same call the
@@ -9139,23 +9133,7 @@ private:
         return {{QStringLiteral("mode"), mode}, {QStringLiteral("records"), selected}};
     }
 
-    void refreshTerminalChip() {
-        if (!m_terminalChip) return;
-        m_terminalChip->setVisible(hasShell());
-        const QJsonArray selected = terminalSnapshot().value(QStringLiteral("records")).toArray();
-        QString text = QStringLiteral("Terminal: ") + terminalSharingMode();
-        if (!selected.isEmpty()) {
-            const auto row = selected.first().toObject();
-            const QString state = row.value(QStringLiteral("state")).toString();
-            const QString outcome = state == QStringLiteral("running") ? state
-                : row.value(QStringLiteral("exit_status")).toInt() == 0 ? QStringLiteral("succeeded") : QStringLiteral("failed");
-            text = QStringLiteral("Terminal: %1 · %2").arg(row.value(QStringLiteral("command")).toString().left(48), outcome);
-        } else if (m_terminalRemoved) text = QStringLiteral("Terminal: removed for next prompt");
-        m_terminalChip->setText(text);
-    }
-
     void syncTerminalContext() {
-        refreshTerminalChip();
         if (!m_configured) return;
         const QString mode = terminalSharingMode();
         send({{"type", "terminal_context_update"}, {"payload", QJsonObject{
@@ -9175,13 +9153,20 @@ private:
             send({{"type", "terminal_context_preview"}, {"payload", snapshot}});
         });
         auto *remove = menu.addAction(QStringLiteral("Remove from next prompt"));
-        connect(remove, &QAction::triggered, this, [this] { m_terminalRemoved = true; m_terminalAttachment = {}; refreshTerminalChip(); });
+        connect(remove, &QAction::triggered, this, [this] {
+            m_terminalRemoved = true; m_terminalAttachment = {};
+            status(QStringLiteral("Terminal output left out of the next prompt."));
+        });
         auto *attach = menu.addMenu(QStringLiteral("Attach output"));
         attach->setEnabled(terminalSharingMode() != QStringLiteral("off"));
         for (const auto value : m_terminalRecords.records()) {
             const auto record = value.toObject();
             auto *action = attach->addAction(record.value(QStringLiteral("command")).toString().left(100));
-            connect(action, &QAction::triggered, this, [this, record] { m_terminalAttachment = record; m_terminalRemoved = false; refreshTerminalChip(); });
+            connect(action, &QAction::triggered, this, [this, record] {
+                m_terminalAttachment = record; m_terminalRemoved = false;
+                status(QStringLiteral("Next prompt carries the output of: %1")
+                           .arg(record.value(QStringLiteral("command")).toString().left(48)));
+            });
         }
         auto *ask = menu.addAction(QStringLiteral("Ask about this output"));
         ask->setEnabled(!selected.isEmpty());
@@ -9196,7 +9181,7 @@ private:
         }
         auto *follow = menu.addAction(QStringLiteral("Use global sharing setting"));
         connect(follow, &QAction::triggered, this, [this] { m_terminalSharingOverride.clear(); syncTerminalContext(); });
-        menu.exec(m_terminalChip->mapToGlobal(QPoint(0, m_terminalChip->height())));
+        menu.exec(m_editor->mapToGlobal(QPoint(0, 0)));
     }
 
     // Relay-run terminal commands: the command line, its exit status and, on engines that can
@@ -9389,6 +9374,7 @@ private:
             {QStringLiteral("profile"), QStringLiteral("[name]"), QStringLiteral("Model profile: switch the five tier lists to a named set (Options › Models › profile); alone, a picker")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
             {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
+            {QStringLiteral("terminal"), QString(), QStringLiteral("Terminal output for the next prompt: preview, attach, remove; this pane's sharing")},
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
             {QStringLiteral("fork"), QString(), QStringLiteral("Continue this conversation in a new pane")},
@@ -9916,6 +9902,9 @@ private:
             if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
             m_contextNotePending = true;
             send({{"type", "context"}});
+        } else if (name == QStringLiteral("terminal")) {
+            if (!hasShell()) status(QStringLiteral("This pane has no terminal."));
+            else terminalContextMenu();
         } else if (name == QStringLiteral("rewind")) openRewind();
         else if (name == QStringLiteral("rewind-code")) openRewind(QStringLiteral("code"));
         else if (name == QStringLiteral("fork")) requestFork();
@@ -15123,7 +15112,7 @@ private:
         entry.shellText = shellText;
         entry.noHandoff = m_remoteSubmit;
         if (!m_remoteSubmit && hasShell()) entry.terminalSnapshot = terminalOverride.isEmpty() ? terminalSnapshot() : terminalOverride;
-        m_terminalAttachment = {}; m_terminalRemoved = false; refreshTerminalChip();
+        m_terminalAttachment = {}; m_terminalRemoved = false;
         if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
@@ -19066,7 +19055,6 @@ private:
     QPointer<relay::sessioninfo::InfoView> m_infoView;                // the ⓘ pane, bound here
     relay::conversations::FindBar *m_findBar = nullptr;
     relay::terminalcontext::Records m_terminalRecords;
-    QToolButton *m_terminalChip = nullptr;
     QString m_terminalSharingOverride;
     QJsonObject m_terminalAttachment, m_routedTerminalSnapshot;
     bool m_terminalRemoved = false, m_terminalSyncPending = false;

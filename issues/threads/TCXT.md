@@ -33,3 +33,6 @@ Stage 1 and stage 2 (native Bash/Zsh/Fish/PowerShell hooks) are landed: integrat
 
 <!-- relay:entry 20260923T012903Z-0t author=agent kind=event model=claude-opus-5-5 pane=0fa7361c turn=aa8f43a16ef04af5b0021f990db8b0fe/761deb2025cf42a7b393647dbcc5c703 -->
 - ✦ agent moved this card · Executing → Needs verification · Stages 1 and 2 landed (567d9f18, 88c69ffb and earlier). Targeted tests and the live GUI drive pass on the exact-tree binary. Two-pane and SSH live checks plus independent verification remain. · evidence docs/qa_evidence/2026-09-22-terminal-context/ · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260923T020500Z-nc author=agent kind=decision model=claude-opus-5-5 -->
+Owner, 2026-09-22, on the "Terminal: … · succeeded" chip above the prompt: "what is this new thing in the top left of the prompt box? i did not want that", then agreed to remove it. The chip is gone from the composer; automatic sharing is unchanged, the global Automatic/Manual/Off setting stays in Options, and the chip's menu (preview, attach, remove for next prompt, ask about it, this pane's sharing) is now `/terminal`. Removing or attaching says so in the status line instead of on the chip. Card "Done means" and plan updated to match.

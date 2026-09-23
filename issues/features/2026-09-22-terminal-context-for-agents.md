@@ -30,7 +30,7 @@ This turn saves the plan. Implementation has not started. The recommendations be
 
 - After a composer command, asking what just ran returns the actual command, host/directory, status and captured output in native and guest agents, without rerunning it or requiring a paste.
 - Concurrent panes and SSH reconnects cannot substitute another command; a queued question keeps the terminal snapshot selected at submission, and unavailable or truncated output is explicitly labelled.
-- Automatic/manual/off sharing, a preview/removal chip, and bounded read-only retrieval work independently of persistent history indexing; shell completion alone never starts inference.
+- Automatic/manual/off sharing, preview/removal through `/terminal` (no chip in the prompt box: owner, 2026-09-22), and bounded read-only retrieval work independently of persistent history indexing; shell completion alone never starts inference.
 - Native-shell commands become available in stage 2 when integration can identify their boundaries; unsupported capture and full-screen applications report their limits instead of inventing output.
 - Targeted tests and isolated GUI evidence establish the behavior, followed by separate verification before closure. Stage 1 alone does not close this full feature card.
 
@@ -54,7 +54,7 @@ Make “what command did I just run and what did it say?” and “why did that 
 
 Automatic sharing is on for the attached terminal pane. Send the latest user-run command with a head/tail excerpt and compact metadata for a few preceding commands; aim for 2–4k tokens total and enforce a hard byte ceiling. Keep user-run and agent-run origins separate, so agent tool activity cannot replace “what I just ran.” Include any currently running command as running, without a fabricated exit status.
 
-Show a removable “Terminal: npm test · failed” chip before submission. Its preview must match the actual sanitized payload. Explicit selection wins over automatic selection. Removing the chip excludes that snapshot from the turn, including automatic retrieval of the excluded record. A global setting provides Automatic / Manual / Off with a per-pane override. Manual grants only attached records; Off supplies no terminal metadata or read capability. Changing to Off revokes future reads, but cannot retract content already sent to a provider.
+Nothing is shown in the prompt box (owner, 2026-09-22, after the chip landed: "i did not want that"). `/terminal` opens a menu to preview, attach or remove the output for the next prompt and to set this pane's sharing. Its preview must match the actual sanitized payload. Explicit selection wins over automatic selection. Removing it excludes that snapshot from the turn, including automatic retrieval of the excluded record. A global setting provides Automatic / Manual / Off with a per-pane override. Manual grants only attached records; Off supplies no terminal metadata or read capability. Changing to Off revokes future reads, but cannot retract content already sent to a provider.
 
 Persistent history indexing and live sharing remain independent. Indexing disabled must not break live context; sharing disabled must not silently enable indexing. Existing history settings continue controlling disk retention. Default new live records to memory only, bounded per pane (initial proposal: 32 commands, 64 KiB each, 2 MiB total). Report eviction explicitly. Do not silently expand existing disk retention. A transcript retains the excerpts actually sent according to existing conversation retention.
 
