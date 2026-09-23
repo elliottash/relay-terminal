@@ -312,8 +312,9 @@ void GlobalsPane::display(const QJsonObject &record) {
     const QSignalBlocker blocker(m_editor);
     m_editor->setPlainText(m_original);
     m_selected = identity(record);
-    if (record.isEmpty() && m_section->currentIndex() == kSuggestions) {
-        m_source->setText(tr("Select a suggestion to keep, edit or reject it."));
+    if (record.isEmpty()) {
+        m_source->setText(m_section->currentIndex() == kSuggestions ? tr("Select a suggestion to keep, edit or reject it.")
+                                                                    : tr("Select a record to inspect or edit its source."));
         updateButtons();
         return;
     }

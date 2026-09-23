@@ -263,6 +263,7 @@ private slots:
         pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(0);
         QTest::qWait(20);
         QVERIFY(split->sizes().at(0) <= listBefore + 1);
+        QCOMPARE(pane.findChild<QLabel *>("globalsSource")->text(), QString("Select a record to inspect or edit its source."));
         pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(4);
         QCOMPARE(pane.findChild<QLabel *>("globalsNotice")->text(), QString("No suggestions waiting."));
         QVERIFY(pane.findChild<QLabel *>("globalsSource")->text().startsWith("Select a suggestion"));
