@@ -1,0 +1,4 @@
+openrouter main: TIER_DEFAULTS names deepseek/deepseek-v4.1-flash (deepseek-v4.1-flash), but model-ranking.md gives z-ai/glm-5.3-flash (glm-5.3-flash) — its Provider picks main cell is glm-5.3-flash
+gemini main: TIER_DEFAULTS names gemini-3.1-pro-preview (gemini-3.1-pro-preview), but model-ranking.md gives gemini-flash-latest (gemini-flash-latest) — that is its highest-scored main model
+gemini flash: TIER_DEFAULTS names gemini-3.8-flash (gemini-3.8-flash), but model-ranking.md gives gemini-flash-latest (gemini-flash-latest) — that is its highest-scored flash model
+exit 1

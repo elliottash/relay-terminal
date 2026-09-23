@@ -1,0 +1,28 @@
+ranked   = what model-ranking.md gives with only that provider usable
+defaults = presets.TIER_DEFAULTS (a guest harness has none); * marks a disagreement
+guest:codex   ranked    high gpt-6-astra                         main gpt-6-sol                           flash gpt-6-luna                          lite -
+guest:claude  ranked    high fable                               main opus                                flash sonnet                              lite -
+glm-coding    ranked    high glm-5.3                             main glm-5.3                             flash glm-5.3-flash                       lite -
+              defaults                                           main glm-5.3                             flash glm-5.3-flash                       lite google/gemini-3.8-flash@openrouter
+kimi-code     ranked    high k3                                  main k3                                  flash kimi-for-coding-highspeed           lite -
+              defaults                                           main k3                                  flash kimi-for-coding-highspeed           lite google/gemini-3.8-flash@openrouter
+minimax       ranked    high MiniMax-M3                          main MiniMax-M3                          flash MiniMax-M2.7-highspeed              lite -
+              defaults                                           main MiniMax-M3                          flash MiniMax-M2.7-highspeed              lite google/gemini-3.8-flash@openrouter
+relay-pro     ranked    high relay-pro-high                      main relay-pro-main                      flash relay-pro-flash                     lite -
+              defaults  high relay-pro-high                      main relay-pro-main                      flash relay-pro-flash                     lite relay-lite@relay-free
+openai        ranked    high gpt-6-astra                         main gpt-6-sol                           flash gpt-6-luna                          lite -
+              defaults                                           main gpt-6-sol                           flash gpt-6-luna                          lite gpt-6-luna
+anthropic     ranked    high claude-fable-5-1                    main claude-opus-5-5                     flash claude-sonnet-5                     lite -
+              defaults                                           main claude-opus-5-5                     flash claude-sonnet-5                     lite claude-haiku-4-5
+gemini        ranked    high gemini-pro-latest                   main gemini-flash-latest                 flash gemini-flash-latest                 lite gemini-3.5-flash-lite
+              defaults                                           main gemini-3.1-pro-preview*             flash gemini-3.8-flash*                   lite gemini-3.5-flash-lite
+deepseek      ranked    high deepseek-flash                      main deepseek-flash                      flash deepseek-flash                      lite -
+              defaults                                           main deepseek-flash                      flash deepseek-flash                      lite deepseek-flash
+glm           ranked    high glm-5.3                             main glm-5.3                             flash glm-5.3-flash                       lite -
+              defaults                                           main glm-5.3                             flash glm-5.3-flash                       lite google/gemini-3.8-flash@openrouter
+kimi          ranked    high kimi-k3                             main kimi-k3                             flash kimi-k2.7-code-highspeed            lite -
+              defaults                                           main kimi-k3                             flash kimi-k2.7-code-highspeed            lite google/gemini-3.8-flash@openrouter
+openrouter    ranked    high z-ai/glm-5.3                        main z-ai/glm-5.3-flash                  flash deepseek/deepseek-v4.1-flash        lite google/gemini-3.5-flash-lite
+              defaults                                           main deepseek/deepseek-v4.1-flash*       flash deepseek/deepseek-v4.1-flash        lite google/gemini-3.5-flash-lite
+relay-free    ranked    high relay-main                          main relay-main                          flash relay-flash                         lite relay-lite
+              defaults                                           main relay-main                          flash relay-flash                         lite relay-lite

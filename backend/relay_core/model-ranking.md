@@ -94,6 +94,35 @@ the list, they run on Relay Free's role for the tier instead.
 - A serving variant (`-highspeed`, `k3-256k`, `:batch`) is a different model to the person picking
   one, so it gets its own row (design section 3.3). It may share a score; it rarely shares a class.
 
+## Refreshing the models
+
+When a lab ships new models, `scripts/relay-models.py` (card #MCP7) does the mechanical part and
+this file stays the one place the *choices* are written. Five steps, in order:
+
+1. **See what is new**: `python3 scripts/relay-models.py discover`. It asks everything this
+   machine can reach — each built-in provider with a stored key (its `/models` listing), the
+   installed codex CLI's catalogue, Claude Code's aliases and OpenRouter's public listing — and
+   prints, per provider, the models it serves that the catalog does not know (NEW) and the
+   catalog models it no longer serves (GONE). It never prints a key; a source it cannot reach is
+   one line and the rest carry on.
+2. **Rename a model that replaced another** (same family, new version — Opus 5 became Opus 5.5):
+   `python3 scripts/relay-models.py rename <old-id> <new-id> --dry-run`, then without `--dry-run`.
+   It rewrites live code, tests, fixtures and docs, never `issues/` or `docs/qa_evidence/`, which
+   record what ran at the time. Anthropic's API spells a version's dot as a dash
+   (`claude-opus-5-5`); the name people read keeps the dot (`claude-opus-5.5`), which the
+   catalog row's `name` says — pass `--name old=new` when the name changes too.
+3. **Set the defaults**: `python3 scripts/relay-models.py set <provider> high=<id> main=<id>
+   flash=<id>` (any subset of the four classes). It writes the Models rows' `classes` here,
+   `presets.TIER_DEFAULTS` and the `MODEL_CATALOG` rows and tier tags in one step, adds a row for
+   a model the catalog has never seen, and refuses — changing nothing — when it cannot find what
+   it means to edit. A brand-new model arrives with a blank `score` and no Levels row: fill them
+   in here by hand if the defaults should differ from the blank-cell rules above.
+4. **Prove it**: `python3 scripts/relay-models.py check` (the places above agree), `show` (the
+   high/main/flash/lite grid each provider now gets), then `tests/test_relay_models.py`,
+   `tests/test_model_ranking.py`, `tests/test_presets.py` and `tests/test_tier_lists.py`. Tests
+   that name a model the refresh moved will fail on purpose; update their expectations.
+5. **Land it** with `scripts/land.py`: every command above prints the paths it touched.
+
 ## Providers
 
 | provider | kind | order |
