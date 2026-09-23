@@ -442,6 +442,7 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 | Profiles / colour-scheme UI, settings dialogs | ❌ (`ColorScheme` struct only) | ❌ | ✅ | |
 | Silence/activity monitoring | ❌ (host can use `onOutput`) | ❌ | ✅ | |
 | Inline images: kitty graphics, iTerm2 `OSC 1337 File=`, sixel (#1MGS) | 🟡 (the same code path, since images are read out of the stream by `session/ImageProtocol` before any core sees them, but this core is not built on the aarch64 dev box, so untested) | ✅ (drawn by the view over `relay-image:` link rows, `core/InlineImage.h`) | ❌ | ImageTest, ViewTest image cases, CoreTest::imageRowsKeepTheirColumn, docs/qa_evidence/2026-09-22-inline-images |
+| Inline media: audio controls, chart/video/PDF/SVG previews, animation, tables and math (#MDA7) | 🟡 (shared view path; this core is not built on the aarch64 dev box) | ✅ (`relay-media:` rows painted and clicked by the view) | ❌ | ViewTest media cases, MarkdownAnsi tests, docs/qa_evidence/2026-09-23-inline-media |
 | Linux | ✅ | ✅ | ✅ | |
 | macOS | 🟡 code paths exist (forkpty+select, Cmd shortcuts, Apple Color Emoji), never built | 🟡 | ❌ | |
 | Windows | ❌ ConPTY stub | ❌ | ❌ | |
