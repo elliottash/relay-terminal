@@ -774,7 +774,7 @@ def main():
                      "agent_busy": turns.busy,
                      "text": str(exc)[:2000] if configure_fault or isinstance(exc, (ValueError, OSError, keystore.KeystoreError))
                      else f"Protocol error ({type(exc).__name__})."}
-            if kind in ("set_model", "set_agent_role") and turns.agent is not None:
+            if locals().get("kind") in ("set_model", "set_agent_role") and turns.agent is not None:
                 active = turns.agent
                 error.update(event="model_switch_refused", code="model_switch_failed", at="request",
                              model=request.get("model", ""), current_model=active.config.model,
