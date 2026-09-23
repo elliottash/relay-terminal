@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Render a bounded LaTeX math manifest to a persistent PNG for Relay."""
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+# Agent replies are untrusted TeX. Only math commands are allowed; TeX file I/O, definitions,
+# catcode changes and shell escapes cannot enter the generated document.
+COMMANDS = set((
+    "frac dfrac tfrac sqrt sum prod int iint iiint lim log ln exp sin cos tan cot sec csc "
+    "arcsin arccos arctan sinh cosh tanh min max sup inf arg det dim gcd ker Pr "
+    "alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda "
+    "mu nu xi pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega "
+    "Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega infty partial nabla "
+    "cdot times div pm mp le leq ge geq ne neq approx sim equiv propto in notin subset "
+    "subseteq supset supseteq cup cap emptyset forall exists neg land lor to mapsto "
+    "rightarrow leftarrow Rightarrow Leftarrow Leftrightarrow iff implies longrightarrow "
+    "left right bigl bigr Bigl Bigr mathbb mathcal mathrm mathbf mathit text operatorname "
+    "overline underline hat bar vec dot ddot tilde widehat widetilde boxed "
+    "underbrace overbrace begin end quad qquad hspace vspace displaystyle textstyle "
+    "smallmatrix matrix pmatrix bmatrix cases aligned align gathered substack "
+    "ldots cdots vdots ddots dots dotsc dotsb ell dotsm "
+    "langle rangle lceil rceil lfloor rfloor vert Vert mid parallel perp angle triangle "
+    "lbrace rbrace lvert rvert lVert rVert color cancels"  # 'color' rejected below
+).split()) - {"color", "cancels", "vspace", "hspace"}
+
+
+def validate(expr):
+    if not isinstance(expr, str) or not expr or len(expr) > 4096 or "\x00" in expr:
+        raise ValueError("math expression is empty or too long")
+    if any(char in expr for char in ("%", "#", "\\\\", "\r", "\n")):
+        raise ValueError("math expression contains a TeX control character")
+    for match in re.finditer(r"\\([A-Za-z]+|.)", expr):
+        if match.group(1) not in COMMANDS and match.group(1) not in ("{", "}", "_", "^", "$", "&", ",", ";", ":", "!", " "):
+            raise ValueError("unsupported LaTeX command: " + match.group(1))
+    if expr.count("{") != expr.count("}"):
+        raise ValueError("unbalanced math braces")
+    return expr
+
+
+def render(manifest):
+    data = json.loads(Path(manifest).read_text(encoding="utf-8"))
+    if data.get("version") != 1 or data.get("kind") != "math":
+        raise ValueError("not a Relay math manifest")
+    expr = validate(data.get("latex"))
+    latex = shutil.which("latex")
+    dvisvgm = shutil.which("dvisvgm")
+    raster = shutil.which("rsvg-convert")
+    if not all((latex, dvisvgm, raster)):
+        raise ValueError("math needs latex, dvisvgm and rsvg-convert")
+    root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "relay" / "media"
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o700)
+    target = root / (hashlib.sha256(expr.encode()).hexdigest() + "-math.png")
+    if target.is_file():
+        return target
+    document = ("\\documentclass[12pt]{article}\n\\usepackage{amsmath,amssymb}\n"
+                "\\pagestyle{empty}\n\\begin{document}\n\\[\n" + expr +
+                "\n\\]\n\\end{document}\n")
+    with tempfile.TemporaryDirectory(prefix="relay-math-") as tmp:
+        directory = Path(tmp)
+        source = directory / "math.tex"
+        source.write_text(document, encoding="utf-8")
+        env = os.environ.copy()
+        env["openin_any"] = "p"
+        env["openout_any"] = "p"
+        for argv in ([latex, "-no-shell-escape", "-halt-on-error", "-interaction=nonstopmode", "math.tex"],
+                     [dvisvgm, "--no-fonts", "--exact-bbox", "-o", "math.svg", "math.dvi"],
+                     [raster, "--zoom=2", "-o", "math.png", "math.svg"]):
+            result = subprocess.run(argv, cwd=directory, env=env, stdin=subprocess.DEVNULL,
+                                    capture_output=True, timeout=8, check=False)
+            if result.returncode:
+                raise ValueError((result.stderr or result.stdout).decode("utf-8", "replace")[-400:])
+        png = directory / "math.png"
+        if png.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError("rendered math exceeds 16 MiB")
+        target.write_bytes(png.read_bytes())
+        target.chmod(0o600)
+    return target
+
+
+if __name__ == "__main__":
+    try:
+        print(render(sys.argv[1]))
+    except (IndexError, KeyError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        print("relay-render-math: " + str(exc), file=sys.stderr)
+        raise SystemExit(1)
