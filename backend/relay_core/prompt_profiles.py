@@ -178,7 +178,8 @@ def skill_names(index) -> str:
 
 
 def system_prompt(*, workspace: str, skills=None, instructions: str = "",
-                  board: str = "", board_note: str = "") -> str:
+                  board: str = "", board_note: str = "", memory: str = "",
+                  skills_line: str | None = None) -> str:
     """The short profile's prompt, assembled in `Agent.system_prompt`'s own stable-first order.
 
     The project's instruction files stay. They are the user's own rules for this repository rather
@@ -191,9 +192,24 @@ def system_prompt(*, workspace: str, skills=None, instructions: str = "",
     last for the reason the full profile puts them last: the note changes while the conversation
     runs, and on llama.cpp a line that moves in the middle throws away every cached token below it.
     """
-    sections = [SYSTEM_SHORT, instructions or "", "Chosen workspace: " + workspace,
-                skill_names(skills) if skills is not None else "", board or "", board_note or ""]
-    return "\n\n".join(text for text in (s.strip("\n") for s in sections) if text)
+    return "\n\n".join(text for _, text in sections(
+        workspace=workspace, skills=skills, instructions=instructions, board=board,
+        board_note=board_note, memory=memory, skills_line=skills_line))
+
+
+def sections(*, workspace: str, skills=None, instructions: str = "", board: str = "",
+             board_note: str = "", memory: str = "", skills_line: str | None = None) -> list[tuple[str, str]]:
+    """`system_prompt`'s sections by name, empty ones dropped (#0C0V: `/context` counts them).
+
+    `skills_line` is the names line already rendered — what `Agent` pins for the life of a
+    conversation — and wins over `skills`, which renders it now. `memory` is its own section so
+    that a memory change can be told apart from an instruction-file change.
+    """
+    names = skills_line if skills_line is not None else (skill_names(skills) if skills is not None else "")
+    named = [("base", SYSTEM_SHORT), ("instructions", instructions or ""), ("memory", memory or ""),
+             ("workspace", "Chosen workspace: " + workspace), ("skills", names),
+             ("board_policy", board or ""), ("board_note", board_note or "")]
+    return [(name, text.strip("\n")) for name, text in named if text.strip("\n")]
 
 
 def tool_specs(specs: list[dict]) -> list[dict]:

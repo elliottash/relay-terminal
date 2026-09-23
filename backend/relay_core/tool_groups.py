@@ -53,6 +53,43 @@ LOAD_TOOLS_SPEC = {"type": "function", "function": {
         "required": ["group"], "additionalProperties": False}}}
 
 
+class LoadedGroups(set):
+    """The groups `load_tools` fetched in this conversation, iterated in the order they were loaded.
+
+    A set to everything that asks "is it loaded", so a caller holding a plain set is unaffected;
+    the order is what `Agent.tools` appends them in (#0C0V). Iterating `GROUPS` instead put a group
+    loaded second *before* one loaded first whenever it came earlier in this module — an insert in
+    the middle of the tool list, which re-bills every cached token after it.
+    """
+
+    def __init__(self, groups=()):
+        super().__init__()
+        self._order: list[str] = []
+        for group in groups:
+            self.add(group)
+
+    def add(self, group) -> None:
+        if group not in self:
+            self._order.append(group)
+        super().add(group)
+
+    def discard(self, group) -> None:
+        if group in self:
+            self._order.remove(group)
+        super().discard(group)
+
+    def remove(self, group) -> None:
+        self._order.remove(group)
+        super().remove(group)
+
+    def clear(self) -> None:
+        self._order.clear()
+        super().clear()
+
+    def __iter__(self):
+        return iter(list(self._order))
+
+
 def group_of(name: str) -> str | None:
     return _OWNER.get(name)
 

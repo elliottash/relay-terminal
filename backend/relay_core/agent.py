@@ -5,6 +5,7 @@ import contextlib
 import copy
 import dataclasses
 import json
+import re
 import threading
 import time
 import itertools
@@ -551,6 +552,13 @@ def _format_terminal_location(context) -> str:
 #: point: they can only append, never insert.
 TAIL_TOOLS = ("set_keybinding", "type_into_program", "run_in_terminal")
 
+#: The system prompt's sections that change while a conversation runs (#0C0V step 6): the skill
+#: catalogue (a skill edited or imported), the project instruction files, the Board memories and
+#: the Board claims line. They are pinned at the conversation's first turn and a later change is
+#: told in a Relay context note (`Agent._prompt_change_note`), so the first message — and every
+#: provider's cached prefix behind it — stays byte-identical for the life of the conversation.
+VOLATILE_SECTIONS = ("skills", "instructions", "memory", "board_note")
+
 
 def validate_tool_scope(value) -> str:
     """The named tool scope of `configure {context: {scope}}` (protocol 33, card #AGNT).
@@ -701,7 +709,7 @@ class Agent:
         # The on-demand tool groups `load_tools` has fetched in this conversation (#GMCF decision
         # 9). Per conversation, not per turn: a schema the model has been given stays given, and a
         # new conversation starts from the names again.
-        self.loaded_tool_groups: set[str] = set()
+        self.loaded_tool_groups: set[str] = tool_groups.LoadedGroups()
         self.completion_check = completion_check
         self.audit_requests = audit_requests
         self._announce = False   # emit requests/todos events on change (after construction)
@@ -813,12 +821,17 @@ class Agent:
         self.todos = todo_tool.TodoList()
         # A new conversation starts from the group names again (#GMCF 9): the schemas were loaded
         # into a conversation, and this one has not asked for them.
-        self.loaded_tool_groups = set()
+        self.loaded_tool_groups = tool_groups.LoadedGroups()
         self.plan_path = None
         # Session info (card #Y63Z): every model this conversation ran on, and the provider-reported
         # token totals (and cost, where the provider reports one). Kept in the session file.
         self.usage_totals = sessions_usage.empty_usage()
         self.models_used: list[str] = []
+        # A new conversation pins its prompt afresh at its first turn, and its prefix check
+        # starts with nothing to compare against (#0C0V).
+        self._prompt_pins = None
+        self._prompt_told = {}
+        self._reset_prefix_check()
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.context_invalidate()
 
@@ -1042,9 +1055,21 @@ class Agent:
         The plan-mode note used to sit in the middle and toggle with the mode: it is now the
         turn's Relay context (`plan_mode_note`), which costs nothing above it.
 
+        Since #0C0V the sections in `VOLATILE_SECTIONS` are **pinned** once the conversation has
+        started: the prompt carries the values it was first sent with, for the life of the
+        conversation and across a restart, and a later change reaches the model as a Relay context
+        note on its next turn (`_prompt_change_note`) — so a claim or a memory never rewrites the
+        first message, which on a hosted provider re-bills the whole conversation.
+        """
+        return "\n\n".join(text for _, text in self.prompt_sections())
+
+    def prompt_sections(self) -> list[tuple[str, str]]:
+        """`system_prompt`'s sections by name, empty ones dropped; `/context` counts these.
+
         `getattr` throughout: `refresh_system_prompt` runs while `__init__` is still setting the
         pane's parts up.
         """
+        pins = getattr(self, "_prompt_pins", None) or self._volatile_now()
         if self.profile() == "short":
             # A model that pays for the prompt in seconds gets the rules and the tools it can use,
             # and none of the todo, app, own-session or keybinding text: 1.5k tokens against 14.5k,
@@ -1052,17 +1077,17 @@ class Agent:
             # exception since the owner's decision of 2026-09-20 — a pane with a board attached
             # carries decision 8's policy block and the five board tools, because a capture pane
             # that cannot file what it was told is not worth the tokens it saves.
-            short = prompt_profiles.system_prompt(
-                workspace=str(self.executor.workspace.root), skills=self.executor.skills,
-                instructions=(self.instructions.section if self.instructions is not None else "")
-                             + memories.prompt_section(self.executor.workspace.root),
+            short = prompt_profiles.sections(
+                workspace=str(self.executor.workspace.root), skills_line=pins["skill_names"],
+                instructions=pins["instructions"], memory=pins["memory"],
                 board=board_tools.prompt_section(getattr(self, "board", None)),
-                board_note=board_tools.session_note(getattr(self, "board", None)))
+                board_note=pins["board_note"])
             # The brief survives the short profile: it is the one paragraph that says which
             # surface this agent is on, and a console with the rules of a terminal pane is the
             # thing #AGNT exists to stop. It is a few hundred tokens, and it is what the person
             # in Options is actually talking to.
-            return "\n\n".join(t for t in (short, self.context_brief()) if t)
+            brief = self.context_brief().strip("\n")
+            return short + ([("brief", brief)] if brief else [])
         todo_rules = todo_tool.RULES if getattr(self, "track_requests", False) and getattr(self, "todo_tool", False) else ""
         # #GMCF decision 9: a group whose schemas are loaded on demand takes its rules with it, and
         # leaves the one line that says the names exist. The line is the same whether or not the
@@ -1071,31 +1096,131 @@ class Agent:
         # Protocol 30: driving the app, and reading this pane's own session. Both are "" for an
         # agent that has neither, so a worker the GUI sent no `app` block to is unchanged.
         sections = [
-            SYSTEM,
+            ("base", SYSTEM),
             # What this agent is about (protocol 33): the context's brief, sent **once**, in the
             # prompt, rather than prefixed to every turn the way `board_chat` did it. It is the
             # second most stable thing here — it changes only when the console's context does —
             # and putting it high is also what makes it visible to `session_info`.
-            self.context_brief(),
-            todo_rules,
-            "" if "app" in deferred else app_tools.prompt_section(getattr(self, "app", None)),
-            "" if "own_session" in deferred else activity_tools.prompt_section(getattr(self, "activity", None)),
-            self.executor.skills.prompt_section() if self.executor.skills is not None else "",
-            self.instructions.section if self.instructions is not None else "",
-            memories.prompt_section(self.executor.workspace.root),
-            "Chosen workspace: " + str(self.executor.workspace.root),
+            ("brief", self.context_brief()),
+            ("todo_rules", todo_rules),
+            ("app", "" if "app" in deferred else app_tools.prompt_section(getattr(self, "app", None))),
+            ("own_session", "" if "own_session" in deferred
+             else activity_tools.prompt_section(getattr(self, "activity", None))),
+            ("skills", pins["skills"]),
+            ("instructions", pins["instructions"]),
+            ("memory", pins["memory"]),
+            ("workspace", "Chosen workspace: " + str(self.executor.workspace.root)),
             # Below the workspace line because `tests` is one of the groups: which groups exist
             # changes when a project is attached, and that belongs with the Switchboard sections
             # rather than above everything they share.
-            tool_groups.prompt_line(deferred),
-            board_tools.prompt_section(getattr(self, "board", None)),
-            board_tools.session_note(getattr(self, "board", None)),
+            ("tool_groups", tool_groups.prompt_line(deferred)),
+            ("board_policy", board_tools.prompt_section(getattr(self, "board", None))),
+            ("board_note", pins["board_note"]),
         ]
         # One blank line between sections, wherever each one's own text puts its newlines.
-        return "\n\n".join(text for text in (s.strip("\n") for s in sections) if text)
+        return [(name, text.strip("\n")) for name, text in sections if text.strip("\n")]
+
+    def _volatile_now(self) -> dict[str, str]:
+        """The `VOLATILE_SECTIONS` as they read right now, both skill renderings included.
+
+        Both profiles' skill text is kept because a pin has to outlive a profile switch: a
+        failover onto the Lite tier and back must come back to the prompt it left, byte for byte.
+        """
+        skills = getattr(self.executor, "skills", None)
+        loaded = getattr(self, "instructions", None)
+        return {"skills": skills.prompt_section() if skills is not None else "",
+                "skill_names": prompt_profiles.skill_names(skills) if skills is not None else "",
+                "instructions": loaded.section if loaded is not None else "",
+                "memory": memories.prompt_section(self.executor.workspace.root),
+                "board_note": board_tools.session_note(getattr(self, "board", None))}
+
+    def _pinnable(self) -> bool:
+        """A subagent replaces `system_prompt` on the instance (`subagents.py`) and carries none of
+        the volatile sections, so it keeps the plain rewrite and gets no change notes."""
+        return "system_prompt" not in vars(self)
 
     def refresh_system_prompt(self) -> None:
-        self.messages[0] = {"role": "system", "content": self.system_prompt()}
+        """Rebuild the first message. With the volatile sections pinned (#0C0V) this changes it only
+        when something structural moved — a board attached, the profile, the console's context —
+        and that is announced to the prefix check as an expected rebuild, naming the sections."""
+        sections = dict(self.prompt_sections()) if self._pinnable() else {}
+        content = "\n\n".join(sections.values()) if sections else self.system_prompt()
+        messages = getattr(self, "messages", None)
+        if messages and len(messages) > 1 and messages[0].get("content") != content:
+            before = getattr(self, "_prompt_built", {})
+            moved = [name for name in dict.fromkeys([*before, *sections])
+                     if before.get(name) != sections.get(name)]
+            self.expect_prefix_change("prompt_rebuilt" + (": " + ", ".join(moved) if moved else ""))
+        self._prompt_built = sections
+        self.messages[0] = {"role": "system", "content": content}
+
+    def _pin_prompt(self, pins: dict | None = None) -> None:
+        """Fix the volatile sections for this conversation: `pins` as saved, or as they read now."""
+        now = self._volatile_now() if pins is None else None
+        self._prompt_pins = dict(pins["pinned"]) if pins is not None else dict(now)
+        self._prompt_told = dict(pins.get("told") or pins["pinned"]) if pins is not None else dict(now)
+
+    def _prompt_pin_state(self) -> dict | None:
+        """What `session_data` keeps so a resumed conversation sends the same first message."""
+        pins = getattr(self, "_prompt_pins", None)
+        if pins is None or not self._pinnable():
+            return None
+        told = getattr(self, "_prompt_told", None) or pins
+        return {"pinned": dict(pins), **({"told": dict(told)} if told != pins else {})}
+
+    @staticmethod
+    def _valid_pins(value) -> dict | None:
+        keys = ("skills", "skill_names", "instructions", "memory", "board_note")
+        def ok(part):
+            return isinstance(part, dict) and all(isinstance(part.get(k), str) for k in keys)
+        if not isinstance(value, dict) or not ok(value.get("pinned")):
+            return None
+        told = value.get("told")
+        return {"pinned": {k: value["pinned"][k] for k in keys},
+                **({"told": {k: told[k] for k in keys}} if ok(told) else {})}
+
+    def _prompt_change_note(self) -> str:
+        """The Relay context note for what changed in a pinned section since the model was last
+        told, or "" (#0C0V). Called once per turn, before the prompt is added.
+
+        The first turn of a conversation pins instead: the prompt is rebuilt with the values of
+        this moment, exactly as before, and nothing is noted. A turn on a guest harness is left
+        alone — the guest has its own instructions — and whatever changed meanwhile is told on the
+        next native turn.
+        """
+        if not self._pinnable() or self._guest_harness():
+            return ""
+        if getattr(self, "_prompt_pins", None) is None:
+            self._pin_prompt()
+            self.refresh_system_prompt()
+            return ""
+        now = self._volatile_now()
+        told = self._prompt_told
+        skills_key = "skill_names" if self.profile() == "short" else "skills"
+        lines = []
+        for name in VOLATILE_SECTIONS:
+            key = skills_key if name == "skills" else name
+            if now[key] != told.get(key):
+                lines.append(self._volatile_line(name, now[key]))
+        self._prompt_told = now
+        return f"{CONTEXT_OPEN}\n" + "\n".join(lines) + f"\n{CONTEXT_CLOSE}\n\n" if lines else ""
+
+    def _volatile_line(self, name: str, text: str) -> str:
+        text = text.strip("\n")
+        if name == "board_note":
+            board = getattr(self, "board", None)
+            held = list(getattr(board, "claimed", None) or []) if text else []
+            token = getattr(board, "pane_token", None) or ""
+            told = self._prompt_told.get("board_note") or ""
+            session = (f"Your Board session is now {token[:8]}. "
+                       if text and token and token[:8] not in told else "")
+            return (f"Board claims changed: {session}"
+                    + ("you now hold " + ", ".join(f"#{c}" for c in held) + "." if held
+                       else "you hold no cards now."))
+        what = {"memory": "Board memories changed; this replaces the memory section of the system prompt",
+                "skills": "The skill catalogue changed; this replaces the one in the system prompt",
+                "instructions": "The project instructions changed; these replace the ones in the system prompt"}[name]
+        return f"{what}:\n{text}" if text else f"{what}: there are none now."
 
     def context_brief(self) -> str:
         """The context's brief, or "" — a terminal pane's brief is Relay's own `SYSTEM` prompt."""
@@ -1233,7 +1358,8 @@ class Agent:
         # back until `load_tools` asks, and then appended after everything else — so a load leaves
         # every byte a provider has already cached exactly where it was (#GMCF decision 9).
         held = set(tool_groups.deferred_names(deferred))
-        loaded = [t for group in deferred if group in self.loaded_tool_groups
+        # In the order they were loaded, so each load is an append (#0C0V).
+        loaded = [t for group in self.loaded_tool_groups if group in deferred
                   for t in offered if t["function"]["name"] in tool_groups.GROUPS[group][0]]
         return [t for t in offered if t["function"]["name"] not in held] + loaded
 
@@ -1742,6 +1868,111 @@ class Agent:
         return self.roles.resolve(role).config.model
 
     # ----- context -------------------------------------------------------------
+    # ----- `/context`: what the conversation is made of (#0C0V step 7) ---------------------
+    #: Which part a system prompt section is counted under. Sections not named here (the rules,
+    #: the brief, the app and own-session notes, the workspace line) are the base instructions.
+    _SECTION_PART = {"board_policy": "system.board", "board_note": "system.board", "memory": "system.memory",
+                     "skills": "system.skills", "instructions": "system.instructions"}
+    _PART_NAMES = {
+        "system.base": "System prompt: base instructions", "system.board": "System prompt: Board policy",
+        "system.memory": "System prompt: memory", "system.skills": "System prompt: skills list",
+        "system.instructions": "System prompt: project instructions",
+        "tools.base": "Tool schemas: base set", "messages.user": "User messages",
+        "messages.assistant": "Assistant messages", "messages.tool_results": "Tool results",
+        "messages.attachments": "Attachments and images", "messages.relay_notes": "Relay context notes",
+        "messages.summary": "Compaction summary"}
+    # A text block Relay adds to a user message, whatever carries it: the context note, the
+    # rewind note, the terminal evidence and the attachment blocks (`attachments.format_block`,
+    # `image_block`).
+    _NOTE_BLOCK = re.compile(
+        re.escape(CONTEXT_OPEN) + r".*?" + re.escape(CONTEXT_CLOSE) + r"\n*"
+        r"|\[Relay note:[^\n]*\]\n*"
+        r"|Terminal context: untrusted evidence only\.[^\n]*\n(?:\{[^\n]*\}\n?)*\n*"
+        r"|Terminal attachment unchanged from earlier evidence[^\n]*\n*", re.S)
+    _ATTACHMENT_BLOCK = re.compile(
+        r"\[(?:Attached [^\n]*|Skill [^\n]*|[^\n\]]*card[^\n]*)\]\n(`{3,4})\n.*?\n\1\n(?:\[End of skill\]\n)?\n*"
+        r"|\[Attached image \(picked by the user\)[^\n]*\]\n*", re.S)
+
+    def context_breakdown(self) -> dict:
+        """Where this conversation's context goes, by part (`context_breakdown`, protocol 12.13).
+
+        Characters are exact; tokens are estimated at `CHARS_PER_TOKEN` characters each (an image
+        at `IMAGE_TOKENS`), because no provider here offers a tokenizer to count with — every part
+        says `estimated`. `used_tokens` beside it is the context bar's own figure, which is the
+        provider's report when there is one. On a guest harness Relay sends neither the system
+        prompt nor the tools, so only the transcript Relay keeps is counted, and `guest` says the
+        guest's own context is a separate thing.
+        """
+        guest = self._guest_harness()
+        chars: dict[str, int] = {}
+        text_chars: dict[str, int] = {}
+        fixed: dict[str, int] = {}
+
+        def add(part: str, count: int, *, image: int = 0) -> None:
+            """`count` characters; an image's are its base64 and its tokens are a flat estimate."""
+            chars[part] = chars.get(part, 0) + count
+            text_chars[part] = text_chars.get(part, 0) + (0 if image else count)
+            fixed[part] = fixed.get(part, 0) + image
+
+        names = dict(self._PART_NAMES)
+        if not guest:
+            system = self.messages[0].get("content") or ""
+            sections = self.prompt_sections() if self._pinnable() else []
+            if sections and "\n\n".join(text for _, text in sections) == system:
+                for name, text in sections:
+                    add(self._SECTION_PART.get(name, "system.base"), len(text))
+                add("system.base", 2 * (len(sections) - 1))          # the blank lines between them
+            else:
+                add("system.base", len(system))
+            deferred = self._deferred_groups()
+            for spec in self.tools():
+                group = tool_groups.group_of(spec["function"]["name"])
+                part = f"tools.{group}" if group in deferred else "tools.base"
+                if part != "tools.base":
+                    names[part] = f"Tool schemas: {group} (loaded)"
+                add(part, len(json.dumps(spec, ensure_ascii=False)))
+        for message in self.messages[1:]:
+            role, kind = message.get("role"), message.get("relay_kind")
+            content = message.get("content")
+            text = content if isinstance(content, str) else ""
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "image_url":
+                        url = (item.get("image_url") or {}).get("url") or ""
+                        add("messages.attachments", len(url), image=compaction.IMAGE_TOKENS)
+                    elif isinstance(item, dict):
+                        text += str(item.get("text") or "")
+            if role == "assistant":
+                calls = message.get("tool_calls")
+                add("messages.assistant", len(text) + (len(json.dumps(calls, ensure_ascii=False)) if calls else 0)
+                    + len(str(message.get("reasoning_content") or "")))
+            elif role == "tool":
+                add("messages.tool_results", len(text))
+            elif kind == "summary":
+                add("messages.summary", len(text))
+            elif kind in ("note", "recitation", "carried"):
+                add("messages.relay_notes", len(text))
+            else:
+                notes = sum(len(m.group(0)) for m in self._NOTE_BLOCK.finditer(text))
+                rest = self._NOTE_BLOCK.sub("", text)
+                attached = sum(len(m.group(0)) for m in self._ATTACHMENT_BLOCK.finditer(rest))
+                add("messages.relay_notes", notes)
+                add("messages.attachments", attached)
+                add("messages.user", len(text) - notes - attached)
+        parts = [{"id": part, "name": names.get(part, part), "chars": count,
+                  "tokens": fixed[part] + -(-text_chars[part] // compaction.CHARS_PER_TOKEN), "estimated": True}
+                 for part, count in chars.items() if count or fixed[part]]
+        used, reported = self.context.used(self.messages, self.tools())
+        out = {"event": "context_breakdown", "parts": parts, "total_tokens": sum(p["tokens"] for p in parts),
+               "total_chars": sum(p["chars"] for p in parts), "window": self.context.window,
+               "used_tokens": used, "used_estimated": reported, "chars_per_token": compaction.CHARS_PER_TOKEN,
+               "model": self.config.model}
+        if guest:
+            out["guest"] = True
+            out["note"] = ("Relay's own transcript of this conversation. The guest harness keeps its own "
+                           "context, with its own system prompt and tools, which Relay does not see.")
+        return out
+
     def context_event(self) -> dict:
         event = self.context.event(self.messages, self.tools())
         # A switch waiting for the next step (or for its compaction): the model chip already names
@@ -1978,6 +2209,7 @@ class Agent:
             else:
                 self.context.invalidate()
                 after, _ = self.context.used(self.messages, tools)
+                self.expect_prefix_change("compaction", notes_lost=True)
                 # The work moved on enough to rewrite the conversation: the pane title and the
                 # session summary are both owed a refresh.
                 self._title_stale = True
@@ -2055,6 +2287,7 @@ class Agent:
         if not count:
             return
         self.messages = messages
+        self.expect_prefix_change("tool_results_cleared")
         self.context.invalidate()
         self.emit({"event": "tool_results_cleared", "turn_id": turn_id, "count": count, "chars": chars,
                    "keep_groups": compaction.CLEAR_KEEP_GROUPS})
@@ -2146,7 +2379,9 @@ class Agent:
             ids = [(r["command_id"], r["revision"]) for r in validated["terminal_context"]["records"]]
             context_note = context_note.replace(excerpt, "Terminal attachment unchanged from earlier evidence "
                 + json.dumps(ids) + ". Use terminal_read for retained output; fresh reads are explicit.\n\n")
-        note = (self._pending_note + plan_mode_note(self.mode) + context_note
+        # A claim, a memory, a skill or an instruction file that changed since the model was last
+        # told is said here rather than written into the system message (#0C0V).
+        note = (self._pending_note + self._prompt_change_note() + plan_mode_note(self.mode) + context_note
                 + (hint + "\n\n" if hint else "")
                 + format_attachments(attachments) + image_block(attachments))
         if reset_cancellation:
@@ -3182,6 +3417,86 @@ class Agent:
         reasons = "; ".join(f"{name}: {errors.get(name, 'failed')}" for name in swap["names"])
         return f"{swap['from_model']} failed; original: {str(first)[:600]}; fallbacks: {reasons}", first
 
+    # ----- prefix-change detection (#0C0V step 6) ----------------------------------
+    # Every hosted provider's prompt cache and llama.cpp's slot reuse key on the request's prefix:
+    # tools, then the system message, then the messages. A request whose previous one is not a
+    # prefix of it re-bills everything from the first byte that moved. Each request is compared
+    # with the one before it, and a break is an event naming the part, so Activity can show which
+    # request paid for a rebuild and why. Only a break the code meant — a compaction, a rewind,
+    # cleared tool results, a prompt rebuilt because a board was attached — is `expected`.
+
+    def _reset_prefix_check(self) -> None:
+        self._prefix_last = None
+        self._prefix_expected: list[str] = []
+        self._prefix_requests = 0
+
+    def expect_prefix_change(self, reason: str, *, notes_lost: bool = False) -> None:
+        """Say that the next request's prefix moves on purpose, and why.
+
+        `notes_lost`: the rewrite may have dropped earlier Relay context notes (a compaction, a
+        rewind), so the next turn re-tells whatever differs from the pinned prompt.
+        """
+        expected = getattr(self, "_prefix_expected", None)
+        if expected is not None and reason not in expected:
+            expected.append(reason)
+        if notes_lost and getattr(self, "_prompt_pins", None) is not None:
+            self._prompt_told = dict(self._prompt_pins)
+
+    @staticmethod
+    def _prefix_digest(value) -> str:
+        import hashlib
+        if isinstance(value, dict):
+            # Relay's own bookkeeping keys never reach a provider (`provider.py` drops them).
+            value = {k: v for k, v in value.items() if not k.startswith("relay_")}
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                                               default=str)
+        return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+    def _check_prefix(self, record: dict, step: int, tools: list[dict]) -> dict | None:
+        """Compare this request's prefix with the last one's; emit `prefix_changed` on a break.
+
+        A guest harness keeps its own context, so there is nothing of Relay's to compare. A model
+        change starts over: another model has another cache, whatever the bytes.
+        """
+        if self._guest_harness():
+            return None
+        self._prefix_requests = getattr(self, "_prefix_requests", 0) + 1
+        now = {"model": (self.config.base_url, self.config.model),
+               "system": self._prefix_digest(self.messages[0].get("content")),
+               "tools": [self._prefix_digest(t) for t in tools],
+               "messages": [self._prefix_digest(m) for m in self.messages[1:]]}
+        last, self._prefix_last = getattr(self, "_prefix_last", None), now
+        expected, self._prefix_expected = getattr(self, "_prefix_expected", []), []
+        if last is None or last["model"] != now["model"]:
+            return None
+        parts = []
+        if now["tools"][:len(last["tools"])] != last["tools"]:
+            parts.append("tools")
+        if now["system"] != last["system"]:
+            parts.append("system")
+        if now["messages"][:len(last["messages"])] != last["messages"]:
+            parts.append("messages")
+        if not parts:
+            return None
+        event = {"event": "prefix_changed", "turn_id": record.get("turn_id"), "request": self._prefix_requests,
+                 "step": step, "part": parts[0], "parts": parts, "expected": bool(expected)}
+        if expected:
+            event["reason"] = "; ".join(expected)
+        if "messages" in parts:
+            same = next((i for i, (a, b) in enumerate(zip(last["messages"], now["messages"])) if a != b),
+                        min(len(last["messages"]), len(now["messages"])))
+            event["message_index"] = same + 1          # index into the request, system at 0
+        self._count_prefix_change(record)
+        logs.event(_log, "prefix_changed", session=self.session_id, turn=record.get("turn_id"), step=step,
+                   parts=",".join(parts), expected=bool(expected))
+        self.emit(event)
+        return event
+
+    @staticmethod
+    def _count_prefix_change(record: dict) -> None:
+        """`prefix_changes` on the turn record: how many of this turn's requests broke the prefix."""
+        record["prefix_changes"] = record.get("prefix_changes", 0) + 1
+
     def _model_call_on_provider(self, record: dict, ctx: dict, step: int) -> dict:
         """One model call, retried once when the provider stalls.
 
@@ -3202,7 +3517,9 @@ class Agent:
             call_started = time.monotonic()
             self._produced_output = False
             try:
-                return self.provider.complete(self.messages, self.tools(), self._provider_emit,
+                tools = self.tools()
+                self._check_prefix(record, step, tools)
+                return self.provider.complete(self.messages, tools, self._provider_emit,
                                               self.cancel_event)
             except ProviderTruncated as exc:
                 retry = (exc.reason == "length" and cut_off < MAX_TRUNCATION_RETRIES
@@ -3972,6 +4289,7 @@ class Agent:
                 kept = [self.messages[0]] + list(base[1:index])
                 rewound_n = self._record_rewound(turn, restore, item, kept, restored, conflicts)
                 self.messages = kept
+                self.expect_prefix_change("rewind", notes_lost=True)
                 self.epoch = int(key)
                 for stale in [k for k in self.snapshots if int(k) >= self.epoch]:
                     del self.snapshots[stale]
@@ -4163,7 +4481,16 @@ class Agent:
         self.usage_totals = sessions_usage.load_usage(data.get("usage"))
         self.models_used = [m for m in data.get("models") or [] if isinstance(m, str)][:50]
         self.epoch = epoch
+        # The first message the conversation was sent, again (#0C0V): the pinned sections as
+        # saved, or — for a session saved before pins existed — as they read now.
+        pins = self._valid_pins(data.get("prompt_pins"))
+        self._prompt_pins = None
+        self._prompt_told = {}
+        if pins is not None or messages:
+            self._pin_prompt(pins)
+        self._reset_prefix_check()
         system = {"role": "system", "content": self.system_prompt()}
+        self._prompt_built = dict(self.prompt_sections())
         self.snapshots = {k: [system] + v for k, v in snapshots.items()}
         self.messages = [system] + adapt_history(list(messages), self._effort_style(), skip_system=True)
         self.context.invalidate()
@@ -4205,6 +4532,9 @@ class Agent:
                 "model": model, "preset": preset.id if preset else None,
                 "effort": effort, "mode": self.mode, "turns": self.turns, "epoch": self.epoch,
                 "messages": self.messages[1:],
+                # The pinned prompt sections (#0C0V), so a resumed conversation's first message is
+                # the one it was sent with.
+                "prompt_pins": self._prompt_pin_state(),
                 "snapshots": {k: v[1:] for k, v in self.snapshots.items()},
                 "checkpoints": self.checkpoints.to_json(),
                 "requests": self.requests.to_json(), "todos": self.todos.to_json(), "plan_path": self.plan_path,

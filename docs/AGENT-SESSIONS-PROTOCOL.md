@@ -174,6 +174,46 @@ Free's ceiling — and is `""` everywhere else, because nothing is silently sent
   also carries **`handover_chars`** and **`handover_tokens`** (the brief's size; tokens estimated at
   4 characters each). The turn's record carries the same two fields.
 - `context` message → same event on demand.
+- **The prefix does not move** (#0C0V step 6). Tools, then the system message, then the messages
+  are what every provider's prompt cache keys on, so the system message and the tool list are
+  byte-identical for the life of a conversation. The sections that change while it runs — the
+  skill catalogue, the project instruction files, the Board memories and the Board claims line
+  (`agent.VOLATILE_SECTIONS`) — are **pinned** at its first turn and a later change is told on the
+  next user turn as a Relay context note at the front of the prompt, only when the text actually
+  changed: `[Relay context: …]` then `Board claims changed: you now hold #X, #Y.` /
+  `… you hold no cards now.`, or `Board memories changed; this replaces the memory section of the
+  system prompt:` (likewise the skill catalogue and the project instructions) with the new text.
+  `refresh_system_prompt()` still rebuilds the first message when something structural moved (a
+  board attached or detached, the app catalogue, the profile, a console's context). The pins are
+  saved as the session's `prompt_pins {pinned, told?}` and restored with it, so a resumed
+  conversation sends the first message it was sent with; a compaction or a rewind re-tells what
+  differs from the pins, because the notes may have gone with the rewritten messages. A guest
+  harness turn gets no note (the guest has its own instructions); the next native turn does.
+- **`prefix_changed {turn_id, request, step, part, parts, expected, reason?, message_index?}`**:
+  each provider request is hashed (system message; each tool schema; each message without Relay's
+  `relay_*` keys) and compared with the previous request of the same model. When the previous one
+  is not a prefix of this one — a tool inserted or changed rather than appended, a different system
+  message, an earlier message rewritten — the event names the parts in cache order (`tools`,
+  `system`, `messages`; `part` is the first) and, for `messages`, the request index of the first
+  message that differs (system = 0). `request` counts this conversation's requests from 1.
+  `expected: true` with `reason` when Relay did it on purpose: `compaction`, `rewind`,
+  `tool_results_cleared`, `prompt_rebuilt: <sections>`; `expected: false` is a cache break nobody
+  meant, which is a bug. A model change starts the comparison over (another model, another cache),
+  and a guest harness pane is not checked. The turn's record counts them as `prefix_changes`.
+- **`context_breakdown`** → `context_breakdown {id, parts: [{id, name, chars, tokens, estimated:
+  true}], total_tokens, total_chars, window, used_tokens, used_estimated, chars_per_token, model,
+  guest?, note?}`: what `/context` shows. Parts, empty ones left out: `system.base` (Relay's rules,
+  the brief, the todo, app and own-session rules, the workspace and tool-group lines),
+  `system.skills`, `system.instructions`, `system.memory`, `system.board` (policy and claims line),
+  `tools.base`, `tools.<group>` per loaded `load_tools` group, `messages.user`,
+  `messages.assistant` (text, tool calls, reasoning), `messages.tool_results`,
+  `messages.attachments` (attached files and skills, images at 1,600 tokens each),
+  `messages.relay_notes` (Relay context notes, terminal evidence, reminders, carried state) and
+  `messages.summary`. `chars` is exact; `tokens` is always an estimate at 4 characters a token —
+  no provider here offers a tokenizer — and `used_tokens` beside it is the context bar's figure,
+  the provider's report when it has one. On a guest harness pane only Relay's transcript is
+  counted (Relay sends that guest no system prompt and no tools), with `guest: true` and a `note`
+  saying the guest's own context is separate.
 - Every path that replaces the conversation emits the new one's `context` too: `load_state`,
   `resume`, a conversation `rewind`, `set_model` and `reset` (new conversation: `/new`, deleting the
   conversation the pane is showing, "execute in fresh context"). For `reset` it is emitted before
@@ -1000,6 +1040,9 @@ per request; the prompt is not). A swap that stays inside one tier touches neith
 ends, `_end_failover` comes back through the same path and the pane's own profile is restored
 byte for byte, so the rest of the conversation hits the prefix it had before the swap
 (`tests/test_system_prompt.py::StabilityTests::test_a_failover_across_tiers_re_prefills_once_and_comes_back_byte_for_byte`).
+The pinned sections (4) hold both renderings of the skills — the catalogue and the short
+profile's names line — so a swap across tiers and back cannot pick up a claim or a memory made
+meanwhile; that change is told in a note instead.
 
 The short profile drops no *rule* the full one keeps: every line of `SYSTEM_SHORT` is one of
 `SYSTEM`'s, tightened, and what is absent is about features the profile does not offer. Since the
@@ -1035,7 +1078,8 @@ full profile names them in one line of the prompt and sends their schemas only o
 
 `load_tools {group}` returns `{loaded, tools: [names], already_loaded, note}`, and the group's
 schemas are **appended to the end of the tool list** of the next request and stay for the rest of
-the conversation. Nothing above them moves — that is the whole mechanism: on llama.cpp the tool list
+the conversation. Groups are appended in the order they were loaded (`tool_groups.LoadedGroups`,
+#0C0V), not in the table's order, so a second load never lands in front of the first. Nothing above them moves — that is the whole mechanism: on llama.cpp the tool list
 is rendered above the system prompt, so a schema inserted in the middle re-prefills everything
 (11,309 tokens, 13 s measured). Calling one of the names before its group is loaded is refused with
 `"<name> is not loaded in this conversation. Call load_tools with group=\"<group>\" first…"`, from

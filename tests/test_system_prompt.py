@@ -26,7 +26,7 @@ from unittest import mock
 from relay_core import activity_tools, app_tools, board as board_mod, board_tools
 from relay_core import instructions as instructions_mod, skills as skills_mod
 from relay_core import agent as agent_module, program_input, remote_session, terminal_handoff
-from relay_core import tools as tools_mod
+from relay_core import tool_groups, tools as tools_mod
 from relay_core.agent import Agent
 from relay_core.keybindings import KeybindingCatalog
 from relay_core.provider import ProviderConfig
@@ -249,6 +249,287 @@ class StabilityTests(PromptFixture):
         prompt = agent.system_prompt()
         self.assertNotIn(agent.session_id, prompt)
         self.assertNotIn(str(os.getpid()), prompt.split('Chosen workspace')[0])
+
+
+    # ---- #0C0V step 6: what changes mid-conversation is a note, never the first message ----
+
+    def test_a_claim_mid_conversation_is_a_note_and_the_prefix_does_not_move(self):
+        agent, provider = self.talking_agent()
+        agent.ask('first')
+        card = agent.board.run('board_create_card', {'tab': 'features', 'status': 'inbox',
+                                                     'title': 'A card', 'request': 'do the thing'})
+        agent.board.run('board_claim', {'id': card['id']})
+        agent.refresh_system_prompt()          # what `board_protocol` and the others still call
+        agent.ask('second')
+        agent.ask('third')
+        (first, tools1), (second, tools2), (third, tools3) = provider.requests
+        self.assertEqual(first[0], second[0])
+        self.assertEqual(second[0], third[0])
+        self.assertEqual(tools1, tools2)
+        self.assertEqual(tools2, tools3)
+        self.assertNotIn('You hold', second[0]['content'])
+        # Exactly one note, on the turn after the change, and none on the turn after that.
+        told = [m['content'] for m in third[1:] if agent_module.CONTEXT_OPEN in str(m.get('content'))]
+        self.assertEqual(len(told), 1, told)
+        self.assertTrue(second[-1]['content'].startswith(agent_module.CONTEXT_OPEN))
+        self.assertIn(f"Board claims changed: you now hold #{card['id']}.", second[-1]['content'])
+        self.assertEqual(third[-1]['content'], 'third')
+        self.assertEqual(self.prefix_events(agent), [])
+
+    def test_a_memory_change_mid_conversation_is_a_note_and_the_prefix_does_not_move(self):
+        memory = {'text': 'Board memories: lower-priority saved context.\n\n[project memory #M1: m1.md]\nUses tabs.\n'}
+        with mock.patch.object(agent_module.memories, 'prompt_section', lambda *a, **k: memory['text']):
+            agent, provider = self.talking_agent()
+            agent.ask('first')
+            memory['text'] += '\n[project memory #M2: m2.md]\nPrefers pytest.\n'
+            agent.refresh_system_prompt()
+            agent.ask('second')
+            agent.ask('third')
+        (first, tools1), (second, tools2), (third, _) = provider.requests
+        self.assertEqual((first[0], tools1), (second[0], tools2))
+        self.assertEqual(first[0], third[0])
+        self.assertIn('Uses tabs.', first[0]['content'])
+        self.assertNotIn('Prefers pytest', first[0]['content'])
+        note = second[-1]['content']
+        self.assertIn('Board memories changed; this replaces the memory section', note)
+        self.assertIn('Prefers pytest.', note)
+        self.assertEqual(third[-1]['content'], 'third')
+
+    def test_a_turn_with_nothing_changed_adds_nothing_and_moves_nothing(self):
+        agent, provider = self.talking_agent()
+        agent.ask('first')
+        for _ in range(3):
+            agent.refresh_system_prompt()
+        agent.ask('second')
+        (first, tools1), (second, tools2) = provider.requests
+        self.assertEqual((first[0], tools1), (second[0], tools2))
+        self.assertEqual(second[-1]['content'], 'second')
+        self.assertEqual(second[:len(first)], first[:len(first)])
+        self.assertEqual(self.prefix_events(agent), [])
+
+    def test_the_pinned_prompt_survives_a_save_and_a_resume(self):
+        # The first message a resumed conversation sends is the one it was sent with, claim or
+        # not, so a restart inside the provider's cache lifetime still hits it.
+        agent, _ = self.talking_agent()
+        agent.ask('first')
+        card = agent.board.run('board_create_card', {'tab': 'features', 'status': 'inbox',
+                                                     'title': 'A card', 'request': 'do the thing'})
+        agent.board.run('board_claim', {'id': card['id']})
+        agent.ask('second')
+        data = json.loads(json.dumps(agent.session_data()))
+        again = self.agent()
+        again._apply_session(data, keep_id=True)
+        self.assertEqual(again.messages[0], agent.messages[0])
+        self.assertEqual(json.dumps(again.tools()), json.dumps(agent.tools()))
+        # The claim was told before the save; the resumed pane holds nothing, and says so once.
+        provider = Recorder()
+        again.provider = provider
+        again.ask('third')
+        self.assertIn('you hold no cards now', provider.requests[0][0][-1]['content'])
+
+    def test_a_load_appends_its_group_at_the_end_in_the_order_loaded(self):
+        # Loading `tests` and then `app` used to put `app`'s schemas in front of `tests`', because
+        # the list followed the groups' order in `tool_groups`, not the loads'.
+        agent = self.agent()
+        names = lambda: [t['function']['name'] for t in agent.tools()]
+        base = names()
+        agent._execute(agent._prepare('load_tools', {'group': 'tests'}), {})
+        after_tests = names()
+        agent._execute(agent._prepare('load_tools', {'group': 'app'}), {})
+        after_app = names()
+        self.assertEqual(after_tests[:len(base)], base)
+        self.assertEqual(after_app[:len(after_tests)], after_tests)
+        self.assertEqual(after_app[-1], tool_groups.GROUPS['app'][0][-1])
+
+    # ---- helpers ------------------------------------------------------------------------------
+
+    def talking_agent(self):
+        agent = self.agent()
+        events = []
+        agent.emit = events.append
+        agent.test_events = events
+        provider = Recorder()
+        agent.provider = provider
+        return agent, provider
+
+    @staticmethod
+    def prefix_events(agent):
+        return [e for e in agent.test_events if e.get('event') == 'prefix_changed']
+
+
+class Recorder:
+    """A provider that answers every request with "ok" and keeps a copy of what it was sent."""
+
+    def __init__(self):
+        self.requests = []
+
+    def complete(self, messages, tools, emit, cancel):
+        self.requests.append((json.loads(json.dumps(messages)), json.loads(json.dumps(tools))))
+        emit({'event': 'delta', 'text': 'ok'})
+        return {'role': 'assistant', 'content': 'ok'}
+
+    def cancel(self):
+        pass
+
+
+class PrefixCheckTests(PromptFixture):
+    """#0C0V step 6: a request whose predecessor is not its prefix says so, and names the part."""
+
+    def talking(self):
+        agent = self.agent()
+        self.events = []
+        agent.emit = self.events.append
+        agent.provider = Recorder()
+        return agent
+
+    def changes(self):
+        return [e for e in self.events if e.get('event') == 'prefix_changed']
+
+    def test_an_edited_earlier_message_is_an_unexpected_change(self):
+        agent = self.talking()
+        agent.ask('first')
+        agent.messages[1]['content'] = 'first, rewritten behind the cache'
+        agent.ask('second')
+        [event] = self.changes()
+        self.assertEqual((event['part'], event['parts'], event['expected']), ('messages', ['messages'], False))
+        self.assertEqual(event['message_index'], 1)
+        self.assertEqual(event['request'], 2)
+        self.assertEqual(agent.turn_log[event['turn_id']]['prefix_changes'], 1)
+        self.assertNotIn('reason', event)
+
+    def test_a_change_the_code_meant_is_expected_with_its_reason(self):
+        agent = self.talking()
+        agent.ask('first')
+        agent.ask('second')
+        agent.expect_prefix_change('tool_results_cleared')
+        agent.messages[2]['content'] = '[cleared]'      # sent as part of the second request's prefix
+        agent.ask('second')
+        agent.ask('third')
+        [event] = self.changes()
+        self.assertEqual((event['part'], event['expected'], event['reason'], event['message_index']),
+                         ('messages', True, 'tool_results_cleared', 2))
+        # The expectation is spent on the request it was for.
+        agent.messages[1]['content'] = 'again'
+        agent.ask('fourth')
+        self.assertFalse(self.changes()[-1]['expected'])
+
+    def test_detaching_the_board_rebuilds_the_prompt_and_says_which_sections(self):
+        agent = self.talking()
+        agent.ask('first')
+        agent.board = None
+        agent.refresh_system_prompt()
+        agent.ask('second')
+        [event] = self.changes()
+        self.assertEqual(event['parts'], ['tools', 'system'])
+        self.assertTrue(event['expected'])
+        self.assertIn('prompt_rebuilt', event['reason'])
+        self.assertIn('board_policy', event['reason'])
+
+    def test_a_compaction_is_expected_and_the_notes_are_told_again(self):
+        agent = self.talking()
+        agent.ask('first')
+        card = agent.board.run('board_create_card', {'tab': 'features', 'status': 'inbox',
+                                                     'title': 'A card', 'request': 'do the thing'})
+        agent.board.run('board_claim', {'id': card['id']})
+        agent.ask('second')                              # told here
+        agent.expect_prefix_change('compaction', notes_lost=True)
+        agent.messages[1:] = [{'role': 'user', 'content': 'summary', 'relay_kind': 'summary'}]
+        agent.ask('third')
+        [event] = self.changes()
+        self.assertEqual((event['expected'], event['reason']), (True, 'compaction'))
+        self.assertIn(f"you now hold #{card['id']}", agent.provider.requests[-1][0][-1]['content'])
+
+    def test_clearing_stale_tool_results_is_the_one_expected_break(self):
+        # `tests/test_tool_output_bounds.py`'s run: nine big command results, one clearing batch.
+        sys.path.insert(0, str(ROOT / 'tests'))
+        import test_tool_output_bounds as bounds
+        events = []
+        steps = [bounds.call(n, 'run_command', {'command': 'seq 1 20000'}) for n in range(9)]
+        agent = Agent(CONFIG, self.temp.name, events.append, provider=bounds.Scripted(steps))
+        agent.ask('go')
+        self.assertEqual(len([e for e in events if e['event'] == 'tool_results_cleared']), 1)
+        changes = [e for e in events if e['event'] == 'prefix_changed']
+        self.assertEqual([(e['part'], e['expected'], e.get('reason')) for e in changes],
+                         [('messages', True, 'tool_results_cleared')])
+
+    def test_a_guest_harness_is_not_checked(self):
+        agent = self.talking()
+        agent.provider.serves_side_calls = False
+        agent._injected_provider = True
+        agent.ask('first')
+        agent.messages[1]['content'] = 'edited'
+        agent.ask('second')
+        self.assertEqual(self.changes(), [])
+
+
+class ContextBreakdownTests(PromptFixture):
+    """#0C0V step 7: `/context` by part, every part estimated, and the parts add up."""
+
+    def test_the_parts_add_up_to_the_request(self):
+        agent = self.agent()
+        agent.emit = lambda event: None
+        agent.provider = Recorder()
+        agent.ask('first')
+        card = agent.board.run('board_create_card', {'tab': 'features', 'status': 'inbox',
+                                                     'title': 'A card', 'request': 'do the thing'})
+        agent.board.run('board_claim', {'id': card['id']})
+        agent.ask('second')
+        agent.messages.append({'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': 'c1', 'type': 'function', 'function': {'name': 'read_file', 'arguments': '{}'}}]})
+        agent.messages.append({'role': 'tool', 'tool_call_id': 'c1', 'content': 'x' * 400})
+        out = agent.context_breakdown()
+        parts = {p['id']: p for p in out['parts']}
+        self.assertTrue(all(p['estimated'] for p in out['parts']))
+        self.assertEqual(out['total_tokens'], sum(p['tokens'] for p in out['parts']))
+        system = agent.messages[0]['content']
+        self.assertEqual(sum(p['chars'] for k, p in parts.items() if k.startswith('system.')), len(system))
+        tools = agent.tools()
+        self.assertEqual(sum(p['chars'] for k, p in parts.items() if k.startswith('tools.')),
+                         sum(len(json.dumps(t, ensure_ascii=False)) for t in tools))
+        users = [m['content'] for m in agent.messages[1:] if m['role'] == 'user']
+        self.assertEqual(parts['messages.user']['chars'] + parts['messages.relay_notes']['chars'],
+                         sum(len(u) for u in users))
+        self.assertEqual(parts['messages.user']['chars'], len('first') + len('second'))
+        self.assertEqual(parts['messages.tool_results']['chars'], 400)
+        self.assertEqual(parts['messages.tool_results']['tokens'], 100)
+        self.assertIn('system.board', parts)
+        self.assertIn('system.skills', parts)
+        self.assertEqual(out['window'], agent.context.window)
+        self.assertNotIn('guest', out)
+
+    def test_a_loaded_group_is_its_own_part(self):
+        agent = self.agent()
+        agent._execute(agent._prepare('load_tools', {'group': 'own_session'}), {})
+        parts = {p['id']: p for p in agent.context_breakdown()['parts']}
+        self.assertIn('tools.own_session', parts)
+        self.assertEqual(parts['tools.own_session']['name'], 'Tool schemas: own_session (loaded)')
+
+    def test_an_image_counts_as_an_image_and_a_guest_pane_says_so(self):
+        agent = self.agent()
+        agent.messages.append({'role': 'user', 'relay_kind': 'prompt', 'content': [
+            {'type': 'text', 'text': 'look'},
+            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + 'A' * 8000}}]})
+        agent.provider = Recorder()
+        agent.provider.serves_side_calls = False
+        agent._injected_provider = True
+        out = agent.context_breakdown()
+        parts = {p['id']: p for p in out['parts']}
+        self.assertTrue(out['guest'])
+        self.assertIn('separate', out['note'].lower() + ' separate')
+        self.assertFalse(any(k.startswith(('system.', 'tools.')) for k in parts))
+        self.assertEqual(parts['messages.attachments']['tokens'], agent_module.compaction.IMAGE_TOKENS)
+        self.assertEqual(parts['messages.user']['chars'], 4)
+
+    def test_the_request_answers_with_the_breakdown(self):
+        from relay_core import session_protocol
+        self.assertIn('context_breakdown', session_protocol.TYPES)
+        agent = self.agent()
+        sent = []
+        handler = session_protocol.SessionCommands.__new__(session_protocol.SessionCommands)
+        handler.turns = mock.Mock(agent=agent)
+        handler.emit = sent.append
+        handler.handle('context_breakdown', {'type': 'context_breakdown', 'id': 7})
+        self.assertEqual((sent[0]['event'], sent[0]['id']), ('context_breakdown', 7))
 
 
 class PolicyCacheTests(unittest.TestCase):

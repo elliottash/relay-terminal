@@ -48,7 +48,7 @@ GUEST_RECONCILE_EVERY = 5.0
 GUEST_TAIL_POLL_EVERY = 0.5
 GUEST_TAIL_RETRY_EVERY = 1.0
 
-TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind", "fork", "load_state",
+TYPES = {"set_model", "set_effort", "context", "context_breakdown", "compact", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
          # pane title (protocol section 18)
@@ -427,6 +427,12 @@ class SessionCommands:
 
     def _context(self, request):
         event = self._agent().context_event()
+        event["id"] = request.get("id")
+        self.emit(event)
+
+    def _context_breakdown(self, request):
+        """`/context`'s table (protocol 12.13, #0C0V): the conversation's context by part, estimated."""
+        event = self._agent().context_breakdown()
         event["id"] = request.get("id")
         self.emit(event)
 
