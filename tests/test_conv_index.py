@@ -355,17 +355,18 @@ class IndexTests(unittest.TestCase):
         only_agent = self.index.search("scrollback", scope="all", sources=["agent"])
         self.assertEqual([i["source"] for i in only_agent["items"]], ["agent"])
 
-    def test_shortest_title_and_model_sorts(self):
-        """The Sessions pane's header clicks (#EV45): fewest turns, and A→Z / Z→A over the title
-        and over what the Model column shows, ties broken newest first, pinned still ahead."""
+    def test_shortest_requests_title_and_model_sorts(self):
+        """Column sorts use stored counts and shown text, with newest-first ties."""
         self.index.update_session(session("a" * 32, title="capybara", turns=9, updated=1000.0,
-                                          model="zeta", summary="Zebra recap"), self.root)
+                                          model="zeta", summary="Zebra recap", open_requests=2), self.root)
         self.index.update_session(session("b" * 32, title="Capybara", turns=1, updated=2000.0,
-                                          model="alpha", summary="alpha recap"), self.root)
+                                          model="alpha", summary="alpha recap", open_requests=0), self.root)
         self.index.update_session(session("c" * 32, title="wombat", turns=4, updated=3000.0,
-                                          model="m", summary="Middle recap"), self.root)
+                                          model="m", summary="Middle recap", open_requests=1), self.root)
         ids = lambda result: [i["session_id"][0] for i in result["items"]]  # noqa: E731
         self.assertEqual(ids(self.index.search("", scope="all", sort="shortest")), ["b", "c", "a"])
+        self.assertEqual(ids(self.index.search("", scope="all", sort="requests_desc")), ["a", "c", "b"])
+        self.assertEqual(ids(self.index.search("", scope="all", sort="requests")), ["b", "c", "a"])
         # Case-insensitive over the shown title, ties newest first, and a rename re-keys the row.
         self.assertEqual(ids(self.index.search("", scope="all", sort="title")), ["b", "a", "c"])
         self.assertEqual(ids(self.index.search("", scope="all", sort="title_desc")), ["c", "b", "a"])
@@ -380,6 +381,8 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(ids(self.index.search("", scope="all", sort="summary")), ["c", "b", "a"])
         self.index.record_commands("/tmp/alpha", [{"command": "git status", "exit_status": 0}])
         terminal = conv_index.terminal_id("/tmp/alpha")
+        self.assertEqual([i["session_id"] for i in self.index.search("", scope="all", sort="requests")["items"]],
+                         ["b" * 32, "c" * 32, "a" * 32, terminal])
         order = [i["session_id"] for i in self.index.search("", scope="all", sort="model")["items"]]
         self.assertEqual(order, ["b" * 32, "c" * 32, terminal, "a" * 32])
         # Pinned is ahead of every order, so an alphabetical sort lists the pinned row first.

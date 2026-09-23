@@ -265,7 +265,7 @@ SOURCES = ("agent", "terminal", "subagent", "claude", "codex")
 # The guest sources (protocol 26.7): their rows are written by guest_sessions.py from the guests'
 # own transcripts, never from Relay's session files, so a rebuild leaves them to `guest_reconcile`.
 GUEST_SOURCES = ("claude", "codex")
-SORTS = ("recent", "oldest", "longest", "shortest", "title", "title_desc", "model", "model_desc",
+SORTS = ("recent", "oldest", "longest", "shortest", "requests_desc", "requests", "title", "title_desc", "model", "model_desc",
          "summary", "summary_desc", "relevance")
 # The keys the alphabetical sorts order by. `title` keys on the name the GUI shows — a custom
 # rename over the stored title — and `model` on what the Sessions pane's Model column displays
@@ -2342,6 +2342,7 @@ class ConversationIndex:
         Words are an AND over the whole conversation, not over one message: a conversation matches
         when every word or phrase occurs somewhere in it, and an excluded word must occur nowhere
         in it. `sort` is "recent" (default), "oldest", "longest" (most turns), "shortest" (fewest),
+        "requests_desc" (most unfinished requests), "requests" (fewest),
         "title"/"title_desc" (the custom title over the stored one, A→Z or Z→A), "model"/
         "model_desc" (what the GUI's Model column shows, A→Z or Z→A), "summary"/
         "summary_desc" (the saved Recap column, A→Z or Z→A), or "relevance" (the
@@ -2391,6 +2392,8 @@ class ConversationIndex:
         order = {"recent": "COALESCE(c.updated, 0) DESC", "oldest": "COALESCE(c.updated, 0) ASC",
                  "longest": "c.turns DESC, COALESCE(c.updated, 0) DESC",
                  "shortest": "c.turns ASC, COALESCE(c.updated, 0) DESC",
+                 "requests_desc": "CASE WHEN c.source='agent' THEN 0 ELSE 1 END, c.open_requests DESC, COALESCE(c.updated, 0) DESC",
+                 "requests": "CASE WHEN c.source='agent' THEN 0 ELSE 1 END, c.open_requests ASC, COALESCE(c.updated, 0) DESC",
                  "title": _TITLE_KEY + " ASC, COALESCE(c.updated, 0) DESC",
                  "title_desc": _TITLE_KEY + " DESC, COALESCE(c.updated, 0) DESC",
                  "model": _MODEL_KEY + " ASC, COALESCE(c.updated, 0) DESC",

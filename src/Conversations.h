@@ -78,7 +78,7 @@ QStringList dateGroupOrder();
 // Clicking a session-list header sorts by that column (the sort itself is the worker's, so the
 // group rows and the paging survive). `nextHeaderSort` is the sort a click on `column` asks for
 // next given the list's current sort: each column toggles between its two orders (Updated:
-// newest↔oldest, Turns: most↔fewest, Session and Model: A→Z↔Z→A), and a click on a column the
+// newest↔oldest, Turns and Requests: most↔fewest, Session and Model: A→Z↔Z→A), and a click on a column the
 // current sort does not belong to takes that column's first order. `headerSortColumn` is the
 // column a sort id shows its arrow in, -1 when it has none ("relevance" ranks matches, not a
 // column), and `headerSortOrder` the arrow's direction.

@@ -174,9 +174,11 @@ QString nextHeaderSort(int column, const QString &current) {
                                                            : QStringLiteral("recent");
         case 2:  return current == QLatin1String("longest") ? QStringLiteral("shortest")
                                                             : QStringLiteral("longest");
-        case 3:  return current == QLatin1String("model") ? QStringLiteral("model_desc")
+        case 3:  return current == QLatin1String("requests_desc") ? QStringLiteral("requests")
+                                                                  : QStringLiteral("requests_desc");
+        case 4:  return current == QLatin1String("model") ? QStringLiteral("model_desc")
                                                           : QStringLiteral("model");
-        case 4:  return current == QLatin1String("summary") ? QStringLiteral("summary_desc")
+        case 5:  return current == QLatin1String("summary") ? QStringLiteral("summary_desc")
                                                             : QStringLiteral("summary");
         default: return current;
     }
@@ -185,15 +187,16 @@ QString nextHeaderSort(int column, const QString &current) {
 int headerSortColumn(const QString &sort) {
     if (sort == QLatin1String("recent") || sort == QLatin1String("oldest")) return 1;
     if (sort == QLatin1String("longest") || sort == QLatin1String("shortest")) return 2;
+    if (sort == QLatin1String("requests_desc") || sort == QLatin1String("requests")) return 3;
     if (sort == QLatin1String("title") || sort == QLatin1String("title_desc")) return 0;
-    if (sort == QLatin1String("model") || sort == QLatin1String("model_desc")) return 3;
-    if (sort == QLatin1String("summary") || sort == QLatin1String("summary_desc")) return 4;
+    if (sort == QLatin1String("model") || sort == QLatin1String("model_desc")) return 4;
+    if (sort == QLatin1String("summary") || sort == QLatin1String("summary_desc")) return 5;
     return -1;
 }
 
 Qt::SortOrder headerSortOrder(const QString &sort) {
     return sort == QLatin1String("oldest") || sort == QLatin1String("shortest")
-                   || sort == QLatin1String("title") || sort == QLatin1String("model")
+                   || sort == QLatin1String("requests") || sort == QLatin1String("title") || sort == QLatin1String("model")
                    || sort == QLatin1String("summary")
                ? Qt::AscendingOrder
                : Qt::DescendingOrder;
@@ -806,6 +809,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_sort->addItem(QStringLiteral("Oldest first"), QStringLiteral("oldest"));
     m_sort->addItem(QStringLiteral("Most turns"), QStringLiteral("longest"));
     m_sort->addItem(QStringLiteral("Fewest turns"), QStringLiteral("shortest"));
+    m_sort->addItem(QStringLiteral("Most open requests"), QStringLiteral("requests_desc"));
+    m_sort->addItem(QStringLiteral("Fewest open requests"), QStringLiteral("requests"));
     m_sort->addItem(QStringLiteral("Title A→Z"), QStringLiteral("title"));
     m_sort->addItem(QStringLiteral("Title Z→A"), QStringLiteral("title_desc"));
     m_sort->addItem(QStringLiteral("Model A→Z"), QStringLiteral("model"));
@@ -848,9 +853,11 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
 
     m_tree = new QTreeWidget;
     m_tree->setObjectName(QStringLiteral("sessionsTree"));
-    m_tree->setColumnCount(5);
+    m_tree->setColumnCount(6);
     m_tree->setHeaderLabels({QStringLiteral("Session"), QStringLiteral("Updated"),
-                             QStringLiteral("Turns"), QStringLiteral("Model"), QStringLiteral("Recap")});
+                             QStringLiteral("Turns"), QStringLiteral("Requests"),
+                             QStringLiteral("Model"), QStringLiteral("Recap")});
+    m_tree->headerItem()->setToolTip(3, QStringLiteral("User requests that still need completion"));
     m_tree->setRootIsDecorated(true);
     m_tree->setUniformRowHeights(false);
     m_tree->setAllColumnsShowFocus(true);
@@ -859,7 +866,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    m_tree->header()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(5, QHeaderView::Stretch);
     m_tree->setColumnWidth(0, 260);
     m_tree->setExpandsOnDoubleClick(false);
     m_tree->setItemDelegateForColumn(0, new RowDelegate(m_tree));
@@ -867,6 +875,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     // date groups) and sort the display text ("14 min ago"). Sorting is asked of the worker —
     // a header click is the Sort combo in another form (the sectionClicked wiring below).
     m_tree->setSortingEnabled(false);
+    m_tree->header()->setSectionsClickable(true);
     // The unfolded rows wrap, so their height depends on how wide the first column is.
     connect(m_tree->header(), &QHeaderView::sectionResized, this,
             [this](int section, int, int) { if (section == 0) m_tree->doItemsLayout(); });
@@ -1771,13 +1780,17 @@ void SessionManager::fillFacets(const QJsonObject &facets) {
 // One row of the list: the title with its tags, the muted summary under it, and the columns.
 QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJsonObject &item) {
     const bool terminal = isTerminal(item);
+    const QString source = item.value(QStringLiteral("source")).toString();
+    const bool tracksRequests = source == QLatin1String("agent");
     const int open = item.value(QStringLiteral("open_requests")).toInt();
     auto *row = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_tree);
     row->setText(1, whenText(item.value(QStringLiteral("updated")).toDouble(), QDateTime::currentDateTime()));
-    row->setText(2, QString::number(item.value(QStringLiteral("turns")).toInt())
-                        + (open > 0 ? QStringLiteral(" · %1 open").arg(open) : QString()));
-    const QString source = item.value(QStringLiteral("source")).toString();
-    row->setText(3, terminal ? QStringLiteral("terminal")
+    row->setText(2, QString::number(item.value(QStringLiteral("turns")).toInt()));
+    row->setText(3, tracksRequests ? QString::number(open) : QStringLiteral("—"));
+    row->setToolTip(3, !tracksRequests ? QStringLiteral("Request tracking is available for Relay agent sessions")
+                                    : open == 1 ? QStringLiteral("1 user request still needs completion")
+                                                : QStringLiteral("%1 user requests still need completion").arg(open));
+    row->setText(4, terminal ? QStringLiteral("terminal")
                  : isGuestSource(source) ? guestLabel(source)
                                          : rowModelName(item));
     decorate(row, item);
@@ -1826,9 +1839,9 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
 
     if (!thread) {
         const QString recap = item.value(QStringLiteral("summary")).toString().simplified();
-        row->setText(4, recap.isEmpty() ? QStringLiteral("No recap saved") : recap);
-        row->setToolTip(4, recap);
-        row->setForeground(4, recap.isEmpty() ? m_tree->palette().color(QPalette::PlaceholderText)
+        row->setText(5, recap.isEmpty() ? QStringLiteral("No recap saved") : recap);
+        row->setToolTip(5, recap);
+        row->setForeground(5, recap.isEmpty() ? m_tree->palette().color(QPalette::PlaceholderText)
                                                 : m_tree->palette().color(QPalette::Text));
     }
 
@@ -2065,7 +2078,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     m_filling = false;
     for (int column = 1; column < m_tree->columnCount(); ++column)
         header->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(4, QHeaderView::Stretch);
+    header->setSectionResizeMode(5, QHeaderView::Stretch);
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
     // Selecting a session under a collapsed group can expand its parent in Qt. Restore the
     // reader's group choice after restoring the current row, including when that row is hidden.

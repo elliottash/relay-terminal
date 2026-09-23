@@ -1902,7 +1902,7 @@ rename re-writes the title entry, so a conversation is findable under its new na
 
 `conversations {query?, scope: "project"|"all", workspace?, model?, has_open_tasks?, since?,
 until?, sources?: ["agent"|"terminal"|"subagent"|"claude"|"codex"], include_threads?: bool, sort?:
-"recent"|"oldest"|"longest"|"shortest"|"title"|"title_desc"|"model"|"model_desc"|"summary"|"summary_desc"|"relevance",
+"recent"|"oldest"|"longest"|"shortest"|"requests_desc"|"requests"|"title"|"title_desc"|"model"|"model_desc"|"summary"|"summary_desc"|"relevance",
 offset?, matches_per_item? (1–20, default 5), limit? (1–200, default 50), id?}`
 
 v3 filter fields, all optional and all stacking with whatever the query's operators say:
@@ -1916,11 +1916,14 @@ Subagent threads (`source: "subagent"`) are left out unless `include_threads` is
 `sources` names them, and naming a word that is not one of the five is an error. `sources` absent
 means agent sessions and terminal history. `sort`
 (pinned first in every order, alphabetical ties broken newest first): newest `updated` first
-(default), oldest first, most or fewest turns, `title`/`title_desc` by the custom title over the
+(default), oldest first, most or fewest turns, `requests_desc`/`requests` by unfinished user requests,
+`title`/`title_desc` by the custom title over the
 stored one (the Session column), `model`/`model_desc` by what the Sessions pane's Model column
 shows (terminal rows as "terminal", the guests as "Claude Code"/"Codex", others their model),
 `summary`/`summary_desc` by the saved Recap column (empty summaries first or last), or
 relevance (14.2). `offset` pages: the event carries `next_offset` when there is more.
+The Requests column shows `open_requests` only for Relay agent sessions; other sources show a dash
+and sort after tracked rows in either request-count direction.
 
 `scope` defaults to `project`, which uses `workspace` (the pane's own workspace when the field is
 absent). `since`/`until` are epoch seconds against `updated`. An empty `query` lists conversations
