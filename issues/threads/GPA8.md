@@ -1,0 +1,2 @@
+<!-- relay:entry 20260923T164127Z-aa author=codex kind=evidence -->
+Guest parity audit after #XP7N: Board 7 tools missing, Relay app 13 missing, session 2 missing, plus conditional keybinding and program-control tools. Source catalogs: backend/relay_core/board_tools.py, app_tools.py, activity_tools.py, agent.py, guest_board_bridge.py. #4NXH intentionally limited the original Board bridge to five tools.
