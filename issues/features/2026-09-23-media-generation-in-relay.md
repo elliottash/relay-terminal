@@ -1,13 +1,15 @@
 ---
 id: 2GV0
 type: work
-status: planned
+status: needs-verification
 labels: [feature, agent-tools, media]
-assignee: codex
+assignee: agent
+implemented_by: openai/gpt-6-sol via codex
+session: 5834fd5a-9d0a-4abd-8756-1ee961654975
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23; card written by Codex
-links: {plans: [], commits: [2b17ffb791e7a3da2c43a3521783e1c18e7a565f, 58da01e3842965f9b1d4611a70c8aba484334169], evidence: [], related: [], github: null}
+links: {plans: [], commits: [2b17ffb791e7a3da2c43a3521783e1c18e7a565f, 58da01e3842965f9b1d4611a70c8aba484334169, 157e2e6facf02090694dd46685465de2596ad748, 0fba005910299d657f5bc2538f7c7d0e3cf0ef6f, 6b20b8e76c357aa231e38141827f53532f46bcda, cd31c56cc5c50705d3ed199010f82aa8aa69ea7a], evidence: [], related: [], github: null}
 ---
 # Give Relay agents image, sound, and video generation
 
@@ -56,3 +58,19 @@ OpenRouter uses `POST /api/v1/images` (base64 image data) and an asynchronous `P
 **Risks.** Provider catalog prices and model parameters change; a quote is an estimate, never a guarantee. fal's older music endpoint is being retired. Video and music outputs can be large and delayed; download timeouts, restart recovery and output-size limits matter. Fal SFX duration differs from direct ElevenLabs. Guest tools must not expose keys or permit writes outside the workspace.
 
 **Verify.** Add focused adapter tests with mocked provider responses for image decoding, Lyria audio, fal/direct ElevenLabs, and video submit/poll/download; test model-specific validation, missing-key fallback, stale/unknown quotes, cost reporting, bad URLs, size limits, atomic file failure and restart recovery. Run the relevant `tests/test_tools.py`, `tests/test_keystore.py`, `tests/test_images.py` and new media tests, plus protocol and guest-bridge tests. In an isolated profile, generate one small artifact for each capability with test keys or sandboxed provider responses; confirm image display, audio/video file opening and the pre-generation quote in Relay.
+
+## Execution Summary
+2026-09-23: Added native and guest `media_catalog`, `media_quote`, `media_generate` and `media_job` tools. Images use OpenRouter FLUX.2 Klein or Gemini Flash Lite; music uses OpenRouter Lyria or ElevenLabs via fal/direct key; SFX uses ElevenLabs via fal/direct key; video uses exactly standard Seedance 2.0 or Veo 3.1 Lite. fal and ElevenLabs keys appear in Options › Models › API keys. Quote tokens gate paid calls; video and fal jobs persist across worker restarts. Provider bytes are validated and saved under the workspace, with clickable result paths. The service shows an estimate when catalog pricing supports one and otherwise explicitly reports that the estimate is unavailable. API payloads and downloads were verified with mocked provider responses; no paid live generation was run.
+
+## Tests
+tests/test_media.py::MediaTests::test_veo_quote_and_restart_download
+tests/test_media.py::MediaTests::test_direct_music_uses_music_endpoint
+tests/test_media.py::MediaTests::test_seedance_quote_uses_video_tokens
+tests/test_media.py::MediaTests::test_lyria_and_image_decode
+tests/test_media.py::MediaTests::test_fal_sfx_job_and_key_fallback
+tests/test_media.py::MediaTests::test_validation_and_no_artifact_on_bad_provider_data
+tests/test_guest_board_bridge.py::BridgeTests::test_guest_media_call_routes_to_bound_worker
+tests/test_keystore.py::KeystoreTests::test_store_lookup_passes_secret_on_stdin
+tests/test_images.py::ImageFileTests::test_the_type_comes_from_the_bytes_not_the_file_name
+
+Board runs `20260923T223838Z-db9b` and `20260923T223855Z-73c1`: 9/9 passed. The broader shell invocation `PYTHONPATH=backend:. python3 -m unittest tests.test_media tests.test_guest_board_bridge tests.test_tools tests.test_keystore tests.test_images tests.test_tool_labels -q` passed 185/185. `scripts/relay-build --fast --target relay`, the land.py exact-tree build, Python compileall and git diff --check passed. Live paid provider requests and UI playback remain unverified; the verifier can check them with test credentials.
