@@ -7,7 +7,7 @@ assignee: agent
 implemented_by: openai/gpt-6-sol via codex
 rank: zzzzzzzzzzzzzzzzzzr
 created: '2026-09-23'
-links: {plans: [], commits: [a0d54f593e3fc4c9e3f0b281ca4018ce3eb80fc5], evidence: [docs/qa_evidence/2026-09-23-palette-WM4K/palette-results.png, docs/qa_evidence/2026-09-23-palette-WM4K/card-results.png], related: [MAGP], github: null}
+links: {plans: [], commits: [a0d54f593e3fc4c9e3f0b281ca4018ce3eb80fc5, 2a832109044888bbd22c89c6c91cfc16276d9d3a], evidence: [docs/qa_evidence/2026-09-23-palette-WM4K/palette-results.png, docs/qa_evidence/2026-09-23-palette-WM4K/card-results.png], related: [MAGP], github: null}
 ---
 # Search active conversations from the Actions palette
 
