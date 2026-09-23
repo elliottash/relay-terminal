@@ -15,3 +15,9 @@ Arrow is implemented on sendable local agent/steer rows, beside ×, with live sh
 
 <!-- relay:entry 20260923T025453Z-3w author=agent kind=event model=gpt-6-astra pane=c95ef4b6 turn=a4d3237ded6e499298129ce091221313/946e3c14379a4e43babdf8659023bc67 -->
 - ✦ agent moved this card · Executing → Needs verification · Row arrow and hover/click checks pass under Xvfb; broader repeated-Enter failure tracked separately as #VZ8C. · evidence docs/qa_evidence/2026-09-22-queue-send-now/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260923T025736Z-vn author=agent kind=event model=gpt-6-astra pane=c95ef4b6 turn=a4d3237ded6e499298129ce091221313/946e3c14379a4e43babdf8659023bc67 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-queue-sen… → {"plans": [], "commits": ["2f1697795be2d3e00164b4eeeb3a59beefff7581"], "evidence…
+
+<!-- relay:entry 20260923T025736Z-vo author=agent kind=evidence model=gpt-6-astra pane=c95ef4b6 turn=a4d3237ded6e499298129ce091221313/946e3c14379a4e43babdf8659023bc67 -->
+Landed 2f169779. Shared app build and isolated row test passed. The land gate built the exact selected tree; its relay-consolemode-tests --queue-arrow-only also passed under Xvfb with isolated XDG settings. Other sessions' Pane.h and consolemode test hunks were excluded from the commit.

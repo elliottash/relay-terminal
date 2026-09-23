@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mqsn1
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-queue-send-now/], related: [], github: null}
+links: {plans: [], commits: [2f1697795be2d3e00164b4eeeb3a59beefff7581], evidence: [docs/qa_evidence/2026-09-22-queue-send-now/], related: [VZ8C], github: null}
 ---
 # Queue send-now arrow
 

@@ -24,5 +24,10 @@ xvfb-run -a -s '-screen 0 1050x720x24' build/relay-consolemode-tests --queue-arr
 
 The broader `ctest --test-dir build -R '^consolemode$' --output-on-failure`
 fails in the existing `repeatedEnterKeepsTheFirstQueuedPrompt` assertion that
-exactly one worker message was sent, before this new case runs. The failure
+exactly one worker message was sent. The failure
 also reproduces with isolated XDG settings; tracked by #VZ8C and noted on #QFF1.
+
+Committed as `2f169779`. `scripts/relay-build --target relay-consolemode-tests relay`
+passed. The land gate built the exact selected tree, and running its
+`relay-consolemode-tests --queue-arrow-only` under Xvfb with isolated settings
+also passed. The changes belonging to other sessions were excluded.
