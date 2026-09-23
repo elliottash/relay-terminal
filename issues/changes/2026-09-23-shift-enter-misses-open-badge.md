@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-shift-open-B4G7/], related: [E7FP, J8QP], github: null}
+links: {plans: [], commits: [673ade6c831d275d74d537b6266d22560e7ade75], evidence: [docs/qa_evidence/2026-09-23-shift-open-B4G7/], related: [E7FP, J8QP], github: null}
 ---
 # Shift+Enter misses the Sessions open badge
 
