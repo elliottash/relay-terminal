@@ -19,3 +19,6 @@ Compass layout and directional keyboard model are implemented. Focused widget te
 
 <!-- relay:entry 20260923T163014Z-ad author=agent kind=event model=gpt-6-sol pane=ad3e1e93 turn=f1a0a2fb7d424ed0a5069e58546ac2b1/6b333879db3a40eb9ed19539933527d0 -->
 - ✦ agent moved this card · Executing → Needs verification · Compass UI, directional navigation, compact layout and screen-contained dropdown built; focused test and isolated Xvfb drive passed. · evidence docs/qa_evidence/2026-09-23-compass-actions/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T163156Z-5t author=agent kind=event model=gpt-6-sol pane=ad3e1e93 turn=f1a0a2fb7d424ed0a5069e58546ac2b1/6b333879db3a40eb9ed19539933527d0 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-compass-a… → {"plans": [], "commits": ["b1f05a32b08c5a50feebdc14127cbfc0d36dec6c"], "evidence…
