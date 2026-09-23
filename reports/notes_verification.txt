@@ -1,0 +1,24 @@
+i want to have the following cases of analysis for knowledge work, to think about thow relay's 
+
+app developer
+ML / data science researcher
+(social) scientist doing exploratory analysis with existing dataset
+(social) scientist designing and implementing controlled experiments
+mathematician / formal theorist 
+scientist reviewing a paper
+scientist doing lit review
+teacher preparing course materials
+admin assistant dealing with admin tasks
+game development
+
+
+for QA:
+-- can a test script confirm?
+-- can AI confirm based on text output?
+-- can AI confirm based on visual / multimodal output?
+-- is there a verifiable metric? or perhaps, are ther levels. like for art/design, that is the lowest level.
+-- should the AI do pairwise comparisons rather than pointwise evals?
+
+agent should make this suggestion, and also the effort level, per task. 
+
+per project, or per globals (or options?), user can decide wherhe its automatic or not. 
