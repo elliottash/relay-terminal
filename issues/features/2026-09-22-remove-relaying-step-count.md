@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mstpc
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-STPC/result.md], related: [R3YN], github: null}
+links: {plans: [], commits: [8af57af2], evidence: [docs/qa_evidence/2026-09-22-STPC/result.md], related: [R3YN], github: null}
 ---
 # Remove the step count from the Relaying notifier
 
