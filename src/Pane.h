@@ -979,6 +979,24 @@ public:
         }
         return relay::background::name(relay::background::resolve(facts, m_ledger));
     }
+    QString backgroundTaskReason() const {
+        if (!m_guestQuestions.isEmpty()) return m_guestQuestions.constFirst().label;
+        if (m_ask.open()) return questionAt(0).value(QStringLiteral("question")).toString();
+        for (const auto &todo : m_ledger.todos()) {
+            if (todo.status != QStringLiteral("blocked") && todo.status != QStringLiteral("deferred")
+                && todo.status != QStringLiteral("cancelled")) continue;
+            for (const QString &id : todo.requestIds)
+                if (relay::background::requestNumber(id) >= m_backgroundMinRequest)
+                    return todo.note.isEmpty() ? todo.text : todo.note;
+        }
+        for (const auto &request : m_ledger.requests())
+            if (relay::background::requestNumber(request.id) >= m_backgroundMinRequest
+                && (request.status == QStringLiteral("blocked") || request.status == QStringLiteral("deferred")
+                    || request.status == QStringLiteral("cancelled")))
+                return request.reason.isEmpty() ? request.preview : request.reason;
+        if (m_lastAsked || m_lastOutcome == QStringLiteral("error")) return turnSummary();
+        return {};
+    }
     // This pane's share of the machine (issue #D03W): CPU and memory summed over the shell's
     // process tree and the pane's agent worker, sampled by the window's status poll so every
     // pane is measured on the same interval. An idle pane is a valid sample of nothing.
@@ -2935,8 +2953,9 @@ private:
         m_guestQuestions.append(GuestQuestion{sequence, guest, guestQuestionLabel(guest, payload)});
         // Away from the pane too: the bell, and the desktop when Relay is not in front. A blocked
         // guest that only drew a small bar in a background tab said nothing at all.
-        notify(guestName(guest), m_guestQuestions.constLast().label,
-               relay::NotificationCenter::kindWarning);
+        if (!(window() && window()->property("backgroundSession").toBool()))
+            notify(guestName(guest), m_guestQuestions.constLast().label,
+                   relay::NotificationCenter::kindWarning);
         if (m_guestQuestions.size() == 1) showGuestQuestion();
         else refreshGuestBar();      // the one on screen now says how many are behind it
         changed();   // the tab's "needs you" glyph: statusFacts() counts a pending question

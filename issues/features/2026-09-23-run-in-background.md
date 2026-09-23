@@ -1,14 +1,14 @@
 ---
 id: BGRN
 type: work
-status: executing
+status: needs-verification
 labels: [feature, panes, switchboard, notifications]
 assignee: codex
 implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-bgrn/], related: [RG0Z], github: null}
+links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e], evidence: [docs/qa_evidence/2026-09-23-bgrn/], related: [RG0Z], github: null}
 ---
 # Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done
 

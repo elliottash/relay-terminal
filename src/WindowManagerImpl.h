@@ -278,7 +278,7 @@ inline void WindowManager::refreshBackgroundTasks() {
         const QString kind = state == QStringLiteral("done") ? relay::NotificationCenter::kindSuccess
                             : state == QStringLiteral("failed") ? relay::NotificationCenter::kindError
                             : relay::NotificationCenter::kindWarning;
-        relay::NotificationCenter::instance().post(label + title, QString(), kind, token);
+        relay::NotificationCenter::instance().post(label + title, pane->backgroundTaskReason(), kind, token);
     }
     for (auto it = m_backgroundStates.begin(); it != m_backgroundStates.end(); )
         if (!live.contains(it.key())) it = m_backgroundStates.erase(it);
