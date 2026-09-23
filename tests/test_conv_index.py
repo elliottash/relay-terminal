@@ -355,6 +355,15 @@ class IndexTests(unittest.TestCase):
         only_agent = self.index.search("scrollback", scope="all", sources=["agent"])
         self.assertEqual([i["source"] for i in only_agent["items"]], ["agent"])
 
+    def test_recorded_token_sort(self):
+        for sid, amount in (("a", 30), ("b", 10), ("c", 20)):
+            data = session(sid * 32)
+            data["usage"] = {"prompt_tokens": amount, "total_tokens": amount}
+            self.index.update_session(data, self.root)
+        ids = lambda sort: [i["session_id"][0] for i in self.index.search("", scope="all", sort=sort)["items"]]
+        self.assertEqual(ids("tokens_desc"), ["a", "c", "b"])
+        self.assertEqual(ids("tokens"), ["b", "c", "a"])
+
     def test_shortest_requests_title_and_model_sorts(self):
         """Column sorts use stored counts and shown text, with newest-first ties."""
         self.index.update_session(session("a" * 32, title="capybara", turns=9, updated=1000.0,
