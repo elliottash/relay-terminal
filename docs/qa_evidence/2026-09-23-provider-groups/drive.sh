@@ -26,7 +26,7 @@ approvals_ask=@Invalid()
 [models]
 tier\main=glm-coding|glm-5.3|
 CONF
-"$root/build/relay" --workspace "$sandbox/project" >"$out/relay-stderr.log" 2>&1 & relay_pid=$!
+"$root/build/relay" --workspace "$sandbox/project" >"$sandbox/relay-stderr.log" 2>&1 & relay_pid=$!
 sleep 12
 win=$(xdotool search --pid "$relay_pid" | head -1)
 xdotool windowmove "$win" 0 0 windowsize "$win" 1600 900 windowfocus "$win"
