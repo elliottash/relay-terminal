@@ -870,6 +870,65 @@ void aTerminalPanesOwnQueueResumesOnEnterToo()
     CHECK(sent.isEmpty());
 }
 
+void enteringPlanSelectsHigh()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}, {"agent_role", "main"}});
+    sent.clear();
+    console.setAgentMode(QStringLiteral("plan"));
+    CHECK_EQ(sent.size(), 2);
+    if (sent.size() != 2) return;
+    CHECK_EQ(sent[0].value("type").toString(), QStringLiteral("set_agent_role"));
+    CHECK_EQ(sent[0].value("role").toString(), QStringLiteral("high"));
+    CHECK_EQ(sent[1].value("type").toString(), QStringLiteral("set_mode"));
+    CHECK_EQ(sent[1].value("mode").toString(), QStringLiteral("plan"));
+    console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"model", "test"}, {"agent_role", "high"}});
+    sent.clear();
+    console.setAgentMode(QStringLiteral("plan"));
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.last().value("type").toString(), QStringLiteral("set_mode"));
+    sent.clear();
+    console.setAgentMode(QStringLiteral("build"));
+    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.last().value("mode").toString(), QStringLiteral("build"));
+    CHECK_EQ(console.paneMode(), QStringLiteral("high"));
+}
+
+void planWhileConfiguringSelectsHighBeforeMode()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    // A usable endpoint starts configure, but its reply has not arrived yet.
+    console.deliverWorkerEvent(QJsonObject{{"event", "presets"}, {"presets", QJsonArray{
+        QJsonObject{{"id", "test"}, {"model", "test"}, {"local", true},
+                    {"base_url", "http://localhost:1/v1"}}}}});
+    CHECK(std::any_of(sent.cbegin(), sent.cend(), [](const QJsonObject &m) {
+        return m.value("type").toString() == QStringLiteral("configure");
+    }));
+    sent.clear();
+    console.setAgentMode(QStringLiteral("plan"));
+    CHECK_EQ(console.paneMode(), QStringLiteral("high"));
+    CHECK(sent.isEmpty());
+    // Configure was already in flight with Main: its reply must not lose the High choice.
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}, {"agent_role", "main"}});
+    int roleIndex = -1, modeIndex = -1;
+    for (int i = 0; i < sent.size(); ++i) {
+        if (sent[i].value("type").toString() == QStringLiteral("set_agent_role") &&
+            sent[i].value("role").toString() == QStringLiteral("high")) roleIndex = i;
+        if (sent[i].value("type").toString() == QStringLiteral("set_mode") &&
+            sent[i].value("mode").toString() == QStringLiteral("plan")) modeIndex = i;
+    }
+    CHECK(roleIndex >= 0);
+    CHECK(modeIndex > roleIndex);
+}
+
 void repeatedEnterKeepsTheFirstQueuedPrompt()
 {
     StubContext context;
@@ -1130,6 +1189,8 @@ int main(int argc, char **argv)
     cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
+    cases::enteringPlanSelectsHigh();
+    cases::planWhileConfiguringSelectsHighBeforeMode();
     cases::answersBypassQueuedPrompts();
     cases::proseQuestionHoldsTheQueueForItsReply();
     cases::rewindRemovesOnlyTheBranchAndLinksItsCompleteText();

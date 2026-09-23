@@ -39,7 +39,7 @@ from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (EXIT_PLAN_MODE_SPEC, validate_exit_args,
                        PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
-from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
+from .roles import GUEST_BASE_SCHEME, RoleResolver, guest_id_of, is_guest_preset
 from .presets import (apply_effort, context_window_for, effort_levels, effort_style, infer_effort,
                       model_efforts, model_name, model_supports_vision, resolve_preset,
                       tier_default, validate_effort)
@@ -2466,7 +2466,14 @@ class Agent:
         to the main agent (the provider has no effort knob, or the effort is already max) there is
         nothing to swap and no event is sent, exactly like an image the main model can read.
         """
-        target = self.roles.planning_target() if self.roles is not None else None
+        planner = self.roles
+        if planner is not None and not planner.roles.get("planning"):
+            # /high preserves the Main role's base so /main can return to it. Planning
+            # must boost the currently selected model, not route back to that saved base.
+            planner = RoleResolver(self.config, self._preset_id(self.preset),
+                                   key_lookup=planner.key_lookup, main_effort=self.effort,
+                                   guest_check=planner.guest_check)
+        target = planner.planning_target() if planner is not None else None
         guest = None
         if target is not None and is_guest_preset(target.preset_id) and not self._injected_provider:
             # A `guest:` entry of the High list (protocol 13.7): Claude Code or Codex plans this
@@ -2474,7 +2481,7 @@ class Agent:
             # is said, and the turn goes where it would have gone without the guest entries.
             guest = self._start_plan_guest(turn_id, target)
             if guest is None:
-                target = self.roles.planning_target(guests=False)
+                target = planner.planning_target(guests=False)
         if target is None:
             # Nothing to swap on an endpoint pane means the default changed nothing (no effort
             # knob, or the effort is already max). On a guest pane the knob is the harness's own

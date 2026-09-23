@@ -4123,6 +4123,7 @@ public:
 
     void setAgentMode(const QString &mode) {
         if (!m_configured && (!m_deferredPreset.isEmpty() || m_configuring)) {
+            if (mode == QStringLiteral("plan")) setAgentRole(QStringLiteral("high"), false);
             // Picking Plan is not a prompt: keep lazy harness startup, but remember the
             // choice and send it before any queued ask when configuration completes.
             m_pendingAgentMode = mode;
@@ -4133,6 +4134,9 @@ public:
             return;
         }
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+        // Entering Plan selects the same role (and remembered model) as /high. Do not
+        // toggle: a pane already on High must stay there, including on repeated Plan.
+        if (mode == QStringLiteral("plan")) setAgentRole(QStringLiteral("high"), false);
         send({{"type", "set_mode"}, {"mode", mode}});
     }
     void togglePlanMode() { setAgentMode(m_agentMode == QStringLiteral("plan") ? QStringLiteral("build") : QStringLiteral("plan")); }
@@ -11437,6 +11441,7 @@ private:
             if (!m_pendingAgentMode.isEmpty()) {
                 m_agentMode = m_pendingAgentMode;
                 m_pendingAgentMode.clear();
+                if (m_agentMode == QStringLiteral("plan")) setAgentRole(QStringLiteral("high"), false);
                 send({{"type", "set_mode"}, {"mode", m_agentMode}});
             }
             noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on

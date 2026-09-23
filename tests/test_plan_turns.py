@@ -107,6 +107,18 @@ class PlanTurnTests(unittest.TestCase):
         return TrackedProvider.served_configs
 
     # ----- a plan turn swaps, then goes back ------------------------------------------
+    def test_plan_keeps_the_selected_high_model_and_preserves_main(self):
+        agent = self.plan_agent(KIMI, "kimi", tiers={"high": [
+            {"preset": "glm", "model": "glm-5.3", "effort": "max"}]})
+        high = agent.roles.resolve("high")
+        agent.set_model(high.config, high.preset_id)
+        agent.set_effort(high.effort)
+        agent.ask("plan this change")
+        self.assertEqual(self.served_configs()[-1][0], "glm-5.3")
+        self.assertEqual(agent.config.model, "glm-5.3")
+        self.assertEqual(agent.roles.main_config.model, "kimi-k3")
+        self.assertNotIn("plan_route", self.kinds())
+
     def test_a_plan_turn_runs_on_the_planning_config_and_comes_back(self):
         agent = self.plan_agent()
         original = agent.provider
