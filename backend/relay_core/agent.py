@@ -702,6 +702,8 @@ class Agent:
         # The model swap a plan-mode turn is running under, or None (owner, 2026-09-19): the
         # planning role serves plan turns, the pane's own model every other turn.
         self._planning: dict | None = None
+        self._plan_choice = None
+        self._plan_choice_set = False
         # The failover swap a turn is running under, or None (card #G9VE): the pane's own
         # provider, config and preset, put back when the turn ends.
         self._failover: dict | None = None
@@ -1153,7 +1155,11 @@ class Agent:
         # Neither the prompt nor the tool list depends on the mode since #GMCF, so a switch
         # mid-conversation keeps every cached prefix; the refresh stays because it is also where
         # anything else that changed since the last one (a skill, an instruction file) is picked up.
-        self.mode = validate_mode(mode)
+        selected = validate_mode(mode)
+        if selected != self.mode:
+            self._plan_choice = None
+            self._plan_choice_set = False
+        self.mode = selected
         self.refresh_system_prompt()
 
     def set_instructions(self, loaded) -> None:
@@ -2536,7 +2542,12 @@ class Agent:
         model can read.
         """
         planner = self.roles
-        target = planner.planning_target() if planner is not None else None
+        if planner is not None and not self._plan_choice_set:
+            custom = (planner.roles.get("planning") or {}).get("candidates")
+            self._plan_choice = (planner.choose_role("planning") if custom
+                                 else planner.planning_target())
+            self._plan_choice_set = True
+        target = self._plan_choice
         guest = None
         if target is not None and is_guest_preset(target.preset_id) and not self._injected_provider:
             # A `guest:` entry of the High list (protocol 13.7): Claude Code or Codex plans this
@@ -2544,7 +2555,8 @@ class Agent:
             # is said, and the turn goes where it would have gone without the guest entries.
             guest = self._start_plan_guest(turn_id, target)
             if guest is None:
-                target = planner.planning_target(guests=False)
+                target = (None if (planner.roles.get("planning") or {}).get("candidates")
+                          else planner.planning_target(guests=False))
         if target is None:
             return None
         if is_guest_preset(target.preset_id) and guest is None \

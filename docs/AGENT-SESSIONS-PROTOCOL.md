@@ -1058,6 +1058,7 @@ the pane's own model). Each value is `null`, `{}` or `{"inherit": true}` for "sa
 | `model` | string | with `preset`: a different model id on that provider |
 | `extra` | object | provider params; defaults to the preset's `extra`, or — when `model` names one of that provider's *other* models — to that model's own (`presets.model_extra`, the rule a tier list entry follows: glm-5.3-flash is the same request whether it was ranked under Flash or picked by hand) |
 | `effort` | string | one of the levels **that model** offers (section 3), in the provider's own word; omitted means the provider's own default, a level the model does not have is read through `nearest_effort`, and a level asked of a model with no effort knob (Kimi's high-speed ones) is not sent |
+| `candidates` | array | for `planning`, `subagent`, and `switchboard`: an optional ranked list of tier entries, each with optional integer `rank` (1–1000); equal ranks draw once per Plan entry, subagent spawn, or helper conversation. Exclusive with the other role fields. |
 
 A role may name a provider **and** a model **and** a level together, and does routinely since card
 #PK5Q: every helper agent's model box lists a provider's models one by one, the way a terminal
@@ -1172,12 +1173,17 @@ be picked manually."). `configure` and `set_agent_options` accept
 ```
 
 where an entry is `{"preset": <id>, "model": <id or "">, "effort": <that model's own level, or
-absent>}` — a model **plus a reasoning level** ("for codex planning you pick xhigh, not max; for glm 5.3
+absent>, "rank": <integer 1–1000 or absent>}` — a model **plus a reasoning level** ("for codex planning you pick xhigh, not max; for glm 5.3
 you pick max"). Since v3.11 the level is stored and sent in the provider's own word (section 3): a level
 that model does not have is read through `nearest_effort` on the way in, and one no provider has is
 dropped, leaving the entry and the model's own default. An empty `model`
 is that provider's model for the tier; an absent `effort` is the model's own default; a `guest:<id>`
 entry keeps its `effort` as written, because a guest's levels are its CLI's own words (29.3).
+An absent rank uses the entry's list position, preserving older lists. Entries with the same rank
+are drawn at random among usable models at the best available rank. Recent unused subscription
+allowance approaching reset increases a tied model's chance; missing or stale figures give equal
+chances. The selected model and effort stay fixed for that conversation or turn, and fallover tries
+other tied entries before lower ranks.
 **A list never errors on shape** (`roles.validate_tiers`): an entry that is not an object, has no
 preset, names a preset nobody knows or — in `local` — is not a model server on this machine is dropped;
 an `effort` that is not a level is dropped from its entry; an entry repeated lower down is dropped (a

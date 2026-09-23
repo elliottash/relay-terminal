@@ -1436,6 +1436,43 @@ private Q_SLOTS:
         QVERIFY(startEntry(catalog, QString(), QString(), 1000).effort.isEmpty());
     }
 
+    void tiedRanksRoundTripAndDrawAcrossPeers() {
+        const Catalog catalog = catalogFrom(presets());
+        const QString tier = QStringLiteral("main");
+        // Existing settings remain ordered singletons until a person explicitly ties them.
+        QSettings().setValue(QStringLiteral("models/tier/main"),
+                             QStringList{QStringLiteral("glm-coding|glm-5.3|max"),
+                                         QStringLiteral("kimi-code|k3|high")});
+        QCOMPARE(curation::tierList(tier).at(0).rank, 1);
+        QCOMPARE(curation::tierList(tier).at(1).rank, 2);
+        curation::setTierRank(tier, QStringLiteral("kimi-code|k3"), 1);
+        const auto saved = curation::tierList(tier);
+        QCOMPARE(saved.at(0).rank, 1);
+        QCOMPARE(saved.at(1).rank, 1);
+        QCOMPARE(saved.at(1).effort, QStringLiteral("high"));
+        QCOMPARE(drawTier(catalog, tier, 1000, 0.1).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(drawTier(catalog, tier, 1000, 0.9).key, QStringLiteral("kimi-code|k3"));
+    }
+
+    void nearResetAllowanceWeightsOnlyTheBestLiveRank() {
+        Catalog catalog = catalogFrom(presets());
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 1},
+            {QStringLiteral("kimi-code|k3"), QStringLiteral("high"), 1},
+            {QStringLiteral("guest:claude|opus"), QStringLiteral("high"), 2}});
+        const qint64 now = 100000;
+        catalog.limitUpdatedAt[QStringLiteral("glm-coding")] = now - 60;
+        catalog.limitUpdatedAt[QStringLiteral("kimi-code")] = now - 60;
+        catalog.limits[QStringLiteral("glm-coding")] = {LimitWindow{QStringLiteral("weekly"), 20, now + 3600}};
+        catalog.limits[QStringLiteral("kimi-code")] = {LimitWindow{QStringLiteral("weekly"), 20, now + 10 * 86400}};
+        QCOMPARE(drawTier(catalog, tier, now, 0.7).key, QStringLiteral("glm-coding|glm-5.3"));
+        catalog.limitUpdatedAt[QStringLiteral("glm-coding")] = now - 3600; // stale is neutral
+        QCOMPARE(drawTier(catalog, tier, now, 0.7).key, QStringLiteral("kimi-code|k3"));
+        catalog.limits[QStringLiteral("glm-coding")] = {LimitWindow{QStringLiteral("weekly"), 100, now + 3600}};
+        QCOMPARE(drawTier(catalog, tier, now, 0.9).key, QStringLiteral("kimi-code|k3"));
+    }
+
     // Owner, 2026-09-21: a harness he ranked first is what a new pane starts on. Being installed
     // is not a default; being put first is.
     void aGuestAtRankOneIsWhatANewPaneStartsOn() {

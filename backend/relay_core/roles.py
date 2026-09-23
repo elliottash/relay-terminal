@@ -13,6 +13,9 @@ resolver records a one-line warning, which the worker emits in ``model_roles``.
 from __future__ import annotations
 
 import copy
+import math
+import random
+import time
 import urllib.parse
 from dataclasses import dataclass, replace
 
@@ -228,12 +231,30 @@ def validate_roles(raw) -> dict[str, dict]:
             continue
         if not isinstance(value, dict):
             raise ValueError(f"roles.{name} must be an object or null.")
-        unknown = set(value) - {"preset", "base_url", "model", "extra", "effort", "inherit", "tier"}
+        unknown = set(value) - {"preset", "base_url", "model", "extra", "effort", "inherit", "tier", "candidates"}
         if unknown:
             raise ValueError(f"roles.{name}: unknown field {sorted(unknown)[0]!r}.")
         if value.get("inherit") is True:
             continue
         entry: dict = {}
+        if "candidates" in value:
+            if name not in {"planning", "subagent", "switchboard"}:
+                raise ValueError(f"roles.{name}: ranked candidates are not available for this job.")
+            if any(value.get(field) is not None
+                   for field in ("preset", "base_url", "model", "extra", "effort", "tier")):
+                raise ValueError(f"roles.{name}: give candidates or one override, not both.")
+            raw_candidates = value["candidates"]
+            if not isinstance(raw_candidates, list):
+                raise ValueError(f"roles.{name}.candidates must be a list.")
+            tier = "high" if name == "planning" else "main"
+            candidates = []
+            for item in raw_candidates[:MAX_TIER_ENTRIES * 4]:
+                candidate = _list_entry(tier, item)
+                if candidate is not None and _same_target(candidate) not in [_same_target(e) for e in candidates]:
+                    candidates.append(candidate)
+            if candidates:
+                out[name] = {"candidates": candidates[:MAX_TIER_ENTRIES]}
+            continue
         if value.get("tier") is not None:
             # A tiered role takes the High/Main/Flash/Lite model (protocol 13.7). It is exclusive
             # with a hand-picked endpoint, so the two can never disagree.
@@ -413,6 +434,9 @@ def _list_entry(tier: str, value) -> dict | None:
         return None
     if isinstance(value.get("extra"), dict) and not guest:
         entry["extra"] = copy.deepcopy(value["extra"])
+    rank = value.get("rank")
+    if type(rank) is int and 1 <= rank <= 1000:
+        entry["rank"] = rank
     effort = value.get("effort")
     # Every level is its provider's own word now (card #MDL1, 2026-09-21), not one of Relay's
     # four, so a list entry keeps what it was written with — "xhigh" on the OpenAI API and codex,
@@ -442,6 +466,64 @@ def _list_entry(tier: str, value) -> dict | None:
     if tier == "local" and not _is_local_endpoint(entry):
         return None
     return entry
+
+
+def _usage_weight(preset_id: str | None, now: int | None = None,
+                  limits: dict | None = None) -> float:
+    """Give recent unused allowance nearing reset up to five shares of a tied draw."""
+    if now is None:
+        now = int(time.time())
+    if limits is None and is_guest_preset(preset_id):
+        from . import guest_harness_provider
+        limits = guest_harness_provider.last_limits(guest_id_of(preset_id))
+    if not isinstance(limits, dict):
+        return 1.0
+    updated = limits.get("updated_at")
+    if type(updated) not in (int, float) or not 0 <= now - updated <= 1800:
+        return 1.0
+    remaining, urgency, known = 1.0, 0.0, False
+    for window in limits.get("windows") or ():
+        if not isinstance(window, dict):
+            continue
+        used, reset = window.get("used_percent"), window.get("resets_at")
+        if type(used) not in (int, float) or type(reset) not in (int, float) or reset <= now:
+            continue
+        known = True
+        remaining = min(remaining, max(0.0, min(1.0, (100.0 - used) / 100.0)))
+        urgency = max(urgency, math.exp(-(reset - now) / 86400.0))
+    return 1.0 + 4.0 * remaining * urgency if known else 1.0
+
+
+def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
+                       limits_lookup=None, now: int | None = None) -> list[dict]:
+    """Sort ranks, then optionally draw a weighted order within each tied rank."""
+    groups: dict[int, list[dict]] = {}
+    for index, entry in enumerate(entries, 1):
+        rank = entry.get("rank", index)
+        if type(rank) is not int or rank < 1:
+            rank = index
+        groups.setdefault(rank, []).append(entry)
+    result = []
+    if draw is None:
+        draw = random.random
+    for rank in sorted(groups):
+        group = groups[rank].copy()
+        while group:
+            if not choose or len(group) == 1:
+                result.append(group.pop(0))
+                continue
+            weights = [_usage_weight(e.get("preset"), now,
+                                     limits_lookup(e.get("preset")) if limits_lookup else None)
+                       for e in group]
+            position = max(0.0, min(float(draw()), 0.999999999999)) * sum(weights)
+            selected = len(group) - 1
+            for index, weight in enumerate(weights):
+                if position < weight:
+                    selected = index
+                    break
+                position -= weight
+            result.append(group.pop(selected))
+    return result
 
 
 def _strict_entry(name: str, value: dict) -> dict:
@@ -617,7 +699,26 @@ class RoleResolver:
         config.validate()
         return Resolved(role, config, preset_id, effort, source, tier=tier)
 
-    def _configured(self, role: str, entry: dict) -> Resolved:
+    def _configured(self, role: str, entry: dict, *, choose: bool = False) -> Resolved:
+        if "candidates" in entry:
+            tier = "high" if role == "planning" else "main"
+            for candidate in ordered_candidates(entry["candidates"], choose=choose):
+                preset_id = candidate.get("preset")
+                if is_guest_preset(preset_id):
+                    if role == "switchboard" or not self.guest_check(guest_id_of(preset_id)):
+                        continue
+                    chosen, base_url, model, _extra, effort = self._guest_target(candidate)
+                    return self._guest(role, chosen, base_url, model, effort, "configured", tier)
+                try:
+                    chosen, base_url, model, extra, effort = self._list_target(candidate, tier)
+                    resolved = self._build(role, chosen, base_url, model, extra, effort,
+                                           "configured", tier)
+                    if resolved.source != "fallback":
+                        return resolved
+                except (KeyError, ValueError):
+                    continue
+            return self._main(role, "fallback",
+                              f"{LABELS[role]}: no ranked model can run here; using main.")
         if entry.get("tier"):
             return self._tier(role, entry["tier"], "configured", entry.get("effort"))
         preset_text = entry.get("preset")
@@ -699,7 +800,7 @@ class RoleResolver:
         return (preset_id, GUEST_BASE_SCHEME + guest_id_of(preset_id), entry.get("model") or "", {},
                 entry.get("effort"))
 
-    def _tier_entries(self, tier: str, guests: bool = True) -> list[tuple[str | None, str, str, dict, str | None]]:
+    def _tier_entries(self, tier: str, guests: bool = True, choose: bool = False) -> list[tuple[str | None, str, str, dict, str | None]]:
         """The (preset, base_url, model, extra, effort) candidates of one tier, in order: the
         user's list when there is one (protocol 13.7), otherwise the one built-in default — the
         default provider's row of TIER_DEFAULTS, or the first saved endpoint for Local. [] when
@@ -710,6 +811,7 @@ class RoleResolver:
         listed = [entry for entry in self.tiers.get(tier) or []
                   if not is_guest_preset(entry.get("preset")) or (guests and tier in GUEST_TIERS)]
         if listed:
+            listed = ordered_candidates(listed, choose=choose)
             return [self._guest_target(entry) if is_guest_preset(entry.get("preset"))
                     else self._list_target(entry, tier) for entry in listed]
         if self.tiers.get(tier):
@@ -771,7 +873,7 @@ class RoleResolver:
         return Resolved(role, config, preset_id, effort, source, tier=tier)
 
     def _tier(self, role: str, tier: str, source: str, effort: str | None = None,
-              guests: bool = True) -> Resolved:
+              guests: bool = True, choose: bool = False) -> Resolved:
         """A tier's model for one role: the **first usable entry** of the tier's list, at that
         entry's level (protocol 13.7) — usable meaning a stored key, a model server on this machine
         or Relay Free where it works, or, for a guest entry of the High list, a harness that can
@@ -804,7 +906,7 @@ class RoleResolver:
         for candidate in tier_fallbacks(tier):
             if candidate == "main":
                 break
-            entries = self._tier_entries(candidate, guests)
+            entries = self._tier_entries(candidate, guests, choose)
             if not entries and not self.tiers.get(candidate):
                 break               # no list and no built-in default: nothing further down either
             guest_skipped = False
@@ -992,10 +1094,14 @@ class RoleResolver:
         if not entries and tier != "high":
             entries = list(self.tiers.get("main") or []) or [dict(e) for e in (fallbacks or [])
                                                              if isinstance(e, dict)]
-        for index, entry in enumerate(entries):
-            if self._is_entry(entry, preset_id, model, tier):
-                return entries[index + 1:]
-        return entries
+        ranked = sorted(((entry.get("rank", index), index, entry)
+                         for index, entry in enumerate(entries, 1)),
+                        key=lambda row: (row[0], row[1]))
+        for selected_rank, _index, selected in ranked:
+            if self._is_entry(selected, preset_id, model, tier):
+                return [entry for rank, _at, entry in ranked
+                        if (rank == selected_rank and entry is not selected) or rank > selected_rank]
+        return [entry for _rank, _index, entry in ranked]
 
     def _is_entry(self, entry: dict, preset_id, model, tier: str) -> bool:
         """Whether a list entry names the (preset, model) a turn is running on."""
@@ -1119,8 +1225,25 @@ class RoleResolver:
             resolved = self._main("main")
         else:
             entry = self.roles.get(role)
-            resolved = self._configured(role, entry) if entry else self._default(role)
+            resolved = (self._configured(role, entry, choose=(role == "switchboard"))
+                        if entry else self._default(role))
         self._cache[role] = resolved
+        if resolved.warning and resolved.warning not in self.warnings:
+            self.warnings.append(resolved.warning)
+        return resolved
+
+    def choose_role(self, role: str) -> Resolved:
+        """One lifecycle draw; unlike resolve, never reads or writes the display cache."""
+        role = validate_role(role)
+        if role == "main":
+            return self._main("main")
+        entry = self.roles.get(role)
+        if entry:
+            resolved = self._configured(role, entry, choose=True)
+        else:
+            tier = ROLE_TIERS.get(role)
+            resolved = (self._tier(role, tier, "default", choose=True)
+                        if tier and tier != "main" else self._default(role))
         if resolved.warning and resolved.warning not in self.warnings:
             self.warnings.append(resolved.warning)
         return resolved

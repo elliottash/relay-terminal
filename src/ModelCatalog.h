@@ -140,6 +140,7 @@ struct LimitWindow {
 struct Catalog {
     QList<Entry> entries;                 // every model of every preset, in the worker's order
     QHash<QString, QList<LimitWindow>> limits;   // by preset id, from `limits` / Relay Free's `quota`
+    QHash<QString, qint64> limitUpdatedAt; // unix seconds of the last quota report, when known
     // By preset id, the provider's own verdict on the next turn as the last report carried it:
     // "allowed" | "allowed_warning" | "rejected" (usage_limits.status, protocol 29.3). Absent when
     // the provider only gave figures.
@@ -288,6 +289,7 @@ void moveProviderBefore(const QString &id, const QString &beforeId);   // before
 struct TierEntry {
     QString key;      // "<preset>|<model>"
     QString effort;   // a Relay level, or empty
+    int rank = 0;     // 1-based; 0 is a legacy entry whose position supplies its rank
 };
 QStringList tierIds();                                   // main, high, flash, lite, local — page order
 QString tierLabel(const QString &tier);                  // "main models"
@@ -305,6 +307,7 @@ void addToTier(const QString &tier, const QString &key, const QString &effort = 
 void removeFromTier(const QString &tier, const QString &key);
 void moveInTier(const QString &tier, const QString &key, int toIndex);
 void setTierEffort(const QString &tier, const QString &key, const QString &effort);
+void setTierRank(const QString &tier, const QString &key, int rank);
 // The level a model runs at when picked: the main list's entry for it, else the first other list
 // that names it, else empty (the pane keeps its own level, moved to one the model offers).
 QString listEffortFor(const QString &key);
@@ -458,6 +461,9 @@ Entry fallback(const Catalog &catalog, qint64 now = 0);
 QList<Entry> fallbacks(const Catalog &catalog, qint64 now = 0);
 // A tier's list as live catalog entries, in order: usable and not exhausted.
 QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now = 0);
+// One draw from the best live rank. `unitDraw` in [0, 1) is injectable for deterministic tests;
+// a negative value uses the process RNG. Missing or stale quota figures give equal weights.
+Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now = 0, double unitDraw = -1);
 
 // ----- one default, and /swap as a toggle (card #MDL1, rule 3) ----------------------------------
 // > A pane runs on rank 1 of the main list until you pick something else *in that pane*.

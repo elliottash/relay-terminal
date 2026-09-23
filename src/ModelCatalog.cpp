@@ -6,11 +6,13 @@
 #include <QLocale>
 #include <QRegularExpression>
 #include <QHash>
+#include <QRandomGenerator>
 #include <QSettings>
 #include <QVariant>
 #include <QSet>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace relay::models {
@@ -244,6 +246,11 @@ Catalog catalogFrom(const QJsonArray &presets) {
         catalog.presetLabels.insert(id, str(preset, "label").toLower());
         const QList<LimitWindow> windows = windowsOf(preset);
         if (!windows.isEmpty()) catalog.limits.insert(id, windows);
+        const QJsonObject limits = preset.value(QStringLiteral("limits")).toObject();
+        const qint64 updated = limits.value(QStringLiteral("updated_at")).toVariant().toLongLong();
+        if (updated > 0) catalog.limitUpdatedAt.insert(id, updated);
+        else if (!preset.value(QStringLiteral("quota")).toObject().isEmpty())
+            catalog.limitUpdatedAt.insert(id, QDateTime::currentSecsSinceEpoch());
         // A guest row's `limits` is the worker's copy of the last usage_limits event, status included.
         const QString status = str(preset.value(QStringLiteral("limits")).toObject(), "status");
         if (!status.isEmpty()) catalog.status.insert(id, status);
@@ -640,12 +647,25 @@ bool tierListsSet() {
     for (const QString &tier : tierIds()) if (settings.contains(tierKey(tier))) return true;
     return false;
 }
+static TierEntry decodeTierItem(QString item, int position) {
+    int rank = position;
+    const int marker = item.lastIndexOf(QStringLiteral("|rank="));
+    if (marker > 0) {
+        bool ok = false;
+        const int saved = item.mid(marker + 6).toInt(&ok);
+        if (ok && saved > 0 && saved <= 1000) {
+            rank = saved;
+            item.truncate(marker);
+        }
+    }
+    const int last = item.lastIndexOf(QLatin1Char('|'));
+    if (last <= 0) return {};
+    return {item.left(last), item.mid(last + 1), rank};
+}
 QList<TierEntry> tierList(const QString &tier) {
     QList<TierEntry> out;
     for (const QString &item : list(tierKey(tier))) {
-        const int last = item.lastIndexOf(QLatin1Char('|'));
-        if (last <= 0) continue;
-        TierEntry entry{item.left(last), item.mid(last + 1)};
+        TierEntry entry = decodeTierItem(item, out.size() + 1);
         QString preset, model;
         if (Catalog::splitKey(entry.key, &preset, &model)) out << entry;
     }
@@ -653,7 +673,11 @@ QList<TierEntry> tierList(const QString &tier) {
 }
 void setTierList(const QString &tier, const QList<TierEntry> &entries) {
     QStringList items;
-    for (const TierEntry &entry : entries) items << entry.key + QLatin1Char('|') + entry.effort;
+    for (int i = 0; i < entries.size(); ++i) {
+        const TierEntry &entry = entries.at(i);
+        items << entry.key + QLatin1Char('|') + entry.effort
+                     + QStringLiteral("|rank=%1").arg(entry.rank > 0 ? entry.rank : i + 1);
+    }
     // An emptied list is stored as empty, not forgotten: "no fallbacks here" is a choice, and a
     // forgotten key would bring the defaults back.
     QSettings().setValue(tierKey(tier), items);
@@ -686,6 +710,12 @@ void moveInTier(const QString &tier, const QString &key, int toIndex) {
 void setTierEffort(const QString &tier, const QString &key, const QString &effort) {
     QList<TierEntry> entries = tierList(tier);
     for (TierEntry &entry : entries) if (entry.key == key) entry.effort = effort;
+    setTierList(tier, entries);
+}
+void setTierRank(const QString &tier, const QString &key, int rank) {
+    if (rank < 1 || rank > 1000) return;
+    QList<TierEntry> entries = tierList(tier);
+    for (TierEntry &entry : entries) if (entry.key == key) entry.rank = rank;
     setTierList(tier, entries);
 }
 bool inAnyList(const QString &key) {
@@ -826,9 +856,8 @@ void applyProfile(const QString &name) {
     for (const QString &tier : tierIds()) {
         QList<TierEntry> entries;
         for (const QString &item : settings.value(profileTierKey(name, tier)).toStringList()) {
-            const int last = item.lastIndexOf(QLatin1Char('|'));
-            if (last <= 0) continue;
-            entries << TierEntry{item.left(last), item.mid(last + 1)};
+            TierEntry entry = decodeTierItem(item, entries.size() + 1);
+            if (!entry.key.isEmpty()) entries << entry;
         }
         // Every tier is written, absent ones included: a profile is a whole snapshot, so a list it
         // holds nothing for is empty here too and not whatever the profile before it left behind.
@@ -889,12 +918,13 @@ static const QString kProfileDocMarker = QStringLiteral("model profiles");
 static QJsonArray listToJson(const QStringList &items) {
     QJsonArray rows;
     for (const QString &item : items) {
-        const int last = item.lastIndexOf(QLatin1Char('|'));
-        if (last <= 0) continue;
+        const TierEntry entry = decodeTierItem(item, rows.size() + 1);
         QString preset, model;
-        if (!Catalog::splitKey(item.left(last), &preset, &model)) continue;
-        rows << QJsonObject{{QStringLiteral("preset"), preset}, {QStringLiteral("model"), model},
-                            {QStringLiteral("effort"), item.mid(last + 1)}};
+        if (!Catalog::splitKey(entry.key, &preset, &model)) continue;
+        QJsonObject row{{QStringLiteral("preset"), preset}, {QStringLiteral("model"), model},
+                        {QStringLiteral("effort"), entry.effort}};
+        if (entry.rank != rows.size() + 1) row.insert(QStringLiteral("rank"), entry.rank);
+        rows << row;
     }
     return rows;
 }
@@ -941,7 +971,9 @@ static ProfileDoc profileFromJson(const QJsonObject &object) {
             if (preset.isEmpty())
                 Catalog::splitKey(item.value(QStringLiteral("key")).toString(), &preset, &model);
             if (preset.isEmpty() || model.isEmpty()) continue;
-            entries << TierEntry{Catalog::keyFor(preset, model), item.value(QStringLiteral("effort")).toString()};
+            const int saved = item.value(QStringLiteral("rank")).toInt();
+            entries << TierEntry{Catalog::keyFor(preset, model), item.value(QStringLiteral("effort")).toString(),
+                                 saved > 0 && saved <= 1000 ? saved : entries.size() + 1};
         }
         if (!entries.isEmpty()) doc.lists.insert(tier, entries);
     }
@@ -993,8 +1025,12 @@ void writeProfile(const ProfileDoc &profile) {
     QSettings settings;
     for (const QString &tier : tierIds()) {
         QStringList items;
-        for (const TierEntry &entry : profile.lists.value(tier))
-            items << entry.key + QLatin1Char('|') + entry.effort;
+        const auto entries = profile.lists.value(tier);
+        for (int i = 0; i < entries.size(); ++i) {
+            const TierEntry &entry = entries.at(i);
+            items << entry.key + QLatin1Char('|') + entry.effort
+                         + QStringLiteral("|rank=%1").arg(entry.rank > 0 ? entry.rank : i + 1);
+        }
         settings.setValue(profileTierKey(clean, tier), items);
     }
     for (const QString &klass : boxClasses()) {
@@ -1184,6 +1220,50 @@ QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
     return out;
 }
 
+Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double unitDraw) {
+    if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    struct Candidate { Entry entry; double weight; };
+    QList<Candidate> peers;
+    int bestRank = std::numeric_limits<int>::max();
+    const QList<curation::TierEntry> list = curation::activeTierList(tier);
+    for (int i = 0; i < list.size(); ++i) {
+        const auto &item = list.at(i);
+        const int rank = item.rank > 0 ? item.rank : i + 1;
+        if (rank > bestRank) continue;
+        const Entry *entry = catalog.find(item.key);
+        if (!entry || !entry->usable || exhausted(catalog, entry->preset, now)) continue;
+        if (rank < bestRank) { peers.clear(); bestRank = rank; }
+        double weight = 1.0;
+        const qint64 updated = catalog.limitUpdatedAt.value(entry->preset);
+        // A quota report older than half an hour is no evidence of what is left now.
+        if (updated > 0 && updated <= now && now - updated <= 1800) {
+            double remaining = 1.0;
+            double urgency = 0.0;
+            bool known = false;
+            for (const LimitWindow &window : catalog.limits.value(entry->preset)) {
+                if (window.usedPercent < 0 || window.resetsAt <= now) continue;
+                known = true;
+                remaining = qMin(remaining, qBound(0.0, (100.0 - window.usedPercent) / 100.0, 1.0));
+                const double hours = double(window.resetsAt - now) / 3600.0;
+                urgency = qMax(urgency, std::exp(-hours / 24.0));
+            }
+            if (known) weight += 4.0 * remaining * urgency;
+        }
+        peers << Candidate{*entry, weight};
+    }
+    if (peers.isEmpty()) return {};
+    if (peers.size() == 1) return peers.first().entry;
+    if (unitDraw < 0 || unitDraw >= 1) unitDraw = QRandomGenerator::global()->generateDouble();
+    double total = 0;
+    for (const Candidate &peer : peers) total += peer.weight;
+    double position = unitDraw * total;
+    for (const Candidate &peer : peers) {
+        if (position < peer.weight) return peer.entry;
+        position -= peer.weight;
+    }
+    return peers.last().entry;
+}
+
 // Once the tier lists exist the main list is the order: rank 1 is Main, the rest its fallbacks.
 // Before that (an install that has not seen the worker's defaults yet) the old ranked list and its
 // threshold answer, so nothing is ever without a default.
@@ -1258,7 +1338,8 @@ StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, co
     // Rank 1 of the main list, guests included (owner, 2026-09-21). An exhausted rank 1 is stepped
     // over by mainDefault, and nothing is written down, so the pane goes back to it by itself when
     // the subscription resets (design edge case 15).
-    const Entry main = mainDefault(catalog, now);
+    const Entry main = curation::tierListsSet() ? drawTier(catalog, QStringLiteral("main"), now)
+                                               : mainDefault(catalog, now);
     if (main.key.isEmpty()) return choice;   // empty: the caller's own ladder answers
     choice.entry = main;
     choice.effort = mainListEffort(main.key);

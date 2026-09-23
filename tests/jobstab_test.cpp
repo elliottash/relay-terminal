@@ -344,7 +344,7 @@ private Q_SLOTS:
         Served served;
         JobsTab tab;
         tab.setData(dataFor(&served));
-        QVERIFY(tab.selectRole(QStringLiteral("subagent")));
+        QVERIFY(tab.selectRole(QStringLiteral("summaries")));
         QVERIFY(tab.openOverride());
         QVERIFY(tab.popup() != nullptr);
         const QList<FilterRow> rows = tab.popup()->rows();
@@ -353,9 +353,35 @@ private Q_SLOTS:
             if (rows.at(i).data == QStringLiteral("glm-coding|glm-5.3")) at = i;
         QVERIFY(at >= 0);
         tab.popup()->onPicked(at);
-        QCOMPARE(setting(QStringLiteral("subagent"), QStringLiteral("preset")), QStringLiteral("glm-coding"));
-        QCOMPARE(setting(QStringLiteral("subagent"), QStringLiteral("model")), QStringLiteral("glm-5.3"));
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("preset")), QStringLiteral("glm-coding"));
+        QCOMPARE(setting(QStringLiteral("summaries"), QStringLiteral("model")), QStringLiteral("glm-5.3"));
         QCOMPARE(served.resends, 1);
+    }
+
+    void rankedJobOverridesMigrateSingletonsAndPreserveEffort() {
+        QVERIFY(rolestore::setOverride(QStringLiteral("planning"),
+                                       QStringLiteral("guest:claude|opus"), QStringLiteral("high")));
+        const auto singleton = rolestore::rankedOverride(QStringLiteral("planning"));
+        QCOMPARE(singleton.size(), 1);
+        QCOMPARE(singleton.first().rank, 1);
+        QCOMPARE(singleton.first().effort, QStringLiteral("high"));
+        rolestore::setRankedOverride(QStringLiteral("planning"), {
+            {QStringLiteral("guest:claude|opus"), QStringLiteral("high"), 1},
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 1}});
+        QVERIFY(rolestore::rankedOverrideSet(QStringLiteral("planning")));
+        QVERIFY(setting(QStringLiteral("planning"), QStringLiteral("preset")).isEmpty());
+        const auto tied = rolestore::rankedOverride(QStringLiteral("planning"));
+        QCOMPARE(tied.size(), 2);
+        QCOMPARE(tied.at(1).rank, 1);
+        QCOMPARE(tied.at(1).effort, QStringLiteral("max"));
+        Served served;
+        JobsTab tab;
+        tab.setData(dataFor(&served));
+        QVERIFY(tab.overrideText(QStringLiteral("planning")).contains(QStringLiteral("random among 2")));
+        QVERIFY(tab.selectRole(QStringLiteral("planning")));
+        QVERIFY(tab.clearOverride());
+        QVERIFY(!rolestore::rankedOverrideSet(QStringLiteral("planning")));
+        QCOMPARE(tab.overrideText(QStringLiteral("planning")), QStringLiteral("follows high"));
     }
 
     // ----- one row per model, and the guest rule --------------------------------------------------

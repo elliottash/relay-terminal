@@ -320,6 +320,55 @@ class DefaultTests(unittest.TestCase):
         self.assertEqual(terminal_use.tier, "flash")
 
 
+class TiedRankTests(unittest.TestCase):
+    def test_legacy_rows_keep_distinct_ranks_and_ties_can_draw_both(self):
+        rows = [{"preset": "kimi", "model": "kimi-k3"},
+                {"preset": "glm", "model": "glm-5.3"}]
+        self.assertEqual(model_roles.ordered_candidates(rows, choose=True, draw=lambda: .99), rows)
+        tied = [{**row, "rank": 1} for row in rows]
+        self.assertEqual(model_roles.ordered_candidates(tied, choose=True, draw=lambda: 0)[0], tied[0])
+        self.assertEqual(model_roles.ordered_candidates(tied, choose=True, draw=lambda: .99)[0], tied[1])
+
+    def test_recent_unused_allowance_near_reset_gets_more_weight(self):
+        rows = [{"preset": "kimi", "rank": 1}, {"preset": "glm", "rank": 1}]
+        now = 100000
+        limits = {
+            "kimi": {"updated_at": now - 60, "windows": [
+                {"kind": "weekly", "used_percent": 20, "resets_at": now + 3600}]},
+            "glm": {"updated_at": now - 60, "windows": [
+                {"kind": "weekly", "used_percent": 20, "resets_at": now + 10 * 86400}]},
+        }
+        order = model_roles.ordered_candidates(rows, choose=True, draw=lambda: .7,
+                                               limits_lookup=limits.get, now=now)
+        self.assertEqual(order[0]["preset"], "kimi")
+        limits["kimi"]["updated_at"] = now - 3600
+        order = model_roles.ordered_candidates(rows, choose=True, draw=lambda: .7,
+                                               limits_lookup=limits.get, now=now)
+        self.assertEqual(order[0]["preset"], "glm")
+
+    def test_subagent_draws_fresh_without_changing_display_resolution(self):
+        configured = validate_roles({"subagent": {"candidates": [
+            {"preset": "kimi", "model": "kimi-k3", "rank": 1},
+            {"preset": "glm", "model": "glm-5.3", "rank": 1}]}})
+        store = {"kimi": "kimi-key", "glm": "glm-key"}
+        made = RoleResolver(main_config("kimi"), "kimi", configured,
+                            key_lookup=store.get)
+        self.assertEqual(made.resolve("subagent").preset_id, "kimi")
+        with mock.patch.object(model_roles.random, "random", side_effect=[.99, 0]):
+            self.assertEqual(made.choose_role("subagent").preset_id, "glm")
+            self.assertEqual(made.choose_role("subagent").preset_id, "kimi")
+        self.assertEqual(made.resolve("subagent").preset_id, "kimi")
+
+    def test_selected_tie_fails_over_to_earlier_peer_before_lower_rank(self):
+        rows = [{"preset": "kimi", "model": "kimi-k3", "rank": 1},
+                {"preset": "glm", "model": "glm-5.3", "rank": 1},
+                {"preset": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "rank": 2}]
+        made = RoleResolver(main_config("glm"), "glm", tiers={"main": rows},
+                            key_lookup=lambda preset: "key")
+        self.assertEqual([row["preset"] for row in made.failover_chain("main", "glm", "glm-5.3")],
+                         ["kimi", "openrouter"])
+
+
 # ----- plan mode (owner, 2026-09-19) --------------------------------------------------------------
 class PlanRoleTests(unittest.TestCase):
     """The planning role (owner, 2026-09-22: plan mode "is supposed to go into /high"; "it doesnt

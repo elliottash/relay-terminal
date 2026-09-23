@@ -200,21 +200,22 @@ class SubagentFactory:
     def base(self) -> tuple[ProviderConfig, str | None]:
         """The config a subagent that does not name a model uses: the "subagent" role, else main."""
         if self.roles is not None:
-            resolved = self.roles.resolve("subagent")
+            resolved = self.roles.choose_role("subagent")
             if not resolved.is_main:
                 return resolved.config, resolved.preset_id
         return self.config, self.preset_id
 
     def resolve(self, model: str | None, warnings: list[str]) -> tuple[ProviderConfig, str | None]:
-        base_config, base_preset = self.base()
         spec_ = (model or "inherit").strip() or "inherit"
         # With roles configured, a role name ("flash", "chores", ...) picks that role's model unless
         # the user aliased the name to something else. Definitions written before 2026-09-18 say
         # "fast"; canonical_role keeps those working (roles.DEPRECATED_ROLES).
         role_spec = canonical_role(spec_.lower())
         if self.roles is not None and role_spec in ROLES and spec_.lower() not in self.user_aliases:
-            resolved = self.roles.resolve(role_spec)
+            resolved = (self.roles.choose_role(role_spec) if role_spec == "subagent"
+                        else self.roles.resolve(role_spec))
             return resolved.config, resolved.preset_id
+        base_config, base_preset = self.base()
         spec_ = self.aliases.get(spec_.lower(), spec_)
         if spec_ == "inherit" or spec_ == base_config.model:
             return base_config, base_preset

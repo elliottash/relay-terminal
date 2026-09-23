@@ -97,6 +97,10 @@ QString tierSetting(const QString &tier, const QString &field);
 QString overrideKey(const QString &role);
 QString overrideEffort(const QString &role);
 QString overrideTier(const QString &role);            // the legacy key; empty in the ordinary case
+bool supportsRanked(const QString &role);
+QList<models::curation::TierEntry> rankedOverride(const QString &role);
+bool rankedOverrideSet(const QString &role);
+void setRankedOverride(const QString &role, const QList<models::curation::TierEntry> &entries);
 
 // Whether this job is one of `roles.py BACKGROUND_ROLES`: a side call into a conversation running
 // somewhere else, which a guest harness cannot take. Derived from the same rule the worker uses —
@@ -186,6 +190,7 @@ private:
     void updateCompactDetails();
     void applyOverride(const QString &role, const QString &key, const QString &effort);
     void openLevels(const QString &role, const QString &key);
+    void editRankedOverride(const QString &role);
     QString nameFor(const QString &preset, const QString &model) const;
     QString resolvedText(const QJsonObject &entry) const;
     // The entry a group row stands for, honouring the guest rule: the provider this job would
