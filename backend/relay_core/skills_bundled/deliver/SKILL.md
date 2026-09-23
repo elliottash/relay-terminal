@@ -131,8 +131,16 @@ shape it. Execute on a card without it says so on the board and goes on.
   card, so never type either — and never type `session`.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
+- **Show it working, in a picture.** Relay draws images inline (#1MGS), so a change a person can
+  see is proved by one: a screenshot of the real thing, taken after the change, from an isolated
+  profile. Embed it as Markdown, `![what it shows](<evidence dir>/01-….png)`, in
+  `## Execution Summary` and in your reply, one image per claim and the caption saying what the
+  image proves. A failure is shown the same way. A test result proves logic; only the capture
+  proves what the person will see, and a claim with no picture behind it is a claim to check.
 
 ## 6. Reply
 
 Name the card as `#ID`, then one line per thing you did, and where the evidence is. The card holds
 the detail; do not repeat it in the terminal.
+When the change is something a person can see, end with its screenshot as a Markdown image, so
+the proof is in front of them without opening a file.

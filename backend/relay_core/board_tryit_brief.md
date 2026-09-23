@@ -149,6 +149,11 @@ session's staging or made your own, and what you actually saw when you opened it
 expected). This is what makes the person's minute cheap — they are reading the one unanswered
 question, not re-running anybody's work.
 
+Put the pictures in it. Relay draws images inline (#1MGS), so embed the captures that show what
+you saw as Markdown, `![what it shows](<evidence dir>/01-….png)`, one per step that matters and
+the caption saying what it proves or disproves. Captures only: never an image of the expected
+result, which stays sealed.
+
 ## 6. Do not
 
 - **Do not change the code**, run the test suite, or move the card. Try it opens and hands over;
@@ -180,3 +185,5 @@ as, leave whatever you did capture in the evidence directory, and end the turn.
 
 Your last message is what the person reads in the board's notice area. Three lines at most: what
 you opened, where the evidence is, and the one question you are asking them.
+When you captured the app, follow those lines with the one screenshot that shows it opened, as a
+Markdown image.

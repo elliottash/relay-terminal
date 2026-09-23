@@ -15,6 +15,12 @@ links: {plans: [], commits: [], evidence: [], related: [EM1E], github: null}
 ## Issue
 can relay show me images in line? i think we need that
 
+## Decisions
+- 2026-09-22, the owner: "in particular, add to the QA skilling that relay will show you images to
+  prove whether a change is working or not". So the agent conversation's inline images are what QA
+  proof is shown with. The QA text already says so (the bundled `deliver` skill, `board_tryit_brief.md`,
+  and so `issues/POLICY.md`). Until this card lands, those Markdown images appear as their paths.
+
 ## Discussion points
 Relay cannot show an image anywhere today (checked on main, 2026-09-22):
 
