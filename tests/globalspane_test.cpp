@@ -8,6 +8,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTest>
+#include <QToolButton>
 using relay::globals::GlobalsPane;
 
 class GlobalsPaneTest : public QObject {
@@ -128,6 +129,122 @@ private slots:
         pane.findChild<QPushButton *>("globalsInterview")->click();
         QVERIFY(!interviewed);
         QVERIFY(pane.agentScreen().contains("User memory"));
+    }
+    void suggestionsListKeepEditAndNo() {
+        GlobalsPane pane;
+        QList<QJsonObject> requests;
+        pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
+        pane.refresh();
+        QCOMPARE(requests.at(requests.size() - 2).value("type").toString(), QString("globals_suggestions"));
+        QCOMPARE(requests.last().value("type").toString(), QString("globals_list"));
+        auto *section = pane.findChild<QComboBox *>("globalsSection");
+        QCOMPARE(section->itemText(4), QString("Suggestions"));
+        auto *review = pane.findChild<QPushButton *>("globalsReview");
+        QVERIFY(review->isHidden());
+        const QJsonObject a{{"id", "S1"}, {"fact", "Prefers terse answers"}, {"source", "agent"}, {"date", "2026-09-22"}, {"origin", "pane 3, turn 2"}};
+        const QJsonObject b{{"id", "S2"}, {"fact", "Works in Zurich"}, {"source", "claude"}, {"date", "2026-09-22"}};
+        const QJsonObject r{{"id", "R1"}, {"fact", "Likes tabs"}, {"source", "codex"}, {"date", "2026-09-21"}};
+        // Any reply is the whole list, so it counts even when another surface asked for it.
+        pane.handleEvent({{"event", "globals_suggestions"}, {"pending", QJsonArray{a, b}}, {"rejected", QJsonArray{r}}});
+        QCOMPARE(section->itemText(4), QString("Suggestions (2)"));
+        QVERIFY(!review->isHidden());
+        QCOMPARE(review->text(), QString("Review 2 suggestions"));
+        review->click();
+        QCOMPARE(section->currentIndex(), 4);
+        auto *list = pane.findChild<QListWidget *>("globalsList");
+        QCOMPARE(list->count(), 2);
+        QVERIFY(list->item(1)->text().contains("imported from Claude Code"));
+        auto *toggle = pane.findChild<QToolButton *>("globalsRejectedToggle");
+        auto *rejected = pane.findChild<QListWidget *>("globalsRejected");
+        QCOMPARE(toggle->text(), QString("Rejected (1)"));
+        QVERIFY(rejected->isHidden());
+        toggle->click();
+        QVERIFY(!rejected->isHidden());
+        QVERIFY(rejected->item(0)->text().contains("Likes tabs"));
+        QVERIFY(pane.findChild<QPushButton *>("globalsSave")->isHidden());
+        auto *keep = pane.findChild<QPushButton *>("globalsKeep");
+        auto *no = pane.findChild<QPushButton *>("globalsReject");
+        QVERIFY(!keep->isEnabled());
+        const int before = requests.size();
+        list->setCurrentRow(0);
+        QCOMPARE(requests.size(), before);   // the list holds the whole suggestion: no round trip
+        auto *editor = pane.findChild<QPlainTextEdit *>("globalsEditor");
+        QCOMPARE(editor->toPlainText(), QString("Prefers terse answers"));
+        QVERIFY(pane.findChild<QLabel *>("globalsSource")->text().contains("pane 3, turn 2"));
+        // Keep unedited sends no text; the backend keeps the fact as suggested.
+        keep->click();
+        QCOMPARE(requests.last().value("type").toString(), QString("globals_suggestion_accept"));
+        QCOMPARE(requests.last().value("sid").toString(), QString("S1"));
+        QVERIFY(!requests.last().contains("text"));
+        QVERIFY(!keep->isEnabled());
+        pane.handleEvent({{"event", "globals_suggestion_accepted"}, {"id", requests.last().value("id")},
+                          {"record", QJsonObject{{"kind", "memory"}, {"key", "M1"}}}});
+        QVERIFY(pane.findChild<QLabel *>("globalsNotice")->text().contains("Kept"));
+        QCOMPARE(section->itemText(4), QString("Suggestions (1)"));
+        QCOMPARE(list->count(), 1);
+        QCOMPARE(requests.last().value("type").toString(), QString("globals_list"));   // refreshed
+        // Edit, then Keep: the edited wording goes with the accept.
+        list->setCurrentRow(0);
+        pane.findChild<QPushButton *>("globalsEdit")->click();
+        editor->setPlainText("Works in Zurich, Switzerland");
+        QVERIFY(!section->isEnabled());
+        keep->click();
+        QCOMPARE(requests.last().value("text").toString(), QString("Works in Zurich, Switzerland"));
+        pane.handleEvent({{"event", "globals_error"}, {"id", requests.last().value("id")}, {"message", "Already decided"}});
+        QCOMPARE(editor->toPlainText(), QString("Works in Zurich, Switzerland"));
+        QVERIFY(pane.findChild<QLabel *>("globalsNotice")->text().contains("Already decided"));
+        pane.findChild<QPushButton *>("globalsCancel")->click();
+        QCOMPARE(editor->toPlainText(), QString("Works in Zurich"));
+        no->click();
+        QCOMPARE(requests.last().value("type").toString(), QString("globals_suggestion_reject"));
+        QCOMPARE(requests.last().value("sid").toString(), QString("S2"));
+        pane.handleEvent({{"event", "globals_suggestion_rejected"}, {"id", requests.last().value("id")}, {"sid", "S2"}});
+        QVERIFY(pane.findChild<QLabel *>("globalsNotice")->text().contains("won't be suggested again"));
+        QCOMPARE(section->itemText(4), QString("Suggestions"));
+        QVERIFY(pane.agentScreen().contains("Suggestions waiting: 0"));
+    }
+    void transcriptEditOpensTheSuggestion() {
+        GlobalsPane pane;
+        QList<QJsonObject> requests;
+        pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
+        // Asked for before the list has arrived: selected when it does.
+        pane.showSuggestion("S2");
+        QCOMPARE(pane.findChild<QComboBox *>("globalsSection")->currentIndex(), 4);
+        pane.handleEvent({{"event", "globals_suggestions"}, {"pending", QJsonArray{
+            QJsonObject{{"id", "S1"}, {"fact", "One"}}, QJsonObject{{"id", "S2"}, {"fact", "Two"}}}}, {"rejected", QJsonArray{}}});
+        QCOMPARE(pane.findChild<QListWidget *>("globalsList")->currentRow(), 1);
+        QCOMPARE(pane.findChild<QPlainTextEdit *>("globalsEditor")->toPlainText(), QString("Two"));
+        QVERIFY(pane.findChild<QPushButton *>("globalsKeep")->isEnabled());
+        // Decided in the transcript meanwhile: the editor lets it go.
+        pane.handleEvent({{"event", "globals_suggestions"}, {"pending", QJsonArray{QJsonObject{{"id", "S1"}, {"fact", "One"}}}},
+                          {"rejected", QJsonArray{}}});
+        QVERIFY(pane.findChild<QPlainTextEdit *>("globalsEditor")->toPlainText().isEmpty());
+        QVERIFY(!pane.findChild<QPushButton *>("globalsKeep")->isEnabled());
+        pane.showSuggestion("S1");
+        QCOMPARE(pane.findChild<QPlainTextEdit *>("globalsEditor")->toPlainText(), QString("One"));
+    }
+    void toolResultsBecomeTranscriptNotes() {
+        using relay::globals::SuggestionNote;
+        auto note = relay::globals::suggestionFromToolResult({{"tool", "app_user_memory"}, {"result", QJsonObject{
+            {"status", "pending"}, {"id", "S9"}, {"fact", "Prefers  terse\nanswers"}}}});
+        QCOMPARE(note.kind, SuggestionNote::Pending);
+        QCOMPARE(note.id, QString("S9"));
+        QCOMPARE(relay::globals::suggestionLine(note), QString("Remember: Prefers terse answers"));
+        note = relay::globals::suggestionFromToolResult({{"tool", "app_user_memory"}, {"result", QJsonObject{
+            {"status", "declined"}, {"id", QJsonValue()}, {"fact", "Likes tabs"},
+            {"matched", QJsonObject{{"kind", "rejected"}, {"date", "2026-09-21"}}}}}});
+        QCOMPARE(note.kind, SuggestionNote::Declined);
+        QCOMPARE(relay::globals::suggestionLine(note), QString("Not suggested: Likes tabs · you rejected it on 2026-09-21"));
+        note = relay::globals::suggestionFromToolResult({{"tool", "mcp__relay__app_user_memory"}, {"result", QJsonObject{
+            {"output", "{\"status\": \"duplicate\", \"fact\": \"x\"}"}}}});
+        QCOMPARE(note.kind, SuggestionNote::Duplicate);
+        QVERIFY(relay::globals::suggestionLine(note).endsWith("already in user memory"));
+        // A list or save through the same tool, or another tool, draws nothing.
+        QCOMPARE(relay::globals::suggestionFromToolResult({{"tool", "app_user_memory"}, {"result", QJsonObject{{"records", QJsonArray{}}}}}).kind,
+                 SuggestionNote::None);
+        QCOMPARE(relay::globals::suggestionFromToolResult({{"tool", "read_file"}, {"result", QJsonObject{{"status", "pending"}, {"id", "x"}, {"fact", "y"}}}}).kind,
+                 SuggestionNote::None);
+        QVERIFY(relay::globals::suggestionOutcome(false, "x").startsWith("Rejected — won't be suggested again"));
     }
     void staleRepliesCannotReplaceCurrentSelection() {
         GlobalsPane pane;

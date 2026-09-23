@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 #include <QWidget>
@@ -12,8 +13,56 @@ class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
+class QToolButton;
 
 namespace relay::globals {
+// What a finished `app_user_memory` call with action `suggest` asks of the transcript (#MEMS):
+// a pending suggestion gets a "Remember: … Keep · Edit · No" line, a declined or duplicate one a
+// quiet note. Free and pure so the pane and the Globals test read the same result the same way.
+struct SuggestionNote {
+    enum Kind { None, Pending, Declined, Duplicate } kind = None;
+    QString id, fact, detail;
+};
+inline SuggestionNote suggestionFromToolResult(const QJsonObject &event) {
+    SuggestionNote note;
+    const QString tool = event.value(QStringLiteral("tool")).toString();
+    if (tool != QStringLiteral("app_user_memory") && !tool.endsWith(QStringLiteral("__app_user_memory")))
+        return note;
+    QJsonObject result = event.value(QStringLiteral("result")).toObject();
+    // A guest's call arrives as its text output; the same object is inside it.
+    if (!result.contains(QStringLiteral("status")) && result.value(QStringLiteral("output")).isString())
+        result = QJsonDocument::fromJson(result.value(QStringLiteral("output")).toString().toUtf8()).object();
+    const QString status = result.value(QStringLiteral("status")).toString();
+    note.id = result.value(QStringLiteral("id")).toString();
+    note.fact = result.value(QStringLiteral("fact")).toString().simplified();
+    if (status == QStringLiteral("pending") && !note.id.isEmpty() && !note.fact.isEmpty()) note.kind = SuggestionNote::Pending;
+    else if (status == QStringLiteral("declined")) note.kind = SuggestionNote::Declined;
+    else if (status == QStringLiteral("duplicate")) note.kind = SuggestionNote::Duplicate;
+    else return note;
+    // `matched` is the card this suggestion repeats: a rejection declines it, a memory or a
+    // waiting suggestion makes it a duplicate.
+    const QJsonObject matched = result.value(QStringLiteral("matched")).toObject();
+    const QString date = matched.value(QStringLiteral("date")).toString();
+    if (note.kind == SuggestionNote::Declined)
+        note.detail = date.isEmpty() ? QStringLiteral("you rejected it before")
+                                     : QStringLiteral("you rejected it on %1").arg(date);
+    else if (note.kind == SuggestionNote::Duplicate)
+        note.detail = matched.value(QStringLiteral("kind")).toString() == QStringLiteral("pending")
+            ? QStringLiteral("already waiting for your review")
+            : QStringLiteral("already in user memory");
+    return note;
+}
+// The transcript line for each kind, without its links.
+inline QString suggestionLine(const SuggestionNote &note) {
+    if (note.kind == SuggestionNote::Pending) return QStringLiteral("Remember: ") + note.fact;
+    const QString what = note.fact.isEmpty() ? QString() : QStringLiteral(": ") + note.fact;
+    return note.kind == SuggestionNote::None ? QString() : QStringLiteral("Not suggested%1 · %2").arg(what, note.detail);
+}
+inline QString suggestionOutcome(bool kept, const QString &fact) {
+    return kept ? QStringLiteral("Kept: %1 · Globals › User memory").arg(fact)
+                : QStringLiteral("Rejected — won't be suggested again: %1").arg(fact);
+}
+
 // The shared manager hosts this page and routes its requests through its existing worker.
 class GlobalsPane final : public QWidget {
 public:
@@ -22,6 +71,9 @@ public:
     std::function<void()> onInterview;
     void handleEvent(const QJsonObject &event);
     void refresh();
+    // Globals › Suggestions with this suggestion selected in the editor, from a transcript's Edit.
+    void showSuggestion(const QString &id);
+    int pendingSuggestions() const { return m_pending.size(); }
     void setWorkspace(const QString &workspace);
     void focusSearch();
     QString agentScreen() const;
@@ -34,6 +86,10 @@ private:
     void newRecord(const QString &kind);
     void updateButtons();
     bool protectDraft();
+    bool suggesting() const;
+    void decide(bool keep);
+    void rebuildRejected();
+    void updateSectionLabel();
     QLineEdit *m_search;
     QComboBox *m_section;
     QLabel *m_intro;
@@ -47,9 +103,15 @@ private:
     QPushButton *m_retire;
     QPushButton *m_newMemory;
     QPushButton *m_newAlias;
-    QJsonArray m_records;
+    QPushButton *m_review;
+    QPushButton *m_keep;
+    QPushButton *m_edit;
+    QPushButton *m_reject;
+    QToolButton *m_rejectedToggle;
+    QListWidget *m_rejectedList;
+    QJsonArray m_records, m_pending, m_rejected;
     QJsonObject m_record;
-    QString m_workspace, m_original, m_selected, m_listRequest, m_getRequest, m_writeRequest;
+    QString m_workspace, m_original, m_selected, m_listRequest, m_getRequest, m_writeRequest, m_suggestRequest;
     bool m_dirty = false;
     bool m_loading = false;
 };
