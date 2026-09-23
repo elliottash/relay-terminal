@@ -1,15 +1,15 @@
 ---
 id: M8S2
 type: work
-status: executing
+status: needs-verification
 labels: [feature, models, routing]
 assignee: agent
-implemented_by: anthropic/claude-opus-5-5 via claude-code
-session: eabb3454-89f4-430e-8807-5407a961d095
+implemented_by: openai/gpt-6-sol via codex
+session: e32a21bd-2394-4c1a-8488-005e56b4e888
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay guest session, 2026-09-23
-links: {plans: [reports/Multiple subscription routing in Relay.md], commits: [f41d4e2074cee16b7d7fbab84cf1db31bd39283f], evidence: [reports/Multiple subscription routing in Relay.md], related: [RND7, XH4K], github: null}
+links: {plans: [reports/Multiple subscription routing in Relay.md], commits: [f41d4e2074cee16b7d7fbab84cf1db31bd39283f, c3c4baaa2bc2b0cf1f2549a794a48bdfcad49a67, 0dbcbfa5c29eec410b1caa78b7fd227fc5743871], evidence: [reports/Multiple subscription routing in Relay.md, docs/qa_evidence/2026-09-23-guest-accounts-M8S2/], related: [RND7, XH4K, VZ54], github: null}
 ---
 # Run several Claude Code and Codex logins side by side
 
@@ -56,6 +56,7 @@ Not verifiable here: macOS Keychain (per-directory entry) and Windows paths; thi
 ![Options › Models: the default row with add account…, and "claude code (work)" as its own row](../../docs/qa_evidence/2026-09-23-guest-accounts-M8S2/02-providers.png)
 ![After add account + OK: the sign-in typed with the account's directory; the row flips to logged in when it exits 0](../../docs/qa_evidence/2026-09-23-guest-accounts-M8S2/05b-signed-in-row.png)
 ![Available tab: one model's via list names each login](../../docs/qa_evidence/2026-09-23-guest-accounts-M8S2/07-available-via.png)
+Follow-up `0dbcbfa5`: the account-row test now waits for its background catalog scan while its mocked CLI discovery is active, preventing that scan from changing the next test's catalog state.
 
 ## Tests
 `tests/test_guest_accounts.py`
@@ -65,3 +66,18 @@ Not verifiable here: macOS Keychain (per-directory entry) and Windows paths; thi
 `tests/test_model_switch.py`
 `tests/test_roles.py`
 manual: docs/qa_evidence/2026-09-23-guest-accounts-M8S2/
+
+### Check 2026-09-23 19:18
+- passed · unittest:tests.test_guest_accounts — tests/test_guest_accounts.py passed for this revision on spark-dcc9, 2026-09-23T23:18:38Z
+- passed · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
+- passed · unittest:tests.test_keytest_guest — tests/test_keytest_guest.py passed for this revision on spark-dcc9, 2026-09-23T23:18:38Z
+- passed · unittest:tests.test_guest_sessions — tests/test_guest_sessions.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
+- passed · unittest:tests.test_model_switch — tests/test_model_switch.py passed for this revision on spark-dcc9, 2026-09-23T23:18:38Z
+- passed · unittest:tests.test_roles — tests/test_roles.py passed for this revision on spark-dcc9, 2026-09-23T23:18:12Z
+- not-applicable · manual:docs/qa_evidence/2026-09-23-guest-accounts-M8S2/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-guest-accounts-M8S2/
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 1 of 71 are slow (test_guest_startup_and_changes_report_each_models_supported_efforts)
+- notice · unittest:tests.test_keytest_guest — tests/test_keytest_guest.py: 1 of 9 are slow (test_a_guest_that_never_answers_is_timed_out_and_closed)
+- notice · unittest:tests.test_model_switch — tests/test_model_switch.py: 1 of 26 are slow (test_the_next_request_goes_to_the_other_provider_with_its_history_converted)
+- notice · unittest:tests.test_roles — tests/test_roles.py: 6 of 83 are not in the project any more (test_a_high_override_does_not_move_planning, test_a_high_override_naming_only_a_provider_still_leaves_planning_on_main, test_a_high_override_without_a_key_still_leaves_planning_on_main…)
+history: thread
+After `0dbcbfa5`: `PYTHONPATH=backend python3 -m unittest tests.test_guest_accounts tests.test_guest_harness_provider tests.test_keytest_guest tests.test_guest_sessions tests.test_model_switch` passed twice (235 tests each run, 2026-09-23). The `c3c4baaa` land gate built the merged Relay target. `tests_check` reports six listed test modules passed; its remaining notices concern slow or retired tests.
