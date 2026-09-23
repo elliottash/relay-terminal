@@ -75,6 +75,7 @@ private slots:
     void longFindingsRemainReadableAndScrollable();
     void namedDriverUsesControlsAndRefusesUnavailableTargets();
     void cleanupOperationsHaveTranscriptNotes();
+    void unsurfacedEventsNameTheirCard();
     void tryItOpenKeepsWindowsPathsWithSpaces();
     void doneButtonAndKeyOfferUndo();
     void navigationSurvivesReload();
@@ -454,6 +455,27 @@ void BoardPaneTests::tryItOpenKeepsWindowsPathsWithSpaces()
             QVERIFY(command.isEmpty());
         }
     }
+}
+
+// What `RelayWindow::deliverToConsoles` asks of an unsurfaced event before showing it to a card
+// console (#KSKH): the card it names, or nothing when it is the tab's own news. A card turn's
+// own events never reach this helper — they carry `surface: "card:<ID>"` and are routed by it —
+// these are the board's own (`board_activity`, `board_thread_appended`), which used to broadcast
+// to every console of the tab and printed one card's write line inside another card's console.
+void BoardPaneTests::unsurfacedEventsNameTheirCard()
+{
+    using relay::board::namedCardOf;
+    QCOMPARE(namedCardOf({{"event", "board_activity"}, {"id", "K7Q2"}, {"summary", "replaced `## Plan`"}}),
+             QStringLiteral("K7Q2"));
+    QCOMPARE(namedCardOf({{"event", "board_thread_appended"}, {"card_id", "SSRQ"}, {"author", "agent"}}),
+             QStringLiteral("SSRQ"));
+    // The tab's own news names no card and reaches every console as before.
+    QVERIFY(namedCardOf({{"event", "board_activity"}, {"summary", "reordered sections"}}).isEmpty());
+    QVERIFY(namedCardOf({{"event", "configured"}, {"model", "kimi-k3"}}).isEmpty());
+    QVERIFY(namedCardOf({{"event", "queue_changed"}}).isEmpty());
+    // A card turn's own event is surface-routed already; the card it would name is its own.
+    QCOMPARE(namedCardOf({{"event", "delta"}, {"card_id", "K7Q2"}, {"surface", "card:K7Q2"}}),
+             QStringLiteral("K7Q2"));
 }
 
 void BoardPaneTests::cleanupOperationsHaveTranscriptNotes()

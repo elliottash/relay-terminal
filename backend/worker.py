@@ -15,6 +15,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
+from relay_core import board_chat
 from relay_core import memory_import, openrouter_catalog, provider_limits
 from relay_core import final_summary
 from relay_core import request_stream, tool_stream
@@ -267,9 +268,12 @@ def main():
                 # Protocol 30.7: which tab this worker is the helper of. It keys the helper's
                 # conversation with the workspace `board.configure` has just settled, so the
                 # same tab comes back with its own history after a restart. The context's
-                # `persist.key` is the same id by another name and wins when both are sent.
-                board.set_tab((context.persist_key if context is not None else "")
-                              or request.get("tab"))
+                # `persist.key` is the tab id by another name and wins when both are sent —
+                # except a card console's, which names one card's conversation and not the tab
+                # (`board_chat.tab_of`, card #KSKH): it must not become the board's tab, or
+                # every card session built afterwards is keyed under it.
+                board.set_tab(board_chat.tab_of(context.persist_key if context is not None else "",
+                                                request.get("tab")))
                 # A console's board tools offer the console's set — merge, split, the import and
                 # `search_files` — for as long as the console exists, rather than for one turn
                 # the way a card's stage scope does (`ConsoleScope`, #AGNT).

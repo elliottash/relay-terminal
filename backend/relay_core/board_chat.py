@@ -61,6 +61,23 @@ def validate_tab(value) -> str:
     return value.strip()
 
 
+def tab_of(persist_key, tab) -> str:
+    """The tab id a `configure` names, from its two spellings (protocol 30.7, card #KSKH).
+
+    A tab console's `persist.key` is the tab id by another name and won when both were sent —
+    that is the sentence that stood at the call site. A **card** console's key is not that:
+    `<tab>/card:<X>` names one card's conversation (owner decision 1 on #CTRN), not the tab.
+    Handing it to `set_tab` made the board's tab `<tab>/card:<X>`, and `_card_session_file`
+    keyed every card session built afterwards `<tab>/card:<X>/card:<Y>` — found on disk
+    2026-09-23 with five cards' conversations filed under doubled keys, files no restart
+    finds again, and which file a card got depending on which card page was open first. The
+    card's key belongs to the conversation store; the tab id is the top-level `tab`.
+    """
+    if isinstance(persist_key, str) and ("/card:" in persist_key or persist_key.startswith("card:")):
+        persist_key = ""
+    return validate_tab(persist_key or tab)
+
+
 def survey_path(board: B.Board) -> Path:
     return board.root / SURVEY_FILE
 

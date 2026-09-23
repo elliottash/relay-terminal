@@ -9041,6 +9041,12 @@ private:
     void deliverToConsoles(const QString &tab, const QJsonObject &event) {
         if (event.value(QStringLiteral("event")).toString() == QStringLiteral("app_command")) return;
         const QString card = cardSurfaceOf(event);
+        // The card an unsurfaced event is about, when it names one (card #KSKH): a card console
+        // stops it there, so one card's write line, toast and chip do not print in the middle of
+        // another card's conversation — the owner's "two agents seemingly going at once" while
+        // planning several cards. The Switchboard, Options and Sessions consoles share the tab's
+        // conversation (owner decision 1 on #AGNT) and keep every card's line exactly as before.
+        const QString about = relay::board::namedCardOf(event);
         for (int i = int(m_consoles.size()) - 1; i >= 0; --i)
             if (!m_consoles.at(i).pane) m_consoles.removeAt(i);
         const QList<ConsoleEntry> entries = m_consoles;   // a handler may close a pane
@@ -9051,8 +9057,11 @@ private:
             // The console's own `surface`, read through the wrapper so it is the same string the
             // `configure` block carried: `card:<ID>` on a card page, `switchboard`, `options` or
             // `sessions` everywhere else, and none of those can equal a card's.
-            if (!card.isEmpty()
-                && (!entry.context || entry.context->spec().surface != card)) continue;
+            const QString mine = entry.context ? entry.context->spec().surface : QString();
+            if (!card.isEmpty() && (!entry.context || mine != card)) continue;
+            if (!about.isEmpty() && mine.startsWith(QStringLiteral("card:"))
+                && about != mine.section(QLatin1Char(':'), 1))
+                continue;
             entry.pane->deliverWorkerEvent(event);
         }
     }

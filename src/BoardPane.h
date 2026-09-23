@@ -83,6 +83,22 @@ inline QString fixRequest(const QString &path, const QString &message, int total
     return request;
 }
 
+// The card a worker event is *about*, when it names one and is not already addressed to a
+// surface (card #KSKH). A card turn's own events carry `surface: "card:<ID>"` and are routed by
+// it; the board's own — `board_activity` (its `id`), `board_thread_appended` and friends (their
+// `card_id`) — carry none and used to broadcast to every console of the tab. This is what lets
+// `RelayWindow::deliverToConsoles` stop a *card* console from printing another card's write line,
+// toast and chip mid-conversation, which the owner watched as "two agents seemingly going at
+// once" while planning several cards (2026-09-23). Empty when the event names no card: those are
+// the tab's own news and reach every console as before.
+inline QString namedCardOf(const QJsonObject &event)
+{
+    const QString type = event.value(QStringLiteral("event")).toString();
+    if (type == QLatin1String("board_activity"))
+        return event.value(QStringLiteral("id")).toString();
+    return event.value(QStringLiteral("card_id")).toString();
+}
+
 }  // namespace board
 
 class BoardView : public QWidget {

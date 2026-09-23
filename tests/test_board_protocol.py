@@ -19,6 +19,7 @@ import unittest.mock
 
 import fake_cards
 import fake_github as FG
+from relay_core import agent_context as AC
 from relay_core import board as B
 from relay_core import board_protocol as P
 from relay_core import board_tools as T
@@ -612,6 +613,20 @@ class DeleteWriteTests(ProtocolTest):
 
 
 class AskTests(ProtocolTest):
+    def test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only(self):
+        # #KSKH: `worker.py` once fed a card console's persist key (`<tab>/card:<X>`) to
+        # `set_tab`, so the board's tab carried a card's name and every card session built
+        # afterwards was filed under `<tab>/card:<X>/card:<Y>` — a file no restart finds. The
+        # tab is the tab (`board_chat.tab_of`), and this is the key a restart must come back to.
+        self.commands.set_tab("t0123456789ab")
+        card_id = self.make_card()
+        self.cards.hold(card_id)
+        self.send(type="board_ask", id="a1", card=card_id, text="where should this run?")
+        directory, name = self.commands._card_session_file(card_id)
+        self.assertEqual(name, AC.helper_session_id(f"t0123456789ab/card:{card_id}"))
+        self.cards.agent(card_id).release()
+        self.assertTrue(self.cards.wait())
+
     def test_the_question_is_recorded_before_the_agent_sees_it(self):
         card_id = self.make_card()
         self.cards.hold(card_id)                       # the turn waits; the card does not

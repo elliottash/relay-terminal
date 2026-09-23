@@ -150,6 +150,31 @@ class ConsoleSeedTest(BoardConsoleTest):
         self.assertTrue(self.commands.console_seed(self.FakeAgent()))
 
 
+class TabOfTest(unittest.TestCase):
+    """The tab id a configure names, from its two spellings (30.7, card #KSKH).
+
+    A card console's persist key is `<tab>/card:<X>` — one card's conversation (#CTRN decision 1),
+    not a second spelling of the tab id. Fed to `set_tab` it made `board.tab` `<tab>/card:<X>` and
+    every card session built afterwards was keyed `<tab>/card:<X>/card:<Y>`: five cards' files
+    under doubled keys on 2026-09-23, none of them found by a restart.
+    """
+
+    def test_a_tab_consoles_key_is_still_the_tab_by_another_name(self):
+        self.assertEqual(board_chat.tab_of("t0123456789ab", "t0123456789ab"), "t0123456789ab")
+        self.assertEqual(board_chat.tab_of("t0123456789ab", None), "t0123456789ab")
+        self.assertEqual(board_chat.tab_of("", "t0123456789ab"), "t0123456789ab")
+
+    def test_a_card_consoles_key_names_a_card_not_the_tab(self):
+        # The card's own conversation is keyed by it elsewhere (`ContextSpec.store`); the board's
+        # tab falls back to the top-level `tab`, and to nothing when the GUI sent none.
+        self.assertEqual(board_chat.tab_of("t0123456789ab/card:SSRQ", "t0123456789ab"), "t0123456789ab")
+        self.assertEqual(board_chat.tab_of("t0123456789ab/card:SSRQ", None), "")
+        self.assertEqual(board_chat.tab_of("card:SSRQ", "t0123456789ab"), "t0123456789ab")
+
+    def test_no_spellings_at_all_is_no_tab(self):
+        self.assertEqual(board_chat.tab_of(None, None), "")
+
+
 class BusyTest(BoardConsoleTest):
     """A console can write any card, so card work waits for it — and it never waits for itself."""
 
