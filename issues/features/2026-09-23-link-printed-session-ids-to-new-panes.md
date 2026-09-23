@@ -17,7 +17,7 @@ links: {plans: [], commits: [cb0200d9dd263b572a3f4c9dd5139e06a1a55450], evidence
 allow agents to print session ids that will convert to links an open in a new pane.
 
 ## Done means
-A standalone saved Relay, Claude, or Codex session ID printed in agent output becomes a link. Activating it opens that saved conversation in a new pane, or reveals its existing pane. Unknown IDs never open an unrelated session; ordinary hashes and file links retain their behavior.
+A standalone saved Relay, Claude, or Codex session ID printed in agent output becomes a link. Activating it opens that saved conversation in a new pane, or reveals its existing pane. Unknown IDs never open an unrelated session; existing URL and file links retain their behavior. A 32-character hex value with no saved session can still appear clickable because it has the same shape as a Relay ID.
 
 ## Plan
 **Goal:** Make printed session IDs actionable in terminal output.
