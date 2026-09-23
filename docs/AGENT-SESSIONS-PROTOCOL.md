@@ -169,6 +169,17 @@ Free's ceiling — and is `""` everywhere else, because nothing is silently sent
   until the next turn (issue 5PY9).
 - Auto-compaction when `percent >= threshold` at a step boundary (never between a tool call and its results): emits `compaction_started {reason: "auto"|"manual"}` then `compacted {before_tokens, after_tokens, summary_chars}`. Order: drop/trim old tool outputs first, then summarize older turns with a no-tools model call, keeping the system prompt, instructions, the last N turns and the current task.
 - `compact {focus?: string}` → manual compaction.
+- **Stale tool results** (#0C0V step 4, `clear_tool_results`, on by default): after each tool group,
+  when the tool results older than the last 3 assistant tool-call groups add up to 40,000
+  characters or more (results already cleared or elided not counted, results under 1 KiB left
+  alone), all of them are replaced in one batch by a one-line stub
+  `{"cleared": true, "tool", "args" (≤160 chars), "chars" (original size), "note"}` whose note names
+  the call that brings the result back (`command_output(job_id=…, from_line=1)`,
+  `read_file(path=…)`) or says to rerun it. Every result message stays, with its `tool_call_id`, so
+  no provider sees a call without its result; one batch is one cache rebuild, which is why the
+  threshold is high. Then `tool_results_cleared {turn_id, count, chars, keep_groups}` (`chars` =
+  characters freed) and `context`. Never on a guest harness pane (29.3). The user's folds and the
+  turn records keep the full results.
 
 ## 5. Checkpoints, rewind, fork, sessions, recaps
 
@@ -294,12 +305,30 @@ after 2 s. Two tools go with run_command (subagents that have it get them too):
 `command_output {job_id, wait_seconds?}` returns the output not yet read (the newest 32 KiB when
 there is more, `omitted_bytes` counting the rest) and waits up to `wait_seconds` (0–1800) for the
 job to end; `stop_command {job_id}` stops the job's process group and returns `stopped: true`.
+`command_output {job_id, from_line, to_line?}` (#0C0V) instead re-reads those lines (1-based,
+inclusive, counted from the job's first byte) of the kept output, running or finished, without
+moving the read position: `{job_id, output, from_line, to_line, total_lines, next_from_line?,
+cut?, note?, exit_code | still_running}`, at most 12,000 characters as sent.
+
+**What the model gets** (#0C0V step 3). The `tool_result` event, the turn record and the fold carry
+the result above unchanged. The model's copy of a `run_command`, `command_output` or `stop_command`
+result whose unread output is over 12,000 characters (as sent: JSON escaping counted) has in
+`output` the first ~4,000 and last ~8,000, cut at whole lines, around
+`[… N lines / M bytes omitted; command_output(job_id="job-3", from_line=120, to_line=400) reads them]`,
+plus `total_lines` and `total_bytes` of everything the job printed (`dropped_bytes` when some fell
+out of its 1 MiB buffer unread); `truncated`/`omitted_bytes` are left out. `read_file {path,
+from_line?, to_line?}`: with a range, `content` is those lines (bounded the same way) with
+`from_line`, `to_line`, `total_lines`, `next_from_line?`, for the user too; without one, a file over
+12,000 characters reaches the model as ~8,000 of head and ~4,000 of tail around
+the same marker naming `read_file(path="…", from_line=…, to_line=…)`, plus `total_lines` and `bytes`.
+`search_files` matches are cut to the same size with `truncated: true` and a note.
 `tool_output {text}` — or its counts alone, 23.10 — streams only while a call is waiting on the
 job. Stop ends the job being waited on; jobs handed back earlier keep running. At most 8 run at
 once. Every job of a conversation is stopped on a new conversation, when a subagent's run ends,
 and when the worker exits. The pane prints `▸ still running as job-N` / `■ stopped job-N` for
-these results. Only the 16 most recent finished jobs are remembered; `command_output` on an older
-one is an error.
+these results. Finished jobs are remembered, newest first, until their kept output adds up to
+32 MiB (each counted at least 4 KiB; it was the 16 most recent until #0C0V); `command_output` on a
+forgotten one is an error that says to rerun the command.
 
 **Too wide to crawl (card #2Y96, 2026-09-19).** `run_command` refuses, at prepare time, a recursive
 search or listing whose root is the user's home directory, `/`, or a directory the home sits under:
@@ -472,6 +501,7 @@ existing events keep their fields and meaning. Deviations from the research sket
 | `completion_check` | bool | true | end-of-turn re-prompt for open todos (12.5) |
 | `audit_requests` | bool | false | flag-only audit side call after each finished turn (12.6) |
 | `todo_tool` | bool | true | offer `update_todos` and its prompt rules to the model |
+| `clear_tool_results` | bool | true | clear stale tool results between compactions (4, #0C0V); applies from the next tool group |
 | `prompt_profile` | `auto` \| `full` \| `short` | `auto` | which system prompt and tool list this pane sends (12.12). `auto` is `short` when the model is served from this machine (a `local:` endpoint), when the model serving the turn is on the Lite list of Options › Models, or when its catalogue window is at most 32,768; `full` otherwise |
 | `failover` | bool | true | a turn whose provider keeps failing continues on another one (15.2.2) |
 | `fallbacks` | `[{preset, model}, …]` | `[]` | the Options › Models priority list below the pane's own model, in order: where a failing turn goes, first entry first (15.2.2). Relay Free is a target only when it is in the list. Null or a non-list means an empty list; an entry that is not `{preset, model}` is dropped. Superseded by the `tiers.main` list (13.7, v3.10): still accepted, and it **is** the Main chain whenever no `tiers.main` was sent. `fallback` (singular, one `{preset, model}` or null, 2026-09-20 morning) is still read as a one-element list; `fallbacks` wins when both are sent |

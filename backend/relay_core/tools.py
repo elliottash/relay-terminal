@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import os
 from .filelock import chmod_fd
 import posixpath
@@ -36,11 +37,18 @@ from .questions import Questions
 from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
-from .jobs import JobTable
+from .jobs import JobTable, line_range, sent_length, split_lines
 from . import approvals, remote_files, remote_session, security
 
 MAX_FILE = 131072
 MAX_OUTPUT = 32768
+# Card #0C0V: what one command result, file read or search puts into the model's context, which is
+# resent on every later step. The user's fold still gets MAX_OUTPUT and the whole file; the model
+# gets a head and a tail with a marker naming the omitted lines and the call that reads them, so a
+# 1 MB build log costs 3k tokens instead of 8k — every step — and nothing becomes unreadable.
+MODEL_RESULT_CHARS = 12_000
+COMMAND_HEAD_CHARS = 4_000    # a command's errors are at its end: the tail gets two thirds
+FILE_HEAD_CHARS = 8_000       # a file's imports and definitions are at its start: the head does
 # run_command's timeout is how long the call waits before handing a still-running command back as
 # a job (relay_core/jobs.py), no longer when the command is killed. A request outside the range is
 # clamped, never refused: refusing cost a turn and printed an error for a harmless mistake.
@@ -227,6 +235,74 @@ def spec(name: str, description: str, properties: dict, required: list[str]) -> 
             "parameters": {"type": "object", "properties": properties, "required": required,
                            "additionalProperties": False}}}
 
+
+class ToolResult(dict):
+    """A tool result whose copy for the model (`model`) is shorter than what the user's fold and
+    the saved turn get, which is the dict itself (card #0C0V). See model_result()."""
+    model: dict | None = None
+
+
+def head_tail(text: str, head_chars: int, tail_chars: int) -> tuple[str, str, int, int, int]:
+    """Cut `text` (more than head_chars + tail_chars long) to whole lines at each end.
+
+    Sizes are as sent (jobs.sent_length). Returns (head, tail, first omitted line, last omitted
+    line, omitted bytes), lines 1-based in `text`. A line too long to fit is cut inside it, and is
+    then counted as omitted."""
+    lines = split_lines(text)
+    sizes = [sent_length(line) for line in lines]
+    head, used = 0, 0
+    while head < len(lines) and used + sizes[head] <= head_chars:
+        used += sizes[head]
+        head += 1
+    tail, tail_used = 0, 0
+    while (tail < len(lines) - head - 1
+           and tail_used + sizes[-1 - tail] <= tail_chars):
+        tail_used += sizes[-1 - tail]
+        tail += 1
+    # A cut inside a line takes half the budget: escaping can at most double what it is sent as.
+    head_text = "".join(lines[:head]) if head else text[:head_chars // 2]
+    tail_text = "".join(lines[len(lines) - tail:]) if tail else text[-(tail_chars // 2):]
+    omitted = len(text.encode("utf-8")) - len(head_text.encode("utf-8")) - len(tail_text.encode("utf-8"))
+    return head_text, tail_text, head + 1, len(lines) - tail, max(0, omitted)
+
+
+def _marker(first: int, last: int, omitted_bytes: int, call: str) -> str:
+    count = last - first + 1
+    return (f"\n[… {count:,} line{'s' if count != 1 else ''} / {omitted_bytes:,} bytes omitted; "
+            f"{call} reads them]\n")
+
+
+def _range_args(args: dict) -> tuple[int, int | None] | None:
+    """from_line/to_line of a command_output or read_file call, checked: None when neither."""
+    if "from_line" not in args and "to_line" not in args:
+        return None
+    first, last = args.get("from_line", 1), args.get("to_line")
+    for key, value in (("from_line", first), ("to_line", last)):
+        if value is not None and (type(value) is not int or value < 1):
+            raise ValueError(f"{key} must be a line number, 1 or more.")
+    if last is not None and last < first:
+        raise ValueError("to_line must not be before from_line.")
+    return first, last
+
+
+def model_result(name: str, result) -> dict:
+    """What the model gets for a tool result (card #0C0V): the bounded copy a command result or a
+    file read carries, search matches cut to MODEL_RESULT_CHARS, and anything else unchanged."""
+    if isinstance(result, ToolResult) and result.model is not None:
+        return result.model
+    if name == "search_files" and isinstance(result, dict) and isinstance(result.get("matches"), list):
+        kept, used = [], 0
+        for match in result["matches"]:
+            used += sent_length(str(match)) + 4
+            if used > MODEL_RESULT_CHARS:
+                break
+            kept.append(match)
+        if len(kept) < len(result["matches"]):
+            return {**result, "matches": kept, "truncated": True,
+                    "note": f"{len(result['matches']) - len(kept)} more matches omitted; narrow "
+                            "the pattern, path or glob to see them."}
+    return result
+
 TOOLS = [
     spec("run_command", "Run a non-interactive Bash command in the chosen workspace, or with host on the ssh host the Relay context names. NOT an OS sandbox. Does not share interactive shell variables or aliases. "
          "Waits up to timeout_seconds (default 30, at most 1800) for the command to finish. A command still running then is NOT killed: "
@@ -239,8 +315,10 @@ TOOLS = [
                               "description": "Seconds to wait before handing a still-running command back as a job; default 30."},
           "background": {"type": "boolean", "description": "Start it and return after a moment with its job_id and first output, for servers and watchers."}},
          ["command"]),
-    spec("read_file", "Read a UTF-8 text file inside the workspace.",
-         {"path": {"type": "string"}}, ["path"]),
+    spec("read_file", "Read a UTF-8 text file inside the workspace. A long file comes back as its head and tail "
+         "with total_lines; read the rest with from_line/to_line.",
+         {"path": {"type": "string"}, "from_line": {"type": "integer", "minimum": 1},
+          "to_line": {"type": "integer", "minimum": 1}}, ["path"]),
     spec("list_directory", "List at most 200 entries in a workspace directory.",
          {"path": {"type": "string"}}, ["path"]),
     spec("write_file", "Create a new UTF-8 file, or replace an existing one in full. To change part of a file that already exists, use edit_file instead: it does not resend the whole file. The diff is shown to the user. Fails if the file changes while the write is prepared.",
@@ -558,21 +636,28 @@ class ToolExecutor:
             normalized, preview = catalog.prepare(args)
             return Prepared(name, normalized, preview, catalog.path)
         if name in ("command_output", "stop_command"):
-            if set(args) - ({"job_id", "wait_seconds"} if name == "command_output" else {"job_id"}):
+            if set(args) - ({"job_id", "wait_seconds", "from_line", "to_line"}
+                            if name == "command_output" else {"job_id"}):
                 raise ValueError("Unknown tool or unexpected argument.")
             job = self.jobs.get(args.get("job_id"))
             if name == "stop_command":
                 return Prepared(name, {"job_id": job.id}, f"STOP COMMAND\n\n{job.id}: {job.command}")
             wait = clamp_seconds(args.get("wait_seconds", 0), 0, 0, MAX_WAIT)
-            return Prepared(name, {"job_id": job.id, "wait_seconds": wait},
-                            f"COMMAND OUTPUT\n\n{job.id}: {job.command}\nWait: up to {wait}s")
+            prepared = {"job_id": job.id, "wait_seconds": wait}
+            shown = f"COMMAND OUTPUT\n\n{job.id}: {job.command}\nWait: up to {wait}s"
+            if (lines := _range_args(args)) is not None:
+                prepared.update({"from_line": lines[0], "to_line": lines[1]})
+                shown += f"\nLines: {lines[0]}-{lines[1] or 'end'}"
+            return Prepared(name, prepared, shown)
         allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background", "host"},
-                   "read_file": {"path", "host"}, "list_directory": {"path", "host"},
+                   "read_file": {"path", "host", "from_line", "to_line"}, "list_directory": {"path", "host"},
                    "write_file": {"path", "content", "host"},
                    "edit_file": {"path", "old_string", "new_string", "replace_all", "host"}}
         if name not in allowed or set(args) - allowed[name]:
             raise ValueError("Unknown tool or unexpected argument.")
         host = self._host(args)
+        if name == "read_file":
+            _range_args(args)                     # refused here, before anything is read
         if name == "run_command":
             command = self._text(args, "command", maximum=16384)
             if not command.strip():
@@ -761,8 +846,7 @@ class ToolExecutor:
         session = self._remote_ready(prepared.host)
         if name == "read_file":
             data = self._remote_read(session, path)
-            return {"path": args["path"], "content": data.decode("utf-8"),
-                    "sha256": hashlib.sha256(data).hexdigest(), "host": session["host"]}
+            return self._read_result(args, data, host=session["host"])
         if name == "list_directory":
             data = self._remote_run(session, remote_files.list_script(path, session.get("cwd") or None),
                                     path, wrong_type="Path is not a directory.")
@@ -850,6 +934,8 @@ class ToolExecutor:
             return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False))
         if name == "command_output":
             job = self.jobs.get(args["job_id"])
+            if "from_line" in args:
+                return self._job_lines(job, args)
             return self._await(job, args["wait_seconds"])
         if name == "stop_command":
             job = self.jobs.get(args["job_id"])
@@ -860,8 +946,7 @@ class ToolExecutor:
         path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"),
                                       for_read=name in ("read_file", "list_directory"))
         if name == "read_file":
-            data = self.workspace.read_bytes(path)
-            return {"path": args["path"], "content": data.decode("utf-8"), "sha256": hashlib.sha256(data).hexdigest()}
+            return self._read_result(args, self.workspace.read_bytes(path))
         if name == "list_directory":
             if not path.is_dir():
                 raise ValueError("Path is not a directory.")
@@ -939,8 +1024,55 @@ class ToolExecutor:
             raise Cancelled("Stopped.")
         return self._job_result(job)
 
+    def _job_lines(self, job, args: dict) -> dict:
+        """command_output with from_line/to_line: a re-read of the job's kept output, which leaves
+        the unread position alone (card #0C0V). A wait still waits first."""
+        if args["wait_seconds"] and job.running:
+            with self._lock:
+                self._waiting = job
+            try:
+                self.jobs.wait(job, args["wait_seconds"], self.cancel)
+            finally:
+                with self._lock:
+                    self._waiting = None
+            if self.cancel.is_set():
+                self.jobs.stop(job)
+                raise Cancelled("Stopped.")
+        result = self.jobs.read_lines(job, args["from_line"], args["to_line"], MODEL_RESULT_CHARS)
+        if job.running:
+            result["still_running"] = True
+        else:
+            result["exit_code"] = job.exit_code
+        return result
+
+    def _read_result(self, args: dict, data: bytes, *, host: str | None = None) -> dict:
+        """read_file's result: the whole file for the user, and for the model either the lines
+        asked for or, past MODEL_RESULT_CHARS, the head and tail and how to read the rest."""
+        text = data.decode("utf-8")
+        result = ToolResult({"path": args["path"], "content": text, "sha256": hashlib.sha256(data).hexdigest()})
+        if host:
+            result["host"] = host
+        lines = split_lines(text)
+        if "from_line" in args or "to_line" in args:
+            chosen = line_range(lines, args.get("from_line", 1), args.get("to_line"), MODEL_RESULT_CHARS)
+            result.update(chosen)
+            result["content"] = result.pop("output")
+            return result
+        if sent_length(text) > MODEL_RESULT_CHARS:
+            head, tail, first, last, omitted = head_tail(text, FILE_HEAD_CHARS,
+                                                         MODEL_RESULT_CHARS - FILE_HEAD_CHARS)
+            where = f', host="{host}"' if host else ""
+            call = f'read_file(path={json.dumps(args["path"])}{where}, from_line={first}, to_line={last})'
+            result.model = {**result, "content": head + _marker(first, last, omitted, call) + tail,
+                            "total_lines": len(lines), "bytes": len(data)}
+        return result
+
     def _job_result(self, job) -> dict:
-        result = self.jobs.take_output(job, MAX_OUTPUT)
+        data, first_line, dropped = self.jobs.take(job)
+        output = data[-MAX_OUTPUT:] if len(data) > MAX_OUTPUT else data
+        omitted = dropped + len(data) - len(output)
+        result = ToolResult({"output": output.decode("utf-8", "replace"), "truncated": omitted > 0,
+                             "omitted_bytes": omitted})
         result["job_id"] = job.id
         if job.host:
             result["host"] = job.host
@@ -957,6 +1089,21 @@ class ToolExecutor:
             elif job.host and job.exit_code == 255:
                 result["note"] = (f"ssh exited 255: the connection to {job.host} failed or closed, so the "
                                   "command may not have run. The user's ssh session may have ended; ask them.")
+        text = data.decode("utf-8", "replace")
+        if sent_length(text) > MODEL_RESULT_CHARS:
+            # Card #0C0V: the model's copy is the head and tail of everything it had not read yet,
+            # with exact counts and the call that re-reads the middle; the user's is `output` above.
+            head, tail, first, last, omitted = head_tail(text, COMMAND_HEAD_CHARS,
+                                                         MODEL_RESULT_CHARS - COMMAND_HEAD_CHARS)
+            call = (f'command_output(job_id="{job.id}", from_line={first_line + first - 1}, '
+                    f'to_line={first_line + last - 1})')
+            lines, total = self.jobs.counts(job)
+            model = {key: value for key, value in result.items() if key not in ("truncated", "omitted_bytes")}
+            model["output"] = head + _marker(first, last, omitted, call) + tail
+            model.update({"total_lines": lines, "total_bytes": total})
+            if dropped:
+                model["dropped_bytes"] = dropped
+            result.model = model
         return result
 
 
@@ -1004,8 +1151,10 @@ def clamp_seconds(value, default: int, low: int, high: int) -> int:
 BACKGROUND_GLANCE = 2
 JOB_TOOLS = [
     spec("command_output", "Read the output a run_command job has printed since you last read it, and whether it is still running. "
-         "wait_seconds (default 0, at most 1800) waits for the job to finish first; it returns early when it does.",
-         {"job_id": {"type": "string"}, "wait_seconds": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT}}, ["job_id"]),
+         "wait_seconds (default 0, at most 1800) waits for the job to finish first; it returns early when it does. "
+         "from_line/to_line instead re-read those lines of its output, finished or not.",
+         {"job_id": {"type": "string"}, "wait_seconds": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT},
+          "from_line": {"type": "integer", "minimum": 1}, "to_line": {"type": "integer", "minimum": 1}}, ["job_id"]),
     spec("stop_command", "Stop a run_command job and its child processes, and return its last output. "
          "Stop servers and watchers you started once you no longer need them.",
          {"job_id": {"type": "string"}}, ["job_id"]),

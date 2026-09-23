@@ -11,6 +11,10 @@ with threshold defaulting to 0.80.
 
 Compaction never separates an assistant tool call from its tool results: it only cuts at user
 messages (turn starts), and tool outputs are shortened in place rather than removed.
+
+Between compactions, stale tool results are cleared the same way (card #0C0V): once the results
+older than the last CLEAR_KEEP_GROUPS tool-call groups add up to CLEAR_OVER_CHARS, all of them are
+replaced, in one batch, by a one-line stub. See clear_stale_tool_results.
 """
 from __future__ import annotations
 
@@ -179,9 +183,93 @@ def turn_starts(messages: list[dict]) -> list[int]:
     return [i for i, m in enumerate(messages) if i > 0 and is_turn_start(m)]
 
 
+# Stale tool-result clearing (card #0C0V). Every clear rewrites messages the provider has cached,
+# so the next request pays for its prefix again: it has to free enough to be worth that, and to
+# happen rarely. 40,000 characters is ~10k tokens — a dozen large reads or three bounded command
+# results — resent on every later step otherwise; at that size one rebuild pays for itself within
+# a step or two, and a session reaches it a few times between compactions, not every step. The
+# last three groups stay whole because that is what the model is working from.
+CLEAR_KEEP_GROUPS = 3
+CLEAR_OVER_CHARS = 40_000
+CLEAR_MIN_CHARS = 1_024      # a result this short is left alone: its stub would save nothing
+CLEARED_PREFIX = '{"cleared": true'
+
+
+def _stubbed(content: str) -> bool:
+    return content.startswith(CLEARED_PREFIX) or '"elided": true' in content[:40]
+
+
+def _reread(tool: str, args: dict, content: str) -> str | None:
+    """The call that brings a cleared result back, when there is one."""
+    if tool in ("run_command", "command_output", "stop_command"):
+        try:
+            job = json.loads(content).get("job_id")
+        except (ValueError, AttributeError):
+            job = None
+        if isinstance(job, str):
+            return f'command_output(job_id="{job}", from_line=1) while the job is kept'
+    if tool == "read_file" and isinstance(args.get("path"), str):
+        return f"read_file(path={json.dumps(args['path'])})"
+    return None
+
+
+def _stub(tool: str, arguments, content: str) -> str:
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments or {})
+    except (ValueError, TypeError):
+        args = {}
+    if not isinstance(args, dict):
+        args = {}
+    shown = json.dumps(args, ensure_ascii=False)
+    stub = {"cleared": True, "tool": tool, "args": shown if len(shown) <= 160 else shown[:157] + "...",
+            "chars": len(content)}
+    how = _reread(tool, args, content)
+    stub["note"] = ("Old tool result cleared by Relay to save context; "
+                    + (f"{how} reads it again." if how else "rerun the tool if you need it."))
+    return json.dumps(stub, ensure_ascii=False)
+
+
+def clear_stale_tool_results(messages: list[dict], keep_groups: int = CLEAR_KEEP_GROUPS,
+                             over_chars: int = CLEAR_OVER_CHARS) -> tuple[list[dict], int, int]:
+    """Replace the tool results older than the last `keep_groups` assistant tool-call groups with
+    one-line stubs — all of them or none: only when they add up to `over_chars` characters, so one
+    clear frees a lot and the cache is rebuilt once for it. Returns (messages, count, characters
+    freed); the list is the same object when nothing was cleared.
+
+    Every tool message stays where it is with its tool_call_id, so each assistant tool call keeps
+    its result for every provider; only the content changes. Results already stubbed (here or by
+    compaction's trim) are neither counted nor touched again."""
+    groups = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")]
+    if len(groups) <= keep_groups:
+        return messages, 0, 0
+    cutoff = groups[-keep_groups] if keep_groups > 0 else len(messages)
+    calls, stale = {}, []
+    for i in range(1, cutoff):
+        message = messages[i]
+        if message.get("role") == "assistant":
+            for call in message.get("tool_calls") or ():
+                function = call.get("function") or {}
+                calls[call.get("id")] = (function.get("name") or "tool", function.get("arguments"))
+        elif message.get("role") == "tool":
+            content = message.get("content")
+            if isinstance(content, str) and len(content) > CLEAR_MIN_CHARS and not _stubbed(content):
+                stale.append(i)
+    total = sum(len(messages[i]["content"]) for i in stale)
+    if total < over_chars:
+        return messages, 0, 0
+    out, freed = list(messages), 0
+    for i in stale:
+        tool, arguments = calls.get(out[i].get("tool_call_id"), ("tool", None))
+        content = out[i]["content"]
+        stub = _stub(tool, arguments, content)
+        out[i] = {**out[i], "content": stub}
+        freed += len(content) - len(stub)
+    return out, len(stale), freed
+
+
 def _elide(message: dict) -> dict:
     content = message.get("content") or ""
-    if not isinstance(content, str) or len(content) <= TRIM_OVER_CHARS or '"elided": true' in content[:40]:
+    if not isinstance(content, str) or len(content) <= TRIM_OVER_CHARS or _stubbed(content):
         return message
     return {**message, "content": json.dumps({"elided": True, "bytes": len(content.encode("utf-8")),
                                               "head": content[:300],

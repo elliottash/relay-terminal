@@ -8,8 +8,11 @@ then is handed back as a job id with its output so far. The model reads more wit
 (optionally waiting) and ends it with stop_command. A server or watcher starts with background: true.
 
 The limits that remain are about the machine, not the model's patience: at most MAX_RUNNING jobs at
-once, each keeps the last KEEP_BYTES of its output, and only the KEEP_FINISHED most recent finished
-jobs are remembered (every command is a job, so a long conversation would otherwise keep them all).
+once, each keeps the last KEEP_BYTES of its output, and finished jobs are remembered, newest first,
+until their kept output adds up to KEEP_FINISHED_BYTES (every command is a job, so a long conversation
+would otherwise keep them all). Card #0C0V: the model sees at most 12,000 characters of a result and
+reads the rest by line range (read_lines), so a handle from this conversation has to stay readable —
+retention is by bytes, not by count, and a foreground command's job id is that handle too.
 
 A job the model was handed back is also the user's business: it is listed under the pane's prompt
 (src/JobsPanel.h), which the table feeds through on_change and snapshot(), and the user can read or
@@ -21,6 +24,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import json
 import os
 import selectors
 import signal
@@ -32,7 +36,11 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 MAX_RUNNING = 8
-KEEP_FINISHED = 16            # finished jobs remembered for command_output; older ones are forgotten
+# Finished jobs are forgotten oldest first once their kept output passes this (card #0C0V: it was
+# 16 jobs, which a debugging session outran in minutes and left the omitted-lines handles dead).
+# A job with little output still counts JOB_OVERHEAD, so thousands of empty ones are bounded too.
+KEEP_FINISHED_BYTES = 32 << 20
+JOB_OVERHEAD = 4096
 PEEK_BYTES = 256 * 1024       # what the user's "show output" gets: the newest part of the kept output
 KEEP_BYTES = 1 << 20          # output kept per job; older bytes are dropped (and counted)
 TERM_GRACE = 0.3              # seconds between SIGTERM and SIGKILL
@@ -46,6 +54,7 @@ class Job:
     started: float
     buffer: bytearray = field(default_factory=bytearray)
     base: int = 0             # absolute offset of buffer[0]: bytes dropped before it
+    base_lines: int = 0       # newlines in those dropped bytes: buffer[0] is on line base_lines + 1
     read_pos: int = 0         # absolute offset the model has read up to
     exit_code: int | None = None
     finished: float | None = None
@@ -96,6 +105,47 @@ def shell_argv(command: str, env: dict) -> list[str]:
             "-NonInteractive", "-OutputFormat", "Text", "-EncodedCommand", encoded]
 
 
+def split_lines(text: str) -> list[str]:
+    """`text` as lines that keep their "\\n" — split on "\\n" only, so line numbers agree with a
+    newline count (str.splitlines also splits on \\r, form feeds and more)."""
+    parts = text.split("\n")
+    return [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def sent_length(text: str) -> int:
+    """How many characters `text` takes in a tool message, which is JSON: a newline or a quote
+    costs two. The bounds of card #0C0V are in these, so a log of short lines stays inside them."""
+    return len(json.dumps(text, ensure_ascii=False)) - 2
+
+
+def line_range(lines: list[str], first: int, last: int | None, limit: int, skipped: int = 0) -> dict:
+    """Lines `first`..`last` (1-based, inclusive; None = to the end) of a text whose first
+    `skipped` lines are gone and whose remaining lines are `lines`: as many whole lines as fit in
+    `limit` characters as sent (sent_length), with `next_from_line` when the range goes on. Shared
+    by command_output and read_file (card #0C0V)."""
+    total = skipped + len(lines)
+    start = max(first, skipped + 1)
+    end = total if last is None else min(last, total)
+    taken, used, line, result = [], 0, start, {"total_lines": total}
+    while line <= end:
+        text = lines[line - skipped - 1]
+        size = sent_length(text)
+        if used + size > limit:
+            if not taken:
+                taken.append(text[:limit // 2])
+                result["cut"] = (f"Line {line} is {len(text):,} characters; only its first {limit // 2:,} "
+                                 "are shown. Read the rest with a command (cut -c, head -c).")
+                line += 1
+            break
+        taken.append(text)
+        used += size
+        line += 1
+    result.update({"output": "".join(taken), "from_line": start, "to_line": line - 1})
+    if line <= end:
+        result["next_from_line"] = line
+    return result
+
+
 class JobTable:
     """The jobs of one agent (one conversation, or one subagent)."""
 
@@ -119,9 +169,11 @@ class JobTable:
                                  "(or wait for one with command_output) before starting another.")
             job_id = f"job-{self._next}"
             self._next += 1
-            finished = [job for job in self._jobs.values() if not job.running]
-            for old in finished[:max(0, len(finished) - KEEP_FINISHED + 1)]:
-                del self._jobs[old.id]
+            kept = 0
+            for old in reversed([job for job in self._jobs.values() if not job.running]):
+                kept += max(len(old.buffer), JOB_OVERHEAD)
+                if kept > KEEP_FINISHED_BYTES:
+                    del self._jobs[old.id]
         process = subprocess.Popen(argv or shell_argv(command, env),
                                    cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -141,7 +193,8 @@ class JobTable:
             job = self._jobs.get(job_id) if isinstance(job_id, str) else None
         if job is None:
             raise ValueError(f"No command {job_id!r}. Job ids come from a run_command result "
-                             "(\"job_id\"); jobs end with the conversation.")
+                             "(\"job_id\"); jobs end with the conversation, and the oldest finished "
+                             "ones are dropped once their output passes 32 MiB. Rerun the command.")
         return job
 
     # Reads the job's output until its shell exits. The shell's exit ends the job, as a
@@ -216,6 +269,7 @@ class JobTable:
             job.buffer.extend(chunk)
             if len(job.buffer) > KEEP_BYTES:
                 drop = len(job.buffer) - KEEP_BYTES
+                job.base_lines += job.buffer.count(b"\n", 0, drop)
                 del job.buffer[:drop]
                 job.base += drop
             live = job.live
@@ -239,17 +293,38 @@ class JobTable:
                 job.live = None
         return job.done.is_set()
 
-    def take_output(self, job: Job, limit: int) -> dict:
-        """The output the model has not read yet: at most `limit` bytes, the newest if more."""
+    def take(self, job: Job) -> tuple[bytes, int, int]:
+        """The kept output the model has not read yet, and marks it read: (data, the line number
+        data starts on, bytes dropped before it that were never read)."""
         with self._lock:
             omitted = max(0, job.base - job.read_pos)
             start = max(job.read_pos, job.base)
             data = bytes(job.buffer[start - job.base:])
+            line = job.base_lines + job.buffer.count(b"\n", 0, start - job.base) + 1
             job.read_pos = job.total
-        if len(data) > limit:
-            omitted += len(data) - limit
-            data = data[-limit:]
-        return {"output": data.decode("utf-8", "replace"), "truncated": omitted > 0, "omitted_bytes": omitted}
+        return data, line, omitted
+
+    def counts(self, job: Job) -> tuple[int, int]:
+        """(lines, bytes) of everything the job has printed, dropped bytes included."""
+        with self._lock:
+            lines = job.base_lines + job.buffer.count(b"\n")
+            if job.buffer and not job.buffer.endswith(b"\n"):
+                lines += 1
+            return lines, job.total
+
+    def read_lines(self, job: Job, first: int, last: int | None, limit: int) -> dict:
+        """Lines `first`..`last` (1-based, inclusive; `last` None = to the end) of the kept output,
+        at most `limit` characters of whole lines. The model's read position stays where it is:
+        this is the range re-read an omitted-lines marker names (card #0C0V)."""
+        with self._lock:
+            data = bytes(job.buffer)
+            base_lines = job.base_lines
+        result = {"job_id": job.id, **line_range(split_lines(data.decode("utf-8", "replace")),
+                                                 first, last, limit, base_lines)}
+        if base_lines and first <= base_lines:
+            result["note"] = (f"Lines before {base_lines + 1} were dropped: a job keeps its last "
+                              f"{KEEP_BYTES >> 20} MiB of output.")
+        return result
 
     def hand_back(self, job: Job) -> None:
         """The call returned while the job runs on: from now on the user sees it too."""

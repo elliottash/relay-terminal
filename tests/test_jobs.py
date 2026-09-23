@@ -260,12 +260,16 @@ class JobListTests(unittest.TestCase):
         self.assertEqual(self.tools.jobs.running(), [])
 
     def test_finished_jobs_are_forgotten_beyond_the_limit(self):
-        from relay_core.jobs import KEEP_FINISHED
-        for _ in range(KEEP_FINISHED + 5):
-            self.run_tool("run_command", command="true")
-        self.assertLessEqual(len(self.tools.jobs._jobs), KEEP_FINISHED)
+        # Card #0C0V: by kept bytes, not by count; each job counts at least JOB_OVERHEAD.
+        from unittest import mock
+        from relay_core import jobs
+        with mock.patch.object(jobs, "KEEP_FINISHED_BYTES", 4 * jobs.JOB_OVERHEAD):
+            for _ in range(9):
+                self.run_tool("run_command", command="true")
+        self.assertLessEqual(len(self.tools.jobs._jobs), 5)
         with self.assertRaises(ValueError):
             self.tools.jobs.get("job-1")
+        self.assertEqual(self.tools.jobs.get("job-9").id, "job-9")
 
     def test_a_subagents_jobs_are_not_announced(self):
         events = []

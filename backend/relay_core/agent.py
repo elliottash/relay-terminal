@@ -56,7 +56,7 @@ from .sessions import new_id as new_session_id
 from . import sessions as sessions_usage
 from . import remote_session
 from . import terminal_context
-from .tools import Prepared, ToolExecutor, Workspace
+from .tools import Prepared, ToolExecutor, Workspace, model_result
 
 MAX_SNAPSHOTS = 3
 MAX_TURN_LOG = 50           # turns whose tool results and transcript stay available (protocol 11)
@@ -294,7 +294,7 @@ def validate_turn_options(request: dict) -> dict:
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(f"{key} must be an integer from {low} to {high}.")
             out[key] = value
-    for key in ("completion_check", "audit_requests", "todo_tool", "failover"):
+    for key in ("completion_check", "audit_requests", "todo_tool", "failover", "clear_tool_results"):
         if request.get(key) is not None:
             if type(request[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean.")
@@ -604,6 +604,7 @@ class Agent:
                  max_program_writes: int = DEFAULT_MAX_WRITES,
                  todo_tool: bool = True, prompt_profile: str = prompt_profiles.DEFAULT_PROFILE,
                  completion_check: bool = True, audit_requests: bool = False,
+                 clear_tool_results: bool = True,
                  stall_timeout_s: float = DEFAULT_STALL_TIMEOUT,
                  first_token_timeout_s: float = 0.0, failover: bool = True,
                  failover_hosted: bool = False, fallback: dict | None = None,
@@ -624,6 +625,8 @@ class Agent:
         self.first_token_timeout_s = validate_first_token_timeout(first_token_timeout_s)
         # Whether a turn whose provider keeps failing may continue on another one (card #G9VE).
         self.failover = failover
+        # Card #0C0V: stale tool results are cleared between compactions (_clear_stale_tool_results).
+        self.clear_tool_results = clear_tool_results
         # The Options › Models priority list below the pane's own model, in order — a list of
         # `{"preset", "model"}` — which is the whole of where a failover may go (owner,
         # 2026-09-20): "the 2nd model is the main fallback, but there are multiple, as many as
@@ -924,6 +927,7 @@ class Agent:
     def options(self) -> dict:
         return {"max_steps": self.max_steps, "max_tool_calls": self.max_tool_calls,
                 "completion_check": self.completion_check, "audit_requests": self.audit_requests,
+                "clear_tool_results": self.clear_tool_results,
                 "todo_tool": self.todo_tool, "stall_timeout_s": self.stall_timeout_s,
                 # The setting and what it resolves to for the model serving now (#GMCF decision 7).
                 "prompt_profile": self.prompt_profile, "prompt_profile_in_effect": self.profile(),
@@ -2034,6 +2038,23 @@ class Agent:
         context and reports turn-aggregate usage rather than one request's prompt (#CP3M)."""
         return self._injected_provider and not getattr(self.provider, "serves_side_calls", True)
 
+    def _clear_stale_tool_results(self, turn_id) -> None:
+        """Card #0C0V: after a tool group, clear the results older than the last few groups when
+        they add up to enough to be worth one cache rebuild (context.clear_stale_tool_results).
+        Only the content changes: every call keeps its result message, so no provider refuses the
+        history. A guest harness keeps its own context, so there is nothing of ours to clear."""
+        if not self.clear_tool_results or self._guest_harness():
+            return
+        messages, count, chars = compaction.clear_stale_tool_results(self.messages)
+        if not count:
+            return
+        self.messages = messages
+        self.context.invalidate()
+        self.emit({"event": "tool_results_cleared", "turn_id": turn_id, "count": count, "chars": chars,
+                   "keep_groups": compaction.CLEAR_KEEP_GROUPS})
+        self.emit(self.context_event())
+        self._autosave_soon()
+
     def _maybe_compact(self) -> None:
         if not self.context.over(self.messages, self.tools()):
             return
@@ -2361,7 +2382,9 @@ class Agent:
                                 result["error_code"] = code
                         except ValueError as exc:
                             result = {"error": str(exc)[:2000], "refused": True}
-                    add({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result, ensure_ascii=False)})
+                    # Card #0C0V: the model gets the bounded copy; the event and the record, all of it.
+                    add({"role": "tool", "tool_call_id": call["id"],
+                         "content": json.dumps(model_result(func["name"], result), ensure_ascii=False)})
                     self._autosave_soon()
                     ms = int((time.monotonic() - call_started) * 1000)
                     label = tool_labels.result_label(func["name"], label_args, result, ms=ms,
@@ -2379,6 +2402,7 @@ class Agent:
                     if calls_used <= self.max_tool_calls:
                         self._observe_call(ctx, func["name"], label_args or func.get("arguments"), result)
                 batch = None
+                self._clear_stale_tool_results(turn_id)
         except Cancelled:
             # subagents: stop this turn's foreground subagents. Delivered notes stay in the conversation now.
             self._subagents_rollback(batch, [])
