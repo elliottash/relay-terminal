@@ -392,12 +392,15 @@ class TierTableTests(unittest.TestCase):
             "glm-coding": ("glm-5.3", "glm-5.3-flash", "google/gemini-3.8-flash"),
             "kimi": ("kimi-k3", "kimi-k2.7-code-highspeed", "google/gemini-3.8-flash"),
             "kimi-code": ("k3", "kimi-for-coding-highspeed", "google/gemini-3.8-flash"),
-            # No non-flash DeepSeek V4.1 exists on OpenRouter, so Main falls back to the flash model.
-            "openrouter": ("deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash",
+            # OpenRouter Main follows the ranking file's Provider-picks cell (owner, 2026-09-23:
+            # "follow the file"): glm-5.3-flash, the z-ai slug. DeepSeek V4.1 flash keeps Flash.
+            "openrouter": ("z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash",
                            "google/gemini-3.5-flash-lite"),
             "minimax": ("MiniMax-M3", "MiniMax-M2.7-highspeed", "google/gemini-3.8-flash"),
             "anthropic": ("claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"),
-            "gemini": ("gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"),
+            # Gemini Main and Flash both follow model-ranking.md's gemini-flash-latest alias
+            # (owner, 2026-09-23), which always tracks Google's newest Flash model.
+            "gemini": ("gemini-flash-latest", "gemini-flash-latest", "gemini-3.5-flash-lite"),
         }
         for provider, (main, flash, lite) in expected.items():
             table = P.TIER_DEFAULTS[provider]
@@ -528,10 +531,14 @@ class ModelCatalogTests(unittest.TestCase):
                     self.assertEqual(named, set(), (preset_id, row["id"]))
                 else:
                     self.assertIn(row["tier"], P.TIERS)
-        # Two tiers naming one model (DeepSeek on OpenRouter) keep the first in PROVIDER_TIERS order.
+        # Since the owner pointed TIER_DEFAULTS at the ranking file (2026-09-23), OpenRouter Main
+        # names z-ai/glm-5.3-flash and DeepSeek V4.1 flash carries Flash alone.
         deepseek = next(r for r in P.MODEL_CATALOG["openrouter"] if r["id"] == "deepseek/deepseek-v4.1-flash")
-        self.assertEqual(deepseek["tier"], "main")
-        self.assertEqual(self.tiers_naming("openrouter", "deepseek/deepseek-v4.1-flash"), {"main", "flash"})
+        self.assertEqual(deepseek["tier"], "flash")
+        self.assertEqual(self.tiers_naming("openrouter", "deepseek/deepseek-v4.1-flash"), {"flash"})
+        glm = next(r for r in P.MODEL_CATALOG["openrouter"] if r["id"] == "z-ai/glm-5.3-flash")
+        self.assertEqual(glm["tier"], "main")
+        self.assertEqual(self.tiers_naming("openrouter", "z-ai/glm-5.3-flash"), {"main"})
 
     def test_every_label_provider_and_plan_is_lower_case(self):
         # Warp style (owner, 2026-09-20): the GUI shows these as they are and never re-cases them.

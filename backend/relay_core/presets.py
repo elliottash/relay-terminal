@@ -423,7 +423,7 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
                   "flash": ("kimi-code", "kimi-for-coding-highspeed", {}),
                   "lite": _LITE_VIA_OPENROUTER},
     # No non-flash DeepSeek V4.1 exists on OpenRouter, so Main and Flash are the same model there.
-    "openrouter": {"main": ("openrouter", "deepseek/deepseek-v4.1-flash", {}),
+    "openrouter": {"main": ("openrouter", "z-ai/glm-5.3-flash", {}),
                    "flash": ("openrouter", "deepseek/deepseek-v4.1-flash", {}),
                    "lite": ("openrouter", "google/gemini-3.5-flash-lite", {})},
     "minimax": {"main": ("minimax", "MiniMax-M3", {}),
@@ -436,8 +436,8 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
     "openai": {"main": ("openai", "gpt-6-sol", {"reasoning_effort": "medium"}),
                "flash": ("openai", "gpt-6-luna", {"reasoning_effort": "low"}),
                "lite": ("openai", "gpt-6-luna", {"reasoning_effort": "low"})},
-    "gemini": {"main": ("gemini", "gemini-3.1-pro-preview", {"reasoning_effort": "high"}),
-               "flash": ("gemini", "gemini-3.8-flash", {}),
+    "gemini": {"main": ("gemini", "gemini-flash-latest", {"reasoning_effort": "high"}),
+               "flash": ("gemini", "gemini-flash-latest", {}),
                "lite": ("gemini", "gemini-3.5-flash-lite", {})},
     # DeepSeek serves its own Lite, so this is the one first-party API that needs no OpenRouter key
     # to fill all three: Flash at its lowest level, and Lite the same model with thinking off.
@@ -523,9 +523,10 @@ MODEL_CATALOG: dict[str, list[dict]] = {
         {"id": "MiniMax-M2.5", "tier": None, "efforts": None},
     ],
     "openrouter": [
-        {"id": "deepseek/deepseek-v4.1-flash", "tier": "main", "efforts": None},
+        {"id": "deepseek/deepseek-v4.1-flash", "tier": "flash", "efforts": None},
         {"id": "google/gemini-3.8-flash", "tier": "lite", "efforts": None},
         {"id": "google/gemini-3.5-flash-lite", "tier": "lite", "efforts": None},
+        {"id": "z-ai/glm-5.3-flash", "name": "glm-5.3-flash", "tier": "main", "efforts": None},
     ],
     # The four codex-cli 0.155.1 lists first (#E516); every one takes reasoning_effort.
     "openai": [
@@ -551,9 +552,9 @@ MODEL_CATALOG: dict[str, list[dict]] = {
     # for nothing, so the defaults follow Google forward.
     "gemini": [
         {"id": "gemini-pro-latest", "tier": None, "efforts": None},
-        {"id": "gemini-flash-latest", "tier": None, "efforts": None},
-        {"id": "gemini-3.1-pro-preview", "tier": "main", "efforts": None},
-        {"id": "gemini-3.8-flash", "tier": "flash", "efforts": None},
+        {"id": "gemini-flash-latest", "tier": "main", "efforts": None},
+        {"id": "gemini-3.1-pro-preview", "tier": None, "efforts": None},
+        {"id": "gemini-3.8-flash", "tier": None, "efforts": None},
         {"id": "gemini-3.5-flash-lite", "tier": "lite", "efforts": None},
     ],
     # https://api-docs.deepseek.com/api/list-models/ lists exactly these two ids.

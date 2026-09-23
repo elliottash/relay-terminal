@@ -35,7 +35,7 @@ PRESETS = "backend/relay_core/presets.py"
 #                     gemini-pro-latest for high only), TIER_DEFAULTS names the concrete
 #                     gemini-3.1-pro-preview and gemini-3.8-flash.
 # When one is fixed this test fails and says so: delete its line here.
-KNOWN_DRIFT = ("openrouter main:", "gemini main:", "gemini flash:")
+KNOWN_DRIFT = ()
 
 
 def run(*args, root=None, env=None, check_exit=None):
