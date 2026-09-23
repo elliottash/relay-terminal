@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-project-collapse/], related: [], github: null}
+links: {plans: [], commits: [fada01c4334e1b2ebab507263d9e509623070b33], evidence: [docs/qa_evidence/2026-09-23-sessions-project-collapse/], related: [], github: null}
 ---
 # Keep Sessions project groups collapsed across refreshes
 
