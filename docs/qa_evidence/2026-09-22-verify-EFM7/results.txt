@@ -1,0 +1,40 @@
+Independent verification of #EFM7 — full GUI under Xvfb, isolated XDG state, real guest CLIs.
+Binary: clean export build at /tmp/efm7-src-TvGu/build/relay (sha256 in provenance.txt).
+Driver: drive.py; tap.py records non-secret fields of the GUI<->worker stream (*-events.jsonl).
+Codex run by a Codex verifier (stopped on a usage limit after the Codex drive); Claude and API
+runs finished by Claude Opus 5.5 with the same driver and binary.
+
+Tests (tests.txt): 404 targeted backend tests OK.
+
+Codex (guest:codex, gpt-6-astra, medium) — codex-events.jsonl
+  configure effort=medium -> configured effort=medium guest_effort=medium
+  first prompt answered EFM7_CODEX_OK; picker still "medium" after the reply (codex-response.png)
+  set_effort xhigh -> effort_changed effort=xhigh; ultra -> effort=ultra (codex-xhigh/ultra.png)
+  switch to gpt-6-sol -> model_changed effort=ultra guest_effort=ultra (codex-switch.png)
+  PASS
+
+Claude Code (guest:claude, opus, medium) — claude-events.jsonl
+  picker before first prompt: claude-opus-5 / medium (claude-before.png)
+  configure effort=medium -> configured effort=medium guest_effort=medium
+  CLI argv: --model opus --effort medium
+  first prompt answered EFM7_CLAUDE_OK; picker still "medium" (claude-response.png)
+  levels offered: low medium high xhigh max (claude-levels.png)
+  set_effort xhigh -> effort_changed effort=xhigh; relaunched CLI argv --effort xhigh --resume <id>;
+    answered EFM7_CLAUDE_XHIGH_OK, picker "xhigh" (claude-xhigh.png)
+  switch to sonnet via Models pane -> model_changed effort=xhigh guest_effort=xhigh; answered
+    EFM7_CLAUDE_SWITCH_OK on "sonnet", picker claude-sonnet-5 / xhigh (claude-switch.png).
+    The switch is a set_model control request, so the running CLI keeps --effort xhigh.
+  PASS
+
+API (openai, gpt-6-astra, medium; fake key, no inference) — api-events.jsonl
+  GUI sends effort=medium with preset extra reasoning_effort=high -> configured effort=medium
+  first prompt: HTTP 401 (fake key, expected); picker still "medium" (api-openai-before/after.png)
+  Outgoing provider params, replaying the GUI payload against the exported backend:
+    openai gpt-6-astra extra high + effort medium -> {'reasoning_effort': 'medium'}; set_effort low -> low
+    openai gpt-6-astra extra high + effort xhigh  -> {'reasoning_effort': 'xhigh'}
+    kimi-code kimi-for-coding (no knob) extra high + effort medium -> {} ; set_effort low -> {}
+  relay-free relay-main configure high -> configured medium: correct, the model offers low|medium only.
+  PASS
+
+Not covered live: Codex/Claude levels other than those above (covered by the 44-case worker
+regression), and live API inference (no real OpenAI/Kimi key on this machine).

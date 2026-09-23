@@ -37,3 +37,16 @@ Continuing this pane's implementation checks for the follow-up: expand the worke
 
 <!-- relay:entry 20260923T001456Z-jw author=agent kind=event model=gpt-6-astra pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/ebe249905e354bad934e962dd302b5c7 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e"], "evidence… → {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e", "f4bde4dd3…
+
+<!-- relay:entry 20260923T005739Z-vv author=codex kind=progress -->
+### Codex independent verifier · 2026-09-23 00:57
+Claimed independent QA of #EFM7; preserving needs-verification during the live drive. Plan: isolated full GUI with real Codex/Claude first prompts, effort changes and model switches, API configuration-only checks, screenshots and event capture. Board MCP and delegation methods are not exposed to this guest; using the documented file fallback. No implementation changes.
+
+<!-- relay:entry 20260923T012547Z-37 author=agent kind=event model=claude-opus-5-5 pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/8d2538de2b014bca94d09e69354558c3 -->
+- ✦ agent updated this card · appended to `## QA checklist`
+
+<!-- relay:entry 20260923T012552Z-w2 author=agent kind=event model=claude-opus-5-5 pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/8d2538de2b014bca94d09e69354558c3 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e", "f4bde4dd3… → {"plans": [], "commits": ["c1e6ea7154accc193a00c7f915b44cf08522245e", "f4bde4dd3…; appended to `## Verdict`
+
+<!-- relay:entry 20260923T012553Z-tw author=agent kind=event model=claude-opus-5-5 pane=a95d8e80 turn=cbef684dc96b4134aab8544f399ada24/8d2538de2b014bca94d09e69354558c3 -->
+- ✦ agent moved this card · Needs verification → Done · Independent live GUI verification passed for Codex, Claude Code and API panes · evidence docs/qa_evidence/2026-09-22-verify-EFM7/results.txt · verified_by anthropic/claude-opus-5-5 via claude-code
