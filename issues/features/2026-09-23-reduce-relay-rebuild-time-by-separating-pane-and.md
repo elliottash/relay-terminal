@@ -9,7 +9,7 @@ session: d203514e-c598-429e-be3a-f1824c862ad8
 rank: zzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-build-speed-243T/report.md], related: [PF4K], github: null}
+links: {plans: [], commits: [f6480574d52885f40126ff6cfef4d5d433bddeb5], evidence: [docs/qa_evidence/2026-09-23-build-speed-243T/report.md], related: [PF4K], github: null}
 ---
 # Reduce Relay rebuild time by separating Pane and RelayWindow implementations
 
