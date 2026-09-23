@@ -111,3 +111,6 @@ Implement first Ctrl+Enter submission and empty idle guest activation; verify ag
 
 <!-- relay:entry 20260923T234541Z-ye author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
 - ✦ agent moved this card · Executing → Needs verification · Deferred guest first Ctrl+Enter works with typed text or an empty Continue prompt; consolemode and continueturn passed. · evidence docs/qa_evidence/2026-09-23-ctrl-enter-guest/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T234704Z-qf author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-ctrl-ente… → {"plans": [], "commits": ["39af7325be6f369b622a07076b0d99117df81ebc"], "evidence…

@@ -7,7 +7,7 @@ implemented_by: openai/gpt-6-sol via codex
 session: bf8aa1b7-4720-412c-a295-89eceb8d3bae
 rank: zzzzzzzzz
 created: '2026-09-19'
-links: {commits: [d9cde60524af4b8def16916aa505875d321299de, 472ae1a210a4e0577d690ce6effcc396982c9cfc, 78416e396b1cf6db5eebe1b45efab4014de01fda, c55c2e0f5bd75fbd7c7115530784ba2c39534a1c, e7b1e4be527c553403a71487c0b2e4c482e72ad5], evidence: [docs/qa_evidence/2026-09-20-ctrl-enter-continue/, docs/qa_evidence/2026-09-20-ctrl-enter-always/, docs/qa_evidence/2026-09-23-ctrl-enter-guest/], github: null, plans: [], related: [BG2Y]}
+links: {commits: [d9cde60524af4b8def16916aa505875d321299de, 472ae1a210a4e0577d690ce6effcc396982c9cfc, 78416e396b1cf6db5eebe1b45efab4014de01fda, c55c2e0f5bd75fbd7c7115530784ba2c39534a1c, e7b1e4be527c553403a71487c0b2e4c482e72ad5, 39af7325be6f369b622a07076b0d99117df81ebc], evidence: [docs/qa_evidence/2026-09-20-ctrl-enter-continue/, docs/qa_evidence/2026-09-20-ctrl-enter-always/, docs/qa_evidence/2026-09-23-ctrl-enter-guest/], github: null, plans: [], related: [BG2Y]}
 ---
 # ctrl + enter to continue
 

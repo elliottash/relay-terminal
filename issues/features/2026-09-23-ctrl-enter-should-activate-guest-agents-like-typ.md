@@ -7,7 +7,7 @@ implemented_by: openai/gpt-6-sol via codex
 session: bf8aa1b7-4720-412c-a295-89eceb8d3bae
 rank: zzzzzzzzzzzzzzzzzr
 created: '2026-09-23'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-ctrl-enter-guest/], related: [SXF1], github: null}
+links: {plans: [], commits: [39af7325be6f369b622a07076b0d99117df81ebc], evidence: [docs/qa_evidence/2026-09-23-ctrl-enter-guest/], related: [SXF1], github: null}
 ---
 # ctrl + enter should activate guest agents, like typing a first entry
 

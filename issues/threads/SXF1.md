@@ -208,3 +208,6 @@ Recheck the landed Ctrl+Enter Continue behavior, including the first empty submi
 
 <!-- relay:entry 20260923T234544Z-m5 author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
 - ✦ agent moved this card · Executing → Needs verification · The existing empty-box Continue behavior now also activates a deferred idle guest; consolemode and continueturn passed. · evidence docs/qa_evidence/2026-09-23-ctrl-enter-guest/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T234715Z-tk author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…
