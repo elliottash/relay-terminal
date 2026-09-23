@@ -2408,13 +2408,30 @@ private:
     // The lists changed — an edit on Options › Models, a profile switched there or by `/profile`:
     // the page redraws and every pane re-reads them, its box and picker first, then the worker's
     // failover chain (rank 2 reaches it now). One exit for every way the curation moves.
+    //
+    // Coalesced (card #HJ1T): the edit itself is already in QSettings when this is called, and the
+    // picker has already repainted the row, so only the fan-out waits. Run inline it redrew every
+    // settings page and rebuilt every pane's catalog and worker tiers *inside the click*, once per
+    // tick — owner, 2026-09-23: "the checkboxes are not responsive and they are laggy". Five ticks
+    // in a row now cost one fan-out, a moment after the last.
     void modelsCurated() {
+        if (!m_curatedTimer) {
+            m_curatedTimer = new QTimer(this);
+            m_curatedTimer->setSingleShot(true);
+            m_curatedTimer->setInterval(200);
+            connect(m_curatedTimer, &QTimer::timeout, this, [this] { modelsCuratedNow(); });
+        }
+        m_curatedTimer->start();
+    }
+    void modelsCuratedNow() {
+        if (m_curatedTimer) m_curatedTimer->stop();
         refreshSettingsPanes();
         for (Pane *each : allPanes()) {
             each->modelsCurationChanged();
             each->agentOptionsChanged(QStringLiteral("models/fallback"));
         }
     }
+    QTimer *m_curatedTimer = nullptr;
     // `applyMainDefault` was here (card #MDL1). It copied rank 1 of the list into
     // `provider/preset`, `provider/model` and `agent/effort` so that a new pane, which read those
     // keys, would land on it — a second copy of the default that ran on five of the eleven paths
