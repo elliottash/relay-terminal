@@ -11,15 +11,16 @@
 //
 //   providers    step 1: the provider rows and their keys, Options › Models' own section drawn by
 //                Options' own machinery (`relay::SettingsPane` over one section, embedded), so a
-//                key added here is a key added there. Profiles live here too.
+//                key added here is a key added there. Profiles sit first, then guest agents,
+//                subscription keys and pay-as-you-go keys. Defaults live in Options.
 //   available    step 2: the flat `all` tab — one row per model, the `available` tick column,
 //                favorites, then a section per provider alphabetically, the sort menu, OpenRouter's
 //                long tail behind typing, and "+ add a model by id…". No "recent" section.
 //   priorities   steps 3 and 4: **one scrolling page of sections**, one per class — high, main,
 //                flash, and local where this machine serves one — each a header line (the class,
 //                its "show this class in the box" switch and a one-line note) over that class's
-//                numbered rows, with the level list, the "in box" cutoff column, "fill from
-//                defaults", the profile combo and undo. No class tabs and no lite section (owner,
+//                numbered rows, with the level list, the "in box" cutoff column, the profile
+//                combo and undo. No class tabs and no lite section (owner,
 //                2026-09-21: "in a pane, i dont want separate tabs for the modes. they should just
 //                be in divided sections. remove the lite section"); lite's storage stays and the
 //                jobs tab is where a chore's model is set.
@@ -209,11 +210,6 @@ private:
     // follows whatever the person last looked at, so available → priorities keeps your place.
     QString m_classTab = QStringLiteral("main");
     QString m_pendingFilter;
-    // Whether the picker on screen was built with a "fill from defaults" action. The two buttons
-    // are made in its constructor, so a target that gains the action — a restored pane, whose
-    // worker had not answered `presets` when it was first pointed at a pane — needs a rebuild and
-    // not a re-read (card #MDL1 t:a11).
-    bool m_pickerHasFill = false;
     // ----- the helper agent (owner, 2026-09-22) ------------------------------------------------
     ModelsContext *m_context = nullptr;    // owned; outlives the console, as §33 requires
     relay::agent::ConsoleHandle m_console;

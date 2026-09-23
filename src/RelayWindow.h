@@ -3386,6 +3386,90 @@ private:
                                  QStringLiteral("What each job — plan mode, subagents, summaries, chores — runs on "
                                                 "right now, and a model of its own for one: the models pane's jobs tab"),
                                  QStringLiteral("jobs…"), [this] { runAction(QStringLiteral("agent.modelRoles")); });
+        // Keep one source for the controls, but arrange the Models pane's provider page around
+        // the account the key pays for. The saved provider order still applies within each group.
+        const QList<relay::SettingRow> original = models.rows;
+        int providerAt = -1, profilesAt = -1, defaultsAt = -1;
+        for (int i = 0; i < original.size(); ++i) {
+            const QString id = original.at(i).id;
+            if (id == QStringLiteral("heading:providers")) providerAt = i;
+            else if (id == QStringLiteral("heading:profiles")) profilesAt = i;
+            else if (id == QStringLiteral("heading:defaults")) defaultsAt = i;
+        }
+        Q_ASSERT(providerAt >= 0 && profilesAt > providerAt && defaultsAt > profilesAt);
+        QList<relay::SettingRow> arranged;
+        if (!inModelsPane) arranged << original.mid(0, providerAt); // Options' link to the pane
+        arranged << original.mid(profilesAt, defaultsAt - profilesAt);
+        QList<relay::SettingRow> groups[3];
+        QList<relay::SettingRow> beforeGroups;
+        QList<relay::SettingRow> providerRows;
+        QString providerId;
+        const auto flushProvider = [&] {
+            if (providerRows.isEmpty()) return;
+            int group = 2; // API keys, OpenRouter, and custom endpoints
+            if (providerId.startsWith(QStringLiteral("guest:"))) group = 0;
+            else for (const QJsonValue &value : presets) {
+                const QJsonObject preset = value.toObject();
+                if (preset.value(QStringLiteral("id")).toString() != providerId) continue;
+                if (preset.value(QStringLiteral("kind")).toString() == QStringLiteral("plan")) group = 1;
+                break;
+            }
+            groups[group] << providerRows;
+            providerRows.clear();
+        };
+        for (int i = providerAt + 1; i < profilesAt; ++i) {
+            const relay::SettingRow &row = original.at(i);
+            if (row.id.startsWith(QStringLiteral("provider:"))) {
+                flushProvider();
+                providerId = row.id.mid(QStringLiteral("provider:").size());
+                providerRows << row;
+            } else if (row.id == QStringLiteral("models.importWarp")) {
+                flushProvider();
+                groups[2] << row;
+            } else if (row.id == QStringLiteral("models.addProvider") || row.id == QStringLiteral("info:models/none")) {
+                flushProvider();
+                beforeGroups << row;
+            } else {
+                providerRows << row; // models link or guest permissions under its provider
+            }
+        }
+        flushProvider();
+        arranged << beforeGroups;
+        const QStringList labels{QStringLiteral("Guest Agents"), QStringLiteral("Subscription Keys"),
+                                 QStringLiteral("Pay-as-you-go Keys")};
+        for (int i = 0; i < 3; ++i) {
+            relay::SettingRow head = headingRow(labels.at(i));
+            head.collapsible = true;
+            arranged << head;
+            bool first = true;
+            for (relay::SettingRow row : groups[i]) {
+                if (row.id.startsWith(QStringLiteral("provider:"))) {
+                    row.dragGroup = QStringLiteral("providers.") + QString::number(i);
+                    if (first) row.ruleAbove = false;
+                    first = false;
+                }
+                arranged << row;
+            }
+        }
+        if (!inModelsPane) {
+            arranged << original.mid(defaultsAt);
+            relay::SettingRow fill;
+            fill.kind = relay::SettingRow::Buttons;
+            fill.id = QStringLiteral("models.tier.defaults");
+            fill.label = QStringLiteral("Model priority lists");
+            fill.detail = QStringLiteral("Replace all priority lists with the models your providers offer.");
+            fill.buttonTexts = QStringList{QStringLiteral("Fill from defaults"), QStringLiteral("…with OpenRouter")};
+            fill.onButton = [this, target = QPointer<Pane>(pane)](int index) {
+                if (!target || !target->fillTierListsFromDefaults(index == 1)) {
+                    QMessageBox::information(this, QStringLiteral("Model defaults"),
+                        QStringLiteral("No defaults yet — open a pane's agent first, so its worker can compute them."));
+                    return;
+                }
+                modelsCurated();
+            };
+            arranged << fill;
+        }
+        models.rows = arranged;
         return models;
     }
     // The lists changed — an edit on Options › Models, a profile switched there or by `/profile`:

@@ -279,10 +279,8 @@ private Q_SLOTS:
         QCOMPARE(pane.currentTab(), ModelsPane::prioritiesTab());
     }
 
-    // "fill from defaults" is two buttons the picker makes in its constructor, so a target that
-    // gains the action has to rebuild it rather than re-read. A models pane restored with a saved
-    // layout is exactly that case: it is pointed at a pane whose worker has not answered yet.
-    void gainingFillFromDefaultsBringsItsButtons() {
+    // The pane's picker does not offer list replacement; that action lives in Options.
+    void gainingFillFromDefaultsKeepsThePickerWithoutButtons() {
         Served served;
         ModelsPane pane(providerSections());
         ModelsPane::Target early = targetFor(&served);   // no worker answer yet: no action
@@ -291,9 +289,11 @@ private Q_SLOTS:
         QVERIFY(pane.picker()->defaultsButton(false) == nullptr);
         ModelsPane::Target ready = targetFor(&served);
         ready.fillFromDefaults = [](bool) { return true; };
+        ModelPicker *original = pane.picker();
         pane.setTarget(ready);
-        QVERIFY(pane.picker()->defaultsButton(false) != nullptr);
-        QVERIFY(pane.picker()->defaultsButton(true) != nullptr);
+        QCOMPARE(pane.picker(), original);
+        QVERIFY(pane.picker()->defaultsButton(false) == nullptr);
+        QVERIFY(pane.picker()->defaultsButton(true) == nullptr);
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
     }
 

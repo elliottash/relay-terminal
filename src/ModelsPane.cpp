@@ -226,8 +226,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
 
 // The picker, built around the target this pane serves now. It is rebuilt rather than reconfigured
 // on a re-target because its Context is the served pane — the catalog, the model, the level and
-// the "fill from defaults" action are all that pane's, and its undo stack holds edits made while
-// that pane was in front.
+// its undo stack holds edits made while that pane was in front. Defaults are in Options.
 void ModelsPane::buildPicker() {
     const QString wantTier = m_picker ? m_picker->tier() : (m_target.tier.isEmpty() ? m_classTab : m_target.tier);
     const QString wantFilter = m_picker ? m_picker->filter()->text() : m_pendingFilter;
@@ -240,7 +239,6 @@ void ModelsPane::buildPicker() {
     context.tier = wantTier.isEmpty() ? QStringLiteral("main") : wantTier;
     context.filter = wantFilter;
     context.now = m_target.now;
-    context.fillFromDefaults = m_target.fillFromDefaults;
     m_picker = new ModelPicker(context, m_pickerPage);
     // Set before setHosted(), which redraws the footer: the footer only offers "esc back to the
     // pane" where Escape has somewhere to go.
@@ -251,7 +249,6 @@ void ModelsPane::buildPicker() {
     };
     m_picker->onListsChanged = [this] { if (m_target.listsChanged) m_target.listsChanged(); };
     m_picker->openModelsPage = [this] { showTab(providersTab()); };
-    m_pickerHasFill = bool(m_target.fillFromDefaults);
     m_picker->setHosted(true);
     m_picker->installEventFilter(this);
     m_picker->filter()->installEventFilter(this);
@@ -262,11 +259,8 @@ void ModelsPane::buildPicker() {
 
 void ModelsPane::setTarget(const Target &target) {
     // A re-read keeps the picker; a re-target rebuilds it. So does a target that has gained or
-    // lost "fill from defaults", because those two buttons exist only if the Context carried the
-    // action when the widget was made — a models pane restored with a layout is pointed at a pane
-    // whose worker has not answered `presets` yet, so it never had them until now.
-    const bool samePane = m_picker && !target.token.isEmpty() && target.token == m_target.token
-                          && bool(target.fillFromDefaults) == m_pickerHasFill;
+    // Defaults are managed in Options, so gaining them does not rebuild the picker.
+    const bool samePane = m_picker && !target.token.isEmpty() && target.token == m_target.token;
     const QString wantTier = target.tier.isEmpty() ? m_classTab : target.tier;
     m_target = target;
     // The served pane's mode picks the class tab when it *becomes* the served pane; a re-read of

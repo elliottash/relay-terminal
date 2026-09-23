@@ -908,9 +908,10 @@ private slots:
         const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
         QVERIFY(end > start);
         const QString page = text.mid(start, end - start);
-        // The five lists: no numbered rows, no "+ add a model..." button, no "fill the lists".
+        // The five lists: no numbered rows or "+ add a model..." button. Options now owns
+        // the one fill-from-defaults action; the Models pane does not show it.
         for (const QString &gone : {QStringLiteral("models/tier/"), QStringLiteral("models.tier.add."),
-                                    QStringLiteral("models.tier.defaults"), QStringLiteral("models.defaults.none"),
+                                    QStringLiteral("models.defaults.none"),
                                     QStringLiteral("curation::tierList("), QStringLiteral("curation::addToTier(")})
             QVERIFY2(!page.contains(gone), qPrintable(gone + QStringLiteral(" is still on the Models page")));
         // The checklist: no per-model checkbox, no provider fold, no per-provider id box.
@@ -922,6 +923,11 @@ private slots:
         // What stays: the providers, their keys, the guest permission row and the profiles.
         QVERIFY(page.contains(QStringLiteral("headingRow(QStringLiteral(\"providers\"))")));
         QVERIFY(page.contains(QStringLiteral("headingRow(QStringLiteral(\"profiles\"))")));
+        QVERIFY(page.contains(QStringLiteral("QStringLiteral(\"Guest Agents\")")));
+        QVERIFY(page.contains(QStringLiteral("QStringLiteral(\"Subscription Keys\")")));
+        QVERIFY(page.contains(QStringLiteral("QStringLiteral(\"Pay-as-you-go Keys\")")));
+        QVERIFY(page.contains(QStringLiteral("if (!inModelsPane) {\n            arranged << original.mid(defaultsAt);")));
+        QVERIFY(page.contains(QStringLiteral("fill.id = QStringLiteral(\"models.tier.defaults\")")));
         QVERIFY(page.contains(QStringLiteral("\"type\", \"store_key\"")));
         QVERIFY(page.contains(QStringLiteral("guestSettingKey(cli, QStringLiteral(\"permissions\"))")));
     }
