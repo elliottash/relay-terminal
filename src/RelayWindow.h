@@ -3129,19 +3129,27 @@ private:
                     askForKey(str(preset, "id"), str(preset, "label").toLower());
                 });
         }
-        // The last row of the providers group: the one-time migration that was a button in the
-        // retired "Advanced provider settings" dialog (card #MDL1, 2026-09-21). It is step 1 done
-        // in bulk — "add provider", for everything Warp already has a key for — so it belongs
-        // under the providers, at the bottom, where it is out of the way of the first run.
+        // One import door below the provider groups. Only the selected source is read, and the
+        // worker sends back provider names and counts, never credential values.
         {
-            relay::SettingRow warp = buttonRow(QStringLiteral("models.importWarp"),
-                QStringLiteral("keys from warp"),
-                QStringLiteral("Copies the API keys of Warp's custom endpoints into Relay's keyring, once. The keys "
-                               "go from Warp's store straight to the keyring inside the worker: they are never shown "
-                               "here and never written to a settings file"),
-                QStringLiteral("import…"), [request] { request({{"type", "import_warp"}}); });
-            warp.aliases = QStringLiteral("import warp migrate keys keyring move from warp bring my keys");
-            models.rows << warp;
+            relay::SettingRow import = buttonRow(QStringLiteral("models.importKeys"),
+                QStringLiteral("import keys"),
+                QStringLiteral("Copy API keys from Warp, OpenCode, Claude Code or Codex into Relay's keyring. "
+                               "Subscription sign-ins are not API keys."),
+                QStringLiteral("import keys…"), [this, request] {
+                    const QStringList sources{QStringLiteral("Warp"), QStringLiteral("OpenCode"),
+                        QStringLiteral("Claude Code / Codex API keys")};
+                    bool accepted = false;
+                    const QString source = QInputDialog::getItem(this, QStringLiteral("Import keys"),
+                        QStringLiteral("Import API keys from"), sources, 0, false, &accepted);
+                    if (!accepted) return;
+                    const QString kind = source == sources.at(0) ? QStringLiteral("import_warp")
+                        : source == sources.at(1) ? QStringLiteral("import_opencode")
+                        : QStringLiteral("import_agent_tools");
+                    request({{QStringLiteral("type"), kind}, {QStringLiteral("id"), QStringLiteral("models-import")}});
+                });
+            import.aliases = QStringLiteral("import warp opencode claude codex keys keyring migrate");
+            models.rows << import;
         }
 
         // ----- 2. profiles ----------------------------------------------------------------------
@@ -3402,6 +3410,7 @@ private:
         arranged << original.mid(profilesAt, defaultsAt - profilesAt);
         QList<relay::SettingRow> groups[3];
         QList<relay::SettingRow> beforeGroups;
+        QList<relay::SettingRow> afterGroups;
         QList<relay::SettingRow> providerRows;
         QString providerId;
         const auto flushProvider = [&] {
@@ -3423,9 +3432,9 @@ private:
                 flushProvider();
                 providerId = row.id.mid(QStringLiteral("provider:").size());
                 providerRows << row;
-            } else if (row.id == QStringLiteral("models.importWarp")) {
+            } else if (row.id == QStringLiteral("models.importKeys")) {
                 flushProvider();
-                groups[2] << row;
+                afterGroups << row;
             } else if (row.id == QStringLiteral("models.addProvider") || row.id == QStringLiteral("info:models/none")) {
                 flushProvider();
                 beforeGroups << row;
@@ -3451,6 +3460,7 @@ private:
                 arranged << row;
             }
         }
+        arranged << afterGroups;
         if (!inModelsPane) {
             arranged << original.mid(defaultsAt);
             relay::SettingRow fill;
@@ -7515,6 +7525,16 @@ public:
             if (type == QStringLiteral("presets")) {
                 guard->m_helperPresets[tab] = event.value(QStringLiteral("presets")).toArray();
                 relay::SettingsWatch::instance().notify();
+            } else if (type == QStringLiteral("warp_imported") || type == QStringLiteral("opencode_imported")
+                       || type == QStringLiteral("agent_tools_imported")) {
+                const int count = event.value(QStringLiteral("imported")).toArray().size();
+                const int skipped = event.value(QStringLiteral("skipped")).toArray().size();
+                QMessageBox::information(guard, QStringLiteral("Import keys"),
+                    QStringLiteral("Imported %1 API key(s). Skipped %2.").arg(count).arg(skipped));
+                if (relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data()) worker->send({{"type", "presets"}});
+            } else if (type == QStringLiteral("error")
+                       && event.value(QStringLiteral("id")).toString() == QStringLiteral("models-import")) {
+                QMessageBox::warning(guard, QStringLiteral("Import keys"), event.value(QStringLiteral("text")).toString());
             } else if (type == QStringLiteral("key_stored") || type == QStringLiteral("key_removed")
                        || type == QStringLiteral("custom_provider_saved") || type == QStringLiteral("custom_provider_deleted")) {
                 if (relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data()) worker->send({{"type", "presets"}});

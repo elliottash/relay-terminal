@@ -1056,17 +1056,20 @@ private slots:
         QVERIFY2(!pane.contains(QStringLiteral("Relay · Bring your own key")), "the dialog is still in Pane");
         QVERIFY2(!keymap.contains(QStringLiteral("add(\"agent.provider\"")), "the action is still registered");
         QVERIFY2(!keymap.contains(QStringLiteral("\"agent.provider\":[")), "a keybinding preset still binds it");
-        // "Import keys from Warp" was one of its buttons: a row at the bottom of the providers now.
+        // One import row offers all supported sources after the provider groups.
         const int start = window.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
         const QString page = window.mid(start, window.indexOf(QStringLiteral("void modelsCurated() {"), start) - start);
-        const int warp = page.indexOf(QStringLiteral("QStringLiteral(\"models.importWarp\")"));
-        QVERIFY2(warp > 0, "there is nowhere to import Warp's keys from");
-        QVERIFY(page.mid(warp, 900).contains(QStringLiteral("\"type\", \"import_warp\"")));
-        // It is under the providers: after the "+ add provider" row and before the profiles.
+        const int imports = page.indexOf(QStringLiteral("QStringLiteral(\"models.importKeys\")"));
+        QVERIFY2(imports > 0, "there is nowhere to import API keys from");
+        QVERIFY(page.mid(imports, 1700).contains(QStringLiteral("import_warp")));
+        QVERIFY(page.mid(imports, 1700).contains(QStringLiteral("import_opencode")));
+        QVERIFY(page.mid(imports, 1700).contains(QStringLiteral("import_agent_tools")));
+        QVERIFY(page.contains(QStringLiteral("arranged << afterGroups")));
+        // The row is built with providers and moved below all three account groups.
         const int add = page.indexOf(QStringLiteral("QStringLiteral(\"models.addProvider\")"));
         const int profiles = page.indexOf(QStringLiteral("headingRow(QStringLiteral(\"profiles\"))"));
         QVERIFY(add > 0 && profiles > 0);
-        QVERIFY2(warp > add && warp < profiles, "the Warp import is not at the bottom of the providers");
+        QVERIFY2(imports > add && imports < profiles, "the import action is not in the providers section");
         // The consent sentence moved to where a key is actually typed.
         const int ask = page.indexOf(QStringLiteral("auto askForKey = "));
         QVERIFY(ask > 0);

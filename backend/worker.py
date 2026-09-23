@@ -520,6 +520,10 @@ def main():
                 imported, skipped = keystore.import_from_agent_tools()
                 emit({"event": "agent_tools_imported", "id": request.get("id"),
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
+            elif kind == "import_opencode":
+                imported, skipped = keystore.import_from_opencode()
+                emit({"event": "opencode_imported", "id": request.get("id"),
+                      "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
                 subagents.user_activity()
                 loaded = session_protocol.load_attachments(request, turns)

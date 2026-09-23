@@ -6348,7 +6348,14 @@ private:
         }
         if (type == QStringLiteral("key_tested") || type == QStringLiteral("key_removed")
             || type == QStringLiteral("agent_tools_imported")) {
-            if (m_keysDialog) m_keysDialog->handleEvent(event);
+            if (m_keysDialog && m_keysDialog->isVisible()) m_keysDialog->handleEvent(event);
+            else if (type == QStringLiteral("agent_tools_imported")) {
+                const int count = event.value(QStringLiteral("imported")).toArray().size();
+                const int skipped = event.value(QStringLiteral("skipped")).toArray().size();
+                QMessageBox::information(this, QStringLiteral("Import keys"),
+                    QStringLiteral("Imported %1 API key(s). Skipped %2.").arg(count).arg(skipped));
+                refreshPresets();
+            }
             if (type == QStringLiteral("key_tested")) {
                 // A guest's test is its login (35dcb6c4): one turn through its harness, so the
                 // line names the tool and the model it answered on rather than a "key".
@@ -12037,15 +12044,16 @@ private:
                 }
                 configurePreset(choice, false, startModel);
             }
-        } else if (type == QStringLiteral("warp_imported")) {
+        } else if (type == QStringLiteral("warp_imported") || type == QStringLiteral("opencode_imported")) {
             const auto imported = event.value(QStringLiteral("imported")).toArray();
             const auto skipped = event.value(QStringLiteral("skipped")).toArray();
             QStringList names;
             for (const auto &item : imported) names << item.toObject().value(QStringLiteral("name")).toString();
-            QMessageBox::information(this, QStringLiteral("Warp import"),
+            const QString source = type == QStringLiteral("warp_imported") ? QStringLiteral("Warp") : QStringLiteral("OpenCode");
+            QMessageBox::information(this, QStringLiteral("Import keys"),
                 QStringLiteral("Imported %1 key(s) into the keyring: %2\nSkipped: %3").arg(imported.size())
                     .arg(names.join(QStringLiteral(", ")), skipped.isEmpty() ? QStringLiteral("none") : QString::number(skipped.size())));
-            status(QStringLiteral("Warp import finished. Leave the key field empty to use stored keys."));
+            status(source + QStringLiteral(" import finished. Leave the key field empty to use stored keys."));
             send({{"type", "presets"}});
         } else if (type == QStringLiteral("transcribed")) {
             onTranscribed(event);
@@ -12458,6 +12466,10 @@ private:
             }
             finishFixTurn(type == QStringLiteral("done"));
         } else if (type == QStringLiteral("error")) {
+            if (event.value(QStringLiteral("id")).toString() == QStringLiteral("models-import")) {
+                QMessageBox::warning(this, QStringLiteral("Import keys"), event.value(QStringLiteral("text")).toString());
+                return;
+            }
             const auto text = event.value(QStringLiteral("text")).toString();
             if (event.value(QStringLiteral("code")) == QStringLiteral("configure_failed")
                 && event.value(QStringLiteral("restart_worker")).toBool()

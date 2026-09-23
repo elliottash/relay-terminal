@@ -161,6 +161,14 @@ class KeystoreTests(unittest.TestCase):
         self.assertEqual([i.preset for i in imported], ["openrouter"])
         self.assertTrue(any("no key" in s for s in skipped))
 
+    def test_warp_import_preserves_an_existing_relay_key(self):
+        settings = self.seed_warp({"legacy-or": "NEW_SECRET_NEVER_ECHO"})
+        keystore.store("openrouter", "existing")
+        imported, skipped = keystore.import_from_warp(settings)
+        self.assertNotIn("openrouter", [item.preset for item in imported])
+        self.assertEqual(keystore.lookup("openrouter"), "existing")
+        self.assertTrue(any("already has a key" in item for item in skipped))
+
     def test_import_without_warp_keys_fails_cleanly(self):
         settings = self.root / "settings.toml"; settings.write_text(WARP_SETTINGS)
         with self.assertRaises(keystore.KeystoreError): keystore.import_from_warp(settings)
@@ -243,6 +251,34 @@ class KeysModalTests(unittest.TestCase):
             imported, skipped = keystore.import_from_agent_tools(Path(home))
             self.assertEqual(imported, [])
             self.assertEqual(len(skipped), 2)
+
+    def test_opencode_imports_only_matching_plain_api_keys_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "auth.json"
+            path.write_text(json.dumps({
+                "openai": {"type": "api", "key": "OPENAI_SECRET_NEVER_ECHO"},
+                "anthropic": {"type": "oauth", "access": "OAUTH_SECRET_NEVER_ECHO"},
+                "openrouter": {"type": "api", "key": "OTHER_SECRET_NEVER_ECHO"},
+                "unrecognized": {"type": "api", "key": "UNKNOWN_SECRET_NEVER_ECHO"},
+            }))
+            stored = {}
+            with mock.patch.object(keystore, "lookup", lambda pid: "existing" if pid == "openrouter" else ""), \
+                    mock.patch.object(keystore, "store", lambda pid, key: stored.__setitem__(pid, key)):
+                imported, skipped = keystore.import_from_opencode(path)
+            self.assertEqual([item.preset for item in imported], ["openai"])
+            self.assertEqual(stored, {"openai": "OPENAI_SECRET_NEVER_ECHO"})
+            self.assertEqual(len(skipped), 3)
+            self.assertNotIn("SECRET_NEVER_ECHO", json.dumps([item.to_dict() for item in imported] + skipped))
+
+    def test_opencode_missing_or_malformed_auth_fails_without_exposing_contents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "auth.json"
+            with self.assertRaises(keystore.KeystoreError):
+                keystore.import_from_opencode(path)
+            path.write_text("BROKEN_SECRET_NEVER_ECHO{")
+            with self.assertRaises(keystore.KeystoreError) as error:
+                keystore.import_from_opencode(path)
+            self.assertNotIn("BROKEN_SECRET_NEVER_ECHO", str(error.exception))
 
     def test_test_button_reports_success_without_the_key(self):
         events = []

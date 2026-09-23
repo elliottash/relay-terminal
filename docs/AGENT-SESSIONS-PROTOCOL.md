@@ -1398,6 +1398,7 @@ The keys modal needs three things the protocol did not have. All are additive.
 | `remove_key {preset, id?}` | `key_removed {preset, removed: bool}` | delete the keyring entry; `removed: false` when there was none (or `RELAY_KEYRING=off`) |
 | `test_key {preset, id?}` | `key_tested {preset, ok, model, elapsed_ms, error?, reply_chars?}` | one minimal call (two-word prompt, no tools, 256 output tokens) that answers "does this key reach this endpoint" |
 | `import_agent_tools {id?}` | `agent_tools_imported {imported: [{preset, name, model}], skipped: [string]}` | copy an API key out of `~/.claude/settings.json` (`env.ANTHROPIC_API_KEY`) or `~/.codex/auth.json` (`OPENAI_API_KEY`) |
+| `import_opencode {id?}` | `opencode_imported {imported: [{preset, name, model}], skipped: [string]}` | copy matching plain API keys from OpenCode's `auth.json`; skip OAuth, unknown providers and existing Relay keys |
 
 `test_key` runs on a background thread and emits exactly one event. The key is read from the keystore
 inside the worker and never crosses the pipe in either direction; `error` carries the HTTP status only,

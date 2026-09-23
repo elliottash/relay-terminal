@@ -247,6 +247,8 @@ def import_from_warp(settings_path: Path | None = None) -> tuple[list[ImportedEn
             skipped.append(f"{name}: no matching Relay preset")
         elif not isinstance(key, str) or not key.strip():
             skipped.append(f"{name}: no key stored in Warp")
+        elif lookup(preset.id):
+            skipped.append(f"{name}: Relay already has a key")
         else:
             store(preset.id, key)
             imported.append(ImportedEndpoint(preset.id, name, model or preset.model))
@@ -293,8 +295,50 @@ def import_from_agent_tools(home: Path | None = None) -> tuple[list[ImportedEndp
         if not isinstance(value, str) or not value.strip() or any(c.isspace() for c in value.strip()):
             skipped.append(f"{label}: no API key in {relative} (an OAuth login is not an API key)")
             continue
+        if lookup(preset_id):
+            skipped.append(f"{label}: Relay already has a key")
+            continue
         store(preset_id, value)
         imported.append(ImportedEndpoint(preset_id, label, PRESETS[preset_id].model))
+    return imported, skipped
+
+
+def import_from_opencode(auth_path: Path | None = None) -> tuple[list[ImportedEndpoint], list[str]]:
+    """Copy OpenCode's plain provider API keys into Relay; never return key material."""
+    data_home = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    path = Path(auth_path) if auth_path is not None else data_home / "opencode/auth.json"
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            raise KeystoreError("OpenCode's auth.json is too large to import.")
+        auth = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise KeystoreError("OpenCode's auth.json was not found.") from None
+    except (OSError, ValueError):
+        raise KeystoreError("OpenCode's auth.json could not be read as JSON.") from None
+    if not isinstance(auth, dict):
+        raise KeystoreError("OpenCode's auth.json has an unexpected format.")
+    # Only exact provider ids with the same API endpoint in Relay. OpenCode Zen/Go,
+    # plugins, and custom base URLs are separate accounts, even if their key looks familiar.
+    providers = {"openai": "openai", "anthropic": "anthropic", "openrouter": "openrouter",
+                 "google": "gemini", "deepseek": "deepseek", "zai": "glm", "moonshotai": "kimi"}
+    imported, skipped = [], []
+    for source, value in auth.items():
+        preset_id = providers.get(source)
+        if preset_id is None:
+            skipped.append("An OpenCode provider has no matching Relay preset")
+            continue
+        if not isinstance(value, dict) or value.get("type") != "api":
+            skipped.append(f"{source}: not a plain API key")
+            continue
+        key = value.get("key")
+        if not isinstance(key, str) or not key.strip() or any(c.isspace() for c in key):
+            skipped.append(f"{source}: no valid API key")
+            continue
+        if lookup(preset_id):
+            skipped.append(f"{source}: Relay already has a key")
+            continue
+        store(preset_id, key)
+        imported.append(ImportedEndpoint(preset_id, source, PRESETS[preset_id].model))
     return imported, skipped
 
 
