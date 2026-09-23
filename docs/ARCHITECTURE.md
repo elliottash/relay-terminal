@@ -887,7 +887,7 @@ Default window shortcuts:
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control, or back to the prompt (a toggle) | Ctrl+H (composer), Ctrl+Shift+H |
 | Split right | Ctrl+E | Clear the prompt box (Ctrl+Z undoes) | Ctrl+Q (composer), Ctrl+Shift+Q |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
-| Toggle terminal/agent input | Ctrl+I | Board / Sessions & Projects / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+D |
+| Toggle terminal/agent input | Ctrl+I | Board / Sessions & Projects / Globals / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+G / Ctrl+Shift+D |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
@@ -895,9 +895,10 @@ Default window shortcuts:
 Sessions & Projects (`sessions.open`) is Ctrl+Shift+S (#SPSG, #QWAS, 2026-09-22): one pane and one
 key for sessions, projects, background work, recently closed and globals, opened on the tab it was
 last on. It was Ctrl+Shift+Y (sessions), Ctrl+Shift+P (projects) and Ctrl+Shift+G (globals) until
-the owner called them "a single function". `agent.resume`, `conversations.open`, `projects.open` and
-`globals.open` stay registered with no default key and open the same pane on their tab; in the
-palette they are the children of the one "Sessions & Projects" row. The key is a
+the owner called them "a single function". `agent.resume`, `conversations.open` and `projects.open`
+stay registered with no default key and open the same pane on their tab; `globals.open` retains
+Ctrl+Shift+G as a direct shortcut to its tab. In the palette these ids are the children of the one
+"Sessions & Projects" row. The key is a
 **toggle** (owner, 2026-09-20): pressed again with the pane focused it closes the pane, as Esc
 does; pressed while the focus is elsewhere it brings the open pane forward instead, so the key
 never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). A per-tab id
@@ -2078,7 +2079,8 @@ in native mode never pass through Relay and are not indexed.
 
 The shared Sessions & Projects pane (`sessions.open`, Ctrl+Shift+S; #SPSG) has three primary tabs
 (card #P7SJ): Projects (`projects.open`), Sessions (`agent.resume`, `conversations.open`) and Globals
-(`globals.open`). Those ids have no default key; each selects its tab in the existing pane. The
+(`globals.open`). `agent.resume`, `conversations.open` and `projects.open` have no default key;
+`globals.open` keeps Ctrl+Shift+G. Each selects its tab in the existing pane. The
 Projects page (`ProjectsPane`) manages known/pinned projects, attachment, Board access,
 and live panes including No project; its Sessions action applies the matching project filter.
 Options links to this page rather than repeating the project registry. Globals (`GlobalsPane`)

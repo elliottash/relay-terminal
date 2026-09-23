@@ -17,7 +17,7 @@ auto/agent/terminal), Esc (native input), and Ctrl+Shift+C/V plus Ctrl+C/V (copy
 
 **Modifier rule (owner).** Ctrl+Shift+<letter> is Relay's layer. Plain Ctrl+<letter> is bound to
 the *same* command only where the key has no editing or terminal meaning: W, E, N, T, I, F, H, and
-Q in the prompt box. For A S Z X C D P plain Ctrl is left to the editor or the program.
+Q in the prompt box. For A S Z X C D G P plain Ctrl is left to the editor or the program.
 
 **Pairing rule.** No action may hold Ctrl+<L> while a *different* action holds Ctrl+Shift+<L>, in
 any preset. Together with "no chord bound twice" it is checked for all four presets by
@@ -38,10 +38,11 @@ The Relay preset after the move (action → keys; everything not listed is uncha
 | control.prompt | — | Ctrl+Shift+H |
 | pane.restartShell | — | Ctrl+Shift+R (the stopped pane's banner and the palette remain) |
 | agent.stopAllSubagents | — | Ctrl+Shift+X (the subagents UI and the palette remain) |
-| agent.resume, conversations.open, projects.open, globals.open | — | Ctrl+Shift+Y, —, Ctrl+Shift+P, Ctrl+Shift+G. Still registered, for slash commands and keybindings.json; each opens the Sessions & Projects pane on its tab |
+| agent.resume, conversations.open, projects.open | — | Ctrl+Shift+Y, —, Ctrl+Shift+P. Still registered for slash commands and keybindings.json; each opens the Sessions & Projects pane on its tab |
+| globals.open | Ctrl+Shift+G | Restored as the direct Globals shortcut; plain Ctrl+G remains unbound |
 | closed.restore, pane.close, pane.splitRight | Ctrl+Shift+Z; Ctrl+W, Ctrl+Shift+W; Ctrl+E, Ctrl+Shift+E | unchanged |
 
-Freed in the Relay preset: Ctrl+Shift+Y, G, B, R, X and Ctrl+B.
+Freed in the Relay preset: Ctrl+Shift+Y, B, R, X and Ctrl+B. Ctrl+Shift+G opens Globals; Ctrl+G remains available to the editor or terminal program.
 
 **What the move did to the other presets** (each change keeps the two rules above):
 
@@ -56,7 +57,7 @@ Freed in the Relay preset: Ctrl+Shift+Y, G, B, R, X and Ctrl+B.
 | vscode | agent.newChat | — | was Ctrl+N, while Ctrl+Shift+N is window.new: the pairing rule. `/new` and the palette remain |
 | konsole | palette.open | Ctrl+Alt+I, Ctrl+Shift+P | Ctrl+Shift+P added so Actions is on the Relay layer (and reachable from inside a program) as in the other presets; Ctrl+Alt+I kept |
 
-The Board (Ctrl+Shift+A), Sessions & Projects (Ctrl+Shift+S) and prompt.clear inherit the Relay
+The Board (Ctrl+Shift+A), Sessions & Projects (Ctrl+Shift+S), Globals (Ctrl+Shift+G) and prompt.clear inherit the Relay
 default in all four presets; no preset binds those chords to anything else.
 
 ## 1. Warp (Linux)
@@ -284,6 +285,6 @@ a program owns the terminal under the default `program_keys: "shift-only"`.
 
 Card #P7SJ put Projects, Sessions and Globals in one shared pane on Ctrl+Shift+P, Y and G. Since
 #QWAS (2026-09-22) that pane has one key, `sessions.open` on Ctrl+Shift+S, in every preset;
-`projects.open`, `globals.open` and `agent.resume` have no default key (Warp keeps Ctrl+Shift+Y for
-`agent.resume`), and Ctrl+Shift+P is Actions everywhere. Pane screenshot capture is unbound by
+`projects.open` and `agent.resume` have no default key (Warp keeps Ctrl+Shift+Y for
+`agent.resume`); `globals.open` is Ctrl+Shift+G. Ctrl+Shift+P is Actions everywhere. Pane screenshot capture is unbound by
 default. Explicit user overrides still take precedence.

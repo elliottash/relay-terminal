@@ -332,10 +332,10 @@ private:
         add("helper.ask", "agent", "Ask the helper agent about this pane (Options, Actions, Sessions)",
             {QStringLiteral("Alt+Q")});
         // Compatibility actions: the Projects and Globals tabs of the Sessions & Projects pane
-        // (#P7SJ). No default keys since #QWAS: Ctrl+Shift+S (sessions.open) opens the pane, and
-        // Ctrl+Shift+P is the palette's.
+        // (#P7SJ). Projects stays unbound: Ctrl+Shift+S opens the shared pane. Globals keeps its
+        // familiar direct key, Ctrl+Shift+G (#QWAS); Ctrl+G remains the editor/program's.
         add("projects.open", "pane", "Projects: manage projects and their active sessions", {});
-        add("globals.open", "pane", "Globals: global memories, aliases and instructions", {});
+        add("globals.open", "pane", "Globals: global memories, aliases and instructions", {QStringLiteral("Ctrl+Shift+G")});
         add("project.pick", "pane", "Projects: attach this tab to a project Relay knows, or initialize one here", {});
         // One key both ways (#QWAS): Ctrl+H takes control of the terminal and, pressed again, hands
         // it back to the Relay prompt; Ctrl+Shift+H is the same toggle, the twin a program cannot

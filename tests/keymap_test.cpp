@@ -56,8 +56,9 @@ private slots:
             }
         }
         keymap.setPreset(QStringLiteral("relay"));
-        for (const char *key : {"Ctrl+A", "Ctrl+S", "Ctrl+Z", "Ctrl+X", "Ctrl+C", "Ctrl+D", "Ctrl+P", "F1"})
+        for (const char *key : {"Ctrl+A", "Ctrl+S", "Ctrl+Z", "Ctrl+X", "Ctrl+C", "Ctrl+D", "Ctrl+G", "Ctrl+P", "F1"})
             QVERIFY2(keymap.actionForKey(QString::fromLatin1(key)).isEmpty(), key);
+        QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+G")), QStringLiteral("globals.open"));
         QVERIFY(keymap.conflicts().isEmpty());
     }
 
