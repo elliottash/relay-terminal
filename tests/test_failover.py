@@ -428,7 +428,7 @@ class FailoverTests(unittest.TestCase):
 
     def test_each_provider_is_asked_once_and_the_turn_fails_when_none_answers(self):
         error = ProviderError('Provider HTTP 503 for everyone.')
-        stubs = {MAIN.model: Refuser(error), 'kimi-k3': Refuser(error), 'gpt-6-astra': Refuser(error)}
+        stubs = {MAIN.model: Refuser(error), 'kimi-k3': Refuser(error), 'gpt-6-sol': Refuser(error)}   # openai's main
         self.stubs.update(stubs)
         agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}),
                            fallbacks=[*KIMI, {'preset': 'openai', 'model': ''}])

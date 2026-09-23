@@ -442,17 +442,17 @@ class DefaultRulesTests(unittest.TestCase):
         lists = self.defaults(['openai'])
         # The levels are the file's Levels cells, in the endpoint's own words: the owner wrote
         # `gpt-6-astra | high = xhigh, main = medium` ("the API's default is high; codex's own is
-        # medium"), and `gpt-6-luna | flash = low`. He also moved openai's flash model from
-        # terra to luna and left terra a default for nothing.
-        self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-astra', 'medium')])
+        # medium"), and `gpt-6-luna | flash = low`. On 2026-09-22 he made astra openai's high
+        # only, sol its main and luna its flash, leaving terra a default for nothing. gpt-6-sol has
+        # no Levels row, so main starts at the provider's own default for it: openai's `high`.
+        self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-sol', 'high')])
         self.assertEqual(pairs(lists['high']), [('openai', 'gpt-6-astra', 'xhigh')])
         self.assertEqual(pairs(lists['flash']), [('openai', 'gpt-6-luna', 'low')])
         # Lite is Relay Free's, and Relay Free cannot run here, so there is nothing in it.
         self.assertEqual(pairs(lists['lite']), [])
-        # gpt-6-sol scores 47 — above terra and luna — and is in no class, so it is a default for
-        # nothing. That is the file's decision to make, and it is written down in it.
-        self.assertEqual(MR.load().score('gpt-6-sol'), 47)
-        self.assertNotIn('gpt-6-sol', [e['model'] for entries in lists.values() for e in entries])
+        # gpt-5.6-terra is in no class, so it is a default for nothing. That is the file's
+        # decision to make, and it is written down in it.
+        self.assertNotIn('gpt-5.6-terra', [e['model'] for entries in lists.values() for e in entries])
 
     def test_one_provider_means_one_company_not_one_key(self):
         # Owner: "dont pick 2 options from the same provider". `glm` and `glm-coding` are both
@@ -465,10 +465,11 @@ class DefaultRulesTests(unittest.TestCase):
     def test_two_providers_give_two_per_class_by_score(self):
         lists = self.defaults(['openai', 'glm-coding'])
         self.assertEqual(pairs(lists['main']),
-                         [('openai', 'gpt-6-astra', 'medium'), ('glm-coding', 'glm-5.3', 'high')])
+                         [('openai', 'gpt-6-sol', 'high'), ('glm-coding', 'glm-5.3', 'high')])
         self.assertEqual(pairs(lists['high']),
                          [('openai', 'gpt-6-astra', 'xhigh'), ('glm-coding', 'glm-5.3', 'max')])
-        self.assertEqual([MR.load().score(n) for n in ('gpt-6-astra', 'glm-5.3')], [53, 45])
+        self.assertEqual([MR.load().score(n) for n in ('gpt-6-astra', 'gpt-6-sol', 'glm-5.3')],
+                         [53, 47, 45])
 
     def test_three_providers_still_give_two_per_class_and_never_two_from_one(self):
         lists = self.defaults(['openai', 'glm-coding', 'kimi'])
@@ -477,7 +478,7 @@ class DefaultRulesTests(unittest.TestCase):
             self.assertLessEqual(len(entries), 2, tier)
             self.assertEqual(len({e['preset'] for e in entries}), len(entries), tier)
             self.assertEqual(len({e['model'] for e in entries}), len(entries), tier)
-        self.assertEqual(names(lists['main']), ['gpt-6-astra', 'glm-5.3'])     # 53, 45; kimi-k3 44
+        self.assertEqual(names(lists['main']), ['gpt-6-sol', 'glm-5.3'])     # 47, 45; kimi-k3 44
 
     def test_a_blank_score_sorts_last_and_ties_break_by_provider_order_then_name(self):
         # No flash model is scored, so the whole flash class is a tie and the providers' `order`
@@ -491,7 +492,7 @@ class DefaultRulesTests(unittest.TestCase):
                          [None, None])
         self.assertLess(rank.provider_order('glm-coding'), rank.provider_order('minimax'))
         # minimax-m3 is unscored, so it loses main to the three that are scored.
-        self.assertEqual(names(lists['main']), ['gpt-6-astra', 'glm-5.3'])
+        self.assertEqual(names(lists['main']), ['gpt-6-sol', 'glm-5.3'])
 
     def test_a_harness_counts_as_a_provider_and_is_ranked_by_name(self):
         # With Claude Code alone it is the one provider, so one model per class — and its `opus` is
@@ -506,7 +507,7 @@ class DefaultRulesTests(unittest.TestCase):
         self.assertEqual(pairs(alone['high']), [('guest:claude', 'fable', 'high')])
         # A harness is offered for high, main and flash (owner, 2026-09-21: "the worker should
         # allow the harness for flash"), never for lite: lite is nothing but background jobs, and
-        # roles.py will not hand one to an agent of its own. `sonnet` is claude-sonnet-5, the
+        # roles.py will not hand one to an agent of its own. `sonnet` is claude-sonnet-6, the
         # file's flash model.
         self.assertEqual(P.GUEST_CLASSES, ('high', 'main', 'flash'))
         self.assertEqual(pairs(alone['flash']), [('guest:claude', 'sonnet', 'low')])
@@ -526,14 +527,15 @@ class DefaultRulesTests(unittest.TestCase):
         self.assertNotIn('guest:codex', [e['preset'] for entries in lists.values() for e in entries])
 
     def test_the_same_model_from_two_providers_is_listed_once(self):
-        # The OpenAI API and codex both serve gpt-6-astra. One row, from the provider the file
+        # The OpenAI API and codex both serve gpt-6-sol. One row, from the provider the file
         # ranks first — and the second slot goes to somebody else's model.
         codex = {'id': 'guest:codex', 'harness': True, 'logged_in': True, 'guest': 'codex',
                  'efforts': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
                  'models': [{'id': 'gpt-6-astra', 'default_effort': 'medium'},
+                            {'id': 'gpt-6-sol', 'default_effort': 'medium'},
                             {'id': 'gpt-5.6-terra', 'default_effort': 'medium'}]}
         lists = self.defaults(['openai', 'glm-coding'], guests=[codex])
-        self.assertEqual(names(lists['main']), ['gpt-6-astra', 'glm-5.3'])
+        self.assertEqual(names(lists['main']), ['gpt-6-sol', 'glm-5.3'])
         self.assertEqual(lists['main'][0]['preset'], 'guest:codex')    # harness (21) before api (32)
 
     def test_a_keyed_custom_provider_counts_and_is_ranked_by_name_where_the_file_knows_it(self):
@@ -543,7 +545,7 @@ class DefaultRulesTests(unittest.TestCase):
         self.assertEqual((lists['flash'], lists['lite']), ([], []))
         # A custom endpoint serving a model the file *does* know is scored and classed like it.
         lists = self.defaults(['openai'], custom=[('custom:acme', 'claude-opus-5-5')])
-        self.assertEqual(names(lists['main']), ['gpt-6-astra', 'claude-opus-5-5'])
+        self.assertEqual(names(lists['main']), ['claude-opus-5-5', 'gpt-6-sol'])   # 51, 47
 
     def test_a_local_endpoint_is_not_a_provider_and_fills_local_as_before(self):
         lists = self.defaults(['relay-free'], local=[('local:bonsai', 'bonsai-2-27b'),

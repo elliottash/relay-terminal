@@ -43,7 +43,7 @@ from . import presets
 #: DeepSeek and `anthropic/claude-opus-5-5` is Anthropic.  Prefix rules, in order; the first token that
 #: matches anything wins.
 _VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("claude", "anthropic"),        # claude-opus-5-5, claude-code, claude-sonnet-5
+    ("claude", "anthropic"),        # claude-opus-5-5, claude-code, claude-sonnet-6
     ("anthropic", "anthropic"),
     ("gpt", "openai"),              # gpt-6-astra, gpt-5-codex
     ("chatgpt", "openai"),

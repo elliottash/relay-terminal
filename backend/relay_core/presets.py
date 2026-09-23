@@ -429,10 +429,10 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
                 "lite": _LITE_VIA_OPENROUTER},
     # https://platform.claude.com/docs/en/models/overview
     "anthropic": {"main": ("anthropic", "claude-opus-5-5", {}),
-                  "flash": ("anthropic", "claude-sonnet-5", {}),
+                  "flash": ("anthropic", "claude-sonnet-6", {}),
                   "lite": ("anthropic", "claude-haiku-4-5", {})},
-    "openai": {"main": ("openai", "gpt-6-astra", {"reasoning_effort": "high"}),
-               "flash": ("openai", "gpt-5.6-terra", {"reasoning_effort": "medium"}),
+    "openai": {"main": ("openai", "gpt-6-sol", {"reasoning_effort": "high"}),
+               "flash": ("openai", "gpt-6-luna", {"reasoning_effort": "low"}),
                "lite": ("openai", "gpt-6-luna", {"reasoning_effort": "low"})},
     "gemini": {"main": ("gemini", "gemini-3.1-pro-preview", {"reasoning_effort": "high"}),
                "flash": ("gemini", "gemini-3.8-flash", {}),
@@ -527,17 +527,17 @@ MODEL_CATALOG: dict[str, list[dict]] = {
     ],
     # The four codex-cli 0.155.1 lists first (#E516); every one takes reasoning_effort.
     "openai": [
-        {"id": "gpt-6-astra", "tier": "main", "efforts": None},
-        {"id": "gpt-6-sol", "tier": None, "efforts": None},
-        {"id": "gpt-5.6-terra", "tier": "flash", "efforts": None},
-        {"id": "gpt-6-luna", "tier": "lite", "efforts": None},
+        {"id": "gpt-6-astra", "tier": None, "efforts": None},
+        {"id": "gpt-6-sol", "tier": "main", "efforts": None},
+        {"id": "gpt-5.6-terra", "tier": None, "efforts": None},
+        {"id": "gpt-6-luna", "tier": "flash", "efforts": None},
     ],
     # https://platform.claude.com/docs/en/models/overview — the compat layer has no effort knob.
     # Anthropic's API spells two versions with a hyphen where everyone else (and OpenRouter) uses a
     # dot, so those two carry a `name`: without it the same model would sit in the picker twice.
     "anthropic": [
         {"id": "claude-opus-5-5", "tier": "main", "efforts": None},
-        {"id": "claude-sonnet-5", "tier": "flash", "efforts": None},
+        {"id": "claude-sonnet-6", "tier": "flash", "efforts": None},
         {"id": "claude-haiku-4-5", "name": "claude-haiku-4.5", "tier": "lite", "efforts": None},
         {"id": "claude-fable-5-1", "name": "claude-fable-5.1", "tier": None, "efforts": None},
     ],
@@ -571,7 +571,7 @@ MODEL_CATALOG: dict[str, list[dict]] = {
 # Claude Code names its models by family ("fable", "opus"), so a guest reporting "opus" and the
 # `anthropic` preset's "claude-opus-5-5" are one model. This is the only table that says so.
 GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5-5",
-                       "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5"}
+                       "sonnet": "claude-sonnet-6", "haiku": "claude-haiku-4-5"}
 
 # The `name` a MODEL_CATALOG row carries, by model id, for the alias step below: the alias resolves
 # to an API id, and that id may itself be one of the few that cannot be derived.
@@ -681,7 +681,7 @@ OPENROUTER_TWINS: dict[str, str] = {
     "gpt-6-luna": "openai/gpt-6-luna",
     # anthropic (OpenRouter spells the version with a dot)
     "claude-opus-5-5": "anthropic/claude-opus-5-5",
-    "claude-sonnet-5": "anthropic/claude-sonnet-5",
+    "claude-sonnet-6": "anthropic/claude-sonnet-6",
     "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
     "claude-fable-5-1": "anthropic/claude-fable-5.1",
     # deepseek (its own API). Both lines are on OpenRouter: the Flash alias is today's

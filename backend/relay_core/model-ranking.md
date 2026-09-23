@@ -117,14 +117,14 @@ the list, they run on Relay Free's role for the tier instead.
 
 | name | classes | score | notes |
 |---|---|---|---|
-| claude-fable-5.1 | high | 53 | claude code's `fable`, and `anthropic`'s `claude-fable-5-1`. No built-in tier names it, so it is a default for nothing until `high, main` is written here |
-| gpt-6-astra | high, main | 53 | `openai`'s main model, and the one codex lists first |
+| claude-fable-5.1 | high | 53 | claude code's `fable`, and `anthropic`'s `claude-fable-5-1`; `anthropic`'s high |
+| gpt-6-astra | high | 53 | `openai`'s high, and the one codex lists first |
 | claude-opus-5-5 | main | 51 | `anthropic`'s main model; claude code's `opus` is the same model |
-| gpt-6-sol | - | 47 | codex lists it and the OpenAI API serves it; no tier names it |
+| gpt-6-sol | main | 47 | `openai`'s main; codex lists it and the OpenAI API serves it |
 | glm-5.3 | high, main | 45 | one row for `glm` and `glm-coding`; the coding plan wins the tie on `order` |
 | kimi-k3 | high, main | 44 | `kimi`'s main model; kimi code serves the same one as `k3` |
 | claude-haiku-4.5 | - | | `anthropic`'s lite (its own API spells the version with a hyphen) |
-| claude-sonnet-5 | flash | | `anthropic`'s flash |
+| claude-sonnet-6 | flash | | `anthropic`'s flash |
 | deepseek-v4-pro | - |  | `deepseek`'s pro model; the owner, 2026-09-21: "deepseek pro is never used" — DeepSeek runs high, main and flash on V4.1 Flash |
 | deepseek-v4.1-flash | high, main, flash | | openrouter's built-in main *and* flash: there is no non-flash DeepSeek V4.1 |
 | gemini-3.1-pro-preview | - | | the concrete version behind `gemini-pro-latest`; a default for nothing, so the defaults follow Google forward |
@@ -133,8 +133,8 @@ the list, they run on Relay Free's role for the tier instead.
 | gemini-flash-latest | main, flash | | google's moving alias for its current Flash. It **moves**: the model behind it changes without this file changing |
 | gemini-pro-latest | high | | google's moving alias for its current Pro. It **moves** too; `gemini`'s high |
 | glm-5.3-flash | flash | | z.ai's flash, on both the standard API and the coding plan |
-| gpt-5.6-terra | - | | `openai`'s flash |
-| gpt-6-luna | flash | | `openai`'s lite |
+| gpt-5.6-terra | - | | older OpenAI flash; a default for nothing since gpt-6-luna took flash |
+| gpt-6-luna | flash | | `openai`'s flash, and its lite |
 | k3-256k | - | | kimi code's K3 at a wider window: a serving variant with its own row, a default for nothing |
 | kimi-for-coding | - | | kimi code's moving alias for whatever it currently serves; no tier names it |
 | kimi-for-coding-highspeed | flash | | kimi code's flash; no reasoning knob at all |
@@ -171,7 +171,7 @@ provider shows the level in its own vocabulary (codex says `xhigh` for max). Pre
 |---|---|---|---|---|---|
 | claude-fable-5.1 | high | low | low  |  | levels only through claude code; the anthropic API row has no knob |
 | claude-opus-5-5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
-| claude-sonnet-5 | max | high | low |  |  |
+| claude-sonnet-6 | max | high | low |  |  |
 | gpt-6-astra | xhigh | medium | low  |  | the API's default is high; codex's own is medium |
 | gpt-6-luna | max | high | low |  |  |
 | kimi-k3 | max | high | low |  |  |
