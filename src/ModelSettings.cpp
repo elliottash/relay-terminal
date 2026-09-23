@@ -143,7 +143,8 @@ void KeysDialog::updateButtons() {
     m_add->setText(pro ? QStringLiteral("Add / replace code…") : QStringLiteral("Add / replace…"));
     m_test->setText(pro ? QStringLiteral("Check access") : QStringLiteral("Test"));
     m_add->setEnabled(item != nullptr && !included);
-    m_test->setEnabled(item != nullptr);
+    const QString id = item ? item->data(0, PresetRole).toString() : QString();
+    m_test->setEnabled(item != nullptr && id != QStringLiteral("fal") && id != QStringLiteral("elevenlabs"));
     m_where->setEnabled(item != nullptr);
     m_where->setText(included ? QStringLiteral("About Relay Free…") : QStringLiteral("Get a key…"));
     // A key from the environment is not ours to delete.
@@ -184,7 +185,8 @@ void KeysDialog::rebuild() {
         {QStringLiteral("included"), QStringLiteral("Included")},
         {QStringLiteral("subscription"), QStringLiteral("Subscriptions")},
         {QStringLiteral("aggregator"), QStringLiteral("Aggregator")},
-        {QStringLiteral("payg"), QStringLiteral("Pay-as-you-go")}};
+        {QStringLiteral("payg"), QStringLiteral("Pay-as-you-go")},
+        {QStringLiteral("media"), QStringLiteral("Media services")}};
     for (const auto &group : groups) {
         auto *parent = new QTreeWidgetItem(m_list, {group.second});
         QFont bold = parent->font(0);
@@ -252,7 +254,9 @@ void KeysDialog::test(const QString &id) {
 void KeysDialog::handleEvent(const QJsonObject &event) {
     const QString type = event.value(QStringLiteral("event")).toString();
     if (type == QStringLiteral("presets")) {
-        setPresets(event.value(QStringLiteral("presets")).toArray());
+        QJsonArray rows = event.value(QStringLiteral("presets")).toArray();
+        for (const auto &value : event.value(QStringLiteral("media_keys")).toArray()) rows.append(value);
+        setPresets(rows);
     } else if (type == QStringLiteral("hosted_quota")) {
         // Protocol 13.9: after every gateway call, and in reply to a `hosted_quota` request. The
         // Relay Free row's status column follows it live; the `presets` row's `quota` is the

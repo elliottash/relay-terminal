@@ -29,6 +29,7 @@ from . import app_tools
 from . import board_tools
 from . import prompt_profiles
 from . import tool_groups
+from . import media
 from . import todos as todo_tool
 from . import security
 from . import tool_labels
@@ -659,6 +660,7 @@ class Agent:
         self.terminal_context = terminal_context.Service()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills,
                                      policy=security.policy_from(security_options or {}))
+        self.media = media.MediaTools(self.executor.workspace, self.cancel_event)
         # Card #K2FV: the approval checklist. A configure that says nothing about approvals gets
         # allow-all — the cautious set before the first-launch choice is the GUI's default to send
         # (approvals_chosen: false), not a property of a bare Agent (the tests' and the subagents').
@@ -1327,7 +1329,7 @@ class Agent:
         tail = [t for name in TAIL_TOOLS for t in offered if t["function"]["name"] == name]
         tools = [t for t in offered if t["function"]["name"] not in TAIL_TOOLS]
         extra = [todo_tool.SPEC] if self._todos_enabled() else []
-        extra = extra + [WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC] + terminal_context.TOOL_SPECS
+        extra = extra + [WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC] + terminal_context.TOOL_SPECS + media.TOOL_SPECS
         # #GMCF decision 9: `load_tools` itself is a fixture of the list — it is the same spec for
         # every pane and every turn — so it sits here with the stable tools. Only the schemas it
         # fetches are appended, at the very end, where an append costs nothing above them.
@@ -3963,7 +3965,8 @@ class Agent:
         # narrowing it for one turn would re-prefill every cached request below it (#GMCF 4.2) —
         # so the refusal is here, where plan mode's is.
         if self.readonly_turn and (name in READONLY_BLOCKED
-                                   or name in app_tools.WRITE_TOOLS):
+                                   or name in app_tools.WRITE_TOOLS
+                                   or name in {"media_generate", "media_job"}):
             raise ValueError(READONLY_REFUSAL)
         scope = getattr(self.board, "card_scope", None)
         app_tool = self.app is not None and self.app.handles(name)
@@ -3972,7 +3975,7 @@ class Agent:
         # is the board's copy of the same answer, and a card turn is refused these whether or not
         # one is attached — and it borrows `CardScope`'s own sentence, which names Execute. The
         # app tools ride alongside every scope (30.4), so they are asked about first.
-        if self.card_turn is not None and name in CARD_BLOCKED and not app_tool:
+        if self.card_turn is not None and name in (CARD_BLOCKED | {"media_generate", "media_job"}) and not app_tool:
             raise ValueError(board_tools.CardScope(*self.card_turn).refusal(name))
         if scope is not None and not scope.allows(name) and not app_tool:
             # The board's scopes do not know the app tools' names, and they are offered with
@@ -3982,6 +3985,10 @@ class Agent:
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be an object.")
             return Prepared(name, args, self.board.preview(name, args))
+        if name in media.TOOL_NAMES:
+            if not isinstance(args, dict):
+                raise ValueError("Media tool arguments must be an object.")
+            return Prepared(name, args, name.replace("_", " ").upper())
         for side in (self.app, self.activity):
             if side is not None and side.handles(name):
                 if not isinstance(args, dict):
@@ -4039,6 +4046,8 @@ class Agent:
             return self.executor.questions.execute(prepared.arguments, ctx.get("turn_id"))
         if self.board is not None and self.board.handles(prepared.name):
             return self.board.run(prepared.name, prepared.arguments)
+        if prepared.name in media.TOOL_NAMES:
+            return self.media.run(prepared.name, prepared.arguments)
         for side in (self.app, self.activity):
             if side is not None and side.handles(prepared.name):
                 result = side.run(prepared.name, prepared.arguments)

@@ -8441,3 +8441,27 @@ their known line. Native hooks never capture input typed into a running program.
 local programs are labelled unsupported and their capture is cleared. Background output mixed
 into the same PTY cannot reliably be attributed to a job; the evidence is the observed command
 interval, not a per-process stdout trace.
+
+## Generated media (#2GV0)
+
+The `presets` event also carries `media_keys`: service rows for `fal` and `elevenlabs`, each with
+`id`, `label`, `group: "media"`, `key_url` and `key_source`. Options › Models › API keys stores and
+removes them through the existing `store_key` and `remove_key` messages. They are service keys;
+they are not chat model presets. `RELAY_FAL_API_KEY` and `RELAY_ELEVENLABS_API_KEY` work as
+environment alternatives. Key values are never returned to agents or in the `presets` event.
+
+Native and guest agents offer `media_catalog`, `media_quote`, `media_generate` and `media_job`.
+Catalog and quote are read-only. Quote validates a prompt, model and settings, then returns a
+`quote_id`, provider, model, selected settings, `estimated_usd` (or null), `price_source`,
+`quoted_at` and `expires_in_seconds`. A quote expires after ten minutes and is consumed once.
+The agent should show the estimate or its unavailability before calling the paid `media_generate`
+with that ID. A provider request with an uncertain outcome is not automatically retried.
+
+Image and Lyria music calls return a local `path` with `kind`, provider, model,
+`estimated_usd` and `actual_usd` when reported. Direct ElevenLabs music and SFX return the same
+shape. OpenRouter video and fal audio return a durable `job_id` and `status: "pending"` instead;
+`media_job {job_id}` polls it and downloads the result when complete, even after a worker restart.
+A completed job returns `path`, provider, model and costs. A failed job returns a failure status.
+No media bytes, signed URLs or key material are put into conversation events. Files are confined
+to the workspace; the tool result offers the path for opening in the system viewer. Cancellation
+of a turn does not refund an already submitted provider job; a later `media_job` can recover it.

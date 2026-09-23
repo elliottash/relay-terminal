@@ -27,6 +27,7 @@ import uuid
 from relay_core.board_tools import TOOL_NAMES as BOARD_NAMES, CLEANUP_TOOL_NAMES
 from relay_core.app_tools import TOOL_NAMES as APP_NAMES
 from relay_core.activity_tools import TOOL_NAMES as ACTIVITY_NAMES
+from relay_core.media import TOOL_NAMES as MEDIA_NAMES, TOOL_SPECS as MEDIA_SPECS
 
 BOARD_ALLOW = frozenset(BOARD_NAMES + CLEANUP_TOOL_NAMES + ('search_files',))
 DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_todos'))
@@ -40,7 +41,7 @@ ACTIVITY_ALLOW = frozenset(ACTIVITY_NAMES)
 CONDITIONAL_ALLOW = frozenset(('set_keybinding', 'type_into_program'))
 PLAN_ALLOW = frozenset(("write_plan", "exit_plan_mode"))
 ALLOW = (BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW
-         | APP_ALLOW | ACTIVITY_ALLOW | CONDITIONAL_ALLOW | PLAN_ALLOW)
+         | APP_ALLOW | ACTIVITY_ALLOW | CONDITIONAL_ALLOW | PLAN_ALLOW | MEDIA_NAMES)
 WAIT_SECONDS = 10
 # Foreground children can run longer than the native 1800-second wait/test ceiling.
 # The transport deadline is generous; Stop still revokes the live call promptly.
@@ -116,6 +117,7 @@ class Bridge:
             for side in (getattr(self.agent, 'app', None), getattr(self.agent, 'activity', None)):
                 if side is not None:
                     specs += side.tool_specs()
+            specs += MEDIA_SPECS
             catalog = self.agent.executor.keybindings
             if catalog is not None:
                 specs.append(catalog.tool_spec())
@@ -128,7 +130,7 @@ class Bridge:
                 specs += delegation_tool_specs() + [TODO_SPEC]
             # Clients can cache discovery before Agent binding. Offer the static schemas;
             # dispatch still checks the live pane's catalog, scope and turn grant.
-            specs += list(APP_SPECS) + list(ACTIVITY_SPECS)
+            specs += list(APP_SPECS) + list(ACTIVITY_SPECS) + list(MEDIA_SPECS)
             from relay_core.keybindings import KeybindingCatalog
             specs.append(KeybindingCatalog.tool_spec())
         # Guest clients cache discovery before a turn has remote context. Keep the remote

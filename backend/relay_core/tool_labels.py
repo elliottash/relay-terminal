@@ -412,6 +412,15 @@ def _base(name, args: dict, existed) -> dict:
         title = _short(args.get("title"), 40)
         return _row("plan", "writing the plan", f"wrote plan “{title}”" if title else "wrote the plan",
                     "write the plan")
+    if name == "media_catalog":
+        return _row("read", "reading media models", "read media models", "read media models")
+    if name == "media_quote":
+        kind = _short(args.get("kind"), 20) or "media"
+        return _row("read", f"quoting {kind}", f"quoted {kind}", f"quote {kind}")
+    if name == "media_generate":
+        return _row("run", "generating media", "generated media", "generate media")
+    if name == "media_job":
+        return _row("job", "checking media job", "checked media job", "check media job")
     if name == "agent":
         what = _short(args.get("description"), 40) or _short(args.get("subagent_type"), 30) or "subagent"
         return _row("agent", f"starting subagent “{what}”", f"started subagent “{what}”",
@@ -589,6 +598,8 @@ def _open(name, args: dict, result: dict, base: dict, ok: bool, changed) -> dict
     fold = {"type": "fold"}
     if not ok:
         return fold
+    if name in ("media_generate", "media_job") and isinstance(result.get("path"), str):
+        return {"type": "file", "path": result["path"]}
     if name in HOST_TOOLS and isinstance(args.get("host"), str) and args["host"].strip():
         # Card #S5SH: the file is on that host, so "open the file" would open a local file of the
         # same name — the mistake remote path clicks already avoid. The fold has the contents; a

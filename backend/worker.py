@@ -192,7 +192,13 @@ def main():
               + custom_rows
               # Guest agents on this machine (protocol 29.3): no key either, and `harness`
               # is what makes the row this pane's agent rather than a Tier B launch.
-              + guest_rows})
+              + guest_rows,
+              "media_keys": [{"id": service, "label": label, "group": "media",
+                              "key_url": url, "key_source": keystore.key_source(service),
+                              "note": "For music and sound effects generation."}
+                             for service, label, url in (
+                                 ("fal", "fal.ai", "https://fal.ai/dashboard/keys"),
+                                 ("elevenlabs", "ElevenLabs", "https://elevenlabs.io/app/settings/api-keys"))]})
 
     # The codex catalogue lands after the first `presets` answer (the scan must not delay it,
     # 29.3), and nothing re-asks — so the worker pushes a fresh `presets` when it does, and
