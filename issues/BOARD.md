@@ -283,7 +283,7 @@
 | `#GP1N` | [Attach Relay instructions to guest sessions through their native interfaces](features/done/2026-09-21-guest-session-instructions.md) | done | codex |  | [6](threads/GP1N.md) |
 | `#R8PK` | [Restore the open Switchboard card](features/done/2026-09-21-restore-switchboard-card.md) | done | codex |  | [7](threads/R8PK.md) |
 | `#XJSN` | [A custom endpoint's extra request JSON has no home](features/done/2026-09-21-a-custom-endpoints-extra-request-json-has-no-home.md) | done | codex |  | [15](threads/XJSN.md) |
-| `#MKZ0` | [Relay Pro: GLM models with personal access codes](features/done/2026-09-21-relay-pro-behind-a-password.md) | done | codex | 5/5 | [12](threads/MKZ0.md) |
+| `#MKZ0` | [Hosted provider access controls](features/done/2026-09-21-relay-pro-behind-a-password.md) | done | codex |  | [1](threads/MKZ0.md) |
 | `#BH3R` | [Diff adds and removals: black-or-white text on the green/red fill, not green/red text](features/done/2026-09-19-diff-adds-and-removals-black-or-white-text-on-th.md) | done |  |  | [5](threads/BH3R.md) |
 | `#74Y5` | [Built to be driven: the QA agent walks each step of the user experience, and apps expose a way to be driven by name](features/done/2026-09-21-built-to-be-driven-the-qa-agent-walks-the-ux-and-spends-human-time-last.md) | done | codex |  | [9](threads/74Y5.md) |
 | `#KH72` | [Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision](features/done/2026-09-17-model-roles-and-fast-agent.md) | dropped | agent |  | [1](threads/KH72.md) |
