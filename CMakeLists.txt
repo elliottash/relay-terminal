@@ -777,6 +777,12 @@ if(BUILD_TESTING)
     target_compile_definitions(relay-settings-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME settings COMMAND relay-settings-tests)
     set_tests_properties(settings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # src/Keymap.h on its own (#MAGP, #QWAS): setBinding, actionForKey and the Ctrl / Ctrl+Shift
+    # pairing rule across the four presets. The header is otherwise only in relay's one unit.
+    add_executable(relay-keymap-tests tests/keymap_test.cpp)
+    target_link_libraries(relay-keymap-tests PRIVATE relay-voice ${RELAY_QT}::Gui ${RELAY_QT}::Test)
+    add_test(NAME keymap COMMAND relay-keymap-tests)
+    set_tests_properties(keymap PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-filepanes-tests tests/filepanes_test.cpp)
     target_link_libraries(relay-filepanes-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
     add_test(NAME filepanes COMMAND relay-filepanes-tests)

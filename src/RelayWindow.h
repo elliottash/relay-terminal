@@ -106,6 +106,8 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QDialogButtonBox>
+#include <QKeySequenceEdit>
+#include <QPushButton>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
@@ -2148,22 +2150,69 @@ private:
         m_palette->toggle();
     }
 
-    // "Change shortcut…" on a palette row: Options › Keyboard, and which id to bind and how. The
-    // keys themselves live in keybindings.json (the tab's Edit… button), or an agent's
-    // set_keybinding rewrites one binding.
+    // "Change shortcut…" on a palette row (#MAGP): a small dialog that takes the new keys. Press a
+    // combination and Save writes it to keybindings.json for this action (Keymap::setBinding),
+    // taking it off whatever action held it before, which the dialog names first. Remove unbinds
+    // the action; Cancel or Esc leaves everything as it was. A row that is not a Keymap action
+    // (an Options section, a slash command) has no shortcut of its own to change.
     void editShortcutOf(const QString &key) {
-        openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("keyboard"));
-        const bool registered = std::any_of(Keymap::instance().actions().cbegin(), Keymap::instance().actions().cend(),
+        Keymap &keymap = Keymap::instance();
+        const bool registered = std::any_of(keymap.actions().cbegin(), keymap.actions().cend(),
                                             [&](const ActionDef &action) { return action.id == key; });
         if (!registered) {
             notice(QStringLiteral("That row has no shortcut of its own to change."), 6000);
             return;
         }
-        const QStringList keys = Keymap::instance().shortcutTexts(key);
-        notice(QStringLiteral("%1 is \"%2\" in keybindings.json (Edit…)%3; an agent can rebind it too.")
-                   .arg(Keymap::instance().description(key).section(QLatin1Char('('), 0, 0).trimmed(), key,
-                        keys.isEmpty() ? QStringLiteral(", unbound now") : QStringLiteral(", now %1").arg(keys.join(QStringLiteral(", ")))),
-               10000);
+        const auto name = [&keymap](const QString &id) {
+            return keymap.description(id).section(QLatin1Char('('), 0, 0).section(QLatin1Char(':'), 0, 0).trimmed();
+        };
+        const QStringList current = keymap.shortcutTexts(key);
+        QDialog dialog(this);
+        dialog.setWindowTitle(QStringLiteral("Change shortcut"));
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *intro = new QLabel(QStringLiteral("%1: %2. Press the new keys.")
+                                     .arg(name(key), current.isEmpty() ? QStringLiteral("no shortcut now")
+                                                                        : QStringLiteral("now %1").arg(current.join(QStringLiteral(", ")))), &dialog);
+        intro->setWordWrap(true);
+        auto *edit = new QKeySequenceEdit(&dialog);
+        auto *clash = new QLabel(&dialog);
+        clash->setWordWrap(true);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+        auto *remove = buttons->addButton(QStringLiteral("Remove shortcut"), QDialogButtonBox::DestructiveRole);
+        remove->setEnabled(!current.isEmpty());
+        buttons->button(QDialogButtonBox::Save)->setEnabled(false);
+        layout->addWidget(intro);
+        layout->addWidget(edit);
+        layout->addWidget(clash);
+        layout->addWidget(buttons);
+        QString chosen;
+        // One combination, not a sequence: keep the first chord and show who holds it now.
+        QObject::connect(edit, &QKeySequenceEdit::keySequenceChanged, &dialog, [&](const QKeySequence &sequence) {
+            if (sequence.count() > 1) { edit->setKeySequence(QKeySequence(sequence[0])); return; }
+            chosen = sequence.toString(QKeySequence::PortableText);
+            const QString holder = chosen.isEmpty() ? QString() : keymap.actionForKey(chosen);
+            clash->setText(holder.isEmpty() || holder == key ? QString()
+                           : QStringLiteral("%1 is %2's now; saving moves it here.").arg(chosen, name(holder)));
+            buttons->button(QDialogButtonBox::Save)->setEnabled(!chosen.isEmpty() && holder != key);
+        });
+        QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        QObject::connect(remove, &QPushButton::clicked, &dialog, [&] { chosen.clear(); dialog.done(2); });
+        edit->setFocus(Qt::OtherFocusReason);
+        const int result = dialog.exec();
+        if (result == 2) {
+            keymap.setBinding(key, {});
+            notice(QStringLiteral("%1 has no shortcut now.").arg(name(key)), 6000);
+        } else if (result == QDialog::Accepted && !chosen.isEmpty()) {
+            const QString holder = keymap.actionForKey(chosen);
+            if (!holder.isEmpty() && holder != key) {
+                QStringList left = keymap.keysFor(holder);
+                left.erase(std::remove_if(left.begin(), left.end(), [&](const QString &text) { return Keymap::sameKey(text, chosen); }), left.end());
+                keymap.setBinding(holder, left);
+            }
+            keymap.setBinding(key, {chosen});
+            notice(QStringLiteral("%1 is %2 now.").arg(name(key), keymap.shortcutText(key)), 6000);
+        }
     }
 
     // A palette choice: the same recent list the Actions pane keeps (the last 12 distinct keys),

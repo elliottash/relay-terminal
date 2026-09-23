@@ -60,6 +60,24 @@ public:
         writeObject(root);
     }
     QStringList keysFor(const QString &id) const { return m_bindings.value(id); }
+    // One action's keys, written into keybindings.json's "bindings" ("Change shortcut…" on a
+    // palette row, #MAGP). Every other field and binding in the file stays as it is, and the
+    // reload makes it take effect at once. An empty list unbinds the action.
+    void setBinding(const QString &id, const QStringList &keys) {
+        QJsonObject root = readObject();
+        if (!root.contains(QStringLiteral("version"))) root.insert(QStringLiteral("version"), 1);
+        QJsonObject bindings = root.value(QStringLiteral("bindings")).toObject();
+        bindings.insert(id, QJsonArray::fromStringList(keys));
+        root.insert(QStringLiteral("bindings"), bindings);
+        writeObject(root);
+    }
+    // Whether two key texts name the same combination ("Ctrl+Shift+A" and "Shift+Ctrl+A").
+    static bool sameKey(const QString &a, const QString &b) { const int code = parse(a); return code && code == parse(b); }
+    // The action a key (portable text, "Ctrl+Shift+A") is bound to now, or empty.
+    QString actionForKey(const QString &text) const {
+        const int code = parse(text);
+        return code ? m_lookup.value(code) : QString();
+    }
     QString description(const QString &id) const {
         for (const auto &action : m_actions) if (action.id == id) return action.description;
         return id;
