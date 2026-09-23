@@ -4082,7 +4082,7 @@ public:
         if (id.isEmpty()) return;
         if (!queueSessionTextReplay(relay::sessiontext::sessionPath(
                 state.value(QStringLiteral("session_dir")).toString(), id)))
-            m_transcriptPending = id;   // the worker is not up yet; asked at `session_configured`
+            m_transcriptPending = id;   // the worker is not up yet; asked at `ready`
     }
 
     // An explicit choice of level — Alt+E, Alt+. / Alt+,, /effort, the level box. There is no row
@@ -11810,6 +11810,10 @@ private:
         if (handleMemorySuggestionEvent(type, event)) return;   // Keep / No answered, and imports (#MEMS)
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
+            // A conversation opened in a new pane with no saved text: its transcript comes off the
+            // shared index, so it is asked for now. A pane whose harness is deferred is not
+            // configured until its first prompt, and waiting for that left it empty (#0TJ9).
+            if (!m_transcriptPending.isEmpty()) requestSavedTranscript(std::exchange(m_transcriptPending, QString()));
             if (m_restartConfigure) {
                 m_restartConfigure = false;
                 m_configuring = true;
