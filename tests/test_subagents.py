@@ -241,29 +241,20 @@ class ForegroundTests(Base):
         self.assertIn('[Relay subagent]', system)
         self.assertIn('cannot start other agents', system)
 
-    def test_plan_mode_delegates_to_read_only_subagents(self):
-        # #PLDG: a plan turn may delegate, but what it starts cannot write, and it cannot message
-        # (so resume) a subagent that can.
-        self.manager.spawn({'description': 'writer', 'prompt': 'W', 'subagent_type': 'general'})
-        self.rec.wait(lambda e: e['event'] == 'subagent_finished')
+    def test_plan_mode_delegates_like_build_mode(self):
+        # #PLDG (owner, 2026-09-22): plan mode locks nothing, delegation included.
         agent, provider = self.main_agent([
             calls(call('agent', {'description': 'look', 'prompt': 'P', 'subagent_type': 'general'}, 'c1')),
-            calls(call('agent_message', {'id': 'a1', 'text': 'now edit'}, 'm1'),
-                  call('agent_message', {'id': 'a2', 'text': 'look again'}, 'm2')),
+            calls(call('agent_message', {'id': 'a1', 'text': 'look again'}, 'm1')),
             final()])
         agent.set_mode('plan')
         agent.ask('plan it')
         task, messages, tools = next(seen for seen in self.hub.seen if seen[0] == 'P')
-        self.assertNotIn('write_file', tools)
-        self.assertNotIn('edit_file', tools)
-        self.assertIn('read_file', tools)
-        self.assertIn('This agent is read-only', messages[0]['content'])
+        self.assertIn('write_file', tools)
+        self.assertNotIn('This agent is read-only', messages[0]['content'])
         results = self.tool_results(provider)
         self.assertEqual(results['c1']['status'], 'done')
-        self.assertIn('plan mode cannot message it', results['m1']['error'])
-        self.assertEqual(results['m2']['delivered'], 'resumed')
-        self.assertFalse(self.manager._agents['a1'].read_only)
-        self.assertTrue(self.manager._agents['a2'].read_only)
+        self.assertEqual(results['m1']['delivered'], 'resumed')
 
     def test_a_read_only_turn_starts_no_subagent(self):
         agent, provider = self.main_agent([

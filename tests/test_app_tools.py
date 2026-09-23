@@ -854,13 +854,13 @@ class AgentWiringTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(self.gui.last["command"], "set_option")
 
-    def test_plan_mode_keeps_the_reads_and_refuses_the_writes(self):
+    def test_plan_mode_locks_nothing(self):
+        # #PLDG (owner, 2026-09-22): plan mode is an instruction and a model, not a lock.
         self.agent.set_mode("plan")
         self.load_the_app_tools()
         names = [t["function"]["name"] for t in self.agent.tools()]
         self.assertIn("app_option_list", names)
-        with self.assertRaises(ValueError):
-            self.agent._prepare("app_option_set", {"id": "agent.app_writes", "value": True})
+        self.agent._prepare("app_option_set", {"id": "agent.app_writes", "value": True})
         self.agent._prepare("app_open", {"target": "options"})
 
     def test_the_brief_is_in_the_system_prompt(self):

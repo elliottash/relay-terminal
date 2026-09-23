@@ -181,8 +181,7 @@ the finish time is unknown.
 ## 6. Plan mode (Warp-style)
 
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
-- Plan mode: run_command (with command_output and stop_command), read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file, edit_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
-- Plan mode may delegate (#PLDG): `agent`, `agent_message` and `agent_wait` stay available. A subagent started in plan mode is read-only — its definition loses `write_file` and `edit_file`, its prompt says it is read-only, and a guest child runs with `deny` permissions — and it stays read-only after `exit_plan_mode`. `agent_message` from plan mode is refused for a subagent that can write. A read-only turn and a card turn still start none.
+- Plan mode locks nothing (owner, 2026-09-22, #PLDG): every tool stays available and callable — file writes, board and app writes, `set_keybinding`, delegation. Plan mode is the turn's plan-mode note (investigate without changing anything, ask what is ambiguous, finish with `write_plan`) plus the `planning` role's model and reasoning below. The note is an instruction, not an enforced rule.
 - Plan-mode turns run on the `planning` role (13.11): by default the pane's own model at `max`
   reasoning, swapped for that turn only and then put back, with `plan_route` / `plan_route_ended` saying
   so in the pane.
@@ -320,8 +319,7 @@ new_string, replace_all?}` replaces an exact string in a file that already exist
 model should use to change a file it has read — before it, every edit resent the whole file. Both
 run under the same guards (workspace resolution and the secret-file guard, regular UTF-8 files of
 at most 128 KiB, the file's SHA-256 rechecked between the preview and an atomic replace that keeps
-its mode), both are recorded in the turn's checkpoint and undone by `rewind`, and both are removed
-from the tool list in plan mode.
+its mode), and both are recorded in the turn's checkpoint and undone by `rewind`.
 `tool_started.preview` is the title line — `WRITE FILE` or `EDIT FILE`, which the GUI reads to name
 the verb — a blank line, the absolute path, a blank line, the unified diff (`(No text changes)`
 when there is none), a blank line, and `Old bytes: N; new bytes: M.`

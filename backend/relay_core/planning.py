@@ -10,17 +10,14 @@ import time
 from pathlib import Path
 
 MODES = ("build", "plan")
-# The only file write in plan mode is the plan itself, through write_plan. A plan turn may
-# delegate (#PLDG): `agent`, `agent_message` and `agent_wait` are allowed, but a subagent started
-# in plan mode is read-only (`SubagentManager.spawn(read_only=True)` drops its file writes and a
-# guest child gets `deny`), and a message cannot resume one that can write.
-PLAN_BLOCKED_TOOLS = {"write_file", "edit_file", "set_keybinding"}
+# Plan mode locks nothing (owner, 2026-09-22, #PLDG): it is PLAN_MODE_NOTE on the turn plus the
+# `planning` role's model and reasoning. Every tool, delegation included, stays callable.
 MAX_PLAN_BYTES = 131072
 MAX_TITLE = 200
 
 PLAN_MODE_NOTE = """
 
-PLAN MODE is active. Investigate before proposing changes: you may read files, list directories, load skills, run commands and delegate investigation to subagents (they are read-only in plan mode), but commands must be read-only (no edits, installs, git commits, deletions, or writes of any kind). Do not modify the workspace.
+PLAN MODE is active. Investigate before proposing changes: you may read files, list directories, load skills, run commands and delegate investigation to subagents, but commands must be read-only (no edits, installs, git commits, deletions, or writes of any kind). Do not modify the workspace.
 Ask the user clarifying questions with ask_user rather than making large assumptions about what they want. Once you have read enough to know what is actually ambiguous — which of two directions, how far the change goes, a trade-off worth their opinion, wording only they can choose — ask it, in one call, before you write the plan. Give options when the decision has a few known branches and leave them out when it does not; an open question is better than three invented choices. Do not ask what the code can tell you, and do not ask whether the plan is any good: write it and let them edit it.
 When you understand the task, call write_plan exactly once with a short title and a complete Markdown plan: goal, findings with exact file paths, numbered steps, risks, and how to verify. When the work is big enough to split across subagents, the plan also carries an Orchestration block: each subagent (its type and a one-line task), which steps run in parallel, and which wait for which. Only steps that touch no shared files may run in parallel, and writes stay with the main agent; a small plan gets no block. The plan file stays open for the user to review or edit. When the plan is ready to implement, call exit_plan_mode with a concise reason: it switches the session to build mode at once, and you continue with implementation in the same turn. Otherwise reply with a two-sentence summary."""
 

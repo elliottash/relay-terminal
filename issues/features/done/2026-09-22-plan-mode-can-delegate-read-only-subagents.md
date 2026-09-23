@@ -8,26 +8,29 @@ implemented_by: anthropic/claude-opus-5-5 via claude-code
 rank: mpldg
 created: '2026-09-22'
 source: 'Claude Code in a Relay pane, 2026-09-22'
-links: {plans: [], commits: [], evidence: [], related: [K3TY, GMCF, SBGN], github: null}
+links: {plans: [], commits: [e5b9eff6], evidence: [], related: [K3TY, GMCF, SBGN, XP7N, Z0VG], github: null}
 ---
-# Plan mode can delegate to read-only subagents
+# Plan mode locks nothing: an instruction plus the planning model
 
 ## Issue
 i got a note that delegation was disabled in plan mode, can you check that? agents are supposed to be able to delegate subagents to help with planning. (this might have already been fixed)
 
+## Decisions
+Owner, 2026-09-22, after e5b9eff6 made plan-mode subagents read-only: "i thought i wanted nothing to be locked in plan mode. its just an extra instruction to the agent plus high reasoning" · "*higher effort ; that depends on what users want."
+
+So plan mode refuses no tool. It is the plan-mode note on the turn plus the `planning` role (default: the pane's own model at `max` reasoning, #Z0VG; a pinned `roles.planning` entry overrides it). The read-only-subagent rule of e5b9eff6 is withdrawn. This supersedes the K3TY thread's "nothing changes before Execute" and #XP7N's "an edit before the call is still refused".
+
 ## Done means
-- In plan mode `agent`, `agent_message` and `agent_wait` are no longer refused, on the native batch path and through the guest bridge.
-- A subagent started in plan mode has no `write_file`/`edit_file`, its prompt says it is read-only, and a guest child gets `deny` permissions.
-- Plan mode cannot message (and so resume) a subagent that can write.
-- A read-only survey turn and a card turn still start no subagent; failure shows as a `subagent_started` event in those turns.
+- In plan mode every tool is callable: `write_file`, `edit_file`, `set_keybinding`, board and app writes, `agent`/`agent_message`/`agent_wait` (native and through the guest bridge), and subagents get their ordinary tools.
+- The plan-mode note still tells the agent to investigate without changing anything and finish with `write_plan`.
+- Read-only survey turns and card turns keep their own refusals, and start no subagent through the native batch path (which used to skip `_prepare`).
 
 ## Execution Summary
-Not already fixed: #GMCF had put the three agent tools in `PLAN_BLOCKED_TOOLS`, and since #SBGN removed `explore` there was no read-only type left to make an exception for. The K3TY thread had settled that plan turns should run read-only subagents and deferred it to a separate card; this is that card.
-
-`planning.PLAN_BLOCKED_TOOLS` drops the agent tools and the plan note says subagents are read-only. `SubagentManager.spawn/start_batch/run_tool` take `read_only`; a read-only spawn replaces the definition with one without file writes (which also yields the read-only prompt line and guest `deny`), and `agent_message` from plan mode refuses a writable target. `agent.py` passes `read_only=self.mode == "plan"`, keeps the agent tools in `READONLY_BLOCKED` (it was derived from the plan list), and no longer starts a native batch in a read-only or card turn — that path skipped `_prepare`, so those turns could already spawn before.
+First pass (e5b9eff6) let plan mode delegate to read-only subagents. Per the owner's decision, this pass removes every plan-mode lock: `planning.PLAN_BLOCKED_TOOLS` is gone, `Agent._prepare` no longer refuses board, app or executor tools in plan mode, and `SubagentManager` is back to its pre-#PLDG code. `READONLY_BLOCKED` now lists its write tools itself instead of borrowing the plan list. The batch gate for read-only and card turns from e5b9eff6 stays. Protocol §6 and the `write_file` paragraph say plan mode locks nothing.
 
 ## Tests
-- `tests/test_subagents.py`: `test_plan_mode_delegates_to_read_only_subagents`, `test_a_read_only_turn_starts_no_subagent`
-- `tests/test_guest_delegation.py`: `test_plan_mode_spawns_read_only_children`
-- `tests/test_sessions.py`: `test_plan_mode_keeps_the_subagent_tools_in_the_list_and_allows_them`
-- Also green: test_todo_subagents, test_plan_turns, test_questions, test_agents_defs, test_guest_board_bridge, test_board_chat, test_queue, test_board_turns, test_card_model_selection, test_board_tools.
+- `tests/test_subagents.py`: `test_plan_mode_delegates_like_build_mode`, `test_a_read_only_turn_starts_no_subagent`
+- `tests/test_guest_delegation.py`: `test_plan_mode_spawns_children`, `test_readonly_and_card_scope_cannot_spawn`
+- `tests/test_sessions.py`: `test_plan_mode_tools_and_write_plan` (write_file now runs), `test_exit_plan_mode_switches_to_build_and_enables_edits_in_the_same_turn`, `test_plan_mode_keeps_the_subagent_tools_in_the_list_and_allows_them`
+- `tests/test_app_tools.py`: `test_plan_mode_locks_nothing`; `tests/test_guest_board_bridge.py`: `test_plan_readonly_stop_and_next_turn`
+- Also green: test_todo_subagents, test_plan_turns, test_questions, test_board_turns, test_queue, test_board_chat, test_card_model_selection, test_board_tools, test_agents_defs, test_session_protocol, test_failover, test_hosted, test_customproviders, test_remote_board.

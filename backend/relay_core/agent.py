@@ -37,7 +37,7 @@ from .attachments import image_block, images as image_attachments, replace_image
 from .checkpoints import CheckpointStore
 from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (EXIT_PLAN_MODE_SPEC, validate_exit_args,
-                       PLAN_BLOCKED_TOOLS, PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
+                       PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
 from .roles import GUEST_BASE_SCHEME, RoleResolver, guest_id_of, is_guest_preset
 from .presets import (apply_effort, context_window_for, effort_levels, effort_style, infer_effort,
@@ -551,9 +551,9 @@ def validate_tool_scope(value) -> str:
 #: `BoardTools.readonly` refuses with `board_readonly_turn`).  The survey of a fresh board is the
 #: turn this exists for: it presents what a probe found and offers to import it, and nothing is
 #: written until the owner answers, so the rule is enforced rather than asked for in the brief.
-READONLY_BLOCKED = frozenset(PLAN_BLOCKED_TOOLS) | {
-    "agent", "agent_message", "agent_wait",
-    "run_command", "run_in_terminal", "type_into_program", "write_plan", "exit_plan_mode"}
+READONLY_BLOCKED = frozenset({
+    "write_file", "edit_file", "set_keybinding", "agent", "agent_message", "agent_wait",
+    "run_command", "run_in_terminal", "type_into_program", "write_plan", "exit_plan_mode"})
 
 READONLY_REFUSAL = (
     "This turn writes nothing by design — the owner has not confirmed anything yet. Say what you "
@@ -2174,10 +2174,9 @@ class Agent:
                         self._start_audit(ctx, message.get("content") or "")
                     return
                 # subagents: start every `agent` call of this response together so they run concurrently.
-                # Plan mode starts them read-only (#PLDG). A read-only or card turn starts none here:
-                # without a batch its calls go through `_prepare`, which refuses them.
-                batch = (self.subagents.start_batch(calls, self.max_tool_calls - calls_used,
-                                                    read_only=self.mode == "plan")
+                # A read-only or card turn starts none here: without a batch its calls go through
+                # `_prepare`, which refuses them.
+                batch = (self.subagents.start_batch(calls, self.max_tool_calls - calls_used)
                          if self.subagents is not None and not self.readonly_turn
                          and self.card_turn is None else None)
                 for call in calls:
@@ -2201,8 +2200,7 @@ class Agent:
                                 self.emit({"event": "tool_started", "tool": func["name"], "preview": preview,
                                            "label": tool_labels.started_label(func["name"], label_args),
                                            "turn_id": turn_id, "call_id": call["id"]})
-                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event,
-                                                                 read_only=self.mode == "plan")
+                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
                                 self._autosave_soon()
@@ -3527,15 +3525,11 @@ class Agent:
         if self.board is not None and self.board.handles(name):
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be an object.")
-            if self.mode == "plan" and name in board_tools.WRITE_TOOLS:
-                raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
             return Prepared(name, args, self.board.preview(name, args))
-        for side, writes in ((self.app, app_tools.WRITE_TOOLS), (self.activity, ())):
+        for side in (self.app, self.activity):
             if side is not None and side.handles(name):
                 if not isinstance(args, dict):
                     raise ValueError("Tool arguments must be an object.")
-                if self.mode == "plan" and name in writes:
-                    raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
                 return Prepared(name, args, side.preview(name, args))
         if name == "update_todos" and self._todos_enabled():
             if not isinstance(args, dict):
@@ -3553,8 +3547,6 @@ class Agent:
                 raise ValueError("write_plan is only available in plan mode.")
             title, content = validate_plan_args(args)
             return Prepared(name, {"title": title, "content": content}, f"WRITE PLAN\n\n{self.plans_dir}\n\n{title}")
-        if self.mode == "plan" and name in PLAN_BLOCKED_TOOLS:
-            raise ValueError(f"{name} is not available in plan mode. Investigate, then call write_plan.")
         if self.subagents is not None and self.subagents.handles(name):
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be an object.")
@@ -3564,7 +3556,7 @@ class Agent:
     def _execute(self, prepared: Prepared, turn: dict) -> dict:
         if self.subagents is not None and self.subagents.handles(prepared.name):
             return self.subagents.run_tool(prepared.name, prepared.arguments, None, None,
-                                           self.cancel_event, read_only=self.mode == "plan")
+                                           self.cancel_event)
         if prepared.name == tool_groups.LOAD_TOOLS:
             # The schemas reach the model with the next request's tool list, which `tools()`
             # appends them to: nothing above them moves, which is the whole point (#GMCF 9).

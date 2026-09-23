@@ -80,7 +80,8 @@ class BridgeTests(unittest.TestCase):
         self.active()
         args = {'id':self.card, 'text':'must not write'}
         self.agent.mode = 'plan'
-        self.assertIn('plan mode', self.call('board_comment',args)['error'])
+        # Plan mode locks nothing (#PLDG): the call reaches the board's own validation.
+        self.assertNotIn('plan mode', self.call('board_comment',args)['error'])
         self.agent.mode = 'agent'
         self.tools.readonly = True
         self.assertEqual(self.call('board_comment',args,key='readonly')['code'], 'board_readonly_turn')

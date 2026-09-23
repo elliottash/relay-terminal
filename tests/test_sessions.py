@@ -689,24 +689,24 @@ class PlanModeTests(Base):
         self.assertIn('write_plan', tools)
         self.assertIn('run_command', tools)
         # The tool list is the same in both modes since #GMCF — one that came and went cost the
-        # whole cached prefix — so write_file is still offered here and refused when it is called.
+        # whole cached prefix — and since #PLDG plan mode locks nothing: write_file runs.
         self.assertIn('write_file', tools)
         self.assertIn('edit_file', tools)
         # And plan mode is stated in the turn's Relay context, not in the system prompt.
         self.assertNotIn('PLAN MODE', provider.requests[0][0][0]['content'])
         self.assertIn('PLAN MODE', provider.requests[0][0][-1]['content'])
-        self.assertEqual((self.root / 'a.txt').read_text(), 'keep\n')
+        self.assertEqual((self.root / 'a.txt').read_text(), 'changed')
         written = self.of('plan_written')
         self.assertEqual(len(written), 1)
         path = Path(written[0]['path'])
         self.assertRegex(path.name, r'^\d{4}-\d{2}-\d{2}-\d{4}-refactor-the-parser\.md$')
         self.assertEqual(path.read_text(), '# Refactor the Parser!\n\n## Steps\n1. do it\n')
         results = [e for e in self.of('tool_result')]
-        self.assertIn('not available in plan mode', results[0]['result']['error'])
+        self.assertNotIn('error', results[0]['result'])
 
     def exit_request(self):
         provider = ScriptedProvider([
-            tools_msg(call('write_file', {'path': 'before.txt', 'content': 'blocked'})),
+            tools_msg(call('write_file', {'path': 'before.txt', 'content': 'planned'})),
             tools_msg(call('exit_plan_mode', {'reason': 'The implementation plan is ready.'})),
             tools_msg(call('write_file', {'path': 'after.txt', 'content': 'implemented'})),
             text('Finished.')])
@@ -719,7 +719,7 @@ class PlanModeTests(Base):
         # #XP7N (owner 2026-09-21): the agent decides itself, Warp-style — no ask, the turn
         # continues with build tools.
         agent, provider = self.exit_request()
-        self.assertFalse((self.root / 'before.txt').exists())
+        self.assertEqual((self.root / 'before.txt').read_text(), 'planned')  # plan mode locks nothing (#PLDG)
         self.assertEqual((self.root / 'after.txt').read_text(), 'implemented')
         self.assertEqual(agent.mode, 'build')
         self.assertEqual(self.of('mode_changed'), [{'event': 'mode_changed', 'mode': 'build'}])
@@ -768,7 +768,7 @@ class PlanModeTests(Base):
 
     def test_plan_mode_keeps_the_subagent_tools_in_the_list_and_allows_them(self):
         # The tools stay in the list in both modes — removing one re-prefills the request — and
-        # since #PLDG a plan turn may call them: what it starts is read-only (tests/test_subagents.py).
+        # since #PLDG plan mode locks nothing, so a plan turn may call them.
         class FakeSubagents:
             def tool_specs(self):
                 return [{'type': 'function', 'function': {'name': 'agent', 'parameters': {}}}]

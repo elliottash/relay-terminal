@@ -93,13 +93,9 @@ class DelegationTests(unittest.TestCase):
         self.assertEqual(self.call('agent', args)['code'], 'unavailable')
         self.hub.open('review')
 
-    def test_plan_mode_spawns_read_only_children(self):
-        writer = self.spawn()
+    def test_plan_mode_spawns_children(self):
         self.agent.mode = 'plan'
-        child = self.spawn()
-        self.assertTrue(self.manager._agents[child['id']].read_only)
-        self.assertFalse(self.manager._agents[writer['id']].read_only)
-        self.assertIn('plan mode cannot message', self.call('agent_message', {'id': writer['id'], 'text': 'edit'})['error'])
+        self.assertIn('id', self.spawn())
         self.hub.open('review')
 
     def test_readonly_and_card_scope_cannot_spawn(self):
