@@ -1865,12 +1865,18 @@ class Agent:
             if boundary is not None:
                 self._move_epoch(boundary, result["prefix"])
             self.messages = result["messages"]
-            self.context.invalidate()
-            after, _ = self.context.used(self.messages, tools)
-            # The work moved on enough to rewrite the conversation: the pane title and the session
-            # summary are both owed a refresh.
-            self._title_stale = True
-            self._summary_stale = True
+            if boundary is None and not result["trimmed"]:
+                # The transcript was not rewritten: only the measurement would move (a usage
+                # report back to an estimate), and a "reduction" from that alone is accounting
+                # noise, not compaction (#CP3M).
+                after = before
+            else:
+                self.context.invalidate()
+                after, _ = self.context.used(self.messages, tools)
+                # The work moved on enough to rewrite the conversation: the pane title and the
+                # session summary are both owed a refresh.
+                self._title_stale = True
+                self._summary_stale = True
             event = {"event": "compacted", "reason": reason, "before_tokens": before, "after_tokens": after,
                      "summary_chars": result["summary_chars"], "trimmed_tool_outputs": result["trimmed"]}
             if result.get("carried") is not None:
@@ -1927,6 +1933,11 @@ class Agent:
                 item["locations"][new] = index + shift
         self.epoch += 1
 
+    def _guest_harness(self) -> bool:
+        """The turn is served by an injected guest harness (protocol 29.3), which keeps its own
+        context and reports turn-aggregate usage rather than one request's prompt (#CP3M)."""
+        return self._injected_provider and not getattr(self.provider, "serves_side_calls", True)
+
     def _maybe_compact(self) -> None:
         if not self.context.over(self.messages, self.tools()):
             return
@@ -1934,7 +1945,7 @@ class Agent:
         # record of it. With no summaries role of its own, an automatic compaction would ask the
         # harness for a summary it never writes and fail the turn on an empty one — so it is not
         # attempted, and the transcript simply grows.
-        if self._injected_provider and not getattr(self.provider, "serves_side_calls", True):
+        if self._guest_harness():
             resolved = self.roles.resolve("summaries") if self.roles is not None else None
             if resolved is None or resolved.is_main:
                 return
@@ -2146,7 +2157,11 @@ class Agent:
                 self._close_thinking(record)
                 add(message)
                 self._autosave_soon()
-                if self._last_usage:
+                # A guest harness reports the turn's aggregate (every request the guest made,
+                # summed), not one request's prompt: recording it as the tracker's single-call
+                # measurement inflates `used()` towards the sum and calibrates the estimate ratio
+                # up to 4x (#CP3M). Session totals still count it (`_provider_emit`).
+                if self._last_usage and not self._guest_harness():
                     self.context.record_usage(self._last_usage, self.messages, self.tools())
                 self.emit(self.context_event())
                 calls = message.get("tool_calls", [])

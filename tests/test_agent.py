@@ -673,3 +673,69 @@ class LoopAndRecitationTests(unittest.TestCase):
         sub.ask('read all of them')
         self.assertEqual(self.of(events, 'recitation'), [])
         self.assertEqual([m for m in sub.messages if m.get('relay_kind') == 'recitation'], [])
+
+
+class GuestAggregateUsageTests(unittest.TestCase):
+    """#CP3M: a guest harness reports the turn's aggregate (every request it made, summed),
+    which is a usage total — never one request's prompt, so never the context measurement."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
+    def tearDown(self): self.temp.cleanup()
+
+    def test_guest_turn_aggregate_never_becomes_the_context_measurement(self):
+        class GuestProvider:
+            serves_side_calls = False
+            def complete(self, messages, tools, emit, cancel):
+                emit({'event':'usage','usage':{'prompt_tokens':3_100_000,'completion_tokens':5_465,
+                                               'total_tokens':3_105_465,
+                                               'guest_context_tokens':181_959,
+                                               'guest_context_window':258_400}})
+                emit({'event':'delta','text':'Done.'})
+                return {'role':'assistant','content':'Done.'}
+            def cancel(self): pass
+        events=[]
+        agent = Agent(CONFIG, self.temp.name, events.append, provider=GuestProvider())
+        agent.ask('do it')
+        # The aggregate still counts toward the session's usage totals…
+        self.assertEqual(agent.usage_totals['total_tokens'], 3_105_465)
+        # …but the tracker never took it as one request's prompt: no recorded measurement,
+        # no 4x-calibrated estimate ratio, and `used` stays an estimate of the transcript.
+        self.assertIsNone(agent.context._usage_tokens)
+        self.assertEqual(agent.context.ratio, 1.0)
+        used, estimated = agent.context.used(agent.messages, [])
+        self.assertTrue(estimated)
+        self.assertLess(used, 10_000)
+
+    def test_relay_provider_usage_still_calibrates_the_tracker(self):
+        class UsageProvider:
+            def complete(self, messages, tools, emit, cancel):
+                emit({'event':'usage','usage':{'prompt_tokens':5_000,'completion_tokens':100,
+                                               'total_tokens':5_100}})
+                emit({'event':'delta','text':'Done.'})
+                return {'role':'assistant','content':'Done.'}
+            def cancel(self): pass
+        events=[]
+        agent = Agent(CONFIG, self.temp.name, events.append, provider=UsageProvider())
+        agent.ask('do it')
+        self.assertEqual(agent.context._usage_tokens, 5_100)
+
+    def test_unchanged_transcript_reports_no_reduction(self):
+        class UsageProvider:
+            def complete(self, messages, tools, emit, cancel):
+                emit({'event':'usage','usage':{'prompt_tokens':5_000,'completion_tokens':100,
+                                               'total_tokens':5_100}})
+                emit({'event':'delta','text':'Done.'})
+                return {'role':'assistant','content':'Done.'}
+            def cancel(self): pass
+        events=[]
+        agent = Agent(CONFIG, self.temp.name, events.append, provider=UsageProvider())
+        agent.ask('one short turn')
+        before_messages = [dict(m) for m in agent.messages]
+        event = agent.compact('manual')
+        self.assertEqual(event['summary_chars'], 0)
+        self.assertEqual(event['trimmed_tool_outputs'], 0)
+        self.assertEqual(event['before_tokens'], event['after_tokens'])
+        self.assertEqual(agent.messages, before_messages)
+        # The tracker was not invalidated: the usage measurement is still the basis.
+        self.assertEqual(agent.context._usage_tokens, 5_100)
