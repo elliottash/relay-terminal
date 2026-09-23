@@ -284,8 +284,7 @@ a program owns the terminal under the default `program_keys: "shift-only"`.
 - **Super combos:** none of the presets use Super/Meta. GNOME and Plasma reserve most of them (overview, tiling, workspaces), so keep presets free of Meta.
 - **Ctrl+Alt+Del, Ctrl+Alt+Backspace, Ctrl+Alt+F1–F12** (session, VT): not used.
 
-Card #P7SJ put Projects, Sessions and Globals in one shared pane on Ctrl+Shift+P, Y and G. Since
-#QWAS (2026-09-22) that pane has direct keys for Sessions and Projects in every preset: Ctrl+Shift+S and Ctrl+Shift+P;
-`projects.open` has Ctrl+Shift+P; `agent.resume` has no Relay default key (Warp keeps Ctrl+Shift+Y);
-`globals.open` is Ctrl+Shift+G. Ctrl+? opens Actions/help everywhere. Pane screenshot capture is unbound by
-default. Explicit user overrides still take precedence.
+Card #P7SJ put Projects, Sessions and Globals in one shared pane. The 2026-09-23 revision gives
+Sessions Ctrl+Shift+S and Projects Ctrl+Shift+P in every preset. `agent.resume` has no Relay
+default key (Warp keeps Ctrl+Shift+Y); Globals keeps Ctrl+Shift+G. Ctrl+? opens Actions/help.
+Pane screenshot capture is unbound by default. Explicit user overrides still take precedence.
