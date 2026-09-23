@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TerminalSession.h"
 
+#include "core/InlineImage.h"
+
 #include <QMetaObject>
 #include <QPointer>
 
@@ -72,6 +74,28 @@ TerminalSession::TerminalSession(const QString &coreName, QObject *parent)
     };
     ev.notification = [this](const QString &t, const QString &b) { pushEvent({Event::Notify, t, b, {}, 0, 0}); };
 
+    // Both run with m_mutex held, inside feed.
+    auto screen = [this] {
+        const CursorState cursor = m_core->activeCursor();
+        ImageProtocol::Screen s;
+        s.cursorRow = cursor.row;
+        s.cursorCol = cursor.col;
+        s.rows = m_rows;
+        s.columns = m_cols;
+        s.cellPixels = QSize(m_cellWidthPx, m_cellHeightPx);
+        s.altScreen = m_core->altScreen();
+        return s;
+    };
+    for (ImageProtocol *images : {&m_ptyImages, &m_displayImages}) {
+        images->output = [this](const char *d, size_t n) { feedWithInputGaps(d, n); };
+        images->screen = screen;
+    }
+    // Kitty's replies (a=q support probes, OK / errors) go the way the core's own replies do.
+    m_ptyImages.reply = [this](const char *d, size_t n) {
+        if (m_core->events.reply)
+            m_core->events.reply(d, n);
+    };
+
     m_displayRetry.setSingleShot(true);
     m_displayRetry.setInterval(20);
     connect(&m_displayRetry, &QTimer::timeout, this, [this] {
@@ -101,7 +125,7 @@ void TerminalSession::flushDisplayQueue(bool force)
 {
     if (m_pendingDisplay.isEmpty() || (!force && !m_core->atGround()))
         return;
-    feedWithInputGaps(m_pendingDisplay.constData(), size_t(m_pendingDisplay.size()));
+    m_displayImages.feed(m_pendingDisplay.constData(), size_t(m_pendingDisplay.size()));
     m_pendingDisplay.clear();
     m_pendingDisplaySince.invalidate();
 }
@@ -146,6 +170,7 @@ bool TerminalSession::start(const StartOptions &o)
         m_pty.reset();
         return false;
     }
+    inlineimage::pruneImageCache(); // once per session, never per image
     return true;
 }
 
@@ -166,7 +191,7 @@ void TerminalSession::onPtyOutput(const char *data, size_t len)
     m_bytes.fetch_add(len);
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        feedWithInputGaps(data, len);
+        m_ptyImages.feed(data, len);
         if (!m_pendingDisplay.isEmpty())
             flushDisplayQueue(false);
         if (m_outputSignal.load() && m_pendingOutput.size() < (64 << 20))
@@ -266,6 +291,10 @@ void TerminalSession::resize(int rows, int cols, int cellWidthPx, int cellHeight
         m_core->resize(rows, cols, cellWidthPx, cellHeightPx);
         m_rows = rows;
         m_cols = cols;
+        if (cellWidthPx > 0 && cellHeightPx > 0) {
+            m_cellWidthPx = cellWidthPx;
+            m_cellHeightPx = cellHeightPx;
+        }
     }
     if (m_holdPtyResize) {
         m_ptyResizePending = true;

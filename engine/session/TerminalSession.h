@@ -10,6 +10,7 @@
 
 #include "core/VtCore.h"
 #include "core/SequenceScanner.h"
+#include "session/ImageProtocol.h"
 #include "pty/Pty.h"
 
 #include <QElapsedTimer>
@@ -126,6 +127,11 @@ private:
 
     std::unique_ptr<VtCore> m_core;
     SequenceScanner m_inputGapScanner{true};
+    // Inline images (kitty, iTerm2, sixel) are taken out of the stream here and fed to the core as
+    // image rows (core/InlineImage.h). One per source, so an image the program is half way
+    // through sending never swallows Relay's own writes; only the program's gets replies.
+    ImageProtocol m_ptyImages;     // guarded by m_mutex
+    ImageProtocol m_displayImages; // guarded by m_mutex
     std::unique_ptr<Pty> m_pty;
     mutable std::mutex m_mutex;
     mutable std::atomic<int> m_guiWaiting{0};
@@ -150,6 +156,7 @@ private:
     QString m_error;
     int m_rows = 24;
     int m_cols = 80;
+    int m_cellWidthPx = 8, m_cellHeightPx = 16; // last resize(), guarded by m_mutex
     bool m_holdPtyResize = false;
     bool m_ptyResizePending = false;
     int m_pendingPixelWidth = 0, m_pendingPixelHeight = 0;
