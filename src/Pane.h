@@ -12121,6 +12121,9 @@ private:
                     status(QStringLiteral("%1 is this pane's agent; it starts on your first prompt.")
                                .arg(guestName(guest)));
                     changed();
+                    // Board Run may have handed this new pane its first task before presets
+                    // arrived. That task is the first prompt, so start the held harness now.
+                    if (!m_boardTask.isEmpty()) startDeferred();
                     return;
                 }
                 configurePreset(choice, false, startModel);
@@ -13124,7 +13127,8 @@ public:
         m_boardTask = text; m_boardTaskCard = cardId;
         refreshCardChip();   // the header names the card from the moment it is handed (#C7PF)
         if (m_configured) runBoardTask();
-        else status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
+        else if (m_configuring || !startDeferred())
+            status(QStringLiteral("#%1 is handed to this pane; the agent starts on it when it is ready.").arg(cardId));
     }
 
     // Verify (#T71W) hands a card to Claude Code or Codex. The same door the model picker uses:
