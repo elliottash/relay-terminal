@@ -6,13 +6,14 @@
 //
 // A frameless overlay parented to a top-level window, centred horizontally near the top, about
 // 800 px wide and never taller than 60% of the window. The search box sits at the centre of
-// three fixed group arms (Agent/Models/Sessions above, Panes/Files/Board left,
+// three fixed group arms (Agent/Models/Sessions in a horizontal row above, Panes/Files/Board left,
 // Terminal/Remote/Options right), with results below. Each group drops a QMenu. Catalog sections
 // that are not yet assigned to an arm remain reachable under Options; narrow windows stack the
 // arms as rows. Typing searches every item, including submenu children and `/slash` spellings.
 //
-// Keys: Down enters results; Up/Left/Right enter the corresponding arm from search (Left/Right
-// only at a text edge). Repeating a direction moves outward. Enter runs a result or opens a group;
+// Keys: Down enters results; Up enters Models, and Left/Right traverse the top row. From search,
+// Left/Right enter the corresponding side arm only at a text edge. Repeating a side-arm direction
+// moves outward. Enter runs a result or opens a group;
 // Ctrl+Enter runs a result and stays open. Tab walks groups, and typing from a group returns to
 // search. Esc on a group goes home. Esc in search leaves a submenu first,
 // then closes. A click anywhere else in the window closes it, and so does `toggle()` — the

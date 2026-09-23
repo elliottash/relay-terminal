@@ -222,7 +222,7 @@ private slots:
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);   // returns home from the first result
         QCOMPARE(m_palette->currentKey(), QStringLiteral("files.open"));
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);   // from home, enter the upper arm
-        QTRY_VERIFY(m_palette->groupButtons().at(0)->hasFocus());
+        QTRY_VERIFY(m_palette->groupButtons().at(1)->hasFocus());
     }
 
     void typingFindsByLabelStart()
@@ -349,7 +349,7 @@ private slots:
         QTRY_VERIFY(buttons.at(0)->hasFocus());
         QTest::keyClick(buttons.at(0), Qt::Key_Tab);
         QTRY_VERIFY(buttons.at(1)->hasFocus());
-        QTest::keyClick(buttons.at(1), Qt::Key_Left);
+        QTest::keyClick(buttons.at(1), Qt::Key_Tab);
         QTRY_VERIFY(buttons.at(2)->hasFocus());
         QTest::keyClick(buttons.at(2), Qt::Key_Escape);   // back to the search box, still open
         QVERIFY(m_palette->isOpen());
@@ -374,11 +374,20 @@ private slots:
         QCOMPARE(labelOf(options->actions().at(1)), QStringLiteral("Surprise plugin"));
         QLineEdit *search = m_palette->searchBox();
         QTest::keyClick(search, Qt::Key_Up);
-        QTRY_VERIFY(buttons.at(0)->hasFocus());
-        QTest::keyClick(buttons.at(0), Qt::Key_Up);
         QTRY_VERIFY(buttons.at(1)->hasFocus());
-        QTest::keyClick(buttons.at(1), Qt::Key_Up);
+        const QPoint agent = buttons.at(0)->mapTo(m_palette, buttons.at(0)->rect().center());
+        const QPoint models = buttons.at(1)->mapTo(m_palette, buttons.at(1)->rect().center());
+        const QPoint sessions = buttons.at(2)->mapTo(m_palette, buttons.at(2)->rect().center());
+        QVERIFY(agent.x() < models.x() && models.x() < sessions.x());
+        QVERIFY(qAbs(agent.y() - models.y()) <= 2 && qAbs(models.y() - sessions.y()) <= 2);
+        QTest::keyClick(buttons.at(1), Qt::Key_Left);
+        QTRY_VERIFY(buttons.at(0)->hasFocus());
+        QTest::keyClick(buttons.at(0), Qt::Key_Right);
+        QTRY_VERIFY(buttons.at(1)->hasFocus());
+        QTest::keyClick(buttons.at(1), Qt::Key_Right);
         QTRY_VERIFY(buttons.at(2)->hasFocus());
+        QTest::keyClick(buttons.at(2), Qt::Key_Right);
+        QVERIFY(buttons.at(2)->hasFocus());
         QTest::keyClick(buttons.at(2), Qt::Key_Escape);
         QTRY_VERIFY(search->hasFocus());
 

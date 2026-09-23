@@ -402,19 +402,30 @@ void ActionPalette::applyPalette()
     // The window's palette, read at open time: Relay's theme writes its tokens into it, and a
     // theme picked since the last open shows at the next one.
     const QPalette pal = m_window ? m_window->palette() : palette();
+    const QColor panel = pal.color(QPalette::AlternateBase);
+    const QColor accent = pal.color(QPalette::Highlight);
+    const auto blend = [](const QColor &base, const QColor &top, int topWeight) {
+        return QColor::fromRgb((base.red() * (100 - topWeight) + top.red() * topWeight) / 100,
+                               (base.green() * (100 - topWeight) + top.green() * topWeight) / 100,
+                               (base.blue() * (100 - topWeight) + top.blue() * topWeight) / 100);
+    };
+    const QColor buttonFill = blend(panel, accent, 18);
+    const QColor buttonBorder = blend(panel, accent, 55);
+    const QColor buttonHover = blend(panel, accent, 28);
     setPalette(pal);
     setStyleSheet(QStringLiteral(
                       "QFrame#actionPalette { background: %1; border: 1px solid %2; border-radius: 8px; }"
                       "QLineEdit#actionPaletteSearch { background: %3; color: %4; border: 1px solid %2;"
                       " border-radius: 5px; padding: 6px 8px; }"
                       "QLineEdit#actionPaletteSearch:focus { border-color: %5; }"
-                      "QToolButton#actionPaletteGroup { background: %1; color: %6; border: 1px solid %2;"
-                      " border-radius: 10px; padding: 2px 5px; }"
-                      "QToolButton#actionPaletteGroup:hover, QToolButton#actionPaletteGroup:focus { color: %4; border-color: %5; }"
+                      "QToolButton#actionPaletteGroup { background: %6; color: %4; border: 1px solid %7;"
+                      " border-radius: 4px; padding: 5px 6px; font-weight: 600; }"
+                      "QToolButton#actionPaletteGroup:hover, QToolButton#actionPaletteGroup:focus {"
+                      " background: %8; border-color: %5; }"
                       "QListWidget#actionPaletteList { background: transparent; color: %4; border: none; outline: none; }")
                       .arg(pal.color(QPalette::AlternateBase).name(), pal.color(QPalette::Mid).name(),
                            pal.color(QPalette::Base).name(), pal.color(QPalette::Text).name(),
-                           pal.color(QPalette::Highlight).name(), pal.color(QPalette::PlaceholderText).name()));
+                           accent.name(), buttonFill.name(), buttonBorder.name(), buttonHover.name()));
     static_cast<RowDelegate *>(m_delegate)->colors = pal;
 }
 
@@ -447,7 +458,7 @@ void ActionPalette::rebuildButtons()
     m_buttonWidth = -1;
 }
 
-// Three arms meet at the search box. At narrow widths they become three labelled rows.
+// Three arms meet at the search box. The top arm is horizontal at every width.
 void ActionPalette::layoutButtons(int width)
 {
     if (width == m_buttonWidth && m_buttonGrid->count() > 0) return;
@@ -464,7 +475,7 @@ void ActionPalette::layoutButtons(int width)
         m_buttonGrid->addWidget(m_search, 3, 3, 1, 3);
         for (int i = 0; i < m_buttons.size(); ++i) {
             const int group = m_groupIds.at(i);
-            if (group < 3) m_buttonGrid->addWidget(m_buttons.at(i), 2 - group, 3, 1, 3, Qt::AlignHCenter);
+            if (group < 3) m_buttonGrid->addWidget(m_buttons.at(i), 2, 3 + group);
             else if (group < 6) m_buttonGrid->addWidget(m_buttons.at(i), 3, 2 - (group - 3));
             else m_buttonGrid->addWidget(m_buttons.at(i), 3, 6 + group - 6);
         }
@@ -920,7 +931,12 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
     if (onSearch) {
         switch (key->key()) {
         case Qt::Key_Up:
-            if (!m_inResults) { const int i = buttonInDirection(0); if (i >= 0) focusButton(i); return true; }
+            if (!m_inResults) {
+                int i = m_groupIds.indexOf(1); // Models is the middle of the horizontal top row.
+                if (i < 0) i = buttonInDirection(0);
+                if (i >= 0) focusButton(i);
+                return true;
+            }
             for (int i = 0; i < m_rows.size(); ++i) {
                 if (!m_rows.at(i).header.isEmpty()) continue;
                 if (m_list->currentRow() == i) m_inResults = false;
@@ -974,6 +990,15 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
     case Qt::Key_Up:
     case Qt::Key_Left:
     case Qt::Key_Right: {
+        if (armOf(index) == 0) {
+            // The Up arm is a row: Left and Right stay in that row, even at its ends.
+            const int step = key->key() == Qt::Key_Left ? -1 : key->key() == Qt::Key_Right ? 1 : 0;
+            if (step != 0) {
+                const int next = index + step;
+                if (next >= 0 && next < m_buttons.size() && armOf(next) == 0) focusButton(next);
+            }
+            return true;
+        }
         const int direction = key->key() == Qt::Key_Up ? 0 : key->key() == Qt::Key_Left ? 1 : 2;
         if (armOf(index) == direction) {
             const int next = buttonInDirection(direction, index);
@@ -984,7 +1009,8 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
             if (inner >= 0) focusButton(inner);
             else m_search->setFocus(Qt::OtherFocusReason);
         } else {
-            const int next = buttonInDirection(direction);
+            int next = direction == 0 ? m_groupIds.indexOf(1) : -1;
+            if (next < 0) next = buttonInDirection(direction);
             if (next >= 0) focusButton(next);
         }
         return true;
