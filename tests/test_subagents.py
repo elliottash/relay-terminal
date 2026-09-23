@@ -706,3 +706,132 @@ class SubagentPromptTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ModelChoiceTests(unittest.TestCase):
+    """#0C0V step 5: the delegating model picks per task (`flash`, `main`, `high`); with none named, a
+    read-only definition runs on the Flash role and any other on Main, unless the user set the
+    `subagent` role, which wins."""
+
+    KIMI = ProviderConfig('https://api.moonshot.ai/v1', 'kimi-k3', 'kimi-key', {'reasoning_effort': 'high'})
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.reader = AgentDefinition('reader', 'Reads', 'Read.', READ_ONLY_TOOLS, read_only=True)
+        self.general = load_catalog(self.temp.name, []).get('general')
+
+    def factory(self, roles=None, keys=('kimi',), tiers=None):
+        from relay_core.roles import RoleResolver, validate_roles
+        store = {name: f'{name}-key' for name in keys}
+        made = RoleResolver(self.KIMI, 'kimi', validate_roles(roles), key_lookup=lambda p: store.get(p, ''),
+                            main_effort='high', tiers=tiers)
+        return SubagentFactory(self.KIMI, self.temp.name, preset_id='kimi', key_lookup=lambda p: store.get(p, ''),
+                               roles=made, provider_factory=lambda config: config)
+
+    def test_read_only_defaults_to_flash_and_other_to_main(self):
+        factory = self.factory()
+        config, preset, tier = factory.choose(None, [], self.reader)
+        self.assertEqual((preset, config.model, tier), ('kimi', 'kimi-k2.7-code-highspeed', 'flash'))
+        config, preset, tier = factory.choose(None, [], self.general)
+        self.assertEqual((config, tier), (self.KIMI, 'main'))
+
+    def test_a_definition_without_write_tools_counts_as_read_only(self):
+        looker = AgentDefinition('looker', 'Looks', 'Look.', ('read_file', 'list_directory', 'run_command'))
+        self.assertTrue(looker.reads_only)
+        self.assertFalse(self.general.reads_only)
+        self.assertEqual(self.factory().choose(None, [], looker)[2], 'flash')
+
+    def test_the_subagent_role_overrides_both_defaults(self):
+        factory = self.factory({'subagent': {'preset': 'glm'}}, keys=('kimi', 'glm'))
+        for definition in (self.reader, self.general):
+            config, preset = factory.resolve(None, [], definition)
+            self.assertEqual((preset, config.model), ('glm', 'glm-5.3'))
+
+    def test_a_named_model_wins_over_the_default(self):
+        factory = self.factory({'subagent': {'preset': 'glm'}}, keys=('kimi', 'glm'))
+        config, _preset, tier = factory.choose('main', [], self.reader)
+        self.assertEqual((config, tier), (self.KIMI, 'main'))
+        config, preset, tier = factory.choose('flash', [], self.general)
+        self.assertEqual((config.model, tier), ('kimi-k2.7-code-highspeed', 'flash'))
+        config, preset, tier = factory.choose('high', [], self.reader)
+        self.assertEqual((preset, config.model, tier), ('kimi', 'kimi-k3', 'high'))
+
+    def test_the_tier_words_resolve_without_roles(self):
+        factory = SubagentFactory(self.KIMI, self.temp.name, preset_id='kimi')
+        for word in ('flash', 'main', 'high', 'inherit'):
+            warnings = []
+            self.assertIs(factory.resolve(word, warnings)[0], self.KIMI, word)
+            self.assertEqual(warnings, [], word)
+        self.assertIs(factory.resolve(None, [], self.reader)[0], self.KIMI)
+
+    def test_a_tier_with_no_keyed_preset_falls_back_to_main(self):
+        # The High list names a model whose provider has no stored key: the child runs on main.
+        factory = self.factory(tiers={'high': [{'preset': 'openrouter', 'model': 'x/y'}]})
+        config, _preset, _tier = factory.choose('high', [], self.general)
+        self.assertEqual(config.model, 'kimi-k3')
+
+    def test_spawn_passes_no_model_when_none_is_named(self):
+        seen = []
+        manager = SubagentManager(lambda e: None)
+        manager.configure(load_catalog(self.temp.name, []),
+                          lambda definition, model, effort, emit, agent_id: (
+                              seen.append(model) or (_Idle(), 'm', [])))
+        manager._start_thread = lambda sub, text: None
+        manager.spawn({'description': 'a', 'prompt': 'p', 'subagent_type': 'general'})
+        manager.spawn({'description': 'b', 'prompt': 'p', 'subagent_type': 'general', 'model': 'flash'})
+        self.assertEqual(seen, [None, 'flash'])
+
+
+class _Idle:
+    """A subagent's agent that is never run: spawn needs one to bind, shutdown to stop."""
+    messages = []
+    inbox = None
+    models_used = []
+    usage_totals = None
+
+    def stop(self):
+        pass
+
+
+class BatchNoteTests(unittest.TestCase):
+    """#0C0V step 5: three or more children started by one step are announced with their models."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.events = []
+        self.manager = SubagentManager(self.events.append)
+        self.addCleanup(self.manager.shutdown)
+        self.tiers = {}
+
+        def factory(definition, model, effort, emit, agent_id):
+            self.tiers[agent_id] = model or 'main'
+            return _Idle(), f'model-{model or "main"}', []
+        factory.tiers = self.tiers
+        self.manager.configure(load_catalog(self.temp.name, []), factory)
+        self.manager._start_thread = lambda sub, text: None
+
+    def batch(self, *models):
+        return self.manager.start_batch(
+            [call('agent', {'description': f'd{i}', 'prompt': 'p', 'subagent_type': 'general',
+                            **({'model': m} if m else {})}, f'c{i}') for i, m in enumerate(models)], 99)
+
+    def notes(self):
+        return [e for e in self.events if e['event'] == 'subagent_batch']
+
+    def test_three_children_are_listed_with_their_models(self):
+        self.batch('flash', None, 'high')
+        note, = self.notes()
+        self.assertEqual(note['models'], ['model-flash', 'model-main', 'model-high'])
+        self.assertEqual(note['tiers'], ['flash', 'main', 'high'])
+        self.assertEqual(len(note['ids']), 3)
+        self.assertNotIn('warning', note)
+
+    def test_all_high_warns(self):
+        self.batch('high', 'high', 'high')
+        self.assertIn('High tier', self.notes()[0]['warning'])
+
+    def test_two_children_get_no_note(self):
+        self.batch('high', 'high')
+        self.assertEqual(self.notes(), [])

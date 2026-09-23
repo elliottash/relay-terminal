@@ -22,7 +22,7 @@ from . import (alias_import, aliases, attachments, conv_index, customproviders,
                planning, suggestions, titles)
 from .agent import validate_turn_options
 from .requests import check_ledger_id
-from .context import validate_threshold, validate_window
+from .context import validate_over_tokens, validate_threshold, validate_window
 from .presets import (PRESETS, match_preset, model_name, resolve_preset, validate_effort,
                       model_efforts, effort_style, effort_levels)
 from .provider import AUTOMATIC_OUTPUT_TOKENS, ProviderConfig, ProviderError
@@ -178,6 +178,7 @@ def agent_options(request: dict, workspace: str) -> dict:
     return {"preset_id": request.get("preset") if isinstance(request.get("preset"), str) else None,
             "context_window": validate_window(window) if window is not None else None,
             "compact_threshold": validate_threshold(threshold) if threshold is not None else None,
+            "compact_over_tokens": validate_over_tokens(request.get("compact_over_tokens")),
             "effort": validate_effort(effort) if effort is not None else None,
             "session_dir": session_dir,
             "plans_dir": _abs_dir(request.get("plans_dir"), "plans_dir"),
@@ -187,6 +188,7 @@ def agent_options(request: dict, workspace: str) -> dict:
 
 def configured_fields(agent) -> dict:
     fields = {"context_window": agent.context.window, "compact_threshold": agent.context.threshold,
+              "compact_over_tokens": agent.compact_over_tokens,
               "limit_tokens": agent.context.limit, "effort": agent.effort, "mode": agent.mode,
               "instructions": list(agent.instructions.loaded) if agent.instructions else [],
               "session_id": agent.session_id, "plans_dir": str(agent.plans_dir),

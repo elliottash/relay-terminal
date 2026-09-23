@@ -48,6 +48,8 @@ from . import sessions as session_files
 from .tools import ToolExecutor, spec
 
 MAX_CONCURRENT = 4
+# A step that starts this many subagents at once gets a `subagent_batch` note (#0C0V step 5).
+BATCH_NOTE_MIN = 3
 MAX_LIVE = 16
 MAX_AUTO_TURNS = 50   # automatic main turns in a row without user input; 0 = unlimited
 
@@ -180,6 +182,9 @@ class SubagentFactory:
         # settings (owner, 2026-09-19), read at spawn time so a set_agent_options that arrives
         # while a subagent is queued reaches it too.
         self.main_agent = main_agent
+        # agent id -> the tier its model came from ("high", "main", "flash"...; None when unknown),
+        # read by the manager's batch note (#0C0V step 5).
+        self.tiers: dict[str, str | None] = {}
 
     def failover_options(self) -> dict:
         """The failover switch, the priority list and the OpenRouter opt-in a new subagent
@@ -198,15 +203,47 @@ class SubagentFactory:
                 "failover_openrouter": getattr(main, "failover_openrouter", None)}
 
     def base(self) -> tuple[ProviderConfig, str | None]:
-        """The config a subagent that does not name a model uses: the "subagent" role, else main."""
+        """The config `inherit`, and a named model that cannot run, fall back to: the "subagent"
+        role, else main."""
         if self.roles is not None:
             resolved = self.roles.choose_role("subagent")
             if not resolved.is_main:
                 return resolved.config, resolved.preset_id
         return self.config, self.preset_id
 
-    def resolve(self, model: str | None, warnings: list[str]) -> tuple[ProviderConfig, str | None]:
-        spec_ = (model or "inherit").strip() or "inherit"
+    def default(self, definition: AgentDefinition | None) -> tuple[ProviderConfig, str | None, str | None]:
+        """(config, preset, tier) for a subagent that names no model (#0C0V step 5). The user's
+        `subagent` role, when set, is their explicit choice and wins; otherwise a read-only
+        definition (`AgentDefinition.reads_only`) runs on the Flash role — search, reading and
+        checking — and any other on Main."""
+        if self.roles is not None:
+            if self.subagent_role_set():
+                resolved = self.roles.choose_role("subagent")
+                return resolved.config, resolved.preset_id, self._tier_of(resolved)
+            if definition is not None and definition.reads_only:
+                resolved = self.roles.choose_role("flash")
+                return resolved.config, resolved.preset_id, self._tier_of(resolved)
+        return self.config, self.preset_id, "main"
+
+    def subagent_role_set(self) -> bool:
+        return bool((getattr(self.roles, "roles", None) or {}).get("subagent"))
+
+    @staticmethod
+    def _tier_of(resolved) -> str | None:
+        return "main" if resolved.is_main else resolved.tier
+
+    def resolve(self, model: str | None, warnings: list[str],
+                definition: AgentDefinition | None = None) -> tuple[ProviderConfig, str | None]:
+        config, preset_id, _tier = self.choose(model, warnings, definition)
+        return config, preset_id
+
+    def choose(self, model: str | None, warnings: list[str],
+               definition: AgentDefinition | None = None) -> tuple[ProviderConfig, str | None, str | None]:
+        """(config, preset, tier). ``model`` None: the default for ``definition`` (`default`).
+        ``tier`` is the High/Main/Flash/Lite/Local tier the model came from, None when unknown."""
+        if model is None or not model.strip():
+            return self.default(definition)
+        spec_ = model.strip()
         # With roles configured, a role name ("flash", "chores", ...) picks that role's model unless
         # the user aliased the name to something else. Definitions written before 2026-09-18 say
         # "fast"; canonical_role keeps those working (roles.DEPRECATED_ROLES).
@@ -214,30 +251,42 @@ class SubagentFactory:
         if self.roles is not None and role_spec in ROLES and spec_.lower() not in self.user_aliases:
             resolved = (self.roles.choose_role(role_spec) if role_spec == "subagent"
                         else self.roles.resolve(role_spec))
-            return resolved.config, resolved.preset_id
+            return resolved.config, resolved.preset_id, self._tier_of(resolved)
         base_config, base_preset = self.base()
+        base = base_config, base_preset, self._named_tier(base_config, base_preset)
         spec_ = self.aliases.get(spec_.lower(), spec_)
         if spec_ == "inherit" or spec_ == base_config.model:
-            return base_config, base_preset
+            return base
         preset = PRESETS.get(spec_)
         if preset is None:
             preset = next((p for p in PRESETS.values()
                            if spec_ == p.model or spec_.endswith("/" + p.model) or spec_ == f"{p.id}/{p.model}"), None)
         if preset is None:
             warnings.append(f"model {spec_!r} is not a Relay preset; using the main model")
-            return base_config, base_preset
+            return base
         if preset.id == base_preset:
-            return base_config, base_preset
+            return base
         key = self.key_lookup(preset.id) if self.key_lookup else ""
         if not key:
             warnings.append(f"no stored key for preset {preset.id!r}; using the main model")
-            return base_config, base_preset
-        return ProviderConfig(preset.base_url, preset.model, key, dict(preset.extra), self.config.max_tokens), preset.id
+            return base
+        config = ProviderConfig(preset.base_url, preset.model, key, dict(preset.extra), self.config.max_tokens)
+        return config, preset.id, self._named_tier(config, preset.id)
+
+    def _named_tier(self, config: ProviderConfig, preset_id: str | None) -> str | None:
+        """The tier list that names (preset, model), "main" for the pane's own Main model."""
+        if config is self.config:
+            return "main"
+        naming = getattr(self.roles, "naming_tier", None)
+        return naming(preset_id, config.model) if callable(naming) else None
 
     def __call__(self, definition: AgentDefinition, model: str | None, effort: str | None,
                  emit: Callable[[dict], None], agent_id: str):
         warnings: list[str] = []
-        config, preset_id = self.resolve(model, warnings)
+        config, preset_id, tier = self.choose(model, warnings, definition)
+        self.tiers[agent_id] = tier
+        for stale in list(self.tiers)[:-64]:
+            del self.tiers[stale]
         if effort:
             extra = effort_extra(preset_id, config.extra, effort)
             if extra is None:
@@ -258,9 +307,10 @@ class SubagentFactory:
         # presets are keyed and refuses every move, which is why a subagent never failed over.
         # An injected provider (the tests' factory, a guest harness) is still never replaced:
         # `Agent._injected_provider` refuses the swap, as it refuses `set_model`'s.
-        spec = (model or "inherit").strip().lower()
+        spec = (model or "").strip().lower()
         ranked = []
-        if spec in ("inherit", "subagent") and spec not in self.user_aliases and self.roles is not None:
+        on_role = spec in ("inherit", "subagent") or (not spec and self.subagent_role_set())
+        if on_role and spec not in self.user_aliases and self.roles is not None:
             ranked = (getattr(self.roles, "roles", {}).get("subagent") or {}).get("candidates") or []
         agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
                       max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False,
@@ -437,7 +487,8 @@ def delegation_tool_specs(catalog=None, max_concurrent=MAX_CONCURRENT) -> list[d
               "prompt": {"type": "string", "description": "Complete, self-contained task"},
               "subagent_type": {"type": "string", "description": "One of the listed types; default general"},
               "background": {"type": "boolean"},
-              "model": {"type": "string", "description": "Optional: inherit, a Relay preset id, or an alias"},
+              "model": {"type": "string", "description": "flash for search, reading, summarising, checking; "
+                        "main for implementation; high for hard reasoning. Omit for the default."},
               "effort": {"type": "string", "enum": list(EFFORTS)},
               "todo_id": {"type": "string", "description": "Optional: the todo (T<n>) this subagent works on. "
                           "Relay keeps that todo's status in step with it: in_progress now, completed or "
@@ -561,7 +612,21 @@ class SubagentManager:
                 batch[call.get("id")] = self.spawn(args, call_id=call.get("id"))
             except (ValueError, TypeError, OSError) as exc:
                 batch[call.get("id")] = exc
+        self._batch_note([entry for entry in batch.values() if isinstance(entry, Subagent)])
         return batch
+
+    def _batch_note(self, started: list[Subagent]) -> None:
+        """One `subagent_batch` event when a single step starts BATCH_NOTE_MIN or more children
+        (#0C0V step 5): the models they run on, so the parent's transcript shows what a parallel
+        fan-out costs, and a warning when every one of them is on the High tier."""
+        if len(started) < BATCH_NOTE_MIN:
+            return
+        tiers = getattr(self.factory, "tiers", None) or {}
+        event = {"event": "subagent_batch", "ids": [s.id for s in started],
+                 "models": [s.model for s in started], "tiers": [tiers.get(s.id) for s in started]}
+        if all(tier == "high" for tier in event["tiers"]):
+            event["warning"] = f"All {len(started)} subagents run on the High tier."
+        self._emit(event)
 
     def release_batch(self, batch: dict) -> None:
         for entry in batch.values():
@@ -634,7 +699,10 @@ class SubagentManager:
             sub = Subagent(agent_id, definition.name, description.strip(),
                            background if background is not None else bool(definition.background),
                            "", effort, created=self.clock(), generation=self._generation)
-            agent, model_label, warnings = self.factory(definition, model or definition.model, effort,
+            # No model named, by the call or the definition: None, the factory's per-definition
+            # default (`SubagentFactory.default`), which is not quite "inherit" (#0C0V step 5).
+            named = model or (definition.model if definition.model not in ("", "inherit") else None)
+            agent, model_label, warnings = self.factory(definition, named, effort,
                                                         lambda event, s=sub: self._on_event(s, event), agent_id)
             agent.inbox = _SubInbox(self, sub)
             sub.agent, sub.model = agent, model_label

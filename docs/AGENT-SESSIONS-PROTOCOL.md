@@ -28,6 +28,7 @@ after `configured`, before the queued first `ask` (#MDP1).
 | `context_window` | int tokens | model window; GUI sends the preset value; backend falls back to its preset table |
 | `effort` | `low\|medium\|high\|max` | reasoning effort, mapped per provider (section 3) |
 | `compact_threshold` | float 0.5–0.98 | auto-compact when used/window reaches this; default 0.90 unless research changes it |
+| `compact_over_tokens` | int 8000–10000000, or `null`/`0` | size-based compaction (below; #0C0V): compact between turns when the last request's prompt passed this many tokens; `null`/`0`/absent = off (the default); the GUI's value when turned on is 256000. Echoed in `configured` |
 | `session_dir` | abs path | where sessions and checkpoints are stored (default `~/.local/share/relay/sessions/<workspace-hash>/`) |
 | `plans_dir` | abs path | default `<workspace>/.relay/plans` |
 | `instructions` | `{"files": [abs paths], "project_auto": true}` | instruction files to load; `project_auto` also loads project files found in the workspace (AGENTS.md, CLAUDE.md, WARP.md, ... per the scan table) |
@@ -47,6 +48,17 @@ Claude Code's `opus` is `claude-opus-5.5` — then the derivation), and it is th
 `presets` answer puts on each catalog row as `name`. A surface prefers it and derives its own only
 for an older worker that sends none: the desktop through `Pane::modelNameFor`, the phone through
 `app/modelname.js`. It is never sent upstream.
+
+**Size-based compaction** (`compact_over_tokens`, #0C0V step 9, off by default). With N set, a turn
+that ended in `done` (never `cancelled`/`error`, never mid-turn or inside a tool loop) whose last
+single request sent more than N prompt tokens — the provider's `prompt_tokens` for that request,
+else Relay's estimate; never a sum over the turn — is compacted right after `done`, before the next
+queued prompt starts, exactly as the window trigger (section 4) would but measured against N:
+`compaction_started {reason: "auto", trigger: "over_tokens", over_tokens, last_prompt_tokens}` →
+`compacted {…, trigger, over_tokens, last_prompt_tokens}` → `context`. The window trigger stays the
+backstop, and its events now say `trigger: "window"` (`reason` stays `"auto"`); whichever limit is
+reached first compacts. Never on a guest harness pane (29.3): its context is the guest's. A failed
+summary is `error {source: "compaction", text}`, not the turn's error.
 
 **A named preset is an endpoint.** In `configure` and `set_model`, `base_url`, `model` and `extra` are
 optional when `preset` names a built-in preset: the preset supplies each one that is missing, the same
@@ -243,6 +255,18 @@ with the latter becomes a `blocked` subagent outcome, preserved in saved threads
 mentions of blockers are not classified. Provider errors remain failed, cancellation stopped.
 
 - Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?, todo_id?}`; `agent_message {id, text}`; `agent_wait {id?}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents.
+- **Which model a subagent runs on** (#0C0V step 5). The tool tells the delegating model to choose
+  per task: `model: "flash"` for search, reading, summarising and checking, `"main"` for
+  implementation, `"high"` for hard reasoning. Those words are roles (section 13): each resolves
+  like the role, falling back to main when its tier has no keyed model; with no role resolver they
+  mean the main model. With no model named (by the call or the definition): the user's `subagent`
+  role when set — their explicit choice — else the Flash role for a read-only definition (marked
+  read-only, or given no `write_file`/`edit_file`) and Main for any other. `inherit` is the
+  `subagent` role, else main, as before.
+- `subagent_batch {ids, models, tiers, warning?}` — one step started three or more subagents at
+  once: their models (as in `subagent_started`) and tiers (`"high"|"main"|"flash"|"lite"|"local"`,
+  `null` when unknown), in start order, after their `subagent_started` events. `warning` is set
+  when every one is on the High tier. For the parent's transcript; it is not sent to the model.
 - Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"blocked"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`,
   `subagent_handoff {id, handoff: "next_model_call"|"wake"|"pending", wakeups, max_auto_turns, tools?, tokens?, elapsed_ms?}`
   — how a finished background subagent's result reaches the main agent: at its next model call, as a

@@ -62,6 +62,23 @@ def validate_threshold(value) -> float:
     return float(value)
 
 
+# Size-based compaction (card #0C0V step 9): `compact_over_tokens` = N compacts between turns, after
+# `done`, when the turn's last single request sent more than N prompt tokens (`Agent.
+# _compact_after_turn`). Off unless set; the window limit above stays the backstop, and whichever is
+# reached first compacts. Its bounds, and the value the GUI offers when the setting is turned on:
+OVER_TOKENS_MIN, OVER_TOKENS_MAX, DEFAULT_OVER_TOKENS = 8_000, 10_000_000, 256_000
+
+
+def validate_over_tokens(value) -> int | None:
+    """`compact_over_tokens`: None or 0 is off, else an integer number of prompt tokens."""
+    if value is None or (type(value) is int and value == 0):
+        return None
+    if type(value) is not int or not OVER_TOKENS_MIN <= value <= OVER_TOKENS_MAX:
+        raise ValueError(f"compact_over_tokens must be null or 0 (off), or an integer from {OVER_TOKENS_MIN} "
+                         f"to {OVER_TOKENS_MAX} tokens.")
+    return value
+
+
 def validate_window(value) -> int:
     if type(value) is not int or not 4096 <= value <= 10_000_000:
         raise ValueError("context_window must be an integer from 4096 to 10000000 tokens.")

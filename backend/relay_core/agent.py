@@ -612,7 +612,7 @@ class Agent:
                  roles=None, board=None, app=None, helper: bool = False,
                  tool_scope: str | None = None, context_spec=None,
                  security_options: dict | None = None,
-                 approval_options: dict | None = None):
+                 approval_options: dict | None = None, compact_over_tokens: int | None = None):
         self.emit = emit
         self.cancel_event = threading.Event()
         self.config = config
@@ -750,6 +750,9 @@ class Agent:
         self.context = ContextTracker(context_window or context_window_for(self.preset),
                                       DEFAULT_THRESHOLD if compact_threshold is None else compact_threshold,
                                       config.max_tokens)
+        # Size-based compaction (#0C0V step 9): compact between turns once one request's prompt
+        # passed this many tokens. None is off, the default; `_compact_after_turn`.
+        self.compact_over_tokens = compaction.validate_over_tokens(compact_over_tokens)
         self.instructions = instructions  # instructions.LoadedInstructions or None
         root = self.executor.workspace.root
         self.plans_dir = Path(plans_dir) if plans_dir else root / ".relay" / "plans"
@@ -1928,19 +1931,21 @@ class Agent:
 
     def compact(self, reason: str = "manual", focus: str | None = None, *, target_window: int | None = None,
                 target_max_tokens: int | None = None, target_model: str | None = None,
-                keep_turns: int = compaction.KEEP_TURNS, target_limit: int | None = None) -> dict:
+                keep_turns: int = compaction.KEEP_TURNS, target_limit: int | None = None,
+                trigger: dict | None = None) -> dict:
         """Compact the conversation. Only call between steps (never inside a tool-call group).
 
         ``target_window``: compact for a model about to take over (reason "model_switch", issue
         3ES1): the model in force still summarises, but the limit to get under and the carried
         block's budgets are the new window's. ``target_limit``: a lower limit to get under than the
-        window's own (a switch above ``SWITCH_COMPACT_TOKENS``, #SWCP)."""
+        window's own (a switch above ``SWITCH_COMPACT_TOKENS``, #SWCP). ``trigger``: what set off an
+        automatic compaction (`_maybe_compact`, `_compact_after_turn`), copied onto both events."""
         if focus is not None and (not isinstance(focus, str) or len(focus) > 2000):
             raise ValueError("focus must be text of at most 2000 characters.")
         with self._lock:
             tools = self.tools()
             before, _ = self.context.used(self.messages, tools)
-            started = {"event": "compaction_started", "reason": reason}
+            started = {"event": "compaction_started", "reason": reason, **(trigger or {})}
             if target_model:
                 started["for_model"] = target_model
             self.emit(started)
@@ -1983,6 +1988,7 @@ class Agent:
                 event["carried"] = result["carried"]
             if target_model:
                 event["for_model"] = target_model
+            event.update(trigger or {})
             self.emit(event)
             self.emit(self.context_event())
             return event
@@ -2066,7 +2072,34 @@ class Agent:
             resolved = self.roles.resolve("summaries") if self.roles is not None else None
             if resolved is None or resolved.is_main:
                 return
-        self.compact("auto")
+        self.compact("auto", trigger={"trigger": "window"})
+
+    def _compact_after_turn(self) -> None:
+        """Size-based compaction (#0C0V step 9): once a turn is over, compact when its last single
+        request's prompt passed `compact_over_tokens` — the provider's count for that request, else
+        Relay's estimate of the conversation as the request saw it, never a sum over the turn. Runs
+        between turns only (the turn's state is already cleared), and never on a guest harness,
+        whose context is its own. The window limit (`_maybe_compact`) stays the backstop."""
+        over = self.compact_over_tokens
+        if not over or self._guest_harness():
+            return
+        usage = self._last_usage if isinstance(self._last_usage, dict) else {}
+        prompt = usage.get("prompt_tokens")
+        if type(prompt) is not int or prompt <= 0:
+            prompt, _estimated = self.context.used(self.messages, self.tools())
+        if prompt <= over:
+            return
+        try:
+            # Measured against N, not the window: under the window limit an automatic
+            # compaction would otherwise find nothing to do.
+            self.compact("auto", target_limit=over, trigger={"trigger": "over_tokens", "over_tokens": over,
+                                                             "last_prompt_tokens": prompt})
+        except Cancelled:
+            pass
+        except Exception as exc:  # the turn is already done; never turn this into its error
+            self.emit({"event": "error", "source": "compaction",
+                       "text": str(exc)[:2000] if isinstance(exc, ValueError) else
+                       f"Compaction failed ({type(exc).__name__})."})
 
     # ----- turns ---------------------------------------------------------------
     def stop(self):
@@ -2450,6 +2483,8 @@ class Agent:
             if record["elapsed_ms"] is None:
                 record["elapsed_ms"] = int((time.monotonic() - record["started"]) * 1000)
                 record["outcome"] = record["outcome"] or "error"
+            elif record["outcome"] == "done":
+                self._compact_after_turn()
             self.autosave()
 
     # ----- routed turns: plan mode and image turns (shared with failover) ---------------

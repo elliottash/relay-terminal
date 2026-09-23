@@ -63,7 +63,10 @@ TOOL_MAP: dict[str, tuple[str, ...]] = {
 SHELL_WIDENING = {"grep", "grep_search", "search_file_content"}
 
 # Model aliases from other tools. Values are Relay preset ids or "inherit"; configure may override.
-DEFAULT_ALIASES = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "flash": "inherit"}
+# With a role resolver (the worker always has one) the tier words "flash", "main" and "high" name
+# roles and never reach this table; without one there are no tiers, and they mean the main model.
+DEFAULT_ALIASES = {"haiku": "inherit", "sonnet": "inherit", "opus": "inherit", "flash": "inherit",
+                   "main": "inherit", "high": "inherit"}
 
 
 @dataclass
@@ -80,6 +83,12 @@ class AgentDefinition:
     source: str = "builtin"
     tool: str = "relay"          # which tool's format it came from
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def reads_only(self) -> bool:
+        """Marked read-only, or given no tool that writes a file: the kind of subagent (search,
+        reading, checking) that runs on the Flash role when it names no model (#0C0V step 5)."""
+        return self.read_only or not ({"write_file", "edit_file"} & set(self.tools))
 
     def to_dict(self) -> dict:
         return {"name": self.name, "description": self.description, "source": self.source,
