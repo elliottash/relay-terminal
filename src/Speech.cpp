@@ -310,11 +310,7 @@ bool Speaker::useQt() {
                 connect(m_tts, &QTextToSpeech::stateChanged, this, [this, broken](QTextToSpeech::State state) {
                     if (!m_speaking) return;
                     if (state == QTextToSpeech::Speaking) { m_qtStarted = true; return; }
-                    if (state == broken) {
-                        finish();
-                        Q_EMIT failed(QStringLiteral("The system voice stopped with an error."));
-                        return;
-                    }
+                    if (state == broken) { fail(QStringLiteral("The system voice stopped with an error.")); return; }
                     // Ready after Speaking is this piece done. A Ready that arrives before this
                     // piece started speaking is the stop of the utterance it replaced.
                     if (state == QTextToSpeech::Ready && m_qtStarted) next();
@@ -379,9 +375,7 @@ void Speaker::next() {
         if (generation != m_generation || m_process != process) return;   // stopped or replaced
         m_process = nullptr;
         if (status != QProcess::NormalExit || code != 0) {
-            const QString tool = m_tool;
-            finish();
-            Q_EMIT failed(QStringLiteral("%1 stopped with an error (exit %2).").arg(tool).arg(code));
+            fail(QStringLiteral("%1 stopped with an error (exit %2).").arg(m_tool).arg(code));
             return;
         }
         next();
@@ -391,9 +385,7 @@ void Speaker::next() {
         process->deleteLater();
         if (generation != m_generation || m_process != process) return;
         m_process = nullptr;
-        const QString tool = m_tool;
-        finish();
-        Q_EMIT failed(QStringLiteral("%1 could not be started.").arg(tool));
+        fail(QStringLiteral("%1 could not be started.").arg(m_tool));
     });
     // Written once it has started: a write before that is dropped, and the tool would read EOF.
     const QByteArray input = invocation.input;
@@ -421,6 +413,12 @@ void Speaker::stop() {
 #endif
     m_owner.clear();
     Q_EMIT stateChanged();
+}
+
+// Said before finish() so that a listener can still tell whose utterance failed.
+void Speaker::fail(const QString &message) {
+    Q_EMIT failed(message);
+    finish();
 }
 
 void Speaker::finish() {

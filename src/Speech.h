@@ -90,13 +90,14 @@ public:
 
 Q_SIGNALS:
     void stateChanged();                  // started or stopped (finished, stopped, failed)
-    void failed(const QString &message);
+    void failed(const QString &message);   // before the stateChanged() that ends it; owner() still set
 
 private:
     explicit Speaker(QObject *parent);
     ~Speaker() override;
     void next();
     void finish();
+    void fail(const QString &message);
     bool useQt();
     QString tool() const;
 

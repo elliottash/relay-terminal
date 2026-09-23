@@ -373,6 +373,9 @@ private:
         // Voice transcription: the hold key is its own setting (Settings › Voice), because a
         // push-to-talk key is held rather than pressed and is not a shortcut the keymap can bind.
         add("voice.toggle", "agent", "Voice transcription: start or finish recording", {});
+        // Read aloud (#MDA7). No default key: the conventional one, Edge's Ctrl+Shift+U, is IBus's
+        // Unicode entry on Linux desktops and never reaches the app. /speak is the fast path.
+        add("speech.readAloud", "agent", "Read aloud: the last agent reply in the system voice (again to stop)", {});
         // Sharing a pane with a phone (#W5N2). No default shortcut: it is a deliberate act,
         // and the strip button beside the microphone is the usual way in.
         add("pane.share", "terminal", "Share this pane with a phone", {});

@@ -78,6 +78,7 @@
 #include "RemoteFiles.h"     // the host's files: the link probe's cache and `ssh://host/path` (#S5SH)
 #include "backend/VTermBackend.h"
 #include "Voice.h"
+#include "Speech.h"
 #include "Images.h"
 #include "Aliases.h"
 #include "MarkdownAnsi.h"
@@ -737,6 +738,7 @@ public:
         if (m_voiceCapture) m_voiceCapture->cancel();
         if (!m_voiceClip.isEmpty()) QFile::remove(m_voiceClip);
         for (const QString &clip : std::as_const(m_remoteVoiceClips)) QFile::remove(clip);
+        if (m_speechHooked && readingAloud()) relay::speech::Speaker::instance().stop();   // #MDA7
         m_poll.stop();
         // Destroy the terminal before its private shell state directory is removed.
         m_backend = nullptr;
@@ -7938,7 +7940,43 @@ public:
     }
     bool voiceRecording() const { return m_voiceCapture && m_voiceCapture->recording(); }
 
+    // ----- read aloud (card #MDA7) -----------------------------------------------------------
+    // ChatGPT's "Read aloud" under a reply: `/speak`, the palette's Read aloud and, with Options ›
+    // Voice › "Read replies aloud automatically", each finished reply. One utterance app-wide
+    // (relay::speech::Speaker); only the pane that asked shows it, and Esc there stops it.
+    bool readingAloud() const {
+        const auto &speaker = relay::speech::Speaker::instance();
+        return speaker.speaking() && speaker.owner() == this;
+    }
+    void toggleReadAloud() {
+        if (readingAloud()) { relay::speech::Speaker::instance().stop(); return; }
+        readLastReplyAloud();
+        hint(QStringLiteral("speak.slash"), QStringLiteral("Next time: /speak in the prompt box"));
+    }
+    void readLastReplyAloud() {
+        if (m_lastReply.trimmed().isEmpty()) { status(QStringLiteral("No agent reply to read aloud yet.")); return; }
+        readAloud(m_lastReply);
+    }
+    static bool readRepliesAloud() { return QSettings().value(QStringLiteral("speech/auto_read"), false).toBool(); }
+
 private:
+    void readAloud(const QString &markdown) {
+        auto &speaker = relay::speech::Speaker::instance();
+        if (!m_speechHooked) {
+            m_speechHooked = true;
+            // Any pane's start or stop can change this one's line: a new utterance elsewhere ends ours.
+            connect(&speaker, &relay::speech::Speaker::stateChanged, this, [this] { refreshBusyLine(); });
+            connect(&speaker, &relay::speech::Speaker::failed, this, [this](const QString &message) {
+                if (relay::speech::Speaker::instance().owner() == this) status(message);
+            });
+        }
+        QString error;
+        if (!speaker.speak(markdown, this, &error)) status(error);
+    }
+    // The busy line says "Reading aloud · Esc to stop" only when nothing with a stronger claim on
+    // the line and on Esc is running: the agent's turn, a program, a remote login.
+    bool readingAloudShown() const { return readingAloud() && !m_agentBusy && !m_login.active && !processBusy(); }
+
     void startVoice(bool hold) {
         if (!voiceEnabled()) { status(QStringLiteral("Voice transcription is off (Options › Voice).")); return; }
         if (m_native) { status(QStringLiteral("Voice types into the prompt box; leave native input first.")); return; }
@@ -9494,6 +9532,7 @@ private:
             {QStringLiteral("rename"), QStringLiteral("[name]"), QStringLiteral("Name this pane (no name: edit it in the header; empty: back to automatic)")},
             {QStringLiteral("rename-tab"), QStringLiteral("[name]"), QStringLiteral("Name this tab (no name: edit it in the tab)")},
             {QStringLiteral("export"), QString(), QStringLiteral("Save the conversation as Markdown")},
+            {QStringLiteral("speak"), QStringLiteral("[stop]"), QStringLiteral("Read the last agent reply aloud; /speak stop (or Esc) stops it")},
             {QStringLiteral("join"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session: their meeting code, then the PIN")},
             {QStringLiteral("update"), QString(), QStringLiteral("Download and install the latest Relay release, then restart")},
             {QStringLiteral("connect"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session (same as /join)")},
@@ -10098,6 +10137,13 @@ private:
         else if (name == QStringLiteral("continue")) continueTurn(true);   // the slow path: it teaches the empty-box key (#SXF1)
         else if (name == QStringLiteral("instructions")) openInstructions();
         else if (name == QStringLiteral("export")) exportConversation();
+        else if (name == QStringLiteral("speak")) {
+            // `/speak stop` silences whichever pane is reading: the voice is one, app-wide.
+            auto &speaker = relay::speech::Speaker::instance();
+            if (args.trimmed().compare(QStringLiteral("stop"), Qt::CaseInsensitive) != 0) readLastReplyAloud();
+            else if (speaker.speaking()) speaker.stop();
+            else status(QStringLiteral("Nothing is being read aloud."));
+        }
         else if (name == QStringLiteral("agents")) {
             if (onShowAgents) onShowAgents();
             else { m_agentsListPending = true; send({{"type", "agents_list"}, {"workspace", m_workspace}}); }
@@ -12089,6 +12135,11 @@ private:
                 record.outcome = outcome;
                 contextTurnFinished(record);
             }
+            // The reply /speak reads, and Options › Voice › "Read replies aloud automatically" (#MDA7).
+            if (!m_turnText.trimmed().isEmpty()) {
+                m_lastReply = m_turnText;
+                if (outcome == QStringLiteral("done") && readRepliesAloud()) readAloud(m_lastReply);
+            }
             m_itemPrompts.remove(event.value(QStringLiteral("id")).toString());
             m_turnShellPrompt.clear();
             m_runCommands.clear();
@@ -13323,6 +13374,11 @@ private:
     void refreshBusyLine() {
         if (!m_busyLine) return;
         if (m_agentBusy) { tickTurnClock(); return; }
+        if (readingAloudShown()) {   // #MDA7
+            m_busyLine->setBusy(relay::panestatus::State::Idle, QStringLiteral("Reading aloud · Esc to stop"),
+                                QStringLiteral("The last agent reply, in the system voice. Esc or /speak stop ends it."));
+            return;
+        }
         const relay::panestatus::Waiting wait = waitingFacts();
         if (relay::panestatus::isWaiting(wait)) {
             const QString subject = relay::panestatus::waitingSubject(wait);
@@ -16044,6 +16100,13 @@ private:
             && processBusy() && m_backend) {
             interruptShell();
             toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
+            return true;
+        }
+        // Esc stops reading aloud (#MDA7), only while the line above the box says so: otherwise Esc
+        // keeps every meaning it had.
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && readingAloudShown() && !inQueueSelection()
+            && !(m_atList && m_atList->isVisible()) && !(m_cardList && m_cardList->isVisible())) {
+            relay::speech::Speaker::instance().stop();
             return true;
         }
         // Esc Esc in an empty prompt box while the agent is idle opens Rewind. A single Esc no
@@ -19441,6 +19504,8 @@ private:
     QString m_remoteAuthor;   // the author of the prompt being submitted, for its queue entry
     QHash<QString, RemotePrompt> m_remotePrompts;
     relay::voice::Capture *m_voiceCapture = nullptr;
+    QString m_lastReply;          // the last agent reply, which /speak reads (#MDA7)
+    bool m_speechHooked = false;  // this pane listens to relay::speech::Speaker
     QString m_voiceRequest, m_voiceClip;
     // Clips from paired devices, by the worker request id: which remote request asked for it,
     // and the file to unlink once the worker has answered.

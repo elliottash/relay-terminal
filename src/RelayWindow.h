@@ -59,6 +59,7 @@
 #include "RuntimeDirs.h"
 #include "AppPaths.h"       // dataRoot(): where the shipped backend lives
 #include "Voice.h"
+#include "Speech.h"
 #include "Aliases.h"
 #include "OutputLinks.h"
 #include "Conversations.h"
@@ -1410,6 +1411,7 @@ private:
         else if (id == QStringLiteral("agent.stopAllSubagents")) pane->stopAllSubagents();   // subagents UI
         else if (id == QStringLiteral("agent.agentsMenu")) openAgentsMenu();
         else if (id == QStringLiteral("voice.toggle")) pane->toggleVoice(true);
+        else if (id == QStringLiteral("speech.readAloud")) pane->toggleReadAloud();
         else if (id == QStringLiteral("pane.share")) pane->toggleShare();
         else if (id == QStringLiteral("pane.sharing")) openSharingPane(pane, true);
         else if (id == QStringLiteral("agent.modelKeys")) {
@@ -4249,6 +4251,20 @@ private:
         voice.rows << buttonRow(QStringLiteral("agent.modelKeys"), QStringLiteral("OpenRouter key"),
                                 QStringLiteral("Voice needs one of its own, whatever model your panes run"),
                                 QStringLiteral("API keys…"), [this] { runAction(QStringLiteral("agent.modelKeys")); });
+        // Read aloud (#MDA7): the system's own voice and rate, so there is no voice picker here.
+        voice.rows << headingRow(QStringLiteral("Read aloud"));
+        voice.rows << toggleRow(QStringLiteral("speech/auto_read"), QStringLiteral("Read replies aloud automatically"),
+                                QStringLiteral("Each finished agent reply, in the system voice; Esc stops it and /speak "
+                                               "reads the last one again"), false);
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("option:speech_engine");
+            const QString engine = relay::speech::Speaker::instance().engine();
+            info.label = engine.isEmpty() ? relay::speech::missingToolsMessage()
+                                          : QStringLiteral("Speaker: %1 · the system's default voice and rate.").arg(engine);
+            voice.rows << info;
+        }
         sections << voice;
 
         // Remote (#PH0N): one switch and the address it uses. The page is built where the
@@ -4547,6 +4563,14 @@ private:
                                                 hold == QStringLiteral("off") ? QString()
                                                     : QStringLiteral(" · hold %1").arg(relay::voice::holdKeyLabel(hold))),
                                 QStringLiteral("voice.toggle"));
+        }
+        {
+            // Read aloud (#MDA7): the same action as /speak; while this pane reads, it stops.
+            const bool reading = pane && pane->readingAloud();
+            items << actionItem(agent, reading ? QStringLiteral("Stop reading aloud") : QStringLiteral("Read aloud"),
+                                reading ? QStringLiteral("Stop the system voice (Esc in the prompt box)")
+                                        : QStringLiteral("Read the last agent reply in the system voice"),
+                                QStringLiteral("speech.readAloud"));
         }
         if (pane) {
             const QString effort = pane->effort();

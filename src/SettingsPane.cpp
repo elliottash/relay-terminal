@@ -80,6 +80,7 @@ QString actionSlashCommands(const QString &key) {
         {QStringLiteral("agent.continue"), QStringLiteral("/continue")},
         {QStringLiteral("agent.instructions"), QStringLiteral("/instructions")},
         {QStringLiteral("agent.export"), QStringLiteral("/export")},
+        {QStringLiteral("speech.readAloud"), QStringLiteral("/speak")},
         {QStringLiteral("agent.subagentPane"), QStringLiteral("/agents")},
         {QStringLiteral("menu:agents"), QStringLiteral("/agents")},
         {QStringLiteral("agent.agentsMenu"), QStringLiteral("/agents")},
