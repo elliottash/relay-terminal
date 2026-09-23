@@ -9,7 +9,7 @@ session: c14c34a7-957e-488f-8bbe-d5d50b181712
 rank: m
 created: '2026-09-22'
 source: Owner in Relay, 2026-09-22
-links: {commits: [30677e96], evidence: [docs/qa_evidence/2026-09-22-PCBG, docs/qa_evidence/2026-09-22-PCBG/], github: null, plans: [], related: []}
+links: {commits: [30677e96, 9fe3d3dc, 607cc093], evidence: [docs/qa_evidence/2026-09-22-PCBG, docs/qa_evidence/2026-09-22-tryit-PCBG], github: null, plans: [], related: []}
 ---
 # Confirm closing active panes and let work continue in the background
 
