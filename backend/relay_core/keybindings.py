@@ -166,9 +166,10 @@ class KeybindingCatalog:
         "keys; an id that is not one of Relay's is refused with the closest ones.\n"
         "It writes only Relay's keybindings.json, which Relay reloads automatically.")
 
-    def tool_spec(self) -> dict:
+    @classmethod
+    def tool_spec(cls) -> dict:
         return {"type": "function", "function": {"name": "set_keybinding",
-                "description": self.TOOL_DESCRIPTION,
+                "description": cls.TOOL_DESCRIPTION,
                 "parameters": {"type": "object", "properties": {
                     "action": {"type": "string",
                                "description": "The action id, such as pane.splitRight."},

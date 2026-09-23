@@ -260,6 +260,9 @@ class CodexHarness:
                 argv += ["-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false"]
                 for key, value in board_bridge.items():
                     argv += ["-c", "mcp_servers.relay_board." + key + "=" + json.dumps(value)]
+                # Named tests and foreground children can block the MCP call. Keep this
+                # process-local transport timeout with the bridge config.
+                argv += ["-c", "mcp_servers.relay_board.tool_timeout_sec=86400"]
             proc = self._spawn(argv, cwd)
         except OSError as exc:
             raise HarnessNotAvailable(f"Codex could not be started: {exc}") from exc
@@ -545,6 +548,7 @@ class CodexHarness:
             overrides.update({"features.multi_agent": False, "features.multi_agent_v2": False})
             for key, value in self._board_bridge.items():
                 overrides["mcp_servers.relay_board." + key] = value
+            overrides["mcp_servers.relay_board.tool_timeout_sec"] = 86400
         if resume:
             params["threadId"] = resume
             method = "thread/fork" if fork else "thread/resume"

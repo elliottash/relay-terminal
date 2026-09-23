@@ -347,7 +347,7 @@ class BridgeTools(unittest.TestCase):
         bridge = Bridge(available=False)
         self.addCleanup(bridge.close)
         names = {spec["name"] for spec in bridge.specs()}
-        self.assertEqual(APP_ALLOW & names, {"app_user_memory"})
+        self.assertEqual(APP_ALLOW & names, APP_ALLOW)
         self.assertFalse({name for name in names if name.startswith("app_")} - APP_ALLOW)
         spec = next(s for s in bridge.specs() if s["name"] == "app_user_memory")
         self.assertIn("suggest", spec["inputSchema"]["properties"]["action"]["enum"])
@@ -358,11 +358,11 @@ class BridgeTools(unittest.TestCase):
         self.addCleanup(bridge.close)
         app = mock.Mock()
         app.tool_specs.return_value = [dict(s) for s in TOOL_SPECS]
-        agent = mock.Mock(board=None, subagents=None, app=app)
+        agent = mock.Mock(board=None, subagents=None, app=app, activity=None,
+                          executor=mock.Mock(keybindings=None))
         bridge.bind(agent)
         names = {spec["name"] for spec in bridge.specs()}
-        self.assertIn("app_user_memory", names)
-        self.assertNotIn("app_option_set", names)
+        self.assertEqual(names & APP_ALLOW, APP_ALLOW)
         agent.app = None
         self.assertNotIn("app_user_memory", {spec["name"] for spec in bridge.specs()})
 

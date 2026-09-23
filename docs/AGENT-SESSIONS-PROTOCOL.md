@@ -6253,13 +6253,15 @@ its transcript, its request ledger, titles, summaries and the sessions index are
 turn, forwards each harness event as the Relay event in the table, and returns the guest's final
 text as the assistant message with the usage the guest reported. The guest runs its own command
 and file tools. Since card #4NXH, a process-local `relay_board` MCP server exposes
-`board_list`, `board_read`, `board_comment`, `board_update_card`, and `board_move_card`.
+Relay-owned tools. Card #GPA8 expands it to the native Board, app, own-session and conditional
+terminal/keybinding catalogs, including `board_create_card` and `board_claim`. The worker still
+enforces the same pane scope, write toggles, per-turn grants and Board gates as a native agent.
 Card #GD8K adds `agent`, `agent_message`, `agent_wait`, and `update_todos`: Relay owns the
 children, task links, progress events, transcripts and completion handoffs. These tools also work
 without a Board. Initial discovery supplies provisional delegation schemas before the
 worker binds its configured manager; execution always checks the bound agent's actual tools.
-Guest launches always run in the background and waits are capped at ten seconds; wait on the
-returned child id again to retrieve a later result. Native plan/read-only/card-scope gates apply.
+Guest launches honor the native foreground/background selection and `agent_wait` accepts the
+native 1–1800 second timeout. Stop interrupts a blocked wait. Native plan/read-only/card-scope gates apply.
 Bridge-enabled Codex launches and thread start/resume/fork set `features.multi_agent=false` and
 `features.multi_agent_v2=false` without changing the user's configuration. Guest instructions
 require Relay delegation and forbid shell-launched replacement agents. A child inheriting a
@@ -6286,9 +6288,9 @@ Provider close/replacement/start failure closes the socket and removes credentia
 exits when the guest closes stdin. Each replacement gets a fresh capability.
 
 Opening context and generated board policy prefer discovered namespaced tools, with file edits
-as fallback for unavailable connections and board operations outside the five-tool scope (create/claim).
+as fallback when the bridge or a tool is unavailable.
 A turn without discovery emits a status notice instead of claiming connectivity. Relay's automatic
-Execute/Verify actions retain their existing claims; this server does not add a claim tool.
+Execute/Verify actions retain their existing claims.
 
 `configured` gains `guest: "<id>"` and `guest_session: "<the guest's session id>"`; `model` is the
 model the guest reports. `cancel` → `interrupt()`. `compact` → `harness.compact()` and Relay's own

@@ -24,19 +24,27 @@ import tempfile
 import threading
 import uuid
 
-BOARD_ALLOW = frozenset(('board_list', 'board_read', 'board_comment',
-                   'board_update_card', 'board_move_card'))
+from relay_core.board_tools import TOOL_NAMES as BOARD_NAMES, CLEANUP_TOOL_NAMES
+from relay_core.app_tools import TOOL_NAMES as APP_NAMES
+from relay_core.activity_tools import TOOL_NAMES as ACTIVITY_NAMES
+
+BOARD_ALLOW = frozenset(BOARD_NAMES + CLEANUP_TOOL_NAMES + ('search_files',))
 DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_todos'))
 REMOTE_ALLOW = frozenset(("run_command", "read_file", "list_directory", "write_file", "edit_file"))
 EXEC_ALLOW = REMOTE_ALLOW | frozenset(("run_in_terminal", "command_output", "stop_command"))
 TERMINAL_CONTEXT_ALLOW = frozenset(("terminal_history", "terminal_read"))
-# #MEMS: a guest proposes what it learns about the user through Relay's confirm flow (the tool's
-# `suggest`), in place of its own memory. The only app tool a guest gets: it runs in the pane's
-# worker exactly as it does for Relay's own agent, write gate included.
-APP_ALLOW = frozenset(("app_user_memory",))
+# All Relay-owned capabilities use the same Agent prepare/execute path as a native pane.
+# Catalogs, scopes and per-turn grants still decide which calls are allowed.
+APP_ALLOW = frozenset(APP_NAMES)
+ACTIVITY_ALLOW = frozenset(ACTIVITY_NAMES)
+CONDITIONAL_ALLOW = frozenset(('set_keybinding', 'type_into_program'))
 PLAN_ALLOW = frozenset(("write_plan", "exit_plan_mode"))
-ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | APP_ALLOW | PLAN_ALLOW
+ALLOW = (BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW
+         | APP_ALLOW | ACTIVITY_ALLOW | CONDITIONAL_ALLOW | PLAN_ALLOW)
 WAIT_SECONDS = 10
+# Foreground children can run longer than the native 1800-second wait/test ceiling.
+# The transport deadline is generous; Stop still revokes the live call promptly.
+LONG_CALL_SECONDS = 86400
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
 
@@ -105,21 +113,29 @@ class Bridge:
                 specs = specs + manager.tool_specs()
             if self.delegation and self.agent._todos_enabled():
                 specs = specs + [TODO_SPEC]
-            app = getattr(self.agent, 'app', None)
-            if app is not None:
-                specs = specs + [s for s in app.tool_specs() if s['function']['name'] in APP_ALLOW]
+            for side in (getattr(self.agent, 'app', None), getattr(self.agent, 'activity', None)):
+                if side is not None:
+                    specs += side.tool_specs()
+            catalog = self.agent.executor.keybindings
+            if catalog is not None:
+                specs.append(catalog.tool_spec())
         else:
             from relay_core.board_tools import TOOL_SPECS
             from relay_core.app_tools import TOOL_SPECS as APP_SPECS
+            from relay_core.activity_tools import TOOL_SPECS as ACTIVITY_SPECS
             specs = (list(TOOL_SPECS) if self.available else [])
             if self.delegation:
                 specs += delegation_tool_specs() + [TODO_SPEC]
-            # Discovery before the worker binds: the worker's agent always has the app tools.
-            specs += [s for s in APP_SPECS if s['function']['name'] in APP_ALLOW]
+            # Clients can cache discovery before Agent binding. Offer the static schemas;
+            # dispatch still checks the live pane's catalog, scope and turn grant.
+            specs += list(APP_SPECS) + list(ACTIVITY_SPECS)
+            from relay_core.keybindings import KeybindingCatalog
+            specs.append(KeybindingCatalog.tool_spec())
         # Guest clients cache discovery before a turn has remote context. Keep the remote
         # schemas stable, but require an explicit host and validate capabilities on every call.
         from relay_core.tools import TOOLS, JOB_TOOLS, with_host
         from relay_core.terminal_handoff import SPEC as TERMINAL_SPEC
+        from relay_core.program_input import SPEC as PROGRAM_SPEC
         remote = [copy.deepcopy(with_host(s)) for s in TOOLS
                   if s['function']['name'] in REMOTE_ALLOW]
         for spec in remote:
@@ -129,22 +145,13 @@ class Bridge:
             f['parameters']['required'] = [*f['parameters']['required'], 'host']
             f['parameters']['properties']['host']['description'] = (
                 "Required: the active SSH host named by Relay context. Never omit or guess it.")
-        specs += remote + [TERMINAL_SPEC] + [s for s in JOB_TOOLS
+        specs += remote + [TERMINAL_SPEC, PROGRAM_SPEC] + [s for s in JOB_TOOLS
                     if s['function']['name'] in EXEC_ALLOW]
         from relay_core.terminal_context import TOOL_SPECS as CONTEXT_SPECS
         specs += CONTEXT_SPECS
         from relay_core.planning import WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC
         specs += [WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC]
         specs = copy.deepcopy(specs)
-        for spec in specs:
-            f = spec['function']
-            if f['name'] == 'agent':
-                f['description'] += (' In a guest, launches always run in the background. '
-                                     'Use agent_wait to read the result; link a Relay task with todo_id.')
-                f['parameters']['properties']['background'] = {'type': 'boolean', 'enum': [True]}
-            elif f['name'] == 'agent_wait':
-                f['description'] += ' Guest waits return within 10 seconds; call again if still running.'
-                f['parameters']['properties']['timeout_seconds']['maximum'] = WAIT_SECONDS
         return [{'name': f['name'], 'description': f.get('description', ''),
                  'inputSchema': f['parameters']}
                 for spec in specs for f in [spec['function']] if f['name'] in ALLOW]
@@ -221,15 +228,6 @@ class Bridge:
                     if isinstance(wait, bool) or not isinstance(wait, int) or wait < 0:
                         raise ValueError('wait_seconds must be a nonnegative integer.')
                     args['wait_seconds'] = min(wait, WAIT_SECONDS)
-                # Never hold the bridge for an entire model turn. Background children use
-                # Relay's normal manager, task links, transcripts, Stop and idle wake-ups.
-                if name == 'agent':
-                    args['background'] = True
-                elif name == 'agent_wait':
-                    timeout = args.get('timeout_seconds', WAIT_SECONDS)
-                    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
-                        raise ValueError('timeout_seconds must be a positive integer.')
-                    args['timeout_seconds'] = min(timeout, WAIT_SECONDS)
                 # Resolve the deferred group, then use precisely the native policy path.
                 from relay_core import tool_groups
                 group = tool_groups.group_of(name)
@@ -244,7 +242,12 @@ class Bridge:
                     raise ValueError('Tool was cancelled before execution.')
                 if name in REMOTE_ALLOW and remote_before != self.agent.executor.remote_session:
                     raise ValueError('The SSH session changed while preparing this tool; nothing was executed. Try again against the current host.')
-                result = self.agent._execute(prepared, getattr(self.agent, '_turn', None))
+                if name == 'tests_run':
+                    result = self._run_named_tests(prepared, active)
+                elif name == 'agent_wait' or (name == 'agent' and not prepared.arguments.get('background')):
+                    result = self._run_delegation(prepared, active)
+                else:
+                    result = self.agent._execute(prepared, getattr(self.agent, '_turn', None))
                 # #MEMS: the pane draws Keep / Edit / No from a Relay agent's own `suggest` call,
                 # but a guest's reaches it under the guest's tool name with its result trimmed to
                 # a count, so the outcome is told to the pane directly.
@@ -261,6 +264,55 @@ class Bridge:
                     result['error_code'] = code
             return remember(result)
 
+    def _run_named_tests(self, prepared, active):
+        """Let Stop revoke a long native test run while the MCP call waits for its table.
+
+        The normal bridge lock serializes writes and teardown. A named test run can last
+        30 minutes, so its native runner runs on a thread while we release that lock.
+        Every other call still passes through BoardTools' own one-run gate.
+        """
+        done = threading.Event()
+        outcome = {}
+        agent = self.agent
+
+        def run():
+            try:
+                outcome['result'] = agent._execute(prepared, getattr(agent, '_turn', None))
+            except Exception as exc:
+                outcome['error'] = exc
+            finally:
+                done.set()
+
+        threading.Thread(target=run, name='relay-guest-named-tests', daemon=True).start()
+        self.lock.release()
+        try:
+            while not done.wait(.1):
+                if active[1].is_set() or active is not self.active:
+                    try:
+                        agent.board._tests().stop_run()
+                    except Exception:
+                        # The runner may still be starting, or may have just finished.
+                        pass
+            if active[1].is_set() or active is not self.active:
+                raise ValueError('The guest turn stopped while its named tests were running.')
+        finally:
+            self.lock.acquire()
+        if 'error' in outcome:
+            raise outcome['error']
+        return outcome['result']
+
+    def _run_delegation(self, prepared, active):
+        """Wait through Relay's manager without blocking Stop or another bridge call."""
+        agent = self.agent
+        self.lock.release()
+        try:
+            result = agent._execute(prepared, getattr(agent, '_turn', None))
+        finally:
+            self.lock.acquire()
+        if active[1].is_set() or active is not self.active:
+            raise ValueError('The guest turn stopped while waiting for its subagent.')
+        return result
+
     def close(self):
         with self.lock:
             if self.closed:
@@ -274,7 +326,8 @@ class Bridge:
 
 def exchange(capability, method, params=None, key=None):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(30)
+        sock.settimeout(LONG_CALL_SECONDS if method == 'tools/call' and isinstance(params, dict)
+                        and params.get('name') in ('tests_run', 'agent', 'agent_wait') else 30)
         sock.connect(capability['socket'])
         message = dict(capability, method=method, params=params, key=key)
         sock.sendall((json.dumps(message) + '\n').encode())

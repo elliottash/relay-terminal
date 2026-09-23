@@ -1,13 +1,14 @@
 ---
 id: GPA8
 type: work
-status: planned
+status: needs-verification
 labels: [feature, guest, agent]
 assignee: codex
+implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
-source: 'Codex in a Relay pane, 2026-09-23'
-links: {plans: [], commits: [], evidence: [], related: [XP7N, 4NXH, AG7R], github: null}
+source: Codex in a Relay pane, 2026-09-23
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-GPA8-guest-tool-parity/verification.md], related: [XP7N, 4NXH, AG7R], github: null}
 ---
 # Close guest agent tool parity gaps
 
@@ -28,15 +29,25 @@ Audited `Agent.tools()`, `guest_board_bridge.Bridge.specs()`, and their source c
 - Conditional native tools: `set_keybinding` and `type_into_program` are absent from the bridge. Guest harnesses have their own shell, file, skill and question tools, so `run_command`, `ask_user`, `load_skill` and `read_skill_file` require a capability comparison rather than a name-only comparison. The bridge already covers SSH command/file tools, terminal handoff/context, delegation, todos and now Plan exit.
 
 ## Plan
-**Goal:** Make guests able to use Relay pane capabilities without bypassing their existing policy checks.
+**Goal:** Give managed Codex and Claude guests the same Relay capabilities as a native agent of the same pane/console scope, including Board creation and conditional tools.
+
+**Findings:** `guest_board_bridge.py` filters native catalogs through a narrow allowlist. Native policy already lives in `Agent._prepare`/`_execute`, `BoardTools`, `AppTools`, and the executor. Guest-local shell, questions, and skills have harness equivalents; Relay UI/session/Board operations require bridging.
 
 **Steps:**
-1. Add a catalog comparison test that classifies native tools as bridged, guest-native equivalent or explicitly excluded.
-2. Bridge app and session tools through `Agent._prepare` / `_execute`, preserving app write gates, target-pane checks, and UI events.
-3. Bridge the missing Board tools except `board_create_card` until its prior exclusion is reconsidered; preserve Board claim, test and signal gates.
-4. Review conditional keybinding and program-control tools against guest-native behavior, then implement any missing capability with per-turn authorization.
-5. Exercise Codex and Claude harness discovery and calls in live panes, including refusal paths.
+1. Expand guest discovery from the live native catalogs, including Board creation/claim/tests/signals/try, app, session, keybinding, and handed-over program tools, while preserving scope and availability.
+2. Dispatch every call through the existing Agent preparation and execution policy. Handle long test runs and per-turn program control without holding the MCP transport; retain explicit SSH host checks.
+3. Replace stale fallback wording and add a catalog parity test covering native-only capabilities and guest equivalents.
+4. Run targeted bridge/harness tests, then exercise real Codex and Claude discovery and representative success/refusal calls in disposable panes/boards. Record evidence.
 
-**Risks:** #4NXH's five-tool decision was intentional; broadening Board writes needs to preserve ownership and rate limits. App commands can affect other panes, so keep the same target and write gates as the native agent.
+**Risks:** Board imports still require owner authorization; cross-pane app writes use the existing toggle and target checks; program typing requires an active handover. Guest-local tools have different names and should be compared by capability.
 
-**Verify:** Compare tool inventories in an automated test, run bridge policy tests, and confirm discovery and UI events in both guest harnesses.
+**Verify:** Offline parity and policy tests, both real guest harnesses, and visible Relay events/audit records.
+
+## Decisions
+Owner, 2026-09-23: “guests should be able to create cards. build tool parity now. once its fully done, check it works. i want parity for the other differences you mentioend as well.” Guest card creation is authorized; pursue native capability parity, including the other interface differences in the audit.
+
+## Execution Summary
+The guest MCP bridge now derives its Board, app, session and conditional tool schemas from the live native catalogs, including `board_create_card`, `board_claim`, Board tests/signals, app actions and options, `session_info`, `activity`, `set_keybinding` and handed-over `type_into_program`. Dispatch uses `Agent._prepare` and `_execute`, preserving the native scope, write-toggle, read-only and grant checks. Foreground/background delegation and the 1–1800 second `agent_wait` range now match the native manager; Stop interrupts waits. Codex receives a process-local long MCP timeout for native test and foreground child calls. Guest-owned local shell, questions and skill reading remain capability equivalents.
+
+## Tests
+`PYTHONPATH=backend:tests python3 -m unittest tests.test_guest_board_bridge tests.test_guest_delegation tests.test_guest_memory tests.test_guest_harness_codex tests.test_guest_harness_claude tests.test_guest_harness_provider tests.test_app_tools tests.test_keybindings tests.test_board_tools tests.test_board.PolicyFileTests -q` — 668 passed. Real installed Codex and Claude Code managed-client turns each discovered `relay_board`, created and read a disposable card, and in a second turn called app/session tools, created and claimed a card, and checked its named tests. Details and limits: `docs/qa_evidence/2026-09-23-GPA8-guest-tool-parity/verification.md`. A wider optional run had four failures confined to concurrently changing Plan-mode code/tests, outside #GPA8.

@@ -48,7 +48,7 @@ class DelegationTests(unittest.TestCase):
 
     def spawn(self, **extra):
         return self.call('agent', dict(description='Review chapter', prompt='chapter gate:review',
-                                       subagent_type='general', **extra))
+                                       subagent_type='general', background=extra.pop('background', True), **extra))
 
     def test_discovery_before_binding_and_without_board(self):
         cold = Bridge(False)
@@ -57,7 +57,9 @@ class DelegationTests(unittest.TestCase):
         specs = exchange(self.cap, 'tools/list')['tools']
         self.assertEqual({s['name'] for s in specs} & DELEGATION_ALLOW, DELEGATION_ALLOW)
         self.assertEqual(next(s for s in specs if s['name'] == 'agent_wait')
-                         ['inputSchema']['properties']['timeout_seconds']['maximum'], 10)
+                         ['inputSchema']['properties']['timeout_seconds']['maximum'], 1800)
+        self.assertNotIn('enum', next(s for s in specs if s['name'] == 'agent')
+                         ['inputSchema']['properties']['background'])
         self.agent.subagents = None
         self.assertEqual({s['name'] for s in self.bridge.specs()} & DELEGATION_ALLOW, {'update_todos'})
 
@@ -85,7 +87,7 @@ class DelegationTests(unittest.TestCase):
         self.assertFalse(self.call('agent_wait', {'id': child['id']})['timed_out'])
 
     def test_deduplicates_spawn_and_refuses_replay_after_stop(self):
-        args = dict(description='Review', prompt='chapter gate:review', subagent_type='general')
+        args = dict(description='Review', prompt='chapter gate:review', subagent_type='general', background=True)
         first = self.call('agent', args, 'same')
         self.assertEqual(first, self.call('agent', args, 'same'))
         self.assertEqual(len(self.manager.list()), 1)
@@ -106,11 +108,11 @@ class DelegationTests(unittest.TestCase):
         self.assertIn('error', self.spawn())
         self.assertEqual(self.manager.list(), [])
 
-    def test_wait_is_bounded_and_cancel_interrupts(self):
+    def test_wait_uses_native_timeout_and_cancel_interrupts(self):
         child = self.spawn()
         with mock.patch.object(self.manager, 'wait', return_value={'timed_out': True}) as wait:
             self.call('agent_wait', {'id': child['id'], 'timeout_seconds': 1800})
-            self.assertEqual(wait.call_args.args[1], 10)
+            self.assertEqual(wait.call_args.args[1], 1800)
         results = []
         waiter = threading.Thread(target=lambda: results.append(self.call('agent_wait', {'id': child['id']})))
         waiter.start()
@@ -119,6 +121,29 @@ class DelegationTests(unittest.TestCase):
         self.assertFalse(waiter.is_alive())
         self.assertIn('error', results[0])
         self.hub.open('review')
+
+    def test_foreground_child_waits_and_stop_can_revoke_it(self):
+        reports = []
+        foreground = threading.Thread(target=lambda: reports.append(self.spawn(background=False)))
+        foreground.start()
+        self.assertTrue(self.hub.started.wait(2))
+        self.assertTrue(foreground.is_alive())
+        self.hub.open('review')
+        foreground.join(3)
+        self.assertFalse(foreground.is_alive())
+        self.assertEqual(reports[0]['status'], 'done', reports)
+        self.assertIn('REPORT[chapter]', reports[0]['result'])
+
+        self.hub.started.clear()
+        blocked = threading.Thread(target=lambda: reports.append(self.call('agent', {
+            'description': 'Review another chapter', 'prompt': 'other gate:blocked',
+            'subagent_type': 'general', 'background': False})))
+        blocked.start()
+        self.assertTrue(self.hub.started.wait(2))
+        self.agent.cancel_event.set()
+        blocked.join(3)
+        self.assertFalse(blocked.is_alive())
+        self.assertIn('error', reports[1])
 
     def test_pending_child_result_does_not_replace_user_prompt(self):
         self.harness.script = [{'result': ('Compared', 'end', {})}]
@@ -161,7 +186,7 @@ class DelegationTests(unittest.TestCase):
             self.provider.config, self.tmp.name, main_agent=self.agent))
         with mock.patch.object(P, 'make_harness', side_effect=children) as make:
             child = self.call('agent', {'description': 'Guest review', 'prompt': 'Review chapter',
-                                        'subagent_type': 'general'})
+                                        'subagent_type': 'general', 'background': True})
             result = self.call('agent_wait', {'id': child['id']})
             self.assertEqual(result['agents'][0]['status'], 'done', result)
             self.assertIn('Child report', result['agents'][0]['result'])
@@ -185,7 +210,7 @@ class DelegationTests(unittest.TestCase):
         failed = FakeHarness(guest='codex', start_error=RuntimeError('startup failed'))
         with mock.patch.object(P, 'make_harness', return_value=failed):
             child = self.call('agent', {'description': 'Investigate', 'prompt': 'Read only',
-                                        'subagent_type': 'general'})
+                                        'subagent_type': 'general', 'background': True})
             result = self.call('agent_wait', {'id': child['id']})
         self.assertEqual(result['agents'][0]['status'], 'failed', result)
         self.assertEqual(failed.starts[0]['permissions'], 'bypass')
@@ -206,7 +231,7 @@ class DelegationTests(unittest.TestCase):
         child_harness = FakeHarness(guest='codex', script=[{'result': (report, 'end', {})}])
         with mock.patch.object(P, 'make_harness', return_value=child_harness):
             child = self.call('agent', {'description': 'Inspect checkout', 'prompt': 'Investigate; do not edit',
-                                       'subagent_type': 'general', 'todo_id': 'T1'})
+                                       'subagent_type': 'general', 'todo_id': 'T1', 'background': True})
             result = self.call('agent_wait', {'id': child['id']})
         self.assertEqual(child_harness.starts[0]['permissions'], self.provider.permissions)
         self.assertIn('Status: blocked', child_harness.instructions)
@@ -236,7 +261,8 @@ class DelegationTests(unittest.TestCase):
         self.manager.configure(load_catalog(self.tmp.name, []), SubagentFactory(
             self.provider.config, self.tmp.name, main_agent=self.agent))
         with mock.patch.object(P, 'make_harness', return_value=harness):
-            child = self.call('agent', {'description': 'Stop me', 'prompt': 'Wait', 'subagent_type': 'general'})
+            child = self.call('agent', {'description': 'Stop me', 'prompt': 'Wait',
+                                        'subagent_type': 'general', 'background': True})
             self.assertTrue(entered.wait(2))
             sub = self.manager._agents[child['id']]
             with mock.patch.object(sub.agent.provider.live, 'resolve_question', return_value=True) as resolve:

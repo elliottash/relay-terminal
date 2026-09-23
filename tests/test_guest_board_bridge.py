@@ -1,19 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
 from relay_core import board as B, board_tools as T
 from relay_core.agent import Agent
-from relay_core.guest_board_bridge import BOARD_ALLOW, EXEC_ALLOW, PLAN_ALLOW, REMOTE_ALLOW, TERMINAL_CONTEXT_ALLOW, Bridge, exchange
+from relay_core.guest_board_bridge import (APP_ALLOW, ACTIVITY_ALLOW, CONDITIONAL_ALLOW,
+    BOARD_ALLOW, EXEC_ALLOW, PLAN_ALLOW, REMOTE_ALLOW, TERMINAL_CONTEXT_ALLOW, Bridge, exchange)
 from relay_core import guest_harness_provider as P
 from relay_core.guest_harness import TurnResult
 from tests.test_board_tools import CONFIG
 from tests.guest_harness_fake import FakeHarness
+from tests.test_app_tools import APP, FakeGui
+from tests.test_keybindings import ACTIONS
 
 
 class BridgeTests(unittest.TestCase):
@@ -50,15 +55,21 @@ class BridgeTests(unittest.TestCase):
 
     def test_discovery_allowlist_and_unavailable(self):
         specs = exchange(self.cap, 'tools/list')['tools']
-        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW)
+        ordinary = set(T.TOOL_NAMES)
+        expected = ordinary | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | {'type_into_program'}
+        self.assertEqual({s['name'] for s in specs}, expected)
         self.assertTrue(all(s['inputSchema']['type']=='object' for s in specs))
         self.assertEqual(self.call()['code'], 'unavailable')
         self.active()
         self.assertEqual(self.call()['code'], 'unavailable')
         self.assertNotIn('error', self.call(key='active'))
-        self.assertEqual(self.call('board_create_card', key='2')['code'], 'unknown_tool')
+        created = self.call('board_create_card', {'tab':'features', 'status':'inbox',
+                            'title':'Guest-created card', 'request':'A guest needs its own card'}, key='2')
+        self.assertNotIn('error', created)
+        self.assertIsNotNone(self.board.card_by_id(created['id']))
         self.agent.board = None
-        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']}, EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW)
+        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']},
+                         EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | {'type_into_program'})
 
     def test_guest_can_write_plan_and_exit_in_same_turn(self):
         self.active()
@@ -74,6 +85,114 @@ class BridgeTests(unittest.TestCase):
         self.agent.set_mode('plan')
         self.agent.set_readonly(True)
         self.assertIn('writes nothing', self.call('exit_plan_mode', {'reason': 'No'}, key='readonly')['error'])
+
+    def test_native_catalog_parity_and_relay_policy_dispatch(self):
+        from relay_core import app_tools as A
+        from relay_core.activity_tools import ActivityTools
+        from relay_core.keybindings import KeybindingCatalog
+
+        gui = FakeGui()
+        self.agent.app = gui.build({**APP, 'writes_enabled':False}, workspace=self.tmp.name)
+        ActivityTools.attach(self.agent, live_info=lambda: {'model':'guest-model'})
+        key_path = Path(self.tmp.name) / 'relay' / 'keybindings.json'
+        self.agent.executor.keybindings = KeybindingCatalog(str(key_path), ACTIONS)
+        names = {s['name'] for s in exchange(self.cap, 'tools/list')['tools']}
+        self.assertEqual(names & BOARD_ALLOW, set(T.TOOL_NAMES))
+        self.assertEqual(names & APP_ALLOW, APP_ALLOW)
+        self.assertEqual(names & ACTIVITY_ALLOW, ACTIVITY_ALLOW)
+        self.assertEqual(names & CONDITIONAL_ALLOW, CONDITIONAL_ALLOW)
+        self.active()
+
+        # The bridge calls the same native Agent policy and keeps its refusal codes.
+        self.assertIn('rows', self.call('app_option_list', {}, key='options'))
+        self.assertIn('writes_disabled', str(self.call('app_option_set',
+            {'id':'appearance.theme', 'value':'light'}, key='setting-refused')))
+        self.agent.app.set_catalog(A.AppCatalog.from_request(APP))
+        changed = self.call('app_option_set',
+            {'id':'appearance.theme', 'value':'light'}, key='setting-allowed')
+        self.assertNotIn('error', changed, changed)
+        self.assertTrue(gui.commands)
+        self.assertIn('model', self.call('session_info', {}, key='session'))
+
+        # Board creation and claiming are available to guests, including native attribution.
+        made = self.call('board_create_card', {'tab':'features', 'status':'inbox',
+            'title':'Guest parity card', 'request':'Guest needs a new Board card'}, key='create')
+        self.assertNotIn('error', made, made)
+        claimed = self.call('board_claim', {'id':made['id'], 'note':'Implement parity'}, key='claim')
+        self.assertTrue(claimed.get('claimed'), claimed)
+        self.assertIn('statuses', self.call('tests_check', {'card':made['id']}, key='check'))
+        self.assertIn('open', self.call('board_signals', {'action':'list'}, key='signals'))
+
+        # A keybinding call uses the live catalog; the program call is refused without a grant.
+        self.assertNotIn('error', self.call('set_keybinding',
+            {'action':'pane.splitRight', 'keys':['Ctrl+Shift+P']}, key='binding'))
+        program = self.call('type_into_program',
+            {'text':'y', 'intent':'Answer a visible prompt'}, key='no-program-grant')
+        self.assertEqual(program.get('refused'), 'not_granted', program)
+        control = self.agent.executor.program
+        control.begin_turn({'granted':True, 'program':'sample', 'reason':'delegated',
+                            'kind':'yes_no', 'waiting':True, 'screen':'Continue? [Y/n]'})
+        def answer(event):
+            self.events.append(event)
+            if event.get('event') == 'program_input':
+                control.resolve({'id':event['id'], 'ok':True, 'typed':'y',
+                                 'screen':'Continuing', 'program':'sample'})
+        control.emit = answer
+        typed = self.call('type_into_program',
+            {'text':'y', 'intent':'Answer the delegated prompt'}, key='program-granted')
+        self.assertTrue(typed.get('ok'), typed)
+        self.assertEqual(typed['screen'], 'Continuing')
+        native = {s['function']['name'] for s in self.agent.tools()}
+        guest = {s['name'] for s in exchange(self.cap, 'tools/list')['tools']}
+        # The harness supplies its own local shell, file, question and skill tools;
+        # every Relay-owned capability on this native pane must be bridged.
+        harness_equivalents = {'ask_user', 'load_skill', 'read_skill_file', 'load_tools'}
+        self.assertEqual(native - guest - harness_equivalents, set())
+
+    def test_console_board_tools_follow_native_scope(self):
+        pane_names = {s['name'] for s in exchange(self.cap, 'tools/list')['tools']}
+        self.assertFalse({'board_merge_cards', 'board_split_card', 'search_files'} & pane_names)
+        self.tools.begin_console()
+        console_names = {s['name'] for s in exchange(self.cap, 'tools/list')['tools']}
+        self.assertTrue({'board_merge_cards', 'board_split_card', 'search_files'} <= console_names)
+        self.assertNotIn('board_sections', console_names)
+
+    def test_guest_named_test_run_returns_native_verdict(self):
+        self.active()
+        Path(self.tmp.name, 'test_smoke.py').write_text(
+            'import unittest\nclass Smoke(unittest.TestCase):\n'
+            ' def test_ok(self): self.assertEqual(2, 1+1)\n')
+        backend = str(Path(__file__).resolve().parents[1] / 'backend')
+        with mock.patch.dict(os.environ, {'PYTHONPATH': backend + os.pathsep + self.tmp.name}):
+            result = self.call('tests_run',
+                {'ids':['unittest:test_smoke.Smoke.test_ok'], 'timeout_seconds':20}, key='named-run')
+        self.assertEqual(result['counts']['pass'], 1, result)
+        self.assertEqual(result['tests'][0]['id'], 'unittest:test_smoke.Smoke.test_ok')
+
+    def test_stop_revokes_a_running_named_test(self):
+        self.active()
+        Path(self.tmp.name, 'test_slow.py').write_text(
+            'import time, unittest\nclass Slow(unittest.TestCase):\n'
+            ' def test_wait(self): time.sleep(5)\n')
+        backend = str(Path(__file__).resolve().parents[1] / 'backend')
+        outcome = {}
+        def call():
+            with mock.patch.dict(os.environ, {'PYTHONPATH': backend + os.pathsep + self.tmp.name}):
+                outcome['result'] = self.call('tests_run',
+                    {'ids':['unittest:test_slow.Slow.test_wait'], 'timeout_seconds':20}, key='slow-run')
+        thread = threading.Thread(target=call)
+        thread.start()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not self.tools._tests().running():
+            time.sleep(.01)
+        self.assertTrue(self.tools._tests().running())
+        started = time.monotonic()
+        self.cancel.set()
+        self.bridge.end()
+        thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertIn('stopped', outcome['result']['error'])
 
     def test_capability_isolation(self):
         self.active()
@@ -132,7 +251,9 @@ class BridgeTests(unittest.TestCase):
 
     def test_provider_turn_binds_native_context_and_revokes_on_failure(self):
         def turn(prompt, attachments, emit, cancel, harness):
-            self.assertIn('relay_board', prompt)
+            # Relay's tool guidance is a harness instruction, not a prefix of the
+            # user's turn text (#GPF7). Keep this assertion on the actual contract.
+            self.assertIn('relay_board', harness.instructions)
             self.agent.config.model = 'claude-live-model'
             result = self.call('board_comment', {'id':self.card,'kind':'progress','text':'native identity'})
             self.assertNotIn('error',result)
@@ -159,7 +280,8 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(err,'')
         rows = sorted((json.loads(line) for line in out.splitlines()), key=lambda r: r['id'] if r['id'] is not None else 99)
         self.assertEqual(rows[0]['result']['protocolVersion'],'2025-03-26')
-        self.assertEqual(len(rows[1]['result']['tools']),len(BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW))
+        self.assertEqual(len(rows[1]['result']['tools']),
+                         len(T.TOOL_NAMES) + len(EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | {'type_into_program'}))
         self.assertFalse(rows[2]['result']['isError'])
         self.assertIn('error', rows[3])
 

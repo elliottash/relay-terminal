@@ -312,6 +312,7 @@ class AvailabilityTest(HarnessCase):
             name, params = h._request.call_args.args
             self.assertEqual(name, method)
             self.assertEqual(params["config"]["mcp_servers.relay_board.args"], descriptor["args"])
+            self.assertEqual(params["config"]["mcp_servers.relay_board.tool_timeout_sec"], 86400)
             self.assertEqual(params["config"][gh.EFFORT_CONFIG_KEY], "high")
 
     def test_start_raises_not_available_when_codex_is_not_on_path(self):

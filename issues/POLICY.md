@@ -13,9 +13,9 @@ card under `issues/threads/`, and a generated index in `issues/BOARD.md`. A code
 this project matches card text too, so leave the board out of one: `rg -g '!issues/'`. Below are
 the rules; then the procedure they point at; then an appendix that says how to make each
 `board_*` call by editing files, which is the fallback for unavailable tools. When the
-`relay_board` MCP server is connected, prefer its namespaced board_list, board_read,
-board_comment, board_update_card and board_move_card tools. Relay owns their identity and
-guardrails. Creation and claims still use the file fallback.
+`relay_board` MCP server is connected, prefer the Board tools it actually exposes, including
+card creation and claiming. Relay owns their identity and guardrails. Use the file fallback only
+when the bridge or the needed tool is unavailable.
 
 ## The rules
 
