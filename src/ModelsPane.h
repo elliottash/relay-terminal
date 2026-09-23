@@ -6,7 +6,7 @@
 // for the first time, you have a pane at the left and models at the right. and just remove ctrl
 // alt m, not worth the extra confusion … typing it again closes the pane (or esc as you
 // mentioned)." So the modal dialog is gone and this is a `ToolPane` beside the pane it serves, the
-// way Options and Sessions are hosted, with four tabs — the owner's four steps of availability
+// way Options and Sessions are hosted, with five tabs — the owner's availability steps
 // (design 5.7), and then the step they were all in aid of (design 5.9):
 //
 //   providers    step 1: the provider rows and their keys, Options › Models' own section drawn by
@@ -19,16 +19,17 @@
 //   priorities   steps 3 and 4: **one scrolling page of sections**, one per class — high, main,
 //                flash, and local where this machine serves one — each a header line (the class,
 //                its "show this class in the box" switch and a one-line note) over that class's
-//                numbered rows, with the level list, the "in box" cutoff column, the profile
+//                numbered rows, with the "in box" cutoff column, the profile
 //                combo and undo. No class tabs and no lite section (owner,
 //                2026-09-21: "in a pane, i dont want separate tabs for the modes. they should just
 //                be in divided sections. remove the lite section"); lite's storage stays and the
 //                jobs tab is where a chore's model is set.
+//   effort       reasoning levels for models ranked in the class lists.
 //   jobs         what each **job** relay does runs on right now, grouped by the tier it follows,
 //                and a per-job override. This is the retired "per-job models (advanced)" modal,
 //                reviewed and rebuilt (`relay::JobsTab`, design 5.9).
 //
-// **Re-hosted, not rewritten.** available and priorities are one `relay::ModelPicker` — the modal's
+// **Re-hosted, not rewritten.** available, priorities and effort are one `relay::ModelPicker` — the modal's
 // own guts, now a plain widget — put on the flat tab or on a class tab by this pane's tab bar. The
 // providers tab is one `relay::SettingsPane`. Nothing about either was reimplemented here.
 //
@@ -39,7 +40,7 @@
 // opens one per window, re-targets it when Ctrl+Shift+M is pressed from another pane, and closes
 // it when the key is pressed while it has the focus.
 //
-// The keys: Alt+1…Alt+4 and ←/→ walk these four tabs — the priorities page has no class tabs left
+// The keys: Alt+1…Alt+5 and ←/→ walk these five tabs — the priorities page has no class tabs left
 // to want the arrows — and everything else is the hosted widget's own map (the picker's ↑↓ across
 // its sections, →, enter, alt+↑↓ inside a section, delete, ctrl+enter into the highlighted section,
 // ctrl+z; the jobs tab's ↑↓, enter, delete).
@@ -47,7 +48,7 @@
 // It knows nothing about `Pane`, `RelayWindow` or the worker — every one of those arrives as a
 // `std::function` — so tests/modelspane_test.cpp drives the whole surface without a window.
 //
-// **A helper agent at its foot, across all four tabs** (owner, 2026-09-22: "there needs to be a
+// **A helper agent at its foot, across all five tabs** (owner, 2026-09-22: "there needs to be a
 // helper agent on the model page"). It is the Options and Sessions helper, name for name: the
 // collapsed "Helper Agent (Alt+Q)" row at the bottom right, a console the window builds through
 // `onCreateConsole` on the first expand, the fold back to one row, and the same height rules

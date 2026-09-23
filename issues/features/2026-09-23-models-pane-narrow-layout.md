@@ -1,13 +1,13 @@
 ---
 id: N4PW
 type: work
-status: executing
+status: needs-verification
 labels: [feature, models]
 assignee: codex
 rank: m
 created: '2026-09-23'
 source: 'Codex in Relay, 2026-09-23'
-links: {plans: [], commits: [], evidence: [], related: [4BPE], github: null}
+links: {plans: [], commits: [e326182dbae13d6f8bedbb168cf195b9cfd32c92], evidence: [docs/qa_evidence/2026-09-23-models-narrow/], related: [4BPE], github: null}
 ---
 # Make every Models tab usable in a narrow pane
 
@@ -43,4 +43,5 @@ The five Models tabs fit a narrow split. Providers starts with its controls visi
 `scripts/relay-build --target relay-modelspane-tests relay-modelpicker-tests relay-jobstab-tests relay` passed with the shared working tree.
 `QT_QPA_PLATFORM=offscreen ./build/relay-modelspane-tests` — 23 passed.
 `QT_QPA_PLATFORM=offscreen ./build/relay-jobstab-tests` — 22 passed.
+After the helper context update, `relay-modelspane-tests` passed again — 23 passed.
 The current shared working tree's `relay-modelpicker-tests` passed 55 tests. The isolated commit source passed 23 Models pane tests and 49 Model picker tests against the committed baseline; two baseline tests were affected by another session's uncommitted catalog changes and were not included in this change.

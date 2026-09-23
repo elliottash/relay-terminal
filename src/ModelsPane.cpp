@@ -35,7 +35,7 @@ const QString kAll = QStringLiteral("all");
 // ----- the helper agent's context (owner, 2026-09-22) ------------------------------------------
 //
 // "there needs to be a helper agent on the model page." What the agent here is *about*, and
-// nothing else: which of the four tabs is in front, what is typed in its filter, the pane this one
+// nothing else: which of the five tabs is in front, what is typed in its filter, the pane this one
 // serves, and on priorities the class the highlight is in. The console — the prompt box, the
 // queue, the transcript — is a no-shell `Pane` the window builds, the same surface Options and
 // Sessions embed (src/AgentContext.h). It resolves no link of its own: a `models:` link does not
@@ -89,7 +89,7 @@ class ModelsContext final : public agent::Context {
                                    : QStringLiteral("Serving: %1").arg(served));
         const QString filter = m_pane->filterText().trimmed();
         if (!filter.isEmpty()) lines << QStringLiteral("Filter: %1").arg(filter);
-        if (tab == ModelsPane::prioritiesTab()) {
+        if (tab == ModelsPane::prioritiesTab() || tab == ModelsPane::effortTab()) {
             const QString tier = m_pane->tier();
             if (!tier.isEmpty()) lines << QStringLiteral("Class in focus: %1").arg(tier);
         } else if (tab == ModelsPane::jobsTab() && m_pane->jobs()) {
@@ -220,7 +220,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     });
     m_tabs->installEventFilter(this);
 
-    // The helper agent, collapsed to one row at the bottom right under all four tabs — not inside
+    // The helper agent, collapsed to one row at the bottom right under all five tabs — not inside
     // the providers page, whose embedded SettingsPane is never given a factory and so draws no row
     // of its own. The context outlives the console, which is what §33 requires of a host.
     m_context = new ModelsContext(this);

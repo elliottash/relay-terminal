@@ -623,7 +623,7 @@ private Q_SLOTS:
     // ----- the helper agent (owner, 2026-09-22: "there needs to be a helper agent on the model
     // page") ------------------------------------------------------------------------------------
 
-    void theHelperIsOneRowUnderAllFourTabsAndBuildsOneConsole() {
+    void theHelperIsOneRowUnderAllFiveTabsAndBuildsOneConsole() {
         // With no factory — a pane with no window, which is every other test here — there is no
         // row at all: an ask row that does nothing is worse than none.
         ModelsPane unwired(providerSections());
@@ -715,6 +715,9 @@ private Q_SLOTS:
         QVERIFY2(spec.screen.contains(QStringLiteral("Serving: relay-terminal")), qPrintable(spec.screen));
         QVERIFY2(spec.screen.contains(QStringLiteral("Filter: glm")), qPrintable(spec.screen));
         QVERIFY2(spec.screen.contains(QStringLiteral("Class in focus: ")), qPrintable(spec.screen));
+        pane.showTab(ModelsPane::effortTab());
+        QVERIFY(pane.agentContext()->spec().screen.contains(QStringLiteral("Models › effort")));
+        QVERIFY(pane.agentContext()->spec().screen.contains(QStringLiteral("Class in focus: ")));
         pane.showTab(ModelsPane::jobsTab());
         QVERIFY(pane.agentContext()->spec().screen.contains(QStringLiteral("Models › jobs")));
 
