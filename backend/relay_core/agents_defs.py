@@ -15,7 +15,7 @@ Formats (verified 2026-09-17 against each project's docs or source):
 * Cursor ``.cursor/agents/*.md``: ``name, description, model, readonly, is_background``.
 
 Directories are read in precedence order; the first definition of a name wins and later ones are
-reported as duplicates. Built-ins come last, so a user file named ``explore`` replaces the built-in.
+reported as duplicates. Built-ins come last, so a user file named ``general`` replaces the built-in.
 The YAML reader is a small subset parser (the worker runs without site-packages).
 """
 from __future__ import annotations
@@ -90,18 +90,9 @@ class AgentDefinition:
 
 BUILTINS = [
     AgentDefinition(
-        "explore",
-        "Fast read-only investigator: finds files, reads code, runs read-only commands, and reports "
-        "findings. Use for searches and summaries that would otherwise fill the main context.",
-        "You are a read-only exploration agent. Investigate and report; you must not change state. "
-        "Use run_command for anything that only reads or inspects (ls, find, rg, grep, cat, wc, git "
-        "log/show/diff and the like) — the list is what it rules out, not a whitelist. "
-        "Finish with a concise, well-organized report containing exact paths and facts you verified.",
-        READ_ONLY_TOOLS, "inherit", "low", 12, None, True),
-    AgentDefinition(
         "general",
         "General-purpose agent with the same file and command tools as the main agent. Use for "
-        "multi-step tasks that can run in an isolated context and return only a result.",
+        "investigation or implementation. Put task-specific constraints (such as do not edit) in the prompt.",
         "You are a general-purpose agent. Complete the task, verify what you did, and finish with a "
         "concise report of what changed and what was verified.",
         SUBAGENT_TOOLS, "inherit", None, 12),
@@ -503,6 +494,9 @@ class AgentCatalog:
 
     def get(self, name: str) -> AgentDefinition:
         definition = self.definitions.get(name)
+        if definition is None and name == "explore":
+            raise ValueError("The built-in explore agent was removed. Use general and put investigation-only "
+                             "constraints in the prompt.")
         if definition is None:
             raise ValueError(f"Unknown subagent_type {name!r}. Available: {', '.join(self.definitions)}.")
         return definition

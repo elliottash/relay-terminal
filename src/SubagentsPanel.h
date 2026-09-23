@@ -22,7 +22,7 @@ struct SubagentRow {
     // The main agent's todo this subagent works on ("T3"), or empty (card #QHR1). The description
     // then starts with "T3 · ", so the strip, the tab and the ✦ lines all say which task it is.
     QString todoId;
-    QString status = QStringLiteral("waiting");   // waiting | running | done | failed | stopped
+    QString status = QStringLiteral("waiting");   // waiting | running | done | blocked | failed | stopped
     QString lastActivity, summary, handoff;
     QStringList warnings;
     bool background = false, tokensEstimated = true, resumed = false;
@@ -41,7 +41,7 @@ public:
     // A dim one-line notice for the terminal (start, finish, handoff) and the subagent it is
     // about, so the line can link to its tab. Never tool activity.
     std::function<void(const QString &line, const QString &id)> onInline;
-    // A subagent reached done, failed or stopped.
+    // A subagent reached done, blocked, failed or stopped.
     std::function<void(const SubagentRow &row)> onFinished;
     // Rows, counts or main-agent state changed.
     std::function<void()> onChanged;

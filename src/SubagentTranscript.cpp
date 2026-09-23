@@ -702,7 +702,7 @@ void SubagentTabsView::relabel(int index) {
     if (view->ended()) color = theme::TextMuted;
     else if (status == QStringLiteral("running")) color = theme::Agent;
     else if (status == QStringLiteral("done")) color = theme::Success;
-    else if (status == QStringLiteral("failed")) color = theme::Error;
+    else if (status == QStringLiteral("failed") || status == QStringLiteral("blocked")) color = theme::Error;
     else if (status == QStringLiteral("waiting")) color = theme::Text;
     m_bar->setTabTextColor(index, color);
 }

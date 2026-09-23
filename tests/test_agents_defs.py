@@ -48,7 +48,7 @@ class LocationTests(unittest.TestCase):
             definition = catalog.definitions[name]
             self.assertEqual(definition.tool, tool)
             self.assertTrue(definition.source.startswith(str(directory.resolve())))
-        self.assertIn("explore", catalog.definitions)
+        self.assertNotIn("explore", catalog.definitions)
         self.assertIn("general", catalog.definitions)
         self.assertEqual(catalog.duplicates, [])
         paths = [str(d) for d, _ in default_locations(self.ws, self.home)]
@@ -60,13 +60,13 @@ class LocationTests(unittest.TestCase):
     def test_first_source_wins_and_duplicates_reported(self):
         write(self.ws / ".relay/agents/reviewer.md", md("reviewer", "Relay version"))
         write(self.ws / ".claude/agents/reviewer.md", md("reviewer", "Claude version"))
-        write(self.home / ".claude/agents/explore.md", md("explore", "My explore"))
+        write(self.home / ".claude/agents/general.md", md("general", "My general"))
         catalog = load_catalog(self.ws, home=self.home)
         self.assertEqual(catalog.definitions["reviewer"].description, "Relay version")
-        self.assertEqual(catalog.definitions["explore"].description, "My explore")
+        self.assertEqual(catalog.definitions["general"].description, "My general")
         names = sorted((d["name"], d["kept"] == "builtin") for d in catalog.duplicates)
-        self.assertEqual(names, [("explore", False), ("reviewer", False)])
-        dup = next(d for d in catalog.duplicates if d["name"] == "explore")
+        self.assertEqual(names, [("general", False), ("reviewer", False)])
+        dup = next(d for d in catalog.duplicates if d["name"] == "general")
         self.assertEqual(dup["source"], "builtin")
         self.assertTrue(any("duplicate" in w for w in catalog.warnings()))
 
@@ -244,11 +244,20 @@ class FormatTests(unittest.TestCase):
 
     def test_builtins(self):
         catalog = self.load()
-        explore = catalog.definitions["explore"]
-        self.assertEqual(explore.tools, READ_ONLY_TOOLS)
-        self.assertEqual(explore.effort, "low")
-        self.assertEqual(catalog.definitions["general"].tools, SUBAGENT_TOOLS)
-        self.assertEqual(explore.source, "builtin")
+        self.assertEqual(set(catalog.definitions), {"general", "signal"})
+        general = catalog.get("general")
+        self.assertEqual(general.tools, SUBAGENT_TOOLS)
+        self.assertFalse(general.read_only)
+        self.assertIsNone(general.effort)
+        self.assertEqual(general.source, "builtin")
+        with self.assertRaisesRegex(ValueError, "Use general"):
+            catalog.get("explore")
+
+    def test_custom_explore_still_preserves_its_restrictions(self):
+        write(self.ws / ".relay/agents/explore.md", md("explore", extra="tools: Read\n"))
+        definition = self.load().get("explore")
+        self.assertEqual(definition.tools, ("read_file",))
+        self.assertNotEqual(definition.source, "builtin")
 
     def test_yaml_subset(self):
         data = parse_yaml('a: "x # not comment"  # comment\nb: [1, two]\nc: {d: true, e: null}\n'
@@ -279,13 +288,13 @@ class WorkerAgentsListTests(unittest.TestCase):
             self.assertEqual(len(lists), 2, events)
             for listing in lists:
                 names = [item["name"] for item in listing["items"]]
-                self.assertEqual(names, ["reviewer", "explore", "general", "signal"])
+                self.assertEqual(names, ["reviewer", "general", "signal"])
                 self.assertEqual(listing["items"][0]["tools"], ["read_file"])
                 self.assertEqual(listing["duplicates"][0]["name"], "reviewer")
                 for key in ("name", "description", "source", "model", "tools"):
                     self.assertIn(key, listing["items"][0])
             configured = next(e for e in events if e["event"] == "configured")
-            self.assertEqual(configured["agents"], 4)   # reviewer, explore, general, signal
+            self.assertEqual(configured["agents"], 3)   # reviewer, general, signal
 
 
 if __name__ == "__main__":

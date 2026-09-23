@@ -203,8 +203,19 @@ the finish time is unknown.
 
 ## 8. Subagents
 
+The built-in `general` agent handles investigation and implementation; put constraints such as
+"do not edit" in its task prompt. The built-in `explore` type is retired. Custom agent definitions
+(including explicit read-only restrictions) and internal `signal` workers remain supported.
+Tracker summaries show the description without bracketed role prefixes.
+
+Children start their final report with `Status: completed` or `Status: blocked`. A normal turn end
+with the latter becomes a `blocked` subagent outcome, preserved in saved threads and returned by
+`agent_wait`; its linked todo becomes blocked with the report reason. It can resume via
+`agent_message`. Unmarked reports retain the previous done behavior for compatibility; incidental
+mentions of blockers are not classified. Provider errors remain failed, cancellation stopped.
+
 - Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?, todo_id?}`; `agent_message {id, text}`; `agent_wait {id?}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents.
-- Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`,
+- Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"blocked"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`,
   `subagent_handoff {id, handoff: "next_model_call"|"wake"|"pending", wakeups, max_auto_turns, tools?, tokens?, elapsed_ms?}`
   — how a finished background subagent's result reaches the main agent: at its next model call, as a
   wake-up turn Relay queued, or `pending` because the auto-turn budget is spent.

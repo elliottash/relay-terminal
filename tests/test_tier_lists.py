@@ -458,7 +458,7 @@ class SubagentTests(TurnCase):
         factory = SubagentFactory(CONFIG, self.temp.name, preset_id='glm', key_lookup=lambda p: keys.get(p, ''),
                                   roles=resolver(keys, {'main': self.MAIN}),
                                   main_agent=SimpleNamespace(failover=True, fallbacks=[]))
-        sub, _label, _warnings = factory(load_catalog(self.temp.name, []).get('explore'), None, None,
+        sub, _label, _warnings = factory(load_catalog(self.temp.name, []).get('general'), None, None,
                                          self.events.append, 'a1')
         sub.ask('go')
         self.assertEqual((self.events[-1]['event'], self.moves()), ('done', [('glm-5.3', 'gpt-6-astra')]))

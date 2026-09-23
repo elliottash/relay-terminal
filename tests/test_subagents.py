@@ -7,7 +7,7 @@ from pathlib import Path
 
 from relay_core import skills as skills_mod
 from relay_core.agent import Agent
-from relay_core.agents_defs import load_catalog
+from relay_core.agents_defs import AgentDefinition, READ_ONLY_TOOLS, load_catalog
 from relay_core.provider import Cancelled, ProviderConfig
 from relay_core.queue import TurnSupervisor
 from relay_core.subagents import SubagentFactory, SubagentManager, effort_extra
@@ -191,7 +191,7 @@ class ForegroundTests(Base):
         opened.start()
         agent, provider = self.main_agent([
             calls(*(call('agent', {'description': f'task {i}', 'prompt': f'T{i} gate:g{i}',
-                                   'subagent_type': 'explore'}, f'c{i}') for i in range(3))),
+                                   'subagent_type': 'general', 'effort': 'low'}, f'c{i}') for i in range(3))),
             release_when_all_running])
         agent.ask('fan out')
         opened.join(2)
@@ -207,7 +207,7 @@ class ForegroundTests(Base):
         self.assertEqual(self.rec.of('done')[-1]['event'], 'done')
         started = self.rec.of('subagent_started')
         self.assertEqual(len(started), 3)
-        self.assertTrue(all(not s['background'] and s['type'] == 'explore' and s['effort'] == 'low' for s in started))
+        self.assertTrue(all(not s['background'] and s['type'] == 'general' and s['effort'] == 'low' for s in started))
         finished = self.rec.of('subagent_finished')
         self.assertTrue(all(f['handoff'] == 'returned' and f['outcome'] == 'done' for f in finished))
         self.assertIn('agent', provider.seen[0][1])
@@ -223,8 +223,9 @@ class ForegroundTests(Base):
             self.hub.open(f'g{i}')
 
     def test_no_nesting_and_tool_restriction(self):
+        self.manager.catalog.add(AgentDefinition('reader', 'Read only', tools=READ_ONLY_TOOLS, read_only=True))
         agent, provider = self.main_agent([
-            calls(call('agent', {'description': 'nested', 'prompt': 'N nest', 'subagent_type': 'explore'}, 'c1')),
+            calls(call('agent', {'description': 'nested', 'prompt': 'N nest', 'subagent_type': 'reader'}, 'c1')),
             final()])
         agent.ask('try nesting')
         task, messages, tools = self.hub.seen[0]
@@ -414,7 +415,7 @@ class StopAndMessageTests(Base):
 class HandoffTests(Base):
     def test_background_completion_wakes_idle_main_agent(self):
         agent, provider = self.with_turns([
-            calls(call('agent', {'description': 'explore bg', 'prompt': 'E gate:g1', 'subagent_type': 'explore',
+            calls(call('agent', {'description': 'explore bg', 'prompt': 'E gate:g1', 'subagent_type': 'general',
                                  'background': True}, 'c1')),
             final('started it'),
             final('handled result')])
@@ -430,7 +431,7 @@ class HandoffTests(Base):
         queued = self.rec.wait(lambda e: e['event'] == 'queued' and e.get('origin') == 'relay')
         self.rec.wait(lambda e: e['event'] == 'agent_finished', count=2)
         prompt = provider.seen[2][0][-1]['content']
-        self.assertTrue(prompt.startswith('Background agent a1 (explore) finished: done.'))
+        self.assertTrue(prompt.startswith('Background agent a1 (general) finished: done.'))
         self.assertIn('[Relay context: added by Relay, not typed by the user]', prompt)
         self.assertIn('untrusted model output', prompt)
         self.assertIn('REPORT[E]', prompt)
@@ -579,7 +580,7 @@ class WorkerOptionTests(unittest.TestCase):
             self.assertIn({'event': 'agents_status', 'items': []}, events)
             self.assertTrue(any(e['event'] == 'error' and 'Unknown subagent' in e['text'] for e in events))
             configured = next(e for e in events if e['event'] == 'configured')
-            self.assertEqual(configured['agents'], 3)   # explore, general, signal (#AQ6X)
+            self.assertEqual(configured['agents'], 2)   # general, signal (#AQ6X)
 
 
 class FactoryTests(unittest.TestCase):
@@ -600,7 +601,7 @@ class FactoryTests(unittest.TestCase):
             factory.resolve('openrouter', warnings)
             factory.resolve('gpt-9', warnings)
             self.assertEqual(len(warnings), 2)
-            agent, label, warns = factory(catalog.get('explore'), None, 'low', lambda e: None, 'a1')
+            agent, label, warns = factory(catalog.get('general'), None, 'low', lambda e: None, 'a1')
             self.assertEqual(agent.provider.extra['reasoning_effort'], 'low')
             self.assertEqual(label, 'kimi-k3')
             self.assertEqual(effort_extra('openrouter', {}, 'max'), {'reasoning': {'effort': 'xhigh'}})

@@ -963,7 +963,7 @@ class SubagentFailoverTests(unittest.TestCase):
                                provider_factory=provider_factory)
 
     def subagent(self, factory, model=None):
-        agent, _label, _warnings = factory(self.catalog.get('explore'), model, None,
+        agent, _label, _warnings = factory(self.catalog.get('general'), model, None,
                                            self.events.append, 'a1')
         return agent
 

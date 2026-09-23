@@ -129,6 +129,7 @@ QString SubagentModel::statusIcon(const QString &status) {
     if (status == QStringLiteral("running")) return QStringLiteral("●");
     if (status == QStringLiteral("done")) return QStringLiteral("✓");
     if (status == QStringLiteral("failed")) return QStringLiteral("✗");
+    if (status == QStringLiteral("blocked")) return QStringLiteral("!");
     if (status == QStringLiteral("stopped")) return QStringLiteral("■");
     return QStringLiteral("○");   // waiting
 }
@@ -845,15 +846,14 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
                 QColor color = theme::TextMuted;
                 if (row->status == QStringLiteral("running")) color = theme::Accent;
                 else if (row->status == QStringLiteral("done")) color = kDone();
-                else if (row->status == QStringLiteral("failed")) color = kFailed();
+                else if (row->status == QStringLiteral("failed") || row->status == QStringLiteral("blocked")) color = kFailed();
                 QStringList parts;
                 if (!row->live()) parts << row->status;
                 else if (row->status == QStringLiteral("waiting")) parts << QStringLiteral("waiting");
                 parts << SubagentModel::formatElapsed(m_model->elapsedNow(*row));
                 parts << QStringLiteral("%1 tool%2").arg(row->tools).arg(row->tools == 1 ? QString() : QStringLiteral("s"));
                 parts << SubagentModel::formatTokens(row->tokens, row->tokensEstimated) + QStringLiteral(" tok");
-                QString description = row->type.isEmpty() || row->type == QStringLiteral("general")
-                    ? row->description : QStringLiteral("[%1] %2").arg(row->type, row->description);
+                QString description = row->description;
                 if (row->live() && !row->lastActivity.isEmpty() && row->lastActivity != QStringLiteral("starting"))
                     description += QStringLiteral("  ·  ") + row->lastActivity;
                 drawRow(leftCell, onRow && (!split || m_column == Subagents), SubagentModel::statusIcon(row->status), color,

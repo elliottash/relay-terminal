@@ -7,10 +7,11 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from relay_core import todos as todo_mod
-from test_subagents import Base, call, calls, final
+from test_subagents import Base, SubProvider, call, calls, final
 
 
 def todos(*items):
@@ -43,6 +44,7 @@ class ValidateTests(unittest.TestCase):
 
     def test_finish_outcomes(self):
         for outcome, status, note in (('done', 'completed', None), ('failed', 'blocked', 'Subagent a1 failed: boom'),
+                                      ('blocked', 'blocked', 'Subagent a1 blocked: boom'),
                                       ('stopped', 'pending', 'Subagent a1 was stopped before it finished.')):
             todo_list = todo_mod.TodoList()
             todo_list.replace({'items': [{'text': 'a', 'status': 'pending'}]}, set(), None)
@@ -101,6 +103,27 @@ class ValidateTests(unittest.TestCase):
 
 
 class ModelLinkTests(Base):
+    def test_explicit_blocked_report_keeps_task_open_and_can_resume(self):
+        agent, _ = self.main_agent([])
+        agent.todos.replace({'items': [{'text': 'Inspect checkout', 'status': 'pending'}]}, set(), None)
+        with mock.patch.object(SubProvider, 'complete', return_value=final(
+                'Status: blocked\nCannot read the checkout: sandbox initialization failed.')):
+            sub = self.manager.spawn({'description': 'Inspect', 'prompt': 'Inspect checkout',
+                                      'subagent_type': 'general', 'background': True, 'todo_id': 'T1'})
+            self.assertTrue(sub.done.wait(5))
+        self.assertEqual(sub.status, 'blocked')
+        self.assertEqual(self.rec.of('subagent_finished')[-1]['outcome'], 'blocked')
+        self.assertEqual(agent.todos.items[0]['status'], 'blocked')
+        self.assertIn('sandbox initialization failed', agent.todos.items[0]['note'])
+        self.assertEqual(self.manager.thread_data(sub)['status'], 'blocked')
+        with mock.patch.object(SubProvider, 'complete', return_value=final(
+                'Status: completed\nCheckout inspected; earlier blocked access is resolved.')):
+            self.manager.send_message(sub.id, 'Access restored; try again', origin='main')
+            self.assertTrue(sub.done.wait(5))
+        self.assertEqual(sub.status, 'done')
+        self.assertEqual(agent.todos.items[0]['status'], 'completed')
+        self.assertIsNone(agent.todos.items[0]['note'])
+
     def test_background_subagent_with_todo_id_drives_the_todo_and_the_request(self):
         agent, provider = self.main_agent([
             todos({'text': 'write docs', 'status': 'pending'}, {'text': 'fix bug', 'status': 'pending'}),

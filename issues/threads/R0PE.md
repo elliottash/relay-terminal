@@ -25,3 +25,6 @@ Built relay and both targeted test binaries; subagents and striplayout passed. R
 <!-- relay:entry 20260922T180000Z-r7 author=codex kind=evidence -->
 ### Codex · 2026-09-22
 Linked refinement commit ebe54d353eab5be31ba9b5741ee271df4aad5efc; exact committed C++ tree builds.
+
+<!-- relay:entry 20260923T004035Z-aj author=agent kind=decision model=gpt-6-astra pane=bad2b7a2 turn=e17cd47ea62a4df4b394e4536bad2fbb/7f17b5fcc85d48dfb7f4790eddd745a7 -->
+Owner: "i agree, make these changes -- so remove the [explore] and [signal] tags as well". Card #SBGN implements removal of the tracker role prefixes along with retiring built-in explore and reporting blocked subagent outcomes.

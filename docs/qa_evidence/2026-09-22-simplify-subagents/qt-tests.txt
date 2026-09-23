@@ -1,0 +1,10 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 15: subagents
+1/2 Test #15: subagents ........................   Passed    0.57 sec
+    Start 19: striplayout
+2/2 Test #19: striplayout ......................   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.59 sec

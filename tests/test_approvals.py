@@ -503,7 +503,7 @@ class SubagentApprovalTests(unittest.TestCase):
     def spawn(self, root, events, main_agent):
         factory = SubagentFactory(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""), root,
                                   provider_factory=lambda config: object(), main_agent=main_agent)
-        return factory(load_catalog(root, []).get("explore"), None, None, events.append, "a1")[0]
+        return factory(load_catalog(root, []).get("general"), None, None, events.append, "a1")[0]
 
     def test_a_subagent_inherits_the_panes_checklist_when_it_spawns(self):
         with tempfile.TemporaryDirectory() as root:

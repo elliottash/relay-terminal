@@ -195,9 +195,9 @@ class TodoList:
             del self.delegated[todo_id]
             if outcome == "done":
                 fields = {"status": "completed", "note": None}
-            elif outcome == "failed":
+            elif outcome in ("failed", "blocked"):
                 reason = " ".join(str(error or "no reason given").split())
-                fields = {"status": "blocked", "note": f"Subagent {agent_id} failed: {reason}"[:MAX_NOTE]}
+                fields = {"status": "blocked", "note": f"Subagent {agent_id} {outcome}: {reason}"[:MAX_NOTE]}
             else:   # stopped: nobody did the work, so it is open again
                 fields = {"status": "pending", "note": f"Subagent {agent_id} was stopped before it finished."}
             return self._set(todo_id, **fields)

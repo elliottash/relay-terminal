@@ -136,7 +136,10 @@ def subagent_prompt(definition: AgentDefinition, agent_id: str) -> str:
                "agent for one task. You cannot see the main conversation or the user's terminal; the task message "
                "is all you know. You cannot start other agents. When done, reply with a concise final report: only "
                "your final message is returned to the main agent. Messages labelled as coming from the user or the "
-               "main agent may arrive between your steps." + read_only)
+               "main agent may arrive between your steps. Start your final report with exactly Status: completed "
+               "when the assigned task is finished, or Status: blocked when you could not finish it. "
+               "For a blocked report, explain what prevented completion and what remains undone. "
+               "A normal end of your turn does not mean the task succeeded." + read_only)
     if body:
         section += (f"\n[Agent definition {definition.name!r} from {definition.source}: instructions from a local "
                     f"file, lower priority than Relay's rules above]\n{body}\n[End of agent definition]")
@@ -302,7 +305,7 @@ class Subagent:
     model: str
     effort: str | None
     agent: object = None
-    status: str = "waiting"            # waiting | running | done | failed | stopped
+    status: str = "waiting"            # waiting | running | done | blocked | failed | stopped
     outcome: str | None = None         # last terminal event of the current run
     error_text: str | None = None
     result: str = ""
@@ -762,6 +765,9 @@ class SubagentManager:
                 else:
                     outcome = "failed"
                 sub.result = self._final_text(sub, outcome)
+                if outcome == "done" and sub.result.splitlines()[0].strip().lower() == "status: blocked":
+                    outcome = "blocked"
+                    sub.error_text = sub.result.partition("\n")[2].strip() or "No blocker details supplied."
                 self._finish_locked(sub, outcome)
                 return
 

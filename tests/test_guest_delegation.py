@@ -53,13 +53,13 @@ class DelegationTests(unittest.TestCase):
     def test_discovery_before_binding_and_without_board(self):
         cold = Bridge(False)
         self.addCleanup(cold.close)
-        self.assertEqual({s['name'] for s in cold.specs()}, DELEGATION_ALLOW)
+        self.assertEqual({s['name'] for s in cold.specs()} & DELEGATION_ALLOW, DELEGATION_ALLOW)
         specs = exchange(self.cap, 'tools/list')['tools']
-        self.assertEqual({s['name'] for s in specs}, DELEGATION_ALLOW)
+        self.assertEqual({s['name'] for s in specs} & DELEGATION_ALLOW, DELEGATION_ALLOW)
         self.assertEqual(next(s for s in specs if s['name'] == 'agent_wait')
                          ['inputSchema']['properties']['timeout_seconds']['maximum'], 10)
         self.agent.subagents = None
-        self.assertEqual({s['name'] for s in self.bridge.specs()}, {'update_todos'})
+        self.assertEqual({s['name'] for s in self.bridge.specs()} & DELEGATION_ALLOW, {'update_todos'})
 
     def test_task_child_events_result_and_saved_transcript(self):
         tasks = self.call('update_todos', {'items': [{'text': 'Review chapter', 'status': 'pending'}]})
@@ -159,7 +159,7 @@ class DelegationTests(unittest.TestCase):
             sub = self.manager._agents[child['id']]
             saved = json.loads(self.agent.store.thread_path(self.agent.session_id, sub.thread_id).read_text())
             self.assertTrue(any(m.get('tool_calls') for m in saved['messages']))
-            self.assertEqual(sub.agent._guest_session_data.board_bridge.specs(), [])
+            self.assertFalse({s['name'] for s in sub.agent._guest_session_data.board_bridge.specs()} & DELEGATION_ALLOW)
             self.call('agent_message', {'id': child['id'], 'text': 'Follow up'})
             followed = self.call('agent_wait', {'id': child['id']})
             self.assertEqual(followed['agents'][0]['status'], 'done', followed)
@@ -167,17 +167,17 @@ class DelegationTests(unittest.TestCase):
             self.assertTrue(children[1].closed)
             self.assertEqual(make.call_count, 2)
 
-    def test_guest_readonly_start_failure_and_model_change(self):
+    def test_guest_general_start_failure_and_model_change(self):
         from relay_core.provider import ProviderConfig
         factory = SubagentFactory(self.provider.config, self.tmp.name, main_agent=self.agent)
         self.manager.configure(load_catalog(self.tmp.name, []), factory)
         failed = FakeHarness(guest='codex', start_error=RuntimeError('startup failed'))
         with mock.patch.object(P, 'make_harness', return_value=failed):
-            child = self.call('agent', {'description': 'Explore', 'prompt': 'Read only',
-                                        'subagent_type': 'explore'})
+            child = self.call('agent', {'description': 'Investigate', 'prompt': 'Read only',
+                                        'subagent_type': 'general'})
             result = self.call('agent_wait', {'id': child['id']})
         self.assertEqual(result['agents'][0]['status'], 'failed', result)
-        self.assertEqual(failed.starts[0]['permissions'], 'deny')
+        self.assertEqual(failed.starts[0]['permissions'], 'bypass')
         self.assertTrue(failed.closed)
         sub = self.manager._agents[child['id']]
         next_config = ProviderConfig('harness://codex', 'another-model', '')
@@ -186,6 +186,31 @@ class DelegationTests(unittest.TestCase):
         self.assertIsNone(sub.agent.provider.session_id)
         self.manager._apply_model(sub, CONFIG, None)
         self.assertIs(sub.agent.provider.config, CONFIG)
+
+    def test_guest_blocked_report_persists_and_general_inherits_permissions(self):
+        self.manager.configure(load_catalog(self.tmp.name, []), SubagentFactory(
+            self.provider.config, self.tmp.name, main_agent=self.agent))
+        self.call('update_todos', {'items': [{'text': 'Inspect checkout', 'status': 'pending'}]})
+        report = 'Status: blocked\nCannot read checkout: sandbox initialization failed.'
+        child_harness = FakeHarness(guest='codex', script=[{'result': (report, 'end', {})}])
+        with mock.patch.object(P, 'make_harness', return_value=child_harness):
+            child = self.call('agent', {'description': 'Inspect checkout', 'prompt': 'Investigate; do not edit',
+                                       'subagent_type': 'general', 'todo_id': 'T1'})
+            result = self.call('agent_wait', {'id': child['id']})
+        self.assertEqual(child_harness.starts[0]['permissions'], self.provider.permissions)
+        self.assertIn('Status: blocked', child_harness.instructions)
+        self.assertEqual(result['agents'][0]['status'], 'blocked', result)
+        self.assertIn(report, result['agents'][0]['result'])
+        self.assertEqual(self.agent.todos.items[0]['status'], 'blocked')
+        sub = self.manager._agents[child['id']]
+        saved = json.loads(self.agent.store.thread_path(self.agent.session_id, sub.thread_id).read_text())
+        self.assertEqual(saved['status'], 'blocked')
+
+    def test_custom_readonly_guest_keeps_explicit_restriction(self):
+        from relay_core.agents_defs import AgentDefinition, READ_ONLY_TOOLS
+        factory = SubagentFactory(self.provider.config, self.tmp.name, main_agent=self.agent)
+        definition = AgentDefinition('reader', 'Read only', tools=READ_ONLY_TOOLS, read_only=True)
+        self.assertEqual(factory.guest_provider(self.provider.config, definition, None, 'a1').permissions, 'deny')
 
     def test_stopping_guest_closes_harness_and_routes_questions(self):
         from relay_core.provider import Cancelled

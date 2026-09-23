@@ -159,6 +159,46 @@ private slots:
         QCOMPARE(h.model.liveCount(), 0);
     }
 
+    void blockedReportIsNotSuccessfulCompletion() {
+        Harness h;
+        h.start("a1");
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','outcome':'blocked','summary':'Cannot read checkout','tools':1,'elapsed_ms':20000}"));
+        QCOMPARE(h.model.row(QStringLiteral("a1"))->status, QStringLiteral("blocked"));
+        QCOMPARE(h.model.row(QStringLiteral("a1"))->summary, QStringLiteral("Cannot read checkout"));
+        QCOMPARE(h.model.liveCount(), 0);
+        QCOMPARE(h.finished, QStringList{QStringLiteral("a1:blocked")});
+        QCOMPARE(SubagentModel::statusIcon(QStringLiteral("blocked")), QStringLiteral("!"));
+        QVERIFY(h.inlineLines.last().contains(QStringLiteral("blocked")));
+        h.model.handle(json("{'event':'subagent_started','id':'a1','type':'general','description':'Inspect checkout','resumed':true}"));
+        QCOMPARE(h.model.liveCount(), 1);
+    }
+
+    void trackerOmitsRoleTagsIncludingHistoricalRows() {
+        auto render = [](bool legacyTypes) {
+            Harness h;
+            SubagentsPanel panel(&h.model);
+            const QStringList types{QStringLiteral("general"), QStringLiteral("explore"), QStringLiteral("signal")};
+            for (int i = 0; i < 3; ++i) {
+                const QString id = QStringLiteral("a%1").arg(i + 1);
+                h.model.handle(QJsonObject{{"event", "subagent_started"}, {"id", id},
+                    {"type", legacyTypes ? types[i] : QStringLiteral("general")},
+                    {"description", QStringLiteral("Inspect checkout %1").arg(i + 1)}, {"model", "fixture"}});
+                h.model.handle(QJsonObject{{"event", "subagent_finished"}, {"id", id},
+                    {"outcome", i == 1 ? "blocked" : "done"}, {"elapsed_ms", 20000}, {"tools", 1}});
+            }
+            panel.refresh();
+            panel.resize(1000, panel.sizeHint().height());
+            panel.show();
+            QTest::qWaitForWindowExposed(&panel);
+            return panel.grab().toImage();
+        };
+        const auto general = render(false);
+        const auto historical = render(true);
+        QCOMPARE(historical, general);
+        const QString screenshot = qEnvironmentVariable("RELAY_TRACKER_SCREENSHOT");
+        if (!screenshot.isEmpty()) QVERIFY(historical.save(screenshot));
+    }
+
     void handoffPendingBeyondCap() {
         Harness h;
         h.start("a2");
