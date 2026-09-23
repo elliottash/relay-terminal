@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Show a local file as an inline Relay image or media row (#MDA7).
+
+The escape contains a path, never file contents. Relay reads the file on this
+machine; an SSH pane must therefore run this helper on the machine displaying
+Relay, rather than send a path from the remote host.
+"""
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from urllib.parse import quote, urlparse
+import wave
+
+MAX_INPUT = 64 * 1024 * 1024
+MAX_TABLE_ROWS = 5000
+MAX_TABLE_COLUMNS = 100
+KINDS = {"image", "svg", "pdf", "audio", "video", "chart", "table"}
+
+
+def sniff(head):
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image"
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return "image"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "image"
+    if head.lstrip().startswith(b"<svg") or b"<svg" in head[:1024].lower():
+        return "svg"
+    if head.startswith(b"%PDF-"):
+        return "pdf"
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return "audio"
+    if head.startswith(b"ID3") or head.startswith(b"OggS") or head.startswith(b"fLaC"):
+        return "audio"
+    if head.startswith(b"\x1aE\xdf\xa3") or head[4:8] == b"ftyp":
+        return "video"
+    if b"<html" in head[:1024].lower() or b"<!doctype html" in head[:1024].lower():
+        return "chart"
+    return None
+
+
+def cache_dir():
+    root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "relay" / "media"
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o700)
+    return root
+
+
+def run_checked(argv, output=None, timeout=20):
+    result = subprocess.run(argv, stdout=subprocess.PIPE if output is None else subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, timeout=timeout, check=False)
+    if result.returncode or (output is not None and not Path(output).is_file()):
+        detail = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise ValueError((detail[-1] if detail else "preview command failed")[:240])
+    return result.stdout
+
+
+def preview(path, kind, target, explicit=None):
+    if explicit:
+        shot = Path(explicit).expanduser().resolve()
+        with shot.open("rb") as source:
+            head = source.read(1024)
+        if sniff(head) != "image":
+            raise ValueError("--snapshot must name a PNG, JPEG, GIF or WebP image")
+        return str(shot)
+    source = str(path) if path else target
+    key = hashlib.sha256((kind + "\0" + source + "\0" + str(path.stat().st_mtime_ns if path else os.getpid())).encode()).hexdigest()
+    dest = cache_dir() / (key + ".png")
+    if dest.is_file():
+        return str(dest)
+    if kind == "svg":
+        tool = shutil.which("rsvg-convert")
+        if not tool:
+            raise ValueError("SVG preview needs rsvg-convert or --snapshot")
+        data = run_checked([tool, "--format=png", "--width=1200", str(path)])
+        dest.write_bytes(data)
+    elif kind == "pdf":
+        tool = shutil.which("pdftoppm")
+        if not tool:
+            raise ValueError("PDF preview needs pdftoppm or --snapshot")
+        run_checked([tool, "-f", "1", "-singlefile", "-scale-to", "1200", "-png", str(path), str(dest.with_suffix(""))], dest)
+    elif kind == "video":
+        tool = shutil.which("ffmpeg")
+        if not tool:
+            raise ValueError("video poster needs ffmpeg or --snapshot")
+        run_checked([tool, "-nostdin", "-v", "error", "-y", "-ss", "1", "-i", str(path),
+                     "-frames:v", "1", "-vf", "scale=1200:-2", str(dest)], dest)
+    elif kind == "chart":
+        tool = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+        if not tool:
+            raise ValueError("chart snapshot needs Chrome/Chromium or --snapshot")
+        page = path.as_uri() if path else target
+        with tempfile.TemporaryDirectory(prefix="relay-show-browser-") as profile:
+            run_checked([tool, "--headless", "--no-first-run", "--disable-gpu", "--hide-scrollbars",
+                         "--disable-extensions", "--user-data-dir=" + profile, "--window-size=1200,800",
+                         "--screenshot=" + str(dest), page], dest)
+    else:
+        raise ValueError("no preview for " + kind)
+    if dest.stat().st_size > MAX_INPUT:
+        dest.unlink(missing_ok=True)
+        raise ValueError("generated preview is too large")
+    return str(dest)
+
+
+def duration_and_waveform(path):
+    duration = 0.0
+    bars = []
+    with path.open("rb") as source:
+        is_wave = source.read(12).startswith(b"RIFF")
+    if is_wave:
+        try:
+            with wave.open(str(path), "rb") as sound:
+                duration = sound.getnframes() / sound.getframerate()
+        except (wave.Error, EOFError, ZeroDivisionError):
+            pass
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        try:
+            raw = run_checked([ffprobe, "-v", "error", "-show_entries", "format=duration",
+                               "-of", "default=noprint_wrappers=1:nokey=1", str(path)], timeout=8)
+            duration = max(0.0, float(raw.strip()))
+        except (ValueError, subprocess.TimeoutExpired):
+            pass
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        try:
+            pcm = run_checked([ffmpeg, "-nostdin", "-v", "error", "-t", "30", "-i", str(path),
+                               "-ac", "1", "-ar", "8000", "-f", "s16le", "-"], timeout=12)
+            samples = memoryview(pcm[:480000]).cast("h")
+            for n in range(64):
+                lo, hi = n * len(samples) // 64, (n + 1) * len(samples) // 64
+                bars.append(round(max((abs(x) for x in samples[lo:hi]), default=0) / 32768, 3))
+        except (ValueError, subprocess.TimeoutExpired, TypeError):
+            pass
+    return duration, bars
+
+
+def table_shape(path, delimiter):
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as source:
+        reader = csv.reader(source, delimiter=delimiter)
+        rows = []
+        for row in reader:
+            if len(row) > MAX_TABLE_COLUMNS:
+                raise ValueError("table has too many columns")
+            rows.append(row)
+            if len(rows) > MAX_TABLE_ROWS:
+                raise ValueError("table has too many rows")
+    return len(rows), max((len(row) for row in rows), default=0)
+
+
+def emit_image(path):
+    payload = str(path).encode("utf-8")
+    import base64
+    with path.open("rb") as source:
+        png = source.read(8).startswith(b"\x89PNG")
+    control = b"\x1b_Ga=T,t=f,q=2" + (b",f=100" if png else b"")
+    sys.stdout.buffer.write(control + b";" + base64.b64encode(payload) + b"\x1b\\\n")
+
+
+def emit_media(data):
+    encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    key = hashlib.sha256(encoded).hexdigest()
+    manifest = cache_dir() / (key + ".json")
+    if not manifest.exists():
+        manifest.write_bytes(encoded)
+    uri = "relay-media:" + quote(str(manifest), safe="")
+    sys.stdout.buffer.write(("\x1b]8;;" + uri + "\x1b\\⠀\x1b]8;;\x1b\\\n").encode("utf-8"))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", help="local file, localhost URL, or - for stdin")
+    parser.add_argument("--kind", choices=sorted(KINDS), help="override type detection")
+    parser.add_argument("--name", help="file name for stdin data")
+    parser.add_argument("--snapshot", help="existing image preview for chart, SVG, PDF or video")
+    parser.add_argument("--url", help="live local/localhost page to open when a chart is clicked")
+    args = parser.parse_args(argv)
+    path = None
+    target = None
+    if args.source == "-":
+        data = sys.stdin.buffer.read(MAX_INPUT + 1)
+        if len(data) > MAX_INPUT:
+            parser.error("stdin exceeds 64 MiB")
+        suffix = Path(args.name or "input").suffix[:16]
+        path = cache_dir() / (hashlib.sha256(data).hexdigest() + suffix)
+        if not path.exists():
+            path.write_bytes(data)
+    elif args.source.startswith(("http://", "https://")):
+        parsed = urlparse(args.source)
+        if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            parser.error("only localhost chart URLs are accepted")
+        target = args.source
+    else:
+        path = Path(args.source).expanduser().resolve()
+        if not path.is_file():
+            parser.error("source is not a file")
+    head = path.open("rb").read(1024) if path else b""
+    kind = args.kind or ("chart" if target else sniff(head))
+    if not kind and path:
+        suffix = path.suffix.lower()
+        kind = {".mp3": "audio", ".m4a": "audio", ".aac": "audio", ".mp4": "video",
+                ".mov": "video", ".webm": "video", ".csv": "table", ".tsv": "table"}.get(suffix)
+    if not kind:
+        parser.error("unsupported media type")
+    if kind == "image":
+        if not path:
+            parser.error("image needs a local file")
+        emit_image(path)
+        return 0
+    data = {"version": 1, "kind": kind, "path": str(path) if path else ""}
+    if kind in ("svg", "pdf", "video", "chart"):
+        if kind == "chart":
+            live = args.url or target or path.as_uri()
+            parsed = urlparse(live)
+            if parsed.scheme not in ("file", "http", "https") or (parsed.scheme != "file" and parsed.hostname not in ("localhost", "127.0.0.1", "::1")):
+                parser.error("chart URL must be a local file or localhost")
+            data["url"] = live
+        try:
+            data["preview"] = preview(path, kind, target, args.snapshot)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            parser.error(str(exc))
+    elif kind == "audio":
+        if not path:
+            parser.error("audio needs a file")
+        data["duration"], data["waveform"] = duration_and_waveform(path)
+    elif kind == "table":
+        if not path:
+            parser.error("table needs a file")
+        data["delimiter"] = "\t" if path.suffix.lower() == ".tsv" else ","
+        try:
+            data["rows"], data["columns"] = table_shape(path, data["delimiter"])
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+    emit_media(data)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
