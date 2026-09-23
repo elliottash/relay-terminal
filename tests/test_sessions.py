@@ -766,20 +766,25 @@ class PlanModeTests(Base):
             agent.set_mode('yolo')
 
 
-    def test_plan_mode_keeps_the_subagent_tools_in_the_list_and_refuses_them(self):
-        # A subagent may write files, so a plan turn still never starts one (#GMCF): the tools
-        # stay in the list — removing one re-prefills the request — and the call is refused.
+    def test_plan_mode_keeps_the_subagent_tools_in_the_list_and_allows_them(self):
+        # The tools stay in the list in both modes — removing one re-prefills the request — and
+        # since #PLDG a plan turn may call them: what it starts is read-only (tests/test_subagents.py).
         class FakeSubagents:
             def tool_specs(self):
                 return [{'type': 'function', 'function': {'name': 'agent', 'parameters': {}}}]
+
+            def handles(self, name):
+                return name == 'agent'
+
+            def preview(self, name, args):
+                return 'AGENT'
         agent = self.agent(ScriptedProvider())
         agent.subagents = FakeSubagents()
         self.assertIn('agent', [t['function']['name'] for t in agent.tools()])
         agent.set_mode('plan')
         self.assertIn('agent', [t['function']['name'] for t in agent.tools()])
-        with self.assertRaises(ValueError) as caught:
-            agent._prepare('agent', {'type': 'general', 'description': 'd', 'prompt': 'p'})
-        self.assertIn('not available in plan mode', str(caught.exception))
+        prepared = agent._prepare('agent', {'type': 'general', 'description': 'd', 'prompt': 'p'})
+        self.assertEqual(prepared.name, 'agent')
 
 
 class AttachmentTests(Base):

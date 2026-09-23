@@ -324,6 +324,7 @@ class Subagent:
     generation: int = 0
     run_start_index: int = 1
     todo_id: str | None = None          # the main agent's todo this subagent works on (card #QHR1)
+    read_only: bool = False             # started from plan mode without file writes (#PLDG)
     pending_model: tuple | None = None  # (config, preset_id) a running subagent switches to at its next step
     done: threading.Event = field(default_factory=threading.Event)
     # The durable thread (card #Y63Z): its id, the session that started it and where it is saved.
@@ -543,7 +544,7 @@ class SubagentManager:
             return f"MESSAGE AGENT {args.get('id')}\n\n{str(args.get('text', ''))[:1000]}"
         return f"WAIT FOR AGENT {args.get('id') or 'all background agents'}"
 
-    def start_batch(self, calls: list[dict], budget: int) -> dict:
+    def start_batch(self, calls: list[dict], budget: int, *, read_only: bool = False) -> dict:
         """Start every `agent` call of one model response before any is awaited, so they run concurrently."""
         batch: dict = {}
         for index, call in enumerate(calls):
@@ -552,7 +553,7 @@ class SubagentManager:
                 continue
             try:
                 args = json.loads(func.get("arguments") or "{}")
-                batch[call.get("id")] = self.spawn(args, call_id=call.get("id"))
+                batch[call.get("id")] = self.spawn(args, call_id=call.get("id"), read_only=read_only)
             except (ValueError, TypeError, OSError) as exc:
                 batch[call.get("id")] = exc
         return batch
@@ -562,13 +563,16 @@ class SubagentManager:
             if isinstance(entry, Subagent) and not entry.background and not entry.done.is_set():
                 self.stop(entry.id)
 
-    def run_tool(self, name: str, args: dict, call_id, batch: dict | None, cancel: threading.Event) -> dict:
+    def run_tool(self, name: str, args: dict, call_id, batch: dict | None, cancel: threading.Event,
+                 *, read_only: bool = False) -> dict:
+        """`read_only` is plan mode's (#PLDG): a subagent it starts cannot write files, and a
+        message cannot resume or steer one that can."""
         if not isinstance(args, dict):
             raise ValueError("Tool arguments must be an object.")
         if name == "agent":
             entry = (batch or {}).get(call_id)
             if entry is None:
-                entry = self.spawn(args, call_id=call_id)
+                entry = self.spawn(args, call_id=call_id, read_only=read_only)
             if isinstance(entry, Exception):
                 raise ValueError(str(entry))
             if entry.background:
@@ -580,6 +584,12 @@ class SubagentManager:
         if name == "agent_message":
             if set(args) - {"id", "text"}:
                 raise ValueError("Unknown tool or unexpected argument.")
+            if read_only:
+                with self._lock:
+                    target = self._agents.get(args.get("id")) if isinstance(args.get("id"), str) else None
+                if target is not None and not target.read_only:
+                    raise ValueError(f"Subagent {target.id} can write files, so plan mode cannot message it. "
+                                     "Start a new subagent, or message it after exit_plan_mode.")
             return self.send_message(args.get("id"), args.get("text"), origin="main")
         if name == "agent_wait":
             if set(args) - {"id", "timeout_seconds"}:
@@ -589,7 +599,7 @@ class SubagentManager:
 
     # ----- lifecycle --------------------------------------------------------------------
     def spawn(self, args: dict, *, call_id=None, parent_thread: str | None = None,
-              signal: str = "") -> Subagent:
+              signal: str = "", read_only: bool = False) -> Subagent:
         if not isinstance(args, dict):
             raise ValueError("Tool arguments must be an object.")
         if set(args) - {"description", "prompt", "subagent_type", "background", "model", "effort", "todo_id"}:
@@ -620,6 +630,11 @@ class SubagentManager:
             if not isinstance(type_name, str):
                 raise ValueError("subagent_type must be text.")
             definition = self.catalog.get(type_name)
+            if read_only:
+                # Plan mode (#PLDG): the same definition without its file writes. `read_only` puts
+                # the read-only line in its prompt and makes a guest child's permissions `deny`.
+                definition = dataclasses.replace(definition, read_only=True, tools=tuple(
+                    t for t in definition.tools if t not in ("write_file", "edit_file")))
             if sum(1 for s in self._agents.values() if s.live) >= MAX_LIVE:
                 raise ValueError(f"Too many subagents are running or waiting ({MAX_LIVE}).")
             agent_id = f"a{self._next}"
@@ -633,6 +648,7 @@ class SubagentManager:
             agent.inbox = _SubInbox(self, sub)
             sub.agent, sub.model = agent, model_label
             sub.todo_id = todo_id
+            sub.read_only = bool(definition.read_only)
             # A signal thread (#AQ6X): not reachable through the `agent` tool — the keyword is the
             # board worker's, and the fault's key is what makes the thread findable afterwards.
             sub.signal = str(signal or "")[:200]

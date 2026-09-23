@@ -552,6 +552,7 @@ def validate_tool_scope(value) -> str:
 #: turn this exists for: it presents what a probe found and offers to import it, and nothing is
 #: written until the owner answers, so the rule is enforced rather than asked for in the brief.
 READONLY_BLOCKED = frozenset(PLAN_BLOCKED_TOOLS) | {
+    "agent", "agent_message", "agent_wait",
     "run_command", "run_in_terminal", "type_into_program", "write_plan", "exit_plan_mode"}
 
 READONLY_REFUSAL = (
@@ -2173,8 +2174,12 @@ class Agent:
                         self._start_audit(ctx, message.get("content") or "")
                     return
                 # subagents: start every `agent` call of this response together so they run concurrently.
-                batch = (self.subagents.start_batch(calls, self.max_tool_calls - calls_used)
-                         if self.subagents is not None and self.mode != "plan" else None)
+                # Plan mode starts them read-only (#PLDG). A read-only or card turn starts none here:
+                # without a batch its calls go through `_prepare`, which refuses them.
+                batch = (self.subagents.start_batch(calls, self.max_tool_calls - calls_used,
+                                                    read_only=self.mode == "plan")
+                         if self.subagents is not None and not self.readonly_turn
+                         and self.card_turn is None else None)
                 for call in calls:
                     if self.cancel_event.is_set():
                         raise Cancelled("Stopped.")
@@ -2196,7 +2201,8 @@ class Agent:
                                 self.emit({"event": "tool_started", "tool": func["name"], "preview": preview,
                                            "label": tool_labels.started_label(func["name"], label_args),
                                            "turn_id": turn_id, "call_id": call["id"]})
-                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
+                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event,
+                                                                 read_only=self.mode == "plan")
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
                                 self._autosave_soon()
@@ -3558,7 +3564,7 @@ class Agent:
     def _execute(self, prepared: Prepared, turn: dict) -> dict:
         if self.subagents is not None and self.subagents.handles(prepared.name):
             return self.subagents.run_tool(prepared.name, prepared.arguments, None, None,
-                                           self.cancel_event)
+                                           self.cancel_event, read_only=self.mode == "plan")
         if prepared.name == tool_groups.LOAD_TOOLS:
             # The schemas reach the model with the next request's tool list, which `tools()`
             # appends them to: nothing above them moves, which is the whole point (#GMCF 9).

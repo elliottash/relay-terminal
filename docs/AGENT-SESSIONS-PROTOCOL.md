@@ -182,6 +182,7 @@ the finish time is unknown.
 
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
 - Plan mode: run_command (with command_output and stop_command), read_file, list_directory, load_skill, read_skill_file stay available for investigation; write_file, edit_file and set_keybinding are removed from the tool list; the system prompt says to investigate without changing anything and to finish by calling `write_plan`.
+- Plan mode may delegate (#PLDG): `agent`, `agent_message` and `agent_wait` stay available. A subagent started in plan mode is read-only — its definition loses `write_file` and `edit_file`, its prompt says it is read-only, and a guest child runs with `deny` permissions — and it stays read-only after `exit_plan_mode`. `agent_message` from plan mode is refused for a subagent that can write. A read-only turn and a card turn still start none.
 - Plan-mode turns run on the `planning` role (13.11): by default the pane's own model at `max`
   reasoning, swapped for that turn only and then put back, with `plan_route` / `plan_route_ended` saying
   so in the pane.
