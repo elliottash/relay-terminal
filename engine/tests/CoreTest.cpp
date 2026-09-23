@@ -2,6 +2,7 @@
 // Screen-model tests: feed byte sequences into every available VtCore and
 // assert cells, text, modes and events.
 #include "core/AnsiSerializer.h"
+#include "core/InlineImage.h"
 #include "core/LibVtermCore.h"
 #include "core/SequenceScanner.h"
 #include "core/VtCore.h"
@@ -235,6 +236,31 @@ private slots:
         QVERIFY(h.vt->hyperlinkRuns(QStringLiteral("relay://other/")).empty());
         QVERIFY(h.vt->hyperlinkRuns(QString()).empty());
         QCOMPARE(int(h.vt->hyperlinkRuns(QStringLiteral("relay://call/p/1/b")).size()), 1);
+    }
+
+    // An image's rows stay in its column wherever it starts, #1MGS. Given the column,
+    // placementBytes() returns with CR LF and a cursor-forward, which holds in the last column
+    // (where the cell leaves a wrap pending and a backspace would step one column left) and under
+    // newline mode (LNM, where LF alone returns to column 0).
+    void imageRowsKeepTheirColumn()
+    {
+        QFETCH_GLOBAL(QString, core);
+        for (const int col : {0, 7, 19}) {
+            for (const bool lnm : {false, true}) {
+                Harness h(core, 8, 20);
+                if (lnm)
+                    h.feed("\x1b[20h");
+                h.feed("\x1b[2;" + QByteArray::number(col + 1) + "H");
+                h.feed(inlineimage::placementBytes(QStringLiteral("/tmp/pic.png"), QSize(1, 3), true, col));
+                const std::vector<VtCore::HyperlinkRun> runs =
+                    h.vt->hyperlinkRuns(QString::fromLatin1(inlineimage::kImagePrefix));
+                QCOMPARE(int(runs.size()), 3);
+                for (int i = 0; i < 3; ++i) {
+                    QCOMPARE(runs[size_t(i)].startRow, 1 + i);
+                    QCOMPARE(runs[size_t(i)].startCol, col);
+                }
+            }
+        }
     }
 
     // An anchor line longer than the grid soft-wraps; the fold hangs under the

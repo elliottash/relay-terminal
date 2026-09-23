@@ -78,7 +78,7 @@ QSize cellsFor(QSize pixels, QSize cellPixels, int maxCols, int maxRows, QSize r
     return QSize(std::clamp(int(std::ceil(cols - 1e-6)), 1, maxCols), std::clamp(int(std::ceil(rows - 1e-6)), 1, maxRows));
 }
 
-QByteArray placementBytes(const QString &path, QSize cells, bool moveCursor)
+QByteArray placementBytes(const QString &path, QSize cells, bool moveCursor, int startCol)
 {
     const int rows = std::clamp(cells.height(), 1, kMaxRows);
     const int cols = std::clamp(cells.width(), 1, kMaxCols);
@@ -92,8 +92,14 @@ QByteArray placementBytes(const QString &path, QSize cells, bool moveCursor)
         out += "\x1b\\";
         out += cell;
         out += "\x1b]8;;\x1b\\";
-        if (row + 1 < rows)
+        if (row + 1 >= rows)
+            continue;
+        if (startCol < 0)
             out += "\b\n";
+        else if (startCol == 0)
+            out += "\r\n";
+        else
+            out += "\r\n\x1b[" + QByteArray::number(startCol) + 'C';
     }
     if (!moveCursor)
         out += "\x1b" "8";

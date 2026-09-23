@@ -68,7 +68,13 @@ QSize cellsFor(QSize pixels, QSize cellPixels, int maxCols, int maxRows, QSize r
 // rows stay in the same column and the screen scrolls at the bottom as a picture would make it).
 // After the last row the cursor ends where kitty puts it: on the image's last row, just past its
 // right edge. `moveCursor = false` (kitty C=1) brackets it in DECSC/DECRC instead.
-QByteArray placementBytes(const QString &path, QSize cells, bool moveCursor = true);
+//
+// `startCol` is the cursor's column (0-based) when the caller knows it, and every caller that can
+// should pass it: rows then return with CR, LF and a cursor-forward to that column. The backspace
+// form, used when it is -1, drifts one column left when the image sits in the last column (the
+// cell leaves the cursor pending a wrap there, so BS steps back from it) and goes to column 0 under
+// newline mode (LNM), where LF also returns the carriage.
+QByteArray placementBytes(const QString &path, QSize cells, bool moveCursor = true, int startCol = -1);
 
 // $XDG_CACHE_HOME/relay/images/terminal, created on demand. Images a program sent as data are
 // kept here as files named by their content hash, so a restored session finds them again.
