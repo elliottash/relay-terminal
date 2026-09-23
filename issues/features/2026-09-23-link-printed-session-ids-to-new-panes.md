@@ -9,7 +9,7 @@ session: 3478d988-a618-47c5-a4f4-7196fdc7261f
 rank: zzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Codex in Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-TYH4/validation.md], related: [], github: null}
+links: {plans: [], commits: [cb0200d9dd263b572a3f4c9dd5139e06a1a55450], evidence: [docs/qa_evidence/2026-09-23-TYH4/validation.md], related: [], github: null}
 ---
 # Link printed session IDs to new panes
 
