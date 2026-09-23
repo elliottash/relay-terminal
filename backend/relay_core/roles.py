@@ -476,6 +476,9 @@ def _usage_weight(preset_id: str | None, now: int | None = None,
     if limits is None and is_guest_preset(preset_id):
         from . import guest_harness_provider
         limits = guest_harness_provider.last_limits(guest_id_of(preset_id))
+    elif limits is None and preset_id in ("glm-coding", "kimi-code"):
+        from . import provider_limits
+        limits = provider_limits.last(preset_id)
     if not isinstance(limits, dict):
         return 1.0
     updated = limits.get("updated_at")

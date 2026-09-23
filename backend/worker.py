@@ -15,7 +15,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
-from relay_core import memory_import, openrouter_catalog
+from relay_core import memory_import, openrouter_catalog, provider_limits
 from relay_core import final_summary
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -163,6 +163,7 @@ def main():
         # served from the day-old cache now, fetched on its own thread once per process when
         # that is stale, and re-pushed below when the fetch lands. Never on this thread.
         openrouter_catalog.start_refresh()
+        provider_limits.start(key_lookup=keystore.lookup, emit=emit)
         # The two default fillings of Options › Models' five lists (owner, 2026-09-20; 13.7),
         # computed from what can take a turn right now so the GUI's two buttons only apply them.
         guest_rows = guest_harness_provider.preset_rows()
@@ -178,7 +179,8 @@ def main():
               "tier_list_defaults": list_defaults,
               "presets": [{**p.to_dict(), **(pro_status if p.id == "relay-pro" else relay_free if p.id == "relay-free" else
                                              {"has_stored_key": bool(sources[p.id]),
-                                              "key_source": sources[p.id]})}
+                                              "key_source": sources[p.id],
+                                              "limits": provider_limits.last(p.id)})}
                           for p in PRESETS.values()]
               # Model servers on this machine (protocol 28): no key to store, so
               # has_stored_key stays false and `local` is what makes the row usable.
@@ -199,6 +201,7 @@ def main():
     # held, and the fetch that lands after it pushes a fresh one, so the id box completes against
     # the live list without a re-ask.
     openrouter_catalog.set_listener(lambda: emit_presets())
+    provider_limits.set_listener(lambda: emit_presets())
     # And for a custom provider's /models listing (28.6): the save answers at once, the probe
     # lands later and pushes the row with the served models added.
     customproviders.set_listener(lambda: emit_presets())
