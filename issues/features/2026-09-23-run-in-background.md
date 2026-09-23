@@ -3,12 +3,13 @@ id: BGRN
 type: work
 status: needs-verification
 labels: [feature, panes, switchboard, notifications]
-assignee: codex
+assignee: agent
 implemented_by: openai/gpt-6-sol via codex
+session: b9142532-7085-4094-aa52-9b0d7dcb36c2
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
-links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3], evidence: [docs/qa_evidence/2026-09-23-bgrn/], related: [RG0Z], github: null}
+links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3, 676961d64fba9dc43f9337e174cce97d23856a1d], evidence: [docs/qa_evidence/2026-09-23-bgrn/, docs/qa_evidence/2026-09-23-bgrn-shortcut/], related: [RG0Z], github: null}
 ---
 # Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done
 
@@ -24,6 +25,9 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 > while we are here, lets discuss the terminology for deliver, execute, send & hide, etc, to make things clear and intuitive.
 
 > i like this terminology. write the plan on a card
+> put the run in background button just to the left of the mode picker (auto / agent terminal).
+>
+> how about ctrl alt enter also triggers run in the background
 
 ## Decisions
 - **Both entry points, Board first.** Board **Run** (today's Execute) goes to the background by default, with **Run in pane** as the alternative. In a pane, backgrounding is an explicit handoff: **Run in background** for a new task, **Move to background** for one already running. Both share one background list, one set of header counts and one notification path, and opening from either reveals the same live session with its context.
@@ -47,6 +51,8 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 - **Run's key is `r`; `x` is removed**, with no alias (owner: "1 yes, and you can go ahead and remove x.").
 - **Green done tasks clear once opened** (owner: "2 yes.").
 - **What "done" means, for built-in and guest agents alike:** a background task is green when every request in its request ledger (`backend/relay_core/requests.py`) is `done` (the turn ended normally and every linked todo is completed), no todo it owns is open, and no subagent it started is still running. A card-backed Run is green only when the card reaches `needs-verification` or `done`. Anything cancelled, blocked or deferred goes to amber with its reason.
+- **Composer placement:** the Run in background button sits immediately to the left of the auto / agent / terminal mode picker (owner: “put the run in background button just to the left of the mode picker (auto / agent terminal).”).
+- **Shortcut:** Ctrl+Alt+Enter runs the prompt in background through the same action as the button (owner: “how about ctrl alt enter also triggers run in the background”). It replaces that combination's previous send-now binding.
 
 ## Done means
 - From a pane, Run in background on a ready task removes the pane from the layout (neighbours expand), the violet count goes up, and the agent keeps working. Move to background does the same for a running turn without losing its conversation or terminal.
@@ -54,6 +60,7 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 - Board Run backgrounds by default and Run in pane keeps today's behaviour. Clicking a count, a notification or the card's Open session reveals the same live session.
 - A task that isn't ready never hides: the pane says why and offers the next step.
 - "Execute" appears nowhere in the UI, hints or docs; it reads "Run". Failure shows up as a hidden pane with no count, a count that disagrees with the list, a duplicate notification, or a green count while the work is unfinished.
+- The composer Run in background button is immediately to the left of the auto / agent / terminal mode picker. Ctrl+Alt+Enter invokes that same action from the composer, while Ctrl+Enter retains send-now. With no agent configured, the shortcut shows the readiness reason and preserves the draft.
 
 ## Plan
 **Goal:** Run in background from panes and from the Board, header counts for background work, readiness and completion semantics you can trust, and the Plan → Run → Verify terminology.
@@ -91,6 +98,7 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 
 ## Execution Summary
 Implemented live-pane background ownership with request-linked working, needs-you, done, failed and interrupted states, header counts, one notification per state change, and open/stop navigation. Board Run now backgrounds by default, with Run in pane as the visible alternative; pane composer, header and Actions expose background handoff. Claude task tools are disabled, and Codex plan updates feed Relay todos. Restored background windows appear interrupted after restart. See `docs/qa_evidence/2026-09-23-bgrn/` for the isolated UI probe.
+Followup: placed the composer button immediately before the mode picker, moved Ctrl+Alt+Enter from send-now to `pane.runInBackground`, and kept the shortcut active only in the composer. The button and shortcut use the same pane action.
 
 ## Tests
 - `scripts/relay-build --target relay-requests-tests --target relay` — built successfully.
@@ -98,3 +106,6 @@ Implemented live-pane background ownership with request-linked working, needs-yo
 - `PYTHONPATH=backend python3 -m unittest tests.test_guest_harness_claude tests.test_guest_harness_codex tests.test_background_plan -q` — 150 passed.
 - `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn/drive.sh` — isolated Board screenshot and no-agent guard, evidence in `docs/qa_evidence/2026-09-23-bgrn/`.
 - Full `boardexecute` C++ case currently fails on its stale `QPushButton` lookup for Plan/Run/Verify after the existing action row changed to `QToolButton`; that pre-existing failure is tracked separately.
+- `scripts/relay-build --target relay` — passed for composer placement and shortcut routing.
+- `scripts/relay-build --target relay-keymap-tests` and `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^keymap$' --output-on-failure` — passed, including cross-preset Ctrl+Alt+Enter ownership.
+- `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn-shortcut/drive.sh` — isolated screenshot of adjacent controls and the no-agent shortcut guard; see `docs/qa_evidence/2026-09-23-bgrn-shortcut/`.

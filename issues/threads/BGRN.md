@@ -38,3 +38,35 @@ Implemented the live-pane background path, Board Run default and Run in pane, re
 
 <!-- relay:entry 20260923T185053Z-2k author=agent kind=event model=gpt-6-sol pane=6e4865f9 turn=a7740578e6674cdea34c8be534de20ad/36297f8d0a514ae29ba79e7494449a87 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e"], "evidence… → {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272…
+
+<!-- relay:entry 20260923T192902Z-np author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent claimed this card · assignee agent, Needs verification → Executing, session b9142532
+
+<!-- relay:entry 20260923T192902Z-nq author=agent kind=progress model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 pane_token=b9142532-7085-4094-aa52-9b0d7dcb36c2 -->
+Claimed (b9142532) · working on it from a terminal pane
+
+Move Run in background beside the mode picker and bind Ctrl+Alt+Enter to that action, then verify the composer path.
+
+<!-- relay:entry 20260923T192918Z-zs author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent updated this card · appended to `## Issue`
+
+<!-- relay:entry 20260923T192924Z-r3 author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260923T192930Z-n6 author=agent kind=decision model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+Owner: “put the run in background button just to the left of the mode picker (auto / agent terminal).” “how about ctrl alt enter also triggers run in the background”
+
+<!-- relay:entry 20260923T194834Z-ek author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272… → {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272…; appended to `## Done means`
+
+<!-- relay:entry 20260923T194900Z-wp author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T194912Z-pm author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260923T194918Z-nr author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent moved this card · Executing → Needs verification · Composer button placement and Ctrl+Alt+Enter shortcut are implemented; isolated UI and keymap evidence is recorded. · evidence docs/qa_evidence/2026-09-23-bgrn-shortcut/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T195218Z-ct author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272… → {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272…
