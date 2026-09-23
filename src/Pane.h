@@ -876,6 +876,18 @@ public:
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
+    // Only on close/list refresh, not on the input poll. Foreground state alone misses a
+    // shell's `command &`, stopped jobs, and worker jobs left running after an agent turn.
+    bool hasCloseWork() const {
+        if (m_agentBusy || m_guestBusy || m_subagents.liveCount() > 0
+            || m_jobs.runningCount() > 0 || processBusy()) return true;
+        const qint64 shell = shellPid();
+        if (shell <= 0) return false;
+        const auto processes = relay::usage::walkTrees({shell});
+        return std::any_of(processes.cbegin(), processes.cend(), [shell](const auto &process) {
+            return process.pid != shell && process.state != 'Z' && process.state != 'X';
+        });
+    }
     // ----- pane chrome (src/PaneChrome.h): status glyph (#XM0T) and remote session (#SPBN) -----
     QHBoxLayout *headerLayout() const { return m_headerLayout; }
     QWidget *headerWidget() const { return m_headerWidget; }

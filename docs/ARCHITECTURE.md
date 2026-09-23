@@ -188,6 +188,16 @@ Layout rules:
   nodes and `buildNode()` / `createPane()` rebuild them; the saved window layout below uses the
   same shapes, so there is only one layout format in the app.
 - Closing a window asks for confirmation when it has more than one pane or anything is busy.
+- Closing an active terminal pane (× or Ctrl+W) asks whether to stop its work, continue in the
+  background, or cancel. Cancel is the default and Escape action. Activity includes agent turns,
+  delegated agents, worker jobs, foreground programs, and live shell descendants (including `&`
+  and stopped jobs). The same choice protects closing a tab with active terminal panes.
+  Backgrounding moves the live pane into a hidden window owned by `WindowManager`; its shell,
+  worker, output and callbacks remain alive. Sessions → Background (also in Actions) reopens that
+  same window; it does not resume a saved conversation or start a replacement process. The last
+  pane leaves a fresh terminal open so background sessions remain reachable without a system tray.
+  Background sessions last for this Relay process. Closing the final visible window warns that
+  it will stop them; explicitly quitting Relay destroys them as it does visible sessions.
 - **Pane button row** (`PaneChrome`, a child of each leaf created in `syncChrome()`): shown for
   the leaf under the mouse (application event filter, Enter/MouseMove). There is **one** new-pane
   button, ⊞ (card #803C; it replaced ⬓+ and ◫+). It runs `pane.newByMouse`, which is not a

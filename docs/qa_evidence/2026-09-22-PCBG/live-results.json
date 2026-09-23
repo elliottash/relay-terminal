@@ -1,0 +1,15 @@
+{
+  "binary": "/home/elliott/repos/relay-terminal/build/relay",
+  "sandbox": "/tmp/pcbg-live-xbuz7_ql",
+  "passed": [
+    "Ctrl+W detects a shell background job; Escape preserves it",
+    "Pane \u00d7 invokes the same active-job dialog",
+    "Backgrounding last pane preserves shell child and leaves Relay reachable",
+    "Sessions \u2192 Background reopens the original running shell job",
+    "Close and stop job terminates the real shell background child",
+    "An active agent turn prompts; default Enter cancels",
+    "Backgrounding agent preserves worker PID and continued output without cancel/shutdown",
+    "Worker job still prompts after agent finishes; Stop shuts down child",
+    "Final-window exit warns about background sessions; Cancel keeps them alive"
+  ]
+}

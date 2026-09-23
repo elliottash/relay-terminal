@@ -222,13 +222,27 @@ inline RelayWindow *WindowManager::newWindow(const QJsonArray &tabs, int current
     return window;
 }
 
-inline RelayWindow *WindowManager::newEmptyWindow(const QRect &geometry) {
+inline RelayWindow *WindowManager::newEmptyWindow(const QRect &geometry, bool background) {
     auto *window = new RelayWindow(this);
     relay::theme::polishWindow(window);
     if (geometry.isValid()) window->setGeometry(geometry);
     m_windows.append(window);
-    window->show();
+    window->setProperty("backgroundSession", background);
+    if (!background) window->show();
     return window;
+}
+
+inline QList<Pane *> WindowManager::backgroundPanes() const {
+    QList<Pane *> panes;
+    for (const auto &window : m_windows)
+        if (window && window->property("backgroundSession").toBool()) panes += window->allPanes();
+    return panes;
+}
+
+inline bool WindowManager::lastVisibleWindow(const RelayWindow *closing) const {
+    for (const auto &window : m_windows)
+        if (window && window != closing && window->isVisible()) return false;
+    return true;
 }
 
 // The window Relay opens when there is no saved layout to restore (main.cpp: `restoreSavedLayout()`
@@ -326,6 +340,7 @@ inline void WindowManager::cycle(RelayWindow *from, int delta) {
     int index = m_windows.indexOf(from);
     if (index < 0) index = 0;
     RelayWindow *next = m_windows.at((index + delta + m_windows.size()) % m_windows.size());
+    next->setProperty("backgroundSession", false);
     next->showNormal(); next->raise(); next->activateWindow();
 }
 

@@ -136,6 +136,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include "ActivePaneClose.h"
 #include <functional>
 #include <memory>
 #include <cmath>
@@ -218,7 +219,9 @@ public:
     bool cleanShell() const { return m_cleanShell; }
     RelayWindow *newWindow(const QJsonArray &tabs, int current = 0, const QRect &geometry = QRect());
     RelayWindow *newWindowAt(const QString &cwd);
-    RelayWindow *newEmptyWindow(const QRect &geometry);   // the caller adopts a tab into it
+    RelayWindow *newEmptyWindow(const QRect &geometry, bool background = false);   // the caller adopts a tab into it
+    QList<Pane *> backgroundPanes() const;
+    bool lastVisibleWindow(const RelayWindow *window) const;
     void cycle(RelayWindow *from, int delta);
     // ----- recently closed (src/ClosedStack.h) --------------------------------------------------
     // The last 25 closed panes, tabs and windows, newest last. `restore` brings the newest back
@@ -326,6 +329,7 @@ private:
 };
 
 class RelayWindow final : public QMainWindow {
+    friend class WindowManager;
 public:
     explicit RelayWindow(WindowManager *manager) : m_manager(manager) {
         setAttribute(Qt::WA_DeleteOnClose);
@@ -624,7 +628,8 @@ public:
         if (!pane || pane->window() != this) return;
         if (QWidget *page = pageOf(pane)) m_tabs->setCurrentWidget(page);
         setActiveLeaf(pane);
-        if (isMinimized()) showNormal();
+        setProperty("backgroundSession", false);
+        if (isMinimized() || !isVisible()) showNormal();
         raise();
         activateWindow();
         focusLeaf(pane);
@@ -1107,7 +1112,8 @@ protected:
     void closeEvent(QCloseEvent *event) override {
         if (!m_confirmedClose) {
             const auto panes = allPanes();
-            const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->agentBusy() || p->processBusy(); });
+            const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->hasCloseWork(); })
+                || (m_manager->lastVisibleWindow(this) && !m_manager->backgroundPanes().isEmpty());
             if (busy || panes.size() > 1) {
                 if (!confirmClose()) { event->ignore(); return; }
             }
@@ -4718,6 +4724,14 @@ private:
         items << actionItem(panes, QStringLiteral("Focus mode"), QStringLiteral("Dim other panes"), QStringLiteral("pane.focusMode"), relay::settings::boolValue(QStringLiteral("appearance/focus_mode"), false));
         items << actionItem(panes, QStringLiteral("Dim while working"), QStringLiteral("Dim working agents"), QStringLiteral("pane.autoDim"), relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
+        {
+            PaletteItem background;
+            background.key = QStringLiteral("sessions.background"); background.section = panes;
+            background.label = QStringLiteral("Background sessions");
+            background.detail = QStringLiteral("Reopen work kept running after closing its pane");
+            background.run = [this] { openSessions(QStringLiteral("background")); };
+            items << background;
+        }
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
         {
             // "Auto-resize" is what the owner calls it (#GSJ7), so the name is searchable and the
@@ -10891,6 +10905,42 @@ public:
         addSessionsTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), [](RelayWindow *window) -> QWidget * {
             return createClosedList(window);
         });
+        addSessionsTab(QStringLiteral("background"), QStringLiteral("Background"), [](RelayWindow *window) -> QWidget * {
+            auto *page = new QWidget;
+            auto *layout = new QVBoxLayout(page);
+            layout->addWidget(new QLabel(QStringLiteral("Sessions kept running after their pane closed. Reopen to view output or stop work."), page));
+            auto *list = new QListWidget(page);
+            list->setObjectName(QStringLiteral("backgroundSessions"));
+            layout->addWidget(list);
+            auto *reopen = new QPushButton(QStringLiteral("Reopen session"), page);
+            layout->addWidget(reopen);
+            WindowManager *manager = window->m_manager;
+            auto refresh = [list, manager, reopen] {
+                const QString selected = list->currentItem() ? list->currentItem()->data(Qt::UserRole).toString() : QString();
+                list->clear();
+                for (Pane *pane : manager->backgroundPanes()) {
+                    auto *item = new QListWidgetItem(QStringLiteral("%1 · %2 · %3")
+                        .arg(pane->paneTitle().isEmpty() ? pane->cwd() : pane->paneTitle(),
+                             pane->hasCloseWork() ? QStringLiteral("Running") : QStringLiteral("Finished"),
+                             pane->sessionToken().left(8)), list);
+                    item->setData(Qt::UserRole, pane->sessionToken());
+                    if (pane->sessionToken() == selected) list->setCurrentItem(item);
+                }
+                if (!list->currentItem() && list->count()) list->setCurrentRow(0);
+                reopen->setEnabled(list->count() > 0);
+            };
+            auto open = [list, manager, refresh] {
+                if (auto *item = list->currentItem()) manager->focusPane(item->data(Qt::UserRole).toString());
+                refresh();
+            };
+            connect(reopen, &QPushButton::clicked, page, open);
+            connect(list, &QListWidget::itemActivated, page, [open](QListWidgetItem *) { open(); });
+            auto *timer = new QTimer(page);
+            connect(timer, &QTimer::timeout, page, [page, refresh] { if (page->isVisible()) refresh(); });
+            timer->start(1500);
+            refresh();
+            return page;
+        });
     }
 
 private:
@@ -10901,16 +10951,54 @@ private:
         // The Settings pane closes the way Esc closes it: focus goes back where it was, and it is
         // never what closes the window. Its × is the chrome's, so that button comes here too.
         if (auto *tool = dynamic_cast<ToolPane *>(pane); tool && tool->settings()) { closeSettingsPane(tool); return; }
+        closePane(pane, true);
+    }
+
+    bool backgroundPane(Pane *pane) {
         QWidget *page = pageOf(pane);
-        if (leavesIn(page).size() > 1) closePane(pane, true);
-        else if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), true);
-        else closeWindowWithWarning();
+        if (!page) return false;
+        const QString project = tabProject(page);
+        // Leave a reachable window when the last pane is backgrounded. No desktop tray is
+        // required, and Qt's last-window exit cannot silently kill the session just retained.
+        if (m_tabs->count() == 1 && leavesIn(page).size() == 1)
+            if (!addTab(paneNode(pane->cwd()))) return false;
+        RelayWindow *background = m_manager->newEmptyWindow(geometry(), true);
+        if (!takeLeaf(pane)) { background->deleteLater(); return false; }
+        background->adoptLeafAsTab(pane);
+        if (!project.isEmpty()) background->attachTab(background->pageOf(pane), project,
+            QString::fromLatin1(relay::projects::kReasonRestored));
+        m_manager->scheduleSave();
+        notice(QStringLiteral("Job continues in the background. Reopen it in Sessions → Background."), 7000);
+        hint(QStringLiteral("sessions.background"),
+             relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("projects.open")),
+                                            QStringLiteral("open Sessions, then Background")));
+        return true;
+    }
+
+    relay::paneclose::Choice askActiveClose(int count = 1) {
+        if (m_closePrompt) return relay::paneclose::Choice::Cancel;
+        m_closePrompt = true;
+        QPointer<RelayWindow> guard(this);
+        const auto choice = relay::paneclose::ask(this, count);
+        if (guard) m_closePrompt = false;
+        return guard ? choice : relay::paneclose::Choice::Cancel;
     }
 
 public:
     void closePane(QWidget *pane, bool record) {
+        if (m_closePrompt) return;
         QWidget *page = pageOf(pane);
         if (!page) return;
+        bool stopApproved = false;
+        if (auto *terminal = dynamic_cast<Pane *>(pane); terminal && terminal->hasCloseWork()) {
+            QPointer<QWidget> guard(pane);
+            const auto choice = askActiveClose();
+            if (choice == relay::paneclose::Choice::Cancel || !guard) return;
+            if (choice == relay::paneclose::Choice::Background) { backgroundPane(terminal); return; }
+            stopApproved = true;
+            page = pageOf(pane);
+            if (!page) return;
+        }
         // Closing the one pane kind that can hold unsaved edits asks first (card #SEJ2):
         // Save writes them, Discard closes, Cancel keeps the pane.
         if (auto *tool = dynamic_cast<ToolPane *>(pane);
@@ -10950,8 +11038,14 @@ public:
         }
         if (leavesIn(page).size() <= 1) {
             // Last pane of its tab: close the tab, or the window when it is the last tab.
-            if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), record);
-            else { if (record) { m_confirmedClose = true; } else { m_confirmedClose = true; m_skipRemember = true; } close(); }
+            if (m_tabs->count() > 1) closeTab(m_tabs->indexOf(page), record, stopApproved);
+            else {
+                if (record && m_manager->lastVisibleWindow(this) && !m_manager->backgroundPanes().isEmpty()
+                    && !confirmClose()) return;
+                m_confirmedClose = true;
+                if (!record) m_skipRemember = true;
+                close();
+            }
             return;
         }
         auto *splitter = dynamic_cast<QSplitter *>(pane->parentWidget());
@@ -10994,9 +11088,27 @@ public:
         updateTitles();
     }
 
-    void closeTab(int index, bool record) {
+    void closeTab(int index, bool record, bool stopApproved = false) {
+        if (m_closePrompt) return;
         QWidget *page = m_tabs->widget(index);
         if (!page) return;
+        if (!stopApproved) {
+            int busy = 0;
+            for (Pane *pane : panesIn(page)) if (pane->hasCloseWork()) ++busy;
+            if (busy) {
+                QPointer<QWidget> guard(page);
+                const auto choice = askActiveClose(busy);
+                if (choice == relay::paneclose::Choice::Cancel || !guard) return;
+                if (choice == relay::paneclose::Choice::Background) {
+                    const auto terminals = panesIn(page);
+                    for (Pane *pane : terminals) if (!backgroundPane(pane)) return;
+                    if (guard && m_tabs->indexOf(guard) >= 0) closeTab(m_tabs->indexOf(guard), record, true);
+                    return;
+                }
+                index = m_tabs->indexOf(page);
+                if (index < 0) return;
+            }
+        }
         if (record && !serializeTab(index).isEmpty()) {
             ClosedItem item;
             item.window = this;
@@ -11022,11 +11134,14 @@ public:
 private:
     bool confirmClose() {
         const auto panes = allPanes();
-        const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->agentBusy() || p->processBusy(); });
+        const bool busy = std::any_of(panes.cbegin(), panes.cend(), [](Pane *p) { return p->hasCloseWork(); });
         int leafCount = 0;
         for (int i = 0; i < m_tabs->count(); ++i) leafCount += leavesIn(m_tabs->widget(i)).size();
         QString text = QStringLiteral("Close this window and its %1 tab(s) and %2 pane(s)?").arg(m_tabs->count()).arg(leafCount);
         if (busy) text += QStringLiteral("\n\nA program or agent turn is still running and will be stopped.");
+        if (m_manager->lastVisibleWindow(this) && !m_manager->backgroundPanes().isEmpty())
+            text += QStringLiteral("\n\nClosing the last window exits Relay and stops its %1 background session(s).")
+                .arg(m_manager->backgroundPanes().size());
         const QString keys = Keymap::instance().shortcutText(QStringLiteral("closed.restore"));
         text += QStringLiteral("\n\n%1 reopens it in the same directories, with its text and conversations and new shells.")
                     .arg(keys.isEmpty() ? QStringLiteral("\"Restore closed\" in the palette") : keys);
@@ -11081,6 +11196,7 @@ private:
     }
 
     WindowManager *m_manager;
+    bool m_closePrompt = false;
     // The helper agents of this window: one per tab, keyed by the tab's persistent id and started
     // by the first thing that asks it something — a Switchboard opening, or a question typed into
     // Options, Actions or Sessions (card #FEJQ, protocol §30.7, owner 2026-09-20). It was keyed by
