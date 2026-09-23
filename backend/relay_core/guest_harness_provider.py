@@ -7,10 +7,12 @@ above it — `Agent`, the turn record, the request ledger, the queue, the sessio
 ordinary machinery and never learns that the model is a whole other agent:
 
 * `HarnessProvider` satisfies the provider surface `Agent` uses (`complete`, `cancel`, `config`,
-  `set_stall_timeout`, `stall_timeout`, `response_open`). `complete()` takes the last user message,
-  runs **one** harness turn, translates each `HarnessEvent` into the Relay event of the 29.1 table,
+  `set_stall_timeout`, `stall_timeout`, `response_open`). `complete()` takes the last user message
+  — preceded once by the conversation so far when the harness is fresh mid-conversation
+  (`handover_brief`, #1V4F: no context is lost on a model change) — runs **one** harness turn, translates each `HarnessEvent` into the Relay event of the 29.1 table,
   and returns the guest's final text as the assistant message with no tool calls, so the Agent's
-  turn loop ends the turn on it exactly as it ends a plain answer.
+  turn loop ends the turn on it exactly as it ends a plain answer. The guest's own tool calls and
+  results are written into `agent.messages` as they happen, so the next model inherits them.
 * A guest is a **preset**: `preset_rows()` is what the worker's `presets` answer carries, and
   `config_for_preset()` is what `session_protocol.provider_config` returns for `guest:<id>`.
 * `start_provider()` builds the adapter (lazily imported, so a missing or half-written one is
@@ -634,6 +636,8 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     provider.session_id = started.session_id or ""
     provider.permissions = options["permissions"]
     provider.effort = _harness_effort(harness) or options["effort"] or ""
+    # A resumed or forked session carries its own history; a fresh one is briefed on its first turn.
+    provider.briefed = bool(options["resume"] or options["fork"])
     logs.event(_log, "guest_harness_started", guest=guest_id, model=config.model,
                resumed=bool(options["resume"]), fork=options["fork"],
                permissions=options["permissions"], effort=provider.effort)
@@ -657,12 +661,59 @@ def _close_quietly(harness) -> None:
 # ----- the provider -------------------------------------------------------------------------------
 
 
+# The model-switch handover (#1V4F, owner 2026-09-22: "its critical that no context is loss on
+# model changes"). A guest harness started mid-conversation has seen none of it, so its first
+# prompt carries the transcript so far. Larger than a plan turn's excerpt: this is the whole
+# conversation the guest now continues, and every guest's window is far above it.
+HANDOVER_MAX_CHARS = 160_000
+HANDOVER_TOOL_RESULT_CHARS = 4_000
+HANDOVER_NOTE = ("You are taking over this conversation from another model in Relay. Everything "
+                 "below happened earlier in this session, and you are continuing it: treat it as "
+                 "your own context, not as a task list.")
+# A guest pane's tool results as they enter Relay's transcript (`agent.messages`), so a model
+# switched in afterwards sees what the guest read and ran. The same bound as Relay's own tools'
+# output (`tools.MAX_OUTPUT`).
+RECORDED_TOOL_RESULT_CHARS = 32_768
+
+
+def handover_brief(messages: list[dict]) -> str:
+    """The conversation before this turn's prompt, as a Relay context block for a guest that has
+    not seen it, or "" when there is nothing before the prompt (#1V4F)."""
+    from .agent import CONTEXT_CLOSE, CONTEXT_OPEN
+    from .planning import render_transcript
+    # What `complete()` sends is every user message after the last assistant one; the history is
+    # what precedes it (the system prompt aside — the guest has its own).
+    end = len(messages)
+    while end > 0 and messages[end - 1].get("role") == "user":
+        end -= 1
+    history = [m for m in messages[:end] if m.get("role") != "system"]
+    transcript = render_transcript(history, (CONTEXT_OPEN, CONTEXT_CLOSE), max_chars=HANDOVER_MAX_CHARS,
+                                   max_tool_chars=HANDOVER_TOOL_RESULT_CHARS, until_prompt=False)
+    if not transcript:
+        return ""
+    return f"{CONTEXT_OPEN}\n{HANDOVER_NOTE}\n\n{transcript}\n{CONTEXT_CLOSE}"
+
+
+def _recorded(result: dict) -> dict:
+    """A guest tool result as it enters `agent.messages`: long text fields cut, still valid JSON."""
+    out = dict(result)
+    for key in ("output", "diff"):
+        value = out.get(key)
+        if isinstance(value, str) and len(value) > RECORDED_TOOL_RESULT_CHARS:
+            out[key] = value[:RECORDED_TOOL_RESULT_CHARS] + " […]"
+    return out
+
+
 class HarnessProvider:
     """One guest harness, wearing the surface `Agent` calls on `self.provider`.
 
     Threading follows the contract: `complete()` runs on the turn thread; `cancel()` and
     `answer()` come from the worker's protocol thread while it blocks.
     """
+    # A pane's guest writes its tool calls and results into `agent.messages` as Relay's own agent
+    # does, so the conversation a later model inherits holds them (#1V4F). Child harnesses did
+    # this first, for their thread views.
+    record_guest_tools = True
 
     # The Agent's side calls (titles, summaries, compaction, route assist) are not served here:
     # each would spend a guest turn. `Agent.side_provider` reads this and uses a role of its own
@@ -698,6 +749,10 @@ class HarnessProvider:
         # the rules and the transcript so far, which the last user message alone does not carry.
         # A string, or a callable given the conversation and returning the prompt; None once used.
         self.opening = None
+        # Whether this harness has been given the conversation it is answering in (#1V4F): False
+        # for a fresh session, True once briefed, or from the start for a resumed/forked session
+        # that holds its own history.
+        self.briefed = False
         self._agent = None
         self.board_bridge = None
         self.instructions: str | None = None
@@ -784,6 +839,15 @@ class HarnessProvider:
         opening, self.opening = self.opening, None
         if opening is not None:
             prompt = opening(messages) if callable(opening) else str(opening)
+        elif not self.briefed and agent is not None:
+            # A fresh harness in the middle of a conversation (#1V4F): the model box switched the
+            # pane onto this guest, or back onto it after another model. It gets the transcript
+            # once, ahead of the prompt; Relay's own transcript is not touched.
+            brief = handover_brief(messages)
+            if brief:
+                prompt = brief + "\n\n" + prompt
+                emit({"event": "status", "text": f"Handed the conversation so far to "
+                                                 f"{guest.spec(self.guest_id).name}."})
         if not prompt and not attachments:
             raise ProviderError("There is nothing to send to the guest: the last message has no text.")
         record = getattr(agent, "_turn_record", None) if agent is not None else None
@@ -802,6 +866,8 @@ class HarnessProvider:
             if agent is not None and agent._todos_enabled():
                 prompt += "\n\n[Relay tasks: current state, preserve when updating]\n" + json.dumps(
                     agent.todos.snapshot(), ensure_ascii=False)
+        # Set before sending: a failed first turn on a live harness has still been given it.
+        self.briefed = True
         try:
             result = self.harness.send(prompt, attachments=attachments or None,
                                        emit=turn.on_event, cancel=cancel)
@@ -1098,7 +1164,7 @@ class _Turn:
                 {'role': 'assistant', 'content': '', 'tool_calls': [
                     {'id': call_id, 'type': 'function', 'function': {
                         'name': call['name'], 'arguments': json.dumps(call['args'])}}]},
-                {'role': 'tool', 'tool_call_id': call_id, 'content': json.dumps(result)}])
+                {'role': 'tool', 'tool_call_id': call_id, 'content': json.dumps(_recorded(result))}])
         event = {"event": "tool_result", "tool": call["name"], "result": result, "label": label,
                  "ms": ms, "call_id": call_id}
         if self.turn_id is not None:
@@ -1563,8 +1629,8 @@ def detach(agent) -> HarnessProvider | None:
 def switch_model(agent, guest_id: str | None, request: dict) -> HarnessProvider | None:
     """Reuse the harness this pane already has, when `set_model` only changes the guest's model.
 
-    29.3 restarts the harness when the *preset* changes ("the Relay conversation is kept; the
-    guest's context is not"). Asking the same guest for another model is not that: the contract has
+    29.3 restarts the harness when the *preset* changes, and the fresh one is briefed on the
+    conversation (#1V4F). Asking the same guest for another model is not that: the contract has
     `set_model(model)` for it, the guest keeps everything it has read so far, and restarting would
     throw that away for nothing. Anything that names a `resume` or a `fork` is a different session
     and does restart. Returns None when the pane must start a fresh harness.
@@ -1697,6 +1763,7 @@ def resume_session(agent, data, emit) -> None:
     previous, provider.harness = provider.harness, replacement
     _close_quietly(previous)
     provider.session_id = started.session_id or session
+    provider.briefed = True                 # its own session: it holds its own history
     if started.model:
         provider.config.model = started.model
         agent.config.model = started.model

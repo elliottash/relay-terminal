@@ -6260,15 +6260,25 @@ Execute/Verify actions retain their existing claims; this server does not add a 
 
 `configured` gains `guest: "<id>"` and `guest_session: "<the guest's session id>"`; `model` is the
 model the guest reports. `cancel` → `interrupt()`. `compact` → `harness.compact()` and Relay's own
-compaction of the transcript. `set_model` to another `guest:` preset restarts the harness (the
-Relay conversation is kept; the guest's context is not, and `model_changed` says so); `set_model`
-back to a normal preset ends the harness and the conversation continues on the provider with the
-transcript Relay kept. `session_data` records `guest` and `guest_session`, so a Relay `resume` of a
+compaction of the transcript. `set_model` to another `guest:` preset restarts the harness;
+`set_model` back to a normal preset ends the harness and the conversation continues on the provider
+with the transcript Relay kept. **No context is lost on a model change** (#1V4F, owner 2026-09-22:
+"its critical that no context is loss on model changes"): a harness started fresh in the middle of a
+conversation — switched to from an endpoint, from another guest, or back after another model ran
+turns — is sent the transcript so far once, ahead of its first prompt, as a Relay context block
+(`guest_harness_provider.handover_brief`: user and assistant text, each tool call, tool results cut
+to 4 KB, the whole capped from the front at 160 KB with an "earlier conversation omitted" line), and a
+`status` says "Handed the conversation so far to <guest>." A resumed or forked guest session holds its
+own history and is not briefed (`HarnessProvider.briefed`); a same-guest model change keeps the live
+session. The brief never enters Relay's transcript. `session_data` records `guest` and `guest_session`, so a Relay `resume` of a
 harness session starts the harness with `resume` and the same id; a guest session row (26.7) is
 resumed with `configure {preset: "guest:<id>", guest: {resume: "<id>"}}`.
 
 **What the transcript holds.** Relay's messages: the user's prompt, the guest's final text, and
-one record per tool call with the label and the diff, exactly as for Relay's own turns; the guest's
+each guest tool call with its result as an assistant `tool_calls` message and a `tool` message (#1V4F;
+text fields cut at 32 KB, the bound on Relay's own tool output), so a model switched in afterwards
+sees what the guest read and ran; plus one turn record per tool call with the label and the diff,
+exactly as for Relay's own turns; the guest's
 inner reasoning and its own system prompt are not copied. The guest's own transcript stays the
 guest's (`~/.claude/projects`, `~/.codex/sessions`) and is what the sessions index reads.
 

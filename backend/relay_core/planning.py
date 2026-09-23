@@ -86,20 +86,24 @@ def strip_context_blocks(text: str, open_marker: str, close_marker: str) -> str:
     return out.strip()
 
 
-def guest_plan_prompt(messages: list[dict], prompt: str, guest_name: str = "",
-                      context_markers: tuple[str, str] = ("", "")) -> str:
-    """The first prompt a guest's fresh session is sent for a plan turn.
+def render_transcript(messages: list[dict], context_markers: tuple[str, str] = ("", ""), *,
+                      max_chars: int = MAX_GUEST_TRANSCRIPT_CHARS,
+                      max_tool_chars: int = MAX_GUEST_TOOL_RESULT_CHARS,
+                      until_prompt: bool = True) -> str:
+    """The conversation before this turn's prompt, as plain labelled text a fresh guest can read.
 
     ``messages`` is the pane's conversation; the transcript is everything before the user message
-    that carries this turn's ``prompt`` (matched by `relay_kind: "prompt"`, last one), rendered as
+    that carries this turn's prompt (matched by `relay_kind: "prompt"`, last one), rendered as
     labelled turns — the user's words with Relay's notes stripped, the assistant's text and the
-    tools it called, tool results cut to a bounded excerpt — and capped from the front so the most
-    recent part is what survives. ``context_markers`` are the lines Relay wraps its notes in
-    (`agent.CONTEXT_OPEN` / `CONTEXT_CLOSE`), passed in because this module does not import the agent.
+    tools it called, tool results cut to ``max_tool_chars`` — and capped from the front at
+    ``max_chars`` so the most recent part is what survives. ``context_markers`` are the lines Relay
+    wraps its notes in (`agent.CONTEXT_OPEN` / `CONTEXT_CLOSE`), passed in because this module does
+    not import the agent. Shared by the plan-turn guest and the model-switch handover (#1V4F).
+    ``until_prompt=False`` renders ``messages`` whole: the caller has already cut it.
     """
     open_marker, close_marker = context_markers
     history = list(messages or [])
-    for index in range(len(history) - 1, -1, -1):
+    for index in range(len(history) - 1, -1, -1) if until_prompt else ():
         message = history[index]
         if isinstance(message, dict) and message.get("role") == "user" \
                 and message.get("relay_kind") == "prompt":
@@ -128,11 +132,19 @@ def guest_plan_prompt(messages: list[dict], prompt: str, guest_name: str = "",
         elif role == "tool":
             text = _message_text(message.get("content")).strip()
             if text:
-                cut = text[:MAX_GUEST_TOOL_RESULT_CHARS]
+                cut = text[:max_tool_chars]
                 lines.append("Tool result:\n" + cut + (" […]" if len(text) > len(cut) else ""))
     transcript = "\n\n".join(lines)
-    if len(transcript) > MAX_GUEST_TRANSCRIPT_CHARS:
-        transcript = _OMITTED + "\n\n" + transcript[-MAX_GUEST_TRANSCRIPT_CHARS:]
+    if len(transcript) > max_chars:
+        transcript = _OMITTED + "\n\n" + transcript[-max_chars:]
+    return transcript
+
+
+def guest_plan_prompt(messages: list[dict], prompt: str, guest_name: str = "",
+                      context_markers: tuple[str, str] = ("", "")) -> str:
+    """The first prompt a guest's fresh session is sent for a plan turn: the plan rules, the
+    transcript so far (`render_transcript`) and the request."""
+    transcript = render_transcript(messages, context_markers)
     parts = [GUEST_PLAN_NOTE]
     if transcript:
         parts.append("The conversation so far in this session"

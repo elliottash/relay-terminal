@@ -1,10 +1,12 @@
 ---
 id: 1V4F
 type: work
-status: planned
+status: needs-verification
+implemented_by: anthropic/claude-opus-5-5 via claude-code
+assignee: claude-code
 rank: zzzzzzzzzzzzzzzi
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-no-context-lost-on-switch/], related: [4NXH, PLDG, PH9G], github: null}
 ---
 # codex bugs
 
@@ -22,6 +24,14 @@ it also couldnt access tools:
 The Switchboard board_* tools were not available in this session, so I could not append commit links or move #VWSD to needs-verification.
 
 session: bb2d13c855b94b2c87c91ced1e437da6
+
+## Decisions
+Owner, 2026-09-22: "of course: its critical that no context is loss on model changes. so you can verify that". This answers the plan's open question: a guest that has not seen the conversation is briefed on the whole transcript, a switch back onto a guest included (no resume-on-return, step 6 not done).
+
+## Done means
+- A guest harness started mid-conversation (from an endpoint, from another guest, or back after another model) gets the conversation so far once, ahead of its first prompt; failure shows as the guest answering "I don't have the preceding task details".
+- A model switched in after a guest pane sees the guest's tool calls and results, not only its final prose.
+- Resumed/forked guest sessions and same-guest model changes are not re-briefed; Relay's own transcript never contains the brief.
 
 ## Plan
 ### Goal
@@ -59,3 +69,18 @@ A pane switched onto a guest (Codex/Claude Code) mid-conversation must give that
 - `scripts/relay-build` first (never `cmake --build` by hand).
 - Manual, one Codex turn, which spends the owner's subscription: under Xvfb with an isolated `XDG_CONFIG_HOME`, hold a two-turn conversation on a hosted model, switch the model to Codex, ask "continue" — the reply is informed and a status line says the conversation was handed over.
 - Evidence under `docs/qa_evidence/YYYY-MM-DD-guest-carries-conversation/`, with the QA checklist in this card.
+
+## Execution Summary
+Verified the fault at 18dd9c71 with a fake-harness repro (after a kimi turn, a switch to guest:claude sent only the new prompt), and found the reverse loss: a pane guest's tool activity never entered `agent.messages`.
+
+- `planning.render_transcript` is the plan-turn transcript renderer factored out; `guest_plan_prompt` uses it unchanged.
+- `guest_harness_provider`: `handover_brief(messages)` renders everything before the pending user messages as a `CONTEXT_OPEN` block (160 KB cap from the front, tool results 4 KB); `HarnessProvider.briefed` is False for a fresh harness, True for `resume`/`fork` and after `resume_session`; `complete()` prepends the brief once and emits "Handed the conversation so far to <guest>."
+- `HarnessProvider.record_guest_tools = True` (children had it): each guest tool call and result is written into `agent.messages`, text fields cut at 32 KB and still valid JSON (`_recorded`).
+- Protocol 29.3 ("the guest's context is not" kept) and the module docstring rewritten.
+
+Bounds that remain by design: the 160 KB brief cap, and compaction when switching to a model whose window is smaller than the conversation.
+
+## Tests
+- `tests/test_guest_handover.py` — 9 tests, every switch direction; 6 fail on the parent tree, all pass with the fix (evidence dir).
+- Green: test_guest_harness_provider, test_guest_delegation, test_guest_board_bridge, test_plan_turns, test_guest_sessions, test_model_switch, test_configure_recovery, test_subagents, test_guest_harness_codex, test_guest_harness_claude, test_guest_context_meter, test_session_protocol, test_sessions, test_summaries, test_conv_index. test_agent's `test_malformed_request_does_not_crash` fails identically on the parent tree.
+- Not done: a live switch with a real guest (spends the owner's subscription; the verifier's call).
