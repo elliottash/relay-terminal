@@ -1,10 +1,9 @@
 ---
 id: MEMS
 type: work
-status: discussing
+status: executing
 labels: [feature, memory, globals, guests]
 assignee: claude-code
-waiting_on: owner
 rank: mumrz
 created: '2026-09-22'
 source: 'Claude Code in a Relay pane, 2026-09-22 (follow-up to #M7RY)'
@@ -25,6 +24,7 @@ can we give the users a way to replace codex / claude memories with relay memori
 - 2026-09-22, owner: "new memories are suggestions that the user confirms." Agents propose user facts as they learn them; nothing lands in user memory without a confirm.
 - 2026-09-22, owner: "if the user rejects, rejections are remembered so that, new potentialy memories will be declined if they trigger that same suggestion again."
 - 2026-09-22, owner: "on startup, relay can get the memories from claude and codex and import them."
+- 2026-09-22, owner: "yes to 1-4. guests use relay memory, and thats the default." Relay-launched claude/codex default to Relay memory: their own memory off, Relay user memory injected, their suggestions go through Relay's confirm.
 
 ## Discussion points
 - **Replace guest memory with Relay memory (asked by the owner).** Feasible per launch, without touching the user's own `~/.claude` / `~/.codex` config: Relay already starts `claude --settings <file> --append-system-prompt …` (`backend/relay_core/guest_launch.py`, `guest_harness_claude.py`) and `codex -c key=value …` (`guest_harness_codex.py`). The installed CLIs have the switches: Claude `autoMemoryEnabled` / `CLAUDE_CODE_DISABLE_AUTO_MEMORY`; Codex `memories.generate_memories` and a use switch under `memories.*` (seen in the 2026-09-22 binaries; exact keys to be confirmed at implementation). "Replace" = guest's own memory off for Relay-launched sessions + Relay user memory injected into its instructions + guest suggestions routed to Relay's confirm flow. Question: one global setting "Guests use: their own memory / Relay memory / both", default?
