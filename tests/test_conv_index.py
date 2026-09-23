@@ -819,7 +819,9 @@ class MigrationTests(unittest.TestCase):
         """Turn the database back into an older one: drop the columns that version did not have
         (and, below v3, the header entries it did not write)."""
         db = sqlite3.connect(str(path))
-        dropped = conv_index.V7_COLUMNS
+        dropped = conv_index.V8_COLUMNS
+        if version < 7:
+            dropped += conv_index.V7_COLUMNS
         if version < 5:
             dropped += conv_index.V5_COLUMNS
         if version < 4:
@@ -903,6 +905,28 @@ class MigrationTests(unittest.TestCase):
         row = index._db.execute(
             "SELECT guest_source, guest_session FROM conversations WHERE session_id=?", (data["id"],)).fetchone()
         self.assertEqual(("codex", guest_id), tuple(row))
+
+    def test_a_v7_index_keeps_guest_rows_and_adds_provenance_column(self):
+        path = self.root / "index.db"
+        index = ConversationIndex(path)
+        index.update_guest({"source": "codex", "id": "codex-old", "title": "old guest",
+                            "workspace": "/tmp/alpha", "created": 1000.0, "mtime": 1000.0,
+                            "message_count": 1, "entries": []})
+        index.close()
+        self.downgrade(path, version=7)
+
+        index = ConversationIndex(path)
+        self.addCleanup(index.close)
+        index.search("", scope="all", sources=["codex"])
+        self.assertEqual(7, index.migrated_from)
+        row = index._db.execute("SELECT source, relay_launched FROM conversations"
+                                " WHERE session_id='codex-old'").fetchone()
+        self.assertEqual(("codex", 0), tuple(row))
+        index.update_guest({"source": "codex", "id": "codex-old", "title": "old guest",
+                            "workspace": "/tmp/alpha", "created": 1000.0, "mtime": 1000.0,
+                            "message_count": 1, "entries": [], "relay_launched": True})
+        self.assertEqual(1, index._db.execute("SELECT relay_launched FROM conversations"
+                                              " WHERE session_id='codex-old'").fetchone()[0])
 
     def test_a_v2_index_is_migrated_and_reconcile_backfills_the_new_columns(self):
         data = session("a" * 32, workspace="/tmp/alpha", branch="main", summary="the summary",
@@ -1087,6 +1111,31 @@ class GuestRowTests(unittest.TestCase):
         self.index.delete_session("a" * 32)
         self.assertEqual({self.CLAUDE, "b" * 32},
                          {item["session_id"] for item in self.index.search("", **both)["items"]})
+
+    def test_spawned_guest_is_a_subagent_not_a_top_level_session(self):
+        owner, thread = "a" * 32, "b" * 32
+        spawned = "01a0c6b5-139f-7493-83a8-4f16a86a22c2"
+        independent, independent_codex = self.CLAUDE, "codex-cli"
+        self.index.update_session(session(owner))
+        self.index.update_thread({"id": thread, "owner_session": owner,
+                                  "workspace": "/tmp/alpha", "description": "Research QA methods",
+                                  "created": 1000.0, "messages": [{"role": "user", "content": "Research QA"}]})
+        self.index.update_guest(self.record(spawned, source="codex", relay_launched=True))
+        self.index.update_guest(self.record(independent, source="claude", relay_launched=False))
+        self.index.update_guest(self.record(independent_codex, source="codex", relay_launched=False))
+        combined = {"scope": "all", "sources": ["agent", "claude", "codex"]}
+        ids = lambda **extra: {item["session_id"] for item in
+                               self.index.search("", **combined, **extra)["items"]}
+        self.assertEqual({owner, independent, independent_codex}, ids())
+        self.assertEqual({owner, independent, independent_codex, thread}, ids(include_threads=True))
+        self.assertEqual({spawned, independent_codex}, {item["session_id"] for item in
+                                                        self.index.search("", scope="all",
+                                                                          sources=["codex"])["items"]})
+
+        # A growing guest transcript keeps its provenance when indexed incrementally.
+        self.index.update_guest({**self.record(spawned, source="codex", relay_launched=True),
+                                 "append": True, "entry_base": 2, "entries": [], "mtime": 2000.0})
+        self.assertEqual({owner, independent, independent_codex}, ids())
 
     # ----- the meta store ------------------------------------------------------------
     def test_a_name_and_a_pin_are_written_beside_the_database(self):

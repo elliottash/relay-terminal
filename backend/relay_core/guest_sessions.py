@@ -30,9 +30,10 @@ real directory that does not hold the session (GT7X). It is empty when the trans
 a directory at all, and then the pane's own is as good a guess as any; :func:`resume_spawn` hands
 the argv and the directory back as one payload.
 
-Search spans all sources because the rows share the one index; the default listing still shows
-Relay's own conversations only, and a query names ``claude``/``codex`` in `sources` to see the
-guests (the same rule that keeps subagent threads out unless asked for).
+Search spans all sources because the rows share one index. The combined Sessions list includes
+independent Claude and Codex conversations, while the native transcripts of Relay-launched runs
+are represented by Relay's own sessions and subagent threads. A guest-only source view exposes
+the native transcript directly.
 
 The active pane's live transcript is tailed read-only by :class:`LiveTail`, so a session the
 guest is writing right now appears (and stays current) without a rescan. Nothing here writes
@@ -71,7 +72,7 @@ UUID_TAIL = re.compile(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 # Codex threads database columns this module reads; older schemas simply lack the later ones.
 CODEX_THREAD_COLUMNS = ("id", "rollout_path", "cwd", "name", "title", "first_user_message",
                         "created_at", "updated_at")
-PARSER_VERSION = 2  # Reparse saved cursors when prompt filtering changes.
+PARSER_VERSION = 3  # Reparse saved cursors to capture Relay-launched guest provenance.
 
 
 # ----- records and resume commands --------------------------------------------------------------
@@ -255,6 +256,10 @@ class _Parser:
         self.raw_cwd = ""
         self.created: float | None = None
         self.first_prompt = ""
+        # The native transcript identifies runs Relay launched. They have a Relay session or
+        # subagent thread of their own, so the combined Sessions list should not show the native
+        # transcript as another top-level conversation. Guest-only views still expose it.
+        self.relay_launched = False
         self.message_count = 0
         self.entries: list[dict] = []
         self._turn = 0
@@ -290,6 +295,7 @@ class _Parser:
         `first_prompt` is kept only as far as the title fallback reads it."""
         return {"session_id": self.session_id, "workspace": self.workspace, "raw_cwd": self.raw_cwd,
                 "created": self.created, "first_prompt": _one_line(self.first_prompt, MAX_PROMPT_PREVIEW),
+                "relay_launched": self.relay_launched,
                 "message_count": self.message_count, "turn": self._turn,
                 "entries": self._base + len(self.entries), "titles": dict(self.titles)}
 
@@ -304,6 +310,7 @@ class _Parser:
         self.created = (float(created) if isinstance(created, (int, float))
                         and not isinstance(created, bool) else None)
         self.first_prompt = str(state.get("first_prompt") or "")
+        self.relay_launched = bool(state.get("relay_launched"))
         self.message_count = max(0, int(state.get("message_count") or 0))
         self._turn = max(0, int(state.get("turn") or 0))
         self._base = max(0, int(state.get("entries") or 0))
@@ -317,6 +324,7 @@ class _Parser:
         return {"source": self.source, "id": self.session_id, "file": str(path), "title": title,
                 "title_kind": title_kind, "workspace": self.workspace, "raw_cwd": self.raw_cwd,
                 "first_prompt": _one_line(self.first_prompt, conv_index.MAX_PREVIEW),
+                "relay_launched": self.relay_launched,
                 "created": self.created if self.created is not None else mtime,
                 "mtime": float(mtime), "message_count": self.message_count,
                 "entries": self.entries, "entry_base": self._base}
@@ -351,6 +359,10 @@ class _ClaudeParser(_Parser):
         when = _epoch(data.get("timestamp"))
         self._stamp(when)
         kind = data.get("type")
+        if kind == "user" and data.get("entrypoint") == "sdk-cli":
+            # Claude's SDK entry point is what Relay's guest harness launches. A transcript may
+            # begin with a peer/system message and omit promptSource before its first SDK prompt.
+            self.relay_launched = True
         if kind == "custom-title":
             self.titles["custom"] = str(data.get("customTitle") or "")
         elif kind == "ai-title":
@@ -432,6 +444,7 @@ class _CodexParser(_Parser):
         if not isinstance(payload, dict):
             return
         if kind == "session_meta":
+            self.relay_launched = payload.get("originator") == "relay"
             identifier = payload.get("session_id") or payload.get("id")
             if not self.session_id and isinstance(identifier, str) and identifier:
                 self.session_id = identifier

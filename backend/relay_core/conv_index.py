@@ -112,7 +112,8 @@ from .presets import model_name as _model_name
 # table that records what the files they come from looked like when they were read. No new column;
 # v1–v5 migrate in place and the rows are backfilled by the next `reconcile()`, as v3's were.
 # v7 (2026-09-23, #D2PX): link Relay sessions to the guest transcripts they wrap.
-SCHEMA_VERSION = 7
+# v8 (2026-09-23, #K9QA): mark native guest transcripts launched by Relay, including subagents.
+SCHEMA_VERSION = 8
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
 MAX_SUMMARY = 4000           # per-conversation cap for a summary
@@ -194,7 +195,8 @@ CREATE TABLE IF NOT EXISTS conversations(
     entry_count  INTEGER NOT NULL DEFAULT 0,
     entry_digest TEXT NOT NULL DEFAULT '',
     guest_source TEXT NOT NULL DEFAULT '',
-    guest_session TEXT NOT NULL DEFAULT ''
+    guest_session TEXT NOT NULL DEFAULT '',
+    relay_launched INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS conversations_by_owner ON conversations(owner_session);
 CREATE TABLE IF NOT EXISTS entries(
@@ -331,6 +333,7 @@ V4_COLUMNS = (("raw_cwd", "TEXT NOT NULL DEFAULT ''"),)
 V5_COLUMNS = (("entry_count", "INTEGER NOT NULL DEFAULT 0"), ("entry_digest", "TEXT NOT NULL DEFAULT ''"))
 V7_COLUMNS = (("guest_source", "TEXT NOT NULL DEFAULT ''"),
               ("guest_session", "TEXT NOT NULL DEFAULT ''"))
+V8_COLUMNS = (("relay_launched", "INTEGER NOT NULL DEFAULT 0"),)
 # v6 (#0TJ9) adds no column: its rows are entries, and `session_sidecars` is a table the schema
 # creates on its own. What it does ask for is the v3 backfill — every agent and subagent row is
 # marked behind, so the next reconcile reads each conversation's sidecars once.
@@ -1210,7 +1213,7 @@ class ConversationIndex:
         except sqlite3.DatabaseError:
             version = None
         self.migrated_from = None
-        if version in (1, 2, 3, 4, 5, 6) and version < SCHEMA_VERSION:
+        if version in (1, 2, 3, 4, 5, 6, 7) and version < SCHEMA_VERSION:
             try:
                 self._migrate(db, version)
                 self.migrated_from = version
@@ -1255,7 +1258,7 @@ class ConversationIndex:
 
     @staticmethod
     def _migrate(db, version: int) -> None:
-        """v1..v6 -> v7 in place, because terminal-history rows have no file to be rebuilt
+        """v1..v7 -> v8 in place, because terminal-history rows have no file to be rebuilt
         from — and, since v4, neither have the guest rows.
 
         v1 -> v2 adds the thread columns and moves user titles and pins to the session files, where
@@ -1266,10 +1269,11 @@ class ConversationIndex:
         it is the one migration that does not ask for a re-read. v5 -> v6 adds no column at all:
         `session_sidecars` is created with the schema, empty, and the rows the sidecars hold are
         backfilled by the next reconcile the way v3's columns were. v6 -> v7 adds the Relay
-        session's linked guest source and id, also backfilled from its file on reconcile.
+        session's linked guest source and id, also backfilled from its file on reconcile. v7 -> v8
+        adds native guest provenance, filled by the next guest reconcile.
         """
         columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
-        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS + V7_COLUMNS:
+        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS + V7_COLUMNS + V8_COLUMNS:
             if name not in columns:
                 db.execute(f"ALTER TABLE conversations ADD COLUMN {name} {kind}")
         if version < 2:
@@ -1734,10 +1738,11 @@ class ConversationIndex:
             if appending:
                 db.execute(
                     "UPDATE conversations SET workspace=?, raw_cwd=?, project=?, title=?, custom_title=?,"
-                    " updated=?, turns=?, pinned=?, first_prompt=?, file_mtime=?, indexed_version=? WHERE session_id=?",
+                    " updated=?, turns=?, pinned=?, first_prompt=?, relay_launched=?, file_mtime=?, indexed_version=? WHERE session_id=?",
                     (workspace, raw_cwd, project_name(workspace), title, custom_title,
                      mtime or time.time(), max(0, int(data.get("message_count") or 0)),
-                     pinned, first_prompt, mtime, SCHEMA_VERSION, session_id))
+                     pinned, first_prompt, int(bool(data.get("relay_launched"))), mtime,
+                     SCHEMA_VERSION, session_id))
                 # The searchable title entry is rewritten only when the name changed; the rest of
                 # the entries are left exactly where they are, which is the point of appending.
                 shown = custom_title or title
@@ -1755,12 +1760,12 @@ class ConversationIndex:
                 db.execute(
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, raw_cwd, project, title,"
                     " custom_title, model, preset, created, updated, turns, open_requests, session_dir, pinned,"
-                    " file_mtime, indexed_version, first_prompt)"
-                    " VALUES(?,?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?, ?)",
+                    " file_mtime, indexed_version, first_prompt, relay_launched)"
+                    " VALUES(?,?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?, ?, ?)",
                     (session_id, source, workspace, raw_cwd, project_name(workspace), title, custom_title,
                      data.get("created") or mtime, mtime or time.time(),
                      max(0, int(data.get("message_count") or 0)),
-                     pinned, mtime, SCHEMA_VERSION, first_prompt))
+                     pinned, mtime, SCHEMA_VERSION, first_prompt, int(bool(data.get("relay_launched")))))
                 written = header_entries(custom_title or title, "") + rows
             db.executemany(
                 "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
@@ -2264,6 +2269,9 @@ class ConversationIndex:
             add("NOT (c.source IN ('claude','codex') AND EXISTS ("
                 "SELECT 1 FROM conversations owner WHERE owner.source='agent'"
                 " AND owner.guest_source=c.source AND owner.guest_session=c.session_id))")
+            # Saved subagent threads represent Relay's spawned guests; their native transcripts
+            # must not become top-level sessions when the thread checkbox is off.
+            add("NOT (c.source IN ('claude','codex') AND c.relay_launched=1)")
         for flag, column in ((has_edits, "c.has_edits"), (unfinished, "c.unfinished"), (pinned, "c.pinned")):
             if flag is not None:
                 add(f"{column} = ?", 1 if flag else 0)

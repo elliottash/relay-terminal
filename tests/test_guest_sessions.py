@@ -273,6 +273,18 @@ class ClaudeParsing(unittest.TestCase):
         self.assertEqual("pane-drag-fix", parsed["title"])
         self.assertEqual("custom", parsed["title_kind"])
 
+    def test_sdk_launched_transcript_is_marked_separately_from_cli_conversation(self):
+        lines = claude_lines()
+        lines[4]["entrypoint"] = "sdk-cli"
+        lines[4]["promptSource"] = "sdk"
+        parsed, _ = self.parse(lines)
+        self.assertTrue(parsed["relay_launched"])
+        del lines[4]["promptSource"]
+        parsed, _ = self.parse(lines)
+        self.assertTrue(parsed["relay_launched"], "SDK system/peer prompts need the same classification")
+        parsed, _ = self.parse(claude_lines())
+        self.assertFalse(parsed["relay_launched"])
+
     def test_title_precedence(self):
         cases = ((("pane-drag-fix", "Pane drag"), "pane-drag-fix", "custom"),
                  ((None, "Pane drag"), "Pane drag", "ai"),
@@ -364,6 +376,15 @@ class CodexParsing(unittest.TestCase):
         self.assertEqual("what does the diff view do", parsed["title"])
         self.assertEqual("prompt", parsed["title_kind"])
         self.assertEqual(["prompt", "tool_call", "reply"], [row["kind"] for row in parsed["entries"]])
+
+    def test_relay_originator_is_marked_separately_from_codex_cli(self):
+        lines = codex_lines()
+        lines[0]["payload"]["originator"] = "relay"
+        path = write_codex(self.home, lines)
+        self.assertTrue(guest_sessions.parse_codex_rollout(path)["relay_launched"])
+        lines[0]["payload"]["originator"] = "codex-tui"
+        path = write_codex(self.home, lines)
+        self.assertFalse(guest_sessions.parse_codex_rollout(path)["relay_launched"])
 
     def test_developer_messages_are_not_conversation_messages(self):
         path = write_codex(self.home, codex_lines(developer=True))
