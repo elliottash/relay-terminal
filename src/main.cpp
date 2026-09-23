@@ -321,6 +321,28 @@ public:
 #endif
 
 int main(int argc, char **argv) {
+    // /restart launches this executable as a detached waiter. Do not create QApplication, a
+    // window, or a layout lock until the old process has finished aboutToQuit and exited.
+    constexpr auto restartArg = "--relay-restart-after=";
+    if (argc == 2 && QByteArray(argv[1]).startsWith(restartArg)) {
+        const QList<QByteArray> identity = QByteArray(argv[1]).mid(int(strlen(restartArg))).split(':');
+        bool pidOk = false, startedOk = false;
+        relay::runtimedirs::Owner previous;
+        if (identity.size() == 2) {
+            previous.pid = identity.at(0).toLongLong(&pidOk);
+            previous.startTime = identity.at(1).toULongLong(&startedOk);
+        }
+        if (!pidOk || !startedOk || !previous.isValid() || !previous.startTime) {
+            fprintf(stderr, "relay: invalid restart process identity\n");
+            return 2;
+        }
+        if (!relay::runtimedirs::waitForExit(previous, 180000)) {
+            fprintf(stderr, "relay: previous instance did not exit; start Relay manually when it closes\n");
+            return 3;
+        }
+        argc = 1;
+        argv[1] = nullptr;
+    }
 #ifdef Q_OS_MACOS
     RelayMacApplication app(argc, argv);
     qputenv("RELAY_THEME_DIR", (QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/relay/theme")).toUtf8());
@@ -446,4 +468,3 @@ int main(int argc, char **argv) {
         return 1;
     }
 }
-

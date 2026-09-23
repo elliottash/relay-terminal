@@ -70,6 +70,17 @@ class RuntimeDirsTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void restartWaitRequiresTheExactOldProcess() {
+        const Owner running = self();
+        QVERIFY(running.isValid());
+        QVERIFY(running.startTime != 0);
+        QVERIFY(!waitForExit(running, 75));   // a still-running Relay must not be reopened over
+        Owner recycled = running;
+        ++recycled.startTime;
+        QVERIFY(waitForExit(recycled, 75));   // a reused pid is not the old Relay
+        QVERIFY(!waitForExit({}, 75));        // no identity must never bypass the wait
+    }
+
     void namesAreQtsOwnAlphabet() {
         QVERIFY(isRuntimeDirName(QStringLiteral("relay-aB3xyZ")));
         QVERIFY(isRuntimeDirName(QStringLiteral("relay-open-000000")));

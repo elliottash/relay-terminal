@@ -1338,6 +1338,7 @@ private:
             updateApp();
             hint(QStringLiteral("update.palette"), QStringLiteral("Next time: type /update in any prompt box"));
         }
+        else if (id == QStringLiteral("app.restart")) restartApp();
         else if (id == QStringLiteral("keybindings.edit")) {
             Keymap::instance().ensureFile();
             const QString editor = qEnvironmentVariable("VISUAL", qEnvironmentVariable("EDITOR", QStringLiteral("nano")));
@@ -5079,6 +5080,9 @@ private:
         items << actionItem(app, QStringLiteral("Options…"),
                             QStringLiteral("What persists: appearance, models, terminal, agent, voice, privacy, keyboard"),
                             QStringLiteral("app.settings"));
+        items << actionItem(app, QStringLiteral("Restart Relay"),
+                            QStringLiteral("Save this workspace, exit, then reopen it · /restart"),
+                            QStringLiteral("app.restart"));
         {
             // "Which build am I on" is a question you ask in words, not by hunting through tabs, and
             // the page it opens is all Info rows — which the Options search skips on purpose, since
@@ -7138,12 +7142,49 @@ public:
         return value == QStringLiteral("stable") ? value : QStringLiteral("all");
     }
 
+    // /restart and a completed /update share one handoff. The detached replacement waits for this
+    // exact process (pid and start time) to exit before it creates QApplication or takes the layout
+    // lock. aboutToQuit writes scrollback and layout while every pane is still alive.
+    bool restartApp() {
+        static bool queued = false;
+        if (queued) { notice(QStringLiteral("Relay is already restarting.")); return true; }
+        if (m_updateProcess) { notice(QStringLiteral("Finish the update before restarting Relay.")); return false; }
+        if (!WindowManager::restoreEnabled() || !m_manager->ownsLayout()) {
+            notice(QStringLiteral("This window set is not being saved. Enable Reopen windows on start, then restart the owning Relay."), 8000);
+            return false;
+        }
+        int busy = 0;
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *window = dynamic_cast<RelayWindow *>(top))
+                for (Pane *pane : window->allPanes())
+                    if (pane->hasCloseWork()) ++busy;
+        for (Pane *pane : m_manager->backgroundPanes())
+            if (pane && pane->hasCloseWork()) ++busy;
+        if (busy && QMessageBox::question(this, QStringLiteral("Restart Relay?"),
+                QStringLiteral("%1 running program or agent turn(s) will stop. Save the workspace and restart now?").arg(busy),
+                QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes)
+            return false;
+        const relay::runtimedirs::Owner owner = relay::runtimedirs::self();
+        if (!owner.isValid() || !owner.startTime) {
+            notice(QStringLiteral("Relay could not identify this process; restart manually after quitting."), 8000);
+            return false;
+        }
+        const QString arg = QStringLiteral("--relay-restart-after=%1:%2").arg(owner.pid).arg(owner.startTime);
+        if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), {arg}, QDir::currentPath())) {
+            notice(QStringLiteral("Relay could not launch its restart helper. This window is still open."), 8000);
+            return false;
+        }
+        queued = true;
+        notice(QStringLiteral("Saving the workspace; Relay will reopen after this instance exits."), 4000);
+        QTimer::singleShot(0, qApp, [] { QCoreApplication::quit(); });
+        return true;
+    }
+
     // /update and the palette's Update action: scripts/relay-update.py fetches the newest GitHub
     // release's .deb for this distribution and architecture, checks it against the release's
     // SHA256SUMS and installs it with pkexec (the password dialog is polkit's, never a prompt the
     // app could read). Every line it prints becomes the window's notice. When it finishes with the
-    // UPDATED marker, Relay restarts itself: the new binary is started first, then the windows
-    // close through their ordinary path so layout and scrollback are saved for it to reopen.
+    // UPDATED marker, Relay uses the same exit-then-launch handoff as /restart.
     void updateApp() {
 #ifdef Q_OS_MACOS
         QDesktopServices::openUrl(QUrl(QStringLiteral("https://relay-terminal.ai/#install")));
@@ -7194,16 +7235,7 @@ public:
             m_updateProcess = nullptr;
             process->deleteLater();
             if (code != 0 || !m_updateInstalled) return;
-            notice(QStringLiteral("Restarting Relay…"), 4000);
-            // The running process keeps its inode, so the path can be started before it closes;
-            // the arguments this instance was given (a --workspace, say) are the ones to keep.
-            QProcess::startDetached(QCoreApplication::applicationFilePath(),
-                                    QCoreApplication::arguments().mid(1));
-            for (QWidget *widget : QApplication::topLevelWidgets())
-                if (auto *window = dynamic_cast<RelayWindow *>(widget)) {
-                    window->m_confirmedClose = true;   // /update was asked for; no close dialog on top of it
-                    window->close();
-                }
+            if (!restartApp()) notice(QStringLiteral("Update installed. Restart Relay manually when ready."), 8000);
         });
         process->start(python, {QStringLiteral("-X"), QStringLiteral("utf8"), script, QStringLiteral("install"),
                                 QStringLiteral("--channel"), updateChannel()});
@@ -8513,6 +8545,7 @@ private:
         };
         pane->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
         pane->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
+        pane->onRestartApp = [guard]() { if (auto *w = windowOf(guard)) w->restartApp(); };
         pane->onOpenCard = [guard](const QString &id) { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openBoardCard(id); } };
         // The agent drives the app (#FEJQ, §30): the catalog this pane's worker is configured with,
         // and one `app_command` out of it, executed in the window the pane is in.
@@ -8866,6 +8899,7 @@ private:
             if (auto *w = windowOf(guard)) w->refreshModelsPaneFor(guard);
         };
         console->onUpdateApp = [guard]() { if (auto *w = windowOf(guard)) w->updateApp(); };
+        console->onRestartApp = [guard]() { if (auto *w = windowOf(guard)) w->restartApp(); };
         console->onJoinShared = [guard](const QString &code) { if (auto *w = windowOf(guard)) w->joinSharedSession(code); };
         // The `board` block of its `configure` is the tab's, exactly as a pane's is.
         console->onBoardSettings = [guard]() -> QJsonObject {

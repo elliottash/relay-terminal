@@ -842,6 +842,7 @@ public:
     std::function<void(const QString &project, const QString &what)> onProjectInitEvent;
     std::function<void(const QString &code)> onJoinShared;   // /join CODE, /connect CODE
     std::function<void()> onUpdateApp;   // /update: install the latest release, restart into it
+    std::function<void()> onRestartApp;  // /restart: save, exit, then reopen the saved workspace
     std::function<void(const QString &)> onOpenCard;   // Switchboard: one card, from the work chip
     // The agent drives the app (card #FEJQ, protocol §30). Two hooks, both the window's:
     //  * the `app` block that rides on every `configure` and on an `app_catalog` refresh — the
@@ -9632,6 +9633,7 @@ private:
             {QStringLiteral("speak"), QStringLiteral("[stop]"), QStringLiteral("Read the last agent reply aloud; /speak stop (or Esc) stops it")},
             {QStringLiteral("join"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session: their meeting code, then the PIN")},
             {QStringLiteral("update"), QString(), QStringLiteral("Download and install the latest Relay release, then restart")},
+            {QStringLiteral("restart"), QString(), QStringLiteral("Save this workspace and reopen Relay after it exits")},
             {QStringLiteral("connect"), QStringLiteral("[code]"), QStringLiteral("Join someone's shared session (same as /join)")},
             {QStringLiteral("shell"), QStringLiteral("<command>"), QStringLiteral("Send to the terminal")},
             {QStringLiteral("agent"), QStringLiteral("<prompt>"), QStringLiteral("Send to the agent")}};
@@ -10208,6 +10210,9 @@ private:
             // The window runs scripts/relay-update.py and shows each of its lines as the notice;
             // on its UPDATED marker it restarts Relay into the version it just installed.
             if (onUpdateApp) onUpdateApp();
+        }
+        else if (name == QStringLiteral("restart")) {
+            if (onRestartApp) onRestartApp();
         }
         else if (name == QStringLiteral("board") || name == QStringLiteral("switchboard")) {
             if (onOpenBoard) onOpenBoard();

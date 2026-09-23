@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QThread>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -217,6 +218,17 @@ bool ownerAlive(const Owner &owner) {
 }
 
 bool ownerAlive(const QString &dir) { return ownerAlive(readOwner(dir)); }
+
+bool waitForExit(const Owner &owner, qint64 timeoutMs) {
+    if (!owner.isValid() || !owner.startTime || timeoutMs < 0) return false;
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (ownerAlive(owner)) {
+        if (elapsed.elapsed() >= timeoutMs) return false;
+        QThread::msleep(50);
+    }
+    return true;
+}
 
 bool isRuntimeDirName(const QString &name) {
     QString suffix;

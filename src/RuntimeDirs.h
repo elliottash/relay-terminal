@@ -110,6 +110,10 @@ bool ownerAlive(const Owner &owner);
 // The same for the owner file in `dir`. An unmarked directory is not "alive".
 bool ownerAlive(const QString &dir);
 
+// A detached Relay replacement waits here before it creates QApplication or opens the saved
+// layout. The pid/start-time pair prevents a recycled pid from delaying the restart.
+bool waitForExit(const Owner &owner, qint64 timeoutMs);
+
 // Exactly a name QTemporaryDir would have made for us: `relay-` or `relay-open-` plus six
 // characters of [A-Za-z0-9]. Nothing else is ever a sweep candidate.
 bool isRuntimeDirName(const QString &name);
