@@ -190,6 +190,36 @@ class TerminalContextIntegrationTests(unittest.TestCase):
                                      'revoked' if revoke == 'off' else 'unavailable')
                     bridge.end()
 
+    def test_repeat_attachment_deduplicates_excerpt_but_preserves_reads_and_reattaches(self):
+        agent, provider = self.native([('terminal_read', {'command_id': 'one'})])
+        context = {'terminal_context': snapshot(record(output='UNIQUE_REPEAT_EVIDENCE', revision=7))}
+        agent.terminal_context.update(context['terminal_context'])
+        agent.ask('Explain the command', context=context)
+        first_user = [m for m in provider.messages if m['role'] == 'user'][-1]['content']
+        self.assertIn('UNIQUE_REPEAT_EVIDENCE', first_user)
+        self.assertEqual(self.results()[-1]['output'], 'UNIQUE_REPEAT_EVIDENCE')
+
+        provider.calls = 0
+        self.events.clear()
+        agent.ask('Explain it again', context=context)
+        second_user = [m for m in provider.messages if m['role'] == 'user'][-1]['content']
+        self.assertNotIn('UNIQUE_REPEAT_EVIDENCE', second_user)
+        self.assertIn('Terminal attachment unchanged', second_user)
+        self.assertIn('one', second_user)
+        self.assertIn('7', second_user)
+        self.assertEqual(self.results()[-1]['output'], 'UNIQUE_REPEAT_EVIDENCE')
+        self.assertEqual(self.results()[-1]['record']['revision'], 7)
+
+        # Model compaction can remove the earlier user message containing evidence.
+        agent.messages[:] = [m for m in agent.messages if m['role'] == 'system']
+        provider.calls = 0
+        self.events.clear()
+        agent.ask('Explain after compaction', context=context)
+        third_user = [m for m in provider.messages if m['role'] == 'user'][-1]['content']
+        self.assertIn('UNIQUE_REPEAT_EVIDENCE', third_user)
+        self.assertNotIn('Terminal attachment unchanged', third_user)
+        self.assertEqual(self.results()[-1]['output'], 'UNIQUE_REPEAT_EVIDENCE')
+
     def test_remote_branch_preserves_context_and_short_profile_offers_tools(self):
         agent, provider = self.native(profile='short')
         context = self.live_and_queued(agent)
