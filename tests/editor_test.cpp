@@ -17,6 +17,33 @@
 class EditorTests : public QObject {
     Q_OBJECT
 private Q_SLOTS:
+    void longDraftFollowsPaneHeightLimit() {
+        RichEditor editor;
+        editor.resize(420, 64);
+        editor.setAutoHeight(1, 1000);
+        editor.setHeightLimit(360);
+        editor.setPlainText(QStringLiteral("A long prompt line.\n").repeated(80));
+        QCOMPARE(editor.height(), 360);
+        editor.setHeightLimit(220);
+        QCOMPARE(editor.height(), 220);
+        QCOMPARE(editor.toPlainText().count(QLatin1Char('\n')), 80);
+        editor.setHeightLimit(480);
+        QCOMPARE(editor.height(), 480);
+        editor.clear();
+        QVERIFY(editor.height() < 100);
+    }
+    void wrappedDraftGrowsWhenPaneNarrows() {
+        RichEditor editor;
+        editor.resize(600, 64);
+        editor.setAutoHeight(1, 1000);
+        editor.setHeightLimit(480);
+        editor.show();
+        editor.setPlainText(QStringLiteral("word ").repeated(45));
+        const int wideHeight = editor.height();
+        editor.resize(160, editor.height());
+        QTRY_VERIFY(editor.height() > wideHeight);
+        QVERIFY(editor.height() <= 480);
+    }
     void bottomRowFollowsVisualLines() {
         RichEditor editor; editor.resize(220, 150); editor.show(); editor.setFocus();
         QVERIFY(QTest::qWaitForWindowExposed(&editor));

@@ -50,6 +50,8 @@ public:
     // Ghost text: a dim suggestion drawn after the cursor when it sits at the end of the text.
     // Grow with the text instead of standing empty: one line when idle, up to maxLines, then scroll.
     void setAutoHeight(int minLines, int maxLines);
+    // The containing pane can impose a pixel cap that follows its own height.
+    void setHeightLimit(int pixels);
     // The placeholder shrinks with the pane instead of wrapping onto a second line.
     void updatePlaceholder();
     // Other users of the editor (the Switchboard's reply box) hint at their own job. Longest
@@ -76,6 +78,7 @@ protected:
     bool canInsertFromMimeData(const QMimeData *source) const override;
     void dropEvent(QDropEvent *event) override;
 private:
+    void updateAutoHeight();
     // Inserts `@path` tokens for attached images, separated from whatever is already typed.
     void insertAttachments(const QStringList &tokens);
     bool m_dropping = false;
@@ -92,6 +95,7 @@ private:
     bool m_preedit = false;
     QString m_ghost;
     int m_minLines = 0, m_maxLines = 0;
+    int m_heightLimit = 0;
     QColor m_caret;
     QTimer *m_caretBlink = nullptr;
     bool m_caretOn = true;

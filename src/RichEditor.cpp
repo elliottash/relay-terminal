@@ -62,14 +62,10 @@ RichEditor::RichEditor(QWidget *parent) : QPlainTextEdit(parent) {
     setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     updatePlaceholder();
     setMinimumHeight(64);
-    setMaximumHeight(260);
     setTabStopDistance(fontMetrics().horizontalAdvance(QLatin1Char(' ')) * 4);
     setUndoRedoEnabled(true);
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
     new ShellHighlighter(document());
-    connect(document(), &QTextDocument::blockCountChanged, this, [this] {
-        setFixedHeight(std::clamp(document()->blockCount() * fontMetrics().lineSpacing() + 30, 64, 260));
-    });
 }
 
 void RichEditor::remember(const QString &text) {
@@ -143,6 +139,9 @@ void RichEditor::refreshHistory() {
 void RichEditor::resizeEvent(QResizeEvent *event) {
     QPlainTextEdit::resizeEvent(event);
     updatePlaceholder();
+    // A narrower pane changes the number of wrapped visual lines without changing the text.
+    if (event->oldSize().width() != event->size().width())
+        QTimer::singleShot(0, this, [this] { updateAutoHeight(); });
 }
 
 // Longest hint that fits on one line; a narrow pane loses the help note first, then words.
@@ -173,16 +172,23 @@ void RichEditor::updatePlaceholder() {
 void RichEditor::setAutoHeight(int minLines, int maxLines) {
     m_minLines = std::max(1, minLines);
     m_maxLines = std::max(m_minLines, maxLines);
-    auto apply = [this] {
-        const QFontMetrics metrics(font());
-        const int line = std::max(14, metrics.lineSpacing());
-        const int lines = std::clamp(int(std::ceil(document()->size().height())), m_minLines, m_maxLines);
-        const int chrome = int(document()->documentMargin()) * 2 + frameWidth() * 2 + 4;
-        setFixedHeight(lines * line + chrome);
-    };
-    connect(document(), &QTextDocument::contentsChanged, this, apply);
-    connect(this, &QPlainTextEdit::textChanged, this, apply);
-    apply();
+    connect(document(), &QTextDocument::contentsChanged, this, [this] { updateAutoHeight(); });
+    updateAutoHeight();
+}
+
+void RichEditor::setHeightLimit(int pixels) {
+    m_heightLimit = pixels;
+    updateAutoHeight();
+}
+
+void RichEditor::updateAutoHeight() {
+    if (!m_minLines) return;
+    const int line = std::max(14, fontMetrics().lineSpacing());
+    const int lines = std::clamp(int(std::ceil(document()->size().height())), m_minLines, m_maxLines);
+    const int chrome = int(document()->documentMargin()) * 2 + frameWidth() * 2 + 4;
+    const int minimum = m_minLines * line + chrome;
+    setFixedHeight(m_heightLimit > 0 ? std::clamp(lines * line + chrome, minimum, m_heightLimit)
+                                     : lines * line + chrome);
 }
 
 void RichEditor::setGhost(const QString &remainder) {

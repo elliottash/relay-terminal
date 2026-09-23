@@ -4935,6 +4935,8 @@ public:
 protected:
     void resizeEvent(QResizeEvent *event) override {
         QWidget::resizeEvent(event);
+        // Leave the header, chips and terminal room even for a very long draft.
+        if (m_editor) m_editor->setHeightLimit(std::max(m_editor->minimumHeight(), height() * 2 / 3 - 72));
         // Split panes get narrow: drop the key hints and the agent workspace path first.
         if (m_help) m_help->setVisible(width() >= 900);
         placeQueueStrip();
@@ -5460,7 +5462,8 @@ private:
         m_editor->useHistoryFile(promptHistoryPath());
         m_highlighter = new relay::InputHighlighter(m_editor->document());
         QTimer::singleShot(0, this, [this] { refreshDestinationColor(); });
-        m_editor->setAutoHeight(1, 8);   // one line when idle, growing with the text
+        m_editor->setAutoHeight(1, 1000);   // the pane height caps long drafts
+        m_editor->setHeightLimit(std::max(m_editor->minimumHeight(), height() * 2 / 3 - 72));
         auto *inputRow = new QHBoxLayout;
         inputRow->setContentsMargins(0, 0, 0, 0);
         inputRow->setSpacing(6);
