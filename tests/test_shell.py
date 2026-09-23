@@ -45,6 +45,9 @@ class BashSession:
                    RELAY_PYTHON=sys.executable, RELAY_CLEAN_SHELL="1" if clean else "0")
         if home:
             env["HOME"] = str(home)
+        # Run inside a Relay pane, the test inherits that pane's start directory; the shell under
+        # test must start where the test runs, not where the pane was opened (#TCXT).
+        env.pop("RELAY_START_DIR", None)
         self.process = subprocess.Popen([sys.executable, "-S", str(ROOT / "tests/pty_child.py"),
             "--noprofile", "--rcfile", str(ROOT / "shell/integration.bash"), "-i"],
             stdin=slave, stdout=slave, stderr=slave, env=env, start_new_session=True)
