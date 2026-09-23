@@ -2994,7 +2994,9 @@ and arrays of likely duplicate and related `{id, title, status, score}` rows, us
 fuzzy matching over open cards. With `semantic: true`, a background chores-role call later sends
 `phase: "semantic"` with duplicate and related ID arrays plus an optional tab and labels. A
 missing provider or timeout yields empty suggestions. The GUI matches request IDs so an older
-answer cannot change a newer draft. No suggestion writes a card or link by itself.
+answer cannot change a newer draft. The semantic call sees at most 120 open card titles and has a
+five-second watchdog; the owner can save while it runs. No suggestion writes a card or link by
+itself.
 
 `board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
 is its first line (shortened) unless one is given. `section` (2026-09-20, #3XZV) parks the new
