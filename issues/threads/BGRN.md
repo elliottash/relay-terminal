@@ -35,3 +35,6 @@ Implemented the live-pane background path, Board Run default and Run in pane, re
 
 <!-- relay:entry 20260923T184923Z-2c author=agent kind=event model=gpt-6-sol pane=6e4865f9 turn=a7740578e6674cdea34c8be534de20ad/36297f8d0a514ae29ba79e7494449a87 -->
 - ✦ agent moved this card · Executing → Needs verification · Implementation landed in 854c097d; isolated Board UI probe, request lifecycle tests, guest plan mirror tests, and exact-tree build are recorded. · evidence docs/qa_evidence/2026-09-23-bgrn/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T185053Z-2k author=agent kind=event model=gpt-6-sol pane=6e4865f9 turn=a7740578e6674cdea34c8be534de20ad/36297f8d0a514ae29ba79e7494449a87 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e"], "evidence… → {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272…
