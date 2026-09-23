@@ -778,7 +778,7 @@ void ImageProtocol::place(const Stored &image, QSize requestedCells, bool moveCu
     const int maxCols = std::max(1, s.columns - s.cursorCol);
     const int maxRows = s.altScreen ? std::max(1, s.rows - s.cursorRow) : std::max(1, s.rows * 3 / 4);
     const QSize cells = inlineimage::cellsFor(image.pixels, s.cellPixels, maxCols, maxRows, requestedCells);
-    emitBytes(inlineimage::placementBytes(image.path, cells, moveCursor));
+    emitBytes(inlineimage::placementBytes(image.path, cells, moveCursor, s.cursorCol));
 }
 
 // ---- iTerm2 ------------------------------------------------------------------------------------

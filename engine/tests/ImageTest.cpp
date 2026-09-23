@@ -348,10 +348,16 @@ private slots:
             columns << run.startCol;
         QCOMPARE(columns.value(0), 39);
         QVERIFY(rig.text().split('\n').value(3).startsWith("next"));
-        // Contract bug (core/InlineImage.cpp): writing the row cell in the last column leaves the
-        // cursor pending a wrap, and placementBytes' "\b" then lands one column further left.
-        QEXPECT_FAIL("", "placementBytes' backspace from the right margin, #1MGS", Continue);
+        // The row cell in the last column leaves the cursor pending a wrap; the rows below must
+        // still start in that column (placementBytes is given the cursor's column).
         QCOMPARE(columns, (QList<int>{39, 39, 39}));
+        // Under newline mode (LNM) LF also returns the carriage; the rows still keep the column.
+        Rig lnm(10, 40);
+        lnm.feed("\x1b[20h...." + kitty("a=T,f=100", pngBytes(QSize(20, 60)).toBase64()));
+        const auto lnmRuns = lnm.core->hyperlinkRuns(QString::fromLatin1(kImagePrefix));
+        QCOMPARE(int(lnmRuns.size()), 3);
+        for (const VtCore::HyperlinkRun &run : lnmRuns)
+            QCOMPARE(run.startCol, 4);
     }
 
     void kittyNoCursorMove()
