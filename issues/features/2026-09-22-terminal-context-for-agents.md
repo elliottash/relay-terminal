@@ -1,13 +1,14 @@
 ---
 id: TCXT
 type: work
-status: executing
+status: needs-verification
 labels: [feature, agent, terminal, context]
 assignee: codex
+implemented_by: anthropic/claude-opus-5-5 via claude-code
 rank: mtcxt
 created: '2026-09-22'
 source: User conversation with Codex in Relay, 2026-09-22
-links: {plans: [], commits: [338342cbc2e032cf7d32dd765e33085b72727872], evidence: [], related: [CCKY, AGNT], github: null}
+links: {plans: [], commits: [338342cbc2e032cf7d32dd765e33085b72727872, 279fe679, 096285c1, 274b87e4, fea4f6ca, 310a96a7, bdf93cc4, a4847c3d, 567d9f18, aaa8d03f, 88c69ffb, '92031692'], evidence: [docs/qa_evidence/2026-09-22-terminal-context/], related: [CCKY, AGNT], github: null}
 ---
 # Give agents recent command and output context from their terminal pane
 
@@ -106,7 +107,12 @@ Extend relevant existing tests in `tests/test_conv_index.py`, `tests/inputpolicy
 - [x] Freeze command-record schema, scope rules and submission snapshot contract <!-- t:x7 -->
 - [x] Implement bounded composer capture and per-pane records <!-- t:x8 -->
 - [x] Expose native and guest context plus authorized history/read tools <!-- t:4a -->
-- [ ] Add sharing controls, preview/removal and explicit attachments <!-- t:4h s=in-progress -->
-- [ ] Verify and land stage 1 with protocol documentation <!-- t:4t s=in-progress -->
+- [x] Add sharing controls, preview/removal and explicit attachments <!-- t:4h -->
+- [x] Verify and land stage 1 with protocol documentation <!-- t:4t -->
 - [x] Extend native-shell lifecycle capture and block attachment in stage 2 <!-- t:w0 -->
-- [ ] Complete cross-pane/SSH/native/guest evidence and independent verification <!-- t:kg s=in-progress -->
+- [ ] Complete cross-pane/SSH/native/guest evidence and independent verification <!-- t:kg -->
+
+## Tests
+- `PYTHONPATH=backend:.:tests python3 -m unittest tests.test_terminal_context tests.test_terminal_context_integration tests.test_guest_board_bridge tests.test_prompt_profiles tests.test_terminal_command_hooks`
+- `scripts/relay-build --target relay-terminalrecords-tests && ctest --test-dir build -R terminalrecords`
+- `RELAY_TEST_BINARY=<relay> python3 docs/qa_evidence/2026-09-22-terminal-context/live-drive.py` (Xvfb, isolated profile, fixture worker)
