@@ -14,6 +14,8 @@ Validation:
 - Board format check has no P7CK findings; 12 existing errors concern other cards.
 - The focused three-case `--plan-click-only` run passed under Xvfb/xcb with isolated
   settings (exit 0). `TestsCommands.check_card('P7CK')` reports no findings.
+- Commit `5bbbc029` also passed the exact-tree console build gate and the same focused
+  Xvfb check against its isolated build output.
 
 Reproduce the focused three-case plan check after building:
 ```sh
