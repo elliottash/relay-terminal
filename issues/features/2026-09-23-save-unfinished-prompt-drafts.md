@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-save-drafts/], related: [H8VP], github: null}
+links: {plans: [], commits: [ad7213d3825b6dae5b23e864797817e4fb3a5ef1], evidence: [docs/qa_evidence/2026-09-23-save-drafts/], related: [H8VP], github: null}
 ---
 # Save unfinished prompt drafts on exit and crash
 

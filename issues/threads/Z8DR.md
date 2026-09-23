@@ -12,3 +12,6 @@ Claimed for Codex. Tracing the terminal and hosted-console draft lifetimes befor
 
 <!-- relay:entry 20260923T103100Z-3z author=agent kind=event model=gpt-6-sol pane=efdadbe4 turn=2a243c9c15664ca28cc392c51ffeffd3/b02b6b60ebb94060bffc978ac0032ba3 -->
 - ✦ agent moved this card · Executing → Needs verification · Atomic draft writes built; windowstate test and isolated SIGKILL restart drives passed for terminal, Board, and card reply. · evidence docs/qa_evidence/2026-09-23-save-drafts/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T103246Z-xh author=agent kind=event model=gpt-6-sol pane=efdadbe4 turn=2a243c9c15664ca28cc392c51ffeffd3/b02b6b60ebb94060bffc978ac0032ba3 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-save-draf… → {"plans": [], "commits": ["ad7213d3825b6dae5b23e864797817e4fb3a5ef1"], "evidence…
