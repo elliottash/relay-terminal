@@ -10,3 +10,6 @@ Filed the close-time final recap decision separately from the Sessions table UI 
 
 <!-- relay:entry 20260923T121807Z-vs author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/5eaf94c328b34ad9a15b0d908d04b473 -->
 - ✦ agent updated this card · waiting_on: (unset) → owner
+
+<!-- relay:entry 20260923T122034Z-aj author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/5eaf94c328b34ad9a15b0d908d04b473 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["PV7W"], "github": null… → {"plans": [], "commits": ["a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae"], "evidence…

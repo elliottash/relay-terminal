@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-recap-preview/], related: [Y4MT, RCP9], github: null}
+links: {plans: [], commits: [a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae], evidence: [docs/qa_evidence/2026-09-23-sessions-recap-preview/], related: [Y4MT, RCP9], github: null}
 ---
 # Show recap in the Sessions table and open preview on demand
 
