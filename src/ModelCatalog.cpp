@@ -188,13 +188,17 @@ QString Catalog::resolveKey(const QString &preset, const QString &reportedModel)
     for (const Entry &entry : entries)
         if (entry.preset == preset && entry.model == reportedModel) return entry.key;
     // The alias knowledge is already in the row: the worker names `guest:claude|opus`
-    // "claude-opus-5-5", which is what the CLI reports once it is running, so comparing names is
-    // comparing what the two spellings mean. `reportedModel` is compared as it stands too, for a
-    // row whose name is itself the alias (a guest whose family nothing maps).
-    const QString wanted = nameOf(reportedModel);
+    // "claude-opus-5.5", and the CLI reports the API id "claude-opus-5-5" once it is running.
+    // Anthropic spells a version's dot as a dash, so a short number after a number is read as a
+    // minor version on both sides (a date suffix is not), and comparing names is comparing what
+    // the two spellings mean. `reportedModel` is compared as it stands too, for a row whose name
+    // is itself the alias (a guest whose family nothing maps).
+    static const QRegularExpression minorDash(QStringLiteral("(?<=\\d)-(\\d{1,2})(?=-|$)"));
+    const auto versioned = [](QString name) { return name.toLower().replace(minorDash, QStringLiteral(".\\1")); };
+    const QString wanted = versioned(nameOf(reportedModel));
     for (const Entry &entry : entries) {
         if (entry.preset != preset) continue;
-        if (entry.name.compare(wanted, Qt::CaseInsensitive) == 0
+        if (versioned(entry.name) == wanted
             || entry.name.compare(reportedModel, Qt::CaseInsensitive) == 0)
             return entry.key;
     }

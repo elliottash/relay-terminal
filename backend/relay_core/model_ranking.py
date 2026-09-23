@@ -307,7 +307,7 @@ _GUEST_MODEL_IDS = {"claude": ("fable", "opus", "sonnet", "haiku"),
                     "codex": ("gpt-6-astra", "gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna")}
 # And the level words each CLI names (`guest_harness_claude.EFFORTS`,
 # `guest_harness_codex.EFFORTS`), for the same reason and the same check: a Levels cell saying
-# `xhigh` for `claude-opus-5-5` is right because Claude Code has an xhigh, even though Anthropic's
+# `xhigh` for `claude-opus-5.5` is right because Claude Code has an xhigh, even though Anthropic's
 # own compat layer has no knob at all. Codex narrows its list per model; the union is what a cell
 # is checked against, so a level one codex model does not have is the CLI's to refuse.
 _GUEST_LEVELS = {"claude": ("low", "medium", "high", "xhigh", "max"),

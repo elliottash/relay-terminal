@@ -59,7 +59,7 @@ QJsonArray presets() {
     QJsonObject guest{{QStringLiteral("id"), QStringLiteral("guest:claude")}, {QStringLiteral("label"), QStringLiteral("Claude Code")},
                       {QStringLiteral("provider"), QStringLiteral("Claude Code")}, {QStringLiteral("model"), QString()},
                       {QStringLiteral("harness"), true},
-                      {QStringLiteral("models"), QJsonArray{model(QStringLiteral("opus"), QStringLiteral("claude-opus-5-5"), QString(), {QStringLiteral("low"), QStringLiteral("high")}),
+                      {QStringLiteral("models"), QJsonArray{model(QStringLiteral("opus"), QStringLiteral("claude-opus-5.5"), QString(), {QStringLiteral("low"), QStringLiteral("high")}),
                                                             model(QStringLiteral("sonnet"), QStringLiteral("claude-sonnet-6"), QString(), {})}},
                       {QStringLiteral("limits"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("5h")}, {QStringLiteral("used_percent"), 38.0}, {QStringLiteral("resets_at"), 0}},
                                                             QJsonObject{{QStringLiteral("kind"), QStringLiteral("weekly")}, {QStringLiteral("used_percent"), 60.0}, {QStringLiteral("resets_at"), 0}}}}};
@@ -521,7 +521,7 @@ private Q_SLOTS:
         const QList<Entry> list = shown(catalog);
         const QList<Entry> alpha = ordered(list, Sort::Alphabetical, catalog);
         QCOMPARE(alpha.first().provider, QStringLiteral("claude code"));
-        QCOMPARE(alpha.first().name, QStringLiteral("claude-opus-5-5"));
+        QCOMPARE(alpha.first().name, QStringLiteral("claude-opus-5.5"));
         const QList<Entry> smart = ordered(list, Sort::Intelligence, catalog);
         QCOMPARE(smart.first().key, QStringLiteral("glm-coding|glm-5.3"));   // 45 beats 44
         QCOMPARE(smart.at(1).key, QStringLiteral("kimi-code|k3"));
@@ -1193,7 +1193,7 @@ private Q_SLOTS:
         const Catalog catalog = catalogFrom(presets());
         // The worker's `name` wins where the id cannot be derived to it.
         QCOMPARE(catalog.find(QStringLiteral("kimi-code|k3"))->name, QStringLiteral("kimi-k3"));
-        QCOMPARE(catalog.find(QStringLiteral("guest:claude|opus"))->name, QStringLiteral("claude-opus-5-5"));
+        QCOMPARE(catalog.find(QStringLiteral("guest:claude|opus"))->name, QStringLiteral("claude-opus-5.5"));
         // A row with no `name` at all (an older worker) is derived here.
         const Catalog groups = catalogFrom(groupPresets());
         QCOMPARE(groups.find(QStringLiteral("openrouter|openai/gpt-6-sol"))->name, QStringLiteral("gpt-6-sol"));
@@ -1371,7 +1371,8 @@ private Q_SLOTS:
 
     void aReportedModelResolvesToThePresetsOwnEntry() {
         const Catalog catalog = catalogFrom(presets());
-        // Claude Code is started with the alias `opus` and reports `claude-opus-5-5`: one entry.
+        // Claude Code is started with the alias `opus` and reports `claude-opus-5-5`, the API id; the
+        // row is named `claude-opus-5.5`, Anthropic's version dash read as a dot. One entry.
         QCOMPARE(catalog.resolveKey(QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5-5")),
                  QStringLiteral("guest:claude|opus"));
         QCOMPARE(catalog.resolveKey(QStringLiteral("guest:claude"), QStringLiteral("opus")),

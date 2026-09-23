@@ -997,7 +997,7 @@ class _Turn:
             if self.agent is not None:
                 self.agent.config.model = model
             # `model_name` (protocol 13, card #MDL1 rule 1): Claude Code reports "opus" and
-            # Relay calls that model "claude-opus-5-5" everywhere else, so the name travels with it.
+            # Relay calls that model "claude-opus-5.5" everywhere else, so the name travels with it.
             self.emit({"event": "model_changed", "model": model, "applies": "now",
                        "model_name": model_name(PRESET_PREFIX + self.provider.guest_id, model),
                        "preset": PRESET_PREFIX + self.provider.guest_id,

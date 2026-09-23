@@ -119,7 +119,7 @@ the list, they run on Relay Free's role for the tier instead.
 |---|---|---|---|
 | claude-fable-5.1 | high | 53 | claude code's `fable`, and `anthropic`'s `claude-fable-5-1`; `anthropic`'s high |
 | gpt-6-astra | high | 53 | `openai`'s high, and the one codex lists first |
-| claude-opus-5-5 | main | 51 | `anthropic`'s main model; claude code's `opus` is the same model |
+| claude-opus-5.5 | main | 51 | `anthropic`'s main model; claude code's `opus` is the same model |
 | gpt-6-sol | main | 47 | `openai`'s main; codex lists it and the OpenAI API serves it |
 | glm-5.3 | high, main | 45 | one row for `glm` and `glm-coding`; the coding plan wins the tie on `order` |
 | kimi-k3 | high, main | 44 | `kimi`'s main model; kimi code serves the same one as `k3` |
@@ -170,7 +170,7 @@ provider shows the level in its own vocabulary (codex says `xhigh` for max). Pre
 | name | high | main | flash | lite | notes |
 |---|---|---|---|---|---|
 | claude-fable-5.1 | high | low | low  |  | levels only through claude code; the anthropic API row has no knob |
-| claude-opus-5-5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
+| claude-opus-5.5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
 | claude-sonnet-6 | max | high | low |  |  |
 | gpt-6-astra | xhigh | medium | low  |  | the API's default is high; codex's own is medium |
 | gpt-6-luna | max | high | low |  |  |

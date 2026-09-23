@@ -614,7 +614,7 @@ class ModelCatalogTests(unittest.TestCase):
         # A guest alias is named after the model it points at (owner, 2026-09-21).
         for alias, model in P.GUEST_MODEL_ALIASES.items():
             self.assertEqual(P.model_name("guest:claude", alias), P.model_name("anthropic", model), alias)
-        self.assertEqual(P.model_name("guest:claude", "opus"), "claude-opus-5-5")
+        self.assertEqual(P.model_name("guest:claude", "opus"), "claude-opus-5.5")
         self.assertEqual(P.model_name("guest:claude", "fable"), "claude-fable-5.1")
         # Relay Free's three are role names and keep them, hyphenated (design 3.5).
         self.assertEqual([r["name"] for r in P.catalog_rows("relay-free")],

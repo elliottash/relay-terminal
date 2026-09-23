@@ -536,7 +536,7 @@ MODEL_CATALOG: dict[str, list[dict]] = {
     # Anthropic's API spells two versions with a hyphen where everyone else (and OpenRouter) uses a
     # dot, so those two carry a `name`: without it the same model would sit in the picker twice.
     "anthropic": [
-        {"id": "claude-opus-5-5", "tier": "main", "efforts": None},
+        {"id": "claude-opus-5-5", "name": "claude-opus-5.5", "tier": "main", "efforts": None},
         {"id": "claude-sonnet-6", "tier": "flash", "efforts": None},
         {"id": "claude-haiku-4-5", "name": "claude-haiku-4.5", "tier": "lite", "efforts": None},
         {"id": "claude-fable-5-1", "name": "claude-fable-5.1", "tier": None, "efforts": None},
@@ -600,7 +600,7 @@ def model_name(preset_id, model_id) -> str:
     In order (design rule 1): the ``name`` its own MODEL_CATALOG row carries, for the handful that
     cannot be derived (``kimi-code``'s "k3" is "kimi-k3"; Anthropic spells two versions with a
     hyphen where OpenRouter uses a dot); then a guest alias through GUEST_MODEL_ALIASES, so Claude
-    Code's "opus" is "claude-opus-5-5"; else `derived_name`.
+    Code's "opus" is "claude-opus-5.5"; else `derived_name`.
     """
     text = (model_id or "").strip() if isinstance(model_id, str) else ""
     if not text:
@@ -680,7 +680,7 @@ OPENROUTER_TWINS: dict[str, str] = {
     "gpt-5.6-terra": "openai/gpt-5.6-terra",
     "gpt-6-luna": "openai/gpt-6-luna",
     # anthropic (OpenRouter spells the version with a dot)
-    "claude-opus-5-5": "anthropic/claude-opus-5-5",
+    "claude-opus-5-5": "anthropic/claude-opus-5.5",
     "claude-sonnet-6": "anthropic/claude-sonnet-6",
     "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
     "claude-fable-5-1": "anthropic/claude-fable-5.1",
@@ -843,7 +843,7 @@ def model_efforts(preset_id, model: str) -> list[str] | None:
 # appends a twin whose completion price, as OpenRouter's live listing gives it, is at or under this
 # many US dollars per million tokens. On 2026-09-20 that admits z-ai/glm-5.3 ($2.86),
 # minimax/minimax-m3 ($1.20) and the flash models, and leaves out moonshotai/kimi-k3 ($8.50),
-# openai/gpt-6-astra and anthropic/claude-opus-5-5 ($25-50). A twin whose price is unknown (no
+# openai/gpt-6-astra and anthropic/claude-opus-5.5 ($25-50). A twin whose price is unknown (no
 # listing fetched yet) is left out of Main and High, where a wrong guess is expensive, and kept in
 # Flash and Lite, where every twin there is cheap.
 OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK = 3.0
@@ -933,7 +933,7 @@ def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str
     ``model-ranking.md``'s **Levels** table first, by the model's ``name`` — the owner asked for
     "a similar defaults file for the reasoning levels across model X class" and then filled it in,
     so a cell there is the answer, mapped into this model's own vocabulary (`nearest_effort`,
-    because one name can be served by two providers and `claude-opus-5-5` is `xhigh` through Claude
+    because one name can be served by two providers and `claude-opus-5.5` is `xhigh` through Claude
     Code and has no level at all through Anthropic's compat layer).
 
     A blank cell, or no ``name`` to look up, is the rule that was there before it, which is also
@@ -1111,7 +1111,7 @@ def _usable_guest(row) -> bool:
 def _guest_candidates(row: dict, rank) -> list[_Candidate]:
     """A guest harness's own models, scored by **name** through the same table as everyone else's
     (owner, 2026-09-21): `gpt-6-astra` through codex scores what `gpt-6-astra` through the OpenAI
-    API scores, and claude code's `opus` is `claude-opus-5-5`.
+    API scores, and claude code's `opus` is `claude-opus-5.5`.
 
     Only the classes a guest may serve (GUEST_CLASSES). A guest whose list the file has never heard
     of — codex's catalogue is whatever the CLI ships — falls back to the first model its own list

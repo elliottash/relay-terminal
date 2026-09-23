@@ -43,7 +43,7 @@ a model carries the name beside the id — `configured` and `model_changed` carr
 `openai/gpt-6-sol`); the name is what a person reads and is lower-case, has no spaces and no
 vendor prefix (`minimax-m3`, `kimi-k3`, `gpt-6-sol`). The worker computes it once
 (`presets.model_name(preset_id, model_id)`: the model's own catalog `name`, then a guest alias —
-Claude Code's `opus` is `claude-opus-5-5` — then the derivation), and it is the same string the
+Claude Code's `opus` is `claude-opus-5.5` — then the derivation), and it is the same string the
 `presets` answer puts on each catalog row as `name`. A surface prefers it and derives its own only
 for an older worker that sends none: the desktop through `Pane::modelNameFor`, the phone through
 `app/modelname.js`. It is never sent upstream.
@@ -1323,7 +1323,7 @@ buttons only apply one of them and send it back as `tiers`:
   same model twice, a blank score last and ties broken by the provider's `order` then the name.
   Two presets of one company (`glm` and `glm-coding`) are **one provider**, and the plan wins the
   tie, so the credit already paid for is spent first. A guest's models are scored by **name** like
-  anyone else's (`opus` is `claude-opus-5-5`, `gpt-6-astra` through codex scores what the OpenAI API's
+  anyone else's (`opus` is `claude-opus-5.5`, `gpt-6-astra` through codex scores what the OpenAI API's
   does) and a guest is offered for `high`, `main` and `flash` — the tiers a guest entry may serve
   (`roles.GUEST_TIERS`; `flash` since 2026-09-21, owner: "the worker should allow the harness for
   flash, and defaults should be the same across plans / apis / harnesses") — and never for `lite`,
@@ -1352,7 +1352,7 @@ buttons only apply one of them and send it back as `tiers`:
   live listing prices its completion at or under
   `presets.OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK` = **$3.00 per million tokens** (on 2026-09-20:
   `z-ai/glm-5.3` at $2.86 and `minimax/minimax-m3` at $1.20 are in; `moonshotai/kimi-k3` at $8.50,
-  `openai/gpt-6-astra` and `anthropic/claude-opus-5-5` are out). A twin whose price is unknown (no listing
+  `openai/gpt-6-astra` and `anthropic/claude-opus-5.5` are out). A twin whose price is unknown (no listing
   fetched yet) is left out of `main` and `high` and kept in `flash` and `lite`. A `flash` or `lite` twin
   says `low` like the rest of its list, unless the listing says the model takes no level. `lite`
   **starts with OpenRouter's own Lite pick** — the `## Provider picks` row in the ranking file,
@@ -1454,7 +1454,7 @@ every row that carries one — the built-in table, OpenRouter's live listing, a 
 model_id)` computes it, in order: the `name` its MODEL_CATALOG row carries, for the three ids that
 cannot be derived (`kimi-code`'s `k3` is `kimi-k3`; Anthropic writes `claude-haiku-4-5` and
 `claude-fable-5-1` where OpenRouter writes the version with a dot); then a guest alias through
-`presets.GUEST_MODEL_ALIASES`, so Claude Code's `opus` is `claude-opus-5-5`; else the id with
+`presets.GUEST_MODEL_ALIASES`, so Claude Code's `opus` is `claude-opus-5.5`; else the id with
 everything up to the last `/` and a leading `~` removed, lower-cased, whitespace turned into `-`.
 Serving variants keep their own names (`-highspeed`, `:batch`, `k3-256k`, `-pro`) because they are
 different models to the person picking one, and Relay Free's three are `relay-main` / `relay-flash`

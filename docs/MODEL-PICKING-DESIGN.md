@@ -40,7 +40,7 @@ the box's text, so it says "Codex (main)" too.
 | GPT-6 Sol | `openai` `gpt-6-sol` | `guest:codex` `gpt-6-sol` | `openai/gpt-6-sol` |
 | Kimi K3 | `kimi` `kimi-k3`, `kimi-code` **`k3`** | | `moonshotai/kimi-k3` |
 | GLM-5.3 | `glm` and `glm-coding`, both `glm-5.3` | | `z-ai/glm-5.3` |
-| Claude Opus 5.5 | `anthropic` `claude-opus-5-5` | `guest:claude` **`opus`** | `anthropic/claude-opus-5-5` |
+| Claude Opus 5.5 | `anthropic` `claude-opus-5-5` | `guest:claude` **`opus`** | `anthropic/claude-opus-5.5` |
 | Claude Haiku 4.5 | `claude-haiku-4-5` (hyphen) | `haiku` | `anthropic/claude-haiku-4.5` (dot) |
 | MiniMax M3 | **`MiniMax-M3`** (capitals) | | `minimax/minimax-m3` |
 | Gemini 3.8 Flash | `gemini` `gemini-3.8-flash` | | `google/gemini-3.8-flash`, a built-in `openrouter` row |
@@ -226,7 +226,7 @@ it is spent.
    because it happens to be installed is not a default"). *Recommended: yes when the owner ranked it
    first* — being installed is not a default, being put first is — provided the harness process
    starts on the first turn, not when the pane opens.
-2. **The name of a Claude Code alias**: `claude-opus-5-5` (what it points at; recommended, matches
+2. **The name of a Claude Code alias**: `claude-opus-5.5` (what it points at; recommended, matches
    the OpenAI example) or `opus` (what is typed to the CLI).
 3. **`relay-main` rather than `relay main`**: follows from "always lowercase, no spaces";
    recorded here because an earlier note called the hyphenated form unrecognisable.

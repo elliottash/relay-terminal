@@ -49,7 +49,7 @@ struct Entry {
     QString preset;       // "glm-coding", "guest:claude", "local:spark", "relay-free"
     QString model;        // the id the API or CLI takes
     // What a person reads, and the only name this model has (card #MDL1, rule 1): lower-case, no
-    // spaces, no vendor prefix — "glm-5.3-flash", "claude-opus-5-5" for Claude Code's `opus`,
+    // spaces, no vendor prefix — "glm-5.3-flash", "claude-opus-5.5" for Claude Code's `opus`,
     // "gpt-6-sol" whether it comes from codex, the OpenAI API or "openai/gpt-6-sol" on
     // OpenRouter. The worker computes it (`presets.model_name`) and sends it as the row's `name`;
     // a row without one — a custom id, an older worker — gets `nameOf(model)`.
