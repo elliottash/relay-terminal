@@ -441,7 +441,7 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 | Font choice, zoom | ✅ | ✅ | ✅ | |
 | Profiles / colour-scheme UI, settings dialogs | ❌ (`ColorScheme` struct only) | ❌ | ✅ | |
 | Silence/activity monitoring | ❌ (host can use `onOutput`) | ❌ | ✅ | |
-| Sixel / kitty graphics | ❌ (libghostty-vt parses kitty graphics; not rendered) | ❌ | ❌ | |
+| Inline images: kitty graphics, iTerm2 `OSC 1337 File=`, sixel (#1MGS) | 🟡 (the same code path, since images are read out of the stream by `session/ImageProtocol` before any core sees them, but this core is not built on the aarch64 dev box, so untested) | ✅ (drawn by the view over `relay-image:` link rows, `core/InlineImage.h`) | ❌ | ImageTest, ViewTest image cases, CoreTest::imageRowsKeepTheirColumn, docs/qa_evidence/2026-09-22-inline-images |
 | Linux | ✅ | ✅ | ✅ | |
 | macOS | 🟡 code paths exist (forkpty+select, Cmd shortcuts, Apple Color Emoji), never built | 🟡 | ❌ | |
 | Windows | ❌ ConPTY stub | ❌ | ❌ | |
