@@ -1,12 +1,14 @@
 ---
 id: XJ2B
 type: work
-status: inbox
+status: dropped
 labels: [bug, signal]
+assignee: agent
+implemented_by: openai/gpt-6-sol via codex
 rank: zzzzzzzzzzzzzzzzzz
 created: '2026-09-23'
 source: signal unittest:unittest.loader._FailedTest.test_board_protocol, 2026-09-23
-links: {plans: [], commits: [], evidence: [], related: [], github: null, signal: unittest:unittest.loader._FailedTest.test_board_protocol}
+links: {plans: [], commits: [36ca8f6d], evidence: [], related: [0VEG], github: null, signal: unittest:unittest.loader._FailedTest.test_board_protocol}
 ---
 # unittest:unittest.loader._FailedTest.test_board_protocol fails
 
@@ -36,3 +38,6 @@ ModuleNotFoundError: No module named 'fake_cards'
 scope execution
 ```
 
+
+## Resolution
+The failed import came from the Board runner importing `tests.test_board_protocol` with only `backend` on `PYTHONPATH`. `tests/test_board_protocol.py` now adds its sibling fixture directory to `sys.path` (commit `36ca8f6d`), and this signal resolved on two consecutive recorded passes at 2026-09-23 19:03:05 UTC. #0VEG owns the same module collection repair; no separate fix remains.

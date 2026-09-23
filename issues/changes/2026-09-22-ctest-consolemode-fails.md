@@ -9,7 +9,7 @@ session: 8f478c92-da57-4c74-b20e-5a3929f72d24
 rank: zzzzzzzzzzzzzzzzzi
 created: '2026-09-22'
 source: signal ctest:consolemode, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-vz8c/report.md], related: [], github: null, signal: ctest:consolemode}
+links: {plans: [], commits: [3dad4ea0cdb054c4db39062bc9ab6dc876072e9e], evidence: [docs/qa_evidence/2026-09-23-vz8c/report.md], related: [], github: null, signal: ctest:consolemode}
 ---
 # ctest:consolemode fails
 

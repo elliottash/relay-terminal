@@ -40,3 +40,6 @@ Resume interrupted exact-revision consolemode fix and close the signal through r
 
 <!-- relay:entry 20260923T232428Z-sj author=agent kind=event model=gpt-6-sol pane=8f478c92 turn=4f8b0198068442a7bce4a462b35dcbc6/80cb48d68f5643ea9feb8afb8071a7ee -->
 - ✦ agent moved this card · Executing → Needs verification · Complete consolemode test passes twice in isolated worktree and twice through recorded same-key history; signal resolved. · evidence docs/qa_evidence/2026-09-23-vz8c/report.md · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T232552Z-f1 author=agent kind=event model=gpt-6-sol pane=8f478c92 turn=4f8b0198068442a7bce4a462b35dcbc6/80cb48d68f5643ea9feb8afb8071a7ee -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-vz8c/repo… → {"plans": [], "commits": ["3dad4ea0cdb054c4db39062bc9ab6dc876072e9e"], "evidence…
