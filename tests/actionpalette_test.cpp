@@ -13,15 +13,19 @@
 // "Change shortcut…" and hands over the item's key. The window's catalog, recent store and contextual rows are the caller's,
 // and are faked here.
 #include "ActionPalette.h"
+#include "PaletteCardSearch.h"
 
 #include <QAbstractButton>
 #include <QApplication>
 #include <QContextMenuEvent>
+#include <QDir>
+#include <QFile>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
 #include <QScrollBar>
 #include <QTest>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -254,6 +258,54 @@ private slots:
         if (!capture.isEmpty()) QVERIFY(m_palette->grab().save(capture));
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
         QCOMPARE(m_ran, QStringList{QStringLiteral("conversation:one")});
+    }
+
+    void exactCardLookupReadsClaimWithoutMatchingThreadMentions()
+    {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        QVERIFY(QDir(temp.path()).mkpath(QStringLiteral("features")));
+        QVERIFY(QDir(temp.path()).mkpath(QStringLiteral("threads")));
+        QFile thread(temp.path() + QStringLiteral("/threads/WM4K.md"));
+        QVERIFY(thread.open(QIODevice::WriteOnly));
+        thread.write("---\nid: WM4K\n---\n# Wrong thread\n");
+        thread.close();
+        QFile card(temp.path() + QStringLiteral("/features/card.md"));
+        QVERIFY(card.open(QIODevice::WriteOnly));
+        card.write("---\nid: WM4K\nsession: pane-token-123\nstatus: executing\n---\n# Search active conversations\n");
+        card.close();
+        QCOMPARE(palettecards::code(QStringLiteral(" #wm4k ")), QStringLiteral("WM4K"));
+        QVERIFY(palettecards::code(QStringLiteral("1234")).isEmpty());
+        QVERIFY(palettecards::code(QStringLiteral("WM4")).isEmpty());
+        const auto hit = palettecards::find(temp.path(), QStringLiteral("WM4K"));
+        QVERIFY(hit.has_value());
+        QCOMPARE(hit->title, QStringLiteral("Search active conversations"));
+        QCOMPARE(hit->session, QStringLiteral("pane-token-123"));
+        QVERIFY(!palettecards::find(temp.path(), QStringLiteral("WXYZ")).has_value());
+    }
+
+    void cardCodeShowsPaneAndBoardChoices()
+    {
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("#WM4K"));
+        ActionItem pane = item(QStringLiteral("pane:token"), QStringLiteral("Cards"),
+                               QStringLiteral("Claiming pane · Research"));
+        pane.run = [this] { m_ran << QStringLiteral("pane:token"); };
+        ActionItem card = item(QStringLiteral("card:WM4K"), QStringLiteral("Cards"),
+                               QStringLiteral("#WM4K · Search active conversations"));
+        card.run = [this] { m_ran << QStringLiteral("card:WM4K"); };
+        m_palette->setCardResults(QStringLiteral("#WM4K"), {pane, card});
+        QCOMPARE(rowsOf(m_palette->list()).mid(0, 3),
+                 (QStringList{QStringLiteral("# Cards"), QStringLiteral("Claiming pane · Research"),
+                              QStringLiteral("#WM4K · Search active conversations")}));
+        const QString capture = qEnvironmentVariable("RELAY_PALETTE_CARD_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(m_palette->grab().save(capture));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("pane:token"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("card:WM4K"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
+        QCOMPARE(m_ran, QStringList{QStringLiteral("card:WM4K")});
     }
 
     void typingFindsBySlashAlias()

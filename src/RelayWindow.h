@@ -73,6 +73,7 @@
 #include "TestSuitesPane.h"   // the Test suites pane, beside the Switchboard (card #7BM4)
 #include "ProfilePane.h"      // the Profile result pane, ditto (card #7BM4 phase 5)
 #include "ActionPalette.h"    // the Actions palette, Ctrl+? (card #MAGP)
+#include "PaletteCardSearch.h" // exact #card lookup for Actions search (#WM4K)
 
 #include <QAbstractButton>
 #include <QDateTime>
@@ -2167,7 +2168,66 @@ private:
         return nullptr;
     }
 
+    static Pane *paneForPaletteToken(const QString &token) {
+        if (token.isEmpty()) return nullptr;
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *window = dynamic_cast<RelayWindow *>(top))
+                if (Pane *pane = window->findPaneByToken(token)) return pane;
+        return nullptr;
+    }
+
+    void searchPaletteCards(const QString &query) {
+        const QString id = relay::palettecards::code(query);
+        QList<relay::ActionItem> items;
+        if (!id.isEmpty()) {
+            QSet<QString> seenRoots;
+            auto addProject = [this, &seenRoots, &items, &id](const QString &project) {
+                const QString root = relay::projects::boardDirOf(project);
+                if (root.isEmpty() || seenRoots.contains(root) || items.size() >= 12) return;
+                seenRoots.insert(root);
+                const auto card = relay::palettecards::find(root, id);
+                if (!card) return;
+                const QString token = card->session;
+                if (Pane *claimant = paneForPaletteToken(token)) {
+                    relay::ActionItem paneItem;
+                    paneItem.key = QStringLiteral("pane:") + token;
+                    paneItem.section = QStringLiteral("Cards");
+                    paneItem.label = QStringLiteral("Claiming pane · %1").arg(
+                        claimant->paneTitle().isEmpty() ? shortPath(claimant->cwd()) : claimant->paneTitle());
+                    paneItem.detail = QStringLiteral("#%1 · pane %2").arg(id, token.left(8));
+                    paneItem.run = [this, token] { m_manager->focusPane(token); };
+                    items.append(paneItem);
+                }
+                relay::ActionItem cardItem;
+                cardItem.key = QStringLiteral("card:") + project + QLatin1Char('#') + id;
+                cardItem.section = QStringLiteral("Cards");
+                cardItem.label = QStringLiteral("#%1 · %2").arg(id, card->title);
+                cardItem.detail = token.isEmpty() ? QStringLiteral("Open Board card")
+                                : paneForPaletteToken(token) ? QStringLiteral("Open Board card · pane %1").arg(token.left(8))
+                                                             : QStringLiteral("Open Board card · claimed by closed pane %1").arg(token.left(8));
+                cardItem.run = [this, project, id] {
+                    openNotificationSource(QStringLiteral("board:") + project + QLatin1Char('#') + id);
+                };
+                items.append(cardItem);
+            };
+            for (QWidget *top : QApplication::topLevelWidgets()) {
+                auto *window = dynamic_cast<RelayWindow *>(top);
+                if (!window) continue;
+                for (int tab = 0; tab < window->m_tabs->count(); ++tab) {
+                    const QString project = window->boardWorkspaceOfTab(window->m_tabs->widget(tab));
+                    if (!project.isEmpty()) addProject(project);
+                }
+                for (Pane *pane : window->allPanes()) {
+                    const QString project = relay::boardRootFor({pane->workspace(), pane->cwd()});
+                    if (!project.isEmpty()) addProject(project);
+                }
+            }
+        }
+        if (m_palette) m_palette->setCardResults(query, items);
+    }
+
     void searchPaletteConversations(const QString &query) {
+        searchPaletteCards(query);
         Pane *owner = m_active;
         if (!owner) {
             const QList<Pane *> panes = allPanes();

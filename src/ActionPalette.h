@@ -75,6 +75,7 @@ public:
     // The window supplies indexed matches for the typed query; replies may arrive out of order.
     void setConversationSearch(std::function<void(const QString &query)> search);
     void setConversationResults(const QString &query, const QList<ActionItem> &items);
+    void setCardResults(const QString &query, const QList<ActionItem> &items);
 
     // Parts, for tests and for a caller that wants to drive or inspect them.
     QLineEdit *searchBox() const { return m_search; }
@@ -130,6 +131,7 @@ private:
     std::function<void(const QString &)> m_editShortcut;
     std::function<void(const QString &)> m_conversationSearch;
     QList<ActionItem> m_conversations;
+    QList<ActionItem> m_cards;
     QTimer *m_searchTimer = nullptr;
 
     QLineEdit *m_search = nullptr;

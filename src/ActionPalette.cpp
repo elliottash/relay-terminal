@@ -295,6 +295,7 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
     connect(m_search, &QLineEdit::textChanged, this, [this] {
         m_inResults = false;
         m_conversations.clear();
+        m_cards.clear();
         m_searchTimer->stop();
         if (m_open && !m_submenu && !m_search->text().trimmed().isEmpty()) m_searchTimer->start();
         rebuild();
@@ -340,6 +341,13 @@ void ActionPalette::setConversationResults(const QString &query, const QList<Act
 {
     if (!m_open || m_submenu || query != m_search->text().trimmed()) return;
     m_conversations = items;
+    rebuild();
+}
+
+void ActionPalette::setCardResults(const QString &query, const QList<ActionItem> &items)
+{
+    if (!m_open || m_submenu || query != m_search->text().trimmed()) return;
+    m_cards = items;
     rebuild();
 }
 
@@ -389,6 +397,7 @@ void ActionPalette::open()
     m_flat.reset();
     m_submenu.reset();
     m_conversations.clear();
+    m_cards.clear();
     m_searchTimer->stop();
     m_inResults = false;
     applyPalette();
@@ -732,6 +741,11 @@ void ActionPalette::rebuild()
                 if (compassGroup(item) == m_groupIds.at(group)) rows.append({item, QString(), QString()});
         }
     } else {
+        if (!m_cards.isEmpty()) {
+            header(QStringLiteral("Cards"));
+            for (const ActionItem &item : std::as_const(m_cards))
+                rows.append({item, QString(), QString()});
+        }
         if (!m_conversations.isEmpty()) {
             header(QStringLiteral("Conversations"));
             for (const ActionItem &item : std::as_const(m_conversations))
