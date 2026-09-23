@@ -2684,6 +2684,13 @@ class Agent:
         except Exception as exc:
             self._subagents_rollback(batch, [])
             text = str(exc)[:2000] if isinstance(exc, (ValueError, ProviderError)) else f"Agent error ({type(exc).__name__})."
+            if not isinstance(exc, (ValueError, ProviderError)):
+                # The pane sees the class only; the private log keeps the traceback (card #D09N).
+                _log.error("turn_exception session=%s turn=%s error=%s", self.session_id, turn_id,
+                           type(exc).__name__, exc_info=True)
+                if isinstance(exc, (AttributeError, ImportError, NameError)) and logs.source_changed():
+                    text = (f"Agent error ({type(exc).__name__}): Relay's backend code changed after this "
+                            "agent started, so it mixed old and new modules. Restart the agent to load it.")
             # A failover chain that ran out reports the failure that started it, not the last
             # provider's (card #G9VE); `reported` is the exception whose code, if any, travels.
             reported = exc

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from relay_core import logs
@@ -157,6 +158,55 @@ ctypes.string_at(0)               # and now a real segmentation fault
         self.assertIn('outcome=done', body)
         self.assertNotIn(PROMPT, body)                 # no prompt at the default level
         self.assertNotIn('the model answer', body)     # and no answer, ever
+
+    def failing_turn(self, error):
+        class Provider:
+            def complete(self, messages, tools, emit, cancel):
+                raise error
+            def cancel(self): pass
+
+        events = []
+        with tempfile.TemporaryDirectory() as workspace:
+            agent = Agent(ProviderConfig('http://127.0.0.1:12345/v1', 'mock', ''), workspace,
+                          events.append, provider=Provider())
+            agent.ask(PROMPT)
+        return [e['text'] for e in events if e.get('event') == 'error']
+
+    def test_an_unexpected_turn_exception_keeps_its_traceback_in_the_log(self):
+        # Card #D09N: the pane is told the class only, the private log gets the traceback.
+        log = logs.configure('worker', pane='pane-9', level='info')
+        errors = self.failing_turn(AttributeError("module 'x' has no attribute 'config_preset'"))
+        for handler in log.handlers:
+            handler.flush()
+        self.assertEqual(errors, ['Agent error (AttributeError).'])
+        body = self.text()
+        self.assertIn('turn_exception', body)
+        self.assertIn('Traceback', body)
+        self.assertIn('config_preset', body)
+        self.assertNotIn(PROMPT, body)
+
+    def test_a_missing_attribute_after_a_source_edit_says_to_restart(self):
+        logs.configure('worker', pane='pane-9', level='info')
+        with mock.patch.object(logs, 'source_changed', return_value=True):
+            errors = self.failing_turn(AttributeError('gone'))
+            other = self.failing_turn(KeyError('k'))
+        self.assertEqual(len(errors), 1)
+        self.assertIn('Restart the agent', errors[0])
+        self.assertEqual(other, ['Agent error (KeyError).'])
+
+    def test_source_changed_compares_the_tree_with_the_one_loaded(self):
+        logs._build_id.cache_clear()
+        self.addCleanup(logs._build_id.cache_clear)
+        with mock.patch.dict(os.environ, {'RELAY_BUILD_ID': ''}), \
+                mock.patch.object(logs, '_source_fingerprint', return_value='source-a'):
+            self.assertEqual(logs._build_id(), 'source-a')
+            self.assertFalse(logs.source_changed())
+        with mock.patch.dict(os.environ, {'RELAY_BUILD_ID': ''}), \
+                mock.patch.object(logs, '_source_fingerprint', return_value='source-b'):
+            self.assertTrue(logs.source_changed())
+        with mock.patch.dict(os.environ, {'RELAY_BUILD_ID': 'pkg-1'}), \
+                mock.patch.object(logs, '_source_fingerprint', return_value='source-c'):
+            self.assertFalse(logs.source_changed())   # a packaged build is not a checkout
 
 
 class WorkerLogTests(unittest.TestCase):

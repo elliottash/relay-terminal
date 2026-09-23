@@ -43,6 +43,21 @@ def _identity(value: str) -> str:
 @lru_cache(maxsize=1)
 def _build_id() -> str:
     """Fingerprint the loaded backend source tree when no packaged build ID is supplied."""
+    return _source_fingerprint()
+
+
+def source_changed() -> bool:
+    """True when a source checkout's backend was edited after this process fingerprinted it.
+
+    A long-running worker imports some modules lazily, so an edit in between can pair a new
+    module with an old one already loaded (card #D09N: a child agent's AttributeError)."""
+    if os.environ.get("RELAY_BUILD_ID"):
+        return False
+    loaded = _build_id()
+    return loaded != "unknown" and _source_fingerprint() not in (loaded, "unknown")
+
+
+def _source_fingerprint() -> str:
     try:
         root = Path(__file__).resolve().parent
         digest = hashlib.sha256()
