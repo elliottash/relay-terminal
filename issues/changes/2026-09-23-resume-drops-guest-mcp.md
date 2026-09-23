@@ -7,7 +7,7 @@ assignee: codex
 rank: mbrs2
 created: '2026-09-23'
 source: 'User report in Relay, 2026-09-23'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-BRS2/], related: [4NXH, GSK7], github: null}
+links: {plans: [], commits: [cbcf9e3f5071404866687415e189a6aa5703581f], evidence: [docs/qa_evidence/2026-09-23-BRS2/], related: [4NXH, GSK7], github: null}
 ---
 # Resuming a guest conversation drops Relay MCP tools
 
