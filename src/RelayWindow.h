@@ -4396,10 +4396,10 @@ private:
         privacy.rows << toggleRow(QStringLiteral("suggestions/next_command"),
                                   QStringLiteral("AI next-command suggestions"),
                                   QStringLiteral("After a command finishes. Sends the command and its recent output "
-                                                 "to the Suggestions model, which stays on your own provider."), false);
+                                                 "to the Suggestions model, which stays on your own provider."), true);
         privacy.rows << toggleRow(QStringLiteral("suggestions/next_prompt"),
                                   QStringLiteral("Suggested next prompts"),
-                                  QStringLiteral("After an agent turn. Sends a summary of the conversation."), false);
+                                  QStringLiteral("After an agent turn. Sends a summary of the conversation."), true);
         privacy.rows << toggleRow(QStringLiteral("instructions/project_auto"),
                                   QStringLiteral("Load project instruction files automatically"),
                                   QStringLiteral("CLAUDE.md, AGENTS.md and WARP.md found in the workspace"), true);

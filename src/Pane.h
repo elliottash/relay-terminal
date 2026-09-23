@@ -12240,7 +12240,7 @@ private:
                 updateIdleRecap();
             }
             if (outcome == QStringLiteral("done") && !m_agentBusy && !moreTurnsPending()
-                && QSettings().value(QStringLiteral("suggestions/next_prompt"), false).toBool())
+                && QSettings().value(QStringLiteral("suggestions/next_prompt"), true).toBool())
                 QTimer::singleShot(300, this, [this] { requestSuggestion(QStringLiteral("next_prompt")); });
             changed();
         } else if (type == QStringLiteral("delta")) {
@@ -17560,7 +17560,7 @@ private:
             });
         }
         m_commandNatural = false;
-        if (QSettings().value(QStringLiteral("suggestions/next_command"), false).toBool() && !m_agentBusy) {
+        if (QSettings().value(QStringLiteral("suggestions/next_command"), true).toBool() && !m_agentBusy) {
             const auto context = loginContext();
             const QString token = m_login.token;
             QTimer::singleShot(250, this, [this, command, code, context, token] {
@@ -18815,7 +18815,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             const bool suggestNext = m_commandLoaded;
             m_commandLoaded = false;
             if (suggestNext && !m_pendingCommand.isEmpty() && !m_agentBusy
-                && QSettings().value(QStringLiteral("suggestions/next_command"), false).toBool()) {
+                && QSettings().value(QStringLiteral("suggestions/next_command"), true).toBool()) {
                 const QString command = m_pendingCommand;
                 QTimer::singleShot(250, this, [this, command, status] {
                     requestSuggestion(QStringLiteral("next_command"), {{"command", command}, {"exit_status", status}, {"cwd", m_cwd}});
