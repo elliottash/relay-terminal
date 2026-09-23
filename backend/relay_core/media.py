@@ -326,6 +326,8 @@ class MediaTools:
             if choice["aspect_ratio"] not in ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"):
                 raise MediaError("Unsupported video aspect ratio.")
             row = self._video_catalog().get(choice["model"], {})
+            if not row and (choice["resolution"], choice["aspect_ratio"]) != ("720p", "16:9"):
+                raise MediaError("Video catalog unavailable; quote the default 720p 16:9 settings or retry later.")
             for setting, field in (("resolution", "supported_resolutions"), ("aspect_ratio", "supported_aspect_ratios")):
                 value = choice.get(setting)
                 if value is not None and row.get(field) and value not in row[field]:
@@ -334,6 +336,8 @@ class MediaTools:
                 raise MediaError("Duration is not supported by the selected video model.")
         if kind == "image":
             row = self._image_catalog().get(choice["model"], {})
+            if not row and (choice.get("resolution") or choice.get("aspect_ratio")):
+                raise MediaError("Image catalog unavailable; retry model-specific settings later.")
             parameters = row.get("supported_parameters") or {}
             for setting in ("resolution", "aspect_ratio"):
                 value = choice.get(setting)

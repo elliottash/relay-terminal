@@ -32,6 +32,9 @@ class MediaTests(unittest.TestCase):
         self.service = media.MediaTools(Workspace(self.temp.name))
         self.service._catalog = {VEO["id"]: VEO}
         self.service._catalog_at = media.time.time()
+        self.service._images = {model: {"id": model, "supported_parameters": {}}
+                                for model in media.IMAGE_MODELS}
+        self.service._images_at = media.time.time()
         self.service._image_endpoints[media.IMAGE_DEFAULT] = (media.time.time(), [])
 
     def test_veo_quote_and_restart_download(self):
