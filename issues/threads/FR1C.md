@@ -52,3 +52,23 @@ it does not block pairing, just repeated dialog-opening in one hour.
 
 <!-- relay:entry 20260922T012001Z-d4 author=agent kind=event model=gpt-6-astra pane=c966ed5f turn=96cbf82e701e4581bd3c303ec3190b30/e2b9681671ba45bebdf35c185a91fa0b -->
 - ✦ agent moved this card · Needs verification → Discussing · Implementation already landed; awaiting owner device results required by the existing checklist.
+
+<!-- relay:entry 20260923T214432Z-wj author=owner kind=comment mode=discuss -->
+It’s working well
+
+<!-- relay:entry 20260923T214457Z-yw author=agent kind=event model=kimi-k3 pane=switchboard turn=8261a0bf1be77e9726c6d0e5047a1f98/774309013b53415a8d68a69997a66a7c -->
+- ✦ agent updated this card · waiting_on: owner → (unset); replaced `## QA checklist`
+
+<!-- relay:entry 20260923T214504Z-m1 author=agent kind=event model=kimi-k3 pane=switchboard turn=8261a0bf1be77e9726c6d0e5047a1f98/774309013b53415a8d68a69997a66a7c -->
+- ✦ agent moved this card · Discussing → Done · Owner confirmed the iPhone/iPad checklist on 2026-09-23: "It's working well." All four tasks landed, driven and deployed; acceptance met. · implemented_by kimi/kimi-k3 · verified_by kimi/kimi-k3
+
+<!-- relay:entry 20260923T214512Z-50 author=agent kind=comment mode=discuss model=kimi-k3 turn=8261a0bf1be77e9726c6d0e5047a1f98/774309013b53415a8d68a69997a66a7c -->
+Reading the card so I can close it out on your word.
+
+That's the confirmation the checklist was waiting on. Closing #FR1C: marking the checklist passed on your report and moving it to done.
+
+
+
+**Done:** #FR1C is closed. I marked the QA checklist passed on your report and moved the card from Discussing to Done.
+
+The whole arc landed as planned: "Pair a phone…" one click from the window chrome, the typed eight-character code over CPace, install-first on iOS, and one-tap notifications — deployed and now confirmed on your own devices. The one known rough edge left on the record is #PRM2 (the pairing dialog burning a few rendezvous rooms per open), which stays open on its own card.

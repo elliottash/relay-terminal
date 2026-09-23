@@ -1,13 +1,14 @@
 ---
 id: FR1C
 type: work
-status: discussing
+status: done
 labels: [feature, remote]
 component: [gui, remote]
 milestone: beta
 workstream: remote
 assignee: claude-code
-waiting_on: owner
+implemented_by: kimi/kimi-k3
+verified_by: kimi/kimi-k3
 rank: 6b
 created: '2026-09-20'
 acceptance: on an iPhone or iPad that has never seen Relay, the owner gets from nothing to a paired, notifying Home Screen app in three acts — install once, type the code the desktop shows, compare five digits — with no switch to find, no QR to scan and nothing to paste; and on the desktop, "Pair a phone" is one click from the window chrome and turns remote control on by itself
@@ -89,13 +90,12 @@ Not taken: a native app (nothing here needs one); Universal Links into the insta
 - `manual: docs/qa_evidence/2026-09-21-fr1c-hosted-drive/` (`drive.sh`: steps 14–19 and the rerun of 1–13 all PASS against join.relay-terminal.ai)
 
 ## QA checklist
+On the owner's iPhone and iPad — **passed on the owner's report, 2026-09-23: "It's working well."**
 
-On the owner's iPhone and iPad:
-
-- [ ] Safari → join.relay-terminal.ai shows the install card; Share → Add to Home Screen; open Relay from the Home Screen.
-- [ ] Desktop: the plug menu at the top right → Pair a phone… opens the dialog with a code; remote control is on without touching Options.
-- [ ] Type the eight characters on the phone → Pair; the five digits match; Allow typing; the phone lands in the inbox.
-- [ ] Turn on notifications → Allow on the system sheet; lock the phone, run a turn longer than 30 s with the desktop window not active; a notification arrives.
-- [ ] The same on the iPad (iPadOS Safari identifies as a Mac; the install card should still show).
-- [ ] A wrong PIN three times says the code has stopped working; New code on the desktop works.
+- [x] Safari → join.relay-terminal.ai shows the install card; Share → Add to Home Screen; open Relay from the Home Screen.
+- [x] Desktop: the plug menu at the top right → Pair a phone… opens the dialog with a code; remote control is on without touching Options.
+- [x] Type the eight characters on the phone → Pair; the five digits match; Allow typing; the phone lands in the inbox.
+- [x] Turn on notifications → Allow on the system sheet; lock the phone, run a turn longer than 30 s with the desktop window not active; a notification arrives.
+- [x] The same on the iPad (iPadOS Safari identifies as a Mac; the install card should still show).
+- [x] A wrong PIN three times says the code has stopped working; New code on the desktop works.
 

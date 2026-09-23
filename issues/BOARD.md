@@ -14,7 +14,6 @@
 | `#FDBK` | [/bug (and /feedback): save the session and send it to a clearinghouse](features/2026-09-21-a-bug-command-alias-feedback-that-saves-the-sess.md) | inbox | unassigned |  | [2](threads/FDBK.md) |
 | `#CF3A` | [bug: on restore, command histories arent working (up / down to see previous comm…](features/2026-09-23-bug-on-restore-command-histories-arent-working-u.md) | inbox |  |  | [1](threads/CF3A.md) |
 | `#FJ9S` | [bug: ctrl + shift + s would not open sessions from an aux pane (text editor)](features/2026-09-23-bug-ctrl-shift-s-would-not-open-sessions-from-an.md) | inbox |  |  | [1](threads/FJ9S.md) |
-| `#FR1C` | [Pairing a phone without friction: one entry point on the desktop, a typed code on the phone](features/2026-09-20-phone-pairing-without-friction.md) | discussing | claude-code | 4/4 | [10](threads/FR1C.md) |
 | `#PH0N` | [Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone](features/2026-09-20-phone-remote-control-all-day.md) | discussing | claude-code | 8/10 | [28](threads/PH0N.md) |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 3/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
@@ -337,6 +336,7 @@
 | `#FW77` | [Relay as a pure terminal (TUI) app](features/deferred/2026-09-17-terminal-only-tui-relay.md) | deferred |  |  | [1](threads/FW77.md) |
 | `#5V1E` | [tab detach button is not intuitive](features/deferred/2026-09-19-tab-detach-button-is-not-intuitive.md) | deferred |  |  | [4](threads/5V1E.md) |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
+| `#FR1C` | [Pairing a phone without friction: one entry point on the desktop, a typed code on the phone](features/done/2026-09-20-phone-pairing-without-friction.md) | done | claude-code | 4/4 | [13](threads/FR1C.md) |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 | `#B1AD` | [Document cross-platform build instructions for every repository agent](features/done/2026-09-21-document-cross-platform-build-instructions.md) | done | codex | 3/3 | [3](threads/B1AD.md) |

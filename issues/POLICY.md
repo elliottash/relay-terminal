@@ -139,9 +139,9 @@ working). Anything smaller: go straight to work.
 **Whether or not it needs a plan, write `## Done means` before you write code** — two to five
 lines: the outcome someone could check, and how failure would be recognised. It is what a separate
 verifying session checks the work against, so it has to be chosen before the implementation can
-shape it. Execute on a card without it says so on the board and goes on.
+shape it. Run on a card without it says so on the board and goes on.
 
-### 5. Execute
+### 5. Run
 
 - **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage
   produced. Planning leaves `## Done means` and `## Plan`; the work keeps `## Tasks` live; landing
