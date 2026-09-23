@@ -30,6 +30,12 @@ MAX_HEADERS = 64 * 1024
 # optional in practice: Cloudflare, in front of join.relay-terminal.ai, answers 403 to a request
 # that arrives with no User-Agent or with Python's default one.
 USER_AGENT = "Relay/0.1"
+# How often a long-lived socket is pinged. A link with nothing to say sends no bytes at all, and
+# the Cloudflare Tunnel in front of join.relay-terminal.ai closes a WebSocket that has been
+# silent for about two minutes: the desktop's link went offline and came back every 125 s all
+# day, and every phone on it was closed with it. Any frame resets that clock; a ping is the
+# cheapest, and every peer answers one without its application seeing it.
+KEEPALIVE_SECONDS = 30.0
 
 OP_CONT, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG = 0x0, 0x1, 0x2, 0x8, 0x9, 0xA
 
@@ -210,6 +216,18 @@ class WebSocket:
 
     async def ping(self, payload: bytes = b"") -> None:
         await self._send_frame(OP_PING, payload[:125])
+
+    async def keepalive(self, interval: float | None = None) -> None:
+        """Ping every ``interval`` seconds (``KEEPALIVE_SECONDS``) until the socket closes.
+
+        Run it as a task beside the reader and cancel it when the reader returns. Sends share
+        the frame lock, so a ping never lands in the middle of another frame."""
+        try:
+            while not self._closed:
+                await asyncio.sleep(interval or KEEPALIVE_SECONDS)
+                await self.ping()
+        except (ConnectionClosed, WebSocketError, OSError):
+            pass
 
     async def _send_frame(self, opcode: int, payload: bytes) -> None:
         if self._closed:

@@ -1450,6 +1450,41 @@ class BoardViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_a_card_opened_while_offline_is_read_when_the_link_comes_back(self):
+        """The reconnect asked for the board again and never for the open card, so a card opened
+        in a drop said "Offline — the card opens when your desktop is reachable" with the link
+        long back up, until something else happened to move it."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await browser.evaluate("window.fakeRrp.drop()")
+                await browser.evaluate(
+                    f"document.querySelector('.rb-row[data-card-id=\"{CARD_ID}\"]').click()")
+                await browser.wait_for(
+                    "document.querySelector('.rb-card-line').textContent.includes('Offline')")
+                reads = lambda: [m for m in self.requests_seen if m["request"]["type"] == "board_card_get"]
+                self.requests_seen = await self.requests(browser)
+                self.assertEqual(reads(), [], "a read went out with no link")
+
+                await browser.evaluate("window.dispatchEvent(new Event('online'))")
+                await browser.wait_for(
+                    "window.fakeRrp.boardRequests().some(m => m.request.type === 'board_card_get')")
+                self.requests_seen = await self.requests(browser)
+                self.assertEqual([m["request"] for m in reads()],
+                                 [{"type": "board_card_get", "id": CARD_ID}])
+                await browser.evaluate(f"window.fakeRrp.board({reads()[0]['rid']}, {js(CARD)})")
+                await browser.wait_for("!!document.querySelector('.rb-thread .rb-entry')")
+                self.assertNotIn("Offline", await browser.evaluate(
+                    "document.querySelector('.rb-card-line').textContent"))
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     # ---- notifications -------------------------------------------------------------------------------
 
     def test_a_card_notification_opens_the_board_on_that_card(self):

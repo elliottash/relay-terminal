@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from remote import client as client_mod
 from remote import host as host_mod
@@ -763,6 +764,45 @@ class AlwaysOnLinkTests(unittest.TestCase):
                 await harness.until(lambda: harness.host.devices_online() == 0,
                                     what="both gone")
         run(main(), timeout=90)
+
+    def test_a_silent_link_is_pinged_from_both_ends(self):
+        """The Cloudflare Tunnel in front of the hosted rendezvous closes a WebSocket that has
+        been silent for about two minutes, and an idle link sent nothing at all: the desktop went
+        offline every 125 s, taking every phone on it along. Now the hub pings the rendezvous,
+        and the rendezvous pings the desktop and every phone, each answered with a pong."""
+        from remote import ws
+        frames: list[tuple[int, int, bool]] = []      # (socket id, opcode, masked = client side)
+        original = ws.WebSocket._send_frame
+
+        async def recording(socket, opcode, payload):
+            frames.append((id(socket), opcode, socket._mask))
+            return await original(socket, opcode, payload)
+
+        async def main():
+            async with Harness(reconnect=(0.05, 0.2)) as harness:
+                first, record, _, _ = await harness.pair()
+                await first.close()
+                phone = client_mod.Client(harness.base)
+                await phone.connect(record)
+                await phone.expect("panes")
+                hub = id(harness.host.socket)
+                frames.clear()
+                await harness.until(
+                    lambda: {(hub, ws.OP_PING), (hub, ws.OP_PONG)}
+                    <= {(s, op) for s, op, _ in frames}
+                    # The rendezvous's side (unmasked) pings two sockets, the desktop's and the
+                    # phone's, and both client ends (masked) answer.
+                    and len({s for s, op, masked in frames if op == ws.OP_PING and not masked}) >= 2
+                    and len({s for s, op, masked in frames if op == ws.OP_PONG and masked}) >= 2,
+                    timeout=10, what="pings both ways, each answered")
+                # Nobody's link dropped for it: the ping is below the application.
+                self.assertEqual(harness.links[-1], (True, ""))
+                self.assertEqual(id(harness.host.socket), hub)
+                await phone.close()
+
+        with mock.patch.object(ws, "KEEPALIVE_SECONDS", 0.05), \
+                mock.patch.object(ws.WebSocket, "_send_frame", recording):
+            run(main(), timeout=60)
 
 
 class ConnectTokenTests(unittest.TestCase):

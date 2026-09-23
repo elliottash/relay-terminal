@@ -580,6 +580,7 @@ class Host:
         # not, without polling `socket`. The back-off bounds are per hub so a test can shrink them.
         self.reconnect_min = RECONNECT_MIN
         self.reconnect_max = RECONNECT_MAX
+        self.keepalive_seconds = ws.KEEPALIVE_SECONDS   # the rendezvous link's ping (ws.py)
         self._link_watchers: list[Callable[[bool, str], None]] = []
         self._link_state: tuple[bool, str] = (False, "not connected yet.")
         # How many of the owner's **own** devices hold a live channel. Guests are never counted:
@@ -771,7 +772,11 @@ class Host:
                 log.info("connected to the rendezvous as %s", self.identity.desktop_id[:8])
                 delay = self.reconnect_min
                 self._link_changed(True, "")
-                await self._read_socket()
+                pinging = asyncio.create_task(self.socket.keepalive(self.keepalive_seconds))
+                try:
+                    await self._read_socket()
+                finally:
+                    pinging.cancel()
             except (ws.WebSocketError, OSError) as error:
                 reason = self._link_reason(error)
                 log.info("rendezvous link down (%s); retrying in %.0fs", error, delay)

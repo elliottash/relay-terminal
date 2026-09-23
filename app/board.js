@@ -1630,9 +1630,12 @@ export function mountBoard(options) {
       onCount();
       return;
     }
-    // Every (re)connect is a new session on the hub: ask again, which also resubscribes.
+    // Every (re)connect is a new session on the hub: ask again, which also resubscribes. The
+    // open card is asked again too: opened while the link was down, it said "Offline" and
+    // nothing ever read it once the link was back.
     openAsked = false;
     openBoard();
+    if (openId) getCard(openId);
     paintInboxRow();
     paintOffline();
     if (visible) { paintList(); paintCard(); }

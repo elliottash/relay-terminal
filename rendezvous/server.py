@@ -864,6 +864,9 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
             await previous.close(4409, "replaced by a newer connection.")
         store.note("desktop_online", desktop_id)
         log.info("desktop %s online from %s", desktop_id[:8], socket.peer)
+        # Both ends ping (remote/ws.py, KEEPALIVE_SECONDS): a desktop from before the hub did
+        # is kept up by this side alone.
+        pinging = asyncio.create_task(socket.keepalive())
         try:
             while True:
                 message = await socket.recv()
@@ -888,6 +891,7 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         except ws.ConnectionClosed:
             pass
         finally:
+            pinging.cancel()
             for client in hub.detach_desktop(desktop_id, socket):
                 await client.close(4404, "the desktop went offline.")
             store.note("desktop_offline", desktop_id)
@@ -933,6 +937,9 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
             return
         store.note("channel_open", desktop_id, room=bool(room))
 
+        # A phone that is only watching sends nothing, and the proxy closes a silent socket
+        # (remote/ws.py, KEEPALIVE_SECONDS). A browser answers a ping without the page seeing it.
+        pinging = asyncio.create_task(socket.keepalive())
         try:
             while True:
                 message = await socket.recv()
@@ -949,6 +956,7 @@ def build(store: Store, static_root: Path | None = None) -> httpd.Server:
         except ws.ConnectionClosed:
             pass
         finally:
+            pinging.cancel()
             hub.drop_channel(desktop_id, channel)
             live = hub.desktops.get(desktop_id)
             if live is not None:
