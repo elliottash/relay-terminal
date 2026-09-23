@@ -762,8 +762,10 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_projectFilter->addItem(QStringLiteral("No project"), QStringLiteral("none"));
     m_projectFilter->setToolTip(QStringLiteral("Only the sessions of one project Relay knows, or the ones outside every known project"));
     m_model = new QComboBox;
+    m_model->setObjectName(QStringLiteral("sessionsModel"));
     m_model->addItem(QStringLiteral("Any model"), QString());
     m_date = new QComboBox;
+    m_date->setObjectName(QStringLiteral("sessionsDate"));
     m_date->addItem(QStringLiteral("Any time"), QStringLiteral("any"));
     m_date->addItem(QStringLiteral("Today"), QStringLiteral("today"));
     m_date->addItem(QStringLiteral("Last 7 days"), QStringLiteral("week"));

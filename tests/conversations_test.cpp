@@ -10,6 +10,7 @@
 #include "SessionInfo.h"
 
 #include <QAction>
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -31,6 +32,7 @@
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QToolButton>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QElapsedTimer>
 #include <QTreeWidgetItemIterator>
@@ -61,6 +63,23 @@ static QTreeWidgetItem *rowTitled(QTreeWidget *tree, const QString &title) {
     for (QTreeWidgetItemIterator it(tree); *it; ++it)
         if ((*it)->text(0) == title) return *it;
     return nullptr;
+}
+
+// Select through the actual combo popup, not setCurrentIndex: this catches a control whose menu
+// appears to work but never delivers the user's click to SessionManager.
+static bool chooseComboItem(QComboBox *combo, const QString &data) {
+    const int at = combo->findData(data);
+    if (at < 0) return false;
+    QTest::mouseClick(combo, Qt::LeftButton, Qt::NoModifier,
+                      QPoint(combo->width() - 8, combo->height() / 2));
+    QAbstractItemView *view = combo->view();
+    if (!view || !view->isVisible()) return false;
+    const QModelIndex index = combo->model()->index(at, 0);
+    view->scrollTo(index);
+    const QPoint point = view->visualRect(index).center();
+    QTest::mouseMove(view->viewport(), point);
+    QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+    return combo->currentIndex() == at;
 }
 
 // ----- a fake console, for the helper agent (card #AGNT step 7) --------------------------------
@@ -1407,6 +1426,84 @@ private slots:
         manager.setQuery(QStringLiteral("month"));
         manager.setResults({{QStringLiteral("items"), QJsonArray{today, older}}});
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
+    }
+
+    void sessionsDropdownsRespondToMouseChoices() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.setKnownProjects({{QStringLiteral("alpha"), QStringLiteral("/tmp/alpha")},
+                                  {QStringLiteral("beta"), QStringLiteral("/tmp/beta")}});
+        manager.resize(1000, 700);
+        manager.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        QJsonObject today = sessionItem(QStringLiteral("a"), QStringLiteral("Alpha work"), QStringLiteral("alpha"));
+        today.insert(QStringLiteral("updated"), double(QDateTime::currentSecsSinceEpoch()));
+        QJsonObject older = sessionItem(QStringLiteral("b"), QStringLiteral("Beta work"), QStringLiteral("beta"));
+        older.insert(QStringLiteral("updated"), double(QDateTime::currentDateTime().addDays(-40).toSecsSinceEpoch()));
+        const QJsonArray items{today, older};
+        manager.setResults({{QStringLiteral("items"), items},
+                            {QStringLiteral("facets"), QJsonObject{
+                                {QStringLiteral("models"), QJsonArray{QStringLiteral("glm-5")}},
+                                {QStringLiteral("branches"), QJsonArray{QStringLiteral("main"), QStringLiteral("work")}}}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        auto *group = manager.findChild<QComboBox *>(QStringLiteral("sessionsGroup"));
+        QVERIFY(tree && group);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("alpha"));
+        QVERIFY(chooseComboItem(group, QStringLiteral("date")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Older"));
+        manager.setResults({{QStringLiteral("items"), items}});
+        QCOMPARE(group->currentData().toString(), QStringLiteral("date"));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today"));
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/by-date.png")));
+        QVERIFY(chooseComboItem(group, QStringLiteral("none")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Alpha work"));
+        QVERIFY(chooseComboItem(group, QStringLiteral("project")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("alpha"));
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/by-project.png")));
+
+        auto *kind = manager.findChild<QComboBox *>(QStringLiteral("sessionsKind"));
+        auto *project = manager.findChild<QComboBox *>(QStringLiteral("sessionsProject"));
+        auto *scope = manager.findChild<QComboBox *>(QStringLiteral("sessionsScope"));
+        auto *sort = manager.findChild<QComboBox *>(QStringLiteral("sessionsSort"));
+        auto *branch = manager.findChild<QComboBox *>(QStringLiteral("sessionsBranch"));
+        auto *model = manager.findChild<QComboBox *>(QStringLiteral("sessionsModel"));
+        auto *date = manager.findChild<QComboBox *>(QStringLiteral("sessionsDate"));
+        QVERIFY(kind && project && scope && sort && branch && model && date);
+        QVERIFY(chooseComboItem(kind, QStringLiteral("agent")));
+        QCOMPARE(asked.last().value(QStringLiteral("sources")).toArray(), QJsonArray{QStringLiteral("agent")});
+        QVERIFY(chooseComboItem(project, QStringLiteral("/tmp/beta")));
+        QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/beta"));
+        manager.setResults({{QStringLiteral("items"), items}, {QStringLiteral("scope"), QStringLiteral("all")}});
+        QVERIFY(chooseComboItem(scope, QStringLiteral("project")));
+        QCOMPARE(project->currentData().toString(), QString());
+        QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("project"));
+        QVERIFY(chooseComboItem(scope, QStringLiteral("all")));
+        QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("all"));
+        QVERIFY(chooseComboItem(sort, QStringLiteral("title")));
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("title"));
+        QVERIFY(chooseComboItem(model, QStringLiteral("glm-5")));
+        QCOMPARE(asked.last().value(QStringLiteral("model")).toString(), QStringLiteral("glm-5"));
+        QVERIFY(chooseComboItem(date, QStringLiteral("week")));
+        QVERIFY(asked.last().value(QStringLiteral("since")).toDouble() > 0);
+        QVERIFY(chooseComboItem(branch, QStringLiteral("work")));
+        QCOMPARE(asked.last().value(QStringLiteral("branch")).toString(), QStringLiteral("work"));
+        auto *filters = manager.findChild<QToolButton *>(QStringLiteral("sessionsFilters"));
+        QVERIFY(filters && filters->menu());
+        QAction *hasEdits = manager.findChild<QAction *>(QStringLiteral("filterHasEdits"));
+        QVERIFY(hasEdits);
+        QTimer::singleShot(0, filters->menu(), [menu = filters->menu(), hasEdits] {
+            const QPoint actionPoint = menu->actionGeometry(hasEdits).center();
+            QTest::mouseMove(menu, actionPoint);
+            QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, actionPoint);
+        });
+        QTest::mouseClick(filters, Qt::LeftButton);
+        QVERIFY(hasEdits->isChecked());
+        QVERIFY(asked.last().value(QStringLiteral("has_edits")).toBool());
     }
 
     void collapsedProjectStaysCollapsedAcrossResults() {
