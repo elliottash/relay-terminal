@@ -1761,9 +1761,12 @@ class ConversationIndex:
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, raw_cwd, project, title,"
                     " custom_title, model, preset, created, updated, turns, open_requests, session_dir, pinned,"
                     " file_mtime, indexed_version, first_prompt, relay_launched)"
-                    " VALUES(?,?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?, ?, ?)",
+                    " VALUES(?,?,?,?,?,?,?, '', ?, ?, ?, ?, 0, '', ?, ?, ?, ?, ?)",
+                    # `preset` is the account a session belongs to, `guest:claude:work`, for a
+                    # transcript read out of a registered account's directory (#M8S2); '' for the
+                    # CLI's default login, as it always was.
                     (session_id, source, workspace, raw_cwd, project_name(workspace), title, custom_title,
-                     data.get("created") or mtime, mtime or time.time(),
+                     str(data.get("preset") or ""), data.get("created") or mtime, mtime or time.time(),
                      max(0, int(data.get("message_count") or 0)),
                      pinned, mtime, SCHEMA_VERSION, first_prompt, int(bool(data.get("relay_launched")))))
                 written = header_entries(custom_title or title, "") + rows

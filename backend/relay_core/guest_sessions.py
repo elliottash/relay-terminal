@@ -52,7 +52,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import conv_index, guest, logs
+from . import conv_index, guest, guest_accounts, logs
 
 log = logs.get("guest_sessions")
 
@@ -118,14 +118,35 @@ def resume_spawn(source: str, session_id: str, workspace: str | None = None, *,
 def to_record(data: dict, *, fork: bool = False) -> dict:
     """The protocol 26.7 record of one parsed guest session (see the module docstring)."""
     workspace = str(data.get("workspace") or "")
-    return {"source": data.get("source") or "",
+    return _with_account({"source": data.get("source") or "",
             "id": str(data.get("id") or ""),
             "title": " ".join(str(data.get("title") or "").split())[:MAX_TITLE] or UNTITLED,
             "mtime": float(data.get("mtime") or 0.0),
             "workspace": workspace,
             "message_count": int(data.get("message_count") or 0),
             "resume_command": resume_command(data.get("source") or "", data.get("id") or "", fork=fork),
-            "resume_cwd": str(data.get("raw_cwd") or "") or workspace}
+            "resume_cwd": str(data.get("raw_cwd") or "") or workspace}, str(data.get("source") or ""),
+        account_of(data))
+
+
+def account_of(item: dict) -> str:
+    """The registered account a guest session belongs to (#M8S2), from its record's `account` or
+    its index row's `preset` (`guest:claude:work`); "" for the CLI's default login."""
+    account = item.get("account") if isinstance(item, dict) else None
+    if not account and isinstance(item, dict):
+        preset = str(item.get("preset") or "")
+        if preset.startswith("guest:"):
+            account = guest_accounts.split_key(preset[len("guest:"):])[1]
+    return account if guest_accounts.valid_id(account) else ""
+
+
+def _with_account(record: dict, source: str, account: str) -> dict:
+    """A record's account fields: `account`, and `preset` — the harness preset that resumes it,
+    because the session is only on disk in that account's directory."""
+    if account:
+        record["account"] = account
+        record["preset"] = f"guest:{source}:{account}"
+    return record
 
 
 def item_to_record(item: dict, *, fork: bool = False) -> dict:
@@ -135,7 +156,7 @@ def item_to_record(item: dict, *, fork: bool = False) -> dict:
     source = str(item.get("source") or "")
     updated = item.get("updated") or item.get("created") or 0.0
     workspace = str(item.get("workspace") or "")
-    return {"source": source,
+    return _with_account({"source": source,
             "id": str(item.get("session_id") or item.get("id") or ""),
             "title": " ".join(str(item.get("title") or "").split())[:MAX_TITLE] or UNTITLED,
             "mtime": float(updated if isinstance(updated, (int, float)) else 0.0),
@@ -145,7 +166,7 @@ def item_to_record(item: dict, *, fork: bool = False) -> dict:
                                              fork=fork),
             # The row keeps both: `workspace` resolved, for grouping and filters, and the cwd the
             # transcript wrote, which is the one the guest resumes by (see the module docstring).
-            "resume_cwd": str(item.get("raw_cwd") or "") or workspace}
+            "resume_cwd": str(item.get("raw_cwd") or "") or workspace}, source, account_of(item))
 
 
 def annotate_items(items, *, fork: bool = False) -> list[dict]:
@@ -171,7 +192,9 @@ def annotate_items(items, *, fork: bool = False) -> list[dict]:
                     "message_count": record["message_count"],
                     "workspace": record["workspace"],
                     "resume_command": record["resume_command"],
-                    "resume_cwd": record["resume_cwd"]})
+                    "resume_cwd": record["resume_cwd"],
+                    **({"account": record["account"], "preset": record["preset"]}
+                       if record.get("account") else {})})
     return out
 
 
@@ -887,19 +910,29 @@ def source_root(source: str, home: str | None = None) -> Path:
                 else guest.codex_sessions_dir(home))
 
 
-def _claude_paths(home: str | None) -> list[Path]:
+def account_roots(source: str, home: str | None = None) -> list[tuple[str, str]]:
+    """`(account id, config directory)` of each registered account of `source` (#M8S2). Only for
+    the real home: a scan of another `home` (tests, an import) has no registry of its own."""
+    if home is not None:
+        return []
+    return [(entry.id, entry.config_dir) for entry in guest_accounts.accounts(source)]
+
+
+def _claude_paths(home: str | None, root: str | None = None) -> list[Path]:
     """claude's session transcripts: one ``<cwd-slug>/<session-id>.jsonl`` per session. The
     ``subagents/`` transcripts claude nests below them are not sessions of their own (the same
-    line the index draws between a conversation and a subagent thread)."""
-    root = Path(guest.claude_projects_dir(home))
+    line the index draws between a conversation and a subagent thread). `root` is an account's
+    ``projects`` directory instead of the default login's."""
+    root = Path(root or guest.claude_projects_dir(home))
     if not root.is_dir():
         return []
     return [path for path in root.glob("*/*.jsonl") if not path.name.startswith(".")]
 
 
-def _codex_paths(home: str | None) -> list[Path]:
-    """codex's rollouts: ``~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl``."""
-    root = Path(guest.codex_sessions_dir(home))
+def _codex_paths(home: str | None, root: str | None = None) -> list[Path]:
+    """codex's rollouts: ``~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`` (or under an account's
+    ``$CODEX_HOME/sessions`` when `root` names one)."""
+    root = Path(root or guest.codex_sessions_dir(home))
     if not root.is_dir():
         return []
     return [path for path in root.rglob("*.jsonl") if CODEX_ROLLOUT.match(path.name)]
@@ -961,10 +994,36 @@ def _walk(paths: list[Path], parse, *, limit: int | None = None,
 def _scan(source: str, home: str | None, *, limit: int | None,
           known: dict[str, float | None] | None, skip: set[str] | None = None,
           cursors: dict[str, dict] | None = None) -> tuple[list[dict], set[str]]:
-    """One guest's transcripts (newest first) and the session ids skipped as unchanged."""
+    """One guest's transcripts (newest first) and the session ids skipped as unchanged: the
+    default login's, then each registered account's (#M8S2), whose records carry the account."""
     guest.spec(source)
+    records, kept = _scan_root(source, home, None, limit=limit, known=known, skip=skip,
+                               cursors=cursors)
+    for account, directory in account_roots(source, home):
+        more, more_kept = _scan_root(source, home, directory, limit=limit, known=known, skip=skip,
+                                     cursors=cursors)
+        records += [_with_account(record, source, account) for record in more]
+        kept |= more_kept
+    return records, kept
+
+
+def _codex_state_db_in(directory: str) -> str | None:
+    """`guest.codex_state_db` for an account's CODEX_HOME: the highest `state_*.sqlite` in it."""
+    versioned = []
+    for path in Path(directory).glob("state_*.sqlite"):
+        match = re.fullmatch(r"state_(\d+)\.sqlite", path.name)
+        if match:
+            versioned.append((int(match.group(1)), str(path)))
+    return max(versioned)[1] if versioned else None
+
+
+def _scan_root(source: str, home: str | None, account_dir: str | None, *, limit: int | None,
+               known: dict[str, float | None] | None, skip: set[str] | None = None,
+               cursors: dict[str, dict] | None = None) -> tuple[list[dict], set[str]]:
+    """One login's transcripts: the default one (`account_dir` None) or an account's."""
     if source == "claude":
-        return _walk(_claude_paths(home),
+        root = os.path.join(account_dir, "projects") if account_dir else None
+        return _walk(_claude_paths(home, root),
                      lambda path, state: parse_claude_transcript(path, state=state),
                      limit=limit, known=known, skip=skip, cursors=cursors)
     meta: dict[str, dict] | None = None
@@ -972,10 +1031,13 @@ def _scan(source: str, home: str | None, *, limit: int | None,
     def parse(path: Path, state: dict | None) -> dict | None:
         nonlocal meta
         if meta is None:
-            meta = codex_thread_meta(guest.codex_state_db(home))
+            meta = codex_thread_meta(_codex_state_db_in(account_dir) if account_dir
+                                     else guest.codex_state_db(home))
         return parse_codex_rollout(path, meta=meta.get(_file_id(path)), state=state)
 
-    return _walk(_codex_paths(home), parse, limit=limit, known=known, skip=skip, cursors=cursors)
+    root = os.path.join(account_dir, "sessions") if account_dir else None
+    return _walk(_codex_paths(home, root), parse, limit=limit, known=known, skip=skip,
+                 cursors=cursors)
 
 
 def scan_claude(home: str | None = None, *, limit: int | None = None,
@@ -1089,7 +1151,10 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
         # Pruning on that emptied the pane and took the pins and the custom titles with it — and
         # a guest row has no file beside it to restore them from. So an absent root prunes
         # nothing; a root that is there and empty still does.
-        if source_root(source, home).is_dir():
+        # With accounts (#M8S2) every login's directory has to be there: a session of an account
+        # whose directory is momentarily unreachable is not a session that went away.
+        if source_root(source, home).is_dir() and all(
+                os.path.isdir(directory) for _, directory in account_roots(source, home)):
             prunable |= {identifier for identifier, row in known.items() if row[0] == source}
         else:
             log.debug("guest reconcile: %s has no session directory; nothing pruned", source)
@@ -1150,7 +1215,8 @@ def search_sessions(index: conv_index.ConversationIndex, query: str, *,
 
 
 def claude_live_transcript(workspace: str | None = None, home: str | None = None, *,
-                           session_id: str | None = None) -> Path | None:
+                           session_id: str | None = None,
+                           account_dir: str | None = None) -> Path | None:
     """The transcript claude is writing in `workspace` right now.
 
     With a `session_id` it is exactly ``<projects>/<cwd-slug>/<session-id>.jsonl`` — claude names
@@ -1164,7 +1230,8 @@ def claude_live_transcript(workspace: str | None = None, home: str | None = None
     back to the newest ``.jsonl`` in the project directory (`claude_slug`), or the newest
     anywhere when no workspace is given either.
     """
-    root = Path(guest.claude_projects_dir(home))
+    root = Path(os.path.join(account_dir, "projects") if account_dir
+                else guest.claude_projects_dir(home))
     if not root.is_dir():
         return None
     if session_id:
@@ -1192,7 +1259,8 @@ def rollout_thread_id(path: str | Path) -> str:
 
 
 def codex_live_rollout(cwd: str | None = None, home: str | None = None, *,
-                       thread_id: str | None = None) -> Path | None:
+                       thread_id: str | None = None,
+                       account_dir: str | None = None) -> Path | None:
     """The rollout codex is writing in `cwd` right now.
 
     With a `thread_id` it is that thread's rollout and no other: the threads database is asked
@@ -1208,12 +1276,14 @@ def codex_live_rollout(cwd: str | None = None, home: str | None = None, *,
     back whichever thread sqlite happened to return first — in practice the *oldest* one the user
     had ever opened in that directory. The tail then followed a transcript nothing was writing
     to, which looks exactly like a guest that has stopped talking."""
-    root = Path(guest.codex_sessions_dir(home))
+    root = Path(os.path.join(account_dir, "sessions") if account_dir
+                else guest.codex_sessions_dir(home))
     if not root.is_dir():
         return None
+    state_db = _codex_state_db_in(account_dir) if account_dir else guest.codex_state_db(home)
     rollouts = [path for path in root.rglob("*.jsonl") if CODEX_ROLLOUT.match(path.name)]
     if thread_id:
-        meta = codex_thread_meta(guest.codex_state_db(home)).get(thread_id) or {}
+        meta = codex_thread_meta(state_db).get(thread_id) or {}
         named = Path(meta.get("file") or "")
         if str(named) != "." and named.is_file():
             return named
@@ -1223,7 +1293,7 @@ def codex_live_rollout(cwd: str | None = None, home: str | None = None, *,
         return None
     if cwd:
         candidates = [Path(meta.get("file") or "")
-                      for meta in codex_thread_meta(guest.codex_state_db(home)).values()
+                      for meta in codex_thread_meta(state_db).values()
                       if meta.get("workspace") == cwd]
         matched = _by_age(path for path in candidates if path.is_file())
         if matched:
@@ -1253,14 +1323,15 @@ def _rollout_cwd(path: Path) -> str:
 
 
 def live_transcript(source: str, workspace: str | None = None, home: str | None = None, *,
-                    session_id: str | None = None) -> Path | None:
+                    session_id: str | None = None, account_dir: str | None = None) -> Path | None:
     """The transcript a guest is writing right now in `workspace`, or — when the caller knows
     which session it is after — that session's own file, whatever else is being written in the
-    same directory. An unknown source is a ValueError."""
+    same directory. `account_dir` is a registered account's config directory (#M8S2), whose
+    sessions are there and nowhere else. An unknown source is a ValueError."""
     guest.spec(source)
     if source == "claude":
-        return claude_live_transcript(workspace, home, session_id=session_id)
-    return codex_live_rollout(workspace, home, thread_id=session_id)
+        return claude_live_transcript(workspace, home, session_id=session_id, account_dir=account_dir)
+    return codex_live_rollout(workspace, home, thread_id=session_id, account_dir=account_dir)
 
 
 def guess_source(path: str | Path) -> str:
@@ -1293,11 +1364,16 @@ class LiveTail:
 
     META_REFRESH = 30.0            # seconds between reads of codex's threads database
 
-    def __init__(self, path: str | Path, *, source: str | None = None, home: str | None = None):
+    def __init__(self, path: str | Path, *, source: str | None = None, home: str | None = None,
+                 account: str = "", account_dir: str | None = None):
         self.path = Path(path)
         self.source = source or guess_source(self.path)
         guest.spec(self.source)
         self.home = home
+        # A registered account's session (#M8S2): its records say so, and codex's threads
+        # database is the one in that account's directory.
+        self.account = account
+        self.account_dir = account_dir
         self._cursor = _Cursor(self.path, self.source)
         self._record: dict | None = None
         # codex's threads database, read at most every `META_REFRESH` seconds (see the class).
@@ -1307,15 +1383,20 @@ class LiveTail:
 
     @classmethod
     def for_session(cls, source: str, workspace: str | None = None, *,
-                    session_id: str | None = None, home: str | None = None) -> "LiveTail | None":
+                    session_id: str | None = None, home: str | None = None,
+                    account: str = "") -> "LiveTail | None":
         """A tail of the named session's transcript — or, with no id, of whatever the guest is
         writing in `workspace` (`live_transcript`). None when there is no such transcript yet.
 
         This is the constructor a caller that knows *which* session it wants should use: two
         guests in one directory write two transcripts, and only the id tells them apart.
         """
-        path = live_transcript(source, workspace, home, session_id=session_id)
-        return cls(path, source=source, home=home) if path else None
+        account_dir = guest_accounts.config_dir(source, account) if account else None
+        if account and not account_dir:
+            return None                       # an account that is not registered any more
+        path = live_transcript(source, workspace, home, session_id=session_id, account_dir=account_dir)
+        return (cls(path, source=source, home=home, account=account, account_dir=account_dir)
+                if path else None)
 
     def refresh(self) -> dict | None:
         """Consume what the guest appended and return the record as it now stands."""
@@ -1335,7 +1416,8 @@ class LiveTail:
         another read."""
         now = time.monotonic()
         if self._meta_at is None or now - self._meta_at >= self.META_REFRESH:
-            self._meta = codex_thread_meta(guest.codex_state_db(self.home))
+            self._meta = codex_thread_meta(_codex_state_db_in(self.account_dir) if self.account_dir
+                                           else guest.codex_state_db(self.home))
             self._meta_at = now
         return self._meta
 
@@ -1346,7 +1428,8 @@ class LiveTail:
         if self.source == "codex":
             # The rollout's name carries the thread id before its first line has been read.
             meta = self._thread_meta().get(_file_id(self.path) or self._cursor.parser.session_id)
-        return self._cursor.record(mtime, meta=meta)
+        record = self._cursor.record(mtime, meta=meta)
+        return _with_account(record, self.source, self.account) if record is not None else None
 
     @property
     def parsed(self) -> dict | None:
@@ -1412,7 +1495,7 @@ class GuestTail:
 
     # ----- lifecycle -----------------------------------------------------------------
     def start(self, index: conv_index.ConversationIndex, source: str, workspace: str | None = None,
-              session_id: str | None = None) -> bool:
+              session_id: str | None = None, account: str = "") -> bool:
         """Follow the named session's transcript (or whatever `source` is writing in `workspace`).
 
         False when there is no transcript to follow yet — a guest that has not written its first
@@ -1421,7 +1504,8 @@ class GuestTail:
         guest.spec(source)
         with self._lock:
             self._reset()
-            tail = LiveTail.for_session(source, workspace, session_id=session_id, home=self.home)
+            tail = LiveTail.for_session(source, workspace, session_id=session_id, home=self.home,
+                                        account=account)
             if tail is None:
                 return False
             self._tail, self._index, self._source = tail, index, source

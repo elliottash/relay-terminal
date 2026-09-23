@@ -197,7 +197,12 @@ class CodexHarness:
 
     def __init__(self, *, codex_path: str | None = None, spawn=None,
                  client_version: str | None = None, request_timeout: float = 120.0,
-                 close_timeout: float = 2.0, error_grace: float = 5.0, own_memory: bool = True):
+                 close_timeout: float = 2.0, error_grace: float = 5.0, own_memory: bool = True,
+                 env_overrides: dict | None = None, env_remove=()):
+        # A registered account (guest_accounts, #M8S2): its CODEX_HOME, and the API-key variables
+        # that would outrank the login in it, for this app-server only.
+        self._env_overrides = dict(env_overrides or {})
+        self._env_remove = tuple(env_remove or ())
         # False when Options' "guests use memory from" is `relay` (#MEMS): codex's memories are
         # off for this app-server only, by `-c` (`guest_launch.CODEX_MEMORY_OFF`) — on the process,
         # not the thread, because codex consolidates memories at startup before any thread exists.
@@ -234,6 +239,13 @@ class CodexHarness:
         self._dead = False
         self._dead_reason = ""
 
+    def _child_env(self) -> dict:
+        env = dict(os.environ)
+        for key in self._env_remove:
+            env.pop(key, None)
+        env.update(self._env_overrides)
+        return env
+
     # ----- the contract ------------------------------------------------------------------------
 
     def start(self, *, cwd: str, model: str | None = None, resume: str | None = None,
@@ -264,7 +276,8 @@ class CodexHarness:
                 # Named tests and foreground children can block the MCP call. Keep this
                 # process-local transport timeout with the bridge config.
                 argv += ["-c", "mcp_servers.relay_board.tool_timeout_sec=86400"]
-            proc = self._spawn(argv, cwd)
+            proc = (self._spawn(argv, cwd, env=self._child_env())
+                    if self._env_overrides or self._env_remove else self._spawn(argv, cwd))
         except OSError as exc:
             raise HarnessNotAvailable(f"Codex could not be started: {exc}") from exc
         with self._lock:
@@ -1237,10 +1250,10 @@ def catalog_rows(entries, current: str = "") -> list[dict]:
     return rows
 
 
-def _spawn_codex(argv: list[str], cwd: str):
+def _spawn_codex(argv: list[str], cwd: str, env: dict | None = None):
     return subprocess.Popen(argv, cwd=cwd or None, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1,
-                            env=dict(os.environ))
+                            env=dict(os.environ) if env is None else env)
 
 
 def parse_login_status(returncode: int, stdout: str, stderr: str = "") -> bool:

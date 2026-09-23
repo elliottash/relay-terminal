@@ -81,6 +81,14 @@ class Provider:
     order: int
 
 
+def _guest_family(preset_id):
+    """`guest:claude` for a registered account's `guest:claude:work` (#M8S2): an account is the
+    same provider as its CLI, and ranks with it."""
+    if isinstance(preset_id, str) and preset_id.startswith("guest:") and preset_id.count(":") == 2:
+        return preset_id.rsplit(":", 1)[0]
+    return preset_id
+
+
 @dataclass(frozen=True)
 class Model:
     """One row of the Models table, keyed by the one name the model has (design rule 1)."""
@@ -153,11 +161,13 @@ class Ranking:
     def provider_order(self, preset_id) -> int:
         """The tie-break for a provider, lower first; UNKNOWN_PROVIDER_ORDER for one with no row
         (a custom provider, a model server on this machine)."""
+        preset_id = _guest_family(preset_id)
         row = self.providers.get(preset_id) if isinstance(preset_id, str) else None
         return row.order if row is not None else UNKNOWN_PROVIDER_ORDER
 
     def provider_kind(self, preset_id) -> str:
         """`plan` | `harness` | `api` | `router` | `free`, or "" for a provider with no row."""
+        preset_id = _guest_family(preset_id)
         row = self.providers.get(preset_id) if isinstance(preset_id, str) else None
         return row.kind if row is not None else ""
 

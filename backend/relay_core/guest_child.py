@@ -38,7 +38,7 @@ class GuestChildProvider:
         if self.effort:
             options["effort"] = self.effort
         provider = guests.start_provider(
-            "guest:" + guests.config_guest_id(self.config), {"guest": options}, self.workspace,
+            guests.config_preset(self.config), {"guest": options}, self.workspace,
             config=self.config, skill_index=self.skills, instruction_suffix=self.instructions,
             delegation=False)
         self.live = provider

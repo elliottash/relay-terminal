@@ -283,8 +283,13 @@ class ClaudeHarness:
         return cls(extra_args=extra, **kwargs)
 
     def __init__(self, *, settings: str | None = None, binary: str = BINARY, spawn=None,
-                 extra_args: list[str] | None = None, own_memory: bool = True):
+                 extra_args: list[str] | None = None, own_memory: bool = True,
+                 env_overrides: dict | None = None, env_remove=()):
         self._settings = settings
+        # A registered account (guest_accounts, #M8S2): its CLAUDE_CONFIG_DIR, and the credential
+        # variables that would outrank the login in it, for this process only.
+        self._env_overrides = dict(env_overrides or {})
+        self._env_remove = tuple(env_remove or ())
         # False when Options' "guests use memory from" is `relay` (#MEMS): auto-memory off for this
         # process only (`guest_launch.CLAUDE_MEMORY_OFF_*`), on every (re)launch.
         self._own_memory = own_memory
@@ -385,6 +390,9 @@ class ClaudeHarness:
         log.debug("starting claude harness: %s (cwd=%s)", " ".join(argv), self._cwd)
         try:
             env = child_environment()
+            for key in self._env_remove:
+                env.pop(key, None)
+            env.update(self._env_overrides)
             if not self._own_memory:
                 env.update(CLAUDE_MEMORY_OFF_ENV)
             self._proc = self._spawn(argv, self._cwd, env)

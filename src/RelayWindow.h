@@ -864,7 +864,9 @@ public:
     // A guest session resumed in a pane of its own (protocol 26.7). The pane is created *in* the
     // session's directory rather than cd'd into it afterwards, so the guest's own resume — which
     // resolves its id against the directory it starts in — sees the right one from the first line.
-    void openGuestPane(Pane *source, const QString &guest, const QStringList &extra, const QString &cwd) {
+    // `preset` is an account's harness preset (#M8S2): its session resumes there and nowhere else.
+    void openGuestPane(Pane *source, const QString &guest, const QStringList &extra, const QString &cwd,
+                       const QString &preset = QString()) {
         if (!source || source->window() != this || guest.isEmpty()) return;
         const QString directory = QFileInfo(cwd).isDir() ? cwd : source->cwd();
         Pane *pane = nullptr;
@@ -878,9 +880,10 @@ public:
         // own worker answers the same way, and `resumeGuestPreset` waits for that answer.
         if (source->guestHarnessUsable(guest)) {
             const Pane::GuestResume resume = Pane::guestResumeFrom(extra);
-            pane->resumeGuestPreset(guest, resume.sessionId, resume.fork, directory, extra);
+            pane->resumeGuestPreset(guest, resume.sessionId, resume.fork, directory, extra, preset);
             return;
         }
+        if (!preset.isEmpty()) return;   // an account's session never falls back to the default login
         // The pane names itself from its foreground program once the guest starts (the guest
         // registry does the detecting), so nothing is imposed on it here.
         pane->launchGuest(guest, extra, directory);   // the pane's own launch path (26.9)

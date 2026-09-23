@@ -34,7 +34,7 @@ import threading
 import time
 import uuid
 
-from . import guest, logs, questions as questions_mod, tool_labels
+from . import guest, guest_accounts, logs, questions as questions_mod, tool_labels
 from .presets import effort_fixed, model_name, provider_rank, tier_start_efforts
 from .guest_instructions import DEFAULT_MEMORY, memory_mode, own_memory
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessSteerUncertain, HarnessNotAvailable, HarnessEvent,
@@ -77,29 +77,79 @@ MAX_STREAMED_OUTPUT = 32_768
 # ----- the preset ------------------------------------------------------------------------------
 
 
-def preset_guest_id(preset_id) -> str | None:
-    """The guest a `guest:<id>` preset names, or None for anything else."""
+def preset_key(preset_id) -> str | None:
+    """`claude` for `guest:claude`, `claude:work` for the registered account `guest:claude:work`
+    (guest_accounts, #M8S2), or None for anything that is not a guest preset. The key is what a
+    login answer and a usage figure belong to: one per account, not one per CLI."""
     if not isinstance(preset_id, str) or not preset_id.startswith(PRESET_PREFIX):
         return None
-    name = preset_id[len(PRESET_PREFIX):]
-    return name if name in HARNESS_GUESTS else None
+    key = preset_id[len(PRESET_PREFIX):]
+    family, account = guest_accounts.split_key(key)
+    if family not in HARNESS_GUESTS:
+        return None
+    return f"{family}:{account}" if account else family
+
+
+def preset_guest_id(preset_id) -> str | None:
+    """The guest (CLI) a `guest:<id>[:<account>]` preset names, or None for anything else."""
+    key = preset_key(preset_id)
+    return key.partition(":")[0] if key else None
+
+
+def preset_account(preset_id) -> str:
+    """The account id a guest preset names; "" for the CLI's default login or a non-guest."""
+    key = preset_key(preset_id)
+    return key.partition(":")[2] if key else ""
 
 
 def is_guest_preset(preset_id) -> bool:
     return preset_guest_id(preset_id) is not None
 
 
-def base_url(guest_id: str) -> str:
-    return BASE_SCHEME + guest_id
+def base_url(guest_id: str, account: str = "") -> str:
+    return BASE_SCHEME + guest_id + ("/" + account if account else "")
+
+
+def _config_key(config) -> tuple[str, str] | None:
+    url = getattr(config, "base_url", "")
+    if not isinstance(url, str) or not url.startswith(BASE_SCHEME):
+        return None
+    family, _, account = url[len(BASE_SCHEME):].partition("/")
+    if family not in HARNESS_GUESTS or (account and not guest_accounts.valid_id(account)):
+        return None
+    return family, account
 
 
 def config_guest_id(config) -> str | None:
     """The guest a ProviderConfig names, or None. The one test for "this pane is on a guest"."""
-    url = getattr(config, "base_url", "")
-    if not isinstance(url, str) or not url.startswith(BASE_SCHEME):
-        return None
-    name = url[len(BASE_SCHEME):]
-    return name if name in HARNESS_GUESTS else None
+    found = _config_key(config)
+    return found[0] if found else None
+
+
+def config_account(config) -> str:
+    """The account a guest ProviderConfig runs under; "" for the default login."""
+    found = _config_key(config)
+    return found[1] if found else ""
+
+
+def config_preset(config) -> str | None:
+    """The preset id a guest ProviderConfig was made from — `guest:claude:work` keeps its account —
+    or None for a config that is not a guest's."""
+    found = _config_key(config)
+    return PRESET_PREFIX + key_of(*found) if found else None
+
+
+def key_of(guest_id: str, account: str = "") -> str:
+    return f"{guest_id}:{account}" if account else guest_id
+
+
+def account_label(guest_id: str, account: str = "") -> str:
+    """"Claude Code" for the default login, "Claude Code (work)" for a registered account."""
+    name = guest.spec(guest_id).name
+    if not account:
+        return name
+    entry = guest_accounts.find(guest_id, account)
+    return f"{name} ({entry.label if entry is not None else account})"
 
 
 def guest_name(preset_or_config) -> str:
@@ -175,9 +225,12 @@ def config_for_preset(preset_id: str, request: dict) -> ProviderConfig:
     guest_id = preset_guest_id(preset_id)
     if guest_id is None:
         raise ValueError(f"Unknown guest preset {preset_id!r}.")
+    account = preset_account(preset_id)
+    if account:
+        guest_accounts.overrides(guest_id, account)     # a removed account is refused here
     options = guest_options(request.get("guest"))
     model = options["model"] or ""
-    config = ProviderConfig(base_url(guest_id), model, "", {}, _guest_max_tokens())
+    config = ProviderConfig(base_url(guest_id, account), model, "", {}, _guest_max_tokens())
     return config
 
 
@@ -351,20 +404,22 @@ def _login_status_args(guest_id: str) -> tuple | None:
     return tuple(args) if args else None
 
 
-def _read_login_status(guest_id: str, binary: str) -> bool | None:
+def _read_login_status(guest_id: str, binary: str, env: dict | None = None) -> bool | None:
     """Run the guest's status command and read it. The seam tests replace (as with the catalogue);
-    None when this guest's CLI has no status command Relay knows, or the run itself failed."""
+    None when this guest's CLI has no status command Relay knows, or the run itself failed.
+    `env` is a registered account's environment (#M8S2); None is the worker's own."""
     args = _login_status_args(guest_id)
     if args is None:
         return None
     module = importlib.import_module(_ADAPTERS[guest_id][0])
     out = subprocess.run([binary, *args], capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                         timeout=CLI_STATUS_TIMEOUT, check=False)
+                         timeout=CLI_STATUS_TIMEOUT, check=False, env=env)
     return bool(module.parse_login_status(out.returncode, out.stdout or "", out.stderr or ""))
 
 
 def login_status(guest_id: str) -> bool | None:
-    """`logged_in` for a guest's row: True/False once known, None until the scan has said."""
+    """`logged_in` for a guest's row: True/False once known, None until the scan has said.
+    `guest_id` may be an account key (`claude:work`): each account is signed in or not alone."""
     with _catalog_lock:
         return _login.get(guest_id)
 
@@ -372,10 +427,66 @@ def login_status(guest_id: str) -> bool | None:
 def note_login(guest_id: str, logged_in: bool | None) -> None:
     """Record what a guest just proved about its login (a key test's turn ran, or it was refused
     for not being signed in), so the rows say so without a second status command."""
-    if guest_id not in HARNESS_GUESTS or logged_in is None:
+    family, _ = guest_accounts.split_key(guest_id)
+    if family not in HARNESS_GUESTS or logged_in is None:
         return
     with _catalog_lock:
         _login[guest_id] = bool(logged_in)
+
+
+def _account_login(guest_id: str, account: str, binary: str) -> None:
+    """Ask one registered account's CLI whether it is signed in, and remember the answer."""
+    key = key_of(guest_id, account)
+    status = None
+    try:
+        status = _read_login_status(guest_id, binary,
+                                    env=guest_accounts.environment(guest_id, account))
+    except Exception as exc:
+        _log.debug("%s login status could not be read: %s", key, exc)
+    with _catalog_lock:
+        _login.setdefault(key, status)
+
+
+def refresh_logins(listener: bool = True) -> None:
+    """Re-ask every login — each installed CLI's default one and every registered account — on a
+    thread (a sign-in just finished in a pane). The rows are pushed again once the answers are in."""
+    refresh_account_logins(listener, defaults=True)
+
+
+def refresh_account_logins(listener: bool = True, defaults: bool = False) -> None:
+    """Re-ask every registered account whether it is signed in, on a thread (an account was just
+    added, or its login finished in a pane). The rows are pushed again once the answers are in.
+    `defaults` asks each CLI's default login too."""
+    found = installations()
+
+    def run():
+        for gid in (HARNESS_GUESTS if defaults else ()):
+            binary = (found.get(gid) or {}).get("binary") or ""
+            if not binary:
+                continue
+            status = None
+            try:
+                status = _read_login_status(gid, binary)
+            except Exception as exc:
+                _log.debug("%s login status could not be read: %s", gid, exc)
+            if status is not None:
+                with _catalog_lock:
+                    _login[gid] = status
+        for entry in guest_accounts.accounts():
+            binary = (found.get(entry.guest) or {}).get("binary") or ""
+            if not binary:
+                continue
+            with _catalog_lock:
+                _login.pop(entry.key, None)
+            _account_login(entry.guest, entry.id, binary)
+        callback = _catalog_listener
+        if listener and callback is not None:
+            try:
+                callback()
+            except Exception:                                          # pragma: no cover
+                _log.debug("guest scan listener failed", exc_info=True)
+
+    threading.Thread(target=run, name="relay-guest-accounts", daemon=True).start()
 
 
 def start_catalog_scan(guest_id: str = "codex") -> None:
@@ -408,6 +519,9 @@ def start_catalog_scan(guest_id: str = "codex") -> None:
             with _catalog_lock:
                 # A key test that finished while the scan ran has the fresher proof; it wins.
                 _login.setdefault(gid, status)
+            # Each registered account of this guest (#M8S2): its own directory, its own answer.
+            for entry in guest_accounts.accounts(gid):
+                _account_login(gid, entry.id, binary)
         rows: list[dict] = []
         if binaries["codex"]:
             try:
@@ -535,12 +649,56 @@ def preset_rows() -> list[dict]:
         held = last_limits(guest_id)
         if held:
             rows[-1]["limits"] = held
+        # Each registered account of this guest (guest_accounts, #M8S2) is a row of its own: the
+        # same CLI and the same models, its own login, its own limits and its own preset id, so a
+        # model on it is a separate target everywhere a preset id is carried.
+        family_row = rows[-1]
+        for entry in guest_accounts.accounts(guest_id):
+            row = dict(family_row)
+            row.pop("limits", None)
+            row.update({"id": entry.preset_id, "label": account_label(guest_id, entry.id),
+                        "account": entry.id, "account_label": entry.label,
+                        "config_dir": entry.config_dir,
+                        "login_command": guest_accounts.login_command(guest_id, entry.id),
+                        "base_url": base_url(guest_id, entry.id),
+                        "logged_in": (_account_login_status(entry, state["binary"])
+                                      if state["installed"] else None)})
+            held = last_limits(entry.key)
+            if held:
+                row["limits"] = held
+            rows.append(row)
     return rows
 
 
-# `usage_limits` as each guest last reported them, keyed by guest id:
+_asked_accounts: set = set()
+
+
+def _account_login_status(entry, binary: str) -> bool | None:
+    """The account's login answer, asking once in the background when nobody has yet (an account
+    registered after this worker's scan, perhaps by another pane)."""
+    with _catalog_lock:
+        if entry.key in _login:
+            return _login[entry.key]
+        if entry.key in _asked_accounts or not binary:
+            return None
+        _asked_accounts.add(entry.key)
+
+    def run():
+        _account_login(entry.guest, entry.id, binary)
+        callback = _catalog_listener
+        if callback is not None:
+            try:
+                callback()
+            except Exception:                                          # pragma: no cover
+                _log.debug("guest scan listener failed", exc_info=True)
+
+    threading.Thread(target=run, name="relay-guest-account-login", daemon=True).start()
+    return None
+
+
+# `usage_limits` as each guest last reported them, keyed by guest id — or by account key
+# (`claude:work`, #M8S2), because a limit belongs to the login that pays, not to the CLI:
 # {"windows": [{kind, used_percent, resets_at}], "status"?: str, "updated_at": unix seconds}.
-# One worker, one account per guest, so one figure per guest is the whole truth here.
 _LAST_LIMITS: dict[str, dict] = {}
 
 
@@ -554,43 +712,57 @@ def last_limits(guest_id: str) -> dict:
     return out
 
 
-def usage_limits_event(guest_id: str, data: dict) -> dict:
+def usage_limits_event(guest_id: str, data: dict, account: str = "") -> dict:
     """The worker's `usage_limits` event a harness `limits` event becomes (29.3), or {} when it
-    names no window. Also the moment the figures are remembered for `preset_rows()`."""
+    names no window. Also the moment the figures are remembered for `preset_rows()`. `account`
+    files them under that account's key and preset (#M8S2)."""
     windows = limit_windows(data.get("windows") if isinstance(data, dict) else None)
     if not windows:
         return {}
-    event = {"event": "usage_limits", "preset": PRESET_PREFIX + guest_id, "guest": guest_id,
+    key = key_of(guest_id, account)
+    event = {"event": "usage_limits", "preset": PRESET_PREFIX + key, "guest": guest_id,
              "windows": windows}
+    if account:
+        event["account"] = account
     status = data.get("status")
     if isinstance(status, str) and status.strip():
         event["status"] = status.strip()[:40]
     held = {"windows": [dict(w) for w in windows], "updated_at": int(time.time())}
     if "status" in event:
         held["status"] = event["status"]
-    _LAST_LIMITS[guest_id] = held
+    _LAST_LIMITS[key] = held
     return event
 
 
 # ----- starting one ------------------------------------------------------------------------------
 
 
-def make_harness(guest_id: str, probe: bool = False, *, memory: str | None = None):
+def make_harness(guest_id: str, probe: bool = False, *, memory: str | None = None,
+                 account: str = ""):
     """The adapter instance for a guest. The single seam tests replace, and the only place either
     adapter module is imported. `probe` asks for the adapter's key-test variant (`for_probe()`:
     claude with no tools), for keytest's one turn. `memory` is the launch's "guests use memory
-    from" mode (#MEMS): `relay` starts the guest with its own memory off."""
+    from" mode (#MEMS): `relay` starts the guest with its own memory off. `account` is a
+    registered account (#M8S2): the process gets its config directory, and an account that is not
+    registered any more is a HarnessNotAvailable rather than a quiet run on the default login."""
     if guest_id not in _ADAPTERS:
         raise HarnessNotAvailable(f"Relay has no harness for {guest_id!r}.")
     factory = _load_adapter(guest_id)
     if factory is None:
         raise HarnessNotAvailable(
             f"{guest.spec(guest_id).name}'s harness is not available in this build of Relay.")
+    kwargs = {}
+    if account:
+        try:
+            set_env, remove_env = guest_accounts.overrides(guest_id, account)
+        except ValueError as exc:
+            raise HarnessNotAvailable(str(exc)) from None
+        kwargs = {"env_overrides": set_env, "env_remove": remove_env}
     if probe and callable(getattr(factory, "for_probe", None)):
-        return factory.for_probe()
+        return factory.for_probe(**kwargs)
     if memory is not None:
-        return factory(own_memory=own_memory(memory))
-    return factory()
+        return factory(own_memory=own_memory(memory), **kwargs)
+    return factory(**kwargs)
 
 
 _SKILLS_UNSET = object()
@@ -609,8 +781,13 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     guest_id = preset_guest_id(preset_id)
     if guest_id is None:
         raise ValueError(f"Unknown guest preset {preset_id!r}.")
+    account = preset_account(preset_id)
     options = guest_options(request.get("guest"))
-    harness = make_harness(guest_id, memory=options["memory"])
+    try:
+        harness = (make_harness(guest_id, memory=options["memory"], account=account) if account
+                   else make_harness(guest_id, memory=options["memory"]))
+    except HarnessError as exc:
+        raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
     from .guest_board_bridge import Bridge
     from .guest_instructions import build_instructions
     from .board_tools import find_board_root
@@ -643,6 +820,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     config = config if config is not None else config_for_preset(preset_id, request)
     config.model = started.model or options["model"] or guest_id
     provider = HarnessProvider(config, harness, guest_id, stall_timeout=stall_timeout)
+    provider.account = account
     provider.board_bridge = bridge
     provider.instructions = instructions
     provider.memory = options["memory"]
@@ -651,7 +829,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     provider.effort = _harness_effort(harness) or options["effort"] or ""
     # A resumed or forked session carries its own history; a fresh one is briefed on its first turn.
     provider.briefed = bool(options["resume"] or options["fork"])
-    logs.event(_log, "guest_harness_started", guest=guest_id, model=config.model,
+    logs.event(_log, "guest_harness_started", guest=guest_id, account=account, model=config.model,
                resumed=bool(options["resume"]), fork=options["fork"],
                permissions=options["permissions"], effort=provider.effort)
     return provider
@@ -745,6 +923,8 @@ class HarnessProvider:
         self.config = config
         self.harness = harness
         self.guest_id = guest_id
+        # The registered account this harness runs under ("" is the CLI's default login, #M8S2).
+        self.account = config_account(config)
         self.session_id = getattr(harness, "session_id", "") or ""
         # The posture this pane started the guest with, so a resume starts the replacement the same
         # way rather than silently dropping back to the default.
@@ -1057,7 +1237,8 @@ class _Turn:
             # Relay calls that model "claude-opus-5.5" everywhere else, so the name travels with it.
             self.emit({"event": "model_changed", "model": model, "applies": "now",
                        "model_name": model_name(PRESET_PREFIX + self.provider.guest_id, model),
-                       "preset": PRESET_PREFIX + self.provider.guest_id,
+                       "preset": PRESET_PREFIX + key_of(self.provider.guest_id,
+                                                        self.provider.account),
                        "guest": self.provider.guest_id,
                        "guest_session": self.provider.session_id})
 
@@ -1114,10 +1295,11 @@ class _Turn:
             self.provider.guest_context = guest_context(usage) or self.provider.guest_context
 
     def _on_limits(self, data: dict) -> None:
-        event = usage_limits_event(self.provider.guest_id, data)
+        event = usage_limits_event(self.provider.guest_id, data, self.provider.account)
         if not event:
             return
-        self.provider.usage_limits = last_limits(self.provider.guest_id)
+        self.provider.usage_limits = last_limits(key_of(self.provider.guest_id,
+                                                        self.provider.account))
         self.emit(event)
 
     def finish(self, usage: dict) -> None:
@@ -1653,6 +1835,8 @@ def attach(agent, provider: HarnessProvider) -> None:
         if held is not None:
             data["guest"] = held.guest_id
             data["guest_session"] = held.session_id
+            if held.account:
+                data["guest_account"] = held.account
         return data
 
     def context_event():
@@ -1683,17 +1867,20 @@ def detach(agent) -> HarnessProvider | None:
     return provider
 
 
-def switch_model(agent, guest_id: str | None, request: dict) -> HarnessProvider | None:
+def switch_model(agent, guest_id: str | None, request: dict,
+                 account: str = "") -> HarnessProvider | None:
     """Reuse the harness this pane already has, when `set_model` only changes the guest's model.
 
     29.3 restarts the harness when the *preset* changes, and the fresh one is briefed on the
     conversation (#1V4F). Asking the same guest for another model is not that: the contract has
     `set_model(model)` for it, the guest keeps everything it has read so far, and restarting would
     throw that away for nothing. Anything that names a `resume` or a `fork` is a different session
-    and does restart. Returns None when the pane must start a fresh harness.
+    and does restart. So does another account of the same guest (#M8S2): the process is bound to
+    its login from the moment it starts. Returns None when the pane must start a fresh harness.
     """
     provider = agent_provider(agent)
-    if guest_id is None or provider is None or provider.guest_id != guest_id:
+    if guest_id is None or provider is None or provider.guest_id != guest_id \
+            or provider.account != (account or ""):
         return None
     options = guest_options(request.get("guest"))
     if options["resume"] or options["fork"]:
@@ -1742,8 +1929,11 @@ def configured_fields(agent) -> dict:
     provider = agent_provider(agent)
     if provider is None:
         return {}
-    return {"guest": provider.guest_id, "guest_session": provider.session_id,
-            "guest_effort": provider.effort, "effort": provider.effort}
+    fields = {"guest": provider.guest_id, "guest_session": provider.session_id,
+              "guest_effort": provider.effort, "effort": provider.effort}
+    if provider.account:
+        fields["guest_account"] = provider.account
+    return fields
 
 
 def set_effort(agent, effort) -> dict | None:
@@ -1783,6 +1973,13 @@ def session_guest(data) -> tuple[str, str]:
     return guest_id, session.strip()[:200]
 
 
+def session_account(data) -> str:
+    """The account a saved Relay session's guest ran under ("" for the default login, and for
+    every session saved before accounts existed)."""
+    value = data.get("guest_account") if isinstance(data, dict) else None
+    return value if guest_accounts.valid_id(value) else ""
+
+
 def resume_session(agent, data, emit) -> None:
     """A Relay `resume`/`load_state` landed on a conversation that ran on a guest (29.3).
 
@@ -1793,7 +1990,9 @@ def resume_session(agent, data, emit) -> None:
     """
     guest_id, session = session_guest(data)
     provider = agent_provider(agent)
-    if not guest_id or provider is None or provider.guest_id != guest_id:
+    # The session lives in its account's directory, so only a harness on that account can open it.
+    if not guest_id or provider is None or provider.guest_id != guest_id \
+            or provider.account != session_account(data):
         return
     if session == provider.session_id:
         return
@@ -1803,7 +2002,8 @@ def resume_session(agent, data, emit) -> None:
     # the agent it had.
     replacement = None
     try:
-        replacement = make_harness(guest_id, memory=provider.memory)
+        replacement = (make_harness(guest_id, memory=provider.memory, account=provider.account)
+                       if provider.account else make_harness(guest_id, memory=provider.memory))
         started = replacement.start(cwd=str(agent.executor.workspace.root),
                                     model=provider.config.model or None, resume=session,
                                     fork=False, permissions=provider.permissions,

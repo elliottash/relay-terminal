@@ -14,7 +14,7 @@ import tempfile
 import threading
 import time
 
-from . import customproviders, guest_harness_provider, localmodels
+from . import customproviders, guest_accounts, guest_harness_provider, localmodels
 from .guest_harness import HarnessError, HarnessNotAvailable
 from .presets import PRESETS, apply_effort
 from .provider import ChatProvider, ProviderConfig, ProviderError, ProviderTruncated, make_provider
@@ -129,10 +129,17 @@ def check_guest(guest_id: str, make_harness=None, login=None, timeout_s: float =
     ghp = guest_harness_provider
     make_harness = make_harness or ghp.make_harness
     login = login or ghp._read_login_status
+    # `guest_id` may be a registered account's key, `claude:work` (#M8S2): the same test, run
+    # under that account's directory, and its answer filed under that key.
+    key = guest_id
+    guest_id, account = guest_accounts.split_key(key)
+    guest_id = guest_id or key
     name = guest_id
-    preset_id = ghp.PRESET_PREFIX + guest_id
+    preset_id = ghp.PRESET_PREFIX + key
     started = time.monotonic()
     result = {"preset": preset_id, "guest": guest_id, "model": ""}
+    if account:
+        result["account"] = account
 
     def finish(ok: bool, **fields) -> dict:
         result["ok"] = ok
@@ -144,18 +151,25 @@ def check_guest(guest_id: str, make_harness=None, login=None, timeout_s: float =
     if not state.get("installed"):
         return finish(False, error=f"{name} is not installed: no `{name}` on PATH")
     try:
-        signed_in = login(guest_id, state.get("binary") or name)
+        signed_in = (login(guest_id, state.get("binary") or name,
+                           env=guest_accounts.environment(guest_id, account)) if account
+                     else login(guest_id, state.get("binary") or name))
+    except ValueError as exc:                           # the account is not registered any more
+        return finish(False, error=str(exc))
     except Exception as exc:                            # a status command that would not run
         signed_in = None
         result["login_check"] = f"{type(exc).__name__}"
     if signed_in is False:
-        ghp.note_login(guest_id, False)
-        return finish(False, error=f"{name} is not logged in: change login first")
+        ghp.note_login(key, False)
+        hint = (f" (sign in with `{guest_accounts.login_command(guest_id, account)}`)"
+                if account else "")
+        return finish(False, error=f"{name} is not logged in: change login first{hint}")
 
     scratch = cwd or tempfile.mkdtemp(prefix="relay-keytest-")
     harness = None
     try:
-        harness = make_harness(guest_id, probe=True)
+        harness = (make_harness(guest_id, probe=True, account=account) if account
+                   else make_harness(guest_id, probe=True))
         began = harness.start(cwd=scratch, permissions="deny")
         result["model"] = began.model or ""
         outcome: dict = {}
@@ -183,7 +197,7 @@ def check_guest(guest_id: str, make_harness=None, login=None, timeout_s: float =
         result["model"] = harness.model or result["model"]
         if turn_result.stop_reason != "end":
             return finish(False, error=f"{name} ended the turn: {turn_result.stop_reason}")
-        ghp.note_login(guest_id, True)
+        ghp.note_login(key, True)
         text = _one_line(turn_result.text)
         return finish(True, text=text, reply_chars=len(turn_result.text or ""))
     except HarnessNotAvailable as exc:
@@ -191,7 +205,7 @@ def check_guest(guest_id: str, make_harness=None, login=None, timeout_s: float =
     except HarnessError as exc:
         words = _one_line(exc) or f"{name} ended the turn with an error"
         if "not logged in" in words.lower() or "log in" in words.lower():
-            ghp.note_login(guest_id, False)
+            ghp.note_login(key, False)
         return finish(False, error=words)
     except Exception as exc:                               # the adapter itself broke
         return finish(False, error=f"{name} test failed ({type(exc).__name__}).")
@@ -214,10 +228,11 @@ def _run_guest(guest_id: str, emit, request_id, **seams) -> threading.Thread | N
     thread, so the worker keeps answering while the CLI comes up."""
     ghp = guest_harness_provider
     preset_id = ghp.PRESET_PREFIX + guest_id
-    if not (ghp.installations().get(guest_id) or {}).get("installed"):
-        emit({"event": "key_tested", "id": request_id, "preset": preset_id, "guest": guest_id,
+    family = guest_accounts.split_key(guest_id)[0] or guest_id
+    if not (ghp.installations().get(family) or {}).get("installed"):
+        emit({"event": "key_tested", "id": request_id, "preset": preset_id, "guest": family,
               "ok": False, "model": "", "elapsed_ms": 0,
-              "error": f"{guest_id} is not installed: no `{guest_id}` on PATH"})
+              "error": f"{family} is not installed: no `{family}` on PATH"})
         return None
 
     def work():
@@ -236,7 +251,7 @@ def run(preset_id: str, emit, request_id=None, lookup=None, factory=_provider, *
     the guest's own harness (`check_guest`), and `guest_seams` are that function's test hooks.
     """
     from . import keystore
-    guest_id = guest_harness_provider.preset_guest_id(preset_id)
+    guest_id = guest_harness_provider.preset_key(preset_id)
     if guest_id is not None:
         return _run_guest(guest_id, emit, request_id, **guest_seams)
     preset = _preset(preset_id) if isinstance(preset_id, str) else None

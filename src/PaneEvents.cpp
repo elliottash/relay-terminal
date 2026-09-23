@@ -205,7 +205,7 @@ void Pane::handle(const QJsonObject &event) {
             if (!m_pendingGuestResume.guest.isEmpty()) {
                 const PendingGuestResume pending = m_pendingGuestResume;
                 m_pendingGuestResume = PendingGuestResume();
-                startGuestPreset(pending.guest, pending.extra, pending.cwd);
+                startGuestPreset(pending.guest, pending.extra, pending.cwd, pending.preset);
             }
             // …and so could a pane opened by Verify for a guest verifier (#T71W).
             if (!m_pendingGuestTask.guest.isEmpty()) {
@@ -324,6 +324,19 @@ void Pane::handle(const QJsonObject &event) {
             else if (type == QStringLiteral("custom_provider_saved")) status(QStringLiteral("Custom provider saved: %1").arg(name));
             else status(QStringLiteral("Custom provider removed."));
             relay::SettingsWatch::instance().notify();   // the row appears or goes as the fresh presets land
+        } else if (type == QStringLiteral("guest_account_saved") || type == QStringLiteral("guest_account_deleted")) {
+            // A Claude Code / Codex account (#M8S2). A new one asked to be signed in: its CLI's own
+            // login, with the account's directory in front, runs in this pane's terminal.
+            const QJsonObject account = event.value(QStringLiteral("account")).toObject();
+            if (type == QStringLiteral("guest_account_deleted"))
+                status(QStringLiteral("Account removed from Relay; its login directory is left as it was."));
+            else if (event.value(QStringLiteral("sign_in")).toBool() && !account.value(QStringLiteral("login_command")).toString().isEmpty()) {
+                status(QStringLiteral("Account %1 added. Sign in below, then press test on its row.")
+                           .arg(account.value(QStringLiteral("label")).toString()));
+                runLoginCommand(account.value(QStringLiteral("login_command")).toString());
+            } else status(QStringLiteral("Account %1 saved.").arg(account.value(QStringLiteral("label")).toString()));
+            refreshPresets();
+            relay::SettingsWatch::instance().notify();
         } else if (type == QStringLiteral("key_stored")) {
             status(event.value(QStringLiteral("preset")).toString() == QStringLiteral("relay-pro")
                 ? QStringLiteral("Relay Pro access confirmed; code saved to the keyring.")

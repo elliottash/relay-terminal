@@ -1,0 +1,22 @@
+{
+  "accounts": [
+    {
+      "id": "work",
+      "guest": "claude",
+      "label": "work",
+      "config_dir": "<sandbox>/.config/relay/guest-accounts/claude-work"
+    },
+    {
+      "id": "eth",
+      "guest": "codex",
+      "label": "eth",
+      "config_dir": "<sandbox>/.config/relay/guest-accounts/codex-eth"
+    },
+    {
+      "id": "personal",
+      "guest": "claude",
+      "label": "personal",
+      "config_dir": "<sandbox>/.config/relay/guest-accounts/claude-personal"
+    }
+  ]
+}

@@ -15,6 +15,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
+from relay_core import guest_accounts
 from relay_core import board_chat
 from relay_core import memory_import, openrouter_catalog, provider_limits
 from relay_core import final_summary
@@ -489,6 +490,18 @@ def main():
                 emit_presets(request.get("id"))
             elif kind in localmodels.TYPES:
                 localmodels.handle(request, emit)
+            elif kind == "guest_logins_refresh":
+                # A guest sign-in the pane typed has finished (#M8S2): every login is asked again,
+                # and the rows are pushed once the answers are in.
+                guest_harness_provider.refresh_logins()
+            elif kind in guest_accounts.TYPES:
+                # A registered Claude Code / Codex login (#M8S2). A save or a delete changes the
+                # preset list, and a saved account's login is asked again on a thread; the rows
+                # are pushed once more when that answer lands.
+                guest_accounts.handle(request, emit)
+                if kind != "guest_accounts":
+                    emit_presets()
+                    guest_harness_provider.refresh_account_logins()
             elif kind in customproviders.TYPES:
                 # A save or delete changes the preset list, so a fresh `presets` follows the answer.
                 customproviders.handle(request, emit)

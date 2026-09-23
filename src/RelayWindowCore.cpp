@@ -726,6 +726,18 @@ relay::BoardWorker *RelayWindow::boardWorker(QWidget *page) {
             } else if (type == QStringLiteral("error")
                        && event.value(QStringLiteral("id")).toString() == QStringLiteral("models-import")) {
                 QMessageBox::warning(guard, QStringLiteral("Import keys"), event.value(QStringLiteral("text")).toString());
+            } else if (type == QStringLiteral("guest_account_saved") || type == QStringLiteral("guest_account_deleted")) {
+                // Options › Models asked through the tab's helper (#M8S2): the rows come back with
+                // a fresh `presets`, and a sign-in goes to the active pane's terminal when there is one.
+                if (relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data()) worker->send({{"type", "presets"}});
+                const QString login = event.value(QStringLiteral("account")).toObject().value(QStringLiteral("login_command")).toString();
+                if (type == QStringLiteral("guest_account_saved") && event.value(QStringLiteral("sign_in")).toBool() && !login.isEmpty()) {
+                    if (guard->m_active) guard->m_active->runLoginCommand(login);
+                    else QMessageBox::information(guard, QStringLiteral("Models"),
+                             QStringLiteral("Account added. Sign it in from a terminal pane:\n%1").arg(login));
+                }
+            } else if (type == QStringLiteral("error") && event.value(QStringLiteral("id")).toString() == QStringLiteral("guest-account")) {
+                QMessageBox::warning(guard, QStringLiteral("Models"), event.value(QStringLiteral("text")).toString());
             } else if (type == QStringLiteral("key_stored") || type == QStringLiteral("key_removed")
                        || type == QStringLiteral("custom_provider_saved") || type == QStringLiteral("custom_provider_deleted")) {
                 if (relay::BoardWorker *worker = guard->m_boardWorkers.value(tab).data()) worker->send({{"type", "presets"}});
@@ -940,8 +952,8 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         };
         // A guest session resumed in a new pane launches through that pane's own launch path (26.9):
         // the guest id and its arguments travel, not a finished command line.
-        pane->onOpenGuestPane = [guard](const QString &guest, const QStringList &extra, const QString &cwd) {
-            if (auto *w = windowOf(guard)) w->openGuestPane(guard, guest, extra, cwd);
+        pane->onOpenGuestPane = [guard](const QString &guest, const QStringList &extra, const QString &cwd, const QString &preset) {
+            if (auto *w = windowOf(guard)) w->openGuestPane(guard, guest, extra, cwd, preset);
         };
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu

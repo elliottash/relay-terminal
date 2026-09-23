@@ -1420,9 +1420,9 @@ class Agent:
         if self.board is None:
             return
         from . import guest_harness_provider
-        guest_id = guest_harness_provider.config_guest_id(self.config)
+        guest_preset = guest_harness_provider.config_preset(self.config)
         self.board.context.model = self.config.model
-        self.board.context.preset = (f"guest:{guest_id}" if guest_id else
+        self.board.context.preset = (guest_preset if guest_preset else
                                      self.preset.id if self.preset is not None else None)
 
     def set_model(self, config: ProviderConfig, preset_id: str | None = None,

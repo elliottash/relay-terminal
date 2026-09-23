@@ -6687,6 +6687,57 @@ through a fake process; a `FakeHarness` for the provider and worker tests; the e
 `harness-claude-README.md` and `harness-codex-README.md` say what was run against the real CLIs,
 how many turns it cost, and what did not work.
 
+### 29.6 Accounts: several logins of one guest side by side (card #M8S2, 2026-09-23)
+
+Owner, 2026-09-23: "yes, lets build it." Each CLI keeps its whole state — login, settings,
+transcripts — in one directory that an environment variable moves: `CLAUDE_CONFIG_DIR` for Claude
+Code (documented by Anthropic for accounts running side by side), `CODEX_HOME` for Codex. An
+**account** is a name and such a directory; Relay starts that guest's process with the directory
+set and never handles the credentials, which stay where the CLI puts them inside it.
+
+* **Registry.** `$XDG_CONFIG_HOME/relay/guest-accounts.json` (`RELAY_GUEST_ACCOUNTS` overrides),
+  `{"accounts": [{id, guest, label, config_dir}]}`, owned by `backend/relay_core/guest_accounts.py`.
+  An id is 1–32 of `[a-z0-9-]` and not `default`; the CLI's own default directory and a directory
+  already used by another account are refused. A new account with no directory gets
+  `$XDG_CONFIG_HOME/relay/guest-accounts/<guest>-<id>`; an existing directory (already signed in)
+  is used as it is. Removing an account leaves its directory alone.
+* **Preset ids.** An account is the preset `guest:<guest>:<id>` — `guest:claude:work` — beside the
+  unchanged `guest:claude` / `guest:codex`, which are the CLI's default login. Its config's base URL
+  is `harness://<guest>/<id>`. `preset_guest_id` answers the CLI for both shapes, `preset_account`
+  the account, `preset_key` `claude:work`; `roles.guest_id_of` returns that key. Everything that
+  already carries a preset id — `configure`, `set_model`, a `tiers` entry, the saved layout, a plan
+  turn's High pick, a delegated child (`config_preset`) — carries the account with it.
+* **Launch.** `make_harness(guest, account=…)` gives the adapter `env_overrides` (the directory) and
+  `env_remove` (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`; `CODEX_API_KEY`,
+  `OPENAI_API_KEY`), because an inherited key would otherwise outrank the account's login. An
+  account that is not registered any more is an `error` on the `configure`, never a quiet run on
+  the default login. `set_model` to another account of the same guest restarts the harness.
+* **Rows.** `presets` carries one row per account after its guest's row: `id`, `label`
+  ("Claude Code (work)"), `guest`, `account`, `account_label`, `config_dir`, `login_command`
+  (`CLAUDE_CONFIG_DIR=… claude auth login`), its own `logged_in` (asked with the account's
+  environment, on the background scan or on first sight) and its own `limits`. `usage_limits`
+  events of an account name its preset and carry `account`; `_LAST_LIMITS` is keyed by
+  `claude:work`, so quota weighting (13.7) sees each account apart. An account ranks with its CLI.
+* **Protocol.** `guest_accounts` → `guest_accounts {accounts}`; `guest_account_save {account:
+  {guest, label, id?, config_dir?}, sign_in?}` → `guest_account_saved {account, sign_in}` then
+  `guest_accounts`; `guest_account_delete {key: "claude:work"}` → `guest_account_deleted {key,
+  removed}` then `guest_accounts`. A save or delete pushes `presets`. `guest_logins_refresh` asks
+  every login again (the pane sends it when a sign-in it typed exits 0). `test_key {preset:
+  "guest:claude:work"}` tests that account and its answer carries `account`.
+* **Sessions.** `configured` / `model_changed` add `guest_account`, and so does the saved Relay
+  session; a resume only restarts a harness that is on the same account. The guest sessions index
+  reads each account's `projects/` (claude) or `sessions/` and `state_*.sqlite` (codex) besides the
+  default ones and stores the account preset in the row's `preset`; a record carries `account` and
+  `preset`, and the pane resumes it on that preset, through the harness only. The live tail of an
+  account harness reads that account's directory. A reconcile prunes a source only when every
+  registered account's directory is there.
+* **GUI.** Options › Models: a guest's default row has *add account…* (a name and an optional
+  directory; with none, the new directory's sign-in is typed into the active pane); an account's
+  row has *sign in*, *test* and *remove*. The same model through two logins is one folded row whose
+  *via* list names each (the models pane's available tab); a Tier B terminal launch is never used
+  for an account, because it is the default login.
+* Tests: `tests/test_guest_accounts.py`. Evidence: `docs/qa_evidence/2026-09-23-guest-accounts-M8S2/`.
+
 ## 30. The agent drives the app: options, actions, sessions and the helper (v4.0, 2026-09-20)
 
 Card `#FEJQ`, owner 2026-09-20: one helper system, not three features that happen to look alike.

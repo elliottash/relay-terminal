@@ -336,8 +336,17 @@ def is_guest_preset(preset_id) -> bool:
 
 
 def guest_id_of(preset_id) -> str:
-    """`"codex"` for `"guest:codex"`; "" for anything that is not a guest preset."""
+    """`"codex"` for `"guest:codex"`, `"claude:work"` for a registered account's preset
+    (guest_accounts, #M8S2); "" for anything that is not a guest preset. This key is what a login
+    answer and a usage figure belong to."""
     return preset_id[len(GUEST_PRESET_PREFIX):] if is_guest_preset(preset_id) else ""
+
+
+def guest_base_url(preset_id) -> str:
+    """`harness://claude`, or `harness://claude/work` for an account's preset: the base URL
+    `guest_harness_provider.base_url` gives, spelled here without importing the guest stack."""
+    family, _, account = guest_id_of(preset_id).partition(":")
+    return GUEST_BASE_SCHEME + family + ("/" + account if account else "")
 
 
 def guest_runnable(guest_id: str) -> bool:
@@ -348,9 +357,12 @@ def guest_runnable(guest_id: str) -> bool:
     if not guest_id:
         return False
     try:
-        from . import guest_harness_provider as ghp
-        return bool(ghp.adapter_available(guest_id)
-                    and (ghp.installations().get(guest_id) or {}).get("installed")
+        from . import guest_accounts, guest_harness_provider as ghp
+        family, account = guest_accounts.split_key(guest_id)
+        if account and guest_accounts.find(family, account) is None:
+            return False                # a removed account never falls back to another login
+        return bool(ghp.adapter_available(family)
+                    and (ghp.installations().get(family) or {}).get("installed")
                     and ghp.login_status(guest_id) is not False)
     except Exception:
         return False
@@ -803,7 +815,7 @@ class RoleResolver:
         base URL, the entry's model ("" is the guest's own default) and its level in the guest's
         own words. No key, no extras — a guest turn is a process on a pipe, not a request body."""
         preset_id = entry["preset"]
-        return (preset_id, GUEST_BASE_SCHEME + guest_id_of(preset_id), entry.get("model") or "", {},
+        return (preset_id, guest_base_url(preset_id), entry.get("model") or "", {},
                 entry.get("effort"))
 
     def _tier_entries(self, tier: str, guests: bool = True, choose: bool = False) -> list[tuple[str | None, str, str, dict, str | None]]:

@@ -1108,7 +1108,10 @@ public:
     void removeKey(const QString &preset) { send({{"type", "remove_key"}, {"preset", preset}}); }
     // Options › Models › "change login" on Claude Code or Codex: the CLI's own login runs in this
     // pane's terminal, where it can open a browser and ask what it asks.
-    void runLoginCommand(const QString &command) { submitTerminal(command, true); }
+    // A guest CLI's sign-in (Options › Models' "change login" / "sign in"). Remembered, so that when
+    // it exits 0 the worker asks every login again and the rows stop saying "not logged in" without
+    // a press on test (#M8S2).
+    void runLoginCommand(const QString &command) { m_guestLoginCommand = command; submitTerminal(command, true); }
     // Options › Models › "+ add provider" › custom (owner, 2026-09-20: "like in warp custom
     // providers"): a named OpenAI-compatible endpoint with a key and model ids becomes a preset row
     // (protocol §28.6). The worker answers custom_provider_saved / _deleted and pushes `presets`.
@@ -2033,7 +2036,7 @@ public:
                              .arg(paneLogId(), key, level, m_currentPreset, m_configured ? QStringLiteral("1") : QStringLiteral("0"),
                                   m_deferredPreset, guestInFront() ? m_guest : QString()));
         if (const QString guest = guestOfPreset(preset); !guest.isEmpty()) {
-            if (preset != m_currentPreset || model != m_guestModel || m_agentRole != QStringLiteral("main")) pickGuest(guest, model);
+            if (preset != m_currentPreset || model != m_guestModel || m_agentRole != QStringLiteral("main")) pickGuest(guest, model, preset);
         } else if (preset != m_currentPreset) {
             leaveGuest([this, preset, model] { selectModel(preset, model); });
         } else if (model != paneModel() || m_agentRole != QStringLiteral("main")) {
@@ -4091,7 +4094,9 @@ public:
     // A guest session (protocol 26.7) resumed in a new pane: the guest, the tool's own arguments
     // (`-r <id>`, `resume <id>`…) and the directory it must run in (empty keeps this pane's). The
     // new pane launches it through its own `launchGuest` (26.9), so it is configured like a picked one.
-    std::function<void(const QString &guest, const QStringList &extra, const QString &cwd)> onOpenGuestPane;
+    // `preset` is the account's harness preset for a session kept in a registered account's
+    // directory (#M8S2, "guest:claude:work"); empty for the CLI's default login.
+    std::function<void(const QString &guest, const QStringList &extra, const QString &cwd, const QString &preset)> onOpenGuestPane;
     std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
 
     // ----- reasoning levels are the model's (card #MDL1, owner 2026-09-21) --------------------
@@ -7943,11 +7948,22 @@ public:
         // the bypass flag and the bridge (26.9), so a resumed guest is configured like a picked one.
         const QStringList extra = words.mid(1);
         const QString cwd = relay::conversations::guestCwd(item);
+        // A session of a registered account (#M8S2) is on disk only in that account's directory,
+        // so it resumes on that account's preset and through the harness alone: the terminal
+        // launch is the CLI's default login, which does not have it.
+        const QString itemPreset = item.value(QStringLiteral("preset")).toString();
+        const QString accountPreset = guestOfPreset(itemPreset) == source && itemPreset != QStringLiteral("guest:") + source
+            ? itemPreset : QString();
+        if (!accountPreset.isEmpty() && !guestHarnessUsable(source)) {
+            status(QStringLiteral("That session belongs to %1, which can only be resumed through its harness here.")
+                       .arg(guestPresetName(accountPreset)));
+            return;
+        }
         if (newPane) {
             // A guest fork names itself only once it is running, so its text is stashed here and
             // claimed by the pane the fork comes up in, as a Relay fork's is (#0TJ9).
             if (fork) pendingForkText() = ForkText{sessionTextLines(), QDateTime::currentDateTimeUtc(), source};
-            if (onOpenGuestPane) { onOpenGuestPane(source, extra, cwd); return; }
+            if (onOpenGuestPane) { onOpenGuestPane(source, extra, cwd, accountPreset); return; }
             status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
             return;
         }
@@ -7965,7 +7981,7 @@ public:
         // pane's own agent* — `configure` with `guest.resume`, in the session's directory — so the
         // conversation, the call lines and the chips are Relay's from the first turn.
         if (guestHarnessUsable(source)) {
-            resumeGuestPreset(source, resume.sessionId, resume.fork, cwd, extra);
+            resumeGuestPreset(source, resume.sessionId, resume.fork, cwd, extra, accountPreset);
             return;
         }
         // In this pane, in the session's own directory (both guests resolve an id against the
@@ -8119,6 +8135,11 @@ private:
         m_terminalRecords.finish(exitStatus);
         syncTerminalContext();
         if (m_captureCommand.isEmpty()) return;
+        // A guest sign-in this pane typed has finished: on success every login is asked again.
+        if (!m_guestLoginCommand.isEmpty() && m_captureCommand.trimmed() == m_guestLoginCommand.trimmed()) {
+            m_guestLoginCommand.clear();
+            if (exitStatus == 0) send({{"type", "guest_logins_refresh"}});
+        }
         if (m_backend) m_backend->setOutputCallbackEnabled(true);
         m_capturing = false;
         QJsonObject item{{QStringLiteral("command"), m_captureCommand},
@@ -10679,9 +10700,17 @@ private:
     // guest rows at all) keeps the Tier B launch of 26.9, which is also what a `claude` typed by
     // hand gets. `guestHarnessUsable` is the one place that decides between the two.
 public:
-    // "guest:claude" → "claude"; anything else → empty.
+    // "guest:claude" → "claude"; anything else → empty. A registered account's preset
+    // (#M8S2, "guest:claude:work") is the same CLI, so it answers "claude" too: the account stays in
+    // the preset id itself, which is what every configure, set_model and saved layout carries.
     static QString guestOfPreset(const QString &presetId) {
-        return presetId.startsWith(QStringLiteral("guest:")) ? presetId.mid(6) : QString();
+        return presetId.startsWith(QStringLiteral("guest:")) ? presetId.mid(6).section(QLatin1Char(':'), 0, 0) : QString();
+    }
+    // How a guest preset is named in a sentence: "claude code", or "claude code (work)" for an
+    // account, from the worker's row label when it has sent one.
+    QString guestPresetName(const QString &presetId) const {
+        const QString label = presetById(presetId).value(QStringLiteral("label")).toString();
+        return label.isEmpty() ? guestName(guestOfPreset(presetId)) : label.toLower();
     }
     // Can this guest be the pane's agent through its harness, here and now? Only the worker knows:
     // it owns the adapter and looks for the binary. No preset (no worker yet, an older worker, a
@@ -10709,7 +10738,16 @@ private:
     // "The user picked this guest": the model box, `/model claude`, the palette. One door, so the
     // Tier A/Tier B decision is made once. `model` is a model named with the pick (`/model claude
     // opus`), which only the harness can honour.
-    void pickGuest(const QString &guest, const QString &model = QString()) {
+    // `presetId` is the harness preset when the pick named one — an account's
+    // `guest:claude:work` (#M8S2) — and the guest's default login otherwise.
+    void pickGuest(const QString &guest, const QString &model = QString(), const QString &presetId = QString()) {
+        // An account runs only through its harness: the terminal launch below is the CLI's default
+        // login, and running a pick for "work" on it would bill the wrong account (#M8S2).
+        if (!presetId.isEmpty() && presetId != QStringLiteral("guest:") + guest && !guestHarnessUsable(guest)) {
+            status(QStringLiteral("%1 can only run through its harness, which is not available here.").arg(guestPresetName(presetId)));
+            refreshPickers();
+            return;
+        }
         if (!guestHarnessUsable(guest)) {
             if (!model.isEmpty())
                 status(QStringLiteral("%1 picks its own model when it runs in the terminal; ignoring “%2”.")
@@ -10718,13 +10756,13 @@ private:
             else chooseGuest(guest);
             return;
         }
-        const QString id = QStringLiteral("guest:") + guest;
+        const QString id = presetId.isEmpty() ? QStringLiteral("guest:") + guest : presetId;
         if (id == m_currentPreset && m_configured && m_guest.isEmpty()) {
             if (model.isEmpty()) {
                 // The model it is running, when the harness has said which (card #MDL1, rule 1);
                 // the harness's own name only while nothing knows what that model is.
                 const QString running = modelNameFor(id, m_guestModel);
-                status(QStringLiteral("Already on %1.").arg(running.isEmpty() ? guestName(guest) : running));
+                status(QStringLiteral("Already on %1.").arg(running.isEmpty() ? guestPresetName(id) : running));
                 refreshPickers();
             }
             else setMainModel(model);   // same guest, another model: the harness restarts on it
@@ -10778,10 +10816,11 @@ private:
         const QString guest = event.value(QStringLiteral("guest")).toString(guestOfPreset(m_currentPreset));
         if (guest.isEmpty()) { m_guestSession.clear(); return; }
         m_guestSession = event.value(QStringLiteral("guest_session")).toString();
+        const QString name = guestOfPreset(m_currentPreset) == guest ? guestPresetName(m_currentPreset) : guestName(guest);
         status(m_guestSession.isEmpty()
-                   ? QStringLiteral("%1 is this pane's agent.").arg(guestName(guest))
+                   ? QStringLiteral("%1 is this pane's agent.").arg(name)
                    : QStringLiteral("%1 is this pane's agent (session %2).")
-                         .arg(guestName(guest), m_guestSession.left(8)));
+                         .arg(name, m_guestSession.left(8)));
     }
 
 public:
@@ -10812,7 +10851,8 @@ public:
     // not have the worker's presets yet; the choice then waits for them, as a restored pane's does.
     // `extra` is the row's own argv, kept only as the Tier B fallback for that case.
     void resumeGuestPreset(const QString &guest, const QString &sessionId, bool fork,
-                           const QString &cwd = QString(), const QStringList &extra = QStringList()) {
+                           const QString &cwd = QString(), const QStringList &extra = QStringList(),
+                           const QString &presetId = QString()) {
         if (!cwd.isEmpty() && QFileInfo(cwd).isDir()) {
             m_workspace = cwd;
             // The pane's shell follows the agent into the session's directory, as the Tier B
@@ -10823,21 +10863,27 @@ public:
         m_guestRequest = QJsonObject();
         if (!sessionId.isEmpty()) m_guestRequest.insert(QStringLiteral("resume"), sessionId);
         if (fork) m_guestRequest.insert(QStringLiteral("fork"), true);
-        if (m_presets.isEmpty()) { m_pendingGuestResume = {guest, extra, cwd}; return; }
-        startGuestPreset(guest, extra, cwd);
+        if (m_presets.isEmpty()) { m_pendingGuestResume = {guest, extra, cwd, presetId}; return; }
+        startGuestPreset(guest, extra, cwd, presetId);
     }
 private:
     // The staged resume, once the worker's presets are in (or straight away when they already are).
-    void startGuestPreset(const QString &guest, const QStringList &extra, const QString &cwd) {
+    void startGuestPreset(const QString &guest, const QStringList &extra, const QString &cwd,
+                          const QString &presetId = QString()) {
+        const QString id = presetId.isEmpty() ? QStringLiteral("guest:") + guest : presetId;
         if (!guestHarnessUsable(guest)) {   // the worker cannot run it after all: Tier B, as before
             m_guestRequest = QJsonObject();
+            if (id != QStringLiteral("guest:") + guest) {   // an account's session: never the default login
+                status(QStringLiteral("%1 can only run through its harness, which is not available here.").arg(guestPresetName(id)));
+                return;
+            }
             launchGuest(guest, extra, cwd);
             return;
         }
-        leaveGuest([this, guest] {
+        leaveGuest([this, id] {
             if (m_agentBusy) stopAgent();   // a configure ends the conversation; the turn goes first
-            configurePreset(QStringLiteral("guest:") + guest, false);
-            status(QStringLiteral("Resuming the %1 session on this pane's agent.").arg(guestName(guest)));
+            configurePreset(id, false);
+            status(QStringLiteral("Resuming the %1 session on this pane's agent.").arg(guestPresetName(id)));
         });
     }
 
@@ -15346,6 +15392,7 @@ private:
     // (GT7X, 26.3/26.4). The events themselves are files in guest-events/, deleted as they are
     // handled, so nothing about them is cached here.
     QString m_guestModel;
+    QString m_guestLoginCommand;       // the guest sign-in this pane typed, until it exits (#M8S2)
     QList<GuestQuestion> m_guestQuestions;   // pending, oldest first; the front one is on screen
     int m_guestContextPct = -1;   // the guest's context window share in use; -1 when unknown
     relay::queuesubmit::GuestDelivery m_guestDelivery;
@@ -15789,7 +15836,7 @@ private:
     QString m_presetBeforeGuest;       // the model to go back to if the guest cannot start (29.3)
     QString m_guestSession;            // the guest's own session id: from `configured` (Tier A), or
                                        // the launch, its hooks or its rollout tail (Tier B, 26.7)
-    struct PendingGuestResume { QString guest; QStringList extra; QString cwd; };
+    struct PendingGuestResume { QString guest; QStringList extra; QString cwd; QString preset; };
     PendingGuestResume m_pendingGuestResume;   // a sessions row waiting for the worker's presets
     struct PendingGuestTask { QString guest, task, card; };
     PendingGuestTask m_pendingGuestTask;       // a Verify on a guest waiting for the same (#T71W)

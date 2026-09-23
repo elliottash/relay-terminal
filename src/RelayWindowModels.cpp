@@ -267,9 +267,12 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                     ? QStringLiteral("included, no key needed") : QStringLiteral("needs python3-cryptography");
             } else if (guest) {
                 const QJsonValue loggedIn = preset.value(QStringLiteral("logged_in"));
+                const bool account = !str(preset, "account").isEmpty();   // #M8S2
                 status = loggedIn.isBool() ? (loggedIn.toBool() ? QStringLiteral("logged in on this machine")
-                                                                : QStringLiteral("not logged in: change login runs the CLI's own sign-in"))
-                                           : QStringLiteral("on this machine, runs with your own login");
+                                                                : account ? QStringLiteral("not logged in: sign in runs the CLI's own sign-in for this account")
+                                                                          : QStringLiteral("not logged in: change login runs the CLI's own sign-in"))
+                                           : account ? QStringLiteral("a separate login of this CLI, in its own directory")
+                                                     : QStringLiteral("on this machine, runs with your own login");
             } else if (source == QStringLiteral("env")) {
                 status = QStringLiteral("key from RELAY_%1_API_KEY").arg(id.toUpper().replace(QLatin1Char('-'), QLatin1Char('_')));
             } else if (hasKey) {
@@ -285,7 +288,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             row.label = label;
             row.detail = status;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
-            row.infoUrl = guest ? (id == QStringLiteral("guest:claude") ? QStringLiteral("https://docs.claude.com/en/docs/claude-code")
+            row.infoUrl = guest ? (id.startsWith(QStringLiteral("guest:claude")) ? QStringLiteral("https://docs.claude.com/en/docs/claude-code")
                                                                          : QStringLiteral("https://developers.openai.com/codex"))
                         : preset.value(QStringLiteral("custom")).toBool() ? str(preset, "base_url")
                                                                           : str(preset, "key_url");
@@ -322,15 +325,65 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             } else if (guest) {
                 // The same two buttons as a keyed provider, in the guest's words: its login is its
                 // key. The CLI's own sign-in runs in the pane's terminal; test runs one turn.
-                const QString cli = id.mid(6);
-                const QString login = cli == QStringLiteral("claude") ? QStringLiteral("claude auth login") : cli + QStringLiteral(" login");
-                row.buttonTexts = QStringList{QStringLiteral("change login"), QStringLiteral("test")};
-                row.onButton = [this, request, id, login](int index) {
+                // A registered account (#M8S2) is a row of its own: its sign-in carries its config
+                // directory, and "remove" takes the name out of Relay without signing anybody out.
+                const QString cli = id.mid(6).section(QLatin1Char(':'), 0, 0);
+                const QString account = str(preset, "account");
+                const QString login = !str(preset, "login_command").isEmpty() ? str(preset, "login_command")
+                    : cli == QStringLiteral("claude") ? QStringLiteral("claude auth login") : cli + QStringLiteral(" login");
+                row.buttonTexts = account.isEmpty()
+                    ? QStringList{QStringLiteral("change login"), QStringLiteral("test"), QStringLiteral("add account…")}
+                    : QStringList{QStringLiteral("sign in"), QStringLiteral("test"), QStringLiteral("remove")};
+                if (!account.isEmpty()) {
+                    row.aliases += QStringLiteral(" account subscription ") + account + QLatin1Char(' ') + str(preset, "config_dir");
+                    row.tooltip = QStringLiteral("Runs with %1=%2")
+                        .arg(cli == QStringLiteral("claude") ? QStringLiteral("CLAUDE_CONFIG_DIR") : QStringLiteral("CODEX_HOME"),
+                             str(preset, "config_dir"));
+                }
+                const QString guestLabel = str(preset, "provider").isEmpty() ? label : str(preset, "provider");
+                row.onButton = [this, request, id, login, cli, account, label, guestLabel](int index) {
                     if (index == 0) {
                         // The CLI's sign-in needs a terminal to run in: a pane, which the helper is not.
                         if (m_active) m_active->runLoginCommand(login);
                         else QMessageBox::information(this, QStringLiteral("Models"), QStringLiteral("Open a terminal pane first: `%1` runs there.").arg(login));
-                    } else request({{"type", "test_key"}, {"preset", id}});
+                    } else if (index == 1) {
+                        request({{"type", "test_key"}, {"preset", id}});
+                    } else if (account.isEmpty()) {
+                        // Another login of the same CLI, side by side with this one: a name and a
+                        // directory of its own. Empty directory is a new one under Relay's config,
+                        // signed in next; an existing one (already signed in) is used as it is.
+                        QDialog dialog(this);
+                        dialog.setWindowTitle(QStringLiteral("Add %1 account").arg(guestLabel.toLower()));
+                        auto *form = new QFormLayout(&dialog);
+                        auto *about = new QLabel(QStringLiteral("Another %1 login beside this one, with its own subscription, "
+                                                                "usage limits and sessions.").arg(guestLabel.toLower()), &dialog);
+                        about->setWordWrap(true);
+                        form->addRow(about);
+                        auto *name = new QLineEdit(&dialog);
+                        name->setPlaceholderText(QStringLiteral("work, personal, eth…"));
+                        auto *dir = new QLineEdit(&dialog);
+                        dir->setPlaceholderText(QStringLiteral("empty: a new directory, signed in next"));
+                        form->addRow(QStringLiteral("name"), name);
+                        form->addRow(QStringLiteral("config directory"), dir);
+                        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, name] {
+                            if (!name->text().trimmed().isEmpty()) dialog.accept();
+                        });
+                        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                        form->addRow(buttons);
+                        dialog.resize(520, dialog.sizeHint().height());
+                        if (dialog.exec() != QDialog::Accepted) return;
+                        QJsonObject spec{{QStringLiteral("guest"), cli}, {QStringLiteral("label"), name->text().trimmed()}};
+                        const QString path = QDir::fromNativeSeparators(dir->text().trimmed());
+                        if (!path.isEmpty()) spec.insert(QStringLiteral("config_dir"), path);
+                        request({{"type", "guest_account_save"}, {"id", QStringLiteral("guest-account")},
+                                 {"account", spec}, {"sign_in", path.isEmpty()}});
+                    } else if (QMessageBox::question(this, QStringLiteral("Remove account"),
+                                   QStringLiteral("Remove %1 from Relay? Its login directory is kept, and adding it back "
+                                                  "with the same directory needs no new sign-in.").arg(label)) == QMessageBox::Yes) {
+                        request({{"type", "guest_account_delete"}, {"id", QStringLiteral("guest-account")},
+                                 {"key", cli + QLatin1Char(':') + account}});
+                    }
                 };
             } else if (preset.value(QStringLiteral("custom")).toBool()) {
                 // A custom endpoint (§28.6): edit reopens the form, delete removes it and its key.
@@ -388,8 +441,9 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                     models.rows << link;
                 }
             }
-            if (guest) {
-                // What the guest does when it wants to run a command or change a file. Relay's own
+            if (guest && str(preset, "account").isEmpty()) {
+                // What the guest does when it wants to run a command or change a file. One setting
+                // per CLI, so it sits under the default login's row and covers its accounts too. Relay's own
                 // agent has no per-action approvals and neither does a guest by default (the
                 // owner's rule, 29.1) — but a pane watching a guest work in somebody else's checkout
                 // is a fair reason to want the question, so it is offered rather than assumed. It

@@ -269,7 +269,9 @@ class SessionCommands:
         # GuestTail's own is turned off (`min_poll=0`) so there are not two of them disagreeing.
         self._tail: guest_sessions.GuestTail | None = None
         self._tail_lock = threading.Lock()
-        self._tail_want: tuple[str, str, str] | None = None   # (source, workspace, session id)
+        # (source, workspace, session id, account): the account (#M8S2) says which login's
+        # directory the transcript is in; "" for the CLI's default one.
+        self._tail_want: tuple[str, str, str, str] | None = None
         self._tail_on = False        # `start()` has found the transcript and the rows are being kept
         self._tail_owner = ""        # "agent" (Tier A) or "program" (Tier B); see `_follow`
         self._tail_at = 0.0          # monotonic of the last poll or start attempt
@@ -343,7 +345,8 @@ class SessionCommands:
                     **(refused_fields() if refused_fields else {})}
 
         def apply_target():
-            guest_provider = guest_harness_provider.switch_model(agent, guest_id, request)
+            guest_provider = guest_harness_provider.switch_model(
+                agent, guest_id, request, guest_harness_provider.preset_account(preset_id))
             if guest_id is not None and guest_provider is None:
                 guest_provider = guest_harness_provider.start_provider(
                     preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s,
@@ -1115,7 +1118,8 @@ class SessionCommands:
         root = getattr(getattr(agent, "executor", None), "workspace", None)
         if root is not None:
             workspace = str(getattr(root, "root", "") or "")
-        self._follow("agent", provider.guest_id, workspace, provider.session_id)
+        self._follow("agent", provider.guest_id, workspace, provider.session_id,
+                     getattr(provider, "account", "") or "")
 
     def _program_state(self, program) -> None:
         """Tier B: the pane says what is running in its terminal (`ProgramControl.watch`).
@@ -1145,13 +1149,14 @@ class SessionCommands:
         """Whether Relay may read the guests' files at all (Options > Privacy, review B1)."""
         return guest_sessions.guests_enabled() if self.index_guests is None else bool(self.index_guests)
 
-    def _follow(self, owner: str, source: str, workspace: str, session_id: str) -> None:
+    def _follow(self, owner: str, source: str, workspace: str, session_id: str,
+                account: str = "") -> None:
         """Follow this guest session from the next tick. Nothing is read here: `start()` parses a
         resumed transcript from its first byte, and the protocol thread is not the place for it."""
         session_id = (session_id or "").strip()[:MAX_GUEST_ID]
         if source not in conv_index.GUEST_SOURCES or not session_id:
             return
-        want = (source, workspace or "", session_id)
+        want = (source, workspace or "", session_id, account or "")
         with self._tail_lock:
             if self._tail_owner == owner and self._tail_want == want:
                 return
@@ -1224,8 +1229,9 @@ class SessionCommands:
         try:
             if started:
                 return tail.poll()
-            source, workspace, session_id = want
-            if not tail.start(self.index(), source, workspace or None, session_id=session_id):
+            source, workspace, session_id, account = want
+            if not tail.start(self.index(), source, workspace or None, session_id=session_id,
+                              account=account):
                 return False
             with self._tail_lock:
                 if self._tail_want == want:
