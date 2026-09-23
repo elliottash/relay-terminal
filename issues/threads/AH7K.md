@@ -21,3 +21,6 @@ Claimed by Codex for implementation. I found that Activity starts empty, while P
 
 <!-- relay:entry 20260923T032710Z-wm author=agent kind=event model=gpt-6-sol pane=84c68e0c turn=c9b03d2c079647f6b021ab63746bbc9f/75e1b32bd8014780b675a0b42bbdaa80 -->
 - ✦ agent moved this card · Executing → Needs verification · Activity now displays recent completed turns on open; focused console integration test passes. · evidence docs/qa_evidence/2026-09-22-activity-history/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T032857Z-ge author=agent kind=event model=gpt-6-sol pane=84c68e0c turn=c9b03d2c079647f6b021ab63746bbc9f/75e1b32bd8014780b675a0b42bbdaa80 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-activity-… → {"plans": [], "commits": ["d8e53e5088178b2520e3a9a68b79c2da0b5d097e"], "evidence…

@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: mah7k
 created: '2026-09-22'
 source: User request via Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-activity-history/], related: [QT8C, 4X53], github: null}
+links: {plans: [], commits: [d8e53e5088178b2520e3a9a68b79c2da0b5d097e], evidence: [docs/qa_evidence/2026-09-22-activity-history/], related: [QT8C, 4X53], github: null}
 ---
 # Show historical activity when opening Activity
 
