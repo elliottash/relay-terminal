@@ -1,0 +1,3 @@
+visible terminal composers: 3
+sessions search visible: True
+focus result: PASS

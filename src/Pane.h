@@ -4075,6 +4075,10 @@ public:
     // list's Shift+Enter), so the pane reports "Session loaded", not "Forked from".
     void setInitialState(const QJsonObject &state, const QString &title, bool fork = true) {
         m_initialState = state; m_forkTitle = title; m_initialIsFork = fork;
+        if (!fork) {
+            m_restorePreset = state.value(QStringLiteral("preset")).toString();
+            m_restoreModel = state.value(QStringLiteral("model")).toString();
+        }
         // "Open in new pane": the reference names the conversation, so its saved terminal text
         // comes with it (#0TJ9). A fork's state is the messages themselves and names no session,
         // so there is nothing to look up here — the fork's text is written when its new id lands.
@@ -9178,6 +9182,8 @@ public:
         const QJsonObject reference{{QStringLiteral("version"), 1},
                                     {QStringLiteral("kind"), QStringLiteral("relay_agent_state_ref")},
                                     {QStringLiteral("session_id"), sessionId},
+                                    {QStringLiteral("preset"), item.value(QStringLiteral("preset"))},
+                                    {QStringLiteral("model"), item.value(QStringLiteral("model"))},
                                     {QStringLiteral("session_dir"), directory.isEmpty() ? m_sessionDir : directory}};
         if (newPane) {
             if (onOpenSessionInNewPane) onOpenSessionInNewPane(reference, title);
@@ -12051,7 +12057,7 @@ private:
                 // configure: the pane takes the preset now, says so, and configures when there is
                 // something to ask. Every other door — the box, /model, the picker, a guest
                 // sessions row — configures at once, because each of those *is* somebody asking.
-                if (const QString guest = guestOfPreset(choice); !guest.isEmpty()) {
+                if (const QString guest = guestOfPreset(choice); !guest.isEmpty() && m_initialState.isEmpty()) {
                     m_deferredPreset = choice;
                     m_deferredModel = startModel;
                     m_paneModel = startModel;   // show the ranked model before the guest starts
