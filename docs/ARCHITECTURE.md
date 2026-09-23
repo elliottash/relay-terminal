@@ -925,7 +925,11 @@ from the Keymap description, for each registered id no row or submenu child has,
 is findable the day it is added; `catalogEquivalents()` names the few ids deliberately left out
 because another row does the same thing, and `tests/test_action_catalog.py` checks that list. The
 chord opens the **Actions palette** (`relay::ActionPalette`, `src/ActionPalette.{h,cpp}`): a modal
-over the window with a search box, a button per section and the result list — Recent (the same
+over the window with a central search box and nine stable Compass destinations — Agent, Models,
+Sessions above; Panes, Files, Board left; Terminal, Remote, Options right (#CMPA). Each drops a
+menu of matching catalog sections, with new sections falling into Options. Down from search enters
+results; Up, Left and Right enter their arms (Left and Right preserve cursor movement until the
+text edge). The result list shows Recent (the same
 `palette/recent` store), For this pane (`RelayWindow::paletteForThisPane()`: restart what stopped,
 stop a running turn or its subagents, take control or back to the prompt, clear a full prompt box),
 then every section. The same catalog is rendered by the Actions pane, which is now the shortcut

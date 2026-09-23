@@ -7,6 +7,7 @@
 #include <QEvent>
 #include <QFontMetrics>
 #include <QGuiApplication>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHideEvent>
 #include <QKeyEvent>
@@ -15,6 +16,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QScreen>
 #include <QSet>
 #include <QStyledItemDelegate>
 #include <QToolButton>
@@ -26,11 +28,50 @@ namespace relay {
 
 namespace {
 
-constexpr int kWidth = 640;
+constexpr int kWidth = 800;
 constexpr int kRecentRows = 8;
 constexpr int kMaxResults = 80;
 // Set on a group dropdown and its submenus: their entries carry an item key in QAction::data().
 constexpr const char *kEntriesProperty = "actionPaletteEntries";
+
+// Stable destinations. Catalog sections are allowed to change, but these positions do not.
+const QStringList &compassNames()
+{
+    static const QStringList names{QStringLiteral("Agent"), QStringLiteral("Models"), QStringLiteral("Sessions"),
+                                   QStringLiteral("Panes"), QStringLiteral("Files"), QStringLiteral("Board"),
+                                   QStringLiteral("Terminal"), QStringLiteral("Remote"), QStringLiteral("Options")};
+    return names;
+}
+
+int compassGroup(const QString &section)
+{
+    const QString s = section.toLower();
+    if (s.contains(QStringLiteral("session")) || (s.contains(QStringLiteral("project")) && !s.contains(QStringLiteral("file")))) return 2;
+    if (s.contains(QStringLiteral("model")) || s.contains(QStringLiteral("reasoning"))) return 1;
+    if (s.contains(QStringLiteral("agent")) || s.contains(QStringLiteral("alias")) || s.contains(QStringLiteral("input mode"))) return 0;
+    if (s.contains(QStringLiteral("pane")) || s.contains(QStringLiteral("tab"))) return 3;
+    if (s.contains(QStringLiteral("file"))) return 4;
+    if (s.contains(QStringLiteral("board"))) return 5;
+    if (s.contains(QStringLiteral("terminal")) || s.contains(QStringLiteral("shell"))) return 6;
+    if (s.contains(QStringLiteral("remote")) || s.contains(QStringLiteral("ssh")) || s.contains(QStringLiteral("sharing"))) return 7;
+    return 8; // New catalog sections remain reachable under Options until deliberately assigned.
+}
+
+int compassGroup(const ActionItem &item)
+{
+    const QString &key = item.key;
+    if (key.startsWith(QStringLiteral("board.")) || key.startsWith(QStringLiteral("menu:board"))) return 5;
+    if (key.startsWith(QStringLiteral("sessions.")) || key.startsWith(QStringLiteral("conversations."))
+        || key == QStringLiteral("project.pick") || key == QStringLiteral("projects.open")) return 2;
+    if (key.startsWith(QStringLiteral("model:")) || key.startsWith(QStringLiteral("menu:model"))
+        || key.startsWith(QStringLiteral("agent.model")) || key.startsWith(QStringLiteral("effort:"))
+        || key.startsWith(QStringLiteral("menu:effort"))) return 1;
+    if (key.startsWith(QStringLiteral("files.")) || key == QStringLiteral("project.init")
+        || key == QStringLiteral("project.detach")) return 4;
+    if (key.startsWith(QStringLiteral("ssh.")) || key.startsWith(QStringLiteral("remote."))
+        || key.startsWith(QStringLiteral("pane.share"))) return 7;
+    return compassGroup(item.section.isEmpty() ? QStringLiteral("Other") : item.section);
+}
 
 // The label is the item's text, so a test or a screen reader reads a row the ordinary way.
 enum Role {
@@ -197,18 +238,19 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
     layout->setContentsMargins(10, 10, 10, 8);
     layout->setSpacing(6);
 
-    m_search = new QLineEdit(this);
+    m_buttonRow = new QWidget(this);
+    m_buttonGrid = new QGridLayout(m_buttonRow);
+    m_buttonGrid->setContentsMargins(0, 0, 0, 0);
+    m_buttonGrid->setHorizontalSpacing(2);
+    m_buttonGrid->setVerticalSpacing(2);
+    layout->addWidget(m_buttonRow);
+
+    m_search = new QLineEdit(m_buttonRow);
     m_search->setObjectName(QStringLiteral("actionPaletteSearch"));
-    m_search->setPlaceholderText(QStringLiteral("Search actions, options and slash commands…"));
+    m_search->setPlaceholderText(QStringLiteral("Search actions…"));
     m_search->setClearButtonEnabled(false);
     m_search->installEventFilter(this);
-    layout->addWidget(m_search);
-
-    m_buttonRow = new QWidget(this);
-    m_buttonLines = new QVBoxLayout(m_buttonRow);
-    m_buttonLines->setContentsMargins(0, 0, 0, 0);
-    m_buttonLines->setSpacing(2);
-    layout->addWidget(m_buttonRow);
+    m_buttonGrid->addWidget(m_search, 3, 3, 1, 3);
 
     m_list = new QListWidget(this);
     m_list->setObjectName(QStringLiteral("actionPaletteList"));
@@ -235,11 +277,14 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
         m_returnFocus = nullptr;
         close();
     });
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *) {
+        if (m_open) update();
+    });
     m_delegate = new RowDelegate(m_list);
     m_list->setItemDelegate(m_delegate);
     layout->addWidget(m_list, 1);
 
-    connect(m_search, &QLineEdit::textChanged, this, [this] { rebuild(); });
+    connect(m_search, &QLineEdit::textChanged, this, [this] { m_inResults = false; rebuild(); });
     connect(m_list, &QListWidget::itemEntered, this, [this](QListWidgetItem *item) {
         if (item != nullptr && item->flags().testFlag(Qt::ItemIsSelectable)) m_list->setCurrentItem(item);
     });
@@ -317,6 +362,7 @@ void ActionPalette::open()
     m_items = m_catalog ? m_catalog() : QList<ActionItem>();
     m_flat.reset();
     m_submenu.reset();
+    m_inResults = false;
     applyPalette();
     rebuildButtons();
     {
@@ -362,8 +408,8 @@ void ActionPalette::applyPalette()
                       "QLineEdit#actionPaletteSearch { background: %3; color: %4; border: 1px solid %2;"
                       " border-radius: 5px; padding: 6px 8px; }"
                       "QLineEdit#actionPaletteSearch:focus { border-color: %5; }"
-                      "QToolButton#actionPaletteGroup { background: transparent; color: %6; border: 1px solid transparent;"
-                      " border-radius: 4px; padding: 2px 7px; }"
+                      "QToolButton#actionPaletteGroup { background: %1; color: %6; border: 1px solid %2;"
+                      " border-radius: 10px; padding: 2px 5px; }"
                       "QToolButton#actionPaletteGroup:hover, QToolButton#actionPaletteGroup:focus { color: %4; border-color: %5; }"
                       "QListWidget#actionPaletteList { background: transparent; color: %4; border: none; outline: none; }")
                       .arg(pal.color(QPalette::AlternateBase).name(), pal.color(QPalette::Mid).name(),
@@ -374,14 +420,19 @@ void ActionPalette::applyPalette()
 
 void ActionPalette::rebuildButtons()
 {
-    QStringList sections;
-    for (const ActionItem &item : std::as_const(m_items))
-        if (!sections.contains(sectionOf(item))) sections << sectionOf(item);
-    if (sections == m_sections && m_buttons.size() == sections.size()) return;
-    m_sections = sections;
+    QList<int> ids;
+    for (int group = 0; group < compassNames().size(); ++group) {
+        for (const ActionItem &item : std::as_const(m_items)) {
+            if (compassGroup(item) == group) { ids << group; break; }
+        }
+    }
+    if (ids == m_groupIds && m_buttons.size() == ids.size()) return;
+    m_groupIds = ids;
+    m_sections.clear();
     qDeleteAll(m_buttons);
     m_buttons.clear();
-    for (int i = 0; i < m_sections.size(); ++i) {
+    for (int i = 0; i < m_groupIds.size(); ++i) {
+        m_sections << compassNames().at(m_groupIds.at(i));
         auto *button = new QToolButton(m_buttonRow);
         button->setObjectName(QStringLiteral("actionPaletteGroup"));
         button->setText(QString(m_sections.at(i)).replace(QLatin1Char('&'), QStringLiteral("&&")) + QStringLiteral(" ▾"));
@@ -396,32 +447,29 @@ void ActionPalette::rebuildButtons()
     m_buttonWidth = -1;
 }
 
-// The buttons fill a line and wrap onto the next, so nine groups fit in 640 px.
+// Three arms meet at the search box. At narrow widths they become three labelled rows.
 void ActionPalette::layoutButtons(int width)
 {
-    if (width == m_buttonWidth && m_buttonLines->count() > 0) return;
+    if (width == m_buttonWidth && m_buttonGrid->count() > 0) return;
     m_buttonWidth = width;
-    while (QLayoutItem *line = m_buttonLines->takeAt(0)) {
-        if (QLayout *inner = line->layout())
-            while (QLayoutItem *child = inner->takeAt(0)) delete child;   // the buttons themselves stay
-        delete line;
-    }
-    QHBoxLayout *line = nullptr;
-    int used = 0;
-    for (QToolButton *button : std::as_const(m_buttons)) {
-        const int w = button->sizeHint().width();
-        if (line == nullptr || (used > 0 && used + w > width)) {
-            if (line != nullptr) line->addStretch(1);
-            line = new QHBoxLayout;
-            line->setSpacing(2);
-            m_buttonLines->addLayout(line);
-            used = 0;
+    while (QLayoutItem *item = m_buttonGrid->takeAt(0)) delete item;
+    m_compact = width < 760;
+    if (m_compact) {
+        m_buttonGrid->addWidget(m_search, 0, 0, 1, 3);
+        for (int i = 0; i < m_buttons.size(); ++i) {
+            const int group = m_groupIds.at(i);
+            m_buttonGrid->addWidget(m_buttons.at(i), group / 3 + 1, group % 3);
         }
-        line->addWidget(button);
-        used += w + line->spacing();
+    } else {
+        m_buttonGrid->addWidget(m_search, 3, 3, 1, 3);
+        for (int i = 0; i < m_buttons.size(); ++i) {
+            const int group = m_groupIds.at(i);
+            if (group < 3) m_buttonGrid->addWidget(m_buttons.at(i), 2 - group, 3, 1, 3, Qt::AlignHCenter);
+            else if (group < 6) m_buttonGrid->addWidget(m_buttons.at(i), 3, 2 - (group - 3));
+            else m_buttonGrid->addWidget(m_buttons.at(i), 3, 6 + group - 6);
+        }
     }
-    if (line != nullptr) line->addStretch(1);
-    m_buttonRow->setVisible(!m_buttons.isEmpty());
+    m_buttonGrid->invalidate();
 }
 
 QList<QAbstractButton *> ActionPalette::groupButtons() const
@@ -444,7 +492,7 @@ QMenu *ActionPalette::groupMenu(int index)
     m_menu->setProperty(kEntriesProperty, true);
     QList<ActionItem> items;
     for (const ActionItem &item : std::as_const(m_items))
-        if (sectionOf(item) == m_sections.at(index)) items << item;
+        if (compassGroup(item) == m_groupIds.at(index)) items << item;
     populateMenu(m_menu, items);
     return m_menu;
 }
@@ -482,7 +530,12 @@ void ActionPalette::popupGroup(int index)
     if (menu == nullptr) return;
     m_lastButton = index;
     QToolButton *button = m_buttons.at(index);
-    menu->popup(button->mapToGlobal(QPoint(0, button->height())));
+    QPoint at = button->mapToGlobal(QPoint(0, button->height()));
+    if (QScreen *screen = QGuiApplication::screenAt(at)) {
+        const QRect bounds = screen->availableGeometry().adjusted(8, 8, -8, -8);
+        at.setX(std::clamp(at.x(), bounds.left(), std::max(bounds.left(), bounds.right() - menu->sizeHint().width() + 1)));
+    }
+    menu->popup(at);
     if (!menu->actions().isEmpty()) menu->setActiveAction(menu->actions().constFirst());
 }
 
@@ -491,7 +544,24 @@ void ActionPalette::focusButton(int index)
     if (m_buttons.isEmpty()) return;
     index = (index % int(m_buttons.size()) + int(m_buttons.size())) % int(m_buttons.size());
     m_lastButton = index;
+    m_inResults = false;
     m_buttons.at(index)->setFocus(Qt::TabFocusReason);
+}
+
+int ActionPalette::armOf(int index) const
+{
+    return index < 0 || index >= m_groupIds.size() ? -1 : m_groupIds.at(index) / 3;
+}
+
+int ActionPalette::buttonInDirection(int direction, int from) const
+{
+    int next = -1;
+    for (int i = 0; i < m_groupIds.size(); ++i) {
+        if (armOf(i) != direction) continue;
+        if (from < 0) return i;
+        if (i > from) { next = i; break; }
+    }
+    return next;
 }
 
 int ActionPalette::focusedButton() const
@@ -508,8 +578,7 @@ void ActionPalette::reposition()
     const QMargins margins = layout()->contentsMargins();
     layoutButtons(width - margins.left() - margins.right());
     const int maxHeight = m_window->height() * 6 / 10;
-    int chrome = margins.top() + margins.bottom() + m_search->sizeHint().height() + layout()->spacing();
-    if (!m_buttons.isEmpty()) chrome += m_buttonLines->sizeHint().height() + layout()->spacing();
+    const int chrome = margins.top() + margins.bottom() + m_buttonGrid->sizeHint().height() + layout()->spacing();
     int content = 4;
     for (int i = 0; i < m_list->count(); ++i) content += m_list->sizeHintForRow(i);
     const int listHeight = std::max(std::min(content, maxHeight - chrome), m_list->count() > 0 ? 32 : 0);
@@ -517,6 +586,22 @@ void ActionPalette::reposition()
     setFixedSize(width, chrome + listHeight);
     const int top = std::clamp(m_window->height() / 10, 8, std::max(8, m_window->height() - height() - 8));
     move((m_window->width() - width) / 2, top);
+}
+
+void ActionPalette::paintEvent(QPaintEvent *event)
+{
+    QFrame::paintEvent(event);
+    if (m_compact) return;
+    const int selected = focusedButton();
+    if (selected < 0) return;
+    const QPoint start = m_search->mapTo(this, m_search->rect().center());
+    const QPoint end = m_buttons.at(selected)->mapTo(this, m_buttons.at(selected)->rect().center());
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(palette().color(QPalette::Highlight), 1.5));
+    painter.drawLine(start, end);
+    painter.setBrush(palette().color(QPalette::Highlight));
+    painter.drawEllipse(end, 3, 3);
 }
 
 // ----- rows ---------------------------------------------------------------------------------------
@@ -601,10 +686,10 @@ void ActionPalette::rebuild()
             header(QStringLiteral("For this pane"));
             for (const ActionItem &item : here) rows.append({item, QString(), QString()});
         }
-        for (const QString &section : std::as_const(m_sections)) {
-            header(section);
+        for (int group = 0; group < m_groupIds.size(); ++group) {
+            header(m_sections.at(group));
             for (const ActionItem &item : std::as_const(m_items))
-                if (sectionOf(item) == section) rows.append({item, QString(), QString()});
+                if (compassGroup(item) == m_groupIds.at(group)) rows.append({item, QString(), QString()});
         }
     } else {
         for (const ActionItem &item : std::as_const(m_items)) rows += typedRows(item);
@@ -821,6 +906,7 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
     const bool ours = isToggleKey(key) || key->key() == Qt::Key_Escape || key->key() == Qt::Key_Return
                       || key->key() == Qt::Key_Enter || key->key() == Qt::Key_Up || key->key() == Qt::Key_Down
                       || key->key() == Qt::Key_Tab || key->key() == Qt::Key_Backtab
+                      || (onSearch && (key->key() == Qt::Key_Left || key->key() == Qt::Key_Right))
                       || (onButton && (key->key() == Qt::Key_Left || key->key() == Qt::Key_Right || key->key() == Qt::Key_Space));
     if (type == QEvent::ShortcutOverride) {
         if (ours) key->accept();
@@ -833,10 +919,34 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
     }
     if (onSearch) {
         switch (key->key()) {
-        case Qt::Key_Up: moveCurrent(-1); return true;
-        case Qt::Key_Down: moveCurrent(1); return true;
-        case Qt::Key_PageUp: moveCurrent(-8); return true;
-        case Qt::Key_PageDown: moveCurrent(8); return true;
+        case Qt::Key_Up:
+            if (!m_inResults) { const int i = buttonInDirection(0); if (i >= 0) focusButton(i); return true; }
+            for (int i = 0; i < m_rows.size(); ++i) {
+                if (!m_rows.at(i).header.isEmpty()) continue;
+                if (m_list->currentRow() == i) m_inResults = false;
+                else moveCurrent(-1);
+                break;
+            }
+            return true;
+        case Qt::Key_Down:
+            if (m_inResults) moveCurrent(1);
+            else m_inResults = true; // the first result is highlighted on open
+            return true;
+        case Qt::Key_PageUp: m_inResults = true; moveCurrent(-8); return true;
+        case Qt::Key_PageDown: m_inResults = true; moveCurrent(8); return true;
+        case Qt::Key_Left:
+            if (key->modifiers() == Qt::NoModifier && !m_search->hasSelectedText() && m_search->cursorPosition() == 0) {
+                const int i = buttonInDirection(1); if (i >= 0) focusButton(i);
+                return true;
+            }
+            return false;
+        case Qt::Key_Right:
+            if (key->modifiers() == Qt::NoModifier && !m_search->hasSelectedText()
+                && m_search->cursorPosition() == m_search->text().size()) {
+                const int i = buttonInDirection(2); if (i >= 0) focusButton(i);
+                return true;
+            }
+            return false;
         case Qt::Key_Return:
         case Qt::Key_Enter: activateCurrent(ctrl); return true;
         case Qt::Key_Tab: focusButton(m_lastButton); return true;
@@ -861,15 +971,30 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
     }
     const int index = m_buttons.indexOf(button);
     switch (key->key()) {
-    case Qt::Key_Left: focusButton(index - 1); return true;
-    case Qt::Key_Right: focusButton(index + 1); return true;
+    case Qt::Key_Up:
+    case Qt::Key_Left:
+    case Qt::Key_Right: {
+        const int direction = key->key() == Qt::Key_Up ? 0 : key->key() == Qt::Key_Left ? 1 : 2;
+        if (armOf(index) == direction) {
+            const int next = buttonInDirection(direction, index);
+            if (next >= 0) focusButton(next);
+        } else if ((armOf(index) == 1 && direction == 2) || (armOf(index) == 2 && direction == 1)) {
+            int inner = -1;
+            for (int i = 0; i < index; ++i) if (armOf(i) == armOf(index)) inner = i;
+            if (inner >= 0) focusButton(inner);
+            else m_search->setFocus(Qt::OtherFocusReason);
+        } else {
+            const int next = buttonInDirection(direction);
+            if (next >= 0) focusButton(next);
+        }
+        return true;
+    }
     case Qt::Key_Return:
     case Qt::Key_Enter:
     case Qt::Key_Down:
     case Qt::Key_Space: popupGroup(index); return true;
-    case Qt::Key_Tab:
-    case Qt::Key_Backtab:
-    case Qt::Key_Up:
+    case Qt::Key_Tab: focusButton(index + 1); return true;
+    case Qt::Key_Backtab: focusButton(index - 1); return true;
     case Qt::Key_Escape:
         m_lastButton = index;
         m_search->setFocus(Qt::OtherFocusReason);

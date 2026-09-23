@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The command palette (card #MAGP): a modal over the window with one search box, a row of group
-// buttons that each drop a menu, and a result list that shows Recent and For this pane before
+// The Actions palette (cards #MAGP and #CMPA): a modal over the window with one search box, a
+// three-arm Compass of group buttons, and a result list that shows Recent and For this pane before
 // anything is typed.
 //
 // What is asserted is what the card's "Done means" asks of the widget itself: it opens, closes and
 // opens again every time (#XAME was a menu that would not reopen); typing finds an item by the
 // start of its label and by the `/slash` spelling in its aliases; the empty list is Recent then
 // For this pane; Enter runs the row, reports its key and closes, Ctrl+Enter runs it and stays;
-// each group button's menu holds exactly its section's items with their shortcuts; the keyboard
-// walks from the search box into the button row and back; Esc, the opening chord and a click
+// each Compass group menu holds its assigned catalog items with their shortcuts; the keyboard
+// moves from search into each arm and back; Esc, the opening chord and a click
 // elsewhere close it; with an editor installed, a right-click on a row or a dropdown entry offers
 // "Change shortcut…" and hands over the item's key. The window's catalog, recent store and contextual rows are the caller's,
 // and are faked here.
@@ -67,6 +67,7 @@ class ActionPaletteTests : public QObject {
     QLineEdit *m_elsewhere = nullptr;   // something else in the window, to click on and to hold focus
     ActionPalette *m_palette = nullptr;
     QStringList m_ran, m_chosen;
+    bool m_fullCompass = false;
 
     QList<ActionItem> catalog()
     {
@@ -92,6 +93,14 @@ class ActionPaletteTests : public QObject {
                                      runs(item(QStringLiteral("agent.model.opus"), QStringLiteral("Agent"), QStringLiteral("opus")))};
         };
         out << models;
+        if (m_fullCompass) {
+            out << runs(item(QStringLiteral("model.pick"), QStringLiteral("Models"), QStringLiteral("Pick model")));
+            out << runs(item(QStringLiteral("sessions.open"), QStringLiteral("Sessions & Projects"), QStringLiteral("Sessions")));
+            out << runs(item(QStringLiteral("terminal.clear"), QStringLiteral("Terminal"), QStringLiteral("Clear terminal")));
+            out << runs(item(QStringLiteral("remote.join"), QStringLiteral("Remote and sharing"), QStringLiteral("Join remote")));
+            out << runs(item(QStringLiteral("options.open"), QStringLiteral("Shortcuts"), QStringLiteral("Options")));
+            out << runs(item(QStringLiteral("plugin.surprise"), QStringLiteral("Custom plugin"), QStringLiteral("Surprise plugin")));
+        }
         return out;
     }
 
@@ -106,6 +115,7 @@ private slots:
     {
         m_ran.clear();
         m_chosen.clear();
+        m_fullCompass = false;
         m_window = new QWidget;
         m_window->resize(1000, 700);
         auto *layout = new QVBoxLayout(m_window);
@@ -138,7 +148,7 @@ private slots:
             QVERIFY(m_palette->isOpen());
             QVERIFY(m_palette->isVisible());
             QTRY_VERIFY(m_palette->searchBox()->hasFocus());
-            QVERIFY(m_palette->width() <= 640);
+            QVERIFY(m_palette->width() <= 800);
             QVERIFY(m_palette->height() <= m_window->height() * 6 / 10);
             QCOMPARE(m_palette->x(), (m_window->width() - m_palette->width()) / 2);
             QTest::keyClicks(m_palette->searchBox(), QStringLiteral("zz"));
@@ -194,10 +204,12 @@ private slots:
                                QStringLiteral("Stop the agent"), QStringLiteral("Restart shell")};
         QCOMPARE(rows.mid(0, head.size()), head);
         // Then every group in catalog order, so the empty list reaches everything.
-        QVERIFY(rows.indexOf(QStringLiteral("# Panes & tabs")) > rows.indexOf(QStringLiteral("# For this pane")));
-        QVERIFY(rows.indexOf(QStringLiteral("# Board")) > rows.indexOf(QStringLiteral("# Panes & tabs")));
+        QVERIFY(rows.indexOf(QStringLiteral("# Agent")) > rows.indexOf(QStringLiteral("# For this pane")));
+        QVERIFY(rows.indexOf(QStringLiteral("# Board")) > rows.indexOf(QStringLiteral("# Panes")));
         QVERIFY(rows.contains(QStringLiteral("Model  ›")));
         QCOMPARE(m_palette->currentKey(), QStringLiteral("files.open"));   // the highlight skips the header
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("files.open"));   // enters the results
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
         QCOMPARE(m_palette->currentKey(), QStringLiteral("board.open"));
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
@@ -206,8 +218,11 @@ private slots:
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);
-        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);   // one past the top wraps to the bottom
-        QCOMPARE(m_palette->currentKey(), QStringLiteral("agent.model"));
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("files.open"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);   // returns home from the first result
+        QCOMPARE(m_palette->currentKey(), QStringLiteral("files.open"));
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Up);   // from home, enter the upper arm
+        QTRY_VERIFY(m_palette->groupButtons().at(0)->hasFocus());
     }
 
     void typingFindsByLabelStart()
@@ -283,6 +298,7 @@ private slots:
         QTest::keyClicks(m_palette->searchBox(), QStringLiteral("model"));
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
+        QTest::keyClick(m_palette->searchBox(), Qt::Key_Down);
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Return);
         QCOMPARE(m_chosen, QStringList{QStringLiteral("agent.model.opus")});
         QVERIFY(!m_palette->isOpen());
@@ -292,12 +308,14 @@ private slots:
     {
         m_palette->open();
         const QList<QAbstractButton *> buttons = m_palette->groupButtons();
-        QCOMPARE(buttons.size(), 4);
-        const QStringList sections{QStringLiteral("Panes & tabs"), QStringLiteral("Board"), QStringLiteral("Files"), QStringLiteral("Agent")};
-        const QList<QStringList> expected{{QStringLiteral("Restart shell"), QStringLiteral("Split right")},
-                                          {QStringLiteral("Board")},
+        QCOMPARE(buttons.size(), 5);
+        const QStringList sections{QStringLiteral("Agent"), QStringLiteral("Models"), QStringLiteral("Panes"),
+                                   QStringLiteral("Files"), QStringLiteral("Board")};
+        const QList<QStringList> expected{{QStringLiteral("Stop the agent")},
+                                          {QStringLiteral("Model")},
+                                          {QStringLiteral("Restart shell"), QStringLiteral("Split right")},
                                           {QStringLiteral("Open file…")},
-                                          {QStringLiteral("Stop the agent"), QStringLiteral("Model")}};
+                                          {QStringLiteral("Board")}};
         for (int i = 0; i < buttons.size(); ++i) {
             // `&` is drawn, not read as a mnemonic: "Panes & tabs", never "Panes _tabs".
             QCOMPARE(buttons.at(i)->text().replace(QStringLiteral("&&"), QStringLiteral("&")), sections.at(i) + QStringLiteral(" ▾"));
@@ -308,42 +326,105 @@ private slots:
             QCOMPARE(labels, expected.at(i));
         }
         // The shortcut rides on the right of the entry, and a submenu is a real submenu.
-        QMenu *panes = m_palette->groupMenu(0);
+        QMenu *panes = m_palette->groupMenu(2);
         QCOMPARE(panes->actions().at(0)->text(), QStringLiteral("Restart shell\tCtrl+Shift+R"));
-        QMenu *agent = m_palette->groupMenu(3);
-        QMenu *models = agent->actions().at(1)->menu();
+        QMenu *agent = m_palette->groupMenu(1);
+        QMenu *models = agent->actions().at(0)->menu();
         QVERIFY(models != nullptr);
         emit models->aboutToShow();
         QCOMPARE(models->actions().size(), 2);
         // Choosing an entry runs it, reports it and closes the palette.
-        m_palette->groupMenu(1)->actions().at(0)->trigger();
+        m_palette->groupMenu(4)->actions().at(0)->trigger();
         QCOMPARE(m_ran, QStringList{QStringLiteral("board.open")});
         QCOMPARE(m_chosen, QStringList{QStringLiteral("board.open")});
         QVERIFY(!m_palette->isOpen());
     }
 
-    void tabWalksTheButtonRow()
+    void tabWalksTheCompassGroups()
     {
         m_palette->open();
         QTRY_VERIFY(m_palette->searchBox()->hasFocus());
         const QList<QAbstractButton *> buttons = m_palette->groupButtons();
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);
         QTRY_VERIFY(buttons.at(0)->hasFocus());
-        QTest::keyClick(buttons.at(0), Qt::Key_Right);
+        QTest::keyClick(buttons.at(0), Qt::Key_Tab);
         QTRY_VERIFY(buttons.at(1)->hasFocus());
         QTest::keyClick(buttons.at(1), Qt::Key_Left);
-        QTest::keyClick(buttons.at(0), Qt::Key_Left);   // wraps
-        QTRY_VERIFY(buttons.at(3)->hasFocus());
-        QTest::keyClick(buttons.at(3), Qt::Key_Escape);   // back to the search box, still open
+        QTRY_VERIFY(buttons.at(2)->hasFocus());
+        QTest::keyClick(buttons.at(2), Qt::Key_Escape);   // back to the search box, still open
         QVERIFY(m_palette->isOpen());
         QTRY_VERIFY(m_palette->searchBox()->hasFocus());
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);   // back to the button it left
-        QTRY_VERIFY(buttons.at(3)->hasFocus());
-        QTest::keyClicks(buttons.at(3), QStringLiteral("bo"));   // typing goes to the search box
+        QTRY_VERIFY(buttons.at(2)->hasFocus());
+        QTest::keyClicks(buttons.at(2), QStringLiteral("bo"));   // typing goes to the search box
         QCOMPARE(m_palette->searchBox()->text(), QStringLiteral("bo"));
         QTRY_VERIFY(m_palette->searchBox()->hasFocus());
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Escape);
         QVERIFY(!m_palette->isOpen());
+    }
+
+    void compassArmsAndCaretEdges()
+    {
+        m_fullCompass = true;
+        m_palette->open();
+        const QList<QAbstractButton *> buttons = m_palette->groupButtons();
+        QCOMPARE(buttons.size(), 9);
+        QMenu *options = m_palette->groupMenu(8);
+        QCOMPARE(options->actions().size(), 2); // unfamiliar sections remain reachable
+        QCOMPARE(labelOf(options->actions().at(1)), QStringLiteral("Surprise plugin"));
+        QLineEdit *search = m_palette->searchBox();
+        QTest::keyClick(search, Qt::Key_Up);
+        QTRY_VERIFY(buttons.at(0)->hasFocus());
+        QTest::keyClick(buttons.at(0), Qt::Key_Up);
+        QTRY_VERIFY(buttons.at(1)->hasFocus());
+        QTest::keyClick(buttons.at(1), Qt::Key_Up);
+        QTRY_VERIFY(buttons.at(2)->hasFocus());
+        QTest::keyClick(buttons.at(2), Qt::Key_Escape);
+        QTRY_VERIFY(search->hasFocus());
+
+        QTest::keyClick(search, Qt::Key_Left);
+        QTRY_VERIFY(buttons.at(3)->hasFocus());
+        QTest::keyClick(buttons.at(3), Qt::Key_Left);
+        QTRY_VERIFY(buttons.at(4)->hasFocus());
+        QTest::keyClick(buttons.at(4), Qt::Key_Left);
+        QTRY_VERIFY(buttons.at(5)->hasFocus());
+        QTest::keyClick(buttons.at(5), Qt::Key_Right);
+        QTRY_VERIFY(buttons.at(4)->hasFocus());
+        QTest::keyClick(buttons.at(4), Qt::Key_Right);
+        QTest::keyClick(buttons.at(3), Qt::Key_Right);
+        QTRY_VERIFY(search->hasFocus());
+
+        QTest::keyClicks(search, QStringLiteral("abc"));
+        search->setCursorPosition(1);
+        QTest::keyClick(search, Qt::Key_Right);
+        QVERIFY(search->hasFocus());
+        QCOMPARE(search->cursorPosition(), 2);
+        QTest::keyClick(search, Qt::Key_Right);
+        QCOMPARE(search->cursorPosition(), 3);
+        QTest::keyClick(search, Qt::Key_Right);
+        QTRY_VERIFY(buttons.at(6)->hasFocus());
+        QTest::keyClick(buttons.at(6), Qt::Key_Right);
+        QTRY_VERIFY(buttons.at(7)->hasFocus());
+        QTest::keyClick(buttons.at(7), Qt::Key_Right);
+        QTRY_VERIFY(buttons.at(8)->hasFocus());
+        QTest::keyClicks(buttons.at(8), QStringLiteral("d"));
+        QTRY_VERIFY(search->hasFocus());
+        QCOMPARE(search->text(), QStringLiteral("abcd"));
+    }
+
+    void compassCompactsInANarrowWindow()
+    {
+        m_fullCompass = true;
+        m_window->resize(450, 700);
+        m_palette->open();
+        QCoreApplication::processEvents();
+        QVERIFY(m_palette->width() <= 418);
+        QVERIFY(m_palette->height() <= 420);
+        QVERIFY(m_palette->searchBox()->isVisible());
+        for (QAbstractButton *button : m_palette->groupButtons()) {
+            QVERIFY(button->isVisible());
+            QVERIFY(m_palette->rect().contains(button->mapTo(m_palette, button->rect().center())));
+        }
     }
 
     void downOnAButtonDropsItsMenu()
@@ -356,7 +437,7 @@ private slots:
         QMenu *menu = m_palette->findChild<QMenu *>(QStringLiteral("actionPaletteMenu"));
         QVERIFY(menu != nullptr);
         QTRY_VERIFY(menu->isVisible());
-        QCOMPARE(labelOf(menu->activeAction()), QStringLiteral("Restart shell"));
+        QCOMPARE(labelOf(menu->activeAction()), QStringLiteral("Stop the agent"));
         menu->hide();
     }
 
@@ -440,7 +521,11 @@ private slots:
         m_palette->open();
         QTest::keyClick(m_palette->searchBox(), Qt::Key_Tab);
         QTRY_VERIFY(m_palette->groupButtons().at(0)->hasFocus());
-        QTest::keyClick(m_palette->groupButtons().at(0), Qt::Key_Down);
+        QTest::keyClick(m_palette->groupButtons().at(0), Qt::Key_Tab);
+        QTRY_VERIFY(m_palette->groupButtons().at(1)->hasFocus());
+        QTest::keyClick(m_palette->groupButtons().at(1), Qt::Key_Tab);
+        QTRY_VERIFY(m_palette->groupButtons().at(2)->hasFocus());
+        QTest::keyClick(m_palette->groupButtons().at(2), Qt::Key_Down);
         QMenu *dropdown = m_palette->findChild<QMenu *>(QStringLiteral("actionPaletteMenu"));
         QVERIFY(dropdown != nullptr);
         QTRY_VERIFY(dropdown->isVisible());

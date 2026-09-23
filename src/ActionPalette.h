@@ -5,16 +5,16 @@
 // intuitive access to everything").
 //
 // A frameless overlay parented to a top-level window, centred horizontally near the top, about
-// 640 px wide and never taller than 60% of the window. Top to bottom:
-//  1. a search box — typing filters every item (and every submenu's children, as "Parent › Child")
-//     across label, detail, aliases, section, shortcut and the item's `/slash` spelling;
-//  2. a row of group buttons, one per distinct ActionItem::section in catalog order, each dropping
-//     a QMenu of that section's items with their shortcut on the right;
-//  3. the result list. With an empty query: Recent, For this pane, then every section in turn.
+// 800 px wide and never taller than 60% of the window. The search box sits at the centre of
+// three fixed group arms (Agent/Models/Sessions above, Panes/Files/Board left,
+// Terminal/Remote/Options right), with results below. Each group drops a QMenu. Catalog sections
+// that are not yet assigned to an arm remain reachable under Options; narrow windows stack the
+// arms as rows. Typing searches every item, including submenu children and `/slash` spellings.
 //
-// Keys: Up/Down move; Enter runs the highlighted row and closes; Ctrl+Enter runs it and stays
-// open; Tab moves from the search box into the button row, Left/Right walk it, Enter/Down/Space
-// drop its menu, Esc goes back to the search box. Esc in the search box leaves a submenu first,
+// Keys: Down enters results; Up/Left/Right enter the corresponding arm from search (Left/Right
+// only at a text edge). Repeating a direction moves outward. Enter runs a result or opens a group;
+// Ctrl+Enter runs a result and stays open. Tab walks groups, and typing from a group returns to
+// search. Esc on a group goes home. Esc in search leaves a submenu first,
 // then closes. A click anywhere else in the window closes it, and so does `toggle()` — the
 // opening chord. An item with `children` is a submenu: choosing it lists its children in place.
 // An item with `stayOpen` behaves as Ctrl+Enter always. With `setEditShortcut`, a right-click on
@@ -42,7 +42,7 @@ class QListWidget;
 class QMenu;
 class QStyledItemDelegate;
 class QToolButton;
-class QVBoxLayout;
+class QGridLayout;
 
 namespace relay {
 
@@ -87,6 +87,7 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void hideEvent(QHideEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
 
 private:
     struct Row {
@@ -109,6 +110,8 @@ private:
     void popupGroup(int index);
     void focusButton(int index);
     int focusedButton() const;
+    int buttonInDirection(int direction, int from = -1) const;
+    int armOf(int index) const;
     bool isToggleKey(const QKeyEvent *event) const;
     QList<ActionItem> flatCatalog();
     void populateMenu(QMenu *menu, const QList<ActionItem> &items);
@@ -123,10 +126,11 @@ private:
 
     QLineEdit *m_search = nullptr;
     QWidget *m_buttonRow = nullptr;
-    QVBoxLayout *m_buttonLines = nullptr;   // one QHBoxLayout per line; the row wraps
-    int m_buttonWidth = -1;                   // the width the lines were laid out for
+    QGridLayout *m_buttonGrid = nullptr;
+    int m_buttonWidth = -1;
     QList<QToolButton *> m_buttons;
-    QStringList m_sections;
+    QStringList m_sections;              // the nine stable Compass group names, when populated
+    QList<int> m_groupIds;
     QListWidget *m_list = nullptr;
     QStyledItemDelegate *m_delegate = nullptr;   // the list's row painter; it holds the window's colours
     QPointer<QMenu> m_menu;
@@ -139,6 +143,8 @@ private:
     std::optional<ActionItem> m_submenu;    // the item whose children are listed, if any
     QPointer<QWidget> m_returnFocus;
     int m_lastButton = 0;
+    bool m_inResults = false;
+    bool m_compact = false;
     bool m_open = false;
 };
 
