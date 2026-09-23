@@ -1,13 +1,14 @@
 ---
 id: P9SN
 type: work
-status: executing
+status: needs-verification
 labels: [bug, sessions, guest]
 assignee: codex
+implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User report in Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-guest-preview/], related: [D2PX], github: null}
+links: {plans: [], commits: [c8a6312b51d29266cd1cd2302df4397d2c113a59], evidence: [docs/qa_evidence/2026-09-23-guest-preview/], related: [D2PX], github: null}
 ---
 # Guest preview uses setup text instead of conversation content
 

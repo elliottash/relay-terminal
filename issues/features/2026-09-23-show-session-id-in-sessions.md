@@ -1,13 +1,14 @@
 ---
 id: S7D4
 type: work
-status: executing
+status: needs-verification
 labels: [feature, sessions, gui]
 assignee: codex
+implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User request in Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-session-ids/], related: [D2PX], github: null}
+links: {plans: [], commits: [a5c05608d93dd431742551a7fdccbe9919e146a5], evidence: [docs/qa_evidence/2026-09-23-session-ids/], related: [D2PX], github: null}
 ---
 # Show the session ID in Sessions
 
@@ -34,6 +35,6 @@ Sessions rows show an ID line under the title and opening prompt. A narrow colum
 
 ## Tests
 - PASS: `scripts/relay-build --target relay-conversations-tests`.
-- PASS: `RELAY_SHOT_DIR=$PWD/docs/qa_evidence/2026-09-23-session-ids xvfb-run -a build/relay-conversations-tests rowsCarryTheirSummaryAndTags` (3 QtTest checks).
-- PASS: `scripts/relay-build --target relay`.
+- PASS: `RELAY_SHOT_DIR=$PWD/docs/qa_evidence/2026-09-23-session-ids xvfb-run -a build/relay-conversations-tests sessionRowsExposeFullIds` (3 QtTest checks; tooltip and context-menu copy verified).
+- PASS: `scripts/relay-build --target relay` and the exact commit tree build in `land.py`.
 - Evidence: `docs/qa_evidence/2026-09-23-session-ids/sessions-with-ids.png`.
