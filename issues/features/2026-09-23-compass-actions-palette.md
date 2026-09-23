@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: n
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23
-links: {plans: [], commits: [b1f05a32b08c5a50feebdc14127cbfc0d36dec6c], evidence: [docs/qa_evidence/2026-09-23-compass-actions/, docs/qa_evidence/2026-09-23-compass-refinement/], related: [MAGP], github: null}
+links: {plans: [], commits: [b1f05a32b08c5a50feebdc14127cbfc0d36dec6c, b55b1e6c3594ea3b7f26e0df2eec5f1503477840], evidence: [docs/qa_evidence/2026-09-23-compass-actions/, docs/qa_evidence/2026-09-23-compass-refinement/], related: [MAGP], github: null}
 ---
 # Compass layout and directional navigation for Actions
 

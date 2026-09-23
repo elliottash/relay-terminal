@@ -92,3 +92,7 @@ The card stays in **Executing** with both revisions queued (horizontal top row +
 <!-- relay:entry 20260923T180504Z-k4 author=codex kind=progress -->
 ### Codex · 2026-09-23 18:05
 Built the horizontal Agent / Models / Sessions row and stronger Compass button styling. Up from search reaches Models; Left and Right traverse that row. The focused palette suite passed (24 tests), and isolated dark, narrow, and light captures are in `docs/qa_evidence/2026-09-23-compass-refinement/`. Returned #CMPA to needs-verification for an independent visual check.
+
+<!-- relay:entry 20260923T180658Z-q7 author=codex kind=event -->
+### Codex · 2026-09-23 18:06
+Linked implementation commit `b55b1e6c3594ea3b7f26e0df2eec5f1503477840` to #CMPA after its exact-tree build passed.
