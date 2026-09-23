@@ -282,7 +282,7 @@ const QList<Kind> &kinds() {
         {QStringLiteral("options"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("settings"), QStringLiteral("Options"), QStringLiteral("tools"), Glyph::Options},
         {QStringLiteral("actions"), QStringLiteral("Actions"), QStringLiteral("tools"), Glyph::Actions},
-        {QStringLiteral("sessions"), QStringLiteral("Projects and Sessions"), QStringLiteral("tools"), Glyph::Sessions},
+        {QStringLiteral("sessions"), QStringLiteral("Sessions & Projects"), QStringLiteral("tools"), Glyph::Sessions},
         // The models pane (card #MDL1 t:a11): providers, available models and priorities, beside
         // the pane it serves. A tool surface like Options, whose gear it borrows.
         {QStringLiteral("models"), QStringLiteral("Models"), QStringLiteral("tools"), Glyph::Options},

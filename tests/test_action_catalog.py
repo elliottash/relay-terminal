@@ -87,8 +87,10 @@ class ActionCatalogTest(unittest.TestCase):
         for part in ('searchableActions()', 'paletteForThisPane()', 'palette/recent', 'rememberPaletteChoice(key)',
                      'setToggleKeys', 'setEditShortcut'):
             self.assertIn(part, toggle)
-        # Right-click › Change shortcut… lands on Options › Keyboard.
-        self.assertIn('openSettingsPane(relay::SettingsPane::Mode::Options, QStringLiteral("keyboard"))', member('editShortcutOf'))
+        # Right-click › Change shortcut… takes the new keys and writes them (Keymap::setBinding).
+        edit = member('editShortcutOf')
+        for part in ('QKeySequenceEdit', 'actionForKey(chosen)', 'setBinding(key, {chosen})', 'setBinding(key, {})'):
+            self.assertIn(part, edit)
         here = member('paletteForThisPane')
         for action in ('pane.restartShell', 'agent.stop', 'agent.stopAllSubagents', 'control.human', 'prompt.clear'):
             self.assertIn(f'QStringLiteral("{action}")', here)

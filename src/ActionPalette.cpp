@@ -3,6 +3,7 @@
 
 #include <QAbstractButton>
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QEvent>
 #include <QFontMetrics>
 #include <QGuiApplication>
@@ -224,6 +225,16 @@ ActionPalette::ActionPalette(QWidget *window, std::function<QList<ActionItem>()>
         showShortcutMenu(m_rows.at(row).item.key, m_list->viewport()->mapToGlobal(pos));
     });
     m_list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    // Focus that moves on in the window (a key that opened the Board, a click the filter did not
+    // see, a pane that took the keyboard) closes the palette where the focus now is: it is an
+    // overlay for choosing, and must not stay painted over what the user moved on to. Its own
+    // dropdowns, the right-click menu and a dialog are other windows, so they do not count.
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
+        // Not while it is closing: hiding the focused search box moves focus on by itself first.
+        if (!m_open || !isVisible() || now == nullptr || now == this || isAncestorOf(now) || now->window() != m_window) return;
+        m_returnFocus = nullptr;
+        close();
+    });
     m_delegate = new RowDelegate(m_list);
     m_list->setItemDelegate(m_delegate);
     layout->addWidget(m_list, 1);
@@ -282,7 +293,9 @@ void ActionPalette::showShortcutMenu(const QString &key, const QPoint &globalPos
         close();
         if (edit) edit(key);
     });
+    // Its one entry is highlighted, so the Menu key then Enter reaches it without an arrow first.
     m_shortcutMenu->popup(globalPos);
+    m_shortcutMenu->setActiveAction(change);
 }
 
 void ActionPalette::toggle()
@@ -779,6 +792,20 @@ bool ActionPalette::eventFilter(QObject *watched, QEvent *event)
         auto *widget = qobject_cast<QWidget *>(watched);
         if (widget != nullptr && widget->window() == m_window && widget != this && !isAncestorOf(widget)) close();
         return false;
+    }
+
+    // The Menu key (or Shift+F10) in the search box: the line edit would open its own Undo/Cut
+    // menu, so the highlighted row's "Change shortcut…" is offered instead. The key press may
+    // already have offered it; the context-menu event that follows is then only swallowed.
+    if (watched == m_search && type == QEvent::ContextMenu && m_editShortcut
+        && static_cast<QContextMenuEvent *>(event)->reason() == QContextMenuEvent::Keyboard) {
+        if (!(m_shortcutMenu && m_shortcutMenu->isVisible())) {
+            if (QListWidgetItem *current = m_list->currentItem(); current != nullptr && !currentKey().isEmpty()) {
+                const QRect rect = m_list->visualItemRect(current);
+                showShortcutMenu(currentKey(), m_list->viewport()->mapToGlobal(QPoint(rect.left() + 24, rect.bottom())));
+            }
+        }
+        return true;
     }
 
     // The application filter sees every event while the palette is open: rule most out cheaply.

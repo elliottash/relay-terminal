@@ -2255,6 +2255,9 @@ private:
                                                                                 ? QStringLiteral("the running program")
                                                                                 : pane->foregroundProgramName()),
                                 QStringLiteral("control.human"));
+        else
+            items << actionItem(here, QStringLiteral("Take control of the terminal"),
+                                QStringLiteral("Keys go straight to the shell until you give it back"), QStringLiteral("control.human"));
         if (!pane->composerText().trimmed().isEmpty())
             items << actionItem(here, QStringLiteral("Clear the prompt box"), QStringLiteral("One undo step: Ctrl+Z brings it back"),
                                 QStringLiteral("prompt.clear"));
@@ -5138,6 +5141,7 @@ private:
             const QString section = action.category == QStringLiteral("agent") ? QStringLiteral("Agent")
                 : action.category == QStringLiteral("terminal") ? QStringLiteral("Terminal")
                 : action.category == QStringLiteral("palette") ? QStringLiteral("Shortcuts")
+                : action.category == QStringLiteral("window") ? QStringLiteral("Relay")
                 : QStringLiteral("Panes and tabs");
             items << actionItem(section, label, detail, action.id);
             present.insert(action.id);

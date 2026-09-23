@@ -20,8 +20,9 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
-#include <QTest>
 #include <QScrollBar>
+#include <QTest>
+#include <QTimer>
 #include <QVBoxLayout>
 
 using namespace relay;
@@ -361,6 +362,42 @@ private slots:
 
     // Right-click on a row: "Change shortcut…" closes the palette and hands the row's key to the
     // caller, which opens Options › Keyboard at that action. Nothing runs.
+    // Focus that moves on in the window closes the palette and stays where it went (live drive,
+    // 2026-09-22: Ctrl+Shift+A opened the Board and the palette stayed painted over it).
+    void focusMovingOnCloses()
+    {
+        auto *other = new QLineEdit(m_window);
+        m_window->layout()->addWidget(other);
+        other->show();
+        m_palette->open();
+        QTRY_VERIFY(m_palette->searchBox()->hasFocus());
+        other->setFocus(Qt::OtherFocusReason);
+        QTRY_VERIFY(!m_palette->isOpen());
+        QVERIFY(!m_palette->isVisible());
+        QVERIFY(other->hasFocus());   // not handed back to where the palette was opened from
+        m_palette->open();            // and it opens again
+        QTRY_VERIFY(m_palette->searchBox()->hasFocus());
+    }
+
+    // The keyboard's context-menu event in the search box (what the Menu key becomes on X11)
+    // offers the highlighted row's "Change shortcut…", not the line edit's Undo/Cut menu.
+    void menuKeyInTheSearchBoxOffersChangeShortcut()
+    {
+        QStringList edited;
+        m_palette->setEditShortcut([&edited](const QString &key) { edited << key; });
+        m_palette->open();
+        QTest::keyClicks(m_palette->searchBox(), QStringLiteral("rest"));
+        // Were the line edit's own menu to open, it would block in exec(): close it so the test fails.
+        QTimer::singleShot(1500, [] { if (QWidget *popup = QApplication::activePopupWidget()) popup->close(); });
+        const QPoint at(4, 4);
+        QContextMenuEvent menuKey(QContextMenuEvent::Keyboard, at, m_palette->searchBox()->mapToGlobal(at));
+        QApplication::sendEvent(m_palette->searchBox(), &menuKey);
+        QTRY_VERIFY(m_palette->shortcutMenu() != nullptr && m_palette->shortcutMenu()->isVisible());
+        m_palette->shortcutMenu()->actions().at(0)->trigger();
+        QCOMPARE(edited, QStringList{QStringLiteral("pane.restart")});
+        QVERIFY(!m_palette->isOpen());
+    }
+
     void rightClickOnARowOffersChangeShortcut()
     {
         QStringList edited;
