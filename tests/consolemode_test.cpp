@@ -498,12 +498,17 @@ void ctrlClickEditsTheActualFile()
     CHECK_EQ(context.seen, QStringList({home->path()}));
 }
 
-void theContextGetsFirstRefusalOnEveryLinkKind()
+void theContextGetsFirstRefusalOnLocalLinkKinds()
 {
     StubContext context;
     context.workspace = home->path();
     Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
     QStringList opened;
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent({{"event", "ready"}});
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    sent.clear();
     console.onOpenOption = [&opened](const QString &section, const QString &row) {
         opened << QStringLiteral("option ") + section + QLatin1Char('/') + row;
     };
@@ -517,18 +522,24 @@ void theContextGetsFirstRefusalOnEveryLinkKind()
     const QString card = relay::links::cardTarget(QStringLiteral("K7Q2"));
     const QString path = home->path();
 
-    // Refused by the context: each one goes on to the window, at the thing it names.
+    // Local links go to the context first. A session link opens the saved conversation through
+    // the worker, even when this console has a context of its own.
     context.swallow = false;
     console.openOutputTarget(option, -1, false);
     console.openOutputTarget(session, -1, false);
     console.openOutputTarget(card, -1, false);
     console.openOutputTarget(path, -1, false);
-    CHECK_EQ(context.seen, QStringList({option, session, card, path}));
-    CHECK_EQ(context.kinds, QList<int>({int(relay::links::Kind::Option), int(relay::links::Kind::Session),
+    CHECK_EQ(context.seen, QStringList({option, card, path}));
+    CHECK_EQ(context.kinds, QList<int>({int(relay::links::Kind::Option),
                                         int(relay::links::Kind::Card), int(relay::links::Kind::Path)}));
     CHECK_EQ(opened, QStringList({QStringLiteral("option terminal/copy_on_select"),
-                                  QStringLiteral("session 0f3a"), QStringLiteral("card K7Q2"),
+                                  QStringLiteral("card K7Q2"),
                                   QStringLiteral("path ") + path}));
+    CHECK_EQ(sent.size(), 1);
+    if (sent.size() == 1) {
+        CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("conversation_open"));
+        CHECK_EQ(sent.first().value("session_id").toString(), QStringLiteral("0f3a"));
+    }
 
     // Swallowed by the context — Options revealing its own row, a card page zooming to itself —
     // and then nothing reaches the window: no second Options pane, no second card.
@@ -536,12 +547,14 @@ void theContextGetsFirstRefusalOnEveryLinkKind()
     context.seen.clear();
     context.kinds.clear();
     opened.clear();
+    sent.clear();
     console.openOutputTarget(option, -1, false);
     console.openOutputTarget(session, -1, false);
     console.openOutputTarget(card, -1, false);
     console.openOutputTarget(path, -1, false);
-    CHECK_EQ(context.seen.size(), 4);
+    CHECK_EQ(context.seen.size(), 3);
     CHECK(opened.isEmpty());
+    CHECK_EQ(sent.size(), 1); // the session bypasses the local context in both cases
     }
 
 
@@ -1079,12 +1092,14 @@ void repeatedEnterKeepsTheFirstQueuedPrompt()
     CHECK(console.composerText().isEmpty());
     sent.clear();
     enter();
-    CHECK_EQ(sent.size(), 1);
-    if (sent.size() != 1) return;
-    CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("ask"));
-    CHECK_EQ(sent.first().value("when").toString(), QStringLiteral("steer"));
-    CHECK_EQ(sent.first().value("text").toString(), QStringLiteral("first queued prompt"));
-    const QString steerId = sent.first().value("id").toString();
+    // Steering synchronizes terminal sharing before it sends the queued prompt.
+    CHECK_EQ(sent.size(), 2);
+    if (sent.size() != 2) return;
+    CHECK_EQ(sent.at(0).value("type").toString(), QStringLiteral("terminal_context_update"));
+    CHECK_EQ(sent.at(1).value("type").toString(), QStringLiteral("ask"));
+    CHECK_EQ(sent.at(1).value("when").toString(), QStringLiteral("steer"));
+    CHECK_EQ(sent.at(1).value("text").toString(), QStringLiteral("first queued prompt"));
+    const QString steerId = sent.at(1).value("id").toString();
     CHECK_EQ(console.queuedPrompts(), 1);
     sent.clear();
     enter();
@@ -1516,7 +1531,7 @@ int main(int argc, char **argv)
     cases::theContextBlockAndTheAskFieldsAreTheContextsOwn();
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
-    cases::theContextGetsFirstRefusalOnEveryLinkKind();
+    cases::theContextGetsFirstRefusalOnLocalLinkKinds();
     cases::shiftClickOnALocalPathOpensItExternally();
     cases::ctrlClickEditsTheActualFile();
     cases::aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted();

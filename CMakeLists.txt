@@ -964,6 +964,7 @@ if(BUILD_TESTING)
     # which trips over the raw string in src/Keymap.h ("Ctrl+Shift+(").
     foreach(console_target relay-consolemode-tests relay-console-harness)
         target_sources(${console_target} PRIVATE
+            src/Pane.cpp src/PaneEvents.cpp src/PaneSession.cpp src/PaneUi.cpp src/PaneRuntime.cpp
             src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h
             src/Pane.h src/ApprovalsPane.h src/AgentHost.h src/TranscriptReplay.h src/RelayMark.h
             src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h
