@@ -1,18 +1,17 @@
 ---
 id: 00G1
 type: work
-status: discussing
+status: executing
 labels: [feature, models, ui, design]
 assignee: agent
-implemented_by: anthropic/claude-opus-5-5 via claude-code
-session: 3eb5e6f8-b4a5-4638-8963-891c0e17b166
-waiting_on: owner
+implemented_by: openai/gpt-6-sol via codex
+session: 31883d9c-ec40-4d0e-a526-58a4648ecccd
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Owner in a Relay guest session (Claude Code), 2026-09-23
-links: {plans: [], commits: [], evidence: [], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
+links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
 ---
-# Redesign the Models pane: two tabs (Models, Routing) borrowed from Cursor/Raycast/Linear
+# Redesign the five Models tabs and clarify their labels
 
 ## Issue
 in general,  the available, priorities, effort, and jobs tabs are all terrible. i thought we had some recent edits that tried to improve those. were there some edits that havent laneded or werent committed or maybe were overwritten
@@ -20,42 +19,51 @@ in general,  the available, priorities, effort, and jobs tabs are all terrible. 
 they are just not intuitive, and they are actually slow as well, the checkboxes are not responsive and they are laggy. and its just a small and simple finicky table. are there analogous pages eleswhere we can look at and borrow good design
 
 yes,
+no i want the 5 tabs still
+but change the tab headers to make them more intuitive, especially available and priorities; jobs too
 
 ## Done means
-The Models pane has two tabs, **Models** and **Routing**, replacing Available, Priorities, Effort and Jobs. Providers stays as it is.
-- A new user can, with no instructions: turn a model on or off, set its effort, reorder a class, tie two models so one is picked at random, and give Planning its own models.
-- There are no modal dialogs (rank box, Jobs list dialog), and no editing that works only by clicking a hidden cell.
-- Every control responds within a frame. Toggles and drags change the row in place, and the other panes hear about it on the coalesced path (#HJ1T).
-- Failure looks like: any of those tasks needing a tooltip or a pop-up, or a whole-table rebuild on a toggle.
+The Models pane still has exactly five tabs: Providers, Available, Priorities, Effort, and Jobs, with their current responsibilities and saved tab selection preserved.
+- Available makes on/off state obvious and responds immediately to a click; quick successive clicks persist correctly and other panes receive the final state.
+- Priorities visibly explains ordering, fallbacks, ties/randomization, and the Alt+M box cutoff. Adding, moving, tying, and removing models use discoverable controls.
+- Effort shows each model's supported levels and selected level clearly, with a direct way to change it.
+- Jobs clearly distinguishes inherited routing from a custom list, and its list can be edited without a hidden interaction or modal rank dialog.
+- Providers remains a distinct place to manage accounts and model sources; all five tabs fit and work in a narrow pane.
+- Verification includes interaction timing, storage/routing behavior, targeted tests, and screenshots from the running UI.
+- The five visible tab headers describe their tasks in plain language. In particular, Available becomes **Enabled**, Priorities becomes **Pick order**, and Jobs becomes **Agent jobs** (or shorter wording with the same meaning if narrow-pane testing requires it). Stable internal tab IDs and saved selection continue to work.
 
 ## Plan
-**Goal:** replace the four finicky table tabs with two simple, fast surfaces, borrowing proven patterns:
-- Cursor / VS Code Copilot "Manage Models": a flat toggle list.
-- Raycast AI: effort shown on the model's own row.
-- Linear / macOS service order / OpenRouter routing: short drag lists per class.
-- Continue.dev / Zed roles: jobs that say "same as Main" until customised.
+**Goal:** retain the five existing tabs and make their controls clear and responsive. Use patterns from familiar model lists and sortable lists within each tab, while retaining Relay's existing curation and routing storage.
 
-**Findings:**
-- `src/ModelPicker.cpp` (1,869 lines) draws Available, Priorities and Effort from one `QTreeWidget` with 10 columns, switched by `m_tier`. `rebuild()` clears and redraws every row. Per-row widgets (`setItemWidget` for ▲▼) are expensive in a `QTreeWidget`.
-- Ranks are edited through a `QInputDialog` opened by clicking the rank cell (`ModelPicker.cpp:370`).
-- `src/JobsTab.cpp` (875 lines) is a second table, and its ranked lists live in a modal `QDialog` (`editRankedOverride`).
-- `src/ModelsPane.cpp` hosts both. Storage is `models::curation` in `src/ModelCatalog.cpp`: `tierList`, `setTierRank`, `setAvailable`, box cutoff. The Jobs overrides are `rolestore`.
-- Storage and routing (#RND7 ties, weighting) stay exactly as they are. This is a UI rewrite only.
+**Findings:** `ModelsPane` hosts Providers, Available, Priorities, Effort, and Jobs. `ModelPicker` shares a `QTreeWidget` across Available, Priorities, and Effort; `JobsTab` has a separate table and modal ranked-list editor. The synchronous cross-pane update after edits was addressed separately by #HJ1T. Rank editing and ties are currently hidden behind a rank-cell click.
 
 **Steps:**
-1. **Models tab** (new `src/ModelsListView.{h,cpp}`). One row per model, grouped under provider headers, with a search field on top. Each row reads: name · effort chips (low / med / high / xhigh, only the levels that model has) · context and speed in grey · on/off switch on the right. Build it with `QListView` and a delegate painting a `QAbstractListModel` (no item widgets). A toggle changes one row's data (`dataChanged`) and never rebuilds the view. This replaces Available and Effort.
-2. **Routing tab** (new `src/ModelsRoutingView.{h,cpp}`). One card per class (Main, High/Plan, Flash, Local), then one per job (Planning, Subagents, Helper).
-   - Each class card is a short vertical list with a ⋮⋮ grip and ⌥↑↓ to reorder. Dropping a row onto another row (not between rows) ties them: a bracket plus a "random" chip, and a drag out or "untie" in the context menu separates them. The top group is labelled "runs on" and the rest "fallbacks". A "+ add model" line at the end opens an inline filtered completer, not a dialog.
-   - Each job card is collapsed to one line with a dropdown: "Same as Main (Fable 5.1)", or "Custom…". Custom expands the same drag list inline.
-   - The "show in alt+m box" cutoff becomes a divider line you drag, rather than a checkbox on every row.
-3. Wire both views to the existing `curation::` / `rolestore::` setters, and have them call `ModelPicker::changed()`'s equivalent so the coalesced `modelsCurated()` (#HJ1T) tells the panes.
-4. Retire the old tabs from `ModelsPane::tabIds()`, and delete the dead paths in `ModelPicker` that only served them. The alt+m box picker, which also uses `ModelPicker`, keeps working. Old tab ids in saved layouts map to the new tabs.
-5. Tests: model/view tests that toggling, effort and tie/untie write the right settings and do **not** rebuild the view (count `modelReset`). Also: drag reorder, a job going from "same as" to custom and back, and a narrow-pane layout. Capture isolated Xvfb screenshots of both tabs.
+1. Profile an Available toggle and inspect the redraw path after #HJ1T. Keep the clicked control responsive and update only affected rows where possible; preserve immediate persistence and batched cross-pane notification.
+2. **Providers:** simplify scan order and labels for providers, accounts, and offered models; preserve its own tab and existing actions.
+3. **Available:** show a searchable, provider-grouped model list with an obvious on/off control and clear disabled state. Keep availability separate from effort.
+4. **Priorities:** show each class as a readable ordered list with visible add, move, remove, and tie controls. Label groups of tied models as randomized and make fallbacks and the Alt+M box cutoff explicit. Preserve keyboard access and existing rank storage.
+5. **Effort:** show supported reasoning levels and the current selection on each model row, with a direct selector; keep Effort as its own tab.
+6. **Jobs:** show each job's inherited or custom routing plainly. Edit custom ranked lists inline with the same visible ordering and tie controls used in Priorities, while keeping Jobs as its own tab.
+7. Keep all five tab IDs and saved layouts compatible. Add focused tests for availability, ranking/ties, effort, job inheritance/customization, keyboard access, and narrow-pane fit; capture real UI screenshots on an isolated profile.
 
-**Risks / decisions for the owner:**
-- Q1: are two tabs (Models, Routing) right, or keep Effort as its own tab? Recommendation: two, with effort on the row.
-- Q2: tie by drag-onto (Linear-style) plus an "untie" menu item, rather than typing rank numbers? Recommendation: yes. Numbers go away in the UI; storage keeps ranks.
-- Q3: should the "in box" cutoff become one draggable divider per class? Recommendation: yes.
-- Several other sessions touch `ModelPicker.cpp` and `JobsTab.cpp`. New views go in new files so the rewrite does not collide, and the old code is removed only in step 4.
+**Design choices to validate while implementing:** Use explicit tie/untie actions alongside drag and keyboard moves, so randomization is discoverable without typing duplicate rank numbers. Represent the Alt+M cutoff with a labelled control that states which models are included. Check these controls in the actual narrow UI before settling the interaction.
 
-**Verify:** the new view tests; `relay-modelspane-tests`; manual run on an isolated profile, doing each Done-means task with no instructions, with screenshots in `docs/qa_evidence/2026-09-2x-00G1/`.
+**Risks:** Shared widgets serve multiple tabs and the Alt+M picker; changes must not alter the picker unexpectedly. Several sessions use these files, so claim files before editing and land only this card's hunks.
+
+**Verify:** targeted model picker, Models pane, and Jobs tests; a measured rapid-toggle interaction; manual completion of each Done-means task in a narrow and normal pane; screenshots in `docs/qa_evidence/<date>-00G1/`.
+**Visible tab headers:** Start with Sources | Enabled | Pick order | Effort | Agent jobs. Keep the existing `providers`, `available`, `priorities`, `effort`, and `jobs` IDs in tab data and layout state. Check the five labels together at the supported narrow width; shorten only the visible words if needed, and use tooltips to preserve the full meaning. Update tab-label assertions and screenshots accordingly.
+
+## Decisions
+- Owner, 2026-09-23: "no i want the 5 tabs still". Preserve five distinct pages and their responsibilities: Providers, Available, Priorities, Effort, and Jobs.
+- Owner, 2026-09-23: "but change the tab headers to make them more intuitive, especially available and priorities; jobs too". Rename their visible headers. Proposed labels: **Sources, Enabled, Pick order, Effort, Agent jobs**. Keep stable internal IDs so saved tab selection still opens the same page.
+
+## Execution Summary
+2026-09-23, first slice: commit `af112403` changed the five visible tab headers to Sources, Enabled, Pick order, Effort, and Agent jobs; at 420 px, Order and Roles replace the two longer labels. The internal tab IDs remain unchanged. A 2 px reduction on each side lets all five tabs fit. The broader per-tab control redesign remains open on this card.
+
+![Five tabs at 420 px on the Pick order page](docs/qa_evidence/2026-09-23-00G1-labels/03-priorities.png)
+![Five tabs at 420 px on the Agent jobs page](docs/qa_evidence/2026-09-23-00G1-labels/05-jobs.png)
+
+## Tests
+- `scripts/relay-build --target relay-modelspane-tests` — passed.
+- `xvfb-run -a build/relay-modelspane-tests` — 24 passed, 0 failed.
+- Isolated config screenshot run: `RELAY_N4PW_EVIDENCE=docs/qa_evidence/2026-09-23-00G1-labels xvfb-run -a build/relay-modelspane-tests everyTabKeepsItsMainControlsInANarrowPane` — passed; five images captured.
