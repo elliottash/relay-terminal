@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 session: 6323395d-d98b-4e09-844a-7b6747db6b0a
 rank: zzzzzzzzzzzzzzzzzzr
 created: '2026-09-23'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-palette-WM4K/palette-results.png], related: [MAGP], github: null}
+links: {plans: [], commits: [a0d54f593e3fc4c9e3f0b281ca4018ce3eb80fc5], evidence: [docs/qa_evidence/2026-09-23-palette-WM4K/palette-results.png], related: [MAGP], github: null}
 ---
 # Search active conversations from the Actions palette
 
