@@ -40,6 +40,7 @@ public:
         m_entries.prepend(entry);
         while (m_entries.size() > 32) m_entries.removeLast();
         m_active = true;
+        m_awaitingOutput = expectEcho && !command.isEmpty();
         m_echo = command.toUtf8();
         m_echo.replace("\r", "");
         // Do not allocate another unbounded copy while testing for an echo.
@@ -99,6 +100,7 @@ public:
     }
 
     bool active() const { return m_active; }
+    bool awaitingOutput() const { return active() && m_awaitingOutput; }
 
 private:
     static constexpr int OutputLimit = 64 * 1024;
@@ -115,7 +117,7 @@ private:
     const QString m_pane = uuid();
     QString m_generation = uuid();
     qint64 m_sequence = 0;
-    bool m_active = false, m_stopped = false, m_checkEcho = false;
+    bool m_active = false, m_stopped = false, m_checkEcho = false, m_awaitingOutput = false;
     Parser m_parser = Parser::Text;
     QByteArray m_osc, m_utf8, m_echo, m_echoPending, m_batch;
     int m_utf8Length = 0, m_controlUtf8Remaining = 0;
@@ -348,7 +350,7 @@ private:
     }
     void resetParser() {
         m_parser = Parser::Text;
-        m_stopped = m_checkEcho = false;
+        m_stopped = m_checkEcho = m_awaitingOutput = false;
         m_utf8Length = m_controlUtf8Remaining = 0;
         m_osc.clear(); m_utf8.clear(); m_echo.clear(); m_echoPending.clear();
     }
@@ -427,7 +429,8 @@ private:
             if (command.toUtf8() != commandBytes || cwd.toUtf8() != cwdBytes) return false;
             const auto latest = records.records();
             const bool same = records.active() && !latest.isEmpty()
-                && latest.first().toObject()["command"].toString() == command;
+                && (latest.first().toObject()["command"].toString() == command
+                    || (command.isEmpty() && records.awaitingOutput()));
             if (same) records.outputStarted();
             else {
                 records.begin(command.isEmpty() ? QStringLiteral("[command text unavailable]") : command,

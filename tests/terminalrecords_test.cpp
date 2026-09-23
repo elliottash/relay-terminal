@@ -195,6 +195,36 @@ private Q_SLOTS:
         QCOMPARE(records.latestUser()["output"].toString(), QString("fresh\n"));
     }
 
+    void emptyRemoteMarkerPreservesPendingComposer() {
+        Records records; Stream stream;
+        const QString id = records.begin("printf known", "/remote", "ssh.example", "agent");
+        QVERIFY(records.awaitingOutput());
+        QVERIFY(!stream.append(records, commandMarker("", "/", "wrong"), "secret", "ssh.example"));
+        QVERIFY(records.awaitingOutput());
+        stream.append(records, "printf known\r\n" + commandMarker("") + "known\n", "secret", "ssh.example");
+        QVERIFY(!records.awaitingOutput());
+        QCOMPARE(records.records().size(), 1);
+        const auto current = records.records().first().toObject();
+        QCOMPARE(current["command_id"].toString(), id);
+        QCOMPARE(current["command"].toString(), QString("printf known"));
+        QCOMPARE(current["origin"].toString(), QString("agent"));
+        QCOMPARE(current["output"].toString(), QString("known\n"));
+        QCOMPARE(current["availability"].toString(), QString("captured"));
+        // A later empty native marker must not reuse this already-started record.
+        stream.append(records, commandMarker("") + "unattributed", "secret", "ssh.example");
+        QCOMPARE(records.records().size(), 2);
+        QCOMPARE(records.latestUser()["availability"].toString(), QString("unsupported"));
+        QCOMPARE(records.latestUser()["output"].toString(), QString());
+        QVERIFY(records.latestUser()["command_id"].toString() != id);
+        Records native; Stream nativeStream;
+        nativeStream.append(native, commandMarker(""), "secret", "ssh.example");
+        QCOMPARE(native.latestUser()["availability"].toString(), QString("unsupported"));
+        native.begin("native", "/", "ssh.example", "user", false);
+        QVERIFY(!native.awaitingOutput());
+        nativeStream.append(native, commandMarker(""), "secret", "ssh.example");
+        QCOMPARE(native.latestUser()["availability"].toString(), QString("unsupported"));
+    }
+
     void alternateScreenInOneBatch() {
         for (const QByteArray &params : {QByteArray("47"), QByteArray("1047"), QByteArray("1049"),
                                         QByteArray("25;1049;2004"), QByteArray("47;25")}) {
