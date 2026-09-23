@@ -485,6 +485,22 @@ target_include_directories(relay-voice PUBLIC src)
 target_link_libraries(relay-voice PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-voice PRIVATE ${RELAY_WARNINGS})
 
+# Read aloud (card #MDA7): what of a reply's Markdown is said, how it is cut into sentences, and
+# which command-line speaker runs. QtTextToSpeech is optional, the way Pdf is: found, it speaks
+# with the OS voices; not found, spd-say, espeak-ng, espeak, say or PowerShell do.
+add_library(relay-speech STATIC src/Speech.cpp src/Speech.h)
+target_include_directories(relay-speech PUBLIC src)
+target_link_libraries(relay-speech PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-speech PRIVATE ${RELAY_WARNINGS})
+find_package(${RELAY_QT} QUIET COMPONENTS TextToSpeech)
+if(TARGET ${RELAY_QT}::TextToSpeech)
+    target_link_libraries(relay-speech PRIVATE ${RELAY_QT}::TextToSpeech)
+    target_compile_definitions(relay-speech PRIVATE RELAY_HAVE_QTTEXTTOSPEECH)
+    message(STATUS "Relay: read aloud uses ${RELAY_QT} TextToSpeech")
+else()
+    message(STATUS "Relay: read aloud uses a command-line speaker (${RELAY_QT} TextToSpeech not found)")
+endif()
+
 # Colour themes (issue 0JA7): reading a theme file (TOML) into a ThemeSpec, the tokens a theme
 # must carry, and discovery across the built-in and the user folder. Plain Qt Gui so every rule
 # can be tested without a window;
@@ -601,7 +617,7 @@ if(RELAY_BUILD_APP)
     # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
-    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
+    target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     target_link_libraries(relay PRIVATE relay-actionpalette)
     target_compile_definitions(relay PRIVATE
@@ -912,7 +928,7 @@ if(BUILD_TESTING)
             relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations
             relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate
             relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav
-            relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus
+            relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus
             relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig
             relay-terminal-engine relay-screen relay-slash relay-board relay-aliases
             relay-calllines relay-diffview relay-sharing relay-remotepane relay-internals
@@ -1019,7 +1035,7 @@ if(BUILD_TESTING)
         relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents
         relay-requests relay-conversations relay-completion relay-fileindex relay-backends
         relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes
-        relay-queuenav relay-queuesubmit relay-logging relay-voice relay-images relay-titles relay-panestatus relay-paneusage
+        relay-queuenav relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus relay-paneusage
         relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen
         relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing
         relay-remotepane relay-panestate ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
@@ -1060,6 +1076,9 @@ if(BUILD_TESTING)
     target_link_libraries(relay-voice-tests PRIVATE relay-voice ${RELAY_QT}::Test)
     add_test(NAME voice COMMAND relay-voice-tests)
     set_tests_properties(voice PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-speech-tests tests/speech_test.cpp)
+    target_link_libraries(relay-speech-tests PRIVATE relay-speech ${RELAY_QT}::Test)
+    add_test(NAME speech COMMAND relay-speech-tests)
     add_executable(relay-aliases-tests tests/aliases_test.cpp)
     target_link_libraries(relay-aliases-tests PRIVATE relay-aliases ${RELAY_QT}::Test)
     add_test(NAME aliases COMMAND relay-aliases-tests)
