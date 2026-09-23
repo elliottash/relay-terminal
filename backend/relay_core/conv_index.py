@@ -1701,6 +1701,7 @@ class ConversationIndex:
         workspace = normalize_workspace(str(data.get("workspace") or ""))
         raw_cwd = str(data.get("raw_cwd") or "")
         title = _one_line(data.get("title"), 200)
+        first_prompt = _one_line(data.get("first_prompt"), MAX_PREVIEW)
         rows = [row for row in data.get("entries") or [] if isinstance(row, dict) and row.get("text")]
         mtime = data.get("mtime")
         mtime = float(mtime) if isinstance(mtime, (int, float)) and not isinstance(mtime, bool) else None
@@ -1733,10 +1734,10 @@ class ConversationIndex:
             if appending:
                 db.execute(
                     "UPDATE conversations SET workspace=?, raw_cwd=?, project=?, title=?, custom_title=?,"
-                    " updated=?, turns=?, pinned=?, file_mtime=?, indexed_version=? WHERE session_id=?",
+                    " updated=?, turns=?, pinned=?, first_prompt=?, file_mtime=?, indexed_version=? WHERE session_id=?",
                     (workspace, raw_cwd, project_name(workspace), title, custom_title,
                      mtime or time.time(), max(0, int(data.get("message_count") or 0)),
-                     pinned, mtime, SCHEMA_VERSION, session_id))
+                     pinned, first_prompt, mtime, SCHEMA_VERSION, session_id))
                 # The searchable title entry is rewritten only when the name changed; the rest of
                 # the entries are left exactly where they are, which is the point of appending.
                 shown = custom_title or title
@@ -1754,12 +1755,12 @@ class ConversationIndex:
                 db.execute(
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, raw_cwd, project, title,"
                     " custom_title, model, preset, created, updated, turns, open_requests, session_dir, pinned,"
-                    " file_mtime, indexed_version)"
-                    " VALUES(?,?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?)",
+                    " file_mtime, indexed_version, first_prompt)"
+                    " VALUES(?,?,?,?,?,?,?, '', '', ?, ?, ?, 0, '', ?, ?, ?, ?)",
                     (session_id, source, workspace, raw_cwd, project_name(workspace), title, custom_title,
                      data.get("created") or mtime, mtime or time.time(),
                      max(0, int(data.get("message_count") or 0)),
-                     pinned, mtime, SCHEMA_VERSION))
+                     pinned, mtime, SCHEMA_VERSION, first_prompt))
                 written = header_entries(custom_title or title, "") + rows
             db.executemany(
                 "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
@@ -2466,9 +2467,11 @@ class ConversationIndex:
                     if item.get("parent_thread"):
                         item["parent_title"] = titles.get(item["parent_thread"], "")
             for item in out:
-                if not item["snippet"]:
+                if item["source"] in GUEST_SOURCES:
+                    item["snippet"] = item["first_prompt"][:200]
+                elif not item["snippet"]:
                     item["snippet"] = item["summary"][:200] or item["first_prompt"][:200]
-                if not item["snippet"]:
+                if not item["snippet"] and item["source"] not in GUEST_SOURCES:
                     first = db.execute(
                         f"SELECT text FROM entries WHERE session_id=? AND kind NOT IN ({_NOT_BODY_SQL})"
                         " ORDER BY seq LIMIT 1", (item["session_id"],)).fetchone()

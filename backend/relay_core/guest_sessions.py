@@ -71,6 +71,7 @@ UUID_TAIL = re.compile(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 # Codex threads database columns this module reads; older schemas simply lack the later ones.
 CODEX_THREAD_COLUMNS = ("id", "rollout_path", "cwd", "name", "title", "first_user_message",
                         "created_at", "updated_at")
+PARSER_VERSION = 2  # Reparse saved cursors when prompt filtering changes.
 
 
 # ----- records and resume commands --------------------------------------------------------------
@@ -209,6 +210,28 @@ def _one_line(text, cap: int) -> str:
     return " ".join(str(text or "").split())[:cap]
 
 
+def _user_prompt(text: str) -> str:
+    """Remove Relay's user-role handover envelope before choosing a preview or title."""
+    text = text.strip()
+    while text:
+        if text.startswith("<recommended_plugins>"):
+            end = text.find("</recommended_plugins>")
+            if end < 0:
+                return ""
+            text = text[end + len("</recommended_plugins>"):].strip()
+        elif text.startswith("[Relay context: added by Relay, not typed by the user]"):
+            end = text.rfind("[End of Relay context]")
+            if end < 0:
+                return ""
+            text = text[end + len("[End of Relay context]"):].strip()
+        elif text.startswith(("# AGENTS.md instructions for ", "[Relay note:",
+                              "[Relay summary of the earlier conversation")):
+            return ""
+        else:
+            break
+    return text
+
+
 class _Parser:
     """Fields accumulated from one guest transcript. Subclasses take JSON lines.
 
@@ -293,6 +316,7 @@ class _Parser:
         title, title_kind = self.title()
         return {"source": self.source, "id": self.session_id, "file": str(path), "title": title,
                 "title_kind": title_kind, "workspace": self.workspace, "raw_cwd": self.raw_cwd,
+                "first_prompt": _one_line(self.first_prompt, conv_index.MAX_PREVIEW),
                 "created": self.created if self.created is not None else mtime,
                 "mtime": float(mtime), "message_count": self.message_count,
                 "entries": self.entries, "entry_base": self._base}
@@ -341,9 +365,11 @@ class _ClaudeParser(_Parser):
             if kind == "user":
                 if not texts:
                     return                           # a tool-result carrier, not a prompt
+                text = _user_prompt("\n".join(texts))
+                if not text:
+                    return
                 self._turn += 1
                 self.message_count += 1
-                text = "\n".join(texts)
                 if not self.first_prompt:
                     self.first_prompt = text
                 self._add("prompt", text, when)
@@ -420,6 +446,9 @@ class _CodexParser(_Parser):
                 role = payload.get("role")
                 text = _codex_text(payload.get("content"))
                 if role == "user" and text:
+                    text = _user_prompt(text)
+                    if not text:
+                        return
                     self._turn += 1
                     self.message_count += 1
                     if not self.first_prompt:
@@ -496,7 +525,8 @@ class _Cursor:
 
     # ----- saved state ---------------------------------------------------------------
     def state(self) -> dict:
-        return {"path": str(self.path), "source": self.source, "size": int(max(self.size, 0)),
+        return {"path": str(self.path), "source": self.source, "parser_version": PARSER_VERSION,
+                "size": int(max(self.size, 0)),
                 "mtime_ns": int(self.mtime_ns), "read_to": int(self.offset), "head": self.head,
                 "identity": list(self.identity) if self.identity else None,
                 "parser": self.parser.state()}
@@ -504,7 +534,7 @@ class _Cursor:
     def restore(self, state) -> bool:
         """Pick up where a stored `state()` stopped. The file is not touched here: whether the
         state still fits it is decided by the next `advance()`, which has the stat in hand."""
-        if not isinstance(state, dict) or not state.get("read_to"):
+        if not isinstance(state, dict) or state.get("parser_version") != PARSER_VERSION or not state.get("read_to"):
             return False
         if str(state.get("path") or "") != str(self.path):
             return False                      # the same session id under a different file
@@ -676,8 +706,9 @@ def _apply_codex_meta(parsed: dict, meta: dict | None) -> dict:
         if value:
             parsed["title"], parsed["title_kind"] = value, key
             break
-    if not parsed["title"] and meta.get("first_user_message"):
-        parsed["title"] = _one_line(meta["first_user_message"], MAX_TITLE)
+    first_user_message = _user_prompt(str(meta.get("first_user_message") or ""))
+    if not parsed["title"] and first_user_message:
+        parsed["title"] = _one_line(first_user_message, MAX_TITLE)
         parsed["title_kind"] = "title"
     if not parsed["workspace"] and meta.get("workspace"):
         parsed["workspace"] = str(meta["workspace"])
@@ -1033,7 +1064,9 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
     added = refreshed = 0
     for source in sources:
         records, kept = _scan(source, home, limit=limit,
-                             known={identifier: row[2] for identifier, row in known.items()},
+                             known={identifier: (row[2] if cursors.get(identifier, {}).get("parser_version")
+                                                 == PARSER_VERSION else None)
+                                    for identifier, row in known.items()},
                              skip={identifier for guest_source, identifier in forgotten
                                    if guest_source == source},
                              cursors=cursors)
@@ -1459,4 +1492,3 @@ class GuestTail:
         self._written = tail.entries_read
         self._mtime = parsed.get("mtime")
         return True
-

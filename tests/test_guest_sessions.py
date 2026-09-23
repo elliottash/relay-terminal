@@ -1167,6 +1167,57 @@ class RawWorkingDirectory(unittest.TestCase):
 
 # ----- an incremental reconcile (GT7X review, B5) ---------------------------------------------------
 
+class GuestPromptFiltering(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.index = index_in(self.root)
+        self.addCleanup(self.index.close)
+
+    def test_both_guests_preview_the_first_real_request(self):
+        preamble = "<recommended_plugins>tools</recommended_plugins>\n# AGENTS.md instructions for /repo\n<INSTRUCTIONS>rules</INSTRUCTIONS>"
+        handover = "[Relay context: added by Relay, not typed by the user]\nprevious turns\n[End of Relay context]\nPlease fix the pane"
+        write_claude(self.home, claude_lines(prompts=(preamble, handover), replies=(),
+                                              custom_title=None, ai_title=None))
+        lines = codex_lines(prompt=preamble)
+        lines.append(codex_prompt_line(handover))
+        write_codex(self.home, lines)
+        guest_sessions.reconcile(self.index, str(self.home))
+        items = {item["source"]: item for item in
+                 self.index.search("", scope="all", sources=["claude", "codex"])["items"]}
+        for source in ("claude", "codex"):
+            with self.subTest(source=source):
+                self.assertEqual("Please fix the pane", items[source]["first_prompt"])
+                self.assertEqual("Please fix the pane", items[source]["snippet"])
+
+    def test_only_setup_text_has_no_prompt_snippet(self):
+        write_claude(self.home, claude_lines(prompts=("# AGENTS.md instructions for /repo",),
+                                              replies=(), custom_title=None, ai_title=None))
+        guest_sessions.reconcile(self.index, str(self.home))
+        item = self.index.search("", scope="all", sources=["claude"])["items"][0]
+        self.assertEqual("", item["first_prompt"])
+        self.assertEqual("", item["snippet"])
+
+    def test_an_old_cursor_reindexes_an_unchanged_transcript(self):
+        write_claude(self.home, claude_lines(prompts=("Please fix the pane",),
+                                              replies=(), custom_title=None, ai_title=None))
+        guest_sessions.reconcile(self.index, str(self.home))
+        db = sqlite3.connect(str(self.root / "index.db"))
+        try:
+            state = json.loads(db.execute("SELECT state FROM guest_files WHERE session_id=?",
+                                          (CLAUDE_ID,)).fetchone()[0])
+            state.pop("parser_version")
+            db.execute("UPDATE guest_files SET state=? WHERE session_id=?", (json.dumps(state), CLAUDE_ID))
+            db.execute("UPDATE conversations SET first_prompt='' WHERE session_id=?", (CLAUDE_ID,))
+            db.commit()
+        finally:
+            db.close()
+        self.assertEqual(1, guest_sessions.reconcile(self.index, str(self.home))["refreshed"])
+        self.assertEqual("Please fix the pane",
+                         self.index.search("", scope="all", sources=["claude"])["items"][0]["first_prompt"])
+
+
 class IncrementalReconcile(unittest.TestCase):
     """jsonl is append-only, so a transcript that only grew is read from where the last run
     stopped. Before this, any mtime change re-parsed the whole file and rewrote every entry —
