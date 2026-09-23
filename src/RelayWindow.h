@@ -3108,7 +3108,9 @@ private:
             // The providers without a key, one pick away — and "custom endpoint…" first, always
             // (owner, 2026-09-20): a name, a base URL, a key and model ids, like Warp's custom
             // providers. A built-in pick goes straight to the key box.
-            QStringList names; for (const QJsonObject &preset : std::as_const(waiting)) names << str(preset, "provider").toLower();
+            QStringList names;
+            for (const QJsonObject &preset : std::as_const(waiting))
+                names << str(preset, "provider").section(QStringLiteral(" ("), 0, 0).toLower();
             names.removeDuplicates();
             models.rows << buttonRow(QStringLiteral("models.addProvider"), QStringLiteral("+ add provider"),
                 names.isEmpty() ? QStringLiteral("a custom endpoint") : QStringLiteral("a custom endpoint, or %1").arg(names.join(QStringLiteral(", "))),
@@ -3116,9 +3118,12 @@ private:
                     QList<relay::agentui::PickerRow> rows;
                     rows << relay::agentui::PickerRow{{QStringLiteral("custom endpoint…"), QStringLiteral("any OpenAI-compatible url"), QString()},
                                                       QStringLiteral("A name, a base URL, a key and model ids"), QStringLiteral("custom")};
+                    const auto providerName = [str](const QJsonObject &preset) {
+                        return str(preset, "provider").section(QStringLiteral(" ("), 0, 0).toLower();
+                    };
                     for (const QJsonObject &preset : waiting)
-                        rows << relay::agentui::PickerRow{{str(preset, "label").toLower(), str(preset, "plan").toLower(), str(preset, "key_url")},
-                                                          str(preset, "note"), str(preset, "id")};
+                        rows << relay::agentui::PickerRow{{providerName(preset), str(preset, "plan").toLower(), str(preset, "key_url")},
+                                                          QString(), str(preset, "id")};
                     const auto result = relay::agentui::pick(this, QStringLiteral("add provider"),
                         QStringLiteral("Pick a provider; the next step asks for its key, or for the endpoint."),
                         {QStringLiteral("provider"), QStringLiteral("plan"), QStringLiteral("key page")}, rows,
@@ -3126,7 +3131,7 @@ private:
                     if (result.row < 0) return;
                     if (result.row == 0) { askForCustom(QJsonObject()); return; }
                     const QJsonObject preset = waiting.at(result.row - 1);
-                    askForKey(str(preset, "id"), str(preset, "label").toLower());
+                    askForKey(str(preset, "id"), providerName(preset));
                 });
         }
         // One import door below the provider groups. Only the selected source is read, and the
