@@ -29,7 +29,8 @@ BOARD_ALLOW = frozenset(('board_list', 'board_read', 'board_comment',
 DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_todos'))
 REMOTE_ALLOW = frozenset(("run_command", "read_file", "list_directory", "write_file", "edit_file"))
 EXEC_ALLOW = REMOTE_ALLOW | frozenset(("run_in_terminal", "command_output", "stop_command"))
-ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW
+TERMINAL_CONTEXT_ALLOW = frozenset(("terminal_history", "terminal_read"))
+ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW
 WAIT_SECONDS = 10
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
@@ -119,6 +120,8 @@ class Bridge:
                 "Required: the active SSH host named by Relay context. Never omit or guess it.")
         specs += remote + [TERMINAL_SPEC] + [s for s in JOB_TOOLS
                     if s['function']['name'] in EXEC_ALLOW]
+        from relay_core.terminal_context import TOOL_SPECS as CONTEXT_SPECS
+        specs += CONTEXT_SPECS
         specs = copy.deepcopy(specs)
         for spec in specs:
             f = spec['function']
@@ -168,13 +171,15 @@ class Bridge:
             if not isinstance(key, str) or len(key) > 200 or not isinstance(params, dict):
                 return failure('invalid_request', 'Expected request key and tool parameters.')
             payload = json.dumps(params, sort_keys=True)
-            if key in self.cache:
+            terminal_read = params.get("name") in TERMINAL_CONTEXT_ALLOW
+            if key in self.cache and not terminal_read:
                 old, result = self.cache[key]
                 return result if old == payload else failure('request_reused', 'Request id reused with different arguments.')
             if len(self.cache) >= 10000:
                 return failure('request_limit', 'Restart the guest to make more board calls.')
             def remember(result):
-                self.cache[key] = (payload, result)
+                if not terminal_read:
+                    self.cache[key] = (payload, result)
                 return result
 
             if active is None or active is not self.active or active[1].is_set() or self.agent is None:

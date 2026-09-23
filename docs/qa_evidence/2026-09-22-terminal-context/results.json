@@ -1,0 +1,53 @@
+{
+  "checks": {
+    "composer_capture": true,
+    "exit_status": true,
+    "head_tail_markers": true,
+    "history_disabled": true,
+    "completion_without_inference": true,
+    "snapshot_in_ask": true,
+    "removal": true,
+    "manual": true,
+    "explicit_attachment": true,
+    "off": true,
+    "native_bash": true
+  },
+  "record": {
+    "availability": "captured",
+    "bytes_seen": 46,
+    "command": "printf 'TCXT_FIRST\\nTCXT_LAST\\n'; false",
+    "command_id": "525c0c50-e8d5-4e94-b7b3-01774d9dd38f",
+    "cwd": "/tmp/tcxt-live-t3jxaqma",
+    "ended_at": 1790125261557,
+    "exit_status": 1,
+    "generation": "05c910e3-3f24-4a03-8cfd-534edfa09d62",
+    "host": "",
+    "origin": "user",
+    "output": "\nTCXT_FIRST\nTCXT_LAST\n",
+    "pane_id": "0abad27f-7ec4-44b8-9ec8-398f526337da",
+    "revision": 8,
+    "sequence": 1,
+    "started_at": 1790125261518,
+    "state": "completed"
+  },
+  "native_record": {
+    "availability": "captured",
+    "bytes_seen": 36,
+    "command": "printf 'TCXT_NATIVE\\n'",
+    "command_id": "03f668c1-5588-4a28-b902-487fc9c7b496",
+    "cwd": "/tmp/tcxt-live-t3jxaqma",
+    "ended_at": 1790125282258,
+    "exit_status": 0,
+    "generation": "05c910e3-3f24-4a03-8cfd-534edfa09d62",
+    "host": "",
+    "origin": "user",
+    "output": "\nTCXT_NATIVE\n",
+    "pane_id": "0abad27f-7ec4-44b8-9ec8-398f526337da",
+    "revision": 5,
+    "sequence": 2,
+    "started_at": 1790125282258,
+    "state": "completed"
+  },
+  "sandbox": "/tmp/tcxt-live-t3jxaqma",
+  "worker": "deterministic fixture; no external model"
+}

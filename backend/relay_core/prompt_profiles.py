@@ -111,7 +111,7 @@ SHORT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_cla
 #: `Agent.tools`'s own, so what a pane sends is a subsequence of the full list and never a reorder.
 SHORT_TOOLS = ("run_command", "read_file", "list_directory", "write_file", "edit_file",
                "command_output", "stop_command", "load_skill") + SHORT_BOARD_TOOLS + (
-               "run_in_terminal", "type_into_program")
+               "terminal_history", "terminal_read", "run_in_terminal", "type_into_program")
 
 #: A one- or two-sentence description each, and no parameter prose except `run_command`'s: the
 #: full descriptions are 3.6 KB of rules a 27B model reads as prose rather than as constraints.

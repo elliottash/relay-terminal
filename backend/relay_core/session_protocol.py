@@ -63,7 +63,7 @@ TYPES = {"set_model", "set_effort", "context", "compact", "checkpoints", "rewind
          "requests", "request_get", "request_set", "request_reask", "todos",
          # conversation list and full-text search (protocol section 14)
          "conversations", "conversation_get", "conversation_delete", "conversation_rename",
-         "conversation_pin", "terminal_history", "index_rebuild",
+         "conversation_pin", "terminal_history", "terminal_context_update", "terminal_context_preview", "index_rebuild",
          # session info and the thread history (protocol section 25)
          "session_info"}
 
@@ -1405,6 +1405,14 @@ class SessionCommands:
         self._set_user_fields(session_id, pinned=pinned)
         self.emit({"event": "conversation_pinned", "id": request.get("id"), "session_id": session_id,
                    "pinned": pinned})
+
+    def _terminal_context_preview(self, request):
+        from .terminal_context import format_snapshot
+        self.emit({"event": "terminal_context_preview", "text": format_snapshot(request.get("payload"))})
+
+    def _terminal_context_update(self, request):
+        # Private GUI connection, independent of persistent history/index settings.
+        self._agent().terminal_context.update(request.get("payload"))
 
     def _terminal_history(self, request):
         # Sent for every command the pane ran; with the index off it is simply dropped, so a

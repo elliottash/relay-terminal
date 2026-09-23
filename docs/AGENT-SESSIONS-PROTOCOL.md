@@ -8090,3 +8090,62 @@ context's remote_session object. The pane sends updates on prompt/cwd/identity c
 Remote @ attachments use `{"path":"relative/or/absolute","host":"alias"}` and resolve only
 against the live connection. Their content labels include the host. Guest MCP tools require host
 and never fall back to local paths; visible terminal handoff retains its existing per-turn grant.
+
+### Terminal command evidence (#TCXT)
+
+Live terminal sharing is memory-only and independent of `index/terminal_history` and
+`index/terminal_output`. Each shell pane owns `TerminalRecords::Records`: at most 32 records,
+64 KiB of sanitized UTF-8 head/tail output per record, and 2 MiB serialized total. Eviction removes
+oldest records. Restored scrollback never populates this store. A shell restart or SSH transition
+changes generation; automatic selection never selects an earlier generation.
+
+Records carry `command_id`, `pane_id`, `generation` (opaque identifiers), per-pane `sequence`,
+`origin` (`user` or `agent`), `command`, `cwd`, `host`, `started_at`/`ended_at` (epoch milliseconds),
+`state` (`running`, `completed`, `interrupted`), nullable `exit_status`, `output`, `bytes_seen`,
+`revision`, and `availability` (`captured`, `truncated`, `unsupported`, `interrupted`). Output is
+merged PTY output, not separate stdout/stderr. ANSI/OSC controls and prompt text are removed;
+malformed UTF-8 is replaced. The omission marker measures sanitized bytes omitted. `bytes_seen`
+counts raw PTY bytes with a floor at rendered size when replacement expands malformed input.
+
+GUI → worker `terminal_context_update {payload: {mode, records}}` replaces the worker's live
+collection over its private connection. `mode` is `automatic`, `manual` or `off`; Off sends no
+records and immediately revokes reads. No model is called by this update. `ask.context` accepts
+`terminal_context: {mode, records}`: selected full record values copied **at submission**, including
+before routing/queueing. A later command or later output cannot replace those pinned values.
+Ordinary selection is the latest user-origin record. Agent handoff results use their existing
+report path. Shell-less consoles and paired-device prompts receive no automatic terminal records.
+
+`agent/terminal_context` sets global sharing (default Automatic); the composer chip offers a
+per-pane override, output selection, preview, removal for the next prompt and Ask about this
+output. Manual grants only explicitly attached records. Preview pins the selected revision and
+uses `terminal_context_preview {payload}` → `{event: "terminal_context_preview", text}` to show
+the same credential-filtered, bounded excerpt formatter used for provider delivery. Changing
+sharing does not retract excerpts already sent to a model or stored in its conversation.
+
+Both native agents and guests through `relay_board` expose read-only `terminal_history {}` and
+`terminal_read {command_id, offset?, limit?, fresh?}`. Only this turn's selected IDs are grants;
+there is no workspace history fallback, arbitrary path, host or other-pane lookup. Default reads
+use the pinned revision; `fresh: true` explicitly asks for the live version of the same authorized
+ID/pane/generation and can return `evicted`, `stale` or `revoked`. Off and removal deny reads.
+Offsets/cursors count Unicode characters; response chunks also obey a 16,384-byte cap. Provider
+excerpts total at most 12 KiB, with the retained text accessible through the tools. Output and
+metadata are labelled untrusted evidence; `logs.scrub` supplies best-effort credential filtering,
+not a guarantee that arbitrary secrets are detected.
+
+Shell hooks emit `OSC 777;notify;relay-command;TOKEN;BASE64_COMMAND;BASE64_CWD BEL` before output.
+The stream parser authenticates the local pane token or current SSH login token and splits raw
+PTY chunks before deferred engine callbacks, preserving several commands in one chunk. A matching
+composer record is deduplicated without changing its ID/origin. `OSC 133;D;STATUS` ends output;
+`OSC 133;A`/end-output stops prompt capture. Completion marks remain an attribution boundary,
+not protection against a process that deliberately prints forged shell sequences.
+
+Bundled Bash 4.4+ captures full accepted Readline lines for default Enter bindings; custom
+bindings, uncertain continuations and older Bash report unavailable text. It does not scrape
+history. PowerShell reports the accepted PSReadLine line. Opt-in Zsh and Fish hooks use their
+preexec event's accepted command (`source shell/relay-integration.zsh` or
+`source shell/relay-integration.fish` from an interactive shell inside Relay). Remote Zsh reports
+preexec text; remote Bash native input reports unavailable text while composer commands retain
+their known line. Native hooks never capture input typed into a running program. Full-screen
+local programs are labelled unsupported and their capture is cleared. Background output mixed
+into the same PTY cannot reliably be attributed to a job; the evidence is the observed command
+interval, not a per-process stdout trace.

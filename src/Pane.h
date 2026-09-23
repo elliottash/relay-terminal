@@ -50,6 +50,7 @@
 #include "DiffView.h"       // the diff pane a big edit opens
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
+#include "TerminalRecords.h"
 #include "SettingsPane.h"   // SettingsWatch: a late presets event can change what an open Options pane shows
 #include "SettingsCache.h"  // the settings read per key, per event and per poll (#057J)
 #include "SkillsDialog.h"
@@ -515,6 +516,7 @@ public:
         // in the pane's one delivery queue until this named guest reports that it is idle.
         QString guest;
         QString remoteToken; // queued shell commands belong to this login only
+        QJsonObject terminalSnapshot;
         QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
@@ -5390,6 +5392,15 @@ private:
         m_actionRowLayout->setSpacing(6);
         m_actionRow->hide();
         composerLayout->addWidget(m_actionRow);
+        m_terminalChip = new QToolButton(composer);
+        m_terminalChip->setObjectName(QStringLiteral("terminalContextChip"));
+        m_terminalChip->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        m_terminalChip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        m_terminalChip->setToolTip(QStringLiteral("Preview, attach or remove terminal output; choose sharing for this pane"));
+        connect(m_terminalChip, &QToolButton::clicked, this, [this] { terminalContextMenu(); });
+        composerLayout->addWidget(m_terminalChip);
+        relay::SettingsWatch::instance().listen(this, [this] { syncTerminalContext(); });
+        refreshTerminalChip();
         m_busyLine = new PaneBusyLine(this);
         m_busyLine->setPromptEditor(m_editor);   // the row's left edge is the prompt text's (#HQ2B)
         // The relay mark at its left opens this pane's Activity pane (#4X53) — the same call the
@@ -8639,6 +8650,15 @@ private:
             return true;
         }
         if (type == QStringLiteral("conversations_summarize_cancelled")) return true;
+        if (type == QStringLiteral("terminal_context_preview")) {
+            auto *dialog = new QDialog(this); dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->setWindowTitle(QStringLiteral("Terminal context for next prompt"));
+            auto *layout = new QVBoxLayout(dialog);
+            auto *text = new QPlainTextEdit(dialog); text->setReadOnly(true);
+            text->setPlainText(event.value(QStringLiteral("text")).toString());
+            layout->addWidget(text); dialog->resize(720, 460); dialog->show();
+            return true;
+        }
         if (type == QStringLiteral("terminal_history_indexed") || type == QStringLiteral("index_rebuilt")) {
             if (type == QStringLiteral("index_rebuilt"))
                 status(QStringLiteral("Conversation index rebuilt: %1 conversation(s), %2 entries, %3 ms")
@@ -9082,6 +9102,91 @@ public:
     }
 
 private:
+    void captureTerminalBytes(const QByteArray &bytes) {
+        if (m_terminalStream.append(m_terminalRecords, bytes, m_login.active ? m_login.token : m_token,
+                                    m_login.active ? loginHost() : QString()))
+            syncTerminalContext();
+    }
+
+    QString terminalSharingMode() const {
+        if (!hasShell()) return QStringLiteral("off");
+        const QString mode = m_terminalSharingOverride.isEmpty()
+            ? QSettings().value(QStringLiteral("agent/terminal_context"), QStringLiteral("automatic")).toString()
+            : m_terminalSharingOverride;
+        return mode == QStringLiteral("manual") || mode == QStringLiteral("off") ? mode : QStringLiteral("automatic");
+    }
+
+    QJsonObject terminalSnapshot() const {
+        const QString mode = terminalSharingMode();
+        QJsonArray selected;
+        if (mode != QStringLiteral("off") && !m_terminalRemoved) {
+            QJsonObject record = m_terminalAttachment;
+            if (record.isEmpty() && mode == QStringLiteral("automatic")) record = m_terminalRecords.latestUser();
+            if (!record.isEmpty()) selected.append(record);
+        }
+        return {{QStringLiteral("mode"), mode}, {QStringLiteral("records"), selected}};
+    }
+
+    void refreshTerminalChip() {
+        if (!m_terminalChip) return;
+        m_terminalChip->setVisible(hasShell());
+        const QJsonArray selected = terminalSnapshot().value(QStringLiteral("records")).toArray();
+        QString text = QStringLiteral("Terminal: ") + terminalSharingMode();
+        if (!selected.isEmpty()) {
+            const auto row = selected.first().toObject();
+            const QString state = row.value(QStringLiteral("state")).toString();
+            const QString outcome = state == QStringLiteral("running") ? state
+                : row.value(QStringLiteral("exit_status")).toInt() == 0 ? QStringLiteral("succeeded") : QStringLiteral("failed");
+            text = QStringLiteral("Terminal: %1 · %2").arg(row.value(QStringLiteral("command")).toString().left(48), outcome);
+        } else if (m_terminalRemoved) text = QStringLiteral("Terminal: removed for next prompt");
+        m_terminalChip->setText(text);
+    }
+
+    void syncTerminalContext() {
+        refreshTerminalChip();
+        if (!m_configured) return;
+        const QString mode = terminalSharingMode();
+        send({{"type", "terminal_context_update"}, {"payload", QJsonObject{
+            {"mode", mode}, {"records", mode == QStringLiteral("off") ? QJsonArray{} : m_terminalRecords.records()}}}});
+    }
+
+    void terminalContextMenu() {
+        QMenu menu(this);
+        const auto snapshot = terminalSnapshot();
+        const auto selected = snapshot.value(QStringLiteral("records")).toArray();
+        auto *preview = menu.addAction(QStringLiteral("Preview attached output…"));
+        preview->setEnabled(!selected.isEmpty());
+        connect(preview, &QAction::triggered, this, [this, snapshot] {
+            if (!m_configured) { status(QStringLiteral("Start an agent to preview the shared excerpt.")); return; }
+            const auto rows = snapshot.value(QStringLiteral("records")).toArray();
+            if (!rows.isEmpty()) m_terminalAttachment = rows.first().toObject(); // preview pins the same revision
+            send({{"type", "terminal_context_preview"}, {"payload", snapshot}});
+        });
+        auto *remove = menu.addAction(QStringLiteral("Remove from next prompt"));
+        connect(remove, &QAction::triggered, this, [this] { m_terminalRemoved = true; m_terminalAttachment = {}; refreshTerminalChip(); });
+        auto *attach = menu.addMenu(QStringLiteral("Attach output"));
+        attach->setEnabled(terminalSharingMode() != QStringLiteral("off"));
+        for (const auto value : m_terminalRecords.records()) {
+            const auto record = value.toObject();
+            auto *action = attach->addAction(record.value(QStringLiteral("command")).toString().left(100));
+            connect(action, &QAction::triggered, this, [this, record] { m_terminalAttachment = record; m_terminalRemoved = false; refreshTerminalChip(); });
+        }
+        auto *ask = menu.addAction(QStringLiteral("Ask about this output"));
+        ask->setEnabled(!selected.isEmpty());
+        connect(ask, &QAction::triggered, this, [this] { submitAgent(QStringLiteral("What did this command do and what does its output mean?"), false); });
+        menu.addSeparator();
+        for (const QString &mode : {QStringLiteral("automatic"), QStringLiteral("manual"), QStringLiteral("off")}) {
+            auto *action = menu.addAction(QStringLiteral("Sharing for this pane: ") + mode);
+            action->setCheckable(true); action->setChecked(terminalSharingMode() == mode);
+            connect(action, &QAction::triggered, this, [this, mode] {
+                m_terminalSharingOverride = mode; m_terminalAttachment = {}; m_terminalRemoved = false; syncTerminalContext();
+            });
+        }
+        auto *follow = menu.addAction(QStringLiteral("Use global sharing setting"));
+        connect(follow, &QAction::triggered, this, [this] { m_terminalSharingOverride.clear(); syncTerminalContext(); });
+        menu.exec(m_terminalChip->mapToGlobal(QPoint(0, m_terminalChip->height())));
+    }
+
     // Relay-run terminal commands: the command line, its exit status and, on engines that can
     // stream it, its output. Nothing typed straight into the terminal in native mode is seen here.
     static constexpr int kCommandCaptureCap = 64 * 1024;
@@ -9097,18 +9202,25 @@ private:
     // its output goes to the agent (protocol 22); the index still gets only what the settings allow.
     void beginCommandCapture(const QString &command, bool forAgent = false) {
         m_captureForAgent = forAgent; m_handoffOutput.clear();
-        if ((!indexTerminalHistory() && !forAgent) || command.trimmed().isEmpty()) { m_captureCommand.clear(); return; }
+        if (!command.trimmed().isEmpty()) {
+            m_terminalRecords.begin(command, m_login.active ? m_login.cwd : m_cwd,
+                                    m_login.active ? loginHost() : QString(), forAgent ? QStringLiteral("agent") : QStringLiteral("user"));
+            syncTerminalContext();
+        }
+        if (command.trimmed().isEmpty()) { m_captureCommand.clear(); return; }
         m_captureCommand = command;
         m_captureCwd = m_cwd;
         m_captureAt = QDateTime::currentSecsSinceEpoch();
         m_capture.clear();
-        m_capturing = (indexTerminalOutput() || forAgent) && m_backend;
+        m_capturing = bool(m_backend);
         if (m_capturing) m_backend->setOutputCallbackEnabled(true);
     }
 
     void finishCommandCapture(int exitStatus) {
+        m_terminalRecords.finish(exitStatus);
+        syncTerminalContext();
         if (m_captureCommand.isEmpty()) return;
-        if (m_capturing && m_backend && !m_login.active) m_backend->setOutputCallbackEnabled(false);
+        if (m_backend) m_backend->setOutputCallbackEnabled(true);
         m_capturing = false;
         QJsonObject item{{QStringLiteral("command"), m_captureCommand},
                          {QStringLiteral("exit_status"), exitStatus},
@@ -9560,6 +9672,7 @@ private:
         QueueEntry entry;
         entry.text = trimmed;
         entry.awaitingSkillCatalog = true;
+        entry.terminalSnapshot = terminalSnapshot();
         entry.attachments = attachmentsFor(trimmed);
         entry.cards = cardsFor(trimmed);
         for (const QJsonValue &card : entry.cards)
@@ -9931,6 +10044,7 @@ private:
     struct SteerEntry {
         enum Then { Drop, Edit, ToQueue };
         QString requestId, itemId, text; QJsonArray attachments, cards;
+        QJsonObject terminalSnapshot;
         bool withdraw = false; Then then = Drop;
         QString editText;   // Edit: what was put in the prompt box, to tell an untouched copy from an edit
     };
@@ -10054,6 +10168,7 @@ private:
     void requeueSteer(const SteerEntry &steer) {
         const quint64 selected = selectedEntryId();
         QueueEntry entry; entry.agent = true; entry.text = steer.text; entry.attachments = steer.attachments; entry.cards = steer.cards;
+        entry.terminalSnapshot = steer.terminalSnapshot;
         entry.id = ++m_entrySerial;
         m_entries.prepend(entry);
         keepSelectionOn(selected);   // every queued index just moved down one
@@ -10073,8 +10188,13 @@ private:
         SteerEntry steer;
         steer.requestId = QStringLiteral("steer-%1").arg(++m_askSerial);
         steer.text = entry.text; steer.attachments = entry.attachments; steer.cards = entry.cards;
+        steer.terminalSnapshot = entry.terminalSnapshot;
         m_steering.append(steer);
         QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
+        syncTerminalContext();
+        request.insert(QStringLiteral("context"), QJsonObject{{"terminal_context",
+            terminalSharingMode() == QStringLiteral("off") || entry.terminalSnapshot.isEmpty()
+                ? QJsonObject{{"mode", "off"}, {"records", QJsonArray{}}} : entry.terminalSnapshot}});
         if (!entry.attachments.isEmpty()) request.insert(QStringLiteral("attachments"), entry.attachments);
         if (!entry.cards.isEmpty()) request.insert(QStringLiteral("cards"), entry.cards);
         if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
@@ -10842,6 +10962,8 @@ private:
     }
 
     void startTerminal(bool cleanShell) {
+        m_terminalRecords.resetGeneration();
+        m_terminalStream.clear();
         // Set before the backend starts its shell so the child inherits these values.
         qputenv("RELAY_RUNTIME_DIR", m_runtime.path().toUtf8());
         qputenv("RELAY_SESSION_TOKEN", m_token.toUtf8());
@@ -10981,14 +11103,22 @@ private:
         };
         // Output of the commands Relay itself ran, for the conversation index (protocol 14).
         // Only enabled between "command loaded" and "shell ready", so it costs nothing otherwise.
-        m_backend->setOutputCallbackEnabled(false);
+        m_backend->setOutputCallbackEnabled(true);
         m_backend->onOutput = [this](const QByteArray &bytes) {
+            captureTerminalBytes(bytes);
             // While a login runs, keep the row the host is writing. At its prompt that row is the
             // prompt, and Relay prints it back in its own colours after printing over it (#S5SH).
             if (m_login.active) {
                 for (const char c : bytes) {
                     if (c == '\n' || c == '\r') m_login.line.clear();
                     else if (m_login.line.size() < 8192) m_login.line += c;
+                }
+            }
+            if (m_terminalRecords.active()) {
+                // captureTerminalBytes handles authenticated shell boundaries below.
+                if (!m_terminalSyncPending) {
+                    m_terminalSyncPending = true;
+                    QTimer::singleShot(250, this, [this] { m_terminalSyncPending = false; syncTerminalContext(); });
                 }
             }
             if (!m_capturing || m_capture.size() >= kCommandCaptureCap) return;
@@ -11293,6 +11423,7 @@ private:
             m_submitMode = mode;
             m_handoffChain = 0;   // the user typed something: a chain of hand-overs starts over
             m_pendingSubmit = id; m_submittedDraft = typed;
+            m_routedTerminalSnapshot = terminalSnapshot();
         } else m_previewId = id;
         QJsonObject route{{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
                           {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}};
@@ -11415,6 +11546,7 @@ private:
             }
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
+            syncTerminalContext();
             m_configureAutoRetried = false;
             m_model = event.value(QStringLiteral("model")).toString();
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
@@ -12084,6 +12216,8 @@ private:
     }
 
     void dispatch(const QJsonObject &decision, const QString &mode) {
+        const QJsonObject capturedTerminal = m_routedTerminalSnapshot;
+        m_routedTerminalSnapshot = {};
         const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
         if (route == QStringLiteral("empty")) return;
@@ -12139,7 +12273,8 @@ private:
                 // "command not found" under its echo (card #EB4A). An older worker that does not
                 // send the field keeps the note.
                 submitAgent(text, true,
-                            decision.value(QStringLiteral("explain_invalid")).toBool(true) ? problem : QString());
+                            decision.value(QStringLiteral("explain_invalid")).toBool(true) ? problem : QString(),
+                            QString(), QString(), capturedTerminal);
                 return;
             }
             submitTerminal(text, false, false, handoff);
@@ -12160,7 +12295,7 @@ private:
                                       && decision.value(QStringLiteral("valid")).toBool(true)
                                       && !decision.value(QStringLiteral("agent_signal")).toBool()
                                       ? text : QString();
-            submitAgent(text, true, why, QString(), shellText);
+            submitAgent(text, true, why, QString(), shellText, capturedTerminal);
         }
     }
 
@@ -14929,7 +15064,7 @@ private:
     // queued ahead of it (relay::queuesubmit, #N8VK); a shell command waits for the terminal.
     // The worker only ever receives one agent turn at a time from here.
     void submitAgent(const QString &text, bool fromEditor, const QString &why = QString(), QString when = QString(),
-                     const QString &shellText = QString()) {
+                     const QString &shellText = QString(), const QJsonObject &terminalOverride = {}) {
         // A harness this pane is holding starts here, on the first prompt (card #MDL1). The
         // prompt itself waits in the queue, which `configured` pumps.
         if (!m_configured && !m_configuring && !startDeferred()) {
@@ -14974,6 +15109,8 @@ private:
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
         entry.noHandoff = m_remoteSubmit;
+        if (!m_remoteSubmit && hasShell()) entry.terminalSnapshot = terminalOverride.isEmpty() ? terminalSnapshot() : terminalOverride;
+        m_terminalAttachment = {}; m_terminalRemoved = false; refreshTerminalChip();
         if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
@@ -15206,6 +15343,11 @@ private:
         const QString program = processBusy() ? foregroundCommandLine() : QString();
         // The terminal's directory always goes along: `cd` in the terminal must move the agent too.
         QJsonObject context{{"terminal_cwd", m_cwd}};
+        syncTerminalContext();
+        if (!entry.noHandoff && !entry.fix && !entry.handoff && hasShell())
+            context.insert(QStringLiteral("terminal_context"), terminalSharingMode() == QStringLiteral("off")
+                ? QJsonObject{{"mode", "off"}, {"records", QJsonArray{}}}
+                : entry.terminalSnapshot.isEmpty() ? QJsonObject{{"mode", "manual"}, {"records", QJsonArray{}}} : entry.terminalSnapshot);
         // An ssh or mosh login: which host, and whether the agent can run commands there over the
         // user's own connection (docs/SSH-AND-MOSH.md, section 7).
         if (const QJsonObject login = loginContext(); !login.isEmpty()) context.insert(QStringLiteral("remote_session"), login);
@@ -16952,6 +17094,9 @@ private:
     }
 
     void beginLogin(const QString &program) {
+        m_terminalRecords.resetGeneration();
+        m_terminalStream.clear();
+        syncTerminalContext();
         m_login = RemoteLogin();
         m_login.active = true;
         m_login.program = program;
@@ -17032,10 +17177,13 @@ private:
 
     void endLogin() {
         if (!m_login.active) return;
+        m_terminalRecords.resetGeneration();
+        m_terminalStream.clear();
+        syncTerminalContext();
         relay::log::info(QStringLiteral("login_end pane=%1").arg(paneLogId()));
         forgetLoginFiles(); hideAtPopup(); hideTabPopup();
         if (m_login.offered) hideBanner();
-        if (m_backend && !m_capturing) m_backend->setOutputCallbackEnabled(false);
+        if (m_backend) m_backend->setOutputCallbackEnabled(true);
         if (!m_login.command.isEmpty()) finishLoginCommand(255);
         // Pending remote commands must never spill into the local shell after disconnect.
         for (int i = m_entries.size() - 1; i >= 0; --i)
@@ -18904,6 +19052,12 @@ private:
     QPointer<relay::conversations::SessionManager> m_conversations;   // the window's manager pane, bound here
     QPointer<relay::sessioninfo::InfoView> m_infoView;                // the ⓘ pane, bound here
     relay::conversations::FindBar *m_findBar = nullptr;
+    relay::terminalcontext::Records m_terminalRecords;
+    QToolButton *m_terminalChip = nullptr;
+    QString m_terminalSharingOverride;
+    QJsonObject m_terminalAttachment, m_routedTerminalSnapshot;
+    bool m_terminalRemoved = false, m_terminalSyncPending = false;
+    relay::terminalcontext::Stream m_terminalStream;
     QByteArray m_capture;
     QString m_captureCommand, m_captureCwd;
     qint64 m_captureAt = 0;

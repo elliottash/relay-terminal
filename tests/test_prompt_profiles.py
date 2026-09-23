@@ -148,7 +148,7 @@ class AgentTests(unittest.TestCase):
 
     def test_the_short_profile_sends_eight_tools_when_there_is_no_board(self):
         agent = self.agent(prompt_profile='short', board=False)
-        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:8]))
+        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:8]) + ["terminal_history", "terminal_read"])
         prompt = agent.system_prompt()
         # A pane with no board pays nothing for one, and the todo, app and own-session text
         # is out of the short profile whatever else is in it.
@@ -169,7 +169,7 @@ class AgentTests(unittest.TestCase):
         # find it again, claim it, say what happened — and none of the three that rewrite, move or
         # bulk-import a card, which is where a small model does quiet damage.
         agent = self.agent(prompt_profile='short')
-        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:13]))
+        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:15]))
         self.assertEqual(list(prompt_profiles.SHORT_BOARD_TOOLS),
                          ['board_list', 'board_read', 'board_create_card', 'board_claim',
                           'board_comment'])

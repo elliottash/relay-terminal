@@ -1,7 +1,7 @@
 ---
 id: TCXT
 type: work
-status: planned
+status: executing
 labels: [feature, agent, terminal, context]
 assignee: codex
 rank: mtcxt
@@ -103,10 +103,10 @@ Extend relevant existing tests in `tests/test_conv_index.py`, `tests/inputpolicy
 
 ## Tasks
 
-- [ ] Freeze command-record schema, scope rules and submission snapshot contract <!-- t:x7 -->
-- [ ] Implement bounded composer capture and per-pane records <!-- t:x8 -->
-- [ ] Expose native and guest context plus authorized history/read tools <!-- t:4a -->
-- [ ] Add sharing controls, preview/removal and explicit attachments <!-- t:4h -->
-- [ ] Verify and land stage 1 with protocol documentation <!-- t:4t -->
-- [ ] Extend native-shell lifecycle capture and block attachment in stage 2 <!-- t:w0 -->
-- [ ] Complete cross-pane/SSH/native/guest evidence and independent verification <!-- t:kg -->
+- [x] Freeze command-record schema, scope rules and submission snapshot contract <!-- t:x7 -->
+- [x] Implement bounded composer capture and per-pane records <!-- t:x8 -->
+- [x] Expose native and guest context plus authorized history/read tools <!-- t:4a -->
+- [ ] Add sharing controls, preview/removal and explicit attachments <!-- t:4h s=in-progress -->
+- [ ] Verify and land stage 1 with protocol documentation <!-- t:4t s=in-progress -->
+- [x] Extend native-shell lifecycle capture and block attachment in stage 2 <!-- t:w0 -->
+- [ ] Complete cross-pane/SSH/native/guest evidence and independent verification <!-- t:kg s=in-progress -->

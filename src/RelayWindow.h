@@ -3816,6 +3816,16 @@ private:
                 QSettings().setValue(QStringLiteral("agent/terminal_handoff"), value);
             });
         }
+        security.rows << choiceRow(QStringLiteral("option:terminal_context"),
+            QStringLiteral("Share terminal output with the agent"),
+            QStringLiteral("Automatic attaches the latest command in this pane. Manual shares only output you attach. Off revokes reads. Independent of saved history."),
+            {QStringLiteral("automatic"), QStringLiteral("manual"), QStringLiteral("off")},
+            {QStringLiteral("Automatic"), QStringLiteral("Manual"), QStringLiteral("Off")},
+            QSettings().value(QStringLiteral("agent/terminal_context"), QStringLiteral("automatic")).toString(),
+            QStringLiteral("automatic"), [](const QString &value) {
+                QSettings().setValue(QStringLiteral("agent/terminal_context"), value);
+                relay::SettingsWatch::instance().notify();
+            });
         security.rows << listRow(QStringLiteral("security/command_denylist"),
                                  QStringLiteral("Commands the agent never runs"),
                                  QStringLiteral("Comma-separated. A bare name is a program, so \"rm\" also refuses "

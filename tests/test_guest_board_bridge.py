@@ -9,7 +9,7 @@ from unittest import mock
 
 from relay_core import board as B, board_tools as T
 from relay_core.agent import Agent
-from relay_core.guest_board_bridge import BOARD_ALLOW, EXEC_ALLOW, REMOTE_ALLOW, Bridge, exchange
+from relay_core.guest_board_bridge import BOARD_ALLOW, EXEC_ALLOW, REMOTE_ALLOW, TERMINAL_CONTEXT_ALLOW, Bridge, exchange
 from relay_core import guest_harness_provider as P
 from relay_core.guest_harness import TurnResult
 from tests.test_board_tools import CONFIG
@@ -50,7 +50,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_discovery_allowlist_and_unavailable(self):
         specs = exchange(self.cap, 'tools/list')['tools']
-        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW | EXEC_ALLOW)
+        self.assertEqual({s['name'] for s in specs}, BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW)
         self.assertTrue(all(s['inputSchema']['type']=='object' for s in specs))
         self.assertEqual(self.call()['code'], 'unavailable')
         self.active()
@@ -58,7 +58,7 @@ class BridgeTests(unittest.TestCase):
         self.assertNotIn('error', self.call(key='active'))
         self.assertEqual(self.call('board_create_card', key='2')['code'], 'unknown_tool')
         self.agent.board = None
-        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']}, EXEC_ALLOW)
+        self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']}, EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW)
 
     def test_capability_isolation(self):
         self.active()
@@ -122,7 +122,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(err,'')
         rows = sorted((json.loads(line) for line in out.splitlines()), key=lambda r: r['id'] if r['id'] is not None else 99)
         self.assertEqual(rows[0]['result']['protocolVersion'],'2025-03-26')
-        self.assertEqual(len(rows[1]['result']['tools']),len(BOARD_ALLOW | EXEC_ALLOW))
+        self.assertEqual(len(rows[1]['result']['tools']),len(BOARD_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW))
         self.assertFalse(rows[2]['result']['isError'])
         self.assertIn('error', rows[3])
 
