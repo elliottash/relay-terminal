@@ -199,9 +199,8 @@ bool GlobalsPane::protectDraft() {
 }
 bool GlobalsPane::suggesting() const { return m_record.value("kind").toString() == QLatin1String("suggestion"); }
 void GlobalsPane::showSuggestion(const QString &id) {
-    if (id.isEmpty()) return;
     if (protectDraft()) return;
-    m_selected = QStringLiteral("suggestion:") + id;
+    m_selected = id.isEmpty() ? QString() : QStringLiteral("suggestion:") + id;
     {
         const QSignalBlocker blocker(m_section);
         m_section->setCurrentIndex(kSuggestions);
@@ -210,9 +209,9 @@ void GlobalsPane::showSuggestion(const QString &id) {
     m_record = {};
     rebuild();
     if (auto *item = m_list->currentItem()) display(item->data(Qt::UserRole).toJsonObject());
-    else { display({}); m_selected = QStringLiteral("suggestion:") + id; }
+    else { display({}); m_selected = id.isEmpty() ? QString() : QStringLiteral("suggestion:") + id; }
     updateButtons();
-    m_editor->setFocus();
+    if (id.isEmpty()) m_list->setFocus(); else m_editor->setFocus();
 }
 void GlobalsPane::decide(bool keep) {
     if (!suggesting() || !m_writeRequest.isEmpty()) return;

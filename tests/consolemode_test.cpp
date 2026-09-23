@@ -1333,6 +1333,93 @@ void rewindRemovesOnlyTheBranchAndLinksItsCompleteText()
     CHECK(console.paneTextLines(200000).join('\n').contains(QStringLiteral("still here")));
 }
 
+
+// ----- a memory suggestion waits in the transcript (#MEMS) --------------------------------------
+//
+// Owner, 2026-09-22: "new memories are suggestions that the user confirms. and if the user rejects,
+// rejections are remembered". A finished `app_user_memory suggest` prints "Remember: … Keep · Edit ·
+// No" under its call; Keep and No go to this pane's worker, the answer prints the outcome, and the
+// same links clicked again send nothing. A declined repeat is a note with no links.
+void aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.resize(1000, 650);
+    console.show();
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    QStringList edited;
+    console.onOpenMemorySuggestion = [&edited](const QString &id) { edited << id; };
+    int decided = 0;
+    console.onMemorySuggestionDecided = [&decided] { ++decided; };
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent({{"event", "agent_started"}, {"id", "t1"}});
+    auto suggest = [&](const QString &call, const QJsonObject &result) {
+        // The labels backend/relay_core/tool_labels.py gives this call.
+        const QJsonObject label{{"kind", "other"}, {"running", "running app user memory"}, {"title", "app user memory suggest"}};
+        QJsonObject done = label;
+        done.insert("ok", true);
+        console.deliverWorkerEvent({{"event", "tool_started"}, {"tool", "app_user_memory"}, {"call_id", call}, {"turn_id", "t1"},
+                                    {"label", label}});
+        console.deliverWorkerEvent({{"event", "tool_result"}, {"tool", "app_user_memory"}, {"call_id", call}, {"turn_id", "t1"},
+                                    {"result", result}, {"label", done}, {"ms", 12}});
+    };
+    suggest(QStringLiteral("c1"), {{"status", "pending"}, {"id", "S1"}, {"fact", "Prefers terse answers"}, {"source", "agent"}});
+    suggest(QStringLiteral("c2"), {{"status", "pending"}, {"id", "S2"}, {"fact", "Works in Zurich"}, {"source", "agent"}});
+    suggest(QStringLiteral("c3"), {{"status", "declined"}, {"id", QJsonValue()}, {"fact", "Likes tabs"},
+                                   {"matched", QJsonObject{{"kind", "rejected"}, {"date", "2026-09-21"}}}});
+    { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+    QString text = console.paneTextLines(2000).join('\n');
+    if (qEnvironmentVariableIsSet("RELAY_MEMORY_DUMP")) std::fprintf(stderr, "%s\n", qPrintable(text));
+    CHECK(text.contains(QStringLiteral("Remember: Prefers terse answers   Keep · Edit · No")));
+    CHECK(text.contains(QStringLiteral("Not suggested: Likes tabs · you rejected it on 2026-09-21")));
+    auto *backend = console.findChild<relay::EngineBackend *>();
+    CHECK(backend != nullptr);
+    if (backend) {
+        const QString links = backend->replayableText(2000).join('\n');
+        CHECK(links.contains(QStringLiteral("relay://memory/%1/keep/S1").arg(console.sessionToken())));
+        CHECK(links.contains(QStringLiteral("relay://memory/%1/no/S2").arg(console.sessionToken())));
+    }
+    const QString capture = qEnvironmentVariable("RELAY_MEMORY_LINE_CAPTURE");
+    if (!capture.isEmpty()) CHECK(console.grab().save(capture));
+    auto target = [&](const QString &word, const QString &id) {
+        return QStringLiteral("relay://memory/%1/%2/%3").arg(console.sessionToken(), word, id);
+    };
+    sent.clear();
+    console.openOutputTarget(target(QStringLiteral("edit"), QStringLiteral("S1")), 0, true);
+    CHECK_EQ(edited, QStringList({QStringLiteral("S1")}));
+    CHECK(sent.isEmpty());
+    console.openOutputTarget(target(QStringLiteral("keep"), QStringLiteral("S1")), 0, true);
+    CHECK_EQ(sent.size(), 1);
+    if (sent.size() != 1) return;
+    CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("globals_suggestion_accept"));
+    CHECK_EQ(sent.first().value("sid").toString(), QStringLiteral("S1"));
+    console.openOutputTarget(target(QStringLiteral("no"), QStringLiteral("S1")), 0, true);
+    CHECK_EQ(sent.size(), 1);   // one decision in flight at a time
+    console.deliverWorkerEvent({{"event", "globals_suggestion_accepted"}, {"id", sent.first().value("id")}, {"sid", "S1"},
+                                {"record", QJsonObject{{"kind", "memory"}, {"key", "M1"}}}});
+    CHECK_EQ(decided, 1);
+    sent.clear();
+    console.openOutputTarget(target(QStringLiteral("no"), QStringLiteral("S2")), 0, true);
+    CHECK_EQ(sent.size(), 1);
+    if (sent.size() != 1) return;
+    CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("globals_suggestion_reject"));
+    console.deliverWorkerEvent({{"event", "globals_suggestion_rejected"}, {"id", sent.first().value("id")}, {"sid", "S2"}});
+    { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+    text = console.paneTextLines(2000).join('\n');
+    CHECK(text.contains(QStringLiteral("Kept: Prefers terse answers · Globals › User memory")));
+    CHECK(text.contains(QStringLiteral("Rejected — won't be suggested again: Works in Zurich")));
+    // Decided: the old links answer from memory and send nothing.
+    sent.clear();
+    console.openOutputTarget(target(QStringLiteral("keep"), QStringLiteral("S1")), 0, true);
+    console.openOutputTarget(target(QStringLiteral("keep"), QStringLiteral("S2")), 0, true);
+    console.openOutputTarget(target(QStringLiteral("edit"), QStringLiteral("S2")), 0, true);
+    CHECK(sent.isEmpty());
+    CHECK_EQ(edited.size(), 1);
+    const QString after = qEnvironmentVariable("RELAY_MEMORY_OUTCOME_CAPTURE");
+    if (!after.isEmpty()) CHECK(console.grab().save(after));
+}
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -1353,6 +1440,10 @@ int main(int argc, char **argv)
     qputenv("HOME", scratch.path().toUtf8());
     home = &scratch;
 
+    if (app.arguments().contains(QStringLiteral("--memory-only"))) {
+        cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
+        return failures ? 1 : 0;
+    }
     if (app.arguments().contains(QStringLiteral("--plan-click-only"))) {
         cases::enteringPlanSelectsHigh();
         cases::clickingPlanLeavesModeAndPreservesDraft();
@@ -1392,6 +1483,7 @@ int main(int argc, char **argv)
     cases::answersBypassQueuedPrompts();
     cases::proseQuestionHoldsTheQueueForItsReply();
     cases::rewindRemovesOnlyTheBranchAndLinksItsCompleteText();
+    cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 20 cases, all passed\n");

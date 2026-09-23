@@ -6513,6 +6513,22 @@ public:
         updateTitles();
     }
 
+    // Globals › Suggestions, on one suggestion when `id` is set (#MEMS): a transcript's Edit, and
+    // the Review button on the "memories from Claude Code to review" notification.
+    void openMemorySuggestion(const QString &id) {
+        openSessions(QStringLiteral("globals"));
+        ToolPane *tool = sessionsPaneIn(m_tabs->currentWidget());
+        auto *view = tool ? sessionsViewOf(tool) : nullptr;
+        if (auto *globals = view ? dynamic_cast<relay::globals::GlobalsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceGlobals"))) : nullptr)
+            globals->showSuggestion(id);
+    }
+    // A transcript's Keep or No: every Globals list on screen stops offering that suggestion.
+    static void refreshVisibleGlobals() {
+        for (QWidget *top : QApplication::topLevelWidgets())
+            for (auto *globals : top->findChildren<relay::globals::GlobalsPane *>())
+                if (globals->isVisible()) globals->refresh();
+    }
+
     void closeSessionsPane(ToolPane *tool, Pane *back) {
         if (!tool) return;
         QWidget *page = pageOf(tool);
@@ -8304,6 +8320,8 @@ private:
         };
         // Session manager and ⓘ (cards #R6J0, #Y63Z).
         pane->onOpenSessions = [guard](const QString &query) { if (auto *w = windowOf(guard)) w->openSessionsFor(guard, query); };
+        pane->onOpenMemorySuggestion = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openMemorySuggestion(id); };
+        pane->onMemorySuggestionDecided = [] { refreshVisibleGlobals(); };
         // An `option:sec/row` in this pane's output (#AGNT step 8): Options on that section, zoomed
         // to the row. The same two steps `app_open {target: "options", row}` takes, and the same
         // two the helper's own answers took before the link became a kind of the transcript.
@@ -8511,6 +8529,8 @@ private:
         console->onOpenSessions = [guard](const QString &query) {
             if (auto *w = windowOf(guard)) w->openSessions(QString(), query);
         };
+        console->onOpenMemorySuggestion = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openMemorySuggestion(id); };
+        console->onMemorySuggestionDecided = [] { refreshVisibleGlobals(); };
         console->onOpenDocument = [guard](const QString &path) {
             if (auto *w = windowOf(guard)) w->openDocument(path, w->paneForConsoleOpen(guard), false);
         };
@@ -10006,6 +10026,8 @@ private:
             // is not this window's to revert, and undoFromNotification() says so by doing nothing.
             m_notifications->onAction = [this](const QString &, const QString &actionId) {
                 if (appCommands().undoFromNotification(actionId)) return;
+                // "3 memories from Claude Code to review · Review" (#MEMS): the one review list.
+                if (actionId == QStringLiteral("memory.review")) { m_notifications->hide(); openMemorySuggestion(QString()); return; }
                 // "Working on ctest:panelayout · Open thread" (#AQ6X phase 3, decision 9): the
                 // agent thread Relay started on a failing check nobody was on.
                 const auto thread = relay::board::signalThreadOfAction(actionId);

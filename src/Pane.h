@@ -65,6 +65,7 @@
 #include "InternalsLedger.h"      // …and what that pane took, for the terminal to print when it closes
 #include "Logging.h"
 #include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
+#include "GlobalsPane.h"   // a memory suggestion's transcript line reads its tool result the Globals way (#MEMS)
 #include "TerminalBackends.h"
 #include "TerminalBackend.h"
 #include "EngineBackend.h"     // applyTerminalSettings(): Options › Terminal reaches the engine view in place
@@ -850,6 +851,10 @@ public:
     std::function<void()> onOpenInternals;   // the Activity pane beside this one (#QT8C)
     // The Sharing pane (#W5N2): who is on this shared pane, who is knocking, what is waiting.
     std::function<void()> onOpenSharing;
+    // A memory suggestion's Edit (#MEMS): Globals › Suggestions on that one; an empty id opens the
+    // list. And after this pane kept or rejected one, so an open Globals list stops offering it.
+    std::function<void(const QString &id)> onOpenMemorySuggestion;
+    std::function<void()> onMemorySuggestionDecided;
     // Options, opened at one of its tabs.
     std::function<void(const QString &tab)> onOpenOptions;
     // The models pane (Ctrl+Shift+M, /model, /models; card #MDL1 t:a11, design 5.8). This pane
@@ -3241,6 +3246,11 @@ public:
             const QUrl url(target);
             const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
             if (url.host() == QStringLiteral("continue")) { continueTurn(true); return; }
+            // "Remember: … Keep · Edit · No" (#MEMS): relay://memory/<pane>/<keep|edit|no>/<id>.
+            if (url.host() == QStringLiteral("memory") && parts.size() == 3) {
+                decideMemorySuggestion(parts.at(1), QUrl::fromPercentEncoding(parts.at(2).toUtf8()));
+                return;
+            }
             // A ✦ subagent line: its tab in the subagent pane (card #WD83).
             if (url.host() == QStringLiteral("subagent") && parts.size() == 2) {
                 openSubagent(QUrl::fromPercentEncoding(parts.at(1).toUtf8()));
@@ -5997,6 +6007,9 @@ private:
         // on the default. It was 96 % of the worker→GUI bytes of a long conversation: the whole
         // ledger, up to two hundred entries, three times a turn.
         request.insert(QStringLiteral("requests_delta"), true);
+        // Protocol 34 (#MEMS): Claude Code and Codex memories are offered as suggestions at the
+        // worker's start, and `true` asks for the `memory_import` event that says how many.
+        request.insert(QStringLiteral("memory_import"), settings.value(QStringLiteral("memory/import_guests"), true).toBool());
         request.insert(QStringLiteral("instructions"), QJsonObject{
             {"files", QJsonArray::fromStringList(settings.value(QStringLiteral("instructions/files")).toStringList())},
             {"project_auto", settings.value(QStringLiteral("instructions/project_auto"), true).toBool()}});
@@ -10910,6 +10923,113 @@ private:
         writeTerminal(out);
     }
 
+    // ----- memory suggestions (#MEMS) --------------------------------------------------------
+    //
+    // Owner, 2026-09-22: "new memories are suggestions that the user confirms. and if the user
+    // rejects, rejections are remembered". A completed `app_user_memory suggest` whose result is
+    // pending prints one line under its call, "✦ Remember: <fact>   Keep · Edit · No", each word an
+    // OSC 8 link to relay://memory/<pane>/<word>/<id> like the ▸ Continue link. Keep and No go to
+    // this pane's own worker as `globals_suggestion_accept` / `_reject`, and the answer prints what
+    // became of it on a line of its own: a line already in the scrollback cannot lose its links,
+    // so a second click says it was decided instead of asking again. Edit opens Globals ›
+    // Suggestions on it, where the wording can change before Keep. A declined or duplicate
+    // suggestion is a quiet note with nothing to click.
+    struct MemoryDecision { QString id; bool keep = false; };
+    QHash<QString, QString> m_memoryFacts;          // suggestion id → its fact, for the outcome line
+    QHash<QString, QString> m_memoryDecided;        // suggestion id → "kept" / "rejected"
+    QHash<QString, MemoryDecision> m_memoryRequests;   // request id → the decision in flight
+
+    void printMemorySuggestion(const relay::globals::SuggestionNote &note) {
+        if (note.kind == relay::globals::SuggestionNote::None) return;
+        beginBlock(relay::gaps::Block::Call);   // it sits with the call that made it (#5AWD)
+        ensureLineStart();
+        const QString line = sanitize(relay::globals::suggestionLine(note));
+        if (note.kind != relay::globals::SuggestionNote::Pending) { printInline(QStringLiteral("✦ ") + line + '\n', Ink::Note); return; }
+        m_memoryFacts.insert(note.id, note.fact);
+        // Links need the line written now; a line queued behind a running program is replayed plain.
+        if (hasShell() && !shellIdleAtPrompt()) {
+            printInline(QStringLiteral("✦ %1 · Keep, Edit or No in Globals › Suggestions\n").arg(line), Ink::Note);
+            return;
+        }
+        auto link = [&](const QString &word, const QString &label) {
+            const QByteArray url = QStringLiteral("relay://memory/%1/%2/%3")
+                .arg(m_token, word, QString::fromUtf8(QUrl::toPercentEncoding(note.id))).toUtf8();
+            return "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Agent) + label.toUtf8() + "\x1b[0m" + "\x1b]8;;\x1b\\";
+        };
+        QByteArray out = takeWrapped() + closeProseRun();
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+        if (!m_atLineStart) out += "\r\n";
+        out += inkCode(Ink::Agent) + QStringLiteral("✦ ").toUtf8() + line.toUtf8() + "\x1b[0m   ";
+        out += link(QStringLiteral("keep"), QStringLiteral("Keep")) + inkCode(Ink::Note) + QByteArray(" · ") + "\x1b[0m"
+             + link(QStringLiteral("edit"), QStringLiteral("Edit")) + inkCode(Ink::Note) + QByteArray(" · ") + "\x1b[0m"
+             + link(QStringLiteral("no"), QStringLiteral("No"));
+        out += inkCode(Ink::Note) + QByteArray("  (Ctrl+click)") + "\x1b[0m\r\n";
+        m_atLineStart = true;
+        writeTerminal(out);
+    }
+
+    void decideMemorySuggestion(const QString &word, const QString &id) {
+        if (id.isEmpty()) return;
+        if (m_memoryDecided.contains(id)) {
+            status(m_memoryDecided.value(id) == QStringLiteral("kept") ? QStringLiteral("Already kept in User memory.")
+                                                                       : QStringLiteral("Already rejected; it won't be suggested again."));
+            return;
+        }
+        if (word == QStringLiteral("edit")) {
+            if (onOpenMemorySuggestion) onOpenMemorySuggestion(id);
+            else status(QStringLiteral("Edit it in Globals › Suggestions."));
+            return;
+        }
+        if (word != QStringLiteral("keep") && word != QStringLiteral("no")) return;
+        for (const MemoryDecision &pending : std::as_const(m_memoryRequests))
+            if (pending.id == id) { status(QStringLiteral("Still saving that decision…")); return; }
+        const bool keep = word == QStringLiteral("keep");
+        const QString request = QStringLiteral("memory-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_memoryRequests.insert(request, {id, keep});
+        send({{"type", keep ? QStringLiteral("globals_suggestion_accept") : QStringLiteral("globals_suggestion_reject")},
+              {"id", request}, {"sid", id}});
+    }
+
+    bool handleMemorySuggestionEvent(const QString &type, const QJsonObject &event) {
+        if (type == QStringLiteral("memory_import")) {
+            // Protocol 34: this worker's startup import left facts from Claude Code or Codex
+            // waiting. One entry in the bell, whose button opens the review list.
+            const int claude = event.value(QStringLiteral("claude")).toInt();
+            const int codex = event.value(QStringLiteral("codex")).toInt();
+            const int total = claude + codex;
+            if (total <= 0) return true;
+            const QString from = claude && codex ? QStringLiteral("Claude Code and Codex")
+                               : claude ? QStringLiteral("Claude Code") : QStringLiteral("Codex");
+            relay::NotificationCenter::instance().postWithAction(
+                total == 1 ? QStringLiteral("1 memory from %1 to review").arg(from)
+                           : QStringLiteral("%1 memories from %2 to review").arg(total).arg(from),
+                QStringLiteral("Nothing is remembered until you keep it · Globals › Suggestions"),
+                relay::NotificationCenter::kindInfo, sessionToken(), QStringLiteral("Review"),
+                QStringLiteral("memory.review"));
+            return true;
+        }
+        if (type != QStringLiteral("globals_suggestion_accepted") && type != QStringLiteral("globals_suggestion_rejected")
+            && type != QStringLiteral("globals_error"))
+            return false;
+        const QString request = event.value(QStringLiteral("id")).toString();
+        if (!m_memoryRequests.contains(request)) return false;
+        const MemoryDecision decision = m_memoryRequests.take(request);
+        ensureLineStart();
+        if (type == QStringLiteral("globals_error")) {
+            const QString message = event.value(QStringLiteral("message")).toString(QStringLiteral("Relay could not save that decision."));
+            printInline(QStringLiteral("⚠ ") + message + '\n', Ink::Error);
+        } else {
+            const bool kept = type == QStringLiteral("globals_suggestion_accepted");
+            QString fact = m_memoryFacts.value(decision.id);
+            if (fact.isEmpty()) fact = event.value(QStringLiteral("record")).toObject().value(QStringLiteral("title")).toString(QStringLiteral("#") + decision.id);
+            m_memoryDecided.insert(decision.id, kept ? QStringLiteral("kept") : QStringLiteral("rejected"));
+            printInline(QStringLiteral("✦ ") + sanitize(relay::globals::suggestionOutcome(kept, fact)) + '\n', Ink::Note);
+            if (onMemorySuggestionDecided) onMemorySuggestionDecided();
+        }
+        if (!m_agentBusy && !moreTurnsPending()) closeInline();
+        return true;
+    }
+
     bool handleRequestsEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("ready")) { m_ledger.clear(); m_limitReached = false; m_turnCutOff = false; return false; }
         if (m_ledger.handle(event)) {
@@ -11588,6 +11708,7 @@ private:
         if (handleObservabilityEvent(type, event)) return;
         if (handleSessionEvent(type, event)) return;
         if (handleAliasEvent(type, event)) return;   // aliases (issue G8DK)
+        if (handleMemorySuggestionEvent(type, event)) return;   // Keep / No answered, and imports (#MEMS)
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
             if (m_restartConfigure) {
@@ -12165,6 +12286,8 @@ private:
                 // (#WXT6): foldRequested() answers from the stored diff when it is clicked, so
                 // nothing is printed here and the row is one collapsed line.
             }
+            // A fact the agent learned waits for the user here, under its call (#MEMS).
+            printMemorySuggestion(relay::globals::suggestionFromToolResult(event));
         } else if (type == QStringLiteral("vision_route")) {
             // Image context (protocol 17): this turn runs on another model because the pane's own
             // cannot read images. Said plainly, because the answer comes from a different model.

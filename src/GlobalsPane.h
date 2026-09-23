@@ -71,7 +71,8 @@ public:
     std::function<void()> onInterview;
     void handleEvent(const QJsonObject &event);
     void refresh();
-    // Globals › Suggestions with this suggestion selected in the editor, from a transcript's Edit.
+    // Globals › Suggestions with this suggestion selected in the editor, from a transcript's Edit;
+    // an empty id opens the list with nothing selected.
     void showSuggestion(const QString &id);
     int pendingSuggestions() const { return m_pending.size(); }
     void setWorkspace(const QString &workspace);
