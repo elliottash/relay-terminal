@@ -127,15 +127,17 @@ class PresetTests(unittest.TestCase):
     def test_guest_options_are_validated(self):
         self.assertEqual(ghp.guest_options(None),
                          {"model": "", "resume": None, "fork": False, "permissions": "bypass",
-                          "effort": None})
-        self.assertEqual(ghp.guest_options({"resume": "abc", "fork": True, "permissions": "ask"}),
+                          "effort": None, "memory": "relay"})
+        self.assertEqual(ghp.guest_options({"resume": "abc", "fork": True, "permissions": "ask",
+                                            "memory": "both"}),
                          {"model": "", "resume": "abc", "fork": True, "permissions": "ask",
-                          "effort": None})
+                          "effort": None, "memory": "both"})
         # The guest's own levels, so `xhigh` and `ultra` pass where Relay's own four would not.
         for given, want in (("xhigh", "xhigh"), ("Ultra", "ultra"), ("", None), (None, None)):
             self.assertEqual(ghp.guest_options({"effort": given})["effort"], want, given)
         for bad in ({"nope": 1}, {"fork": "yes"}, {"permissions": "maybe"}, {"model": 3}, "x",
-                    {"effort": "high and also"}, {"effort": 3}):
+                    {"effort": "high and also"}, {"effort": 3}, {"memory": "theirs"},
+                    {"memory": 1}):
             with self.assertRaises(ValueError):
                 ghp.guest_options(bad)
 
@@ -272,7 +274,7 @@ class StartTests(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as cwd, \
                          mock.patch.object(ghp, "make_harness", return_value=harness):
                         provider = ghp.start_provider("guest:" + guest,
-                            {"guest": {"resume": session, "fork": fork},
+                            {"guest": {"resume": session, "fork": fork, "memory": "own"},
                              "skills": {"enabled": False}}, cwd)
                         try:
                             self.assertEqual(harness.instructions, GUEST_INSTRUCTIONS)
@@ -337,7 +339,8 @@ class StartTests(unittest.TestCase):
             harness = FakeHarness([], guest="codex")
             with mock.patch.object(ghp, "make_harness", return_value=harness), \
                  mock.patch("relay_core.skills.from_request", side_effect=AssertionError("rediscovery")):
-                provider = ghp.start_provider("guest:codex", {}, "/tmp", skill_index=index)
+                provider = ghp.start_provider("guest:codex", {"guest": {"memory": "own"}}, "/tmp",
+                                              skill_index=index)
             try:
                 if index is None:
                     self.assertEqual(harness.instructions, GUEST_INSTRUCTIONS)

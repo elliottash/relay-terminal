@@ -13765,6 +13765,9 @@ private:
                                    QStringLiteral("permissions")})
             if (!staged.contains(key))
                 if (const QString value = guestSetting(guest, key); !value.isEmpty()) staged.insert(key, value);
+        // "Guests use memory from" (#MEMS), one setting for both guests; unset is the worker's `relay`.
+        if (const QString memory = QSettings().value(QStringLiteral("guests/memory")).toString().trimmed(); !memory.isEmpty())
+            staged.insert(QStringLiteral("memory"), memory);
         // The owner's rule is the default (29.1): a guest moves around the file system like
         // Relay's own agent. `permissions` is only ever in the request when the user chose
         // otherwise, and `bypass` above is what the worker assumes when it is absent.
@@ -13906,6 +13909,9 @@ public:
             arguments << QStringLiteral("--model") << model;
         if (const QString effort = guestSetting(guest, QStringLiteral("effort")); !effort.isEmpty())
             arguments << QStringLiteral("--effort") << effort;
+        // Options › Privacy "Guests use memory from" (#MEMS); unset is `relay`, guest_launch's default.
+        if (const QString memory = QSettings().value(QStringLiteral("guests/memory")).toString().trimmed(); !memory.isEmpty())
+            arguments << QStringLiteral("--memory") << memory;
         if (!extra.isEmpty()) arguments << QStringLiteral("--") << extra;
         launch->setArguments(arguments);
         m_guestLaunch = launch;

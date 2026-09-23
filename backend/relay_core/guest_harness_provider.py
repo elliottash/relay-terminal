@@ -36,6 +36,7 @@ import uuid
 
 from . import guest, logs, questions as questions_mod, tool_labels
 from .presets import effort_fixed, model_name, provider_rank, tier_start_efforts
+from .guest_instructions import DEFAULT_MEMORY, memory_mode, own_memory
 from .guest_harness import (HARNESS_GUESTS, HarnessError, HarnessSteerUncertain, HarnessNotAvailable, HarnessEvent,
                             limit_windows,
                             TOOL_NAMES, chunk_tool_output, map_tool_name, validate_effort,
@@ -189,9 +190,9 @@ def guest_options(raw) -> dict:
         raw = {}
     if not isinstance(raw, dict):
         raise ValueError("guest must be an object.")
-    unknown = set(raw) - {"model", "resume", "fork", "permissions", "effort"}
+    unknown = set(raw) - {"model", "resume", "fork", "permissions", "effort", "memory"}
     if unknown:
-        raise ValueError("guest may only carry model, resume, fork, permissions and effort.")
+        raise ValueError("guest may only carry model, resume, fork, permissions, effort and memory.")
     model = raw.get("model")
     if model is not None and (not isinstance(model, str) or len(model) > 200):
         raise ValueError("guest.model must be text.")
@@ -205,7 +206,9 @@ def guest_options(raw) -> dict:
             "permissions": validate_permissions(raw.get("permissions")),
             # The guest's own levels, not Relay's four: `validate_effort` only checks the shape
             # and the guest decides whether it has that one (29.3, owner 2026-09-19).
-            "effort": validate_effort(raw.get("effort"))}
+            "effort": validate_effort(raw.get("effort")),
+            # Options' "guests use memory from" (#MEMS): relay (the default), own or both.
+            "memory": memory_mode(raw.get("memory"))}
 
 
 # ----- what this machine has -------------------------------------------------------------------
@@ -568,10 +571,11 @@ def usage_limits_event(guest_id: str, data: dict) -> dict:
 # ----- starting one ------------------------------------------------------------------------------
 
 
-def make_harness(guest_id: str, probe: bool = False):
+def make_harness(guest_id: str, probe: bool = False, *, memory: str | None = None):
     """The adapter instance for a guest. The single seam tests replace, and the only place either
     adapter module is imported. `probe` asks for the adapter's key-test variant (`for_probe()`:
-    claude with no tools), for keytest's one turn."""
+    claude with no tools), for keytest's one turn. `memory` is the launch's "guests use memory
+    from" mode (#MEMS): `relay` starts the guest with its own memory off."""
     if guest_id not in _ADAPTERS:
         raise HarnessNotAvailable(f"Relay has no harness for {guest_id!r}.")
     factory = _load_adapter(guest_id)
@@ -580,6 +584,8 @@ def make_harness(guest_id: str, probe: bool = False):
             f"{guest.spec(guest_id).name}'s harness is not available in this build of Relay.")
     if probe and callable(getattr(factory, "for_probe", None)):
         return factory.for_probe()
+    if memory is not None:
+        return factory(own_memory=own_memory(memory))
     return factory()
 
 
@@ -600,16 +606,18 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     if guest_id is None:
         raise ValueError(f"Unknown guest preset {preset_id!r}.")
     options = guest_options(request.get("guest"))
-    harness = make_harness(guest_id)
+    harness = make_harness(guest_id, memory=options["memory"])
     from .guest_board_bridge import Bridge
     from .guest_instructions import build_instructions
     from .board_tools import find_board_root
     bridge = Bridge(available=delegation and find_board_root(workspace) is not None,
                     delegation=delegation)
     try:
-        instructions = (build_instructions(request.get("skills"), workspace)
+        instructions = (build_instructions(request.get("skills"), workspace,
+                                           memory=options["memory"])
                         if skill_index is _SKILLS_UNSET else
-                        build_instructions(None, workspace, skill_index=skill_index))
+                        build_instructions(None, workspace, skill_index=skill_index,
+                                           memory=options["memory"]))
         if instruction_suffix:
             instructions += "\n\n" + instruction_suffix
         started = harness.start(cwd=workspace, model=options["model"] or None,
@@ -633,6 +641,7 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     provider = HarnessProvider(config, harness, guest_id, stall_timeout=stall_timeout)
     provider.board_bridge = bridge
     provider.instructions = instructions
+    provider.memory = options["memory"]
     provider.session_id = started.session_id or ""
     provider.permissions = options["permissions"]
     provider.effort = _harness_effort(harness) or options["effort"] or ""
@@ -756,6 +765,7 @@ class HarnessProvider:
         self._agent = None
         self.board_bridge = None
         self.instructions: str | None = None
+        self.memory = DEFAULT_MEMORY   # the launch's "guests use memory from" mode (#MEMS)
         self._asker = _Asker()
         self._closed = False
 
@@ -1746,7 +1756,7 @@ def resume_session(agent, data, emit) -> None:
     # the agent it had.
     replacement = None
     try:
-        replacement = make_harness(guest_id)
+        replacement = make_harness(guest_id, memory=provider.memory)
         started = replacement.start(cwd=str(agent.executor.workspace.root),
                                     model=provider.config.model or None, resume=session,
                                     fork=False, permissions=provider.permissions,

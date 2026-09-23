@@ -89,6 +89,7 @@ from .guest_harness import (Emit, HarnessError, HarnessSteerUncertain, HarnessEv
                             TurnResult, approval_scope, chunk_tool_output, map_tool_name,
                             validate_effort, validate_permissions,
                             window_kind_for_minutes)
+from .guest_launch import codex_memory_overrides
 from .presets import model_name
 
 log = logging.getLogger(__name__)
@@ -195,7 +196,11 @@ class CodexHarness:
 
     def __init__(self, *, codex_path: str | None = None, spawn=None,
                  client_version: str | None = None, request_timeout: float = 120.0,
-                 close_timeout: float = 2.0, error_grace: float = 5.0):
+                 close_timeout: float = 2.0, error_grace: float = 5.0, own_memory: bool = True):
+        # False when Options' "guests use memory from" is `relay` (#MEMS): codex's memories are
+        # off for this app-server only, by `-c` (`guest_launch.CODEX_MEMORY_OFF`) — on the process,
+        # not the thread, because codex consolidates memories at startup before any thread exists.
+        self._own_memory = own_memory
         self._codex_path = codex_path or os.environ.get("RELAY_CODEX_BIN") or "codex"
         self._spawn = spawn or _spawn_codex
         self._client_version = client_version or CLIENT_VERSION
@@ -249,6 +254,8 @@ class CodexHarness:
                 "Install it with `npm i -g @openai/codex` and sign in with `codex login`.")
         try:
             argv = [exe, "app-server"]
+            if not self._own_memory:
+                argv += codex_memory_overrides()
             if board_bridge:
                 argv += ["-c", "features.multi_agent=false", "-c", "features.multi_agent_v2=false"]
                 for key, value in board_bridge.items():

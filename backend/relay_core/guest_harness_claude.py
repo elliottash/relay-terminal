@@ -91,6 +91,7 @@ import uuid
 from .guest_harness import (HarnessError, HarnessSteerUncertain, HarnessEvent, HarnessNotAvailable, HarnessStart,
                             TurnResult, approval_scope, map_tool_name, validate_effort,
                             validate_permissions)
+from .guest_launch import CLAUDE_MEMORY_OFF_ENV, CLAUDE_MEMORY_OFF_SETTINGS
 from .presets import model_name
 
 GUEST = "claude"
@@ -281,8 +282,11 @@ class ClaudeHarness:
         return cls(extra_args=extra, **kwargs)
 
     def __init__(self, *, settings: str | None = None, binary: str = BINARY, spawn=None,
-                 extra_args: list[str] | None = None):
+                 extra_args: list[str] | None = None, own_memory: bool = True):
         self._settings = settings
+        # False when Options' "guests use memory from" is `relay` (#MEMS): auto-memory off for this
+        # process only (`guest_launch.CLAUDE_MEMORY_OFF_*`), on every (re)launch.
+        self._own_memory = own_memory
         self._binary = binary
         self._spawn = spawn or _spawn
         self._extra_args = list(extra_args or ())
@@ -335,6 +339,10 @@ class ClaudeHarness:
         argv += list(PERMISSION_FLAGS[permissions])
         if self._settings:
             argv += ["--settings", self._settings]
+        elif not self._own_memory:
+            # `--settings` takes a file or inline JSON; one is enough, and a settings file of the
+            # caller's own is left alone (the environment variable below turns it off regardless).
+            argv += ["--settings", json.dumps(CLAUDE_MEMORY_OFF_SETTINGS)]
         if getattr(self, "_board_bridge", None):
             argv += ["--mcp-config", json.dumps({"mcpServers": {"relay_board": self._board_bridge}})]
         argv += self._extra_args
@@ -375,7 +383,10 @@ class ClaudeHarness:
     def _launch(self, argv: list[str]) -> None:
         log.debug("starting claude harness: %s (cwd=%s)", " ".join(argv), self._cwd)
         try:
-            self._proc = self._spawn(argv, self._cwd, child_environment())
+            env = child_environment()
+            if not self._own_memory:
+                env.update(CLAUDE_MEMORY_OFF_ENV)
+            self._proc = self._spawn(argv, self._cwd, env)
         except FileNotFoundError as exc:
             raise HarnessNotAvailable(f"Claude Code could not be started: {exc}") from exc
         except OSError as exc:

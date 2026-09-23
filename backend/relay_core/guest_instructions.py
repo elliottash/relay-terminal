@@ -27,9 +27,68 @@ Reply in concise Markdown, with code fences for commands and inline code for ide
 
 _UNSET = object()
 
+# Options › Claude Code and Codex, "guests use memory from" (#MEMS, owner 2026-09-22: "guests use
+# relay memory, and thats the default"). `relay`: the guest's own memory is off for that launch and
+# Relay's user memory is in its instructions; `both`: Relay's is added and the guest keeps its own;
+# `own`: Relay adds nothing. Nothing in ~/.claude or ~/.codex is ever edited for it.
+MEMORY_MODES = ("relay", "own", "both")
+DEFAULT_MEMORY = "relay"
 
-def build_instructions(settings, workspace: str, *, skill_index=_UNSET) -> str:
-    """Expose Relay's skill discovery through tools the guest actually owns."""
+
+def memory_mode(value) -> str:
+    """The setting's value, validated: empty or absent is the default, anything unknown refused."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return DEFAULT_MEMORY
+    if not isinstance(value, str) or value.strip() not in MEMORY_MODES:
+        raise ValueError("guest.memory must be relay, own or both.")
+    return value.strip()
+
+
+def own_memory(mode) -> bool:
+    """Whether the guest keeps its own memory for this launch."""
+    return memory_mode(mode) != "relay"
+
+
+def memory_instructions(workspace: str, mode, *, suggest: str = "") -> str:
+    """The block a `relay`/`both` guest's instructions end with: how to propose a fact, then
+    `memories.prompt_section` (the project's and the global Board's memories, user memory
+    included). `suggest` says how this guest proposes a fact; the default is relay_board's
+    `app_user_memory`, which the Tier A bridge exposes. Empty for `own`."""
+    mode = memory_mode(mode)
+    if mode == "own":
+        return ""
+    from . import memories
+    try:
+        section = memories.prompt_section(workspace) if workspace else ""
+    except OSError:
+        section = ""
+    suggest = suggest or ("call relay_board's app_user_memory tool with action \"suggest\" and "
+                          "that one fact")
+    lines = ["[Relay memory]"]
+    if mode == "relay":
+        lines.append("Relay's memory replaces your own for this session: your auto-memory is off, "
+                     "so do not write memory files of your own.")
+    else:
+        lines.append("Relay's memory supplements your own for this session.")
+    lines.append(f"When you learn a durable fact about the user, {suggest}; "
+                 "the user confirms or rejects it in Relay, so do not ask them about it yourself.")
+    lines.append("Never suggest credentials or sensitive traits.")
+    if section:
+        lines.append(section.strip())
+    lines.append("[End of Relay memory]")
+    return "\n".join(lines)
+
+
+def build_instructions(settings, workspace: str, *, skill_index=_UNSET, memory=None) -> str:
+    """Expose Relay's skill discovery through tools the guest actually owns, and — when `memory`
+    names a mode other than `own` — Relay's memory (`memory_instructions`). None adds no memory
+    block; `start_provider` always passes the launch's mode."""
+    base = _with_skills(settings, workspace, skill_index)
+    block = memory_instructions(workspace, memory) if memory is not None else ""
+    return base + ("\n\n" + block if block else "")
+
+
+def _with_skills(settings, workspace: str, skill_index) -> str:
     import json
     from .skills import from_request
 

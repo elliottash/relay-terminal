@@ -5687,6 +5687,17 @@ to a guest Relay started. The consequence is written here rather than discovered
 guest never fires `PermissionRequest`, so the question bar of 26.4 does not appear for it. That bar
 remains for a claude the user started themselves whose own settings ask.
 
+**Relay memory in the terminal** (#MEMS, 29.3). `--memory relay|own|both` (the pane passes Options'
+`guests/memory`; absent is `relay`). With `relay` the settings file also carries `autoMemoryEnabled:
+false` and `autoDreamEnabled: false`, and codex gets the three `-c` memory switches. With `relay` or
+`both` the memory block is written to `<runtime>/guest/claude-memory.md` or `codex-memory.md` (0600):
+claude reads it through `--append-system-prompt-file` (left out when a row's `extra` already appends a
+prompt), codex gets `-c developer_instructions=…` holding the user's own `developer_instructions`
+from `~/.codex/config.toml`, if any, then a pointer to that file — the block itself is never typed
+into the shell. A terminal guest has no relay_board bridge, so its block tells it to propose a fact
+with `guest_launch suggest-memory --source <guest> <fact>`, which writes the same pending suggestion
+`app_user_memory` would. The payload adds `memory` (the mode) and `memory_file` ("" for `own`).
+
 **What a first launch can open on.** Neither bypass flag has a first-run acceptance. Claude Code's
 TUI does show its **workspace trust** dialog once per project directory (default "No, exit": a
 bare Enter ends the guest; the answer is remembered in `~/.claude.json`), which `-p` skips and
@@ -6408,7 +6419,7 @@ does not recognise, and an ask the user stops, is a plain deny.
 
 **The model and the reasoning effort are the guest's own** (owner, 2026-09-19: "you should be able
 to pick the model and reasoning effort for those"). The `guest` block of a `configure` or
-`set_model` carries `model`, `effort`, `resume`, `fork` and `permissions`, and nothing else; a
+`set_model` carries `model`, `effort`, `resume`, `fork`, `permissions` and `memory`, and nothing else; a
 `set_effort` on a guest pane tells the harness and answers the ordinary `effort_changed` rather
 than writing into a `ProviderConfig`, because the effort is a flag on the guest's own command line
 or a field of its own `turn/start`. `configured`, `model_changed` and `effort_changed` carry
@@ -6439,6 +6450,21 @@ turns, transparently: the pane keeps its conversation and sees a gap, never a mi
 Before the first turn the relaunch reuses `--session-id`, because `claude --resume <an id it has
 not written yet>` exits 1. Codex validates an effort itself and its refusal is what the pane shows;
 claude's five are checked locally, because a bad one kills the process at startup.
+
+**Whose memory a guest uses** (#MEMS, owner 2026-09-22: "guests use relay memory, and thats the
+default"). `guest.memory` is `relay` (absent means this), `own` or `both` — Options › Privacy
+"Guests use memory from", QSettings `guests/memory`, sent by the pane in every guest block and
+passed as `--memory` to `guest_launch` (26.9). `relay` and `both` end the guest's instructions with a
+`[Relay memory]` block (`guest_instructions.memory_instructions`: how to propose a fact, then
+`memories.prompt_section` for the workspace, global user memory included); `own` adds nothing.
+`relay` also turns the guest's own memory off for that process, never in `~/.claude` or `~/.codex`:
+claude gets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and `{"autoMemoryEnabled": false,
+"autoDreamEnabled": false}` (through `--settings`), codex's app-server `-c features.memories=false
+-c memories.generate_memories=false -c memories.use_memories=false` (`guest_launch.CODEX_MEMORY_OFF`,
+on the process because codex consolidates at startup). A guest proposes what it learns through
+relay_board's `app_user_memory` `suggest` — the one app tool the bridge exposes to guests
+(`guest_board_bridge.APP_ALLOW`) — so it lands as a suggestion the user keeps or rejects. A change
+applies from the guest's next start; a running harness keeps the mode it was started with.
 
 ### 29.4 The GUI side
 

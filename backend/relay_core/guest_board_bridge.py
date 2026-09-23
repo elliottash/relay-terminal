@@ -30,7 +30,11 @@ DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_to
 REMOTE_ALLOW = frozenset(("run_command", "read_file", "list_directory", "write_file", "edit_file"))
 EXEC_ALLOW = REMOTE_ALLOW | frozenset(("run_in_terminal", "command_output", "stop_command"))
 TERMINAL_CONTEXT_ALLOW = frozenset(("terminal_history", "terminal_read"))
-ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW
+# #MEMS: a guest proposes what it learns about the user through Relay's confirm flow (the tool's
+# `suggest`), in place of its own memory. The only app tool a guest gets: it runs in the pane's
+# worker exactly as it does for Relay's own agent, write gate included.
+APP_ALLOW = frozenset(("app_user_memory",))
+ALLOW = BOARD_ALLOW | DELEGATION_ALLOW | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | APP_ALLOW
 WAIT_SECONDS = 10
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
@@ -100,11 +104,17 @@ class Bridge:
                 specs = specs + manager.tool_specs()
             if self.delegation and self.agent._todos_enabled():
                 specs = specs + [TODO_SPEC]
+            app = getattr(self.agent, 'app', None)
+            if app is not None:
+                specs = specs + [s for s in app.tool_specs() if s['function']['name'] in APP_ALLOW]
         else:
             from relay_core.board_tools import TOOL_SPECS
+            from relay_core.app_tools import TOOL_SPECS as APP_SPECS
             specs = (list(TOOL_SPECS) if self.available else [])
             if self.delegation:
                 specs += delegation_tool_specs() + [TODO_SPEC]
+            # Discovery before the worker binds: the worker's agent always has the app tools.
+            specs += [s for s in APP_SPECS if s['function']['name'] in APP_ALLOW]
         # Guest clients cache discovery before a turn has remote context. Keep the remote
         # schemas stable, but require an explicit host and validate capabilities on every call.
         from relay_core.tools import TOOLS, JOB_TOOLS, with_host
