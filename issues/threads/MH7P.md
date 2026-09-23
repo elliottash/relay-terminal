@@ -11,3 +11,7 @@ Landed and moved to needs-verification.
 - Tests: modelspane 22/22 (new `theHelperIsOneRowUnderAllFourTabsAndBuildsOneConsole`), test_agent_context 24/24.
 - Live drive: docs/qa_evidence/2026-09-22-models-helper. The row shows on first run and on a restored pane. Alt+Q opens the console, and a real glm-5.3-flash turn named the tab, the served pane and the class in focus.
 - Found on the way, not caused by this change (see the evidence README): a helper console's model-box pick does not rescue a tab worker configured on a guest. The next turn still gets the #4NXH refusal, in every helper.
+
+<!-- relay:entry 20260923T030100Z-e2 author=claude-code kind=evidence -->
+### Claude Code · 2026-09-22 23:01
+Landed as 3c6edc69 through `scripts/land.py`. The build gate built the exact committed tree (`verify: the exact tree builds`). Only this card's hunks of `src/RelayWindow.h` and `docs/ARCHITECTURE.md` were taken; other sessions' edits in those files were left in the working tree.

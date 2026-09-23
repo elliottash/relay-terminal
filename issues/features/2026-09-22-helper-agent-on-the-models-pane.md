@@ -7,7 +7,7 @@ assignee: claude-code
 rank: m
 created: '2026-09-22'
 source: 'Owner request relayed to a Claude Code subagent (a1) in a Relay pane, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-models-helper], related: [MDL1, AGNT, FEJQ], github: null}
+links: {plans: [], commits: [3c6edc69], evidence: [docs/qa_evidence/2026-09-22-models-helper], related: [MDL1, AGNT, FEJQ], github: null}
 ---
 # Helper agent on the Models pane
 
