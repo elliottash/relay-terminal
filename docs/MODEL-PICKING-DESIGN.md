@@ -417,8 +417,10 @@ say anything about it. It is a setting again, and its default is exactly what t:
   and anything typed by hand into `models/custom`.
 
 A provider added *after* the list was written keeps the default, so step 1 still gives you step 2
-for free; and a model one of the lists names is available whatever the tick says, because a rank
-the user wrote down that the box would not offer is a list that lies. The dialog's tooltip says so.
+for free. The tick is the user's for a ranked model too (#AVR8, 2026-09-22): un-ticking one keeps
+its rank, draws it greyed and "not available" on Priorities, and `curation::activeTierList` — what
+the worker, the box and the defaults read — skips it until it is ticked again. (It used to pin the
+tick on, so an un-tick sprang back and Priorities never changed.) Lite is never filtered.
 
 **What each step feeds.** `models::shown(catalog)` is every *usable and available* entry in rank
 order — the lists, the box, `/model` and the box's filter all read it. `models::allUsable` is every

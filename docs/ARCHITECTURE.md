@@ -2227,7 +2227,8 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   of a **branded** provider, and of an **open-ended** one (`Entry::openEnded`, OpenRouter's live
   listing) only its recommended rows, which are the ones the worker's catalog names and so carry a
   `tier`, plus anything a tier list names or `models/custom` holds. A provider added after the list
-  was written keeps the default, and a model a tier list names is available whatever the tick says.
+  was written keeps the default. A ranked model the user un-ticks keeps its rank but is skipped:
+  `curation::activeTierList` is the list as it runs (#AVR8).
   `curation::availableKeys / isAvailable / setAvailable`; `models::shown(catalog)` is every usable
   **available** entry in rank order — the lists, the box, its filter and `/model` all read it —
   `models::allUsable(catalog)` is every usable entry (the dialog's "more from openrouter", and the
