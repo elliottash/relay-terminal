@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-provider-groups/], related: [], github: null}
+links: {plans: [], commits: [332050253c018edeedbc32a903e3fe30ef8e530d], evidence: [docs/qa_evidence/2026-09-23-provider-groups/], related: [], github: null}
 ---
 # Group model providers and move defaults
 
