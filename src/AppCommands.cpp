@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "AppCommands.h"
+#include "Reminders.h"
+#include <QRegularExpression>
 #include "Notifications.h"
 
 #include <QDebug>
@@ -712,6 +714,54 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
     };
     const QString what = command.value(QStringLiteral("command")).toString();
     const bool writes = !writesEnabled || writesEnabled();
+
+    if (what == QStringLiteral("reminder")) {
+        const QString action = command.value(QStringLiteral("action")).toString();
+        if (action == QStringLiteral("set") || action == QStringLiteral("cancel")) {
+            if (!writes) return refuse(QStringLiteral("writes_disabled"));
+        }
+        QString error;
+        if (action == QStringLiteral("list")) {
+            QList<Reminder> items;
+            if (!Reminders::instance().list(&items, &error)) return refuse(QStringLiteral("failed"), error);
+            QJsonArray rows;
+            for (const Reminder &item : items)
+                rows.append(QJsonObject{{QStringLiteral("reminder_id"), item.id},
+                                        {QStringLiteral("text"), item.text},
+                                        {QStringLiteral("due_at"), item.due.toString(Qt::ISODateWithMs)}});
+            result.insert(QStringLiteral("ok"), true);
+            result.insert(QStringLiteral("reminders"), rows);
+            return result;
+        }
+        if (action == QStringLiteral("cancel")) {
+            const QString id = command.value(QStringLiteral("reminder_id")).toString();
+            if (id.isEmpty()) return refuse(QStringLiteral("invalid_value"));
+            if (!Reminders::instance().cancel(id, &error))
+                return refuse(error.startsWith(QStringLiteral("No pending"))
+                              ? QStringLiteral("unknown_reminder") : QStringLiteral("failed"), error);
+            result.insert(QStringLiteral("ok"), true);
+            result.insert(QStringLiteral("reminder_id"), id);
+            return result;
+        }
+        if (action == QStringLiteral("set")) {
+            const QString time = command.value(QStringLiteral("due_at")).toString();
+            static const QRegularExpression offset(QStringLiteral("(?:Z|[+-][0-9]{2}:[0-9]{2})$"));
+            if (!offset.match(time).hasMatch())
+                return refuse(QStringLiteral("invalid_value"), QStringLiteral("due_at needs a timezone offset or Z."));
+            QDateTime due = QDateTime::fromString(time, Qt::ISODateWithMs);
+            if (!due.isValid()) due = QDateTime::fromString(time, Qt::ISODate);
+            Reminder created;
+            if (!Reminders::instance().add(command.value(QStringLiteral("text")).toString(),
+                                           due, &created, &error))
+                return refuse(QStringLiteral("invalid_value"), error);
+            result.insert(QStringLiteral("ok"), true);
+            result.insert(QStringLiteral("reminder_id"), created.id);
+            result.insert(QStringLiteral("text"), created.text);
+            result.insert(QStringLiteral("due_at"), created.due.toString(Qt::ISODateWithMs));
+            return result;
+        }
+        return refuse(QStringLiteral("invalid_value"), QStringLiteral("Choose set, list or cancel."));
+    }
 
     // Which pane this command is aimed at, by the pane's session token (§30.3, #AG7R group 2).
     // Three rules, and the first is the one that must ask nothing of the model:

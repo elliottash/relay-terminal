@@ -10,6 +10,7 @@
 #include "ShellHighlighter.h"
 #include "Hints.h"
 #include "Notifications.h"        // window header: the bell and its list
+#include "Reminders.h"            // persistent agent reminders, including missed ones at launch
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "ScreenPrompt.h"          // "is the program waiting for input?", read off the screen
 #include "PaneLayout.h"            // pane focus, pane moves and grip drops
@@ -370,6 +371,27 @@ int main(int argc, char **argv) {
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QCoreApplication::setApplicationVersion(QStringLiteral(RELAY_VERSION));
+    relay::Reminders::instance().onDue([](const relay::Reminder &item) {
+        relay::NotificationCenter::instance().post(QStringLiteral("Reminder"), item.text,
+                                                    relay::NotificationCenter::kindReminder);
+        // Use the desktop's bell sound where it has one; Qt's system bell covers other
+        // platforms and Linux installations without libcanberra's player.
+        bool rang = false;
+#ifdef Q_OS_LINUX
+        const QString bell = QStandardPaths::findExecutable(QStringLiteral("canberra-gtk-play"));
+        if (!bell.isEmpty())
+            rang = QProcess::startDetached(bell, {QStringLiteral("--id=bell"),
+                                                   QStringLiteral("--description=Relay reminder")});
+#endif
+        if (!rang) QApplication::beep();
+        if (QWidget *window = QApplication::activeWindow()) QApplication::alert(window);
+        if (!relay::NotificationCenter::desktopEnabled()) return;
+        const QString notifier = QStandardPaths::findExecutable(QStringLiteral("notify-send"));
+        if (!notifier.isEmpty())
+            QProcess::startDetached(notifier, {QStringLiteral("-a"), QStringLiteral("Relay"),
+                                               QStringLiteral("-u"), QStringLiteral("critical"),
+                                               QStringLiteral("Reminder"), item.text});
+    });
     migrateFastRoleSettings();   // "fast" -> "flash", once, before anything reads these keys
     migrateOutputTokenCeiling(); // the old 32768 ceiling -> 0, "the model's own limit" (#Z79Y)
     // Whether per-pane systemd scopes work here costs a subprocess to find out, and the first pane

@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -99,14 +100,14 @@ MAX_OPEN_CONVERSATIONS = 8
 #: field of the catalog: panes open and close between two catalogs, and an agent aiming at a pane
 #: that has gone is the fault `pane` exists to fix (#AG7R group 2).
 COMMANDS = ("open", "set_option", "run_action", "undo", "list_panes",
-            "send_prompt", "prefill_prompt", "rename")
+            "send_prompt", "prefill_prompt", "rename", "reminder")
 
 #: The `error` vocabulary of `app_command_result` (§30.3).  The worker's own refusals use the
 #: same words, so a refusal reads the same whether the catalog caught it or the pane did.
 ERRORS = ("unknown_row", "unknown_action", "unknown_target", "unknown_change",
           "unknown_conversation", "unknown_pane", "not_settable",
           "secret", "writes_disabled", "invalid_value", "not_agent_safe", "busy", "would_loop",
-          "failed", "no_reply")
+          "failed", "no_reply", "unknown_reminder")
 
 #: What each of those means in a sentence, for the tool result when the GUI sends the code alone.
 ERROR_TEXT = {
@@ -125,6 +126,7 @@ ERROR_TEXT = {
     "would_loop": "Relay stopped that prompt: agents may not drive each other in a ring.",
     "failed": "Relay could not do it.",
     "no_reply": "Relay did not answer.",
+    "unknown_reminder": "No pending reminder has that id.",
 }
 
 MAX_OPTIONS = 2000
@@ -726,6 +728,18 @@ TOOL_SPECS = [
          "app_option_set) gives. The person can do the same from the notification Relay showed "
          "them.",
          {"change_id": {"type": "string", "description": "The change to reverse."}}, ["change_id"]),
+    spec("app_reminder",
+         "Set, list or cancel a Relay reminder. When due, Relay shows a distinct reminder alert "
+         "and rings the system bell. Reminders survive restarting the agent or Relay; if Relay "
+         "is closed at the due time, the alert appears when it next opens. Give an exact time "
+         "with timezone or a relative delay. Set only when the person asked for a reminder.",
+         {"action": {"type": "string", "enum": ["set", "list", "cancel"]},
+          "text": {"type": "string", "description": "What to remind the person about (set)."},
+          "due_at": {"type": "string", "description": "ISO 8601 date and time with Z or UTC offset (set)."},
+          "in_minutes": {"type": "integer", "minimum": 1, "maximum": 525600,
+                         "description": "Minutes from now (set); use instead of due_at."},
+          "reminder_id": {"type": "string", "description": "ID returned by set or list (cancel)."}},
+         ["action"]),
 ]
 
 TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
@@ -736,7 +750,7 @@ TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
 #: first two make another agent act or put words in front of the person, and a rename changes what
 #: they see in the header — reversible by renaming back, which is why it is allowed at all.
 WRITE_TOOLS = ("app_option_set", "app_action_run", "app_send_prompt", "app_prefill_prompt",
-               "app_rename")
+               "app_rename", "app_reminder")
 
 
 class AppTools:
@@ -812,7 +826,8 @@ class AppTools:
             return f"RELAY {head}"
         bits = [f"{key}: {_short(args[key], 120)}"
                 for key in ("id", "value", "key", "pane", "target", "section", "row", "query",
-                            "card", "search", "change_id", "what", "name", "text")
+                            "card", "search", "change_id", "what", "name", "text", "action",
+                            "due_at", "in_minutes", "reminder_id")
                 if args.get(key) is not None]
         return f"RELAY {head}\n\n" + ("\n".join(bits) or "(no arguments)")
 
@@ -828,11 +843,55 @@ class AppTools:
                    "app_panes": self._panes,
                    "app_send_prompt": self._send_prompt,
                    "app_prefill_prompt": self._prefill_prompt, "app_rename": self._rename,
-                   "app_open": self._open, "app_changes": self._changes, "app_undo": self._undo}[name]
+                   "app_open": self._open, "app_changes": self._changes, "app_undo": self._undo,
+                   "app_reminder": self._reminder}[name]
         try:
             return handler(dict(args))
         except AppToolError as exc:
             return exc.to_result()
+
+    def _reminder(self, args: dict) -> dict:
+        action = args.get("action")
+        if action not in ("set", "list", "cancel"):
+            raise AppToolError("Choose set, list or cancel.", code="invalid_value")
+        if action in ("set", "cancel"):
+            self._need_writes("changing reminders")
+        fields = {"action": action}
+        if action == "set":
+            message = args.get("text")
+            if not isinstance(message, str) or not message.strip() or len(message) > 2000:
+                raise AppToolError("text must be 1–2000 characters.", code="invalid_value")
+            has_due = args.get("due_at") is not None
+            has_delay = args.get("in_minutes") is not None
+            if has_due == has_delay:
+                raise AppToolError("Give exactly one of due_at or in_minutes.", code="invalid_value")
+            if has_delay:
+                minutes = args["in_minutes"]
+                if type(minutes) is not int or not 1 <= minutes <= 525600:
+                    raise AppToolError("in_minutes must be 1–525600.", code="invalid_value")
+                due = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+            else:
+                value = args["due_at"]
+                if not isinstance(value, str):
+                    raise AppToolError("due_at must be an ISO 8601 time with timezone.", code="invalid_value")
+                try:
+                    due = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    raise AppToolError("due_at must be an ISO 8601 time with timezone.", code="invalid_value")
+                if due.tzinfo is None or due.utcoffset() is None:
+                    raise AppToolError("due_at needs a timezone offset or Z.", code="invalid_value")
+                if due <= datetime.now(timezone.utc):
+                    raise AppToolError("The reminder time must be in the future.", code="invalid_value")
+            fields.update(text=message.strip(), due_at=due.isoformat(timespec="milliseconds"))
+        elif action == "cancel":
+            reminder_id = args.get("reminder_id")
+            if not isinstance(reminder_id, str) or not reminder_id.strip():
+                raise AppToolError("cancel needs reminder_id from set or list.", code="invalid_value")
+            fields["reminder_id"] = reminder_id.strip()
+        result = self.bridge.send("reminder", fields)
+        if not result.get("ok"):
+            raise _refused(result, f"{action} reminder")
+        return {key: value for key, value in result.items() if key not in ("event", "type", "id")}
 
     def _user_memory(self, args: dict) -> dict:
         from . import board
@@ -1544,6 +1603,8 @@ def prompt_section(tools: "AppTools | None") -> str:
         "app_panes lists the panes of this window — their ids, titles, directories, models and "
         "whether each one's agent is busy — and `pane` on the tools that take it aims at one of "
         "them; your own pane is marked `you`.",
+        "app_reminder lists pending reminders, and when the user asks for one it sets or cancels "
+        "a reminder with a due time. Relay alerts and rings the bell when it is due.",
         "Say what you are doing, in words, whenever you use one of these tools: name the panes, "
         "rows or conversations before or as you act (\"Opening 3 sessions in new panes: A, B, "
         "C.\", \"Turned Copy on select on — Undo is in the notification.\") and never end a turn "

@@ -1072,7 +1072,7 @@ full profile names them in one line of the prompt and sends their schemas only o
 
 | Group | Tools | For |
 |---|---|---|
-| `app` | `app_option_list`, `app_option_get`, `app_option_set`, `app_action_list`, `app_action_run`, `app_panes`, `app_sessions_search`, `app_open`, `app_changes`, `app_undo` | Relay's own Options and actions, the window's panes, the sessions index, putting a screen in front of the user (30.4) |
+| `app` | `app_option_list`, `app_option_get`, `app_option_set`, `app_action_list`, `app_action_run`, `app_panes`, `app_sessions_search`, `app_open`, `app_changes`, `app_undo`, `app_reminder` | Relay's own Options and actions, the window's panes, the sessions index, reminders and putting a screen in front of the user (30.4) |
 | `own_session` | `session_info`, `activity` | this conversation itself (30.5) |
 | `tests` | `tests_check`, `tests_run` | a card's `## Tests` section, and running named tests (31) |
 
@@ -6908,6 +6908,7 @@ worker) and nothing a command carries may take that name from it.
 | `prefill_prompt` | **`pane`**, `text` | puts the prompt in that pane's composer and leaves it unsent |
 | `rename` | `what`: `pane` \| `tab`; `name`, `pane?` | names the pane (`Pane::renameTo`) or the tab it sits in (`RelayWindow::renameTab`); an empty `name` puts it back to the automatic one |
 | `undo` | `change_id` | reverts that entry of the change log (30.6) |
+| `reminder` | `action`: `set` \| `list` \| `cancel`; `text?`, `due_at?`, `reminder_id?` | the GUI's persistent reminder store; set returns `reminder_id` and UTC `due_at`, list returns pending reminders, cancel removes one. Set and cancel obey `writes_enabled`; list is a read. |
 
 **Which pane a command lands on.** Until 2026-09-20 the answer was always "whichever one the
 person is focused on": `RelayWindow::runAction()` opened with `Pane *pane = m_active` and
@@ -7054,6 +7055,7 @@ never the tool list.
 | `app_open` | `target`, `section?`, `row?`, `query?`, `card?`, `id?`, `ids?`, `new_pane?`, `pane?` | one of eleven targets — Options, the actions palette, Sessions, the Board, a past conversation, and since #AG7R group 8 the file explorer, Test suites, Activity, ⓘ, the request ledger and a pane's subagents, each of which had an *action* and no way to be named (two of them among group 1's unreachable twelve). `app_command {command: "open"}`; a `row` is checked against the catalog first, so a misremembered id is a tool error rather than a pane opened at nothing, and a `card` is normalised (`#k7q2` → `K7Q2`). With `target: "conversation"` it opens past conversations: `id` for one, `ids` for up to 8, each in a pane of its own, in the order given and one round trip each, so the result answers **per id** (`results: [{id, ok, title?, error?}]`) and one unknown id does not lose the rest. `new_pane` defaults to true, and `pane` says which pane it opens from — the asking agent's own unless it names another, so `new_pane: false` means "into my pane" (30.3). Returns when the pane has opened, so the agent says what it did, not what it asked for. Not a write: it is offered whatever `writes_enabled` says. |
 | `app_changes` | — | the writes this worker has made so far, newest first (at most 100 kept): `{change_id, kind: "option", id, label, previous, value, when, undone}` for an option and `{change_id, kind: "action", key, label, when, undone}` for an action, `when` being seconds ago, built from the results it received and not from the GUI's log |
 | `app_undo` | `change_id` | `app_command {command: "undo"}` for one of its own changes, and only one it has not already undone |
+| `app_reminder` | `action`: `set` \| `list` \| `cancel`; `text?`, `due_at?`, `in_minutes?`, `reminder_id?` | set a one-time reminder at an ISO 8601 time with timezone or after 1–525600 minutes, list pending reminders, or cancel by the returned id. The GUI claims a due reminder in the persistent store before posting an in-app reminder notification, a desktop alert when enabled, and an audible system bell. Missed reminders fire after Relay restarts; set/cancel obey `writes_enabled`, list does not. |
 
 **An agent may make another agent act, and the rules for that are the person's to see.** The
 three tools above are in `WRITE_TOOLS` with `app_option_set` and `app_action_run`, so Options ›

@@ -188,9 +188,14 @@ target_compile_options(relay-actionpalette PRIVATE ${RELAY_WARNINGS})
 # the executor for one `app_command`, and the change log that makes a write visible and undoable.
 # It is rules over the two catalogs the Options and Actions panes already take, so it builds
 # without a window and tests/appcommands_test.cpp drives the whole channel offscreen.
+add_library(relay-reminders STATIC src/Reminders.cpp src/Reminders.h)
+target_include_directories(relay-reminders PUBLIC src)
+target_link_libraries(relay-reminders PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-reminders PRIVATE ${RELAY_WARNINGS})
+
 add_library(relay-appcommands STATIC src/AppCommands.cpp src/AppCommands.h)
 target_include_directories(relay-appcommands PUBLIC src)
-target_link_libraries(relay-appcommands PUBLIC relay-settings relay-notifications ${RELAY_QT}::Widgets)
+target_link_libraries(relay-appcommands PUBLIC relay-settings relay-notifications relay-reminders ${RELAY_QT}::Widgets)
 target_compile_options(relay-appcommands PRIVATE ${RELAY_WARNINGS})
 
 # Settings › Local models (card #24XJ): the section's rows and the worker traffic behind them,
@@ -768,6 +773,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-appcommands-tests PRIVATE relay-appcommands ${RELAY_QT}::Test)
     add_test(NAME appcommands COMMAND relay-appcommands-tests)
     set_tests_properties(appcommands PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-reminders-tests tests/reminders_test.cpp)
+    target_link_libraries(relay-reminders-tests PRIVATE relay-reminders ${RELAY_QT}::Test)
+    add_test(NAME reminders COMMAND relay-reminders-tests)
+    set_tests_properties(reminders PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-settingscache-tests tests/settingscache_test.cpp)
     target_link_libraries(relay-settingscache-tests PRIVATE relay-settingscache relay-logging relay-paneusage ${RELAY_QT}::Test)
     add_test(NAME settingscache COMMAND relay-settingscache-tests)

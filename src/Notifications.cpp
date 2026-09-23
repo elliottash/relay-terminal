@@ -8,6 +8,7 @@ const QString NotificationCenter::kindInfo = QStringLiteral("info");
 const QString NotificationCenter::kindSuccess = QStringLiteral("success");
 const QString NotificationCenter::kindWarning = QStringLiteral("warning");
 const QString NotificationCenter::kindError = QStringLiteral("error");
+const QString NotificationCenter::kindReminder = QStringLiteral("reminder");
 
 NotificationCenter &NotificationCenter::instance() {
     static NotificationCenter centre;

@@ -561,6 +561,7 @@ QScrollArea#notificationsScroll { background: transparent; border: none; }
 QScrollArea#notificationsScroll > QWidget > QWidget { background: transparent; }
 QFrame#notificationRow { background: @bg; border: 1px solid @border; border-radius: 8px; }
 QFrame#notificationRow:hover { border-color: @accentBorder; }
+QFrame#notificationRow[kind="reminder"] { border: 2px solid @warning; background: @accentSoft; }
 QLabel#notificationTitle { color: @text; font-weight: 600; }
 QLabel#notificationBody { color: @muted; font-size: 9.5pt; }
 QLabel#notificationTime { color: @muted; font-size: 9pt; padding-left: 8px; }
@@ -568,6 +569,7 @@ QLabel#notificationDot { color: @muted; font-size: 9pt; }
 QLabel#notificationDot[kind="success"] { color: @success; }
 QLabel#notificationDot[kind="warning"] { color: @warning; }
 QLabel#notificationDot[kind="error"] { color: @error; })");
+    css += QStringLiteral(R"(QLabel#notificationDot[kind="reminder"] { color: @warning; })");
     css += QStringLiteral(R"(
 QToolButton#notificationDismiss { color: @muted; border: none; background: transparent; padding: 0 4px; font-size: 9pt; }
 QToolButton#notificationDismiss:hover { color: @text; }

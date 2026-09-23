@@ -68,6 +68,34 @@ class FakeGui:
         return self.commands[-1]
 
 
+class ReminderToolTest(unittest.TestCase):
+    def test_set_list_cancel_and_validate_before_gui(self):
+        gui = FakeGui(lambda event: {"ok": True, "reminder_id": "r-1",
+                                     "due_at": event.get("due_at", "")})
+        tools = gui.build()
+        self.assertEqual(tools.run("app_reminder", {"action": "set", "text": "Review logs",
+                                                        "in_minutes": 30})["reminder_id"], "r-1")
+        self.assertEqual(gui.last["command"], "reminder")
+        self.assertIn("+00:00", gui.last["due_at"])
+        self.assertTrue(tools.run("app_reminder", {"action": "list"})["ok"])
+        self.assertTrue(tools.run("app_reminder", {"action": "cancel",
+                                                   "reminder_id": "r-1"})["ok"])
+        count = len(gui.commands)
+        for args in ({"action": "set", "text": "x", "due_at": "2026-09-25T10:00:00"},
+                     {"action": "set", "text": "x", "in_minutes": 0},
+                     {"action": "set", "text": "x", "in_minutes": 2, "due_at": "2026-09-25T10:00:00Z"},
+                     {"action": "cancel"}):
+            self.assertEqual(tools.run("app_reminder", args)["code"], "invalid_value")
+        self.assertEqual(len(gui.commands), count)
+
+    def test_writes_off_still_allows_list(self):
+        gui = FakeGui()
+        tools = gui.build(catalog={**APP, "writes_enabled": False})
+        self.assertTrue(tools.run("app_reminder", {"action": "list"})["ok"])
+        self.assertEqual(tools.run("app_reminder", {"action": "set", "text": "x",
+                                                        "in_minutes": 5})["code"], "writes_disabled")
+
+
 class CatalogTest(unittest.TestCase):
     def test_parses_the_configure_block(self):
         catalog = A.AppCatalog.from_request(APP)

@@ -25,11 +25,11 @@ from __future__ import annotations
 GROUPS: dict[str, tuple[tuple[str, ...], str]] = {
     "app": (("app_option_list", "app_option_get", "app_option_set", "app_action_list",
              "app_action_run", "app_panes", "app_send_prompt", "app_prefill_prompt", "app_rename",
-             "app_sessions_search", "app_open", "app_changes", "app_undo"),
+             "app_sessions_search", "app_open", "app_changes", "app_undo", "app_reminder"),
             "read or change Relay's own Options, run one of its actions, list the window's panes "
             "so an action can be aimed at one, send or pre-fill a prompt in another pane, name a "
             "pane or a tab, search the user's past conversations, or put a screen in front of "
-            "them"),
+            "them, or set, list and cancel reminders"),
     "own_session": (("session_info", "activity"),
                     "read this conversation itself: its model, context left, tokens, and a digest "
                     "of recent turns with their tool-call timings"),

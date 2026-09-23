@@ -25,7 +25,7 @@ struct Notification {
     QDateTime at;
     QString title;
     QString body;
-    QString kind;      // kindInfo / kindSuccess / kindWarning / kindError
+    QString kind;      // kindInfo / kindSuccess / kindWarning / kindError / kindReminder
     QString source;    // pane session token, so the popup can go back to the pane; may be empty
     bool seen = false;
     // ----- an entry that offers something (card #FEJQ, protocol §30.6) ------------------------
@@ -42,7 +42,7 @@ public:
     static NotificationCenter &instance();
 
     static constexpr int kMaxEntries = 200;
-    static const QString kindInfo, kindSuccess, kindWarning, kindError;
+    static const QString kindInfo, kindSuccess, kindWarning, kindError, kindReminder;
 
     // Adds an entry and returns its id. An empty title is ignored (returns an empty id).
     QString post(const QString &title, const QString &body = QString(),
