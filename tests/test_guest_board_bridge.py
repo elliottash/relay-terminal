@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 from relay_core import board as B, board_tools as T
+from relay_core.media import TOOL_NAMES as MEDIA_NAMES
 from relay_core.agent import Agent
 from relay_core.guest_board_bridge import (APP_ALLOW, ACTIVITY_ALLOW, CONDITIONAL_ALLOW,
     BOARD_ALLOW, EXEC_ALLOW, PLAN_ALLOW, REMOTE_ALLOW, TERMINAL_CONTEXT_ALLOW, Bridge, exchange)
@@ -56,7 +57,7 @@ class BridgeTests(unittest.TestCase):
     def test_discovery_allowlist_and_unavailable(self):
         specs = exchange(self.cap, 'tools/list')['tools']
         ordinary = set(T.TOOL_NAMES)
-        expected = ordinary | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | {'type_into_program'}
+        expected = ordinary | EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | MEDIA_NAMES | {'type_into_program'}
         self.assertEqual({s['name'] for s in specs}, expected)
         self.assertTrue(all(s['inputSchema']['type']=='object' for s in specs))
         self.assertEqual(self.call()['code'], 'unavailable')
@@ -69,7 +70,7 @@ class BridgeTests(unittest.TestCase):
         self.assertIsNotNone(self.board.card_by_id(created['id']))
         self.agent.board = None
         self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']},
-                         EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | {'type_into_program'})
+                         EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | MEDIA_NAMES | {'type_into_program'})
 
     def test_guest_can_write_plan_and_exit_in_same_turn(self):
         self.active()
@@ -281,7 +282,7 @@ class BridgeTests(unittest.TestCase):
         rows = sorted((json.loads(line) for line in out.splitlines()), key=lambda r: r['id'] if r['id'] is not None else 99)
         self.assertEqual(rows[0]['result']['protocolVersion'],'2025-03-26')
         self.assertEqual(len(rows[1]['result']['tools']),
-                         len(T.TOOL_NAMES) + len(EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | {'type_into_program'}))
+                         len(T.TOOL_NAMES) + len(EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | MEDIA_NAMES | {'type_into_program'}))
         self.assertFalse(rows[2]['result']['isError'])
         self.assertIn('error', rows[3])
 
