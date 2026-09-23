@@ -9,7 +9,7 @@ session: 7da1eefd-bd8b-46d7-8063-a77023e6a273
 rank: zzzzzzzzzzzzzzzzzzw
 created: '2026-09-23'
 source: Codex follow-up log review, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-khy0/report.md], related: [HG26, 40SN, 0C0V], github: null}
+links: {plans: [], commits: [7328211ff20aa8cdf43734072c40637760b14b4e], evidence: [docs/qa_evidence/2026-09-23-khy0/report.md], related: [HG26, 40SN, 0C0V], github: null}
 ---
 # Separate ad hoc QA probes and surface protocol exception clusters
 

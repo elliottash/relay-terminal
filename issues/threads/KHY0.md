@@ -32,3 +32,6 @@ Implement safe protocol-exception summaries and an isolated QA launcher locally 
 
 <!-- relay:entry 20260923T231410Z-wx author=agent kind=event model=gpt-6-sol pane=7da1eefd turn=4f8b0198068442a7bce4a462b35dcbc6/ad326177e48d4148b93da9d3a7519419 -->
 - ✦ agent moved this card · Executing → Needs verification · QA launcher and safe protocol-error grouping implemented; 8 reporter tests and a real isolated logging subprocess pass. · evidence docs/qa_evidence/2026-09-23-khy0/report.md · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T231537Z-bd author=agent kind=event model=gpt-6-sol pane=7da1eefd turn=4f8b0198068442a7bce4a462b35dcbc6/ad326177e48d4148b93da9d3a7519419 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-khy0/repo… → {"plans": [], "commits": ["7328211ff20aa8cdf43734072c40637760b14b4e"], "evidence…
