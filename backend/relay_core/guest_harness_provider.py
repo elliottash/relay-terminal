@@ -290,7 +290,7 @@ _CODEX_FALLBACK_MODELS = (
     {"id": "gpt-6-astra", "name": "gpt-6-astra", "label": "gpt-6-astra",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
     {"id": "gpt-6-sol", "name": "gpt-6-sol", "label": "gpt-6-sol",
-     "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "low"},
+     "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
     {"id": "gpt-5.6-terra", "name": "gpt-5.6-terra", "label": "gpt-5.6-terra",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
     {"id": "gpt-6-luna", "name": "gpt-6-luna", "label": "gpt-6-luna",

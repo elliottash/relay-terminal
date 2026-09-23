@@ -535,10 +535,10 @@ class DefaultsTests(unittest.TestCase):
                               custom=[('custom:acme', 'acme-1')])['plain']
         # By score (model-ranking.md), one per provider: claude-opus-5-5 51 — which is what the
         # guest's `opus` is, so it is ranked by name like anyone else's model — then gpt-6-sol 47
-        # (the owner, 2026-09-22: astra is openai's high, sol its main). opus starts at its Levels
-        # cell, `main = high`; sol has no row, so at the provider's own default, openai's `high`.
+        # (the owner, 2026-09-22: astra is openai's high, sol its main). Each starts at its Levels
+        # cell: `claude-opus-5.5 | main = high`, `gpt-6-sol | main = medium`.
         self.assertEqual(pairs(plain['main']),
-                         [('guest:claude', 'opus', 'high'), ('openai', 'gpt-6-sol', 'high')])
+                         [('guest:claude', 'opus', 'high'), ('openai', 'gpt-6-sol', 'medium')])
         # And the file's `high` cells, each in the vocabulary of the provider that will run it.
         # High is Claude Code's `fable` (claude-fable-5.1, 53, which the owner classed for high on
         # 2026-09-21) ahead of gpt-6-astra on the same score, because the harnesses sort first in
@@ -614,7 +614,7 @@ class DefaultsTests(unittest.TestCase):
             self.assertEqual(routed[tier][:len(plain[tier])], plain[tier], tier)     # after ALL of them
         # $2.86 is in; GPT-6 ($50) is not, so main's two models yield one twin.
         self.assertEqual(pairs(plain['main']),
-                         [('openai', 'gpt-6-sol', 'high'), ('glm-coding', 'glm-5.3', 'high')])
+                         [('openai', 'gpt-6-sol', 'medium'), ('glm-coding', 'glm-5.3', 'high')])
         self.assertEqual(pairs(routed['main'][len(plain['main']):]),
                          [('openrouter', 'z-ai/glm-5.3', None)])
         # High runs a twin at max too, unless the listing says the model takes no level.
@@ -693,7 +693,7 @@ class StartEffortTests(unittest.TestCase):
         rows = {r['id']: r for r in P.catalog_rows('openai')}
         # A model no tier names runs at the preset's own extras: terra, since luna took flash.
         self.assertEqual(rows['gpt-5.6-terra']['default_effort'], 'high')
-        self.assertEqual(rows['gpt-6-sol']['default_effort'], 'high')
+        self.assertEqual(rows['gpt-6-sol']['default_effort'], 'medium')
         self.assertEqual(rows['gpt-6-luna']['default_effort'], 'low')
         # Anthropic's models carry no levels at all: no default, no tier level.
         self.assertEqual({r['default_effort'] for r in P.catalog_rows('anthropic')}, {None})

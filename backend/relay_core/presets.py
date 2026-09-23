@@ -431,7 +431,7 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
     "anthropic": {"main": ("anthropic", "claude-opus-5-5", {}),
                   "flash": ("anthropic", "claude-sonnet-5", {}),
                   "lite": ("anthropic", "claude-haiku-4-5", {})},
-    "openai": {"main": ("openai", "gpt-6-sol", {"reasoning_effort": "high"}),
+    "openai": {"main": ("openai", "gpt-6-sol", {"reasoning_effort": "medium"}),
                "flash": ("openai", "gpt-6-luna", {"reasoning_effort": "low"}),
                "lite": ("openai", "gpt-6-luna", {"reasoning_effort": "low"})},
     "gemini": {"main": ("gemini", "gemini-3.1-pro-preview", {"reasoning_effort": "high"}),

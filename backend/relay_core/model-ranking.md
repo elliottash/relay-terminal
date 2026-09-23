@@ -173,6 +173,7 @@ provider shows the level in its own vocabulary (codex says `xhigh` for max). Pre
 | claude-opus-5.5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
 | claude-sonnet-5 | max | high | low |  |  |
 | gpt-6-astra | xhigh | medium | low  |  | the API's default is high; codex's own is medium |
+| gpt-6-sol |  | medium |  |  | owner, 2026-09-22: "sol 6 default reasoning level is medium" |
 | gpt-6-luna | max | high | low |  |  |
 | kimi-k3 | max | high | low |  |  |
 | kimi-k2.7-code-highspeed |  |  |  |  | no knob |

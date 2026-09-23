@@ -443,9 +443,9 @@ class DefaultRulesTests(unittest.TestCase):
         # The levels are the file's Levels cells, in the endpoint's own words: the owner wrote
         # `gpt-6-astra | high = xhigh, main = medium` ("the API's default is high; codex's own is
         # medium"), and `gpt-6-luna | flash = low`. On 2026-09-22 he made astra openai's high
-        # only, sol its main and luna its flash, leaving terra a default for nothing. gpt-6-sol has
-        # no Levels row, so main starts at the provider's own default for it: openai's `high`.
-        self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-sol', 'high')])
+        # only, sol its main and luna its flash, leaving terra a default for nothing, and wrote
+        # `gpt-6-sol | main = medium` ("sol 6 default reasoning level is medium").
+        self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-sol', 'medium')])
         self.assertEqual(pairs(lists['high']), [('openai', 'gpt-6-astra', 'xhigh')])
         self.assertEqual(pairs(lists['flash']), [('openai', 'gpt-6-luna', 'low')])
         # Lite is Relay Free's, and Relay Free cannot run here, so there is nothing in it.
@@ -465,7 +465,7 @@ class DefaultRulesTests(unittest.TestCase):
     def test_two_providers_give_two_per_class_by_score(self):
         lists = self.defaults(['openai', 'glm-coding'])
         self.assertEqual(pairs(lists['main']),
-                         [('openai', 'gpt-6-sol', 'high'), ('glm-coding', 'glm-5.3', 'high')])
+                         [('openai', 'gpt-6-sol', 'medium'), ('glm-coding', 'glm-5.3', 'high')])
         self.assertEqual(pairs(lists['high']),
                          [('openai', 'gpt-6-astra', 'xhigh'), ('glm-coding', 'glm-5.3', 'max')])
         self.assertEqual([MR.load().score(n) for n in ('gpt-6-astra', 'gpt-6-sol', 'glm-5.3')],
