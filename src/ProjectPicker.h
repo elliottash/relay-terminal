@@ -2,7 +2,7 @@
 #pragma once
 // The project picker (card #916B): which project a tab that has none should attach to.
 //
-// Ctrl+Shift+S, `/card` and the palette reach for a Board. In a pane standing in a project
+// Ctrl+Shift+A, `/card` and the palette reach for a Board. In a pane standing in a project
 // that is the project's board; in `~/Downloads` or an admin folder there is no candidate at all,
 // and this pane is what opens instead of a "no Board here" line. It lists the projects Relay
 // knows (`projects::Registry::knownProjects()`, most recently attached first), fuzzy-filtered as

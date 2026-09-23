@@ -6651,7 +6651,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_model.reset(event.value(QStringLiteral("cards")).toArray());
         m_pendingDeletes.clear();
         const QJsonObject navigation = m_restoreNavigation;
-        const bool hadFocus = hasFocus();   // opened with Ctrl+Shift+S before the cards arrived
+        const bool hadFocus = hasFocus();   // opened with its key (board.open) before the cards arrived
         rebuild();
         // A pane reopened with words already in its filter asks about them again: the answer it
         // holds is about the cards of a moment ago (#7M6E).

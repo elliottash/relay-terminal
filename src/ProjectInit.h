@@ -27,7 +27,7 @@ namespace projectinit {
 enum class Trigger {
     AgentWork,     // (1) the first prompt sent to the agent in a pane standing in a git repo
     AgentCard,     // (2) the agent's first card: the worker asked with `board_init_request`
-    Switchboard,   // (3) the Board was opened (Ctrl+Shift+S, the palette, /board)
+    Switchboard,   // (3) the Board was opened (Ctrl+Shift+A, the palette, /board)
     CardCommand,   // (4) `/card <text>`: the text is held and lands on a yes
     InitCommand,   // (5) `/init`, the explicit command, which also clears a remembered no
 };
