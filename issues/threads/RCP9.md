@@ -43,3 +43,6 @@ Implemented a detached final-summary helper on worker shutdown. It writes only m
 
 <!-- relay:entry 20260923T160018Z-n3 author=agent kind=event model=gpt-6-sol pane=6b3079fc turn=f4520a5d8d7b4fed83890c56e50a4052/cca5ff3484aa434485bea234e7d8900e -->
 - ✦ agent moved this card · Executing → Needs verification · Detached close recap and persistence checks implemented; 258 targeted tests and the Relay build pass. · evidence docs/qa_evidence/2026-09-23-final-recap-close/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T160117Z-a3 author=agent kind=event model=gpt-6-sol pane=6b3079fc turn=f4520a5d8d7b4fed83890c56e50a4052/cca5ff3484aa434485bea234e7d8900e -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae"], "evidence… → {"plans": [], "commits": ["a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae", "809855f59…

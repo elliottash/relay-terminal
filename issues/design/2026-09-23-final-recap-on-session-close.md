@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae], evidence: [docs/qa_evidence/2026-09-23-final-recap-close/], related: [PV7W], github: null}
+links: {plans: [], commits: [a90f5e423aef80a8a6a4e0f3ddf01b8193d1c2ae, 809855f5962a4ac7a637d2348eaa62bf39c7a7b0], evidence: [docs/qa_evidence/2026-09-23-final-recap-close/], related: [PV7W], github: null}
 ---
 # Generate a final recap when a session closes
 
