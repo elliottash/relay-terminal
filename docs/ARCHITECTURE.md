@@ -2268,13 +2268,15 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   go through `curation::setTierList`, which is the same single writer Options › Models uses and
   writes through to the current profile, and then call `onListsChanged`; the pane wires that to
   `onProfileApplied`, i.e. `RelayWindow::modelsCurated()`, so the page redraws and every running
-  worker is re-sent its tiers. Typing searches `allUsable(catalog)`: this list's matches, then a
-  "not in this list" rule, then a "more from <provider>" rule holding the long tail `shown()` keeps
-  out, all folded by `models::grouped`. The `all` tab is every usable model — filter, sort menu,
+  worker is re-sent its tiers. Under each list, always, is its pool: every `shown(catalog)` model the
+  class may hold and does not rank, under "not in <class> — + add"; typing filters the list and the
+  pool and never reaches the long tail, which only the `all` tab searches (#AVR8, 2026-09-22).
+  A redraw holds a `curation::ReadScope`, so each settings key is read once rather than once per
+  model — the per-row lookups were what froze the pane while typing. The `all` tab is every usable model — filter, sort menu,
   favorites / recent sections — one row per *group*, with "via"
   naming the preferred provider and "+N" and → opening the group's providers beside the levels
-  (which follow the chosen entry into its own words), and "+ add a model by id…" as its last row
-  (`ModelPicker::addModelById`: an id the catalog holds is simply selected, one it does not is
+  (which follow the chosen entry into its own words), and a "+ add model" row ending each provider
+  section, which opens the id prompt on that provider (`ModelPicker::addModelById`: an id the catalog holds is simply selected, one it does not is
   stored in `models/custom`). The profile is in the header when there is
   one, and a footer line spells the tab's keys. Every pick goes
   through `Pane::selectEntry(key, effort)` **in the pane the models pane serves**, which is

@@ -5,7 +5,9 @@
 #include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
+#include <QHash>
 #include <QSettings>
+#include <QVariant>
 #include <QSet>
 
 #include <algorithm>
@@ -31,8 +33,21 @@ constexpr int kRecentCap = 10;
 
 QString str(const QJsonObject &object, const char *field) { return object.value(QLatin1String(field)).toString(); }
 
-QStringList list(const QString &key) { return QSettings().value(key).toStringList(); }
+// The reads a `curation::ReadScope` memoises (see ModelCatalog.h). Outside one, every read is a
+// fresh QSettings lookup, as before; inside one, each key is read once. Writes drop the memo.
+int g_readDepth = 0;
+QHash<QString, QVariant> g_reads;
+
+QVariant readSetting(const QString &key, const QVariant &fallback = QVariant()) {
+    if (g_readDepth == 0) return QSettings().value(key, fallback);
+    auto at = g_reads.constFind(key);
+    if (at == g_reads.constEnd()) at = g_reads.insert(key, QSettings().value(key));
+    return at->isValid() ? *at : fallback;
+}
+
+QStringList list(const QString &key) { return readSetting(key).toStringList(); }
 void store(const QString &key, const QStringList &value) {
+    g_reads.clear();
     if (value.isEmpty()) QSettings().remove(key);
     else QSettings().setValue(key, value);
 }
@@ -405,7 +420,10 @@ void move(const QString &key, int delta, const Catalog &catalog) {
     setRank(key, at + delta, catalog);
 }
 
-void resetPriority() { QSettings().remove(kPriority); }
+void resetPriority() { g_reads.clear(); QSettings().remove(kPriority); }
+
+ReadScope::ReadScope() { ++g_readDepth; }
+ReadScope::~ReadScope() { if (--g_readDepth == 0) g_reads.clear(); }
 
 // ----- step 2: available (owner, 2026-09-21) ---------------------------------------------------
 // The default, with nothing stored: every model of a branded provider, and of an open-ended one
@@ -483,7 +501,7 @@ void setAvailable(const QString &key, bool on, const Catalog &catalog) {
     // is not a model, so a list of nothing but markers is that same reset.
     bool anyModel = false;
     for (const QString &each : std::as_const(keys)) anyModel = anyModel || !each.endsWith(QLatin1Char('|'));
-    if (!anyModel) { QSettings().remove(kAvailable); return; }
+    if (!anyModel) { g_reads.clear(); QSettings().remove(kAvailable); return; }
     // A provider whose every model has been un-ticked leaves `"<preset>|"` behind, which is not a
     // key and matches no entry — it is only there so `presetNamedIn` goes on finding the preset.
     // Without it the provider would read as one nobody has said anything about and the default —
@@ -493,7 +511,7 @@ void setAvailable(const QString &key, bool on, const Catalog &catalog) {
     store(kAvailable, keys);
 }
 
-void resetAvailable() { QSettings().remove(kAvailable); }
+void resetAvailable() { g_reads.clear(); QSettings().remove(kAvailable); }
 
 QStringList customKeys() { return list(kCustom); }
 
@@ -551,9 +569,9 @@ void noteUse(const QString &key) {
     settings.setValue(counter, settings.value(counter, 0).toInt() + 1);
 }
 
-int uses(const QString &key) { return QSettings().value(perKey(QStringLiteral("uses"), key), 0).toInt(); }
+int uses(const QString &key) { return readSetting(perKey(QStringLiteral("uses"), key), 0).toInt(); }
 
-double speed(const QString &key) { return QSettings().value(perKey(QStringLiteral("speed"), key), 0.0).toDouble(); }
+double speed(const QString &key) { return readSetting(perKey(QStringLiteral("speed"), key), 0.0).toDouble(); }
 
 void noteSpeed(const QString &key, double tokensPerSecond) {
     if (key.isEmpty() || !(tokensPerSecond > 0)) return;
@@ -706,7 +724,7 @@ static QString profileBoxOffKey(const QString &name, const QString &tier) {
 }
 int boxCutoff(const QString &tier) {
     if (!boxClasses().contains(tier)) return kBoxCutoffDefault;
-    return qMax(1, QSettings().value(boxCutoffKey(tier), kBoxCutoffDefault).toInt());
+    return qMax(1, readSetting(boxCutoffKey(tier), kBoxCutoffDefault).toInt());
 }
 void setBoxCutoff(const QString &tier, int rank) {
     if (!boxClasses().contains(tier)) return;
@@ -720,7 +738,7 @@ void setBoxCutoff(const QString &tier, int rank) {
 }
 bool boxShown(const QString &tier) {
     if (!boxClasses().contains(tier)) return true;
-    return !QSettings().value(boxOffKey(tier), false).toBool();
+    return !readSetting(boxOffKey(tier), false).toBool();
 }
 void setBoxShown(const QString &tier, bool on) {
     if (!boxClasses().contains(tier)) return;
@@ -989,7 +1007,7 @@ void setFallbackThreshold(int count) {
     else QSettings().setValue(kThreshold, qMax(1, count));
 }
 
-Sort sort() { return sortFromId(QSettings().value(kSort).toString()); }
+Sort sort() { return sortFromId(readSetting(kSort).toString()); }
 void setSort(Sort sort) {
     if (sort == Sort::Priority) QSettings().remove(kSort);
     else QSettings().setValue(kSort, sortId(sort));

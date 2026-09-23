@@ -591,9 +591,18 @@ The key map, and what each key reads:
 | ctrl+enter | add the highlighted model to the section it is in |
 | ctrl+z | undo the last list edit, whichever class it was in |
 | → | the providers of a folded row, then the levels; ← comes back |
-| typing | searches every model: each section shows its own matches, then "not in <class>", then an open-ended provider's tail under "more from <provider>" |
+| typing | filters the page: each section's ranked matches, then its matching "+ add" offers. Never the long tail — that is searched on **available** (owner, 2026-09-22: "searching should happen in the available pane") |
 | the "in box" ticks | a cutoff per class; the tick on a section's own line is whether the box draws that class at all |
 | alt+1…4, ←/→ | the pane's four tabs — nothing under them wants the arrows now |
+
+**Every available model is on the page** (owner, 2026-09-22: "i thought all available models
+would be in priority"). Under each class's ranked rows sits its pool, "not in <class> — + add puts
+it here": every model ticked on **available** that the class may hold (`addableToTier`) and does not
+rank, untyped as well as typed. Ctrl+Enter or a click on "+ add" ranks one. Available is the
+only tab that searches the whole catalog; searching it once per class section on every keystroke
+froze the pane. Available ends each provider section with its own "+ add model" row (owner, same
+day: "the text box is hard to find, make it show up in the provider sections"), which opens the
+id prompt on that provider; a guest harness and Relay Free have none.
 
 **"not in this list" is per section**, not once at the bottom. A model addable to three classes
 appears under all three, which is the true answer to "where can I put this", and it is what makes

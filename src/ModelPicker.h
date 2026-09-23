@@ -246,8 +246,8 @@ private:
     QString rowTier(const QTreeWidgetItem *row) const;
     QString editTier() const;        // rowTier(currentRow()) — which list an edit key acts on
     void stepRow(int delta);         // ↑/↓ over the rows, skipping the section headers
-    void addAddByIdRow();
-    void promptAddModelById();
+    void addAddByIdRow(const QString &preset = QString());
+    void promptAddModelById(const QString &preset = QString());
     void onCheckChanged(QTreeWidgetItem *item, int column);
     void refreshBoxChecks();   // the ticks again from the stored cutoffs, without rebuilding the rows
     // The availability ticks and the greying again, in place: an un-tick changes no row's place in

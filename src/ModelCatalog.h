@@ -183,6 +183,19 @@ QList<Sort> allSorts();
 
 // What the user has said, in QSettings. Every reader tolerates an absent key.
 namespace curation {
+
+// One redraw's worth of settings reads, memoised. A picker redraw asks the same few keys —
+// the available ticks, the lists, favorites, speeds — once per model, and every ask was a fresh
+// QSettings lookup: ~2,000 of them per keystroke on OpenRouter's catalog, which is what froze the
+// models pane while typing (owner, 2026-09-22). While a scope lives each key is read once; any
+// write through this namespace drops the memo. Hold one for a read-only pass, never across edits.
+class ReadScope {
+public:
+    ReadScope();
+    ~ReadScope();
+    ReadScope(const ReadScope &) = delete;
+    ReadScope &operator=(const ReadScope &) = delete;
+};
 QStringList priority();
 // Keys in rank order for this catalog: the tier lists first, main leading (dropping keys that no
 // longer exist), then — only on an install that has stored no tier list at all — whatever

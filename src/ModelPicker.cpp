@@ -64,6 +64,7 @@ constexpr int AddByIdRole = Qt::UserRole + 6;  // the `all` tab's "+ add a model
 constexpr int AvailRole = Qt::UserRole + 7;    // a model row of the `all` tab: its tick is step 2
 constexpr int TierRole = Qt::UserRole + 8;     // the class list this row belongs to
 constexpr int ClassHeadRole = Qt::UserRole + 9;  // a section's own header: its tick is the class switch
+constexpr int AddByIdPresetRole = Qt::UserRole + 10;  // the provider a section's "+ add model" row adds to
 
 const QString kAll = QStringLiteral("all");
 const QString kClasses = QStringLiteral("classes");
@@ -349,6 +350,12 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     connect(m_list, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item, int column) {
         if (!item || item->data(0, SectionRole).toBool()) return;
         if (column == ColRank && item->data(0, AddRole).toBool()) { addSelected(); return; }
+        // "+ add model" is a button in a row's clothes: one click asks, as a button would.
+        if (item->data(0, AddByIdRole).toBool()) {
+            const QString preset = item->data(0, AddByIdPresetRole).toString();
+            QTimer::singleShot(0, this, [this, preset] { promptAddModelById(preset); });
+            return;
+        }
         if (column == ColVia && item->data(0, ViaRole).toStringList().size() > 1 && m_vias->isVisible()) m_vias->setFocus();
     });
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int column) {
@@ -469,14 +476,20 @@ void ModelPicker::focusClass(const QString &tier) {
     // The pane's own model where this section holds it — the row you are most likely to want —
     // then rank 1, and failing both the section's own header, so an empty class is still scrolled
     // to and still says which class the page is on.
-    for (int pass = 0; pass < 3; ++pass)
+    // While something is typed, a class that ranks nothing matching lands on its first "+ add"
+    // offer instead, so ctrl+enter adds what was typed; untyped, the offers are not what it runs.
+    const bool typed = !m_filter->text().trimmed().isEmpty();
+    for (int pass = 0; pass < 4; ++pass)
         for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
             QTreeWidgetItem *item = m_list->topLevelItem(i);
             if (rowTier(item) != tier) continue;
             const bool header = item->data(0, ClassHeadRole).toBool();
-            if (pass < 2 && (header || item->data(0, SectionRole).toBool())) continue;
+            const bool offer = item->data(0, AddRole).toBool();
+            if (pass < 3 && (header || item->data(0, SectionRole).toBool())) continue;
+            if (pass < 2 && offer) continue;
             if (pass == 0 && item->data(0, KeyRole).toString() != m_context.currentKey) continue;
-            if (pass == 2 && !header) continue;
+            if (pass == 2 && (!typed || !offer)) continue;
+            if (pass == 3 && !header) continue;
             m_list->setCurrentItem(item);
             m_list->scrollToItem(item);
             return;
@@ -812,42 +825,29 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
         addListRow(tier, rank, item, entry);
         ++drawn;
     }
-    if (query.isEmpty()) {
-        // One hint, and only where it is the answer: an empty list says how to fill it. The
-        // sectioned page would otherwise carry four copies of a line the footer already says.
-        if (list.isEmpty())
-            addSection(QStringLiteral("nothing in %1 — type a model's name, then ctrl+enter adds it here").arg(tier), tier);
-        else if (!sectionsPage())
-            addSection(QStringLiteral("type a model's name to add it to this list"), tier);
-        return;
+    // Then every other *available* model this class may hold, always and not only while typing
+    // (owner, 2026-09-22: "i thought all available models would be in priority, so searching should
+    // happen in the available pane"). Step 2 is the pool and step 3 orders it, so the pool is on the
+    // page, under "+ add", one click from a rank. Typing here filters what is drawn and nothing
+    // more: the whole catalog — OpenRouter's long tail — is searched on Available only. Searching it
+    // here too, once per class section, froze the pane on every keystroke.
+    QList<Entry> rest;
+    for (const Entry &entry : shown(m_context.catalog)) {
+        if (inList.contains(entry.key) || !addableToTier(entry, tier)) continue;
+        if (!query.isEmpty() && !matches(entry, query)) continue;
+        rest << entry;
     }
-    // Typing searches every model, not only this list: the rows of this list that match come
-    // first, then the rest of the catalog under a rule, folded one row per model. "The rest" is
-    // every *usable* entry, so the long tail `shown()` holds back is reachable here — this is the
-    // door that replaced the per-provider id box on Options › Models (design 5.5) — and it comes
-    // under its own rule so it is clear why those rows were not listed until you typed.
-    QStringList listed;
-    for (const Entry &entry : shown(m_context.catalog)) listed << entry.key;
-    QList<Entry> rest, tail;
-    for (const Entry &entry : allUsable(m_context.catalog)) {
-        if (inList.contains(entry.key) || !addableToTier(entry, tier) || !matches(entry, query)) continue;
-        (listed.contains(entry.key) ? rest : tail) << entry;
-    }
-    if (rest.isEmpty() && tail.isEmpty()) {
-        if (drawn == 0)
+    if (rest.isEmpty()) {
+        if (!query.isEmpty() && drawn == 0)
             addSection(sectionsPage() ? QStringLiteral("nothing in %1 matches “%2”").arg(tier, query)
                                       : QStringLiteral("no model matches “%1”").arg(query), tier);
+        else if (list.isEmpty())
+            addSection(QStringLiteral("nothing in %1 — tick models on available to offer them here").arg(tier), tier);
         return;
     }
-    if (!rest.isEmpty()) {
-        addSection(sectionsPage() ? QStringLiteral("not in %1 — ctrl+enter adds it here").arg(tier)
-                                  : QStringLiteral("not in this list"), tier);
-        for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true, tier);
-    }
-    if (!tail.isEmpty()) {
-        addSection(tailRule(tail), tier);
-        for (const Group &group : grouped(m_context.catalog, tail, nowSeconds())) addGroupRow(group, true, tier);
-    }
+    addSection(sectionsPage() ? QStringLiteral("not in %1 — + add puts it here").arg(tier)
+                              : QStringLiteral("not in this list — + add puts it here"), tier);
+    for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true, tier);
 }
 
 void ModelPicker::buildAll(const QString &query) {
@@ -924,25 +924,44 @@ void ModelPicker::buildAll(const QString &query) {
     std::sort(providers.begin(), providers.end(), [](const QString &a, const QString &b) {
         return QString::compare(a, b, Qt::CaseInsensitive) < 0;
     });
+    // A provider that has nothing listed yet — OpenRouter before any of its models is ticked — is
+    // still a section, so its "+ add model" row is there to press.
+    QHash<QString, QString> presetOf;
+    for (const QString &preset : m_context.catalog.presets()) {
+        const QList<Entry> rows = m_context.catalog.ofPreset(preset);
+        // A guest harness and Relay Free run the models they come with; there is nothing to add.
+        if (rows.isEmpty() || !rows.first().usable || rows.first().guest || rows.first().hosted) continue;
+        const QString provider = rows.first().provider.isEmpty() ? preset : rows.first().provider;
+        if (!presetOf.contains(provider)) presetOf.insert(provider, preset);
+        if (!providers.contains(provider)) providers << provider;
+    }
+    std::sort(providers.begin(), providers.end(), [](const QString &a, const QString &b) {
+        return QString::compare(a, b, Qt::CaseInsensitive) < 0;
+    });
     for (const QString &provider : providers) {
         addSection(provider);
         for (const Group *group : byProvider.value(provider)) addGroupRow(*group, false);
+        // Under every provider rather than once at the foot of the page (owner, 2026-09-22: "the
+        // text box is hard to find, make it show up in the provider sections, as a +add model").
+        if (const QString preset = presetOf.value(provider); !preset.isEmpty()) addAddByIdRow(preset);
     }
-    addAddByIdRow();
 }
 
 // The last row of the `all` tab: the "add a model by id" box that used to sit under every
 // open-ended provider on Options › Models (design 5.5). Almost everything it was for is done by
 // typing now — the filter reaches the whole catalog — so what is left is the case it was really
 // for: an id the provider serves but does not list. Enter on the row asks for it.
-void ModelPicker::addAddByIdRow() {
-    // Column 0, spanned, like a rule — but selectable, because it is a row you press.
-    auto *row = new QTreeWidgetItem(m_list, QStringList{QStringLiteral("+ add a model by id…")});
+void ModelPicker::addAddByIdRow(const QString &preset) {
+    // Column 0, spanned, like a rule — but selectable, because it is a row you press. Under a
+    // provider it is that provider's, and the prompt opens on it.
+    auto *row = new QTreeWidgetItem(m_list, QStringList{preset.isEmpty() ? QStringLiteral("+ add a model by id…")
+                                                                         : QStringLiteral("+ add model")});
     row->setData(0, AddByIdRole, true);
+    row->setData(0, AddByIdPresetRole, preset);
     row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
     row->setFirstColumnSpanned(true);
-    const QString tip = QStringLiteral("A model id your provider serves but does not list. Typing in the filter already "
-                                       "finds every model it does list, this tab's long tail included");
+    const QString tip = QStringLiteral("Add one of this provider's models — its whole list completes as you type, "
+                                       "and an id it serves but does not list is accepted too");
     for (int c = 0; c < ColCount; ++c) row->setToolTip(c, tip);
     row->setForeground(0, palette().color(QPalette::Disabled, QPalette::Text));
 }
@@ -963,7 +982,7 @@ QString ModelPicker::addModelById(const QString &preset, const QString &id) {
     return key;
 }
 
-void ModelPicker::promptAddModelById() {
+void ModelPicker::promptAddModelById(const QString &preset) {
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("add a model by id"));
     auto *form = new QFormLayout(&dialog);
@@ -975,8 +994,11 @@ void ModelPicker::promptAddModelById() {
         provider->addItem(providerText(rows.first()), preset);
     }
     if (provider->count() == 0) return;
-    // The provider of the row you were on, where there was one: the likeliest answer.
-    if (const Entry *entry = m_context.catalog.find(selectedKey()); entry != nullptr)
+    // The section's provider when the row was a section's; else the provider of the row you were
+    // on, where there was one: the likeliest answer.
+    if (!preset.isEmpty())
+        provider->setCurrentIndex(qMax(0, provider->findData(preset)));
+    else if (const Entry *entry = m_context.catalog.find(selectedKey()); entry != nullptr)
         provider->setCurrentIndex(qMax(0, provider->findData(entry->preset)));
     auto *id = new QLineEdit;
     id->setObjectName(QStringLiteral("addByIdModel"));
@@ -1111,6 +1133,7 @@ void ModelPicker::setRowAvailable(const QString &groupKey, bool on) {
 // the click would delete the very item that is being clicked.
 void ModelPicker::refreshAvailability() {
     if (m_list == nullptr || !availabilityTab()) return;
+    const curation::ReadScope reads;
     const bool wasBuilding = m_building;
     m_building = true;
     for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
@@ -1153,6 +1176,7 @@ void ModelPicker::applyAvailability(QTreeWidgetItem *row, bool available, const 
 }
 
 void ModelPicker::rebuild() {
+    const curation::ReadScope reads;   // one settings read per key for the whole redraw
     const QString keep = selectedKey();
     const bool all = m_tier == kAll;
     m_building = true;
@@ -1237,15 +1261,19 @@ QString ModelPicker::selectedEffort() const {
 
 void ModelPicker::selectKey(const QString &key) {
     if (key.isEmpty()) return;
-    for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *item = m_list->topLevelItem(i);
-        if (item->data(0, SectionRole).toBool()) continue;
-        if (item->data(0, KeyRole).toString() == key || item->data(0, ViaRole).toStringList().contains(key)) {
-            m_list->setCurrentItem(item);
-            m_list->scrollToItem(item);
-            return;
+    // A ranked row before a "+ add" offer of the same model: on the priorities page every class
+    // offers what it does not rank, so the first row with the key is often another class's offer.
+    for (int pass = 0; pass < 2; ++pass)
+        for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
+            QTreeWidgetItem *item = m_list->topLevelItem(i);
+            if (item->data(0, SectionRole).toBool()) continue;
+            if (pass == 0 && item->data(0, AddRole).toBool()) continue;
+            if (item->data(0, KeyRole).toString() == key || item->data(0, ViaRole).toStringList().contains(key)) {
+                m_list->setCurrentItem(item);
+                m_list->scrollToItem(item);
+                return;
+            }
         }
-    }
 }
 
 void ModelPicker::onRowChanged() {
@@ -1618,7 +1646,7 @@ void ModelPicker::use() {
     // "+ add a model by id…" is a row you press, not a model you use: Enter on it asks for the id
     // and leaves the dialog open on what it added.
     if (QTreeWidgetItem *row = currentRow(); row != nullptr && row->data(0, AddByIdRole).toBool()) {
-        promptAddModelById();
+        promptAddModelById(row->data(0, AddByIdPresetRole).toString());
         return;
     }
     const QString key = selectedKey();

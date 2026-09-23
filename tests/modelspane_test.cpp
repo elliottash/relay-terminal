@@ -97,13 +97,26 @@ QStringList tabs(QTabBar *bar) {
     return out;
 }
 
+// The rows drawn, without a class's "+ add" pool (#AVR8) — `poolKeys` reads that.
 QStringList rowKeys(QTreeWidget *list) {
     QStringList out;
     for (int i = 0; i < list->topLevelItemCount(); ++i) {
         QTreeWidgetItem *item = list->topLevelItem(i);
-        if (item->isHidden()) continue;
+        if (item->isHidden() || item->data(0, Qt::UserRole + 4).toBool()) continue;
         const QString key = item->data(0, Qt::UserRole).toString();
         if (!key.isEmpty()) out << key;
+    }
+    return out;
+}
+
+// Every available model a class may hold and does not rank, under its "+ add" rule.
+QStringList poolKeys(QTreeWidget *list, const QString &tier = QString()) {
+    QStringList out;
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = list->topLevelItem(i);
+        if (!item->data(0, Qt::UserRole + 4).toBool()) continue;
+        if (!tier.isEmpty() && item->data(0, Qt::UserRole + 8).toString() != tier) continue;
+        out << item->data(0, Qt::UserRole).toString();
     }
     return out;
 }
@@ -300,12 +313,16 @@ private Q_SLOTS:
         QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("glm-coding|glm-5.3")));
     }
 
-    void lateProviderCatalogBecomesSearchableInPriorities() {
+    // A catalog that arrives late is searchable on **available**, where the whole catalog is
+    // searched; ticking a model there puts it in every class's "+ add" pool on priorities (owner,
+    // 2026-09-22: "i thought all available models would be in priority, so searching should
+    // happen in the available pane").
+    void lateProviderCatalogBecomesSearchableInAvailableAndJoinsPriorities() {
         Served served;
         ModelsPane pane(providerSections());
         auto target = targetFor(&served);
         pane.setTarget(target);
-        pane.showTab(ModelsPane::prioritiesTab());
+        pane.showTab(ModelsPane::availableTab());
         pane.picker()->filter()->setText(QStringLiteral("openrouter"));
         QVERIFY(rowKeys(pane.picker()->list()).isEmpty());
         QJsonArray fresh = presets();
@@ -314,9 +331,14 @@ private Q_SLOTS:
                                 model("vendor/new-model", "new-model", "", {})}}};
         target.catalog = catalogFrom(fresh);
         pane.setTarget(target);
-        QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
+        QCOMPARE(pane.currentTab(), QStringLiteral("available"));
         QCOMPARE(pane.picker()->filter()->text(), QStringLiteral("openrouter"));
         QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("openrouter|vendor/new-model")));
+        // A provider listing one model is not open-ended, so that model is available by default
+        // and priorities offers it in main's pool at once; ctrl+enter ranks it.
+        pane.showTab(ModelsPane::prioritiesTab());
+        QVERIFY(poolKeys(pane.picker()->list(), QStringLiteral("main")).contains(QStringLiteral("openrouter|vendor/new-model")));
+        pane.picker()->filter()->setText(QStringLiteral("new-model"));
         pane.picker()->focusClass(QStringLiteral("main"));
         pane.picker()->addSelected();
         QVERIFY(listKeys(QStringLiteral("main")).contains(QStringLiteral("openrouter|vendor/new-model")));
@@ -337,9 +359,11 @@ private Q_SLOTS:
         target.catalog = catalogFrom(fresh);
         pane.setTarget(target);
         pane.showTab(ModelsPane::prioritiesTab());
+        // Ranked nowhere; offered, untyped, where a harness can be a whole agent — main and high.
         QVERIFY(!rowKeys(pane.picker()->list()).contains(QStringLiteral("guest:codex|gpt-6-astra")));
+        QCOMPARE(poolKeys(pane.picker()->list()).count(QStringLiteral("guest:codex|gpt-6-astra")), 2);
         pane.picker()->filter()->setText(QStringLiteral("codex"));
-        QCOMPARE(rowKeys(pane.picker()->list()).count(QStringLiteral("guest:codex|gpt-6-astra")), 2);
+        QCOMPARE(poolKeys(pane.picker()->list()).count(QStringLiteral("guest:codex|gpt-6-astra")), 2);
         for (const QString &tier : {QStringLiteral("main"), QStringLiteral("high")}) {
             pane.picker()->filter()->setText(QStringLiteral("codex"));
             pane.picker()->focusClass(tier);
