@@ -22,6 +22,13 @@ public:
     bool atDraft() const { return m_historyIndex == m_history.size(); }
     // Last visual row, including word wrapping, rather than merely the last paragraph.
     bool onBottomRow() const;
+    // Ctrl+Q / Ctrl+Shift+Q (`prompt.clear`, card #CPRQ): empty the box as ONE undo step, so a
+    // single Ctrl+Z brings every character back however many edits built the draft. Attachments
+    // are `@path` tokens in the text, so they go and come back with it. An empty box is left
+    // alone and nothing is pushed on the undo stack: the next Ctrl+Z still undoes the last real
+    // edit. Returns whether anything was cleared. Nothing is remembered: a cleared draft is not
+    // prompt history (#H8VP). A box mid-way through a history browse is back at its draft.
+    bool clearAsOneEdit();
 
     // Keep this box's history in a file instead of only in this session (src/PromptHistory.h):
     // what is in the file now is loaded, and every later remember() is appended to it. The file

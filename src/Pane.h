@@ -1456,6 +1456,16 @@ public:
         if (m_secretMode) { m_secretEdit->setFocus(Qt::OtherFocusReason); return; }
         m_editor->setFocus(Qt::OtherFocusReason);
     }
+    // `prompt.clear`, Ctrl+Q / Ctrl+Shift+Q (card #CPRQ): empty this pane's prompt box as one undo
+    // step. Image and `@file` attachments are `@path` tokens in its text (attachmentsFor), so the
+    // same Ctrl+Z brings them back too. The agent, its queue and the conversation are untouched,
+    // nothing goes into prompt history, and a password prompt is left to its own field.
+    void clearPrompt() {
+        if (!m_editor || m_secretMode) return;
+        if (m_editor->clearAsOneEdit())
+            status(QStringLiteral("Prompt box cleared · %1 brings it back")
+                       .arg(QKeySequence(QKeySequence::Undo).toString(QKeySequence::NativeText)));
+    }
     // Switchboard: put `#K7Q2 ` (or any text) at the composer's cursor and focus it. Used by the
     // pane's `t` key and by "work on #K7Q2" from a card.
     void insertInComposer(const QString &text) {

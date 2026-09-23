@@ -55,6 +55,88 @@ private Q_SLOTS:
         QTest::keyClick(&editor, Qt::Key_A, Qt::ControlModifier);
         QCOMPARE(editor.textCursor().selectedText(), QStringLiteral("hello world"));
     }
+    // Ctrl+Q (card #CPRQ): clearing is one undo step, whatever built the draft.
+    void clearIsOneUndoStep() {
+        RichEditor editor; editor.resize(600, 150); editor.show(); editor.setFocus();
+        QTest::keyClicks(&editor, "hello world");
+        editor.moveCursor(QTextCursor::Start);
+        QTest::keyClicks(&editor, "say ");                          // a second, separate edit
+        QTest::keyClick(&editor, Qt::Key_End);
+        QTest::keyClick(&editor, Qt::Key_Backspace);                // a third
+        QTest::keyClick(&editor, Qt::Key_Return, Qt::ShiftModifier);
+        QTest::keyClicks(&editor, "  ");                            // whitespace counts as text
+        const QString draft = editor.toPlainText();
+        QCOMPARE(draft, QStringLiteral("say hello worl\n  "));
+        QVERIFY(editor.clearAsOneEdit());
+        QCOMPARE(editor.toPlainText(), QString());
+        QTest::keyClick(&editor, Qt::Key_Z, Qt::ControlModifier);  // ONE undo brings all of it back
+        QCOMPARE(editor.toPlainText(), draft);
+        editor.redo();                                              // redo clears it again
+        QCOMPARE(editor.toPlainText(), QString());
+        editor.undo();
+        QCOMPARE(editor.toPlainText(), draft);
+        QTest::keyClick(&editor, Qt::Key_Z, Qt::ControlModifier);  // the next undo is an earlier edit,
+        QVERIFY(editor.toPlainText() != draft);                     // not a second half of the clear
+        QVERIFY(!editor.toPlainText().isEmpty());
+    }
+    // An empty box: nothing happens, nothing is pushed, and Ctrl+Z still undoes the last real edit.
+    void clearingAnEmptyBoxIsANoOp() {
+        RichEditor editor; editor.resize(600, 150); editor.show(); editor.setFocus();
+        QVERIFY(!editor.clearAsOneEdit());
+        QCOMPARE(editor.document()->availableUndoSteps(), 0);
+        QTest::keyClicks(&editor, "ls");
+        editor.selectAll();
+        QTest::keyClick(&editor, Qt::Key_Delete);                   // the last real edit
+        QCOMPARE(editor.toPlainText(), QString());
+        const int steps = editor.document()->availableUndoSteps();
+        QVERIFY(!editor.clearAsOneEdit());
+        QCOMPARE(editor.document()->availableUndoSteps(), steps);
+        QTest::keyClick(&editor, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor.toPlainText(), QStringLiteral("ls"));
+    }
+    // Attachments are `@path` tokens in the text (EM1E), so the clear takes them and the same
+    // undo step brings them back; the cleared draft is never written to prompt history (#H8VP).
+    void clearTakesAttachmentsAndLeavesHistoryAlone() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("prompt-history.txt"));
+        RichEditor editor; editor.useHistoryFile(path);
+        editor.remember(QStringLiteral("earlier"));
+        editor.onImageMime = [](const QMimeData *data, bool) {
+            return data->hasImage() ? QStringList{QStringLiteral("@/tmp/shot.png")} : QStringList{};
+        };
+        editor.setPlainText(QStringLiteral("look at"));
+        editor.moveCursor(QTextCursor::End);
+        QMimeData *image = new QMimeData;
+        QImage picture(4, 4, QImage::Format_RGB32);
+        picture.fill(Qt::blue);
+        image->setImageData(picture);
+        QApplication::clipboard()->setMimeData(image);
+        editor.paste();
+        QTest::keyClicks(&editor, "please");
+        const QString draft = editor.toPlainText();
+        QCOMPARE(draft, QStringLiteral("look at @/tmp/shot.png please"));
+        QVERIFY(editor.clearAsOneEdit());
+        QCOMPARE(editor.toPlainText(), QString());
+        editor.undo();
+        QCOMPARE(editor.toPlainText(), draft);
+        QCOMPARE(editor.history(), QStringList{QStringLiteral("earlier")});
+        QCOMPARE(relay::prompthistory::read(path, 10), QStringList{QStringLiteral("earlier")});
+    }
+    // A box part-way through a history browse clears back to an empty draft: Down has nothing to
+    // do, and Up starts from the newest entry again.
+    void clearMidBrowseReturnsToTheDraft() {
+        RichEditor editor;
+        editor.remember(QStringLiteral("first"));
+        editor.remember(QStringLiteral("second"));
+        QTest::keyClick(&editor, Qt::Key_Up);
+        QTest::keyClick(&editor, Qt::Key_Up);
+        QCOMPARE(editor.toPlainText(), QStringLiteral("first"));
+        QVERIFY(!editor.atDraft());
+        QVERIFY(editor.clearAsOneEdit());
+        QVERIFY(editor.atDraft());
+        QTest::keyClick(&editor, Qt::Key_Up);
+        QCOMPARE(editor.toPlainText(), QStringLiteral("second"));
+    }
     void submissionAndMultiline() {
         RichEditor editor; QStringList routes;
         editor.onSubmit = [&routes](const QString &route) { routes.append(route); };

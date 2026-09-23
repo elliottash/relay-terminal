@@ -291,6 +291,20 @@ bool RichEditor::onBottomRow() const {
     return !row.isValid() || row.lineNumber() == layout->lineCount() - 1;
 }
 
+bool RichEditor::clearAsOneEdit() {
+    if (document()->isEmpty()) return false;
+    QTextCursor cursor(document());
+    cursor.beginEditBlock();
+    cursor.select(QTextCursor::Document);
+    cursor.removeSelectedText();
+    cursor.endEditBlock();
+    setTextCursor(cursor);
+    setGhost(QString());
+    m_historyIndex = m_history.size();
+    m_draft.clear();
+    return true;
+}
+
 void RichEditor::keyPressEvent(QKeyEvent *event) {
     if (isReadOnly()) { QPlainTextEdit::keyPressEvent(event); return; }
     // Numpad Enter arrives as Qt::Key_Enter with Qt::KeypadModifier set; drop that flag so
