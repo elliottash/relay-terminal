@@ -284,6 +284,29 @@ private Q_SLOTS:
         QVERIFY(editor.ghost().isEmpty());
         QVERIFY(!editor.acceptGhost(true));
     }
+    // A suggestion in an empty box sits where the placeholder is drawn. A resize or a new set of
+    // hints used to bring the placeholder back underneath it, and the two printed over each other.
+    void aSuggestionInAnEmptyBoxHidesThePlaceholder() {
+        RichEditor editor;
+        editor.resize(600, 40);
+        editor.updatePlaceholder();
+        QVERIFY(!editor.placeholderText().isEmpty());
+        editor.setGhost(QStringLiteral("Restart the import from the new build"));
+        QVERIFY(editor.placeholderText().isEmpty());
+        editor.resize(500, 40);
+        QResizeEvent resize(QSize(500, 40), QSize(600, 40));
+        QCoreApplication::sendEvent(&editor, &resize);
+        QVERIFY(editor.placeholderText().isEmpty());
+        editor.setPlaceholders({QStringLiteral("Answer the question…")});
+        QVERIFY(editor.placeholderText().isEmpty());
+        editor.setGhost(QString());
+        QCOMPARE(editor.placeholderText(), QStringLiteral("Answer the question…"));
+        // A history suggestion after typed text leaves the placeholder alone: Qt only draws it
+        // in an empty box, and it is wanted back the moment the text is cleared.
+        editor.setPlainText(QStringLiteral("git"));
+        editor.setGhost(QStringLiteral(" status"));
+        QCOMPARE(editor.placeholderText(), QStringLiteral("Answer the question…"));
+    }
     // Image context (issue EM1E): a paste or a drop the pane claims as an image becomes `@path`
     // tokens instead of text, and everything the pane does not claim still pastes as text.
     void pastedImagesBecomeAttachmentTokens() {

@@ -158,6 +158,13 @@ void RichEditor::updatePlaceholder() {
         QStringLiteral("Commands…"),
         QStringLiteral("…"),
     };
+    // A suggestion in an empty box is drawn where the placeholder would be; showing both prints
+    // one on top of the other. This is re-checked on every resize and every new set of hints,
+    // which is what put the placeholder back under an AI suggestion before.
+    if (!m_ghost.isEmpty() && document()->isEmpty()) {
+        if (!placeholderText().isEmpty()) setPlaceholderText(QString());
+        return;
+    }
     const QStringList &candidates = m_placeholders.isEmpty() ? composer : m_placeholders;
     const QFontMetrics metrics(font());
     const int available = viewport()->width() - int(document()->documentMargin()) * 2 - 8;
@@ -192,8 +199,11 @@ void RichEditor::updateAutoHeight() {
 }
 
 void RichEditor::setGhost(const QString &remainder) {
-    if (remainder == m_ghost) return;
+    // Before the early return: the box may have emptied under an unchanged suggestion.
+    const bool changed = remainder != m_ghost;
     m_ghost = remainder;
+    updatePlaceholder();
+    if (!changed) return;
     viewport()->update();
 }
 
