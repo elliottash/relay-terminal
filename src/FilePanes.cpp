@@ -22,6 +22,7 @@
 #include <QElapsedTimer>
 #include <QResizeEvent>
 #include <algorithm>
+#include <utility>
 #include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -29,6 +30,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFileSystemModel>
+#include <QFileSystemWatcher>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -916,6 +918,19 @@ struct FilePreview::Private {
     QBuffer *pdfBuffer = nullptr;
 #endif
     QPixmap pixmap;
+
+    // ----- the open file changing on disk (#F8R7) --------------------------------------------
+    relay::merge::Snapshot base;       // what the buffer was loaded from / last merged or saved against
+    relay::merge::Snapshot disk;       // the disk's version a waiting conflict is about
+    relay::merge::Revision seen;       // the stat at the last look, so a folder event about a sibling costs nothing
+    QFileSystemWatcher *watcher = nullptr;
+    QTimer *settle = nullptr;          // coalesces a burst of watcher events into one look
+    bool fileEvent = false;            // the file itself signalled since the last look: rehash whatever the stat says
+    bool deleted = false;
+    FilePreview::ConflictMode conflict = FilePreview::ConflictMode::None;
+    QWidget *conflictBar = nullptr;
+    QLabel *conflictText = nullptr;
+    QToolButton *conflictMerge = nullptr, *conflictMine = nullptr, *conflictDisk = nullptr;
 };
 
 FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
@@ -980,6 +995,53 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     header->addWidget(m_reload);
     header->addWidget(m_external);
     layout->addLayout(header);
+
+    // The conflict bar (#F8R7): an external change the pane would not merge into unsaved edits
+    // on its own, or a save that found the disk had moved. It stays until one of its buttons is
+    // pressed; the buffer is not touched until then.
+    d->conflictBar = new QWidget;
+    d->conflictBar->setObjectName(QStringLiteral("filePreviewConflict"));
+    {
+        auto *bar = new QHBoxLayout(d->conflictBar);
+        bar->setContentsMargins(0, 0, 0, 0);
+        bar->setSpacing(4);
+        d->conflictText = new QLabel;
+        d->conflictText->setObjectName(QStringLiteral("filePreviewConflictText"));
+        d->conflictText->setWordWrap(true);
+        d->conflictText->setTextFormat(Qt::PlainText);
+        d->conflictMerge = headerButton(QString(), QString());
+        d->conflictMerge->setObjectName(QStringLiteral("filePreviewConflictMerge"));
+        d->conflictMine = headerButton(QString(), QString());
+        d->conflictMine->setObjectName(QStringLiteral("filePreviewConflictMine"));
+        d->conflictDisk = headerButton(QString(), QString());
+        d->conflictDisk->setObjectName(QStringLiteral("filePreviewConflictDisk"));
+        bar->addWidget(d->conflictText, 1);
+        bar->addWidget(d->conflictMerge);
+        bar->addWidget(d->conflictMine);
+        bar->addWidget(d->conflictDisk);
+        connect(d->conflictMerge, &QToolButton::clicked, this, [this] { resolveConflict(Resolution::Merge); });
+        connect(d->conflictMine, &QToolButton::clicked, this, [this] { resolveConflict(Resolution::KeepMine); });
+        connect(d->conflictDisk, &QToolButton::clicked, this, [this] { resolveConflict(Resolution::TakeDisk); });
+    }
+    d->conflictBar->hide();
+    layout->addWidget(d->conflictBar);
+
+    // The watcher watches the file and its folder: renaming a temporary over the file (how most
+    // editors, git and QSaveFile write) takes the old inode and its watch with it, and only the
+    // folder sees the new one arrive. Events come in bursts, and a look is a read and a hash, so
+    // the first event starts a short timer and the rest ride on it.
+    d->watcher = new QFileSystemWatcher(this);
+    d->settle = new QTimer(this);
+    d->settle->setSingleShot(true);
+    d->settle->setInterval(80);
+    connect(d->settle, &QTimer::timeout, this, [this] { checkDisk(); });
+    connect(d->watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &) {
+        d->fileEvent = true;
+        if (!d->settle->isActive()) d->settle->start();
+    });
+    connect(d->watcher, &QFileSystemWatcher::directoryChanged, this, [this](const QString &) {
+        if (!d->settle->isActive()) d->settle->start();
+    });
 
     m_noticeLabel = new QLabel;
     m_noticeLabel->setObjectName(QStringLiteral("filePreviewNotice"));
@@ -1122,6 +1184,9 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
 }
 
 FilePreview::~FilePreview() {
+    // Both are children and would outlive `d` by a moment; neither may call back into it.
+    delete d->watcher;
+    delete d->settle;
     delete d;
 }
 
@@ -1179,6 +1244,9 @@ bool FilePreview::open(const QString &path) {
     const QFileInfo info(path);
     if (path.isEmpty() || !info.exists() || !info.isFile() || !info.isReadable()) return false;
     setEditable(false);
+    hideConflict();
+    d->deleted = false;
+    d->base = relay::merge::Snapshot();
     m_remoteHost.clear();
     m_remotePath.clear();
     m_hostChip->hide();
@@ -1217,6 +1285,7 @@ bool FilePreview::open(const QString &path) {
         showInfo(absolute, mime.name());
     }
     if (samePath && m_kind == Kind::Text) m_textView->verticalScrollBar()->setValue(scroll);
+    watchLocal();
 
     updateTitleText();
     m_title->setToolTip(absolute);
@@ -1248,6 +1317,10 @@ bool FilePreview::openRemote(const QString &url) {
     m_kind = Kind::None;
     m_markdownSource = false;
     setEditable(false);
+    hideConflict();
+    d->deleted = false;
+    d->base = relay::merge::Snapshot();
+    watchLocal();   // a remote path: stops watching whatever local file was here
     m_pendingLine = 0;
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     delete d->highlighter;
@@ -1482,12 +1555,17 @@ void FilePreview::setEditable(bool on) {
 void FilePreview::updateEditButton() {
     // The ✎ button is the read-only local preview's way into editing (card #SEJ2). A remote file
     // is editable the moment its bytes land, and an image, PDF or info page has nothing to edit.
-    m_edit->setVisible(!isRemote() && !m_editable && (m_kind == Kind::Text || m_kind == Kind::Markdown));
+    // A file shown only up to kMaxTextBytes is not offered: saving the head would cut off the tail.
+    m_edit->setVisible(!isRemote() && !m_editable && !d->base.truncated && (m_kind == Kind::Text || m_kind == Kind::Markdown));
 }
 
 void FilePreview::startEditing() {
     if (m_editable || isRemote()) return;
     if (m_kind != Kind::Text && m_kind != Kind::Markdown) return;
+    if (d->base.truncated) {
+        setNotice(QStringLiteral("Only the first %1 of this file is shown, so it cannot be edited here.").arg(humanSize(kMaxTextBytes)));
+        return;
+    }
     // Markdown is edited as source, the same view the "Source (MD)" button shows.
     if (m_kind == Kind::Markdown && !m_markdownSource) {
         m_markdownSource = true;
@@ -1523,32 +1601,27 @@ bool FilePreview::save() {
     if (!m_editable) return false;
     if (!m_textView->document()->isModified()) return true;
     if (!isRemote()) {
-        // A local save (card #SEJ2): atomically, so a crash or a full disk leaves the old file
-        // whole. The buffer is UTF-8 because the read path decoded it as UTF-8.
-        QSaveFile file(m_path);
-        if (!file.open(QIODevice::WriteOnly)) {
-            setNotice(QStringLiteral("Could not save: %1").arg(file.errorString()));
+        // Never over a change nobody has seen (#F8R7): the disk is compared with the base first,
+        // and a difference goes to the conflict bar as Merge / Overwrite / Reload. A file that is
+        // gone is written back — there is nothing on disk to lose.
+        if (d->conflict != ConflictMode::None) {
+            showConflict(ConflictMode::Save);
             return false;
         }
-        file.write(m_textView->toPlainText().toUtf8());
-        if (!file.commit()) {
-            setNotice(QStringLiteral("Could not save: %1").arg(file.errorString()));
+        const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+        if (disk.revision.exists && !disk.revision.sameContent(d->base.revision)) {
+            if (disk.text == m_textView->toPlainText()) {
+                // Someone already wrote exactly this text.
+                setBase(disk);
+                m_textView->document()->setModified(false);
+                setNotice(QStringLiteral("%1 on disk already has this text.").arg(QFileInfo(m_path).fileName()));
+                return true;
+            }
+            d->disk = disk;
+            showConflict(ConflictMode::Save);
             return false;
         }
-        m_textView->document()->setModified(false);
-        QString said = QStringLiteral("Saved · %1").arg(QLocale().toString(QTime::currentTime(), QLocale::ShortFormat));
-        if (m_teachSaveShortcut) {
-            m_teachSaveShortcut = false;
-            said += QStringLiteral(" · ") + relay::ShortcutHints::nextTime(
-                        QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText),
-                        QStringLiteral("save this file"));
-        }
-        setNotice(said);
-        updateTitleText();
-        if (onTitleChanged) onTitleChanged(title());
-        const QString shown = m_notice;
-        QTimer::singleShot(6000, this, [this, shown] { if (m_notice == shown) setNotice(QString()); });
-        return true;
+        return writeBuffer();
     }
     if (!m_remote) return false;
     if (m_remote->busy()) { setNotice(QStringLiteral("Still saving to %1…").arg(m_remoteHost)); return false; }
@@ -1564,16 +1637,359 @@ bool FilePreview::save() {
     return true;
 }
 
+bool FilePreview::writeBuffer() {
+    // A local save (card #SEJ2): atomically, so a crash or a full disk leaves the old file
+    // whole. The buffer is UTF-8 because the read path decoded it as UTF-8.
+    const QString text = m_textView->toPlainText();
+    const QByteArray bytes = text.toUtf8();
+    QSaveFile file(m_path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        setNotice(QStringLiteral("Could not save: %1").arg(file.errorString()));
+        return false;
+    }
+    file.write(bytes);
+    if (!file.commit()) {
+        setNotice(QStringLiteral("Could not save: %1").arg(file.errorString()));
+        return false;
+    }
+    // What was written is the new base; the watcher's event for this write then finds
+    // nothing to do.
+    relay::merge::Snapshot saved;
+    saved.bytes = bytes;
+    saved.text = text;
+    saved.revision = relay::merge::revisionOf(bytes);
+    const relay::merge::Revision stat = relay::merge::statLocalFile(m_path);
+    saved.revision.mtimeMs = stat.mtimeMs;
+    saved.revision.inode = stat.inode;
+    setBase(saved);
+    d->deleted = false;
+    rewatch();
+    m_textView->document()->setModified(false);
+    QString said = QStringLiteral("Saved · %1").arg(QLocale().toString(QTime::currentTime(), QLocale::ShortFormat));
+    if (m_teachSaveShortcut) {
+        m_teachSaveShortcut = false;
+        said += QStringLiteral(" · ") + relay::ShortcutHints::nextTime(
+                    QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText),
+                    QStringLiteral("save this file"));
+    }
+    setNotice(said);
+    updateTitleText();
+    if (onTitleChanged) onTitleChanged(title());
+    const QString shown = m_notice;
+    QTimer::singleShot(6000, this, [this, shown] { if (m_notice == shown) setNotice(QString()); });
+    return true;
+}
+
+// ----- the open file changing on disk (#F8R7) ----------------------------------------------------
+//
+// The disk is the other editor. Every look goes: stat (cheap, and enough to ignore a folder event
+// about a sibling), then read and hash, and the hash against the base decides. A clean buffer
+// follows the disk; an edited one is reconciled three ways (relay::merge::reconcile) and only a
+// conflict needs the user.
+
+namespace {
+// Text the buffer can hold and a merge can work on: not cut off at kMaxTextBytes, not binary.
+bool mergeable(const relay::merge::Snapshot &snapshot) {
+    return !snapshot.truncated && !snapshot.text.contains(QChar(0));
+}
+}  // namespace
+
+const relay::merge::Snapshot &FilePreview::base() const {
+    return d->base;
+}
+
+bool FilePreview::deletedOnDisk() const {
+    return d->deleted;
+}
+
+bool FilePreview::hasConflict() const {
+    return d->conflict != ConflictMode::None;
+}
+
+void FilePreview::watchLocal() {
+    const QStringList watched = d->watcher->files() + d->watcher->directories();
+    if (!watched.isEmpty()) d->watcher->removePaths(watched);
+    d->settle->stop();
+    d->fileEvent = false;
+    d->seen = relay::merge::Revision();
+    if (isRemote() || m_path.isEmpty()) return;
+    d->watcher->addPath(QFileInfo(m_path).absolutePath());
+    d->watcher->addPath(m_path);
+    // The stat the text was read under, not the stat now: a write between the read and the watch
+    // above sent no event, and this way it still differs and gets a look.
+    const relay::merge::Revision now = relay::merge::statLocalFile(m_path);
+    d->seen = d->base.revision.exists ? d->base.revision : now;
+    if (!now.sameStat(d->seen)) d->settle->start();
+}
+
+void FilePreview::rewatch() {
+    if (isRemote() || m_path.isEmpty()) return;
+    const QString folder = QFileInfo(m_path).absolutePath();
+    if (!d->watcher->directories().contains(folder)) d->watcher->addPath(folder);
+    if (QFileInfo::exists(m_path) && !d->watcher->files().contains(m_path)) d->watcher->addPath(m_path);
+}
+
+void FilePreview::checkDisk() {
+    if (isRemote() || m_path.isEmpty() || m_kind == Kind::None) return;
+    d->settle->stop();
+    const bool fileEvent = std::exchange(d->fileEvent, false);
+    rewatch();
+    const relay::merge::Revision stat = relay::merge::statLocalFile(m_path);
+    if (!stat.exists) {
+        d->seen = stat;
+        if (!d->deleted) {
+            d->deleted = true;
+            showDeleted();
+        }
+        return;
+    }
+    const bool recreated = std::exchange(d->deleted, false);
+    if (!fileEvent && !recreated && stat.sameStat(d->seen)) return;
+    d->seen = stat;
+    const bool text = m_kind == Kind::Text || m_kind == Kind::Markdown;
+    if (!text || d->base.truncated) {
+        // An image, a PDF, an info page or a file too long to edit: never dirty, so it is simply
+        // shown again (open() keeps a text file's scroll).
+        if (!isDirty()) open(m_path);
+        return;
+    }
+    const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+    if (!disk.revision.exists) {
+        d->deleted = true;
+        showDeleted();
+        return;
+    }
+    if (recreated) setNotice(QString());   // the "deleted on disk" line
+    if (disk.revision.sameContent(d->base.revision)) {
+        d->base.revision = disk.revision;   // the same bytes, a newer stat
+        if (d->conflict == ConflictMode::Changed) hideConflict();   // it went back to what was loaded
+        return;
+    }
+    // The conflict on screen is about this very text: nothing new to say.
+    if (d->conflict != ConflictMode::None && disk.revision.sameContent(d->disk.revision)) return;
+    reconcileWith(disk);
+}
+
+void FilePreview::reconcileWith(const relay::merge::Snapshot &disk) {
+    using relay::merge::Outcome;
+    const QString name = QFileInfo(m_path).fileName();
+    QTextDocument *document = m_textView->document();
+    if (!mergeable(disk)) {
+        // Grew past the cap or turned binary: a clean preview shows it as open() would; an edited
+        // buffer is kept, and only Keep mine or Take disk make sense.
+        if (!isDirty()) { open(m_path); return; }
+        d->disk = disk;
+        showConflict(ConflictMode::Changed);
+        return;
+    }
+    if (!isDirty()) {
+        replaceBuffer(disk.text);
+        setBase(disk);
+        document->setModified(false);
+        if (d->conflict == ConflictMode::Changed) hideConflict();
+        return;
+    }
+    const relay::merge::Reconciliation r = relay::merge::reconcile(d->base.text, m_textView->toPlainText(), disk.text);
+    switch (r.outcome) {
+    case Outcome::Unchanged:
+        // Different bytes, the same text in the buffer's form (line endings, say).
+        setBase(disk);
+        if (d->conflict == ConflictMode::Changed) hideConflict();
+        return;
+    case Outcome::Converged:
+        setBase(disk);
+        document->setModified(false);
+        hideConflict();
+        setNotice(QStringLiteral("%1 on disk now has exactly your text.").arg(name));
+        return;
+    case Outcome::TakeDisk:
+        replaceBuffer(r.text);
+        setBase(disk);
+        document->setModified(false);
+        hideConflict();
+        return;
+    case Outcome::Merged:
+        replaceBuffer(r.text);
+        setBase(disk);
+        hideConflict();
+        setNotice(QStringLiteral("%1 changed on disk · merged into your unsaved edits (Ctrl+Z takes the merge back out).").arg(name));
+        return;
+    case Outcome::Conflict:
+        d->disk = disk;
+        showConflict(ConflictMode::Changed, int(r.merge.conflicts.size()));
+        return;
+    }
+}
+
+void FilePreview::replaceBuffer(const QString &text) {
+    const QVector<relay::merge::TextEdit> edits = relay::merge::editsBetween(m_textView->toPlainText(), text);
+    QScrollBar *vertical = m_textView->verticalScrollBar(), *horizontal = m_textView->horizontalScrollBar();
+    const int top = vertical->value(), left = horizontal->value();
+    if (!edits.isEmpty()) {
+        // One edit block: one undo step, and QTextDocument moves every cursor (the view's, with
+        // its selection) past the edits before it, so the caret stays on the text it was on.
+        QTextCursor cursor(m_textView->document());
+        cursor.beginEditBlock();
+        for (qsizetype k = edits.size() - 1; k >= 0; --k) {
+            cursor.setPosition(edits[k].position);
+            cursor.setPosition(edits[k].position + edits[k].removed, QTextCursor::KeepAnchor);
+            cursor.insertText(edits[k].inserted);
+        }
+        cursor.endEditBlock();
+    }
+    vertical->setValue(top);
+    horizontal->setValue(left);
+    if (m_kind == Kind::Markdown) {
+        QScrollBar *rendered = m_markdownView->verticalScrollBar();
+        const int at = rendered->value();
+        m_markdownView->setMarkdown(text);
+        rendered->setValue(at);
+    }
+}
+
+void FilePreview::setBase(const relay::merge::Snapshot &snapshot) {
+    d->base = snapshot;
+    d->seen = snapshot.revision;
+}
+
+void FilePreview::showConflict(ConflictMode mode, int overlaps) {
+    d->conflict = mode;
+    const QString name = QFileInfo(m_path).fileName();
+    if (mode == ConflictMode::Changed) {
+        d->conflictText->setText(
+            overlaps > 0 ? QStringLiteral("%1 changed on disk where you have unsaved edits (%2 overlapping %3). "
+                                          "Your text is untouched.")
+                               .arg(name).arg(overlaps).arg(overlaps == 1 ? QStringLiteral("change") : QStringLiteral("changes"))
+                         : QStringLiteral("%1 changed on disk and cannot be merged with your unsaved edits here. "
+                                          "Your text is untouched.").arg(name));
+        d->conflictMerge->setText(QStringLiteral("Show merge"));
+        d->conflictMerge->setToolTip(QStringLiteral("Put your text, the disk's and the version you loaded into the buffer "
+                                                    "between conflict markers (one undo step)"));
+        d->conflictMine->setText(QStringLiteral("Keep mine"));
+        d->conflictMine->setToolTip(QStringLiteral("Keep your text; saving then writes it over the disk's version"));
+        d->conflictDisk->setText(QStringLiteral("Take disk"));
+        d->conflictDisk->setToolTip(QStringLiteral("Replace your text with the disk's version (one undo step)"));
+    } else {
+        d->conflictText->setText(QStringLiteral("%1 changed on disk since you loaded it, so saving now would overwrite "
+                                                "that change.").arg(name));
+        d->conflictMerge->setText(QStringLiteral("Merge"));
+        d->conflictMerge->setToolTip(QStringLiteral("Merge the disk's changes into your text first, then save again"));
+        d->conflictMine->setText(QStringLiteral("Overwrite"));
+        d->conflictMine->setToolTip(QStringLiteral("Write your text over the disk's version"));
+        d->conflictDisk->setText(QStringLiteral("Reload"));
+        d->conflictDisk->setToolTip(QStringLiteral("Replace your text with the disk's version (one undo step)"));
+    }
+    d->conflictMerge->setEnabled(mergeable(d->disk));
+    d->conflictBar->show();
+}
+
+void FilePreview::hideConflict() {
+    d->conflict = ConflictMode::None;
+    d->disk = relay::merge::Snapshot();
+    d->conflictBar->hide();
+}
+
+void FilePreview::showDeleted() {
+    hideConflict();   // there is no disk version left to choose
+    const QString name = QFileInfo(m_path).fileName();
+    setNotice(m_editable ? QStringLiteral("%1 was deleted on disk · your text is still here, and %2 writes it back.")
+                               .arg(name, QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText))
+                         : QStringLiteral("%1 was deleted on disk · this is the last version Relay read.").arg(name));
+}
+
+bool FilePreview::resolveConflict(Resolution how) {
+    using relay::merge::Outcome;
+    if (d->conflict == ConflictMode::None) return false;
+    const ConflictMode mode = d->conflict;
+    QTextDocument *document = m_textView->document();
+    const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+    if (!disk.revision.exists) {
+        // Gone since the bar went up: only the buffer is left, and saving writes it back.
+        d->deleted = true;
+        showDeleted();
+        return how == Resolution::KeepMine && mode == ConflictMode::Save ? writeBuffer() : true;
+    }
+    if (!disk.revision.sameContent(d->disk.revision)) {
+        // The disk moved again while the bar was up, so the choice was about text that is no
+        // longer there. Ask again about what is.
+        hideConflict();
+        if (mode == ConflictMode::Save) {
+            d->disk = disk;
+            showConflict(ConflictMode::Save);
+        } else {
+            reconcileWith(disk);
+        }
+        return false;
+    }
+    hideConflict();
+    const QString name = QFileInfo(m_path).fileName();
+    switch (how) {
+    case Resolution::TakeDisk:
+        if (!mergeable(disk)) {
+            document->setModified(false);   // the user asked for the disk's copy
+            open(m_path);
+            return true;
+        }
+        replaceBuffer(disk.text);
+        setBase(disk);
+        document->setModified(false);
+        setNotice(QStringLiteral("Took %1 from disk · Ctrl+Z brings your text back.").arg(name));
+        return true;
+    case Resolution::KeepMine:
+        setBase(disk);
+        if (mode == ConflictMode::Save) return writeBuffer();
+        setNotice(QStringLiteral("Keeping your text · %1 writes it over the disk's version.")
+                      .arg(QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+        return true;
+    case Resolution::Merge: {
+        if (!mergeable(disk)) {
+            d->disk = disk;
+            showConflict(mode);
+            return false;
+        }
+        const relay::merge::Reconciliation r = relay::merge::reconcile(d->base.text, m_textView->toPlainText(), disk.text);
+        setBase(disk);
+        switch (r.outcome) {
+        case Outcome::Unchanged:
+            break;
+        case Outcome::Converged:
+            document->setModified(false);
+            break;
+        case Outcome::TakeDisk:
+            replaceBuffer(r.text);
+            document->setModified(false);
+            break;
+        case Outcome::Merged:
+            replaceBuffer(r.text);
+            setNotice(QStringLiteral("Merged the disk's changes into your text · %1 saves it.")
+                          .arg(QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+            break;
+        case Outcome::Conflict: {
+            replaceBuffer(r.merge.text);
+            const int count = int(r.merge.conflicts.size());
+            setNotice(QStringLiteral("%1 marked between <<<<<<< mine and >>>>>>> disk, with the version you loaded "
+                                     "after |||||||. Resolve, then save · Ctrl+Z takes the markers back out.")
+                          .arg(count == 1 ? QStringLiteral("1 conflict") : QStringLiteral("%1 conflicts").arg(count)));
+            goToLine(r.merge.conflicts.first().line + 1);
+            break;
+        }
+        }
+        return true;
+    }
+    }
+    return false;
+}
+
 QString FilePreview::readCapped(const QString &path, qint64 size) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
+    // What is read here is the base every later change on disk is reconciled with (#F8R7).
+    d->base = relay::merge::readLocalFile(path, kMaxTextBytes);
+    if (!d->base.revision.exists) {
         setNotice(QStringLiteral("The file could not be read."));
         return QString();
     }
-    const QByteArray bytes = file.read(kMaxTextBytes);
-    if (size > kMaxTextBytes)
-        setNotice(QStringLiteral("Showing the first %1 of %2.").arg(humanSize(kMaxTextBytes), humanSize(size)));
-    return QString::fromUtf8(bytes);
+    if (d->base.truncated)
+        setNotice(QStringLiteral("Showing the first %1 of %2.").arg(humanSize(kMaxTextBytes), humanSize(std::max(size, d->base.revision.size))));
+    return QString::fromUtf8(d->base.bytes);
 }
 
 void FilePreview::showText(const QString &path, qint64 size) {
@@ -1585,6 +2001,8 @@ void FilePreview::showText(const QString &path, qint64 size) {
         return;
     }
     m_textView->setPlainText(content);
+    // The base in the form the buffer holds it, so "the buffer is still the base" is an exact test.
+    d->base.text = m_textView->toPlainText();
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     const KSyntaxHighlighting::Definition definition = d->repository.definitionForFileName(path);
     // The text first, its colours after: the highlighter is installed on the document that is
@@ -1607,6 +2025,7 @@ void FilePreview::showText(const QString &path, qint64 size) {
 void FilePreview::showMarkdown(const QString &path, qint64 size) {
     const QString content = readCapped(path, size);
     m_textView->setPlainText(content);
+    d->base.text = m_textView->toPlainText();
     // Relative links and images resolve against the file's folder.
     m_markdownView->setSearchPaths({QFileInfo(path).absolutePath()});
     m_markdownView->document()->setBaseUrl(QUrl::fromLocalFile(QFileInfo(path).absolutePath() + QLatin1Char('/')));

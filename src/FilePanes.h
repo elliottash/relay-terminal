@@ -13,9 +13,11 @@
 #include <functional>
 
 #include "RemoteFiles.h"   // files and folders on the host a pane is logged into (#S5SH)
+#include "TextMerge.h"     // revisions, base snapshots and the three-way merge (#F8R7)
 
 class QAbstractItemModel;
 class QFileSystemModel;
+class QFileSystemWatcher;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
@@ -186,6 +188,15 @@ private:
 // goes back over ssh. It is addressed as `ssh://<host>/<path>` (relay::remote::fileUrl), which is
 // what open(), the pane title, the saved window layout and reload() all carry, so a remote file
 // travels every route a local one does.
+//
+// An open local file is watched (card #F8R7): the file and its folder, so a write in place, an
+// atomic replace (a temporary renamed over it), a removal and a recreation are all seen. Whether
+// the file changed is decided by the hash of its bytes against the *base* — what the buffer was
+// loaded from, or last merged or saved against (relay::merge, src/TextMerge.h). A clean buffer
+// follows the disk silently, keeping the cursor and the scroll; an edited one takes a change that
+// does not overlap its edits as one undoable step, and stops at the conflict bar when it does.
+// A file removed from disk leaves the buffer as it was. Saving checks the disk against the base
+// first and asks (Merge / Overwrite / Reload) rather than write over a change nobody has seen.
 class FilePreview : public QWidget {
 public:
     enum class Kind { None, Text, Markdown, Image, Pdf, Info };
@@ -257,6 +268,26 @@ public:
     // True while there is more of the open file to colour.
     bool highlighting() const;
 
+    // ----- the open file changing on disk (#F8R7) --------------------------------------------
+    // What the buffer was loaded from, or last merged or saved against: the base every change on
+    // disk is reconciled with. Its revision has exists=false for a remote file and for anything
+    // that is not local text or Markdown.
+    const relay::merge::Snapshot &base() const;
+    // Look at the disk now rather than at the watcher's next (debounced) tick. The watcher is what
+    // calls it; a test, or a tool that has just written the file, can call it directly.
+    void checkDisk();
+    // The file is gone from disk. The buffer is kept, and a save writes it back.
+    bool deletedOnDisk() const;
+    // A change the pane would not merge on its own is waiting on the conflict bar: an external
+    // change overlapping unsaved edits, or a save that found the disk moved since the base.
+    bool hasConflict() const;
+    // The conflict bar's three buttons. Merge puts a clean merge in the buffer, or both versions
+    // and the base between conflict markers; KeepMine keeps the buffer as it is (and, for a save,
+    // writes it); TakeDisk replaces the buffer with the disk's text. Each is one undo step. Returns
+    // false when nothing was waiting, or when the disk moved again and the bar was re-asked.
+    enum class Resolution { Merge, KeepMine, TakeDisk };
+    bool resolveConflict(Resolution how);
+
     std::function<void(const QString &)> onTitleChanged;
     // A link to a local file or folder was clicked in the rendered Markdown. The preview never
     // follows it itself (issue S1JP): the host opens a pane for it and this one keeps its file.
@@ -299,6 +330,19 @@ private:
     void updateImage();
     void updateModeButton();
     void updateTitleText();
+    // ----- the open file changing on disk (#F8R7) --------------------------------------------
+    void watchLocal();       // watch m_path and its folder; stop watching when there is no local file
+    void rewatch();          // put the file back on the watch list after an atomic replace dropped it
+    void reconcileWith(const relay::merge::Snapshot &disk);
+    // Turn the buffer into `text` with the fewest edits, as one undo step, keeping the cursor and
+    // the scroll; a rendered Markdown view is redrawn from it.
+    void replaceBuffer(const QString &text);
+    void setBase(const relay::merge::Snapshot &snapshot);
+    bool writeBuffer();      // the local QSaveFile write, with no revision check
+    enum class ConflictMode { None, Changed, Save };
+    void showConflict(ConflictMode mode, int overlaps = 0);
+    void hideConflict();
+    void showDeleted();
 
     QString m_path, m_notice;
     Kind m_kind = Kind::None;

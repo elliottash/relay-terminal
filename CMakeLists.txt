@@ -205,9 +205,16 @@ target_include_directories(relay-localmodels PUBLIC src)
 target_link_libraries(relay-localmodels PUBLIC relay-settings ${RELAY_QT}::Widgets)
 target_compile_options(relay-localmodels PRIVATE ${RELAY_WARNINGS})
 
+# Revisions, base snapshots and the three-way line merge an open text buffer reconciles an
+# external change with (card #F8R7). QtCore only: the local and the SSH file pane share it.
+add_library(relay-textmerge STATIC src/TextMerge.cpp src/TextMerge.h)
+target_include_directories(relay-textmerge PUBLIC src)
+target_link_libraries(relay-textmerge PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-textmerge PRIVATE ${RELAY_WARNINGS})
+
 add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h)
 target_include_directories(relay-filepanes PUBLIC src)
-target_link_libraries(relay-filepanes PUBLIC relay-remotefiles relay-hints ${RELAY_QT}::Widgets)
+target_link_libraries(relay-filepanes PUBLIC relay-remotefiles relay-hints relay-textmerge ${RELAY_QT}::Widgets)
 target_compile_options(relay-filepanes PRIVATE ${RELAY_WARNINGS})
 find_package(${RELAY_KF}SyntaxHighlighting QUIET)
 if(TARGET ${RELAY_KF}::SyntaxHighlighting)
@@ -799,6 +806,15 @@ if(BUILD_TESTING)
     target_link_libraries(relay-filepanes-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
     add_test(NAME filepanes COMMAND relay-filepanes-tests)
     set_tests_properties(filepanes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Card #F8R7: the three-way merge, and an open file pane reconciling in-place writes, atomic
+    # replaces, removal, recreation and a save race with its buffer.
+    add_executable(relay-textmerge-tests tests/textmerge_test.cpp)
+    target_link_libraries(relay-textmerge-tests PRIVATE relay-textmerge ${RELAY_QT}::Test)
+    add_test(NAME textmerge COMMAND relay-textmerge-tests)
+    add_executable(relay-filesync-tests tests/filesync_test.cpp)
+    target_link_libraries(relay-filesync-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
+    add_test(NAME filesync COMMAND relay-filesync-tests)
+    set_tests_properties(filesync PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-subagents-tests tests/subagents_test.cpp)
     target_link_libraries(relay-subagents-tests PRIVATE relay-subagents ${RELAY_QT}::Test)
     add_test(NAME subagents COMMAND relay-subagents-tests)
