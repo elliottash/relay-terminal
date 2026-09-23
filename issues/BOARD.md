@@ -2,7 +2,7 @@
      edit the card files and regenerate. -->
 # Board
 
-603 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
+604 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
 
 ## Features (345)
 
@@ -51,7 +51,6 @@
 | `#YZ8G` | [systematic QA skilling needed](features/2026-09-19-systematic-qa-skilling-needed.md) | executing | claude-code |  | [38](threads/YZ8G.md) |
 | `#ESDF` | [switchboard needs an easy way to show me recent cards without the section orderi…](features/2026-09-21-switchboard-needs-an-easy-way-to-show-me-recent.md) | executing | agent |  | [13](threads/ESDF.md) |
 | `#7JD1` | [Stop pauses the queue, Enter resumes it — on the pane and on a phone](features/2026-09-21-stop-pauses-the-queue-enter-resumes-it-on-the-pa.md) | executing | agent |  | [7](threads/7JD1.md) |
-| `#Z55B` | [Land pending checkout work and clean the shared tree](features/2026-09-23-land-pending-checkout-work-and-clean-the-shared.md) | executing | agent |  | [5](threads/Z55B.md) |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/2026-09-17-keyboard-jump-to-output-links.md) | needs-verification | codex |  | [11](threads/GWXM.md) |
 | `#SWPH` | [The Switchboard on the phone: cards, threads and the card actions, by touch](features/2026-09-20-the-switchboard-on-the-phone.md) | needs-verification | claude-code | 4/4 | [5](threads/SWPH.md) |
 | `#SHRP` | [The Sharing pane says what varies: your phones once at the top, guests where there are any, one row per quiet pane](features/2026-09-21-sharing-pane-one-list-not-a-block-per-pane.md) | needs-verification | claude-code | 3/3 | [3](threads/SHRP.md) |
@@ -185,6 +184,7 @@
 | `#0C0V` | [Token efficiency for every model: usage view, bounded tool output, stable prefix, cheaper subagents, economic compaction](features/2026-09-23-token-efficiency-for-every-model-usage-view-boun.md) | needs-verification | agent |  | [15](threads/0C0V.md) |
 | `#R3YN` | [Put the Relaying status above the prompt](features/2026-09-21-relaying-status-above-the-prompt.md) | needs-verification | codex | 5/5 | [6](threads/R3YN.md) |
 | `#MCP7` | [One command to refresh the model defaults when new models ship](features/2026-09-22-refresh-model-defaults-repeatably.md) | needs-verification | claude-code |  | [4](threads/MCP7.md) |
+| `#Z55B` | [Land pending checkout work and clean the shared tree](features/2026-09-23-land-pending-checkout-work-and-clean-the-shared.md) | needs-verification | agent |  | [9](threads/Z55B.md) |
 | `#6W9X` | [Refine: a card action that checks the request before anyone plans it](features/2026-09-23-refine-a-card-action-that-checks-the-request-bef.md) | needs-verification | agent |  | [7](threads/6W9X.md) |
 | `#Y2B9` | [Land pending Priorities pane refinements](features/2026-09-23-land-pending-priorities-pane-refinements.md) | needs-verification | agent |  | [9](threads/Y2B9.md) |
 | `#TYH4` | [Link printed session IDs to new panes](features/2026-09-23-link-printed-session-ids-to-new-panes.md) | needs-verification | agent |  | [11](threads/TYH4.md) |
@@ -354,7 +354,7 @@
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 | `#DKEW` | [change board hotkey to ctrl shift b?](features/done/2026-09-22-change-board-hotkey-to-ctrl-shift-b.md) | dropped |  |  | [6](threads/DKEW.md) |
 
-## Bugs (249)
+## Bugs (250)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -371,6 +371,7 @@
 | `#NYXV` | [tests.test_tier_lists: relay-pro cloud rows fail test_every_cloud_row_carries_both_keys (3 subtests, pre-existing at HEAD)](changes/2026-09-23-tests-test-tier-lists-relay-pro-cloud-rows-fail.md) | inbox |  |  | [1](threads/NYXV.md) |
 | `#XJ2B` | [unittest:unittest.loader._FailedTest.test_board_protocol fails](changes/2026-09-23-unittest-unittest-loader-failedtest-test-board-p.md) | inbox |  |  | [1](threads/XJ2B.md) |
 | `#229N` | [run:unittest failed as a whole run](changes/2026-09-23-run-unittest-failed-as-a-whole-run.md) | inbox |  |  | [1](threads/229N.md) |
+| `#YZZT` | [Mid-turn guest model switch leaves the old harness attached](changes/2026-09-23-mid-turn-guest-model-switch-leaves-the-old-harne.md) | inbox |  |  | [1](threads/YZZT.md) |
 | `#RCPF` | [A recap on a desktop with no keys is written by Relay Free, unasked](changes/2026-09-21-a-recap-spends-relay-free-on-a-desktop-with-no-keys.md) | discussing |  |  | [1](threads/RCPF.md) |
 | `#W7DC` | [Double-click selection on a real row in a folded view returns one character](changes/2026-09-21-double-click-real-row-in-folded-view.md) | discussing |  |  | [2](threads/W7DC.md) |
 | `#5BAS` | [main does not compile on Qt6 (Pane.h:1028), and boardmodel_test.cpp does not compile at all](changes/2026-09-20-main-does-not-compile-on-qt6-pane-h-and-boardmodel-test.md) | discussing |  |  | [4](threads/5BAS.md) |
