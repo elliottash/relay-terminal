@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-23'
 source: 'User report in Relay pane, 2026-09-23'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-crash-session-recovery/], related: [K6KP], github: null}
+links: {plans: [], commits: [60794eef78771cb820b33619c42db3477f25b8a9], evidence: [docs/qa_evidence/2026-09-23-crash-session-recovery/], related: [K6KP, C8SV], github: null}
 ---
 # A crash restart drops the saved conversation from restored panes
 
