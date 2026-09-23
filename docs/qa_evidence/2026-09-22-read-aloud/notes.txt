@@ -1,0 +1,112 @@
+#MDA7 read aloud — implementer evidence (2026-09-22, spark, aarch64, Qt 5.15.13)
+Commits: e2331a6f (relay::speech unit, CMake, tests), b67049da (pane: /speak, palette, Esc, busy line, Options),
+         bb2912b2 (a hung `spd-say -S` stop helper is killed after 2 s; found by the drive in section 3).
+
+What was compiled here
+- configure: "Relay: read aloud uses a command-line speaker (Qt5 TextToSpeech not found)".
+  The RELAY_HAVE_QTTEXTTOSPEECH branch of src/Speech.cpp (QTextToSpeech, Qt6 Error / Qt5 BackendError)
+  was NOT compiled on this machine: no Qt TextToSpeech package is installed.
+- relay-speech, relay-speech-tests, relay-voice-tests, relay-settings-tests and relay were built with scripts/relay-build.
+
+1. Unit tests
+$ ctest --test-dir build -R '^(voice|speech|settings)$'
+    Start 71: voice
+2/3 Test #71: voice ............................   Passed    0.00 sec
+    Start 72: speech
+3/3 Test #72: speech ...........................   Passed    0.56 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   1.25 sec
+
+$ ./build/relay-speech-tests
+PASS   : SpeechTests::initTestCase()
+PASS   : SpeechTests::aReplyIsReadAsProse()
+PASS   : SpeechTests::identifiersAndStraySymbolsSurvive()
+PASS   : SpeechTests::codeBlockOmittedIsSaidOncePerReply()
+PASS   : SpeechTests::piecesAreSentencesAndNeverCrossALine()
+PASS   : SpeechTests::aLongSentenceIsCutAtASpace()
+PASS   : SpeechTests::toolsAreTriedInPreferenceOrder()
+PASS   : SpeechTests::theToolOnAFakePathIsChosen()
+PASS   : SpeechTests::textNeverGoesThroughAShell()
+PASS   : SpeechTests::piecesAreSpokenInOrder()
+PASS   : SpeechTests::stopEndsTheRunningPieceAndANewUtteranceReplacesTheOld()
+PASS   : SpeechTests::aHungStopHelperIsKilled()
+PASS   : SpeechTests::cleanupTestCase()
+Totals: 13 passed, 0 failed, 0 skipped, 0 blacklisted, 2992ms
+
+2. Live drive of the fallback engine (tools on this machine: /usr/bin/spd-say, /usr/bin/espeak-ng)
+A throwaway driver (/tmp/claude-1000/mda7-speak/driver/driver.cpp, linked against build/librelay-speech.a)
+calls the real relay::speech::Speaker with the real PATH ("short": a whole utterance; "stop": stop() after 1.5 s).
+
+$ ./driver short
+23:32:38.671 engine: spd-say
+23:32:38.672 stateChanged: speaking=1
+23:32:38.672 speak() -> 1 
+23:32:41.290 stateChanged: speaking=0
+
+$ ./driver stop
+23:32:47.396 engine: spd-say
+23:32:47.396 stateChanged: speaking=1
+23:32:47.397 speak() -> 1
+23:32:48.919   pgrep -x spd-say: 3369045 /usr/bin/spd-say -S
+3371531 /usr/bin/spd-say -w -N relay -- This is a long reply that Relay reads aloud, sentence by sentence, so that there is something still playing when stop is pressed.
+23:32:48.919 stop()
+23:32:48.921 stateChanged: speaking=0
+23:32:48.921 after stop: speaking=0
+23:32:49.642   pgrep -x spd-say: 3369045 /usr/bin/spd-say -S
+
+$ ./driver short espeak-ng
+23:32:55.649 engine: espeak-ng
+23:32:55.650 stateChanged: speaking=1
+23:32:55.650 speak() -> 1 
+23:32:58.146 stateChanged: speaking=0
+
+$ ./driver stop espeak-ng
+23:33:04.252 engine: espeak-ng
+23:33:04.253 stateChanged: speaking=1
+23:33:04.254 speak() -> 1
+23:33:05.789   pgrep -x espeak-ng: 3376032 /usr/bin/espeak-ng --stdin
+23:33:05.789 stop()
+23:33:05.789 stateChanged: speaking=0
+23:33:05.789 after stop: speaking=0
+23:33:06.521   pgrep -x espeak-ng: (no process)
+
+Does stop silence speech-dispatcher itself, not just the client? A probe message spoken with
+`spd-say -w` is discarded (returns in 0.03 s) while the daemon is still busy, and takes ~1.7 s when it is free.
+  baseline, probe alone:                                   1.81 s
+  kill the spd-say client only, wait 0.5 s, probe:         0.03 s  (daemon still speaking)
+  kill the client + `spd-say -S`, wait 0.5 s, probe:       1.64 s  (daemon free)
+  Relay's Speaker::stop() (kill + -S), then probe:
+                                                           1.68 s
+
+3. The app, under Xvfb (docs/qa_evidence/2026-09-22-read-aloud/drive.sh; stub-provider.py answers
+with a Markdown reply; "Read replies aloud automatically" on in the isolated profile).
+Screens: auto.png (the reply read by itself: "Reading aloud · Esc to stop" above the prompt box),
+esc.png (after Esc: line gone, no speaker process), speak.png (/speak: reading again), speakstop.png
+(/speak stop: line gone, no speaker process). *-bottom.png are the bottom strips of the same shots.
+
+The first run (before bb2912b2) left one `spd-say -S` running after the app had exited: it hung on the
+speech-dispatcher spd-say had autospawned in the sandbox's runtime directory, and startDetached()
+had nothing to kill it with. Now it is a child process with a 2 s deadline (test aHungStopHelperIsKilled),
+and the rerun below ends with no spd-say left. (The drive also kills the sandbox's daemon on exit;
+that daemon ignores SIGTERM.)
+$ docs/qa_evidence/2026-09-22-read-aloud/drive.sh   (drive.log, rerun on the rebuilt relay)
+23:35:57.793   speaker processes: (none)
+23:35:57.795 prompt: hello (auto-read is on)
+23:36:00.616 shot auto.png
+23:36:00.655   speaker processes: 3426615 /usr/bin/spd-say -w -N relay -- Result.
+23:36:00.657 key: Escape
+23:36:02.293 shot esc.png
+23:36:02.329   speaker processes: (none)
+23:36:02.331 prompt: /speak
+23:36:04.861 shot speak.png
+23:36:04.897   speaker processes: 3426844 /usr/bin/spd-say -w -N relay -- Result.
+23:36:04.899 prompt: /speak stop
+23:36:06.712 shot speakstop.png
+23:36:06.750   speaker processes: (none)
+23:36:06.752 key: Escape with nothing being read (Esc keeps its old meaning: nothing is stopped, no error)
+23:36:08.053   speaker processes: (none)
+23:36:10.557 after the 2 s stop-helper deadline:
+23:36:10.591   spd-say processes left: (none)
+23:36:10.593 done: /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-22-read-aloud
