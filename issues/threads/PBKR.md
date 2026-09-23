@@ -12,3 +12,9 @@ Claimed through the file fallback. Confirmed #PH9G intentionally leaves High sel
 
 <!-- relay:entry 20260923T025827Z-pm author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
 - ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260923T030017Z-6z author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-plan-rest… → {"plans": [], "commits": ["ef706804189730e9dd413c9a7e98d99e47add544"], "evidence…
+
+<!-- relay:entry 20260923T030117Z-xa author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+- ✦ agent updated this card · appended to `## Tests`

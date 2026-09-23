@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mpbkr
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-plan-restore/README.md], related: [PH9G, PLDG], github: null}
+links: {plans: [], commits: [ef706804189730e9dd413c9a7e98d99e47add544], evidence: [docs/qa_evidence/2026-09-22-plan-restore/README.md], related: [PH9G, PLDG], github: null}
 ---
 # Leaving Plan restores the previous model selection
 
@@ -41,3 +41,5 @@ Evidence: docs/qa_evidence/2026-09-22-plan-restore/README.md
 - manual: docs/qa_evidence/2026-09-22-plan-restore/README.md (real Pane screenshots with scripted worker events).
 - Exact proposed commit built and passed --plan-click-only in land.py's isolated tree.
 - Full shared-checkout app build blocked by unrelated Actions palette edits: RelayWindow.h references undeclared togglePalette/m_palette. Reported on #MAGP; /tmp/planback-app-build.log.
+- After the other session completed its palette declarations, `scripts/relay-build --target relay -j2` passed: build 2026-09-22.23H.01. The initial shared-build blocker is resolved. Relay has not been restarted.
+- Commit ef706804 passed the focused tests in the isolated landing tree; all 9 guest-handover tests passed there too.

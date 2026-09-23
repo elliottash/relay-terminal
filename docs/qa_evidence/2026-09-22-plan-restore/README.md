@@ -18,8 +18,11 @@ Checks run in the shared checkout:
 - The isolated proposed-commit build and focused tests passed through land.py.
 - Full `scripts/relay-build --target relay -j2` failed in unrelated in-progress
   Actions palette edits (`RelayWindow.h`: undeclared `togglePalette`/`m_palette`).
-  Reported on #MAGP, with output in `/tmp/planback-app-build.log`. The running app
-  has not been replaced with this fix.
+  Reported on #MAGP, with output in `/tmp/planback-app-build.log`. After that session
+  completed the declarations, the retry passed: build `2026-09-22.23H.01`, output
+  `/tmp/planback-app-build-retry.log`. The app has been rebuilt but not restarted.
+- Commit `ef706804189730e9dd413c9a7e98d99e47add544` passed the isolated landing
+  gate; all nine guest-handover tests also passed in that isolated tree.
 
 The screenshots below are real Pane widgets driven by scripted worker events,
 using generic models named original and planner. They do not claim a live provider
