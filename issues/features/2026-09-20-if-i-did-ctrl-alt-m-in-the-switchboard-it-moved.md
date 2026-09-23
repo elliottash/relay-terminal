@@ -1,10 +1,11 @@
 ---
 id: GZAE
 type: work
-status: planned
+status: discussing
+waiting_on: owner
 rank: zzzzzzzzzzzzzzzz
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {related: [AGNT]}
 ---
 # if i did ctrl alt m in the switchboard, it moved me to a pane
 

@@ -1,10 +1,12 @@
 ---
 id: ADTR
 type: work
-status: executing
+status: done
 labels: [bug, remote]
 component: [remote]
 assignee: codex
+implemented_by: kimi/kimi-k3
+verified_by: kimi/kimi-k3
 rank: m
 created: '2026-09-21'
 source: 'Claude Code session on #PH0N, 2026-09-21: found by the hosted drive `docs/qa_evidence/2026-09-21-ph0n-hosted-drive/`'

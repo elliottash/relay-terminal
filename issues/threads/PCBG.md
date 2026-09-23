@@ -27,3 +27,6 @@ Try it staged at docs/qa_evidence/2026-09-22-tryit-PCBG/ (own staging, not reuse
 
 <!-- relay:entry 20260923T014113Z-6r author=agent kind=event model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
 - ✦ agent updated this card · replaced `## Try it`
+
+<!-- relay:entry 20260923T014203Z-dk author=agent kind=event model=kimi-k3 pane=c14c34a7 turn=694ee67257884a32856cf946cb3245b7/19b424157d874651bdc40d3fca9018be -->
+- ✦ agent updated this card · links: {"commits": ["30677e96"], "evidence": ["docs/qa_evidence/2026-09-22-PCBG", "docs… → {"commits": ["30677e96", "9fe3d3dc", "607cc093"], "evidence": ["docs/qa_evidence…

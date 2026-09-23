@@ -26,3 +26,15 @@ Renaming the built-in model names in live code, tests and fixtures: claude-opus-
 
 <!-- relay:entry 20260923T015359Z-h4 author=agent kind=note model=claude-opus-5-5 pane=67f762e5 turn=436528e22f714522bf4960e859798e61/9ec10d207d2f41e391561efa64a67bba -->
 Correction to the Execution Summary: the owner said "claude sonnet 5, not 6". The claude-sonnet-5 → claude-sonnet-6 rename in 89893199 is undone in 263b28b4; Anthropic's flash default is claude-sonnet-5.
+
+<!-- relay:entry 20260923T184324Z-2p author=agent kind=evidence -->
+Check · 7 missing-evidence, 2 not-applicable, 1 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184842Z-fd author=agent kind=evidence -->
+Check · 7 missing-evidence, 2 not-applicable, 1 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T185044Z-az author=agent kind=evidence -->
+Check · 7 missing-evidence, 2 not-applicable, 1 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190407Z-de author=agent kind=evidence -->
+Check · 7 missing-evidence, 2 not-applicable, 1 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

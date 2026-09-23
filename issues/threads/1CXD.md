@@ -90,3 +90,42 @@ Check · 2 missing-evidence, 1 not-applicable, 8 passed; 5 advisory finding(s). 
 
 <!-- relay:entry 20260922T041237Z-kx author=owner kind=progress pane=switchboard pane_token=95b050f5-5361-4f69-9d08-9fb952f59f17 -->
 Claimed (95b050f5) · working on it from a terminal pane
+
+<!-- relay:entry 20260922T041755Z-8c author=agent kind=event model=z-ai/glm-5.3-flashx pane=95b050f5 turn=88a92f945f1c4efc91e09c5cce818efb/13f4413bafc2408da0fbcb692ede63f1 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["82acbc04993af406b9b091f659165e6ba356241c", "e4377755c… → {"commits": ["82acbc04993af406b9b091f659165e6ba356241c", "e4377755c8cbe4a393a91b…
+
+<!-- relay:entry 20260922T041755Z-tb author=agent kind=progress model=z-ai/glm-5.3-flashx pane=95b050f5 turn=88a92f945f1c4efc91e09c5cce818efb/13f4413bafc2408da0fbcb692ede63f1 -->
+Owner interrupted the re-execution pass and said "just commit it in that case". Audit found the rename itself fully landed (three head commits plus the earlier tail, all on the card's links) and the remaining dirty tree was finished work from other sessions, not #1CXD scope. Landed it in six commits through land.py --whole: 5f4f17d2 phone chip icon-only #62M4, 7096a748 boardexecute ctest #48S3, 261dacd0 provider label dedup test #4BPE, ae338851 pane polish (recap spacing, two-line header titles, Del keylines), 138adaee board record (#1CXD, links.commits updated), a897ed1f Keymap whitespace. Left uncommitted on purpose: the two intake files (land.py refuses them by policy), the #GSJ7 scratch script, stray .out/.png scratch files, and the brand-new #DKEW card another live session just created.
+
+<!-- relay:entry 20260922T041801Z-df author=agent kind=event model=z-ai/glm-5.3-flashx pane=95b050f5 turn=88a92f945f1c4efc91e09c5cce818efb/13f4413bafc2408da0fbcb692ede63f1 -->
+- ✦ agent moved this card · Executing → Needs verification · Owner said "just commit it": the rename was already fully landed; audit confirmed no residual scope and the board record landed as 138adaee. Back to needs-verification for the independent check against ## Done means. · implemented_by glm/glm-5.3-flashx
+
+<!-- relay:entry 20260923T184320Z-e7 author=agent kind=evidence -->
+Check · 3 missing-evidence, 2 not-applicable, 6 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184411Z-yj author=agent kind=evidence -->
+Check · 3 missing-evidence, 2 not-applicable, 6 passed; 8 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184511Z-64 author=agent kind=evidence -->
+Check · 1 failed, 2 missing-evidence, 2 not-applicable, 6 passed; 9 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184839Z-ja author=agent kind=evidence -->
+Check · 1 failed, 2 missing-evidence, 2 not-applicable, 6 passed; 9 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T185040Z-7x author=agent kind=evidence -->
+Check · 1 failed, 2 missing-evidence, 2 not-applicable, 6 passed; 9 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190227Z-sy author=agent kind=evidence -->
+Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190240Z-ee author=agent kind=evidence -->
+Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190311Z-ta author=agent kind=evidence -->
+Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190403Z-pd author=agent kind=evidence -->
+Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190432Z-19 author=agent kind=evidence -->
+Check · 2 missing-evidence, 2 not-applicable, 7 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

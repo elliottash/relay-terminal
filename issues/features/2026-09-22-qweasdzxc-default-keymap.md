@@ -1,15 +1,17 @@
 ---
 id: QWAS
 type: work
-status: discussing
+status: needs-verification
 labels: [feature, keyboard]
-waiting_on: owner
+assignee: agent
+implemented_by: openai/gpt-6-sol via codex
+session: 83f552c6-372f-4f64-9b01-2beb4e493f9c
 rank: m
 created: '2026-09-22'
 source: 'Owner in a Relay pane, 2026-09-22; keyboard-system discussion continued from #ACDG, #KYPR and #SPSG'
-links: {plans: [], commits: [], evidence: [], related: [SPSG, MAGP, CPRQ, KYPR, ACDG, DKEW, D60R, RBVK], github: null}
+links: {plans: [], commits: [e914d65c, cd7dcfcb, 3c66dd01, cbdd1166, c00a2859, 3e37c528, 878b0ca452ea7a4c4caa876da1c8d58c39ac8006, 5df774b491e452798b998e27c7ac75e2f4403e90, 134186308f20d143d070b086a40236ee7ab82b13], evidence: [docs/qa_evidence/2026-09-22-keyboard-set/, docs/qa_evidence/2026-09-23-sessions-projects-keys/], related: [SPSG, MAGP, CPRQ, KYPR, ACDG, DKEW, D60R, RBVK], github: null}
 ---
-# Adopt the QWEASDZXC default keymap: A Board, S Sessions & Projects, D explorer, P Actions
+# Adopt the QWEASDZXC default keymap: Board, Sessions, Projects, explorer, Actions/help
 
 ## Issue
 we could also put the board on A and sessions on S? the most accessible keys are 1 2 3 q w e a s d z x c. lets think if that helps the decision. i am thinking that the board 
@@ -30,6 +32,8 @@ Owner: "i dont want a ctrl and ctrl shift to have different funcs".
 Owner: "nobody has used relay yet so we can think fresh."
 Owner: "qweasdzxc are really the sweet spot for accessibility".
 Owner: "ctrl z is undo text edit; ctrl shift z is undo close. x and c reserved for cut and copy."
+Owner: "ctrl shift g can still be globals". Ctrl+Shift+G opens Globals; plain Ctrl+G remains unbound.
+Owner: "ctrl shift p on projects" and "ctrl shift s on sessions". Owner: "i like ctrl ? for actions / help , thats enough." The 2026-09-23 revision gives Projects P, Sessions S and Actions/help Ctrl+?.
 
 ## Planning notes
 The proposed Relay preset. The other three presets get an explicit row for every action whose Relay default moves.
@@ -58,11 +62,18 @@ Defaults live in `src/Keymap.h` (the `Keymap()` constructor; presets in `presetJ
 Sequence: #SPSG (one `sessions.open` action) and #CPRQ first, #MAGP beside them; then this card flips the defaults in one commit so the map never sits half-moved.
 
 ## Done means
-- With the Relay preset, Ctrl+Shift+A opens, focuses or closes the Board; Ctrl+Shift+S the Sessions & Projects pane; Ctrl+Shift+D the explorer; Ctrl+Shift+P the Actions palette; Ctrl+Shift+Q clears the prompt box; Ctrl+Shift+Z restores the last closed. Failure shows as a chord doing something else or nothing, or as a row in Options › Keyboard's conflict list.
-- Ctrl+A, Ctrl+S, Ctrl+Z, Ctrl+X and Ctrl+C in an editor, and Ctrl+D, Ctrl+P and Ctrl+Q in a terminal program, reach the editor or the program unchanged.
-- No Relay command differs between Ctrl+key and Ctrl+Shift+key, H included once the decision on this card is in.
-- Restart after a stop and stop-all-subagents stay reachable without keys: banner, subagents UI, palette.
-- All four presets pass the conflict check, and every printed hint and both docs show the new keys.
+- In the Relay preset, Ctrl+Shift+A opens Board; Ctrl+Shift+S selects Sessions; Ctrl+Shift+P selects Projects; Ctrl+Shift+G selects Globals; Ctrl+Shift+D opens explorer; Ctrl+? opens Actions/help; Ctrl+Shift+Q clears the prompt box; Ctrl+Shift+Z restores closed.
+- Plain Ctrl+A/S/Z/X/C/D/G/P keep their editing or terminal meaning. No Relay action differs between Ctrl+letter and Ctrl+Shift+letter.
+- All four built-in presets have no shortcut conflict, and the printed hints and keybinding docs reflect the keys.
 
 ## Tests
-Planned: `tests/test_keybindings.py` (defaults, the four presets, no duplicate chords, and the Ctrl / Ctrl+Shift pairing rule as a test), `ctest -R panetabnavigation`, `ctest -R filepanes`, `ctest -R settingspane`, and an isolated GUI check with composer focus, file-editor focus and a full-screen program in focus.
+`scripts/relay-build --target relay`
+`QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(conversations|keymap)$' --output-on-failure`
+`PYTHONPATH=backend python3 -m unittest tests.test_keybindings tests.test_action_catalog`
+manual: `docs/qa_evidence/2026-09-22-keyboard-set/`
+manual: `docs/qa_evidence/2026-09-23-sessions-projects-keys/`
+
+## Execution Summary
+Relay preset now: Ctrl+Shift+A Board, S Sessions & Projects, D explorer, P Actions palette, Q clear prompt (plain Ctrl+Q in the prompt box), Z restore closed; Ctrl+H and Ctrl+Shift+H are one take-control toggle; restart and stop-all-subagents keyless (banner, subagents UI, palette); F1 unbound; Ctrl+Shift+Y G B R X and Ctrl+B freed. Warp, VS Code and Konsole presets conflict-free (docs/KEYBINDING-PRESETS.md). Commits: e914d65c keymap and presets, cd7dcfcb window dispatch and docs/ARCHITECTURE.md, 3c66dd01 and cbdd1166 comments, c00a2859 relay-keymap-tests with the pairing-rule test. Evidence: docs/qa_evidence/2026-09-22-keyboard-set/.
+Owner restored Ctrl+Shift+G as a direct Globals shortcut; plain Ctrl+G remains unbound. Verified Relay-keymap and worker tests pass. Commit `3e37c528`; `src/Keymap.h`, `tests/keymap_test.cpp`, `tests/test_keybindings.py`, `docs/KEYBINDING-PRESETS.md`, and `docs/ARCHITECTURE.md`.
+2026-09-23 revision: Ctrl+Shift+P restores Projects, Ctrl+Shift+S selects Sessions, Ctrl+? alone opens Actions/help; Ctrl+Shift+G remains Globals. Updated all built-in presets, keyboard hints, keymap assertions and docs. Commits `878b0ca4`, `5df774b4`, `13418630`. The Xvfb capture of the revised Sessions layout is in `docs/qa_evidence/2026-09-23-sessions-projects-keys/`.

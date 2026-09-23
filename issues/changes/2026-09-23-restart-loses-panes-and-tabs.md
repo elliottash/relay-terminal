@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User report in Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-restart-layout-lock/], related: [8EXS], github: null}
+links: {plans: [], commits: [48f877753c324fa3775d94e591d4bec770240d24], evidence: [docs/qa_evidence/2026-09-23-restart-layout-lock/], related: [8EXS], github: null}
 ---
 # A replacement Relay can erase the previous panes and tabs
 

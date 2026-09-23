@@ -74,3 +74,9 @@ Landed backend implementation, tests, protocol docs and card in 16fd7eddbec2dd26
 <!-- relay:entry 20260921T231917Z-h4 author=codex kind=evidence -->
 ### Codex · harness subagent
 Parent review addressed in c90b6135: preserve earlier Claude continuation text and cover pending-ack visibility, clear/cancel refusal semantics, idle reset and turn-end lease recovery. 128 focused tests passed. Added follow-up commit link. Source/fake-stream evidence supports native next-priority ingestion; owner live guest timing verification remains pending.
+
+<!-- relay:entry 20260922T174311Z-jf author=agent kind=evidence -->
+Check · 5 missing-evidence, 1 not-applicable; 4 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T174524Z-dn author=agent kind=evidence -->
+Check · 5 missing-evidence, 1 not-applicable; 4 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

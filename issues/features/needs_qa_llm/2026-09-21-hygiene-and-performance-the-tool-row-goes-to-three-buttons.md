@@ -83,14 +83,13 @@ Session handoff, 2026-09-21: added owner request delivered after #1CXD B1. Imple
 - manual: docs/qa_evidence/2026-09-21-sw1d/README.md
 - `python3 scripts/relay-board.py check` — no SW1D findings; existing board-wide errors remain outside this change.
 
-### Check 2026-09-21 21:37
-- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
-- passed · ctest:panestatus — ctest -R panestatus passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
-- passed · ctest:profilepane — ctest -R profilepane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+### Check 2026-09-23 15:04
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-23T19:03:58Z
+- missing-evidence · ctest:panestatus — no run of ctest -R panestatus for this revision, from any host, and no attached result
+- missing-evidence · ctest:profilepane — no run of ctest -R profilepane for this revision, from any host, and no attached result
 - not-applicable · manual:docs/qa_evidence/2026-09-21-sw1d/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-sw1d/README.md
-- notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
+- notice · ctest:board — ctest -R board is slow: p95 2.61 s, p50 2.56 s
 history: thread
-
 ## QA checklist
 - [x] Hygiene runs the deterministic format check before Clean up on a disposable board.
 - [x] Real Kimi kimi-k3 generates a preview with one proposed label correction and zero writes.

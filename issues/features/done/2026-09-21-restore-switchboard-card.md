@@ -27,7 +27,7 @@ The layout saves BoardView navigation (open card, selected card and filter), res
 ## Tests
 `ctest -R ^boardpane$`
 
-### Check 2026-09-21 21:37
+### Check 2026-09-23 15:04
 - passed · ctest:boardpane — ctest -R boardpane passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
 history: thread
 ## QA checklist

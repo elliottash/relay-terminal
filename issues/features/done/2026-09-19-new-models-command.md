@@ -1,8 +1,10 @@
 ---
 id: Y2JW
 type: work
-status: ready
+status: done
 labels: [feature, settings]
+implemented_by: kimi/kimi-k3
+verified_by: kimi/kimi-k3
 priority: 1
 rank: zzzzzzy
 created: '2026-09-19'

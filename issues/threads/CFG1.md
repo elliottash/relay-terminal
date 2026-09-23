@@ -43,3 +43,12 @@ Parent completed the landing after subagent a2 hit model capacity. Reviewed only
 <!-- relay:entry 20260922T014800Z-rn author=codex kind=progress -->
 ### Codex · 2026-09-22 01:48
 Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Updated this card’s current references to the renamed cards; prior thread entries are unchanged.
+
+<!-- relay:entry 20260922T174351Z-07 author=agent kind=evidence -->
+Check · 1 missing-evidence, 3 not-applicable, 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T174527Z-v1 author=agent kind=evidence -->
+Check · 1 missing-evidence, 3 not-applicable, 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T025142Z-ag author=agent kind=evidence -->
+Check · 1 failed, 1 missing-evidence, 3 not-applicable; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

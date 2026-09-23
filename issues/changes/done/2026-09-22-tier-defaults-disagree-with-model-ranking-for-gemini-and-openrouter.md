@@ -1,15 +1,15 @@
 ---
 id: Y4PJ
 type: work
-status: executing
+status: done
 labels: [bug, models]
 assignee: agent
 implemented_by: glm/glm-5.3
-session: fe15f16b-a316-46dd-8841-78a4e061687d
+verified_by: glm/glm-5.3
 rank: zzzzzzzzzzzzzzzzz
 created: '2026-09-22'
 source: 'found by scripts/relay-models.py check while delivering #MCP7, 2026-09-22'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-MCP7/check.txt], related: [MCP7], github: null}
+links: {commits: [b759f23deb4f09095716f4fb5a36d39b9f50b3f2], evidence: [docs/qa_evidence/2026-09-22-MCP7/check.txt], github: null, plans: [], related: [MCP7, D0MC]}
 ---
 # TIER_DEFAULTS disagrees with model-ranking.md for gemini main/flash and openrouter main
 

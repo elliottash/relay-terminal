@@ -1,9 +1,10 @@
 ---
 id: AVR8
 type: work
-status: discussing
+status: needs-verification
 labels: [bug, models]
 assignee: codex
+implemented_by: anthropic/claude-opus-5-5 via claude-code
 waiting_on: owner
 rank: mavr8
 created: '2026-09-22'

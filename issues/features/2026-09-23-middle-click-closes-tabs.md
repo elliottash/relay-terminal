@@ -9,7 +9,7 @@ session: 49dbf51d-820d-4c71-8c2c-f411cacebb78
 rank: m
 created: '2026-09-23'
 source: Elliott in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [tests/themetabbar_test.cpp], related: [], github: null}
+links: {plans: [], commits: [c8ee64949712238d6fee1f887fee6a58e74de1bf], evidence: [tests/themetabbar_test.cpp], related: [], github: null}
 ---
 # Middle-click closes tabs
 

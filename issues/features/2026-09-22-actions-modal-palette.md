@@ -1,15 +1,15 @@
 ---
 id: MAGP
 type: work
-status: discussing
+status: needs-verification
 labels: [feature, keyboard, actions]
-waiting_on: owner
+implemented_by: openai/gpt-6-sol via codex
 rank: n
 created: '2026-09-22'
-source: 'Owner in a Relay pane, 2026-09-22; keyboard-system discussion'
-links: {plans: [], commits: [], evidence: [], related: [QWAS, ACDG, A9QR, A7SC, S3JH, XAME, ANX9, KYPR], github: null}
+source: Owner in a Relay pane, 2026-09-22; keyboard-system discussion
+links: {plans: [], commits: [7ff14f76, f040b696, cd7dcfcb, c00a2859, 3857b5fc, 878b0ca452ea7a4c4caa876da1c8d58c39ac8006, 5df774b491e452798b998e27c7ac75e2f4403e90, 134186308f20d143d070b086a40236ee7ab82b13], evidence: [docs/qa_evidence/2026-09-22-keyboard-set/, docs/qa_evidence/2026-09-23-sessions-projects-keys/], related: [QWAS, ACDG, A9QR, A7SC, S3JH, XAME, ANX9, KYPR], github: null}
 ---
-# Actions becomes a modal palette: one search box, group buttons with dropdowns, Ctrl+Shift+P
+# Actions modal palette: search, groups, and Ctrl+? help
 
 ## Issue
 what about actions? i think we need something like ctrl+shift+p for warp. what about ctrl+shift+1 or ctrl+shift+r? i think it should open a magic action modal with text search and some buttons that show dropdowns that give you quick intuitive access to everything.
@@ -34,11 +34,10 @@ First proposal, 2026-09-22.
 **Reopen.** #XAME's finding, a menu that would not reopen after close, applies: the modal opens cleanly every time.
 
 ## Done means
-- Ctrl+Shift+P and Ctrl+? open a modal palette over the window with the search box focused; the same chord, Esc or a click outside closes it; opening it twice in a row works.
-- Typing "restart" finds "Restart this pane's shell or agent"; "/board" finds Board; "keyboard" finds Options › Keyboard. Every registered action is findable by name, proved by a test that walks `Keymap::instance().actions()`.
-- Every group button opens a dropdown with that group's commands and live shortcut hints, and choosing one runs it.
-- The empty palette shows Recent and For this pane, and the For this pane rows change with the pane's state (shell stopped, agent running, program owns the keyboard).
-- Failure shows as the chord opening the old Actions pane, a registered action that search cannot find, or hints that disagree with Options › Keyboard.
+- Ctrl+? opens the modal Actions/help palette with the search box focused; Esc, a click outside, or the same key closes it. Ctrl+Shift+P opens Projects.
+- Search finds registered actions, Options and slash commands; group buttons show live shortcuts and choosing an item runs it.
+- The empty palette shows Recent and For this pane; Change shortcut remains available on a result row.
+- The built-in presets have no Ctrl+Shift+P or other separate shortcut for `palette.open`, with no key conflicts.
 
 ## Plan
 **Goal.** Replace the Actions pane as the command finder with a modal palette that reads the registries.
@@ -57,4 +56,15 @@ First proposal, 2026-09-22.
 **Verify.** `ctest -R settingspane`, a new `ctest -R actionpalette` (catalog completeness, fuzzy search, group menus, recent list, contextual rows), `tests/test_keybindings.py`, and an isolated GUI drive: open, type, choose, reopen, with composer focus and with a full-screen program focused.
 
 ## Tests
-Planned: `ctest -R actionpalette` (new), `ctest -R settingspane`, `tests/test_keybindings.py`, `manual: docs/qa_evidence/<date>-verify-MAGP/`.
+`QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^actionpalette$' --output-on-failure`
+`QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(conversations|keymap)$' --output-on-failure`
+`PYTHONPATH=backend python3 -m unittest tests.test_keybindings tests.test_action_catalog`
+manual: `docs/qa_evidence/2026-09-22-keyboard-set/` (original palette UI)
+manual: `docs/qa_evidence/2026-09-23-sessions-projects-keys/` (revised navigation)
+
+## Execution Summary
+New relay::ActionPalette (src/ActionPalette.{h,cpp}, own library): a modal overlay with the search box, a row of group buttons with dropdowns showing live shortcuts, and a result list that starts with Recent then For this pane. Ctrl+Shift+P and Ctrl+? open it; Esc, the chord, a click elsewhere or focus moving on closes it. Right-click or the Menu key on a row offers Change shortcut…, which opens a key-capture dialog that writes keybindings.json (Keymap::setBinding) and moves a key off its old action. The old Actions list stays as the Shortcut list row. Deviation from the plan: the reference list is reached from the palette's Shortcut list row rather than from Options › Keyboard. Commits: 7ff14f76, f040b696, cd7dcfcb, c00a2859, 3857b5fc (live-drive fixes). Evidence: docs/qa_evidence/2026-09-22-keyboard-set/.
+2026-09-23 revision: Ctrl+? is the Actions/help key; Ctrl+Shift+P now selects Projects. `palette.open` remains registered without a default key. All three alternate Ctrl+? spellings remain for Qt keyboard layouts. Action hints now use `help.shortcuts`. Commits `878b0ca4`, `5df774b4`, `13418630`.
+
+## Decisions
+Owner: "i like ctrl ? for actions / help , thats enough." Ctrl+Shift+P belongs to Projects; the palette remains available through Ctrl+? and its keyboard-layout spellings.

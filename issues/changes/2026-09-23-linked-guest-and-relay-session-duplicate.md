@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User report in Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-linked-sessions/], related: [J8QP], github: null}
+links: {plans: [], commits: [5325d09e8d65efa15cc09e44af2ced3accc65795], evidence: [docs/qa_evidence/2026-09-23-linked-sessions/], related: [J8QP], github: null}
 ---
 # Linked guest and Relay sessions appear twice in Sessions
 

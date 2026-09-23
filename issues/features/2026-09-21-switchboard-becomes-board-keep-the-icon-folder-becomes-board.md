@@ -1,16 +1,16 @@
 ---
 id: 1CXD
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, docs]
 component: [gui, worker]
 assignee: agent
-implemented_by: openai/gpt-6-astra via codex
+implemented_by: glm/glm-5.3-flashx
 session: 95b050f5-5361-4f69-9d08-9fb952f59f17
 rank: zzzzzzzzzzzzzzzzd
 created: '2026-09-21'
 source: owner, 2026-09-21
-links: {plans: [], commits: [82acbc04993af406b9b091f659165e6ba356241c, e4377755c8cbe4a393a91b0c1d0a66f0acff0822, fe82d4344e9892610ee59cfbf1a8d00bf2312263], evidence: [docs/qa_evidence/2026-09-21-1CXD-delivery/], related: [YZ8G], github: null}
+links: {commits: [82acbc04993af406b9b091f659165e6ba356241c, e4377755c8cbe4a393a91b0c1d0a66f0acff0822, fe82d4344e9892610ee59cfbf1a8d00bf2312263, 138adaee], evidence: [docs/qa_evidence/2026-09-21-1CXD-delivery/], github: null, plans: [], related: [YZ8G]}
 ---
 # "Switchboard" becomes "Board" in the product; the icon and aesthetic stay; the folder becomes `board/`
 
@@ -425,21 +425,23 @@ Session handoff, 2026-09-21: implementation is landed, not work to resume from t
 `tests/test_tryit_protocol.py`
 manual: docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt
 
-### Check 2026-09-21 21:39
+### Check 2026-09-23 15:04
 - passed · ctest:projects — ctest -R projects passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
 - passed · ctest:boardworkspace — ctest -R boardworkspace passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
 - passed · ctest:boardsections — ctest -R boardsections passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
 - passed · ctest:projectinit — ctest -R projectinit passed for this revision on spark-dcc9, 2026-09-22T01:39:29Z
-- missing-evidence · ctest:board — no run of ctest -R board for this revision, from any host, and no attached result
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-23T19:03:58Z
 - missing-evidence · ctest:boardpane — no run of ctest -R boardpane for this revision, from any host, and no attached result
 - passed · unittest:tests.test_board — tests/test_board.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
-- passed · unittest:tests.test_board_tools — tests/test_board_tools.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
-- passed · unittest:tests.test_board_protocol — tests/test_board_protocol.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
-- passed · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+- missing-evidence · unittest:tests.test_board_tools — no run of tests/test_board_tools.py for this revision, from any host, and no attached result
+- passed · unittest:tests.test_board_protocol — tests/test_board_protocol.py passed for this revision on spark-dcc9, 2026-09-23T19:04:28Z
+- not-applicable · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py is not in the project any more
 - not-applicable · manual:docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-1CXD-delivery/tests.txt
-- notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
+- notice · ctest:board — ctest -R board is slow: p95 2.61 s, p50 2.56 s
 - notice · unittest:tests.test_board — tests/test_board.py: 2 of 129 are skipped for good (test_union_merge_keeps_both_sides_entries, test_check_flags_private_files_tracked_by_git)
-- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 257 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
-- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 2 of 176 are slow (test_a_row_says_when_the_card_last_changed, test_board_open_sends_the_rows_in_batches_no_message_can_overflow)
-- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 10 of 176 are not in the project any more (test_a_bad_comment_kinds_block_is_reported_before_anything_is_sent, test_a_board_with_no_repository_says_where_to_put_one, test_a_forge_that_refuses_answers_one_error_with_no_token_in_it…)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 258 never ran here (test_verifier_updates_and_qa_transition_preserve_the_implementer)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 258 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
+- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 3 of 180 are slow (test_a_row_says_when_the_card_last_changed, test_board_open_sends_the_rows_in_batches_no_message_can_overflow, test_a_plan_turn_is_refused_the_writers_when_it_calls_them_and_told_about_execute)
+- notice · unittest:tests.test_board_protocol — tests/test_board_protocol.py: 10 of 180 are not in the project any more (test_a_bad_comment_kinds_block_is_reported_before_anything_is_sent, test_a_board_with_no_repository_says_where_to_put_one, test_a_forge_that_refuses_answers_one_error_with_no_token_in_it…)
+- notice · unittest:tests.test_tryit_protocol — tests/test_tryit_protocol.py: 34 of 34 are not in the project any more (test_a_second_answer_refreshes_human_qa_and_does_not_reveal_twice, test_a_section_with_no_sealed_file_still_records_the_verdict, test_an_answer_without_a_try_it_section_is_refused…)
 history: thread

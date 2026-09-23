@@ -32,6 +32,14 @@ manual: docs/qa_evidence/2026-09-22-verify-CFG1/README.md
 manual: docs/qa_evidence/2026-09-22-verify-CFG1/post-fix/provenance.txt
 manual: docs/qa_evidence/2026-09-21-console-configure-loop/NOTES.md
 
+### Check 2026-09-22 22:51
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
+- missing-evidence · ctest:agentcontext — no run of ctest -R agentcontext for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-22-verify-CFG1/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-CFG1/README.md
+- not-applicable · manual:docs/qa_evidence/2026-09-22-verify-CFG1/post-fix/provenance.txt — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-verify-CFG1/post-fix/provenance.txt
+- not-applicable · manual:docs/qa_evidence/2026-09-21-console-configure-loop/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-console-configure-loop/NOTES.md
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 1.63 s, p50 0.88 s
+history: thread
 ## QA checklist
 - [x] Open the Switchboard, open a card page, leave both for a minute: `relay.log` shows no
       repeating `configured` for the tab's consoles.

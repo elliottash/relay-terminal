@@ -9,7 +9,7 @@ session: dfbdbb20-f0a8-4e44-8243-331a27498502
 rank: zzzzzzzw
 created: '2026-09-19'
 source: 'pane 1, 2026-09-19 (Discuss on #SFP6)'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-refused-neutral-ink/], related: [SFP6], github: null}
+links: {plans: [], commits: [d64b46b4], evidence: [docs/qa_evidence/2026-09-22-refused-neutral-ink/], related: [SFP6], github: null}
 ---
 # Refused tool calls keep the ✗ but render in neutral ink, not red
 

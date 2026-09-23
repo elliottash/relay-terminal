@@ -288,3 +288,12 @@ Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status
 
 <!-- relay:entry 20260922T012700Z-ca author=agent kind=evidence -->
 Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T174352Z-h7 author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T174528Z-mh author=agent kind=evidence -->
+Check · 1 missing-evidence, 1 not-applicable; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T025143Z-zt author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 4 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

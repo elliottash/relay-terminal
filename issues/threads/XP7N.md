@@ -39,3 +39,30 @@ Owner: "or actually, i woudl like it if the agent could decide itself ot leave p
 
 <!-- relay:entry 20260921T190635Z-fc author=agent kind=event model=kimi-k3 pane=8d16eb6c turn=195aba7ae52d434a8af209dd30396b81/990dfea6ceaa4ebbac71467fa57dd636 -->
 - ✦ agent moved this card · Executing → Needs verification · Reworked per owner decision: exit_plan_mode now switches to build mode on the agent's own decision (no ask). 89 session/question tests pass; live UI QA remains. · evidence docs/qa_evidence/2026-09-21-plan-exit/verification.md · implemented_by kimi/kimi-k3
+
+<!-- relay:entry 20260922T044939Z-0j author=agent kind=evidence -->
+Check · 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T163053Z-v0 author=agent kind=evidence model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/6a4bad1eb8984546927fcb5e08d2f725 -->
+2026-09-23 triage: Agent._execute handles exit_plan_mode and switches to build for Relay-native tool calls (backend/relay_core/agent.py:3563). A guest planning route instead starts a fresh guest harness with permissions=deny and GUEST_PLAN_NOTE, whose reply is saved as a plan; the guest does not receive Relay's exit_plan_mode tool (agent.py:2588-2629; planning.py:50-58; guest_harness_provider.py:828). This likely explains a guest agent saying it cannot leave Plan despite the owner's 2026-09-21 decision. Needs a separate design/implementation for guest-initiated mode exit or a clear handoff from guest plan reply to Build; exact affected pane was not provided.
+
+<!-- relay:entry 20260923T163146Z-da author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent moved this card · Needs verification → Executing · Owner requested taking over #XP7N to add guest-agent Plan exit and verify it. · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T163217Z-4y author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent updated this card · assignee: agent → codex; appended to `## Plan`
+
+<!-- relay:entry 20260923T163222Z-df author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent updated this card · appended to `## Done means`
+
+<!-- relay:entry 20260923T163723Z-rv author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T163729Z-pw author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260923T163743Z-f4 author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent moved this card · Executing → Needs verification · Guest Plan exit is bridged and 28 targeted tests pass; live guest GUI check remains for a separate verifier. · evidence docs/qa_evidence/2026-09-23-guest-plan-exit-XP7N/verification.md · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T164019Z-rr author=agent kind=event model=gpt-6-sol pane=2e7406f6 turn=1146f84a5b7d4390a2b9887b7a77b357/5adddc8c89644a4c81da1d5935583642 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["97add146dbe8ce0877e31ad533ea21775860874e"], "evidence… → {"plans": [], "commits": ["97add146dbe8ce0877e31ad533ea21775860874e", "9dc211b49…

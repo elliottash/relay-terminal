@@ -27,3 +27,6 @@ Owner asked me to bring all pending checkout work in. I will validate and land t
 
 <!-- relay:entry 20260923T213904Z-db author=agent kind=event model=gpt-6-sol pane=49dbf51d turn=bf07ea53fe1e47b383aeb5e7025ce0da/83e87d8fc35a427d9728ee1d2323a369 -->
 - ✦ agent moved this card · Executing → Needs verification · The Continue group is removed, focused grouping tests pass, and the screenshot is recorded. Full Sessions suite has separate display-backend mouse test failures documented on the card. · evidence docs/qa_evidence/2026-09-23-remove-continue-C7NQ/sessions-by-project.png · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T214157Z-fy author=agent kind=event model=gpt-6-sol pane=49dbf51d turn=bf07ea53fe1e47b383aeb5e7025ce0da/83e87d8fc35a427d9728ee1d2323a369 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-remove-co… → {"plans": [], "commits": ["a7ba054f41e43a03c80cf10b84aaaed327a27823"], "evidence…

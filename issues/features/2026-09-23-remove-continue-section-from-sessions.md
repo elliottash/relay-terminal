@@ -9,7 +9,7 @@ session: 49dbf51d-820d-4c71-8c2c-f411cacebb78
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-remove-continue-C7NQ/sessions-by-project.png], related: [], github: null}
+links: {plans: [], commits: [a7ba054f41e43a03c80cf10b84aaaed327a27823], evidence: [docs/qa_evidence/2026-09-23-remove-continue-C7NQ/sessions-by-project.png], related: [], github: null}
 ---
 # Remove the Continue section from Sessions
 

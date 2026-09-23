@@ -1,12 +1,13 @@
 ---
 id: CPRQ
 type: work
-status: ready
+status: needs-verification
 labels: [feature, keyboard, composer]
+implemented_by: openai/gpt-6-sol via codex
 rank: p
 created: '2026-09-22'
-source: 'Owner in a Relay pane, 2026-09-22; keyboard-system discussion'
-links: {plans: [], commits: [], evidence: [], related: [QWAS, KYPR, H8VP, H7N4], github: null}
+source: Owner in a Relay pane, 2026-09-22; keyboard-system discussion
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-keyboard-set/], related: [QWAS, KYPR, H8VP, H7N4], github: null}
 ---
 # Ctrl+Q clears the prompt box as one undoable edit
 
@@ -34,4 +35,10 @@ Owner: "ctrl z is undo text edit; ctrl shift z is undo close."
 - With a program owning the keyboard, Ctrl+Q reaches the program.
 
 ## Tests
-Planned: the editor test target (`add_test(NAME editor` in `CMakeLists.txt`) for clear as one undo block, the empty no-op and attachments; `ctest -R prompthistory` (a cleared draft is not recorded); `tests/test_keybindings.py` (the new action, both chords, no collision in any preset); and a headless focus case in `ctest -R panetabnavigation` for the program pass-through.
+`ctest -R '^editor$'` (clear is one undo step after several edits; empty box is a no-op with nothing pushed; @attachments come back; mid-browse returns to the draft)
+`ctest -R prompthistory` (a cleared draft is not recorded)
+`PYTHONPATH=backend python3 -m unittest tests.test_keybindings` (prompt.clear on Ctrl+Q and Ctrl+Shift+Q, no collision)
+manual: docs/qa_evidence/2026-09-22-keyboard-set/ (screenshots 11-13: draft, Ctrl+Q cleared with its notice, Ctrl+Z restored)
+
+## Execution Summary
+RichEditor::clearAsOneEdit() and Pane::clearPrompt() (98184a88); prompt.clear on Ctrl+Shift+Q and prompt-box-only Ctrl+Q (e914d65c, cd7dcfcb). Attachments are @path text, so the same undo restores them. A "Prompt box cleared · Ctrl+Z brings it back" notice is shown. Evidence: docs/qa_evidence/2026-09-22-keyboard-set/ 11-13.

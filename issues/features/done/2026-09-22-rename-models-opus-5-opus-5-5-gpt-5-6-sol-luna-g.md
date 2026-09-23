@@ -56,3 +56,24 @@ replace 5.6 sol with 6 sol, 5.6 luna with 6 luna
 `tests/test_web_model_name.py`
 `ctest -R modelcatalog`
 `ctest -R board`
+
+### Check 2026-09-23 15:04
+- missing-evidence · unittest:tests.test_presets — no run of tests/test_presets.py for this revision, from any host, and no attached result
+- not-applicable · unittest:tests.test_tier_lists — tests/test_tier_lists.py is not in the project any more
+- missing-evidence · unittest:tests.test_model_ranking — no run of tests/test_model_ranking.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_guest_harness_claude — no run of tests/test_guest_harness_claude.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_guest_harness_provider — no run of tests/test_guest_harness_provider.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_qa_verifiers — no run of tests/test_qa_verifiers.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_board_tools — no run of tests/test_board_tools.py for this revision, from any host, and no attached result
+- not-applicable · unittest:tests.test_web_model_name — tests/test_web_model_name.py is not in the project any more
+- missing-evidence · ctest:modelcatalog — no run of ctest -R modelcatalog for this revision, from any host, and no attached result
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-23T19:03:58Z
+- notice · unittest:tests.test_tier_lists — tests/test_tier_lists.py is not in the project any more
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 8 of 71 never ran here (test_session_replacement_preserves_bridge_and_instructions, test_a_model_picked_after_the_stand_in_replaces_it, test_first_configuration_on_high_starts_guest_and_preserves_main…)
+- notice · unittest:tests.test_qa_verifiers — tests/test_qa_verifiers.py: 39 of 39 never ran here (test_the_vendor_is_the_model_not_the_aggregator, test_each_preset_signs_with_its_own_vendor, test_a_guest_signs_the_model_it_ran_and_the_harness_that_ran_it…)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 258 never ran here (test_verifier_updates_and_qa_transition_preserve_the_implementer)
+- notice · unittest:tests.test_board_tools — tests/test_board_tools.py: 1 of 258 are not in the project any more (test_the_offered_tools_are_read_only_files_search_and_the_modes_board_tools)
+- notice · unittest:tests.test_web_model_name — tests/test_web_model_name.py is not in the project any more
+- notice · ctest:modelcatalog — ctest -R modelcatalog is slow: p95 3.72 s, p50 3.72 s
+- notice · ctest:board — ctest -R board is slow: p95 2.61 s, p50 2.56 s
+history: thread

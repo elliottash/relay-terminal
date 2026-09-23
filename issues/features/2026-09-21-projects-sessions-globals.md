@@ -158,8 +158,8 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - `tests/test_remote_wire.py`
 - manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 
-### Check 2026-09-21 21:39
-- passed · unittest:tests.test_board_protocol.InitTests — tests/test_board_protocol.py::InitTests passed for this revision on spark-dcc9, 2026-09-22T01:39:51Z
+### Check 2026-09-23 15:03
+- passed · unittest:tests.test_board_protocol.InitTests — tests/test_board_protocol.py::InitTests passed for this revision on spark-dcc9, 2026-09-23T19:03:05Z
 - not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/07-switchboard-direct.png
 - missing-evidence · ctest:conversations — no run of ctest -R conversations for this revision, from any host, and no attached result
 - missing-evidence · ctest:projectspane — no run of ctest -R projectspane for this revision, from any host, and no attached result
@@ -171,6 +171,11 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - missing-evidence · unittest:tests.test_remote_wire — no run of tests/test_remote_wire.py for this revision, from any host, and no attached result
 - not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 - notice · ctest:conversations — ctest -R conversations is slow: p95 3.18 s, p50 2.91 s
+- notice · unittest:tests.test_keybindings — tests/test_keybindings.py: 7 of 32 never ran here (test_qwas_defaults, test_plain_ctrl_is_left_to_the_editor_for_asdzxcp, test_f1_is_not_bound…)
+- notice · unittest:tests.test_globals_protocol — tests/test_globals_protocol.py: 1 of 11 never ran here (test_suggestions_have_their_own_list_accept_and_reject)
+- notice · unittest:tests.test_agent_context — tests/test_agent_context.py: 1 of 24 never ran here (test_the_models_pane_has_a_brief_of_its_own)
+- notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 48 of 48 never ran here (test_every_worker_event_is_classified, test_the_guest_channel_names_are_not_worker_events, test_no_event_is_both_forwarded_and_withheld…)
+- notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 48 of 48 were edited since their history began, so it starts over (test_every_worker_event_is_classified, test_the_guest_channel_names_are_not_worker_events, test_no_event_is_both_forwarded_and_withheld…)
 - notice · unittest:tests.test_remote_wire — tests/test_remote_wire.py: 9 of 48 are skipped for good (test_the_client_resumes_under_the_hubs_own_stream_names, test_a_plain_link_parses, test_percent_encoded_separators_still_parse…)
 history: thread
 ## QA checklist

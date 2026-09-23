@@ -1,12 +1,13 @@
 ---
 id: KYPR
 type: work
-status: inbox
+status: needs-verification
 labels: [bug, keyboard, focus]
+implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-22'
-source: 'Owner in a Codex Relay pane, 2026-09-22; keyboard-system survey'
-links: {plans: [], commits: [], evidence: [], related: [RBVK, D60R, T9ZS, ACDG], github: null}
+source: Owner in a Codex Relay pane, 2026-09-22; keyboard-system survey
+links: {plans: [], commits: [e914d65c, cd7dcfcb, c00a2859, ea943915], evidence: [docs/qa_evidence/2026-09-22-keyboard-set/], related: [RBVK, D60R, T9ZS, ACDG], github: null}
 ---
 # Resolve global versus local shortcuts and preserve program help
 
@@ -28,4 +29,11 @@ Owner: "i dont want a ctrl and ctrl shift to have different funcs". Apply this t
 Each tested shortcut performs the documented command in its focus context, exactly once. Editor and program input remains usable, program F1 is not taken by Relay's command finder, and local/global conflicts have explicit precedence and regression coverage.
 
 ## Tests
-Planned: focused GUI regressions for Actions search Ctrl+N, Explorer Alt+Up, F1 in a terminal program, and matching Ctrl/Ctrl+Shift command families; relevant `tests/settingspane_test.cpp`, `tests/filepanes_test.cpp`, `tests/panetabnavigation_test.cpp`, and `tests/test_keybindings.py`.
+`ctest -R settings` (Ctrl+N in the Actions/Options search moves to the next result, not a new window)
+`ctest -R filepanes` (Alt+Up in the explorer goes to the parent folder, not the pane above)
+`ctest -R keymap` (F1 unbound; Ctrl and Ctrl+Shift never differ; Ctrl+A/S/Z/X/C/D/P left to editors and programs)
+`PYTHONPATH=backend python3 -m unittest tests.test_keybindings`
+manual: docs/qa_evidence/2026-09-22-keyboard-set/ (plain Ctrl+Q acts in the prompt box, screenshot 12)
+
+## Execution Summary
+Global shortcut dispatch now checks focused widgets' `relayLocalKeys` before the Keymap. The Settings search keeps Ctrl+N/Ctrl+P, File Explorer keeps Alt+Up, and F1 remains available to terminal programs. The keyboard pairing and focus-context tests passed; the live drive is in `docs/qa_evidence/2026-09-22-keyboard-set/`. Commits `e914d65c`, `cd7dcfcb`, `c00a2859`, `ea943915`.

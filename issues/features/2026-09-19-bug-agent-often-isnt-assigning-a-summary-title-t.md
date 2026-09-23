@@ -8,7 +8,7 @@ session: b7a78bf3-f266-41da-a607-1a88d0594bc1
 priority: 2
 rank: zzzzzzzzzzzzzzi
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-title-retries/], related: [], github: null}
+links: {plans: [], commits: [0ccc9cd1], evidence: [docs/qa_evidence/2026-09-22-title-retries/], related: [], github: null}
 ---
 # bug? agent often isnt assigning a summary title to the pane header.
 

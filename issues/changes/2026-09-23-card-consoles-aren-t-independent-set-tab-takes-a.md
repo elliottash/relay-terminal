@@ -8,7 +8,7 @@ implemented_by: glm/glm-5.3
 session: d47c1a2d-5224-474f-a103-3fc0a9e65207
 rank: zzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-kskh/], related: [], github: null}
+links: {commits: [aba738b7, 466cc8f4], evidence: [docs/qa_evidence/2026-09-23-kskh/], github: null, plans: [], related: [CTRN, AGNT]}
 ---
 # Card consoles aren't independent: set_tab takes a card's persist key, and one card's writes print in another's console
 
@@ -40,3 +40,9 @@ No behavior change for: tab consoles' conversation keys, terminal panes' inline 
 - Pre-existing failures in the shared checkout, not this change: `test_board_chat test_board_protocol` have 7 failures that fail identically with this change stashed; `scripts/relay-build --target relay` fails on 3 errors in another session's in-flight "run in background" work (`Pane::agentReady`, `WindowManager::refreshBackgroundTasks`/`backgroundCount`) — none in the files this change touched, and `relay-boardpane-tests` (which compiles the modified `src/BoardPane.h`) builds and passes.
 
 Evidence: `docs/qa_evidence/2026-09-23-kskh/`.
+
+### Check 2026-09-23 15:03
+- missing-evidence · unittest:tests.test_board_chat.TabOfTest — no run of tests/test_board_chat.py::TabOfTest for this revision, from any host, and no attached result
+- passed · unittest:tests.test_board_protocol.AskTests.test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only — tests/test_board_protocol.py::AskTests::test_a_card_conversation_is_keyed_by_the_tab_and_the_card_only passed for this revision on spark-dcc9, 2026-09-23T19:03:05Z
+- notice · unittest:tests.test_board_chat.TabOfTest — tests/test_board_chat.py::TabOfTest: 3 of 3 never ran here (test_a_tab_consoles_key_is_still_the_tab_by_another_name, test_a_card_consoles_key_names_a_card_not_the_tab, test_no_spellings_at_all_is_no_tab)
+history: thread

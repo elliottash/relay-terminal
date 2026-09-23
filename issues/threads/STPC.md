@@ -15,3 +15,6 @@ Created and claimed via file fallback. Removing the notifier's step-count field 
 
 <!-- relay:entry 20260923T002149Z-p6 author=agent kind=event model=gpt-6-astra pane=7bc4d8b8 turn=e8841ccaaa9b420d9a3284bac9c4528f/4d17a9ea067d4e25ba700458e36c929e -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-STPC/resu… → {"plans": [], "commits": ["8af57af2"], "evidence": ["docs/qa_evidence/2026-09-22…
+
+<!-- relay:entry 20260923T025144Z-k4 author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

@@ -90,3 +90,6 @@ Make the Run in background tooltip show Ctrl+Alt+Enter and follow live keybindin
 
 <!-- relay:entry 20260923T203343Z-b4 author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f -->
 - ✦ agent moved this card · Executing → Needs verification · The hover now shows Ctrl+Alt+Enter and tracks keybinding changes; the exact-tree build and isolated hover screenshot passed. · evidence docs/qa_evidence/2026-09-23-bgrn-shortcut/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T211609Z-ra author=agent kind=note model=claude-opus-5-5 pane=6b0b0195 turn=d20c4203bb934061b37f73dc69f56a6d/6445f3f6e3cf43be8539a62e7066ec2d -->
+`tests/boardremote_test.cpp` `executeGoesThroughTheWindowsHookAndClaimsTheCard` still expects the phone status "Execute on #K7Q2 from iPhone". Since `854c097d`, `BoardRemote.cpp` says "Run on …", so `ctest -R boardremote` fails at HEAD. It looks like a one-line test update. Seen while testing #6W9X; not changed there.

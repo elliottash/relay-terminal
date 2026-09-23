@@ -75,10 +75,10 @@ If we only bind one modifier (no edit-here action), the same logic still points 
 
 ## Tasks
 
-- [ ] FilePreview: startEditing(), local save via QSaveFile, local dirty guard in open() <!-- t:xy s=in-progress -->
-- [ ] Header Edit button (filePreviewEdit) with visibility rules <!-- t:cq -->
-- [ ] FileExplorer: Ctrl+Enter → onEditFile, Shift+Enter → onOpenExternal (both view and filter box) <!-- t:ey -->
-- [ ] RelayWindow: openPath edit flag, wire onEditFile, dirty-close guard in closePane <!-- t:p5 -->
-- [ ] Shortcut hints for the two new chords <!-- t:7j -->
-- [ ] Tests in tests/filepanes_test.cpp <!-- t:qa -->
-- [ ] Build, ctest -R filepanes, Xvfb evidence, land card <!-- t:tp -->
+- [x] FilePreview: startEditing(), local save via QSaveFile, local dirty guard in open() <!-- t:xy -->
+- [x] Header Edit button (filePreviewEdit) with visibility rules <!-- t:cq -->
+- [x] FileExplorer: Ctrl+Enter → onEditFile, Shift+Enter → onOpenExternal (both view and filter box) <!-- t:ey -->
+- [x] RelayWindow: openPath edit flag, wire onEditFile, dirty-close guard in closePane <!-- t:p5 -->
+- [ ] Shortcut hint for menu "Open external" → Shift+Enter (✎ button hint landed with 5dfec93d) <!-- t:7j -->
+- [x] Tests in tests/filepanes_test.cpp <!-- t:qa -->
+- [ ] Xvfb evidence run → docs/qa_evidence/2026-09-20-edit-here/ (build + ctest passed at land time) <!-- t:tp -->

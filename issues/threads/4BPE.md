@@ -919,3 +919,28 @@ Owner requested valid card codes: #MDL1 → #MDP1 and #RLP7 → #RPR7. Renamed t
 
 <!-- relay:entry 20260922T030529Z-vw author=codex kind=progress -->
 Owner requested fresh valid keys. Renamed the existing card #MDP1 → #4BPE using board.new_id; retained earlier codes as aliases. Card status, ownership, evidence paths and prior thread entries are preserved. New code passes board.valid_id and was collision-checked against card IDs and aliases.
+
+<!-- relay:entry 20260922T043231Z-a8 author=owner kind=comment mode=discuss -->
+Is this done?
+
+<!-- relay:entry 20260922T043250Z-ax author=agent kind=comment mode=discuss model=kimi-k3 turn=4b236ec01581e11077bdbf240ca65770/ea7b9fc5d2f64bd2ad8dc127eb3e0330 -->
+Almost. The state of #4BPE:
+
+- **All 17 tasks are done**, including the second-half work (ranking file, availability, the models pane, jobs tab).
+- **Independent verification (2026-09-22, Codex): 18 of 19 QA checks pass.** The two gaps that were open got closed down to one: the authenticated Codex first-turn issue was root-caused and fixed in `d7c27b95` with a real signed-in turn displaying gpt-6-astra/high.
+- **The one remaining item is #11: live paired-phone presentation** — the six phone naming tests pass, but nobody has driven an actual paired-phone UI session to confirm the model names render there. It's marked partial/blocked, not failed.
+
+So: functionally done on the desktop app; the card itself is still in `executing` here (main has it at needs-verification) and the verdict says "not a full QA pass" solely because of the phone check.
+
+Your call: do you want to (a) accept the phone item as test-covered and close the card, or (b) leave it open until someone drives a real paired phone? Say the word and I'll record the decision and move it.
+
+<!-- relay:entry 20260922T043329Z-ch author=owner kind=comment mode=discuss -->
+Move to needs verification
+
+<!-- relay:entry 20260922T043339Z-03 author=agent kind=event model=kimi-k3 pane=switchboard turn=4b236ec01581e11077bdbf240ca65770/3916a661a5c24b5397ce438a3fe8a4c3 -->
+- ✦ agent moved this card · Executing → Needs verification · Owner: "Move to needs verification". 18/19 QA checks pass (2026-09-22, Codex); only live paired-phone presentation (item 11) remains partial. · evidence docs/qa_evidence/2026-09-22-verify-MDL1/ · implemented_by kimi/kimi-k3
+
+<!-- relay:entry 20260922T043345Z-9k author=agent kind=comment mode=discuss model=kimi-k3 turn=4b236ec01581e11077bdbf240ca65770/3916a661a5c24b5397ce438a3fe8a4c3 -->
+Moving #4BPE to needs-verification with the latest verification evidence path.
+
+**Done:** #4BPE is now in **needs-verification**, with `docs/qa_evidence/2026-09-22-verify-MDL1/` as the evidence path and the thread noting the owner's call plus the one partial item (live paired-phone presentation). A separate verifying session can take it from there.

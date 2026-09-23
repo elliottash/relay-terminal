@@ -46,3 +46,15 @@ Landed 56d671cf. Targeted Conversations tests and clean full application build p
 
 <!-- relay:entry 20260922T013954Z-kk author=agent kind=evidence -->
 Check · 8 missing-evidence, 2 not-applicable, 1 passed; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T165821Z-hj author=agent kind=evidence -->
+Check · 7 missing-evidence, 2 not-applicable, 2 passed; 2 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184510Z-26 author=agent kind=evidence -->
+Check · 8 missing-evidence, 2 not-applicable, 1 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190225Z-3d author=agent kind=evidence -->
+Check · 8 missing-evidence, 2 not-applicable, 1 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190309Z-4k author=agent kind=evidence -->
+Check · 8 missing-evidence, 2 not-applicable, 1 passed; 7 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

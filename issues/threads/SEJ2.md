@@ -26,3 +26,37 @@ Released (ae279c67) · the pane closed
 
 <!-- relay:entry 20260921T114033Z-z5 author=agent kind=progress -->
 The #SEJ2 code was sitting uncommitted in the shared checkout. Landed unchanged on 2026-09-21 as `5dfec93d` after land.py's build gate built the exact tree and `ctest -R '^filepanes$'` passed in it (owner: clean the tree). The commit is the explorer's Ctrl+Enter/Shift+Enter chords, `FilePreview::startEditing()`, the local QSaveFile save, the dirty guards in `open()` and `closePane()`, the header's ✎ button and the new cases in `tests/filepanes_test.cpp` — tasks t:xy, t:cq, t:ey, t:p5 and t:qa. Not landed with it: the "Open external" menu hint (t:7j, only the ✎ button's hint was written) and the Xvfb evidence run (t:tp).
+
+<!-- relay:entry 20260922T044022Z-09 author=owner kind=comment mode=discuss -->
+Is this done and can be moved to verify?
+
+<!-- relay:entry 20260922T044118Z-yk author=agent kind=event model=kimi-k3 pane=switchboard turn=d76d24967cb6b3231a88774b5cda7215/03b26882cd2841d1b682ed26c28e90f8 -->
+- ✦ agent updated this card · tasks: 5/7 done
+
+<!-- relay:entry 20260922T044128Z-8y author=agent kind=comment mode=discuss model=kimi-k3 turn=d76d24967cb6b3231a88774b5cda7215/03b26882cd2841d1b682ed26c28e90f8 -->
+Let me check what's actually in the tree before answering — particularly the missing menu hint (t:7j).
+
+
+
+
+
+
+
+
+
+
+
+The code confirms the thread: the chords, ✎ button, save, and guards are in, but the "Open external" menu hint isn't (no hint fires from the `openExternal` menu path). Let me sync the task list with what actually landed.
+
+
+
+**Not quite — 5 of 7 tasks are done, two remain.** I checked the tree and updated the task list on #SEJ2 to match.
+
+Landed in `5dfec93d` (build-gated, `ctest -R '^filepanes$'` passed at land time): the Ctrl+Enter/Shift+Enter chords, `startEditing()`, local QSaveFile save, both dirty guards, the ✎ Edit button, and the tests.
+
+Still open, both needing a terminal pane (Execute):
+
+1. **t:7j** — the menu-click "Open external" → "Next time: Shift+Enter" hint was never written (only the ✎ button's hint landed). A few lines in `FilePanes.cpp`.
+2. **t:tp** — the Xvfb live evidence run into `docs/qa_evidence/2026-09-20-edit-here/`. A large card moves to needs-verification with its evidence path, so this is the gate for your question.
+
+I'd hold the move until those two land: press **Execute** and a pane can finish both in one short session, then the card goes to verify. If you'd rather drop the menu hint as not worth it, say so and I'll mark t:7j dropped — but the evidence run still has to happen before verification.

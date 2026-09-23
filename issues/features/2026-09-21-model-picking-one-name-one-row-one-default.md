@@ -1,14 +1,15 @@
 ---
 id: 4BPE
-aliases: [MDL1, MDP1]
 type: work
-status: executing
+status: needs-verification
 labels: [feature, models]
 assignee: codex
+implemented_by: kimi/kimi-k3
+aliases: [MDL1, MDP1]
 rank: k
 created: '2026-09-21'
-source: 'Claude Code in a Relay pane, 2026-09-21'
-links: {plans: [docs/MODEL-PICKING-DESIGN.md], commits: [bb19b7b0, b2632bf5, 4e14bdca, a61c713b, 9d0b7b8e, 86ddc3b0, 3cac1ecd, f0dede9c, 95773991, 7f8f0616, 0dddb9ee, c5c815de, e76d6eab, e955feb5, 9eccaa8e, 6b2a3c66, a6a7c72e, bae87fd7, 5de41a8f, 274078a8, 394b282d], evidence: [docs/qa_evidence/2026-09-21-model-box-filter, docs/qa_evidence/2026-09-21-model-defaults-and-swap, docs/qa_evidence/2026-09-21-model-dialog-prioritize, docs/qa_evidence/2026-09-21-model-box-modes, docs/qa_evidence/2026-09-21-model-names-everywhere], related: [DC4J], github: null}
+source: Claude Code in a Relay pane, 2026-09-21
+links: {plans: [docs/MODEL-PICKING-DESIGN.md], commits: [bb19b7b0, b2632bf5, 4e14bdca, a61c713b, 9d0b7b8e, 86ddc3b0, 3cac1ecd, f0dede9c, 95773991, 7f8f0616, 0dddb9ee, c5c815de, e76d6eab, e955feb5, 9eccaa8e, 6b2a3c66, a6a7c72e, bae87fd7, 5de41a8f, 274078a8, 394b282d], evidence: [docs/qa_evidence/2026-09-21-model-box-filter, docs/qa_evidence/2026-09-21-model-defaults-and-swap, docs/qa_evidence/2026-09-21-model-dialog-prioritize, docs/qa_evidence/2026-09-21-model-box-modes, docs/qa_evidence/2026-09-21-model-names-everywhere, docs/qa_evidence/2026-09-22-verify-MDL1/], related: [DC4J], github: null}
 ---
 # Model picking: one name per model, one row per model, one default
 

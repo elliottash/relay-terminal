@@ -57,3 +57,15 @@ Independent verification passed; moved to needs-qa-llm. Added QA checklist/verdi
 <!-- relay:entry 20260922T170241Z-v4 author=codex kind=evidence -->
 ### Codex · 2026-09-22 17:02
 Linked independent verification commit c26b0ec5ccfea5cabbac18d92e82fdc8bbfe8070. No runtime changes.
+
+<!-- relay:entry 20260923T184325Z-4c author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184843Z-x2 author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T185045Z-17 author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190408Z-6n author=agent kind=evidence -->
+Check · 2 missing-evidence, 1 not-applicable, 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

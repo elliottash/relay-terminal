@@ -80,3 +80,11 @@ Surfaces: the Keymap descriptions of `agent.interrupt` / `agent.continue`, the `
 - `manual: docs/qa_evidence/2026-09-20-ctrl-enter-always/`
 
 The first is the rule itself (`src/ContinueTurn.h`, header-only): an empty box with an idle agent continues, text in the box never does, a busy agent never does, a busy agent with text never does. land.py's build gate ran that case in the exact landing tree before the swap. The next three are the worker half this card landed earlier (`backend/relay_core/conv_index.py`, `backend/relay_core/agent.py`): the cut-off predicate, `session_unfinished` ORing it in, and `resume`'s `state_loaded {turn_open}`. The manual entry is the Xvfb drive against the landed build — an ordinary finished turn (D), typed text (F), the step limit (A), the `/continue` hint (H) and a busy agent (G).
+
+### Check 2026-09-22 00:49
+- passed · ctest:continueturn — ctest -R continueturn passed for this revision on spark-dcc9, 2026-09-20T23:48:24Z
+- passed · unittest:tests.test_conv_index.HelperTests.test_turn_left_open_reads_only_the_checkpoint_stamps — tests/test_conv_index.py::HelperTests::test_turn_left_open_reads_only_the_checkpoint_stamps passed for this revision on spark-dcc9, 2026-09-20T23:48:24Z
+- passed · unittest:tests.test_conv_index.HelperTests.test_unfinished_reads_checkpoints_messages_and_todos — tests/test_conv_index.py::HelperTests::test_unfinished_reads_checkpoints_messages_and_todos passed for this revision on spark-dcc9, 2026-09-20T23:48:24Z
+- passed · unittest:tests.test_sessions.SessionTests.test_resume_reports_a_turn_left_open — tests/test_sessions.py::SessionTests::test_resume_reports_a_turn_left_open passed for this revision on spark-dcc9, 2026-09-20T23:48:24Z
+- not-applicable · manual:docs/qa_evidence/2026-09-20-ctrl-enter-always/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-20-ctrl-enter-always/
+history: thread

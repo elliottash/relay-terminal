@@ -130,6 +130,19 @@ Evidence: [GUI screenshots, driver and notes](../../docs/qa_evidence/2026-09-21-
 - `ctest -R globalspane` — tests/globalspane_test.cpp
 - manual: docs/qa_evidence/2026-09-21-projects-sessions-globals/
 
+### Check 2026-09-23 15:40
+- missing-evidence · unittest:tests.test_globals_protocol — no run of tests/test_globals_protocol.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_memories — no run of tests/test_memories.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_aliases — no run of tests/test_aliases.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_system_prompt — no run of tests/test_system_prompt.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_prompt_profiles — no run of tests/test_prompt_profiles.py for this revision, from any host, and no attached result
+- missing-evidence · ctest:globalspane — no run of ctest -R globalspane for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-21-projects-sessions-globals/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-projects-sessions-globals/
+- notice · unittest:tests.test_globals_protocol — tests/test_globals_protocol.py: 1 of 11 never ran here (test_suggestions_have_their_own_list_accept_and_reject)
+- notice · unittest:tests.test_aliases — tests/test_aliases.py: 1 of 34 are skipped for good (test_bash_itself_agrees_the_value_is_one_literal_word)
+- notice · unittest:tests.test_system_prompt — tests/test_system_prompt.py: 15 of 34 never ran here (test_attaching_a_board_changes_nothing_above_the_workspace_line, test_a_claim_mid_conversation_is_a_note_and_the_prefix_does_not_move, test_a_memory_change_mid_conversation_is_a_note_and_the_prefix_does_not_move…)
+- notice · unittest:tests.test_system_prompt — tests/test_system_prompt.py: 1 of 34 are not in the project any more (test_attaching_a_switchboard_changes_nothing_above_the_workspace_line)
+history: thread
 ## QA checklist
 - [ ] Create/edit/retire a global memory and confirm later prompts reflect the saved state.
 - [ ] Pinned/path matching, project shadowing and scoped supersession choose expected memories.

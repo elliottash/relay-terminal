@@ -96,3 +96,6 @@ Check · 1 not-applicable, 3 passed; 2 advisory finding(s). The status is under 
 
 <!-- relay:entry 20260922T044955Z-g1 author=agent kind=event model=gpt-6-astra pane=b7a78bf3 turn=52bf804728cf4665a07750a5af76484a/fa308a84bd3240e4af4861861b0e44e1 -->
 - ✦ agent moved this card · Executing → Needs verification · Implemented failure retries and reason-only logging; 69 Python tests, C++ titles test, isolated Xvfb header fixture pass; tests_check passes all three automated entries. · evidence docs/qa_evidence/2026-09-22-title-retries/ · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260922T045012Z-zt author=agent kind=event model=gpt-6-astra pane=b7a78bf3 turn=52bf804728cf4665a07750a5af76484a/fa308a84bd3240e4af4861861b0e44e1 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-title-ret… → {"plans": [], "commits": ["0ccc9cd1"], "evidence": ["docs/qa_evidence/2026-09-22…

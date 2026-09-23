@@ -16,3 +16,6 @@ Confirmed the count is RequestLedger.open_count(): user requests still open or i
 
 <!-- relay:entry 20260923T162359Z-9w author=agent kind=event model=gpt-6-sol pane=7d5859de turn=d07fe423cc0541e0ac86ecc83c13996d/37e9dd35b60049fe9a91a78f85ddcd68 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-open-requ… → {"plans": [], "commits": ["00eb857104284e1e83e909918079b87be982ee74"], "evidence…
+
+<!-- relay:entry 20260923T162728Z-cp author=agent kind=evidence model=gpt-6-sol pane=7d5859de turn=d07fe423cc0541e0ac86ecc83c13996d/c1a0df4864164dcaa7ee29e1568c2b26 -->
+Follow-up audit for the same disabled-header-click bug: repository search found only two QHeaderView::sectionClicked handlers. Sessions is fixed in #R4WX; TestSuitesPane.cpp explicitly calls setSectionsClickable(true). FilePanes.cpp uses Qt's native setSortingEnabled(true) for local files. ProfilePane.cpp explicitly disables clicks and has no sort handler. No second instance found; no additional code changed.

@@ -701,12 +701,13 @@ drive and what it found.
   back as an editable row). `board` gained the card-to-card transcript hand-over.
 - `boardexecute` fails 3 of 5 exactly as #48S3's thread records, unchanged by any commit here.
 
-### Check 2026-09-21 21:27
+### Check 2026-09-22 22:51
 - not-applicable · unittest:test_roles — test_roles.py is not in the project any more
-- missing-evidence · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — no run of ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit for this revision, from any host, and no attached result
+- failed · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit failed for this revision on spark-dcc9
 - notice · unittest:test_roles — test_roles.py is not in the project any more
-- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 1 of 8 are slow (board)
-- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 3 of 8 never ran here (boardsections, boardworkspace, boardfilter)
+- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 2 of 8 are slow (consolemode, board)
+- notice · ctest:consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit — ctest -R consolemode$|^board$|^boardworkspace$|^boardpane$|^boardsections$|^boardfilter$|^queuenav$|^queuesubmit: 1 of 8 never ran here (boardfilter)
+- notice · ctest:consolemode — ctest -R consolemode failed the last time it ran, 2026-09-23T02:51:38Z
 history: thread
 ## QA checklist
 

@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: mwwb2
 created: '2026-09-22'
 source: User in Relay, 2026-09-22
-links: {plans: [], commits: [fa561d1c66121dba8b1a25b98a30ec128fee44e0], evidence: [docs/qa_evidence/2026-09-22-editor-click-wrap/], related: [4TNY], github: null}
+links: {plans: [], commits: [fa561d1c66121dba8b1a25b98a30ec128fee44e0, 488e2913f4f3d35e87def04f10e7600671807292], evidence: [docs/qa_evidence/2026-09-22-editor-click-wrap/], related: [4TNY], github: null}
 ---
 # Word-wrap toggle in the file editor header
 

@@ -53,6 +53,18 @@ Harness steering now uses native Codex turn/steer and Claude UUID-correlated str
 `tests/test_queue.py`
 `manual: docs/qa_evidence/2026-09-21-harness-steering/README.md`
 
+### Check 2026-09-22 13:45
+- missing-evidence · unittest:tests.test_guest_harness_steer — no run of tests/test_guest_harness_steer.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_guest_harness_provider — no run of tests/test_guest_harness_provider.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_guest_harness_codex — no run of tests/test_guest_harness_codex.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_guest_harness_claude — no run of tests/test_guest_harness_claude.py for this revision, from any host, and no attached result
+- missing-evidence · unittest:tests.test_queue — no run of tests/test_queue.py for this revision, from any host, and no attached result
+- not-applicable · manual:docs/qa_evidence/2026-09-21-harness-steering/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-harness-steering/README.md
+- notice · unittest:tests.test_guest_harness_steer — tests/test_guest_harness_steer.py: 2 of 14 never ran here (test_leased_input_stays_visible_and_cannot_be_withdrawn, test_reset_clears_any_idle_lease)
+- notice · unittest:tests.test_guest_harness_provider — tests/test_guest_harness_provider.py: 5 of 68 never ran here (test_first_configuration_on_high_starts_guest_and_preserves_main, test_api_high_guest_pick_starts_harness_and_main_returns_to_api, test_failed_guest_role_pick_keeps_api_model_and_main_role…)
+- notice · unittest:tests.test_queue — tests/test_queue.py: 2 of 41 never ran here (test_a_submit_runs_now_and_resumes_the_paused_queue, test_a_queued_submit_resumes_too_and_relays_own_does_not)
+- notice · unittest:tests.test_queue — tests/test_queue.py: 1 of 41 are not in the project any more (test_now_runs_while_queue_paused)
+history: thread
 ## QA checklist
 - [ ] Owner tests next-tool-call steering in fresh Claude and Codex harness panes.
 - [ ] Verify normal queued prompts still wait and no steering appears twice.

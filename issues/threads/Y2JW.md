@@ -134,3 +134,78 @@ I have the full picture now. Writing the plan onto the card.
 **Plan is on #Y2JW.** It builds one checklist dialog (new `ModelsDialog` beside `RolesDialog`), opened three ways — `/models`, a "✚ Customize models…" row in the picker, and Settings › Models — persisting a global `models/picker_shown` list that both pickers (the status combo and the `/model` modal) read through one helper. Per-model entries ride the existing `set_model {preset, model}` override, so no worker changes; absent/empty setting keeps today's behavior.
 
 Nothing is needed from you — press **Execute** when ready. The only judgment calls I baked in (both reversible at QA): guest rows are checkable too, and "add models" is the dialog's per-provider "add by id" field plus re-checking hidden entries, rather than a separate picker affordance.
+
+<!-- relay:entry 20260923T182506Z-1n author=owner kind=comment mode=discuss -->
+i think this is resolved -- check if there are any good points here we still need
+
+<!-- relay:entry 20260923T183041Z-q0 author=agent kind=evidence model=kimi-k3 pane=switchboard turn=1ebc6fed9377680339fda5fc25ee16e0/7dba9e6ee501457b986d8a1fb9471ab1 -->
+Resolution check (Discuss turn, owner: "i think this is resolved"). Everything this card asked for shipped via the card #MDL1 model-catalog redesign (2026-09-20/21):
+
+1. **/models command** — exists; opens the Models pane. `docs/ARCHITECTURE.md:3635`: "the models pane (Ctrl+Shift+M, `/model`, `/models`)"; `src/SettingsPane.cpp:68` maps `agent.modelOptions` → `/models`.
+2. **Un-check models so they leave the picker** — the step-2 "available" checklist: `models/available` + `curation::setAvailable` (`src/ModelCatalog.h`), edited per-model in the Models pane's available tab / Ctrl+Alt+M dialog; an un-checked model leaves the tier lists, the box and its typed filter.
+3. **Add models** — per-provider "+ add a model…" rows (`src/ModelPicker.cpp` `addModelById`/`promptAddModelById`), persisted as `models/custom`.
+4. **Per-model, flexible** (Kimi K3 / GLM 5.3 Flash / GPT Luna) — the whole catalog is per-model entries `<preset>|<model>` (`relay::models::Entry`), so any individual model across providers is in or out independently.
+5. **Global** — all curation lives in QSettings, shared by every pane and window.
+
+Note: the plan on this card (`models/picker_shown` + a `ModelsDialog`) was built and then deliberately retired by card #MDL1 t:a10 in favor of `models/available` — the shipped shape differs from the plan, but the requested outcome is fully covered. No leftover points found.
+
+<!-- relay:entry 20260923T183050Z-2w author=agent kind=event model=kimi-k3 pane=switchboard turn=1ebc6fed9377680339fda5fc25ee16e0/7dba9e6ee501457b986d8a1fb9471ab1 -->
+- ✦ agent moved this card · Ready to start → Done · Owner confirmed resolved; verification found every ask shipped via the card #MDL1 model-catalog work (/models command, per-model available checklist, add-by-id, global QSettings). The card's own plan was superseded by that redesign, but the outcome is delivered. · implemented_by kimi/kimi-k3 · verified_by kimi/kimi-k3
+
+<!-- relay:entry 20260923T183100Z-3z author=agent kind=comment mode=discuss model=kimi-k3 turn=1ebc6fed9377680339fda5fc25ee16e0/7dba9e6ee501457b986d8a1fb9471ab1 -->
+Checking whether the planned pieces actually landed in the code.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+All the pieces check out. Recording the verification on the card and closing it.
+
+
+
+**Done: #Y2JW closed.** You're right — it's resolved. I verified against the code and found nothing still needed:
+
+- **`/models` command** — exists and opens the Models pane (`docs/ARCHITECTURE.md:3635`, `src/SettingsPane.cpp:68`).
+- **Un-checking models** — the "available" checklist (`models/available` in `src/ModelCatalog.h`) removes a model from the lists, the box, and its filter, per individual model.
+- **Add models** — per-provider "+ add a model…" rows persist to `models/custom` (`src/ModelPicker.cpp`).
+- **Flexible per-model curation** (your Kimi K3 / GLM 5.3 Flash / GPT Luna example) — the catalog is per-model entries, and it's all global QSettings.
+
+One wrinkle recorded on the card: the plan written here (`models/picker_shown` + a `ModelsDialog`) was actually built and then deliberately retired by card #MDL1 t:a10 in favor of the shipped `models/available` design — different mechanism, same outcome. I logged the full verification as an evidence entry and moved #Y2JW to **done**.

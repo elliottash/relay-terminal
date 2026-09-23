@@ -99,3 +99,12 @@ Landed implementation, approved plan/thread and needs-verification evidence in 5
 
 <!-- relay:entry 20260922T013953Z-1s author=agent kind=evidence -->
 Check · 2 missing-evidence, 1 not-applicable, 5 passed; 3 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T150731Z-83 author=agent kind=evidence -->
+Check · 3 missing-evidence, 1 not-applicable, 4 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T150909Z-8m author=agent kind=evidence -->
+Check · 3 missing-evidence, 1 not-applicable, 4 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260922T151942Z-x9 author=agent kind=evidence -->
+Check · 3 missing-evidence, 1 not-applicable, 4 passed; 5 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

@@ -75,3 +75,27 @@ One decision is left for you in the plan's Risks: whether Flat + Recently update
 Claimed (d863fae3) · working on it from a terminal pane
 
 yes and yes
+
+<!-- relay:entry 20260922T043927Z-7q author=owner kind=comment mode=discuss -->
+This isn’t working at least on the phone
+
+<!-- relay:entry 20260922T044020Z-2e author=agent kind=note model=kimi-k3 pane=switchboard turn=066c2d5b8e4b09a53b67ffa968351aaf/6147e4e489bf4473ad9b6281030ce288 -->
+"This isn't working at least on the phone" — expected, and here's why: the phone board is a separate implementation in `app/board.js`, not the desktop's `board::Model`. The Flat/Stage-grouping work lives in `src/BoardModel.*` + `src/BoardPane.cpp` and only changes what the desktop Switchboard renders. The phone renders its own sections: `app/board.js` builds ordered sections from `board.yaml`'s `columns:` (lines 117–160) and sorts rows inside each (`sortRows`, lines 160+, used at 622/638). It never sees a grouping flag — nothing in the `board_cards` events carries one. Fix path: add a flat "recent" view to `app/board.js` itself (a toggle that renders one list sorted by `updated` desc with a stage chip per row), or surface the desktop's grouping through the remote protocol (`REMOTE-PROTOCOL.md` §17) — the first is smaller and self-contained.
+
+<!-- relay:entry 20260922T044029Z-fk author=agent kind=comment mode=discuss model=kimi-k3 turn=066c2d5b8e4b09a53b67ffa968351aaf/6147e4e489bf4473ad9b6281030ce288 -->
+I'll look at what was actually implemented and how the phone renders the board, to see where it breaks.
+
+
+
+
+
+This is a single ask, no todo list needed. I found the cause — recording it on the card.
+
+**Noted on #ESDF.** The phone board is a completely separate implementation: `app/board.js` builds its own sections from `board.yaml`'s `columns:` and sorts rows inside each. The Flat/Stage-column work landed in `src/BoardModel`/`BoardPane.cpp`, which only drives the desktop Switchboard — the phone never sees a grouping flag, so nothing could change there.
+
+Two ways forward, noted on the card:
+
+1. **Add the flat "recent" view directly to `app/board.js`** — a toggle rendering one list sorted by `updated` desc with a stage chip per row. Small and self-contained.
+2. **Carry the desktop's grouping through the remote protocol** (REMOTE-PROTOCOL §17) so the phone mirrors the desktop's choice. More plumbing.
+
+I'd recommend option 1. Want me to extend this card's scope to cover the phone, or file the phone flat view as its own card?

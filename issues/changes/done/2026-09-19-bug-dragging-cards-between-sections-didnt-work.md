@@ -1,7 +1,7 @@
 ---
 id: 5C4Z
 type: work
-status: inbox
+status: dropped
 priority: -1
 rank: zzzzzzzzzzzr
 created: '2026-09-19'

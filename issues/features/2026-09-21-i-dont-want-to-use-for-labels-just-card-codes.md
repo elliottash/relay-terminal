@@ -67,10 +67,10 @@ Evidence: `docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md` (logs and screensho
 - `ctest -R ^board$`
 - manual: docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md
 
-### Check 2026-09-21 21:37
-- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-22T01:37:20Z
+### Check 2026-09-23 15:04
+- passed · ctest:board — ctest -R board passed for this revision on spark-dcc9, 2026-09-23T19:03:58Z
 - not-applicable · manual:docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-21-s53z-labels/NOTES.md
-- notice · ctest:board — ctest -R board is slow: p95 2.58 s, p50 0.93 s
+- notice · ctest:board — ctest -R board is slow: p95 2.61 s, p50 2.56 s
 history: thread
 ## QA checklist
 - [ ] Labels in the list, filter chips and card meta row show bare words.

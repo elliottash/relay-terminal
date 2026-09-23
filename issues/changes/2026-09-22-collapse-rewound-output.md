@@ -42,3 +42,11 @@ Chat rewind now saves the complete discarded branch as plain text and replaces i
 - manual: docs/qa_evidence/2026-09-22-rewind/tests.log
 - manual: docs/qa_evidence/2026-09-22-rewind/rewind.png
 - manual: docs/qa_evidence/2026-09-22-rewind/viewer.png
+
+### Check 2026-09-22 22:51
+- failed · ctest:consolemode — ctest -R consolemode failed for this revision on spark-dcc9
+- not-applicable · manual:docs/qa_evidence/2026-09-22-rewind/tests.log — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-rewind/tests.log
+- not-applicable · manual:docs/qa_evidence/2026-09-22-rewind/rewind.png — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-rewind/rewind.png
+- not-applicable · manual:docs/qa_evidence/2026-09-22-rewind/viewer.png — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-rewind/viewer.png
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 1.63 s, p50 0.88 s
+history: thread

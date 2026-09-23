@@ -1,14 +1,14 @@
 ---
 id: D0MC
 type: work
-status: executing
+status: done
 labels: [bug, models, tests]
 assignee: agent
 implemented_by: glm/glm-5.3
-session: fe15f16b-a316-46dd-8841-78a4e061687d
+verified_by: glm/glm-5.3
 rank: zzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [928705019522e6453a34f3d7afac36f44f541b84], evidence: [], related: [Y4PJ], github: null}
 ---
 # relay-models check: relay-* ranking rows are always "unserved" — served compares display names to the ranking ids
 

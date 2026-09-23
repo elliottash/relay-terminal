@@ -23,3 +23,15 @@ The work landed in commit `d4ac69d` with Xvfb verification in the evidence direc
 
 <!-- relay:entry 20260922T013728Z-ms author=agent kind=evidence -->
 Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184322Z-gg author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T184841Z-qx author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T185042Z-b4 author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T190406Z-dg author=agent kind=evidence -->
+Check · 1 passed. The status is under `## Tests`; earlier checks are in this thread.

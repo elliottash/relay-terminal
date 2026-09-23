@@ -50,3 +50,6 @@ Claimed the HQ dependency for implementation within card #P7SJ. Owner: "lets go 
 <!-- relay:entry 20260921T222440Z-q1 author=codex kind=evidence -->
 ### Codex · 2026-09-21 22:24
 Implemented with three subagents and landed integration be42269896bc. Targeted backend/widget/keymap tests and exact-tree application build pass. Isolated Xvfb verifies all three shortcut tabs, a saved global memory consumed by runtime and draft preservation. Evidence: docs/qa_evidence/2026-09-21-projects-sessions-globals/. Added execution summary, tests and manual QA checklist; moved to needs-verification.
+
+<!-- relay:entry 20260923T194040Z-gz author=agent kind=evidence -->
+Check · 6 missing-evidence, 1 not-applicable; 4 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

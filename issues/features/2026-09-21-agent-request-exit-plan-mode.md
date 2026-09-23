@@ -39,10 +39,20 @@ bug / feature request -- the agent needs to be able to request to exit planning 
 
 Related plan-turn regression run: baseline guest prompt assertion failure tracked separately in #GPF7; all other tests passed.
 
+### Check 2026-09-22 00:49
+- passed · unittest:tests.test_sessions.PlanModeTests — tests/test_sessions.py::PlanModeTests passed for this revision on spark-dcc9, 2026-09-22T04:49:36Z
+- notice · unittest:tests.test_sessions.PlanModeTests — tests/test_sessions.py::PlanModeTests: 4 of 10 are not in the project any more (test_exit_plan_mode_approval_enables_edits_in_the_same_turn, test_exit_plan_mode_cancellation_never_enables_edits, test_exit_plan_mode_question_limit_does_not_authorize_execution…)
+history: thread
+
+`PYTHONPATH=backend:tests python3 -m unittest tests.test_guest_board_bridge.BridgeTests.test_guest_can_write_plan_and_exit_in_same_turn tests.test_plan_turns.GuestPlanTurnTests tests.test_sessions.PlanModeTests -q` — 28 passed (2026-09-23).
+
+Full guest bridge + plan run: 58 tests, one unrelated existing prompt assertion failure in `test_provider_turn_binds_native_context_and_revokes_on_failure`; details in docs/qa_evidence/2026-09-23-guest-plan-exit-XP7N/verification.md.
 ## Execution Summary
 `exit_plan_mode {reason}` (plan mode only) leaves plan mode on the agent's own decision, Warp-style: it validates the reason, switches the session to build mode at once, emits the existing `mode_changed {mode: "build"}` event, and the turn continues with build tools — no question flow. An edit before the call is still refused; one after it succeeds in the same turn. Readonly turns and build-mode calls are refused; the schema is identical on every request of the turn (prompt cache). First landed as an Execute / Keep planning ask (97add146), reworked per the owner's 2026-09-21 decision.
 
 Evidence: docs/qa_evidence/2026-09-21-plan-exit/verification.md
+
+Guest follow-up (2026-09-23): the Relay guest bridge now advertises `write_plan` and `exit_plan_mode` and routes them through the native Agent policy. Routed guests use ordinary permissions, as current Plan mode is instructional; they can save a plan, exit, and continue in the same turn. A final implementation reply after exit is not saved as a second plan. Evidence: docs/qa_evidence/2026-09-23-guest-plan-exit-XP7N/verification.md
 
 ## QA checklist
 - [ ] In a native Relay plan-mode turn, have the agent call exit_plan_mode: no ask appears, the PLAN indicator clears, Build mode shows, and implementation continues in the same turn.

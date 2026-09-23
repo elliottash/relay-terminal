@@ -39,3 +39,6 @@ Check · 1 not-applicable, 4 passed. The status is under `## Tests`; earlier che
 
 <!-- relay:entry 20260922T174552Z-h9 author=agent kind=event model=gpt-6-astra pane=baae7254 turn=8f65c867dd9d4a8a94e66a0c3929c7b9/ca4dfc45a7264fb7a0708e6bc5e59bf1 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-question-… → {"plans": [], "commits": ["cf473cd53b74016b741ae8730831caefc4a0495e"], "evidence…; appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T025141Z-rt author=agent kind=evidence -->
+Check · 1 failed, 1 not-applicable, 3 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
