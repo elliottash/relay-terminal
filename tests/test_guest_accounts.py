@@ -289,6 +289,9 @@ class RowsAndLimitsTests(unittest.TestCase):
             ghp.usage_limits_event("claude", {"windows": [
                 {"kind": "5h", "used_percent": 10, "resets_at": 1}]}, "work")
             rows = {row["id"]: row for row in ghp.preset_rows()}
+            # The rows start the background scan; it must finish inside these mocks, or it runs on
+            # into the next test and marks *its* catalogue ready.
+            self.assertTrue(ghp.catalog_ready.wait(5.0))
         self.assertIn("guest:claude:work", rows)
         work, home = rows["guest:claude:work"], rows["guest:claude:home"]
         self.assertEqual((work["label"], work["guest"], work["account"]),
