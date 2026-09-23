@@ -2810,12 +2810,21 @@ void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
         } else {
             const QSize natural = m_images.naturalSize(info.preview);
             if (natural.isValid()) {
-                const QSize size = natural.scaled(box.size(), Qt::KeepAspectRatio);
-                const QRect imageRect(box.topLeft(), size);
+                const QRect content = info.kind == QStringLiteral("math")
+                    ? box.adjusted(6, m_ch + 2, -6, -2) : box;
+                const QSize size = natural.scaled(content.size(), Qt::KeepAspectRatio);
+                const QRect imageRect(content.topLeft(), size);
                 ImageCache::State state;
-                const QImage preview = m_images.picture(info.preview, size, devicePixelRatioF(), &state);
-                if (!preview.isNull())
+                QImage preview = m_images.picture(info.preview, size, devicePixelRatioF(), &state);
+                if (!preview.isNull()) {
+                    if (info.kind == QStringLiteral("math")) {
+                        preview = preview.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                        QPainter tint(&preview);
+                        tint.setCompositionMode(QPainter::CompositionMode_SourceIn);
+                        tint.fillRect(preview.rect(), m_scheme.foreground);
+                    }
                     p.drawImage(imageRect, preview);
+                }
             }
             p.fillRect(QRect(box.left(), box.top(), box.width(), m_ch),
                        QColor(0, 0, 0, 150));
