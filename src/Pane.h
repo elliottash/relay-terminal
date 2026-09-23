@@ -9328,7 +9328,6 @@ public:
     // "Continue": an ordinary ask, sent by /continue, the ▸ Continue link, the palette row, and
     // Ctrl+Enter on an empty prompt box (#SXF1).
     void continueTurn(bool slowPath = false) {
-        if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         m_limitReached = false;
         m_turnCutOff = false;
         submitAgent(QStringLiteral("Continue"), false);

@@ -30,6 +30,7 @@
 #include <QPlainTextEdit>
 #include <QToolButton>
 #include <QScreen>
+#include <QSettings>
 
 #include <cstdio>
 
@@ -496,6 +497,46 @@ void ctrlClickEditsTheActualFile()
     console.openOutputTarget(home->path(), 0, true, Qt::ControlModifier);
     CHECK(edited.isEmpty());
     CHECK_EQ(context.seen, QStringList({home->path()}));
+}
+
+void ctrlEnterStartsADeferredGuestOnItsFirstPrompt()
+{
+    QSettings settings;
+    const QVariant previous = settings.value(QStringLiteral("provider/preset"));
+    settings.setValue(QStringLiteral("provider/preset"), QStringLiteral("guest:codex"));
+    for (const QString prompt : {QStringLiteral("First request"), QString()}) {
+        StubContext context;
+        context.workspace = home->path();
+        Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+        QList<QJsonObject> sent;
+        console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+        console.deliverWorkerEvent(QJsonObject{{"event", "presets"}, {"presets", QJsonArray{
+            QJsonObject{{"id", "guest:codex"}, {"label", "Codex"}, {"model", "codex"},
+                        {"harness", true}, {"group", "guest"}}}}});
+        CHECK(std::none_of(sent.cbegin(), sent.cend(), [](const QJsonObject &message) {
+            return message.value("type") == QStringLiteral("configure");
+        }));
+        sent.clear();
+        console.draftInComposer(prompt);
+        console.interruptAgentWithPrompt();
+        CHECK_EQ(sent.size(), 1);
+        if (sent.size() == 1) {
+            CHECK_EQ(sent[0].value("type").toString(), QStringLiteral("configure"));
+            CHECK_EQ(sent[0].value("preset").toString(), QStringLiteral("guest:codex"));
+        }
+        CHECK_EQ(console.queuedPrompts(), 1);
+        console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "codex"},
+                                               {"preset", "guest:codex"}, {"agent_role", "main"}});
+        QCoreApplication::processEvents();
+        QList<QJsonObject> asks;
+        for (const QJsonObject &message : sent)
+            if (message.value("type") == QStringLiteral("ask")) asks << message;
+        CHECK_EQ(asks.size(), 1);
+        if (asks.size() == 1) CHECK_EQ(asks[0].value("text").toString(),
+                                      prompt.isEmpty() ? QStringLiteral("Continue") : prompt);
+    }
+    if (previous.isValid()) settings.setValue(QStringLiteral("provider/preset"), previous);
+    else settings.remove(QStringLiteral("provider/preset"));
 }
 
 void theContextGetsFirstRefusalOnLocalLinkKinds()
@@ -1566,6 +1607,7 @@ int main(int argc, char **argv)
     cases::queueRowArrowSendsOnlyThatPrompt();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
+    cases::ctrlEnterStartsADeferredGuestOnItsFirstPrompt();
     cases::everyChordReachesTheContextWithItsOwnRoute();
     cases::aClickedActionTeachesItsLetter();
     cases::theComposerSaysWhatTheContextSays();

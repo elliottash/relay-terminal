@@ -188,3 +188,23 @@ Owner, in the terminal pane: "ctrl+enter in an empty prompt should always send a
 
 <!-- relay:entry 20260922T044939Z-gd author=agent kind=evidence -->
 Check · 1 not-applicable, 4 passed. The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260923T233919Z-px author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent claimed this card · Needs verification → Executing, implemented_by openai/gpt-6-sol via codex, session bf8aa1b7
+
+<!-- relay:entry 20260923T233919Z-py author=agent kind=progress model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b pane_token=bf8aa1b7-4720-412c-a295-89eceb8d3bae -->
+Claimed (bf8aa1b7) · working on it from a terminal pane
+
+Recheck the landed Ctrl+Enter Continue behavior, including the first empty submission in an idle deferred guest pane; add evidence and return to verification.
+
+<!-- relay:entry 20260923T234127Z-c2 author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent updated this card · replaced `## Done means`
+
+<!-- relay:entry 20260923T234509Z-mp author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent updated this card · links: {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c… → {"commits": ["d9cde60524af4b8def16916aa505875d321299de", "472ae1a210a4e0577d690c…; appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T234518Z-2w author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260923T234544Z-m5 author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent moved this card · Executing → Needs verification · The existing empty-box Continue behavior now also activates a deferred idle guest; consolemode and continueturn passed. · evidence docs/qa_evidence/2026-09-23-ctrl-enter-guest/ · implemented_by openai/gpt-6-sol via codex

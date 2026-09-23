@@ -3,11 +3,11 @@ id: SXF1
 type: work
 status: needs-verification
 assignee: agent
-implemented_by: deepseek/deepseek-v4.1-flash
-session: dc5c54ef-dc70-4eaa-8564-ebd061b9126b
+implemented_by: openai/gpt-6-sol via codex
+session: bf8aa1b7-4720-412c-a295-89eceb8d3bae
 rank: zzzzzzzzz
 created: '2026-09-19'
-links: {commits: [d9cde60524af4b8def16916aa505875d321299de, 472ae1a210a4e0577d690ce6effcc396982c9cfc, 78416e396b1cf6db5eebe1b45efab4014de01fda, c55c2e0f5bd75fbd7c7115530784ba2c39534a1c, e7b1e4be527c553403a71487c0b2e4c482e72ad5], evidence: [docs/qa_evidence/2026-09-20-ctrl-enter-continue/, docs/qa_evidence/2026-09-20-ctrl-enter-always/], github: null, plans: [], related: []}
+links: {commits: [d9cde60524af4b8def16916aa505875d321299de, 472ae1a210a4e0577d690ce6effcc396982c9cfc, 78416e396b1cf6db5eebe1b45efab4014de01fda, c55c2e0f5bd75fbd7c7115530784ba2c39534a1c, e7b1e4be527c553403a71487c0b2e4c482e72ad5], evidence: [docs/qa_evidence/2026-09-20-ctrl-enter-continue/, docs/qa_evidence/2026-09-20-ctrl-enter-always/, docs/qa_evidence/2026-09-23-ctrl-enter-guest/], github: null, plans: [], related: [BG2Y]}
 ---
 # ctrl + enter to continue
 
@@ -71,6 +71,7 @@ Surfaces: the Keymap descriptions of `agent.interrupt` / `agent.continue`, the `
 - Commit `e7b1e4be` (land.py, onto tip `25f54d1b`): the rule, the routing, the surfaces and the test.
 - Live check: `docs/qa_evidence/2026-09-20-ctrl-enter-always/` — Xvfb plus a mock provider on loopback, ALL PASS (the mock's log holds the `Continue` no typing produced after an ordinary turn).
 - Note for whoever lands next on `src/Pane.h`: this commit was held for the `--confirm` review because other live sessions hold the path, and its hunks were all this card's; the working tree still carries their uncommitted work untouched.
+2026-09-23 follow-up for a fresh idle guest pane: `Pane::continueTurn()` now lets `submitAgent("Continue")` activate a deferred guest rather than returning a provider error. The pane regression verifies the first `configure` and single `ask`; see `docs/qa_evidence/2026-09-23-ctrl-enter-guest/README.md`.
 
 ## Tests
 - `ctest -R continueturn` — tests/continueturn_test.cpp
@@ -88,3 +89,10 @@ The first is the rule itself (`src/ContinueTurn.h`, header-only): an empty box w
 - passed · unittest:tests.test_sessions.SessionTests.test_resume_reports_a_turn_left_open — tests/test_sessions.py::SessionTests::test_resume_reports_a_turn_left_open passed for this revision on spark-dcc9, 2026-09-20T23:48:24Z
 - not-applicable · manual:docs/qa_evidence/2026-09-20-ctrl-enter-always/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-20-ctrl-enter-always/
 history: thread
+`ctest --test-dir build -R '^consolemode$' --output-on-failure` — deferred guest first `Continue` and typed prompt.
+`ctest --test-dir build -R '^continueturn$' --output-on-failure` — empty/typed/busy decision.
+`manual: docs/qa_evidence/2026-09-23-ctrl-enter-guest/`
+
+## Done means
+Ctrl+Enter in an empty prompt box sends the ordinary agent prompt `Continue` whenever the agent is idle, including a fresh guest-harness pane whose process is deferred until the first prompt.
+That first `Continue` starts the selected guest and runs once after configuration. A typed prompt remains its own text; a busy empty box sends nothing; a password prompt starts no agent turn.
