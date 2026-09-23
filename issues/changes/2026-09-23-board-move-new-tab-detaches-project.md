@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-23'
 source: 'user in Relay, 2026-09-23'
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-board-move-G4VB/04-moved.png], related: [JN7X, A0SF], github: null}
+links: {plans: [], commits: [4b1df0327181], evidence: [docs/qa_evidence/2026-09-23-board-move-G4VB/04-moved.png], related: [JN7X, A0SF], github: null}
 ---
 # Moving the Board into a new tab loses its project
 
