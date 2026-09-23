@@ -242,6 +242,21 @@ class RelayBuildTest(unittest.TestCase):
         self.assertEqual(third.returncode, 0, third.stdout)
         self.assertNotIn("configuring", third.stdout)
 
+    @unittest.skipUnless(shutil.which("ninja"), "fast builds need Ninja")
+    def test_fast_build_is_separate_and_uses_developer_flags(self):
+        root = self.make_project()
+        self.first_build(root, slow=0)
+        normal_binary = self.binary(root)
+        normal_mtime = normal_binary.stat().st_mtime_ns
+
+        fast = self.build(root, "--fast", "--check", "MARKER-ONE", slow=0)
+        self.assertEqual(fast.returncode, 0, fast.stdout)
+        self.assertTrue((root / "build-fast" / "relay").is_file())
+        self.assertEqual(normal_binary.stat().st_mtime_ns, normal_mtime)
+        cache = (root / "build-fast" / "CMakeCache.txt").read_text()
+        self.assertIn("CMAKE_GENERATOR:INTERNAL=Ninja", cache)
+        self.assertIn("CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O0 -g1 -DNDEBUG", cache)
+
     def test_runs_from_any_cwd_and_checks_the_binary(self):
         root = self.make_project()
         self.first_build(root, slow=0)

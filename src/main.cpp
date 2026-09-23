@@ -153,8 +153,8 @@
 #endif
 
 // The units main.cpp used to hold inline, one header each (see docs/ARCHITECTURE.md).
-// This is still one translation unit: the headers are included here and nowhere else,
-// so Pane and RelayWindow keep their bodies in the class and the build stays as it was.
+// Pane and RelayWindow declarations remain in those headers; larger method bodies now compile
+// in their own source files so an implementation edit need not recompile main.cpp (#243T).
 #include "AppPaths.h"
 #include "Keymap.h"
 #include "Isolation.h"

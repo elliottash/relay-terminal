@@ -594,10 +594,11 @@ if(RELAY_BUILD_APP)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT WIN32 AND NOT APPLE)
         message(FATAL_ERROR "Relay supports Linux, Windows and macOS.")
     endif()
-    # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py); it is
-    # still one translation unit -- main.cpp includes them -- and they are listed so AUTOMOC and
-    # IDEs see them.
+    # main.cpp was split into one header per unit on 2026-09-18 (scripts/split-main.py).
+    # The larger Pane and RelayWindow methods now compile in separate source files (#243T).
     add_executable(relay src/main.cpp
+        src/Pane.cpp src/PaneEvents.cpp src/PaneSession.cpp src/PaneUi.cpp src/PaneRuntime.cpp
+        src/RelayWindow.cpp src/RelayWindowModels.cpp src/RelayWindowSettings.cpp src/RelayWindowCore.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
         # The seam a console makes its surface calls through (#AGNT).
         src/AgentHost.h

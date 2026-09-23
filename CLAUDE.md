@@ -182,7 +182,7 @@ work: it reports that and leaves it alone, and the same goes for stray branches,
 
 ## Build through `scripts/relay-build`
 
-`src/main.cpp` is one translation unit and takes minutes to compile, and every session builds the
+`src/main.cpp` and the window sources can take time to compile, and every session builds the
 same `build/` directory. On 2026-09-19 that produced a green build of code nobody had written: a
 compile that had already read `src/Pane.h` wrote its object **35 seconds after** another session
 edited that header, so the next `cmake --build` saw an object newer than every source, rebuilt
@@ -255,12 +255,12 @@ lines — and one header per unit beside it:
 - `src/WindowManagerImpl.h` — the `WindowManager` members that were already written out of line
   below `RelayWindow`, now `inline`.
 
-**It is still one translation unit.** `main.cpp` includes those headers and nothing else does, and
-every class in them defines its members in the class body, exactly as before. The split was about
-being able to find and edit a class without scrolling past four others — not about build times, and
-not a step towards a library. A one-line change to `Pane` still recompiles the lot. De-inlining
-`Pane` into a `Pane.cpp` is a separate, riskier job; do not start it as a side effect of something
-else.
+The original split was for navigation. Card #243T moved 18 `Pane` and 13 `RelayWindow` method
+bodies into nine `.cpp` files. Editing one of those bodies now compiles its file without rebuilding
+`main.cpp`; editing either class header still recompiles several window sources. Keep new method
+bodies in the matching `.cpp` file when possible, and use `scripts/relay-build --fast` for a
+separate `build-fast/` developer binary (`-O0 -g1`). The normal `build/` remains the optimized
+local validation build.
 
 Two units joined them on 2026-09-21, and they are **not** part of the one translation unit: they are
 their own library (`relay-agentcontext`, QtCore only), so `relay-board`, `relay-settings` and
@@ -282,8 +282,8 @@ Two practical consequences:
   it to the `relay` target's source list in `CMakeLists.txt` if it gets a file of its own (AUTOMOC
   and IDEs read that list; nothing here has `Q_OBJECT`).
 - Each header includes what it uses and compiles on its own. If you add a use of a Qt class, add its
-  `#include` to that header, not only to `main.cpp` — `main.cpp`'s includes come first in the one
-  translation unit, so a missing one in a header will not show up in the build.
+  `#include` to that header, not only to `main.cpp`; the new window source files compile the
+  headers separately.
 
 `scripts/split-main.py` is the tool that did it: it finds every region by content anchor, moves the
 text without rewriting it (the only change is the word `inline`), and `--check` rebuilds the

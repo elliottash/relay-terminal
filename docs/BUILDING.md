@@ -37,6 +37,17 @@ scripts/relay-build --target relay-engine-tests
 ctest --test-dir build -R 'the-targeted-test' --output-on-failure
 ```
 
+For a faster local edit loop, use the separate Ninja developer build:
+
+```bash
+scripts/relay-build --fast --target relay
+./build-fast/relay --workspace /path/to/project
+```
+
+`--fast` uses `-O0 -g1` and leaves the normal `build/` configuration alone. Use the normal build
+for performance checks, release preparation and full validation; the fast binary runs without
+optimization. Both directories are ignored by Git and protected by separate build locks.
+
 Ubuntu 26.04 and Debian 13 use Qt 6 packages such as `qt6-base-dev` and
 `libkf6syntaxhighlighting-dev`. KSyntaxHighlighting and Qt PDF are optional. A normal local install
 uses `cmake --install build` and defaults to `~/.local` when configured through `scripts/build.sh`.

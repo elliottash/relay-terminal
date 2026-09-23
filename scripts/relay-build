@@ -25,6 +25,7 @@ Usage:
 
     scripts/relay-build                      # configure if needed, then build
     scripts/relay-build --target relay       # extra args go to `cmake --build`
+    scripts/relay-build --fast --target relay # separate Ninja build with faster developer flags
     scripts/relay-build --check "Fold thinking"   # fail unless build/relay has it
     scripts/relay-build --wait-seconds 300   # give up if another build holds the lock
 
@@ -218,6 +219,8 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--wait-seconds", type=float, default=0,
                         help="give up after N seconds waiting for another "
                              "session's build (default: wait forever)")
+    parser.add_argument("--fast", action="store_true",
+                        help="build in build-fast/ with Ninja, -O0 and minimal debug info")
     parser.add_argument("--check", metavar="STRING", action="append", default=[],
                         help="after building, fail unless this literal is in "
                              "build/relay (repeatable)")
@@ -237,7 +240,11 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
 
 
 def main(argv: list[str]) -> int:
+    global BUILD, LOCK
     args, extra = parse_args(argv)
+    if args.fast:
+        BUILD = ROOT / "build-fast"
+        LOCK = BUILD / ".relay-build.lock"
 
     lock_fd = acquire(args.wait_seconds)
     if lock_fd is None:
@@ -250,8 +257,10 @@ def main(argv: list[str]) -> int:
         start_ns = time.time_ns()
 
         if args.reconfigure or args.cmake_arg or not configured():
-            command = ["cmake", "-S", str(ROOT), "-B", str(BUILD),
-                       "-DCMAKE_BUILD_TYPE=RelWithDebInfo", *args.cmake_arg]
+            command = ["cmake", "-S", str(ROOT), "-B", str(BUILD)]
+            if args.fast:
+                command += ["-G", "Ninja", "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O0 -g1 -DNDEBUG"]
+            command += ["-DCMAKE_BUILD_TYPE=RelWithDebInfo", *args.cmake_arg]
             say("configuring: " + " ".join(command))
             code = subprocess.call(command, cwd=str(ROOT))
             if code != 0:
