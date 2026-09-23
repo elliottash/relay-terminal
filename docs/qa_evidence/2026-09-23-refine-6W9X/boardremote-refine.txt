@@ -1,0 +1,26 @@
+********* Start testing of BoardRemoteTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : BoardRemoteTests::initTestCase()
+PASS   : BoardRemoteTests::aPhonesRefineIsSaidAsARefine()
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_open)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_refresh)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_card_get)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_search)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_comment)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(no kind is a note)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(a machine's kind is a note)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(a decision is the owner's words)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(a decision already quoted)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(a decision too short to quote)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_move)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_move, no reason)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_create)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_create, words only)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_ask discuss)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_ask plan, no words)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_ask refine, no words)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_cancel)
+PASS   : BoardRemoteTests::eachRequestBecomesTheWorkersOwnMessage(board_resume)
+PASS   : BoardRemoteTests::cleanupTestCase()
+Totals: 22 passed, 0 failed, 0 skipped, 0 blacklisted, 1ms
+********* Finished testing of BoardRemoteTests *********

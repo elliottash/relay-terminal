@@ -1,0 +1,13 @@
+card #3BPH: status=discussing labels=['bug', 'board']
+- links.related += BGRN, 48S3: {"ok": true, "changes": ["links: {\"plans\": [], \"commits\": [], \"evidence\": [], \"related\": [], \"github\": null} → {\"plans\": [], \"commits\": [], \"evidence\": [], \"related\": [\"48S3\", \"BGRN\"], \"githu…"]}
+- links with commits dropped: {"code": "board_mode_refused", "error": "links may change only in `related`: send the card's whole links object with ids added to related, and every other key exactly as it is. A Refine turn writes this card's links.related, its labels and a missing `## Done means`, and comments; the issue is Discuss's to change and the plan is Plan's."}
+- labels += tests (a word the board uses): {"ok": true, "changes": ["labels: [\"bug\", \"board\"] → [\"bug\", \"board\", \"tests\"]"]}
+- labels += zzinvented: {"code": "board_mode_refused", "error": "zzinvented is not a label this board uses yet: suggest it in your note and the owner decides. A Refine turn writes this card's links.related, its labels and a missing `## Done means`, and comments; the issue is Discuss's to change and the plan is Plan's."}
+- ## Done means (card has one already: False): {"ok": true, "changes": ["replaced `## Done means`"]}
+- ## Issue rewrite: {"code": "board_mode_refused", "error": "`## Issue` is not a Refine turn's section. A Refine turn writes this card's links.related, its labels and a missing `## Done means`, and comments; the issue is Discuss's to change and the plan is Plan's."}
+- ## Plan: {"code": "board_mode_refused", "error": "`## Plan` is not a Refine turn's section. A Refine turn writes this card's links.related, its labels and a missing `## Done means`, and comments; the issue is Discuss's to change and the plan is Plan's."}
+- retitle: {"code": "board_mode_refused", "error": "title is not a Refine turn's to change. A Refine turn writes this card's links.related, its labels and a missing `## Done means`, and comments; the issue is Discuss's to change and the plan is Plan's."}
+- move to ready: {"code": "board_mode_refused", "error": "board_move_card is not available in a Refine turn on #3BPH: it reads the repository (read_file, list_directory, search_files) and writes only through the board tools. Writing code is Run's job — the owner hands the card to a terminal pane for that."}
+- comment on #BGRN: {"code": "board_mode_refused", "error": "A Refine turn writes only to #3BPH, the card being refined. Name #BGRN in your note and add it to this card's links.related instead."}
+- note on own card: {"ok": true, "changes": null}
+card #3BPH after: status=discussing labels=['bug', 'board', 'tests'] related=['48S3', 'BGRN']

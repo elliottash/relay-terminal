@@ -1,0 +1,21 @@
+test_refine_cannot_touch_the_issue_the_plan_the_title_or_invent_a_label (tests.test_board_tools.RefineTurnScopeTests.test_refine_cannot_touch_the_issue_the_plan_the_title_or_invent_a_label) ... ok
+test_refine_leaves_an_existing_done_means_alone (tests.test_board_tools.RefineTurnScopeTests.test_refine_leaves_an_existing_done_means_alone) ... ok
+test_refine_may_change_only_the_related_key_of_links (tests.test_board_tools.RefineTurnScopeTests.test_refine_may_change_only_the_related_key_of_links) ... ok
+test_refine_refusals_name_the_mode_and_the_right_buttons (tests.test_board_tools.RefineTurnScopeTests.test_refine_refusals_name_the_mode_and_the_right_buttons) ... ok
+test_refine_touches_no_other_card_and_moves_nothing (tests.test_board_tools.RefineTurnScopeTests.test_refine_touches_no_other_card_and_moves_nothing) ... ok
+test_refine_writes_related_links_known_labels_and_a_missing_done_means (tests.test_board_tools.RefineTurnScopeTests.test_refine_writes_related_links_known_labels_and_a_missing_done_means) ... ok
+test_the_refine_brief_searches_closed_cards_and_never_touches_the_issue (tests.test_board_tools.RefineTurnScopeTests.test_the_refine_brief_searches_closed_cards_and_never_touches_the_issue) ... ok
+test_a_card_turn_does_not_move_a_consoles_tool_list (tests.test_board_tools.CardTurnScopeTests.test_a_card_turn_does_not_move_a_consoles_tool_list)
+Card #CTRN: `CardScope.tool_specs` is gone — what a mode may call is refused instead. ... ok
+test_a_discuss_turn_may_rewrite_the_card_and_the_thread_keeps_the_old_text (tests.test_board_tools.CardTurnScopeTests.test_a_discuss_turn_may_rewrite_the_card_and_the_thread_keeps_the_old_text) ... ok
+test_a_plan_that_repeats_its_heading_is_written_once (tests.test_board_tools.CardTurnScopeTests.test_a_plan_that_repeats_its_heading_is_written_once) ... ok
+test_a_plan_turn_cannot_retitle_relabel_or_touch_the_issue (tests.test_board_tools.CardTurnScopeTests.test_a_plan_turn_cannot_retitle_relabel_or_touch_the_issue) ... ok
+test_a_plan_turn_touches_no_other_card_and_moves_nothing (tests.test_board_tools.CardTurnScopeTests.test_a_plan_turn_touches_no_other_card_and_moves_nothing) ... ok
+test_a_plan_turn_writes_its_own_cards_plan_section (tests.test_board_tools.CardTurnScopeTests.test_a_plan_turn_writes_its_own_cards_plan_section) ... ok
+test_an_unknown_mode_is_refused (tests.test_board_tools.CardTurnScopeTests.test_an_unknown_mode_is_refused) ... ok
+test_the_turn_ends_and_the_tools_are_whole_again (tests.test_board_tools.CardTurnScopeTests.test_the_turn_ends_and_the_tools_are_whole_again) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.246s
+
+OK

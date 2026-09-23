@@ -1,0 +1,7 @@
+test_a_failed_turn_writes_nothing (tests.test_board_protocol.AskTests.test_a_failed_turn_writes_nothing) ... ok
+Owner decision 5 on #CTRN: "yes, unchanged from what a failed turn leaves today." ... ok
+test_a_failed_or_stopped_turn_ends_the_scope_too (tests.test_board_protocol.ModeTests.test_a_failed_or_stopped_turn_ends_the_scope_too) ... ok
+test_a_refine_needs_no_words_carries_its_brief_and_moves_nothing (tests.test_board_protocol.ModeTests.test_a_refine_needs_no_words_carries_its_brief_and_moves_nothing) ... ok
+test_a_refine_with_a_note_passes_it_verbatim (tests.test_board_protocol.ModeTests.test_a_refine_with_a_note_passes_it_verbatim) ... ok
+Ran 182 tests in 15.391s
+OK
