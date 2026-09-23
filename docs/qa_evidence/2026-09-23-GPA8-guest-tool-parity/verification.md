@@ -17,6 +17,10 @@ MCP call returns before the test's five-second sleep would finish. The pre-exist
 test now checks the harness instructions where
 Relay actually sends them; the preceding user prompt contains only the user's words.
 
+The same 668-test command passed again from an archive of landed commit `423326d77f5b`,
+with only tracked backend, tests, scripts, policy and the files those tests read extracted.
+That check used the committed bytes, independent of the shared working tree.
+
 ## Installed-client turns
 
 First turn, each guest was asked to create and read one disposable card through `relay_board`:

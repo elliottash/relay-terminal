@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-GPA8-guest-tool-parity/verification.md], related: [XP7N, 4NXH, AG7R], github: null}
+links: {plans: [], commits: [423326d77f5ba247f8dc3223c34aa1f8f8118612], evidence: [docs/qa_evidence/2026-09-23-GPA8-guest-tool-parity/verification.md], related: [XP7N, 4NXH, AG7R], github: null}
 ---
 # Close guest agent tool parity gaps
 
