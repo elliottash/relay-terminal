@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User report in Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-spawned-guests/], related: [D2PX], github: null}
+links: {plans: [], commits: [fc8a0a4f53b9441d4db066f04b61835d9025abe8], evidence: [docs/qa_evidence/2026-09-23-spawned-guests/], related: [D2PX], github: null}
 ---
 # Spawned guest agents appear as sessions with Subagent threads off
 
