@@ -1403,14 +1403,18 @@ void ModelPicker::updateFooter() {
                                 "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
                                 "to take it out everywhere, tick a row under “more from…” to bring one in")
         : tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · drag to reorder — or into another section to move it "
-                                "there · del removes · type a name, ctrl+enter adds it to the highlighted section · "
-                                "ctrl+z undoes")
+                                "there · del removes · “+ add” or ctrl+enter ranks an available model in its section "
+                                "· typing filters this page; search every model on available · ctrl+z undoes")
               + (sectionsPage() || boxClassTier(m_tier)
                      ? QStringLiteral(" · “in box”: how far down a class alt+m shows, and the tick on a section's "
                                       "own line is whether it shows at all")
                      : QString());
     if (onEscape) text += QStringLiteral(" · esc back to the pane");
     m_footer->setText(text);
+    // Only available searches the whole catalog (#AVR8); a list page filters what it draws.
+    m_filter->setPlaceholderText(m_tier == kAll
+        ? QStringLiteral("search every model · ↑↓ select · enter uses it")
+        : QStringLiteral("filter this page · ↑↓ select · enter uses it · ctrl+enter adds it here"));
 }
 
 // ----- the list edits ----------------------------------------------------------------------------
