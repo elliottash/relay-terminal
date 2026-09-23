@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Relay Terminal — one prompt for your shell and your coding agent</title>
-  <meta name="description" content="A workspace for agentic coding. One prompt box: commands run in your shell, everything else goes to the agent, which answers in the terminal itself. Your issue tracker lives in git, your phone joins without an account, and any provider's key works. No telemetry.">
+  <meta name="description" content="A workspace for agentic coding. One prompt box: commands run in your shell, everything else goes to the agent, which answers in the terminal itself. Your issue tracker lives in git, your phone joins without an account, and any provider's key works.">
   <!-- The two panels the page can be in: IBM Beige and Dark Copper, the app's own themes. -->
   <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)">
@@ -56,7 +56,7 @@
           <h1 id="hero-title">One prompt for your shell and your coding agent</h1>
           <p class="lede">A workspace for agentic coding. Commands go to your shell, everything else goes to
             the agent, and Relay shows you which before you press Enter. It works the moment it opens on an
-            included allowance, and runs on your own API keys when you want them. No account, no telemetry.</p>
+            included allowance, and runs on your own API keys when you want them.</p>
           <div class="cta">
             <a class="button primary" href="https://github.com/elliottash/relay-terminal/releases/tag/v0.1.0-beta.4">Download the beta</a>
             <a class="button" href="https://github.com/elliottash/relay-terminal">Source on GitHub</a>
@@ -333,9 +333,9 @@
               shortcut.</p>
           </li>
           <li class="plain">
-            <h3>No telemetry, no account</h3>
-            <p>No analytics, no crash reporting and no Relay account. Agent requests use the provider selected
-              for that job; <a href="free.html">Relay Free</a> uses a gateway with metadata-only logs.
+            <h3>Your provider, your choice</h3>
+            <p>Agent requests use the provider selected for that job;
+              <a href="free.html">Relay Free</a> uses Relay's gateway.
               Remote sharing and other network tools connect when you use them. AGPL-3.0-or-later.</p>
           </li>
         </ul>
@@ -465,19 +465,18 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
           <div>
             <h3>What stays with you</h3>
             <ul class="checks">
-              <li>No telemetry, no analytics, no crash reporting.</li>
               <li>No Relay account. Requests on your own API key go directly to that provider.
                 <a href="free.html">Relay Free</a> requests go through Relay’s gateway. Different jobs can
                 use different providers; guest-agent background tasks may use Relay Free.</li>
               <li>API keys live in your desktop keyring (GNOME Keyring or KWallet, through
                 <code>secret-tool</code>) or in an environment variable. They are passed on stdin, never on a
                 command line, in a settings file or in a log.</li>
-              <li>Relay does not upload shell history as telemetry. Commands can access the network themselves;
+              <li>Commands can access the network themselves;
                 output the agent reads can become part of its provider request. Remote sharing sends the
                 shared pane over an end-to-end encrypted connection.</li>
               <li>A password typed at a masked prompt goes to that program and nowhere else — not to history,
                 the session file, the logs or any model.</li>
-              <li>Conversations and their search index are files on your disk, deleted with the conversation.</li>
+              <li>Saved conversations and their search index are files on your disk.</li>
             </ul>
           </div>
           <div>
@@ -488,8 +487,8 @@ relay --engine-core=libvterm   # pick the emulator core</code></pre>
                 OpenAI, Anthropic, Gemini or any other OpenAI-compatible endpoint. Their privacy policy
                 applies.</li>
               <li>On <a href="free.html">Relay Free</a>, the same things go to Relay's gateway and on to the
-                provider serving that role. The gateway logs one line of metadata per request and never the
-                text. A request made with your own provider key bypasses that gateway.</li>
+                provider serving that role. A request made with your own provider key bypasses
+                that gateway.</li>
               <li><strong>Agent tools can change your files and run commands as your user.</strong> Current
                 development builds let you choose which capabilities require approval in Options › Security;
                 older betas run tools without per-action approval. Guest agents also follow their own

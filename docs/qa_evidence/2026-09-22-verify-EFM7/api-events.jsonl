@@ -1,5 +1,0 @@
-{"time": 1790126656.995419, "pid": 2568191, "direction": "gui-to-worker", "effort": "medium", "model": "gpt-6-astra", "preset": "openai", "type": "configure", "extra": {"reasoning_effort": "high"}}
-{"time": 1790126657.0374415, "pid": 2568191, "direction": "worker-to-gui", "event": "configured", "model": "gpt-6-astra", "agent_role": "main", "effort": "medium", "mode": "build"}
-{"time": 1790126697.0765703, "pid": 2568191, "direction": "gui-to-worker", "id": "ask-1", "text": "Reply with exactly EFM7_API_OK.", "type": "ask"}
-{"time": 1790126697.0771317, "pid": 2568191, "direction": "worker-to-gui", "event": "agent_started", "id": "50e20c04d209407ebd1f7a01fb2ef5a2"}
-{"time": 1790126697.3471713, "pid": 2568191, "direction": "worker-to-gui", "event": "error", "text": "Provider HTTP 401: the API key was rejected for gpt-6-astra at api.openai.com (openai \u00b7 gpt-6 astra). The stored key is missing, wrong, belongs to a different endpoint of the same provider, or is not allowed this model - open Options \u203a Models to check it."}

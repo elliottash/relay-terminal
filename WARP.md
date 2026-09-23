@@ -35,7 +35,7 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   update it when adding messages or events.
 - **Decisions already made:** no Konsole fork (and KonsolePart itself retired 2026-09-18);
   no per-action tool approvals; BYOK first (Relay Free is an included, quota-limited hosted
-  provider since 2026-09-18, `docs/RELAY-FREE.md`); no telemetry. See `docs/ROADMAP.md`.
+  provider since 2026-09-18, `docs/RELAY-FREE.md`). See `docs/ROADMAP.md`.
 
 ## Words
 

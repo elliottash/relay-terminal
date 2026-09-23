@@ -1,4 +1,0 @@
-Live build: scripts/relay-build, shared checkout. Every source commit passed a separate exact-tree build gate.
-HEAD at capture: 8e6094d9ee145228b4e5896a98a2c11ed8360f06
-build/relay SHA256: 7bc2e701869238ba12c98cafe7b60c62b9f0598bb1bc94ebdc1bbcea2e093109
-Fixture: isolated HOME/XDG/Xvfb, fake loopback upstream, generated test access code, keyring stand-in.

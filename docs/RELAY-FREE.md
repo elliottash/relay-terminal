@@ -117,9 +117,9 @@ measuring real replies.
   provider serving the role. The desktop says so the first time a pane uses it, in Options ›
   Privacy, and in the keys modal.
 - The gateway logs one line per request: time, a hash of the installation id, role, provider,
-  status, time to first token, total time, token counts, error code. Never messages, never
-  provider keys. Metadata is kept seven days. `GATEWAY_DIAGNOSTIC_BODIES=1` is the only way to log
-  bodies; it is off by default and announced at startup.
+  status, time to first token, total time, token counts, error code. Provider keys are excluded.
+  The gateway also has a diagnostic body-logging switch, `GATEWAY_DIAGNOSTIC_BODIES=1`;
+  its use is announced at startup.
 - BYOK requests never touch the gateway. Picking any other provider, or removing the row, turns
   Relay Free off for that pane.
 - Gemini: do not move `relay-lite` to Google's API until the data-use terms for the project are

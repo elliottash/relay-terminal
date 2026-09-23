@@ -1,8 +1,8 @@
 # RRP/1: the Relay Remote Protocol (spec, 2026-09-17)
 
-Phase P0 of `issues/features/2026-09-17-remote-phone-and-multiplayer.md` (`#W5N2`). The design and
-the owner decisions behind it are in [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md);
-this document is the wire contract. Section 14 says which parts exist today.
+Phase P0 of `issues/features/2026-09-17-remote-phone-and-multiplayer.md` (`#W5N2`).
+This document is the wire contract. Section 14 says which parts exist today.
+The public design reference is [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md).
 
 Requirement words are normative: **must**, **must not**, **should**, **may**. A rule marked
 **(security)** is covered by a test before the phase that introduces it can ship.
@@ -696,7 +696,7 @@ that is a token that names *this device*:
 Implementation: Python (asyncio, `websockets`, SQLite) in `rendezvous/`, per the design's section 12
 decision — the same toolchain `backend/` already requires, so `ci.yml` tests it with the existing
 pytest job and a self-hoster needs nothing new. Retention: 7 days of metadata (ids, addresses, byte
-counts), no content, no analytics.
+counts).
 
 Rate limits: 20 pairing rooms/hour and 600 push sends/hour per desktop; concurrent sockets counted
 per device (three per connect token, 32 per desktop, eight per address for rooms). In P2, `/v1/ice` defaults guests to **relay-only** candidates: direct ICE would reveal

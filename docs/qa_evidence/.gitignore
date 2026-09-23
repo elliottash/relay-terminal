@@ -1,0 +1,9 @@
+# Raw traces and archives can contain prompts, tokens, host details, and user paths.
+*.log
+*.jsonl
+*.tgz
+*.zip
+*.har
+*.pcap
+*.sqlite
+*.db

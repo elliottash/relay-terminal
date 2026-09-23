@@ -139,8 +139,8 @@ so users upgrade cleanly from beta to final. Tags containing `-` become GitHub p
    run an agent request with a real key, save a key in the keyring, split a pane, `relay open .`,
    quit and relaunch.
 5. **Privacy text is still true**: `site/index.html` "Your key, your provider" and the README
-   (no telemetry; keys in the keyring or env; prompts and tool results go to the provider;
-   agent tools run without approval unless that changed).
+   (keys in the keyring or env; prompts and tool results go to the selected provider,
+   through Relay's gateway for hosted tiers; agent approval behavior matches the build).
 6. **Metadata**: add a `<release>` entry to `packaging/org.relayterminal.Relay.metainfo.xml` and run
    `appstreamcli validate --no-net packaging/org.relayterminal.Relay.metainfo.xml`.
 7. **Native desktop smoke**: install the Windows installer and both macOS DMGs on matching

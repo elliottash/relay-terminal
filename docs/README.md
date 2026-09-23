@@ -1,7 +1,7 @@
 # Relay documentation
 
 Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
-[ROADMAP.md](ROADMAP.md) for where it is going.
+[ROADMAP.md](ROADMAP.md) for the public development overview.
 
 ## Current
 
@@ -9,7 +9,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 |---|---|
 | [DEBUG-HYGIENE.md](DEBUG-HYGIENE.md) | Local diagnostic summaries, outcome/origin coverage, private daily snapshots and weekly signal/card review (#HG26) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Process model, panes, keyboard, routing, inline agent output, control, file panes, agent backend, keys, isolation, packaging layout, engine interface |
-| [ROADMAP.md](ROADMAP.md) | Goals, decisions already made, near/mid/longer-term work with issue links, non-goals |
+| [ROADMAP.md](ROADMAP.md) | Public development overview and links to the Board |
 | [CRASH-DIAGNOSIS.md](CRASH-DIAGNOSIS.md) | What to do when Relay dies: telling a crash from a quit, the `gui_crash` report in relay.log and `worker-faults.log`, `scripts/relay-debug`, reproducing it outside the app, and why this machine keeps no cores |
 | [PROFILING.md](PROFILING.md) | Machine setup for the test-suites and profiling tooling (`scripts/relay-tooling-setup`), a second runner on any machine you name (`scripts/relay-remote-tests`), the three profile targets by hand (build, Python tests, app), viewing a profile without QtWebEngine, and where results go |
 | [VALIDATION.md](VALIDATION.md) | Test inventory, what was verified live, what was not, QA lane status |
@@ -34,7 +34,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | Document | What it covers |
 |---|---|
 | [NEXT-STEPS-RESEARCH.md](NEXT-STEPS-RESEARCH.md) | Konsole fork vs. owned engine, per-pane process isolation, terminal-only Relay |
-| [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) | Linux packaging options, macOS and Windows blockers and signing costs, website, phased plan |
+| [DISTRIBUTION-RESEARCH.md](DISTRIBUTION-RESEARCH.md) | Public pointer to current build and release instructions |
 | [CONTROL-AND-FILE-PANES-RESEARCH.md](CONTROL-AND-FILE-PANES-RESEARCH.md) | How Warp and others hand control between human and agent, password detection, file pane options |
 | [INTAKE-CLARIFICATION-RESEARCH.md](INTAKE-CLARIFICATION-RESEARCH.md) | Recaps, command suggestions, @ files, compaction thresholds, background handoff, instruction and agent file conventions, full-screen and input detection |
 | [SCRATCHPAD-DESIGN.md](SCRATCHPAD-DESIGN.md) | Proposed per-project user–agent scratchpad: format, review loop, actions, merge rules, protocol |
@@ -46,7 +46,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [AGENT-FEATURES-RESEARCH.md](AGENT-FEATURES-RESEARCH.md) | Session, planning, model/effort, command and subagent UX in Warp, opencode, Claude Code and Codex; recommendations and a subagent design for Relay |
 | [TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md](TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md) | Codex, OpenCode V2 and Claude Code context/cost controls compared with Relay; measured usage spike and prioritized token-efficiency proposals |
 | [PALETTE-RESEARCH.md](PALETTE-RESEARCH.md) | Palette designs in other tools; recommended two palettes, later merged into one actions palette, since 2026-09-18 the Actions tab and search of the Settings pane |
-| [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md) | Warp Remote Control, Blink, sshx and others compared; the phone-first design, phases, threat model and owner decisions behind `#W5N2` |
+| [REMOTE-AND-MULTIPLAYER-DESIGN.md](REMOTE-AND-MULTIPLAYER-DESIGN.md) | Public pointer to the implemented remote protocol and source |
 | [OPENCODE-NOTES.md](OPENCODE-NOTES.md) | What Relay's agent could adopt from opencode, ranked |
 | [SWITCHBOARD-AESTHETIC.md](SWITCHBOARD-AESTHETIC.md) | Proposal: the switchboard aesthetic inside Relay — design only, nothing implemented (`#8E4Q`) |
 | [BOARD-TOOLING-RESEARCH.md](BOARD-TOOLING-RESEARCH.md) | The Board as the project's tooling hub (#7BM4): test explorers and test analytics, what "stale", "slow" and "flaky" mean and how they are measured, profiling shapes and what is feasible on these machines, how seven agent products surface verification, and a ranked list of other tooling that fits a board of cards |
