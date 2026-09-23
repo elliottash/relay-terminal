@@ -208,6 +208,13 @@ def _host(base_url: str) -> str:
         return ""
 
 
+# A model change compacts a conversation above this many tokens first, whatever the new window
+# (owner, 2026-09-23: "when changing between models, i would say, compact if there are more than
+# 128K tokens in the context"). Unlike a window that is too small, it is a preference: when the
+# compaction cannot run, the switch lands with the whole conversation (#SWCP).
+SWITCH_COMPACT_TOKENS = 128_000
+
+
 def _switch_ceiling(window: int, max_tokens: int) -> int:
     """The most a conversation may hold and still get an answer from a model with this window: the
     window less room for a reply (the output budget, but at most a quarter of a small window).
@@ -1336,9 +1343,10 @@ class Agent:
     def switch_fit(self, config: ProviderConfig, window: int) -> dict:
         """How the conversation fits a model it may switch to: the numbers the context bar shows for
         it, and a verdict. ``compacts``: over that model's auto-compaction limit, so the switch
-        compacts first (with the model in force summarising). ``refuse``: a reason, when even a
-        perfect compaction could not fit - the system prompt and tools alone leave no room for a
-        reply in that window."""
+        compacts first (with the model in force summarising) — ``required`` then — or the
+        conversation is above ``SWITCH_COMPACT_TOKENS`` (#SWCP), which compacts it towards ``goal``
+        without making the switch depend on it. ``refuse``: a reason, when even a perfect compaction
+        could not fit - the system prompt and tools alone leave no room for a reply in that window."""
         tools = self.tools()
         used, _ = self.context.used(self.messages, tools)
         ceiling = _switch_ceiling(window, config.max_tokens)
@@ -1346,7 +1354,10 @@ class Agent:
         limit = min(compaction.limit_tokens(window, self.context.threshold, config.max_tokens), ceiling)
         floor = int((compaction.estimate_tokens(self.messages[:1]) + compaction.estimate_tokens(tools))
                     * self.context.ratio)
-        fit = {"used": used, "window": window, "limit": limit, "ceiling": ceiling, "compacts": used >= limit}
+        required = used >= limit
+        fit = {"used": used, "window": window, "limit": limit, "ceiling": ceiling, "required": required,
+               "compacts": required or used > SWITCH_COMPACT_TOKENS,
+               "goal": min(limit, SWITCH_COMPACT_TOKENS)}
         if floor >= fit["ceiling"]:
             # `_own_model`, not `self.config`: while a plan, vision or failover swap is up the model
             # in force is this turn's, and the pane stays on the one the user chose.
@@ -1527,16 +1538,28 @@ class Agent:
         config = pending["config"]
         try:
             self.compact("model_switch", target_window=window, target_max_tokens=config.max_tokens,
-                         target_model=config.model)
+                         target_model=config.model, target_limit=fit["goal"])
             if (self.context.used(self.messages, self.tools())[0] >= fit["limit"]
                     and len(compaction.turn_starts(self.messages)) >= 2):
                 # Auto-compaction keeps the last two turns whole; to fit this window, only the last.
                 self.compact("model_switch", target_window=window, target_max_tokens=config.max_tokens,
                              target_model=config.model, keep_turns=1)
         except Exception as exc:
+            stopped = isinstance(exc, Cancelled)
+            if not stopped and not fit["required"]:
+                # Only the 128K preference asked for it (#SWCP): the conversation fits the new window
+                # as it is, so the switch lands whole rather than being refused. A model in force
+                # that cannot summarise — a guest harness with no summaries role — is the usual case.
+                self.emit({"event": "status", "text": f"Could not compact before switching "
+                                                      f"({str(exc)[:200] or type(exc).__name__}); "
+                                                      f"{config.model} takes over with the whole conversation."})
+                with self._model_lock:
+                    self._switching = None
+                    if self._pending_model is None:
+                        return self._land_switch(pending, turn_id, step, at, compacted=False)
+                return self.apply_pending_model(turn_id, step, at)    # a newer switch wins
             with self._model_lock:
                 self._switching = None
-            stopped = isinstance(exc, Cancelled)
             self._refuse_switch(pending, (f"{config.model} did not take over: the conversation had to be compacted "
                                           f"to fit its window and the compaction "
                                           + ("was stopped" if stopped else f"failed ({str(exc)[:300] or type(exc).__name__})")
@@ -1835,12 +1858,13 @@ class Agent:
 
     def compact(self, reason: str = "manual", focus: str | None = None, *, target_window: int | None = None,
                 target_max_tokens: int | None = None, target_model: str | None = None,
-                keep_turns: int = compaction.KEEP_TURNS) -> dict:
+                keep_turns: int = compaction.KEEP_TURNS, target_limit: int | None = None) -> dict:
         """Compact the conversation. Only call between steps (never inside a tool-call group).
 
         ``target_window``: compact for a model about to take over (reason "model_switch", issue
         3ES1): the model in force still summarises, but the limit to get under and the carried
-        block's budgets are the new window's."""
+        block's budgets are the new window's. ``target_limit``: a lower limit to get under than the
+        window's own (a switch above ``SWITCH_COMPACT_TOKENS``, #SWCP)."""
         if focus is not None and (not isinstance(focus, str) or len(focus) > 2000):
             raise ValueError("focus must be text of at most 2000 characters.")
         with self._lock:
@@ -1856,6 +1880,8 @@ class Agent:
                 target_max = target_max_tokens or self.context.max_tokens
                 limit = min(compaction.limit_tokens(target_window, self.context.threshold, target_max),
                             _switch_ceiling(target_window, target_max))
+            if target_limit:
+                limit = min(limit, target_limit)
                 if carry is not None:
                     carry = lambda region, tail_ids=frozenset(), lean=False: self._carry(  # noqa: E731
                         region, tail_ids, lean, window=target_window)

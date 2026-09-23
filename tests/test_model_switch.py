@@ -356,6 +356,86 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         self.assertFalse(self.sup.busy)
         self.assertEqual((agent.config.model, agent.context.window, self.hooked), ('small', 16000, ['small']))
 
+    # ----- #SWCP (owner, 2026-09-23): a model change compacts above 128K tokens -------------
+    def big_agent(self):
+        """A conversation above SWITCH_COMPACT_TOKENS on a model whose own window still holds it."""
+        agent = self.make_agent(ScriptedProvider())
+        agent.context.window = 1_000_000
+        self.seed_long_history(agent, turns=4, chars=160_000)
+        from relay_core.agent import SWITCH_COMPACT_TOKENS
+        self.assertGreater(agent.context.used(agent.messages, agent.tools())[0], SWITCH_COMPACT_TOKENS)
+        return agent
+
+    def wait_idle(self):
+        for _ in range(100):
+            if not self.sup.busy:
+                break
+            threading.Event().wait(0.02)
+
+    def test_a_switch_above_128k_compacts_even_when_the_new_window_holds_it(self):
+        from relay_core.agent import SWITCH_COMPACT_TOKENS
+        agent = self.big_agent()
+        summarised_by = self.summary_models(agent)
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'big',
+                                       'context_window': 1_000_000})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual((changed['applies'], changed['will_compact']), ('after_compaction', True))
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual((applied['model'], applied['compacted']), ('big', True))
+        self.assertEqual(summarised_by, ['old'])
+        self.assertLess(self.rec.of('compacted')[0]['after_tokens'], SWITCH_COMPACT_TOKENS)
+        self.wait_idle()
+        self.assertEqual(agent.config.model, 'big')
+
+    def test_a_switch_below_128k_that_fits_does_not_compact(self):
+        agent = self.make_agent(ScriptedProvider())
+        agent.context.window = 1_000_000
+        self.seed_long_history(agent, turns=2, chars=40_000)
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'big',
+                                       'context_window': 1_000_000})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual((changed['applies'], changed.get('will_compact')), ('now', None))
+        self.assertEqual(self.rec.of('compaction_started'), [])
+        self.assertEqual(agent.config.model, 'big')
+
+    def test_a_128k_compaction_that_cannot_run_still_lands_the_switch_whole(self):
+        # The model in force cannot summarise (a guest harness with no summaries role answers side
+        # calls with nothing): the conversation fits the new window, so nothing is refused or lost.
+        agent = self.big_agent()
+        before = list(agent.messages)
+        turn = agent.provider.complete
+
+        def complete(messages, tools, emit, cancel):
+            if not tools:
+                return {'role': 'assistant', 'content': ''}
+            return turn(messages, tools, emit, cancel)
+        agent.provider.complete = complete
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'big',
+                                       'context_window': 1_000_000})
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual((applied['model'], applied.get('compacted', False)), ('big', False))
+        self.assertEqual(self.rec.of('model_switch_refused'), [])
+        self.assertTrue(any('takes over with the whole conversation' in e['text']
+                            for e in self.rec.of('status')))
+        self.assertEqual(agent.messages[1:], before[1:])
+
+    def test_a_required_compaction_that_cannot_run_is_still_refused(self):
+        agent = self.make_agent(ScriptedProvider())
+        self.seed_long_history(agent)
+        turn = agent.provider.complete
+
+        def complete(messages, tools, emit, cancel):
+            if not tools:
+                return {'role': 'assistant', 'content': ''}
+            return turn(messages, tools, emit, cancel)
+        agent.provider.complete = complete
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'small',
+                                       'context_window': 16000})
+        refused = self.rec.wait(lambda e: e['event'] == 'model_switch_refused')
+        self.assertIn('compaction failed', refused['reason'])
+        self.wait_idle()
+        self.assertEqual(agent.config.model, 'old')
+
     def test_a_switch_landing_at_turn_end_compacts_before_the_next_turn(self):
         seen, ref = [], []
         step, gate, entered = self.blocked_first_step(ref, seen, text('answered without tools'))
