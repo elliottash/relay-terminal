@@ -9,7 +9,7 @@ session: 49dbf51d-820d-4c71-8c2c-f411cacebb78
 rank: zzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Owner in Relay guest pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [tests/modelpicker_test.cpp], related: [RKP3, RND7], github: null}
+links: {plans: [], commits: [cbfc9756abbccbc577ea9eb854c6496b97cfde00], evidence: [tests/modelpicker_test.cpp], related: [RKP3, RND7], github: null}
 ---
 # Land pending Priorities pane refinements
 
