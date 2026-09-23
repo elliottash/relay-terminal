@@ -140,9 +140,51 @@ QString usageHtml(const QJsonObject &usage) {
 }
 
 QString costHtml(const QJsonObject &usage) {
+    QStringList figures;
     if (usage.contains(QStringLiteral("cost")))
-        return QStringLiteral("$%1").arg(usage.value(QStringLiteral("cost")).toDouble(), 0, 'f', 4);
+        figures << QStringLiteral("$%1 reported").arg(usage.value(QStringLiteral("cost")).toDouble(), 0, 'f', 4);
+    if (usage.contains(QStringLiteral("cost_estimate")))
+        figures << QStringLiteral("$%1 <span class=m>(OpenRouter list-price estimate)</span>")
+                       .arg(usage.value(QStringLiteral("cost_estimate")).toDouble(), 0, 'f', 4);
+    if (!figures.isEmpty()) return figures.join(QStringLiteral(" · "));
     return QStringLiteral("<span class=m>not reported by this provider</span>");
+}
+
+QString turnUsageHtml(const QJsonArray &turns) {
+    if (turns.isEmpty()) return QStringLiteral("<p class=m>No per-turn usage recorded yet.</p>");
+    QString html = QStringLiteral("<table class=usage><tr><th align=left>Turn</th><th align=left>Model</th>"
+                                  "<th align=right>Input</th><th align=right>Cached</th>"
+                                  "<th align=right>Output</th><th align=right>Last prompt</th>"
+                                  "<th align=right>Requests</th><th align=right>Cost</th></tr>");
+    for (const auto &value : turns) {
+        const QJsonObject turn = value.toObject();
+        const auto number = [&turn](const char *key) {
+            const QString name = QString::fromLatin1(key);
+            return turn.contains(name) ? compactNumber(turn.value(name).toVariant().toLongLong()) : QStringLiteral("—");
+        };
+        const QString label = turn.contains(QStringLiteral("turn"))
+            ? QString::number(turn.value(QStringLiteral("turn")).toInt()) : QStringLiteral("—");
+        QString source = turn.value(QStringLiteral("source")).toString();
+        if (source == QLatin1String("guest")) source = QStringLiteral(" · guest reported");
+        else source.clear();
+        QString detail;
+        if (turn.contains(QStringLiteral("handover_tokens")))
+            detail += QStringLiteral(" · handover ~%1 tokens").arg(number("handover_tokens"));
+        if (turn.contains(QStringLiteral("prefix_changes")))
+            detail += QStringLiteral(" · %1 prefix change(s)").arg(number("prefix_changes"));
+        QString cost = costHtml(turn);
+        html += QStringLiteral("<tr><td>%1</td><td>%2</td>"
+                               "<td align=right>%3</td><td align=right>%4</td>"
+                               "<td align=right>%5</td><td align=right>%6</td>"
+                               "<td align=right>%7</td><td align=right>%8</td></tr>")
+                    .arg(label, esc(modelName(turn.value(QStringLiteral("model")).toString())),
+                         number("prompt_tokens"), number("cached_tokens"),
+                         number("completion_tokens"), number("last_prompt_tokens"),
+                         number("requests"), cost);
+        if (!source.isEmpty() || !detail.isEmpty())
+            html += QStringLiteral("<tr><td></td><td colspan=7 class=m>%1%2</td></tr>").arg(esc(source.mid(3)), esc(detail));
+    }
+    return html + QStringLiteral("</table><p class=m>Latest %1 recorded turns; older turns remain in totals.</p>").arg(turns.size());
 }
 
 QString statusMark(const QString &status) {
@@ -186,7 +228,9 @@ QString style() {
         "<style>td.k{color:%1;padding-right:14px;white-space:nowrap;vertical-align:top}"
         "span.m{color:%1} a{color:%2;text-decoration:none} p.t{margin-top:2px;margin-bottom:2px}"
         "p.turn{margin-top:10px;margin-bottom:2px} h2{margin-bottom:4px} h3{margin-top:16px;margin-bottom:4px}"
-        "p.msg{margin-top:6px;margin-bottom:2px} pre{margin-top:0;white-space:pre-wrap}</style>")
+        "p.msg{margin-top:6px;margin-bottom:2px} pre{margin-top:0;white-space:pre-wrap}"
+        "table.usage{border-spacing:0 2px} table.usage th,table.usage td{padding-right:12px;vertical-align:top}"
+        "table.usage th:last-child,table.usage td:last-child{padding-right:0}</style>")
         .arg(muted, linkColor);
 }
 
@@ -225,6 +269,14 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     const QJsonObject usage = info.value(QStringLiteral("usage")).toObject();
     html += row(QStringLiteral("Tokens"), usageHtml(usage));
     html += row(QStringLiteral("Cost"), costHtml(usage));
+    const int children = info.value(QStringLiteral("children_count")).toInt();
+    if (children > 0) {
+        const QJsonObject childUsage = info.value(QStringLiteral("children_usage")).toObject();
+        const QJsonObject taskUsage = info.value(QStringLiteral("task_usage")).toObject();
+        html += row(QStringLiteral("Subagents"), QStringLiteral("%1 · %2").arg(children).arg(usageHtml(childUsage)));
+        html += row(QStringLiteral("Task total"), usageHtml(taskUsage));
+        html += row(QStringLiteral("Task cost"), costHtml(taskUsage));
+    }
     const QString sessionId = info.value(QStringLiteral("session_id")).toString();
     const QString file = info.value(QStringLiteral("file")).toString();
     QString sessionCell = copyableId(sessionId, QStringLiteral("session id"));
@@ -255,6 +307,9 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
         html += row(QStringLiteral("Forked from"), link(QStringLiteral("session"), {{QStringLiteral("id"), forked}, {QStringLiteral("dir"), dir}},
                                                          QStringLiteral("<code>%1</code>").arg(esc(forked.left(8)))));
     html += QStringLiteral("</table>");
+
+    const QJsonArray turnsUsage = info.value(QStringLiteral("turns_usage")).toArray();
+    if (!turnsUsage.isEmpty()) html += QStringLiteral("<h3>Usage by turn</h3>") + turnUsageHtml(turnsUsage);
 
     html += QStringLiteral("<h3>History</h3>");
     const QJsonArray history = info.value(QStringLiteral("history")).toArray();

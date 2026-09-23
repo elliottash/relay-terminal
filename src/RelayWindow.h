@@ -1072,6 +1072,7 @@ protected:
         const bool shifted = key->modifiers() & Qt::ShiftModifier;
         if ((((id == QStringLiteral("control.human") || id == QStringLiteral("prompt.clear")) && !shifted)
              || id == QStringLiteral("input.toggle") || id == QStringLiteral("agent.interrupt")
+             || id == QStringLiteral("pane.runInBackground")
              || id == QStringLiteral("agent.planToggle") || id == QStringLiteral("agent.effortUp") || id == QStringLiteral("agent.effortDown")
              || id == QStringLiteral("find.inView"))
             && !(pane && pane->ownsComposerWidget(widget)))
@@ -4162,6 +4163,14 @@ private:
             else if (ok && number >= 0.5 && number <= 0.98)
                 QSettings().setValue(QStringLiteral("agent/compact_threshold"), number);
         });
+        agent.rows << toggleRow(QStringLiteral("agent/clear_tool_results"), QStringLiteral("Clear old tool results"),
+                                QStringLiteral("Keep recent tool results; shorten older large results in one batch"), true);
+        agent.rows << toggleRow(QStringLiteral("agent/compact_over_enabled"),
+                                QStringLiteral("Compact when a prompt exceeds the size limit"),
+                                QStringLiteral("Between turns only; the model-window limit still applies"), false);
+        agent.rows << numberRow(QStringLiteral("agent/compact_over_tokens"), QStringLiteral("Prompt size limit"),
+                                QStringLiteral("Used when size-based compaction is on; 256,000 tokens by default"),
+                                256000, 8000, 10000000, QStringLiteral(" tokens"));
         // Idle deadline for a model call (protocol 15). Applies to the running agent at once.
         {
             relay::SettingRow stall = numberRow(QStringLiteral("agent/stall_timeout_s"), QStringLiteral("Stop a silent model after"),

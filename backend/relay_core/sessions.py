@@ -186,7 +186,8 @@ def estimate_cost(usage: dict, prices: dict | None) -> float | None:
 # every request is in the session's `usage` totals from the moment it is reported.
 MAX_TURN_USAGE = 200
 TURN_USAGE_INTS = ("turn", "requests", "prompt_tokens", "cached_tokens", "cache_write_tokens",
-                   "completion_tokens", "last_prompt_tokens", "handover_chars", "handover_tokens")
+                   "completion_tokens", "last_prompt_tokens", "handover_chars", "handover_tokens",
+                   "prefix_changes")
 TURN_USAGE_FLOATS = ("cost", "cost_estimate")
 
 

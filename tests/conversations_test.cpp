@@ -331,6 +331,7 @@ private slots:
         QCOMPARE(sinceFor(QStringLiteral("nonsense"), now), 0.0);
         QCOMPARE(sinceFor(QStringLiteral("today"), now),
                  double(QDateTime(now.date(), QTime(0, 0)).toSecsSinceEpoch()));
+        QCOMPARE(sinceFor(QStringLiteral("day"), now), double(now.addSecs(-86400).toSecsSinceEpoch()));
         QCOMPARE(sinceFor(QStringLiteral("week"), now), double(now.addDays(-7).toSecsSinceEpoch()));
         QCOMPARE(sinceFor(QStringLiteral("month"), now), double(now.addDays(-30).toSecsSinceEpoch()));
     }
@@ -658,6 +659,46 @@ private slots:
         QCOMPARE(linkQuery(QUrl(threadCopy)).value(QStringLiteral("what")), QStringLiteral("thread id"));
         QCOMPARE(compactNumber(812), QStringLiteral("812"));
         QCOMPARE(compactNumber(1300000), QStringLiteral("1.3M"));
+    }
+
+    void infoShowsTaskAndTurnUsage() {
+        const QJsonObject turn{{QStringLiteral("turn"), 2}, {QStringLiteral("model"), QStringLiteral("glm-5")},
+                               {QStringLiteral("source"), QStringLiteral("guest")},
+                               {QStringLiteral("prompt_tokens"), 12000}, {QStringLiteral("cached_tokens"), 9000},
+                               {QStringLiteral("last_prompt_tokens"), 8000}, {QStringLiteral("prefix_changes"), 1},
+                               {QStringLiteral("handover_tokens"), 4000}, {QStringLiteral("cost_estimate"), 0.025}};
+        const QJsonObject info{{QStringLiteral("kind"), QStringLiteral("session")},
+                        {QStringLiteral("title"), QStringLiteral("Usage from a long task")},
+                        {QStringLiteral("live"), true},
+                        {QStringLiteral("usage"), QJsonObject{{QStringLiteral("prompt_tokens"), 12000},
+                                                                {QStringLiteral("total_tokens"), 12000}}},
+                        {QStringLiteral("children_count"), 1},
+                        {QStringLiteral("children_usage"), QJsonObject{{QStringLiteral("prompt_tokens"), 5000},
+                                                                         {QStringLiteral("total_tokens"), 5000}}},
+                        {QStringLiteral("task_usage"), QJsonObject{{QStringLiteral("prompt_tokens"), 17000},
+                                                                     {QStringLiteral("total_tokens"), 17000}}},
+                        {QStringLiteral("turns_usage"), QJsonArray{turn}}};
+        const QString html = relay::sessioninfo::renderInfo(info, QDateTime::currentDateTime());
+        QVERIFY(html.contains(QStringLiteral("Task total")));
+        QVERIFY(html.contains(QStringLiteral("Usage by turn")));
+        QVERIFY(html.contains(QStringLiteral("guest reported")));
+        QVERIFY(html.contains(QStringLiteral("handover ~4000 tokens")));
+        QVERIFY(html.contains(QStringLiteral("1 prefix change(s)")));
+        QVERIFY(html.contains(QStringLiteral("OpenRouter list-price estimate")));
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty()) {
+            relay::sessioninfo::InfoView view;
+            QJsonObject request;
+            view.onRequest = [&request](const QJsonObject &sent) { request = sent; };
+            view.resize(850, 650);
+            view.show();
+            view.showLiveSession();
+            QJsonObject event = info;
+            event.insert(QStringLiteral("id"), request.value(QStringLiteral("id")));
+            view.setInfo(event);
+            QApplication::processEvents();
+            QVERIFY(view.grab().save(shotDir + QStringLiteral("/usage-info.png")));
+        }
     }
 
     void paneInfoPopoverCopiesAndKeepsTheInfoClick() {
@@ -1080,7 +1121,7 @@ private slots:
         QTreeWidgetItem *justClosed = rowTitled(tree, QStringLiteral("Just closed"));
         QVERIFY(indexed && opened && justClosed);
         QCOMPARE(justClosed->parent(), tree->topLevelItem(0));
-        QCOMPARE(indexed->text(5), QStringLiteral("Rebuilt the conversation index."));
+        QCOMPARE(indexed->text(6), QStringLiteral("Rebuilt the conversation index."));
         QCOMPARE(indexed->data(0, Qt::UserRole + 4).toString(), QString());
         QVERIFY(indexed->data(0, kBadgeRole).toStringList().contains(QStringLiteral("edits · 2 files")));
         // No summary yet: the first prompt says what it was about instead.
@@ -1379,14 +1420,17 @@ private slots:
         QCOMPARE(nextHeaderSort(0, QStringLiteral("title_desc")), QStringLiteral("title"));
         QCOMPARE(nextHeaderSort(4, QStringLiteral("model")), QStringLiteral("model_desc"));
         QCOMPARE(nextHeaderSort(4, QStringLiteral("relevance")), QStringLiteral("model"));
-        QCOMPARE(nextHeaderSort(5, QStringLiteral("summary")), QStringLiteral("summary_desc"));
-        QCOMPARE(nextHeaderSort(5, QStringLiteral("relevance")), QStringLiteral("summary"));
+        QCOMPARE(nextHeaderSort(6, QStringLiteral("summary")), QStringLiteral("summary_desc"));
+        QCOMPARE(nextHeaderSort(6, QStringLiteral("relevance")), QStringLiteral("summary"));
+        QCOMPARE(nextHeaderSort(5, QStringLiteral("recent")), QStringLiteral("tokens_desc"));
+        QCOMPARE(nextHeaderSort(5, QStringLiteral("tokens_desc")), QStringLiteral("tokens"));
         QCOMPARE(headerSortColumn(QStringLiteral("recent")), 1);
         QCOMPARE(headerSortColumn(QStringLiteral("shortest")), 2);
         QCOMPARE(headerSortColumn(QStringLiteral("requests_desc")), 3);
         QCOMPARE(headerSortColumn(QStringLiteral("title_desc")), 0);
         QCOMPARE(headerSortColumn(QStringLiteral("model")), 4);
-        QCOMPARE(headerSortColumn(QStringLiteral("summary_desc")), 5);
+        QCOMPARE(headerSortColumn(QStringLiteral("summary_desc")), 6);
+        QCOMPARE(headerSortColumn(QStringLiteral("tokens_desc")), 5);
         QCOMPARE(headerSortColumn(QStringLiteral("relevance")), -1);
         QCOMPARE(int(headerSortOrder(QStringLiteral("title"))), int(Qt::AscendingOrder));
         QCOMPARE(int(headerSortOrder(QStringLiteral("requests"))), int(Qt::AscendingOrder));
@@ -1452,11 +1496,13 @@ private slots:
         emit header->sectionClicked(4);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("model"));
         QCOMPARE(header->sortIndicatorSection(), 4);
-        emit header->sectionClicked(5);
+        emit header->sectionClicked(6);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("summary"));
-        QCOMPARE(header->sortIndicatorSection(), 5);
-        emit header->sectionClicked(5);
+        QCOMPARE(header->sortIndicatorSection(), 6);
+        emit header->sectionClicked(6);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("summary_desc"));
+        emit header->sectionClicked(5);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("tokens_desc"));
     }
 
     void filtersSendTheirOwnFieldsAndClear() {
@@ -1681,12 +1727,12 @@ private slots:
         QVERIFY(tree && preview && stack && button && back);
         QCOMPARE(stack->currentWidget(), tree);
         QCOMPARE(tree->headerItem()->text(3), QStringLiteral("Requests"));
-        QCOMPARE(tree->headerItem()->text(5), QStringLiteral("Recap"));
-        QCOMPARE(rowTitled(tree, QStringLiteral("First"))->text(5),
+        QCOMPARE(tree->headerItem()->text(6), QStringLiteral("Recap"));
+        QCOMPARE(rowTitled(tree, QStringLiteral("First"))->text(6),
                  QStringLiteral("A final recap of the first conversation."));
         QTreeWidgetItem *second = rowTitled(tree, QStringLiteral("Second"));
         QVERIFY(second);
-        QCOMPARE(second->text(5), QStringLiteral("No recap saved"));
+        QCOMPARE(second->text(6), QStringLiteral("No recap saved"));
         tree->scrollToItem(second);
         const QPoint point = tree->visualItemRect(second).center();
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
@@ -2009,7 +2055,7 @@ private slots:
         QVERIFY(!button->isEnabled());
         manager.setSummary({{QStringLiteral("session_id"), QStringLiteral("a")},
                             {QStringLiteral("summary"), QStringLiteral("It did the thing.")}});
-        QCOMPARE(row->text(5), QStringLiteral("It did the thing."));
+        QCOMPARE(row->text(6), QStringLiteral("It did the thing."));
         QVERIFY(unfoldedText(row).contains(QStringLiteral("It did the thing.")));
         QVERIFY(!button->isVisibleTo(&manager));            // it has one now
         // An error says so on the row rather than disappearing.
@@ -2043,7 +2089,7 @@ private slots:
         manager.setSummariseProgress({{QStringLiteral("done"), 1}, {QStringLiteral("total"), 4},
                                       {QStringLiteral("session_id"), QStringLiteral("b")},
                                       {QStringLiteral("summary"), QStringLiteral("Live from the batch.")}});
-        QCOMPARE(tree->topLevelItem(0)->child(0)->text(5), QStringLiteral("Live from the batch."));
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(6), QStringLiteral("Live from the batch."));
         bool progress = false;
         for (QLabel *label : manager.findChildren<QLabel *>())
             progress = progress || label->text() == QStringLiteral("Summarising 1 of 4…");
@@ -2055,7 +2101,7 @@ private slots:
         // `session_summary` for the conversation a pane is holding updates its row where it stands.
         manager.setSessionSummary({{QStringLiteral("session_id"), QStringLiteral("b")},
                                    {QStringLiteral("summary"), QStringLiteral("From the pane.")}, {QStringLiteral("turn"), 3}});
-        QCOMPARE(tree->topLevelItem(0)->child(0)->text(5), QStringLiteral("From the pane."));
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(6), QStringLiteral("From the pane."));
     }
 
     void findBarCountsBothSides() {
@@ -2251,9 +2297,10 @@ private slots:
             QVERIFY(row->child(0)->isFirstColumnSpanned());
         }
         // The narrow columns are back to sizing themselves once the list is filled.
-        for (int column = 1; column < 4; ++column)
+        for (int column = 1; column < 5; ++column)
             QCOMPARE(tree->header()->sectionResizeMode(column), QHeaderView::ResizeToContents);
-        QCOMPARE(tree->header()->sectionResizeMode(4), QHeaderView::Stretch);
+        QCOMPARE(tree->header()->sectionResizeMode(5), QHeaderView::ResizeToContents);
+        QCOMPARE(tree->header()->sectionResizeMode(6), QHeaderView::Stretch);
     }
 
     // The list as it is drawn, written out as a PNG so the same page can be compared pixel for
@@ -2271,7 +2318,15 @@ private slots:
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         QVERIFY(tree);
         manager.setQuery(QStringLiteral("index"));
-        manager.setResults({{QStringLiteral("items"), benchItems(24, QStringLiteral("index"))}});
+        QJsonArray items = benchItems(24, QStringLiteral("index"));
+        for (int i = 0; i < items.size(); ++i) {
+            QJsonObject item = items.at(i).toObject();
+            item.insert(QStringLiteral("tokens"), (24 - i) * 125000);
+            items.replace(i, item);
+        }
+        manager.setResults({{QStringLiteral("items"), items}});
+        auto *sort = manager.findChild<QComboBox *>(QStringLiteral("sessionsSort"));
+        sort->setCurrentIndex(sort->findData(QStringLiteral("tokens_desc")));
         // Two rows unfolded, so the rich-text rows the delegate lays out are on screen too.
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             QTreeWidgetItem *group = tree->topLevelItem(i);
@@ -2284,8 +2339,9 @@ private slots:
             }
         }
         // Rebuilt once more: what a keystroke leaves on screen, not what the first fill did.
-        manager.setResults({{QStringLiteral("items"), benchItems(24, QStringLiteral("index"))}});
+        manager.setResults({{QStringLiteral("items"), items}});
         QVERIFY(tree->viewport()->grab().save(directory + QStringLiteral("/sessions-list.png")));
+        QVERIFY(manager.grab().save(directory + QStringLiteral("/sessions-tokens.png")));
         qInfo("wrote %s/sessions-list.png", qPrintable(directory));
     }
 

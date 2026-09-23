@@ -161,8 +161,8 @@ Free's ceiling — and is `""` everywhere else, because nothing is silently sent
   A guest harness reports the pair the same way (29.3); Anthropic counts its cache reads *outside*
   `input_tokens`, so the claude harness's `prompt_tokens` is completed to include them and means what
   every other provider's does.
-  **`cost_estimate`** (2026-09-23, #0C0V decision 1): when the provider reported no `cost`,
-  the request priced at the model's OpenRouter list price — per million tokens, cached tokens at the
+  **`cost_estimate`** (2026-09-23, #0C0V decision 1): the request priced separately at the
+  model's OpenRouter list price, even when the provider also reported `cost` — per million tokens, cached tokens at the
   listing's cache-read price and cache writes at its cache-write price when it gives them, else at
   the prompt price. Read from the catalog already on disk (never fetched during a turn), matched by
   slug or by model name, so a first-party or guest model is priced at its OpenRouter twin. Absent
@@ -2032,7 +2032,8 @@ Subagent threads (`source: "subagent"`) are left out unless `include_threads` is
 `sources` names them, and naming a word that is not one of the five is an error. `sources` absent
 means agent sessions and terminal history. `sort`
 (pinned first in every order, alphabetical ties broken newest first): newest `updated` first
-(default), oldest first, most or fewest turns, `requests_desc`/`requests` by unfinished user requests,
+(default), oldest first, most or fewest turns, `tokens_desc`/`tokens` by recorded token count,
+`requests_desc`/`requests` by unfinished user requests,
 `title`/`title_desc` by the custom title over the
 stored one (the Session column), `model`/`model_desc` by what the Sessions pane's Model column
 shows (terminal rows as "terminal", the guests as "Claude Code"/"Codex", others their model),
@@ -2040,6 +2041,8 @@ shows (terminal rows as "terminal", the guests as "Claude Code"/"Codex", others 
 relevance (14.2). `offset` pages: the event carries `next_offset` when there is more.
 The Requests column shows `open_requests` only for Relay agent sessions; other sources show a dash
 and sort after tracked rows in either request-count direction.
+The Sessions pane shows recorded usage in a Tokens column, sorts it through
+`tokens_desc`/`tokens`, and offers a rolling Last 24 hours filter (`since = now - 86400`).
 
 `scope` defaults to `project`, which uses `workspace` (the pane's own workspace when the field is
 absent). `since`/`until` are epoch seconds against `updated`. An empty `query` lists conversations
@@ -5066,7 +5069,7 @@ Two more fields (2026-09-23, #0C0V step 1), absent from older files, which load 
 - **`turns_usage`**: one record per turn that made a request, oldest first, the last **200**
   (older turns are still in `usage`): `{turn, turn_id, model, source: "native"|"guest", requests,
   prompt_tokens?, completion_tokens?, cached_tokens?, cache_write_tokens?, cost?, cost_estimate?,
-  last_prompt_tokens?, handover_chars?, handover_tokens?}`. The counters are the turn's sums of
+  last_prompt_tokens?, handover_chars?, handover_tokens?, prefix_changes?}`. The counters are the turn's sums of
   its requests' `usage`, and any one nobody reported is **absent, never 0**. `model` is the one that
   served the turn's last request. `last_prompt_tokens` is the latest *single* request's prompt —
   never a sum; for a guest, whose `usage` is its turn's aggregate (#CP3M), it is the guest's own

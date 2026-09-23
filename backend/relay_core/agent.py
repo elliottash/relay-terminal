@@ -2020,10 +2020,10 @@ class Agent:
         self.emit(event)
 
     def _priced_usage(self, usage: dict) -> dict:
-        """`usage` with a `cost_estimate` at the model's OpenRouter list price when the provider
-        reported no `cost` (#0C0V decision 1). From the catalog already on disk, never the network;
+        """`usage` with a separate OpenRouter list-price `cost_estimate` (#0C0V decision 1).
+        Keep a provider-reported `cost` beside it when available. From the catalog, never the network;
         a model the catalog does not price, and a model on this machine, get none."""
-        if "cost" in usage or (self.preset is not None and self.preset.local):
+        if self.preset is not None and self.preset.local:
             return usage
         from . import openrouter_catalog
         prices = openrouter_catalog.prices_for(self.preset.id if self.preset else None, self.config.model)
@@ -2047,7 +2047,7 @@ class Agent:
         if record.get("usage_entry") is not None:
             return
         usage = record.get("usage") or {}
-        extra = {key: record[key] for key in ("last_prompt_tokens", "handover_chars", "handover_tokens")
+        extra = {key: record[key] for key in ("last_prompt_tokens", "handover_chars", "handover_tokens", "prefix_changes")
                  if key in record}
         if not usage.get("requests") and not extra:
             return

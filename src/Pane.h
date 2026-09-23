@@ -4881,6 +4881,7 @@ public:
             || key == QStringLiteral("agent/stall_timeout_s")
             || key == QStringLiteral("agent/first_token_timeout_s")
             || key == QStringLiteral("agent/audit_requests")
+            || key == QStringLiteral("agent/clear_tool_results")
             || key == QStringLiteral("agent/prompt_profile")
             || key == QStringLiteral("agent/failover") || key == QStringLiteral("agent/failover_hosted")
             || key.startsWith(QStringLiteral("models/"))   // the ranked fallback, the OpenRouter opt-ins
@@ -5481,13 +5482,13 @@ private:
         auto *backgroundSend = new QToolButton;
         backgroundSend->setObjectName(QStringLiteral("runInBackgroundButton"));
         backgroundSend->setText(QStringLiteral("↗"));
-        backgroundSend->setToolTip(QStringLiteral("Run the prompt in background"));
+        backgroundSend->setToolTip(QStringLiteral("Run in background (%1)")
+                                       .arg(Keymap::instance().shortcutText(QStringLiteral("pane.runInBackground"))));
         backgroundSend->setAccessibleName(QStringLiteral("Run in background"));
         backgroundSend->setFocusPolicy(Qt::TabFocus);
         connect(backgroundSend, &QToolButton::clicked, this, [this] {
             if (onWindowAction) onWindowAction(QStringLiteral("runBackground"));
         });
-        routeRow->addWidget(backgroundSend);
         updateShareChip();
         m_modeChip = new QToolButton;
         m_modeChip->setObjectName(QStringLiteral("stripChip"));
@@ -5516,6 +5517,7 @@ private:
         m_secretChip->setToolTip(QStringLiteral("The line is written to the program and never stored"));
         m_secretChip->hide();
         corner->addWidget(m_secretChip);
+        corner->addWidget(backgroundSend);
         corner->addWidget(m_modeChip);
         // The routing verdict has no chip of its own: it is the mode chip's tooltip. The label
         // survives only as the place that text and tooltip live, so it is parented to the composer
@@ -6044,6 +6046,7 @@ private:
                 {"stall_timeout_s", std::clamp(settings.value(QStringLiteral("agent/stall_timeout_s"), 60).toInt(), 1, 1800)},
                 {"first_token_timeout_s", std::clamp(settings.value(QStringLiteral("agent/first_token_timeout_s"), 0).toInt(), 0, 1800)},
                 {"audit_requests", settings.value(QStringLiteral("agent/audit_requests"), false).toBool()},
+                {"clear_tool_results", settings.value(QStringLiteral("agent/clear_tool_results"), true).toBool()},
                 // Which system prompt and tool list this pane sends (#GMCF decision 7). "auto" is
                 // short on a model served from this machine or with a window of 32k or less, where
                 // the full 14,500-token prompt is eighteen seconds of prefill on every cold turn.
@@ -6123,6 +6126,9 @@ private:
         bool ok = false;
         const double threshold = settings.value(QStringLiteral("agent/compact_threshold")).toDouble(&ok);
         if (ok && threshold >= 0.5 && threshold <= 0.98) request.insert(QStringLiteral("compact_threshold"), threshold);
+        if (settings.value(QStringLiteral("agent/compact_over_enabled"), false).toBool())
+            request.insert(QStringLiteral("compact_over_tokens"),
+                           std::clamp(settings.value(QStringLiteral("agent/compact_over_tokens"), 256000).toInt(), 8000, 10000000));
         const QString plans = settings.value(QStringLiteral("agent/plans_dir")).toString().trimmed();
         if (!plans.isEmpty() && QDir::isAbsolutePath(QDir::fromNativeSeparators(plans))) request.insert(QStringLiteral("plans_dir"), plans);
         // This pane's own session token (#R9G7). The worker needs it to claim a Switchboard card
@@ -8738,6 +8744,24 @@ private:
             if (m_internals) m_internals->noteUsage(event.value(QStringLiteral("usage")).toObject());
             return true;
         }
+        if (type == QStringLiteral("prefix_changed")) {
+            QStringList parts;
+            for (const auto &part : event.value(QStringLiteral("parts")).toArray()) parts << part.toString();
+            if (m_internals)
+                m_internals->note(QStringLiteral("Prompt prefix changed at request %1: %2%3")
+                    .arg(event.value(QStringLiteral("request")).toInt())
+                    .arg(parts.join(QStringLiteral(", ")),
+                         event.value(QStringLiteral("reason")).toString().isEmpty() ? QString()
+                             : QStringLiteral(" · ") + event.value(QStringLiteral("reason")).toString()));
+            return true;
+        }
+        if (type == QStringLiteral("tool_results_cleared")) {
+            if (m_internals)
+                m_internals->note(QStringLiteral("Shortened %1 old tool results (%2 characters)")
+                    .arg(event.value(QStringLiteral("count")).toInt())
+                    .arg(event.value(QStringLiteral("chars")).toInt()));
+            return true;
+        }
         if (type == QStringLiteral("context")) {
             const auto reading = relay::context::Reading::fromEvent(event);
             m_ctxUsed = reading.used;
@@ -8977,6 +9001,23 @@ private:
         // ----- conversation info, the ⓘ view (protocol section 25) --------------------------
         if (type == QStringLiteral("session_info")) {
             if (m_infoView) m_infoView->setInfo(event);
+            return true;
+        }
+        if (type == QStringLiteral("context_breakdown")) {
+            ensureLineStart();
+            printInline(QStringLiteral("Context components (estimated tokens):\n"), Ink::Note);
+            for (const auto &value : event.value(QStringLiteral("parts")).toArray()) {
+                const QJsonObject part = value.toObject();
+                printInline(QStringLiteral("  %1: %2\n")
+                    .arg(part.value(QStringLiteral("name")).toString(),
+                         compactTokens(part.value(QStringLiteral("tokens")).toVariant().toLongLong())), Ink::Note);
+            }
+            printInline(QStringLiteral("Total estimate: %1 tokens · window %2\n")
+                .arg(compactTokens(event.value(QStringLiteral("total_tokens")).toVariant().toLongLong()),
+                     compactTokens(event.value(QStringLiteral("window")).toVariant().toLongLong())), Ink::Note);
+            if (!event.value(QStringLiteral("note")).toString().isEmpty())
+                printInline(event.value(QStringLiteral("note")).toString() + QLatin1Char('\n'), Ink::Note);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
             return true;
         }
         if (type == QStringLiteral("recap")) {
@@ -9692,7 +9733,8 @@ private:
             {QStringLiteral("models"), QString(), QStringLiteral("The models pane: providers, which models are available, and their order (Ctrl+Shift+M)")},
             {QStringLiteral("profile"), QStringLiteral("[name]"), QStringLiteral("Model profile: switch the five tier lists to a named set (Options › Models › profile); alone, a picker")},
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
-            {QStringLiteral("context"), QString(), QStringLiteral("Show context usage")},
+            {QStringLiteral("context"), QString(), QStringLiteral("Show context usage and its components")},
+            {QStringLiteral("usage"), QString(), QStringLiteral("Open conversation usage by turn (same ⓘ view as /status)")},
             {QStringLiteral("terminal"), QString(), QStringLiteral("Terminal output for the next prompt: preview, attach, remove; this pane's sharing")},
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
@@ -10223,6 +10265,7 @@ private:
             if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
             m_contextNotePending = true;
             send({{"type", "context"}});
+            send({{"type", "context_breakdown"}});
         } else if (name == QStringLiteral("terminal")) {
             if (!hasShell()) status(QStringLiteral("This pane has no terminal."));
             else terminalContextMenu();
@@ -10238,7 +10281,8 @@ private:
             // One pane now: the key that opens it is sessions.open's (#SPSG).
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("sessions.open")); !keys.isEmpty())
                 hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions & projects")));
-        } else if (name == QStringLiteral("status") || name == QStringLiteral("info")) {
+        } else if (name == QStringLiteral("status") || name == QStringLiteral("info")
+                   || name == QStringLiteral("usage")) {
             openInfo();
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.info")); !keys.isEmpty())
                 hint(QStringLiteral("info.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("conversation info")));
@@ -12622,6 +12666,10 @@ private:
             }
         } else if (type == QStringLiteral("status")) {
             const QString text = event.value(QStringLiteral("text")).toString();
+            if (m_internals && event.contains(QStringLiteral("handover_chars")))
+                m_internals->note(QStringLiteral("Guest handover: %1 characters (~%2 tokens)")
+                    .arg(event.value(QStringLiteral("handover_chars")).toInt())
+                    .arg(event.value(QStringLiteral("handover_tokens")).toInt()));
             // While a turn runs the clock owns the status line; model-request updates refresh
             // it without displaying their step count.
             if (m_agentBusy && text.startsWith(QStringLiteral("Requesting model · "))) {

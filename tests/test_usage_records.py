@@ -79,6 +79,8 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(entry, {"turn": 3, "turn_id": "t-1", "model": "glm-5.3", "source": "native",
                                  "requests": 1, "prompt_tokens": 50, "completion_tokens": 5,
                                  "last_prompt_tokens": 50})
+        self.assertEqual(sessions.turn_usage_entry(3, "t-1", "glm-5.3", "native", usage,
+                                                    {"prefix_changes": 2})["prefix_changes"], 2)
         loaded = sessions.load_turns_usage([entry, "junk", {"turn": -1, "source": "alien", "cost": "x"}]
                                            + [entry] * sessions.MAX_TURN_USAGE)
         self.assertEqual(len(loaded), sessions.MAX_TURN_USAGE)
@@ -123,7 +125,7 @@ class AgentRecordTests(unittest.TestCase):
         resumed.resume(agent.session_id)
         self.assertEqual(resumed.turns_usage, [first, second])
 
-    def test_an_unpriced_request_gets_a_list_price_estimate_and_a_priced_one_does_not(self):
+    def test_list_price_estimate_is_separate_from_provider_reported_cost(self):
         agent = self.agent(Requests({"prompt_tokens": 1_000_000, "cached_tokens": 500_000, "completion_tokens": 0}))
         with mock.patch.object(openrouter_catalog, "prices_for", return_value=PRICES) as prices:
             agent.ask("go")
@@ -136,9 +138,9 @@ class AgentRecordTests(unittest.TestCase):
         agent2 = self.agent(Requests({"prompt_tokens": 100, "completion_tokens": 1, "cost": 0.003}))
         with mock.patch.object(openrouter_catalog, "prices_for", return_value=PRICES) as prices:
             agent2.ask("go")
-        prices.assert_not_called()
+        prices.assert_called_with(None, "mock")
         self.assertEqual(agent2.turns_usage[-1]["cost"], 0.003)
-        self.assertNotIn("cost_estimate", agent2.turns_usage[-1])
+        self.assertAlmostEqual(agent2.turns_usage[-1]["cost_estimate"], 0.00021)
 
     def test_a_model_on_this_machine_is_never_priced(self):
         agent = self.agent(Requests({"prompt_tokens": 100, "completion_tokens": 1}))

@@ -106,6 +106,7 @@ QString whenText(double epochSeconds, const QDateTime &now) {
 }
 
 double sinceFor(const QString &id, const QDateTime &now) {
+    if (id == QLatin1String("day")) return double(now.addSecs(-86400).toSecsSinceEpoch());
     if (id == QLatin1String("today")) return double(QDateTime(now.date(), QTime(0, 0)).toSecsSinceEpoch());
     if (id == QLatin1String("week")) return double(now.addDays(-7).toSecsSinceEpoch());
     if (id == QLatin1String("month")) return double(now.addDays(-30).toSecsSinceEpoch());
@@ -178,7 +179,9 @@ QString nextHeaderSort(int column, const QString &current) {
                                                                   : QStringLiteral("requests_desc");
         case 4:  return current == QLatin1String("model") ? QStringLiteral("model_desc")
                                                           : QStringLiteral("model");
-        case 5:  return current == QLatin1String("summary") ? QStringLiteral("summary_desc")
+        case 5:  return current == QLatin1String("tokens_desc") ? QStringLiteral("tokens")
+                                                                 : QStringLiteral("tokens_desc");
+        case 6:  return current == QLatin1String("summary") ? QStringLiteral("summary_desc")
                                                             : QStringLiteral("summary");
         default: return current;
     }
@@ -190,14 +193,15 @@ int headerSortColumn(const QString &sort) {
     if (sort == QLatin1String("requests_desc") || sort == QLatin1String("requests")) return 3;
     if (sort == QLatin1String("title") || sort == QLatin1String("title_desc")) return 0;
     if (sort == QLatin1String("model") || sort == QLatin1String("model_desc")) return 4;
-    if (sort == QLatin1String("summary") || sort == QLatin1String("summary_desc")) return 5;
+    if (sort == QLatin1String("summary") || sort == QLatin1String("summary_desc")) return 6;
+    if (sort == QLatin1String("tokens") || sort == QLatin1String("tokens_desc")) return 5;
     return -1;
 }
 
 Qt::SortOrder headerSortOrder(const QString &sort) {
     return sort == QLatin1String("oldest") || sort == QLatin1String("shortest")
                    || sort == QLatin1String("requests") || sort == QLatin1String("title") || sort == QLatin1String("model")
-                   || sort == QLatin1String("summary")
+                   || sort == QLatin1String("summary") || sort == QLatin1String("tokens")
                ? Qt::AscendingOrder
                : Qt::DescendingOrder;
 }
@@ -791,6 +795,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_date = new QComboBox;
     m_date->setObjectName(QStringLiteral("sessionsDate"));
     m_date->addItem(QStringLiteral("Any time"), QStringLiteral("any"));
+    m_date->addItem(QStringLiteral("Last 24 hours"), QStringLiteral("day"));
     m_date->addItem(QStringLiteral("Today"), QStringLiteral("today"));
     m_date->addItem(QStringLiteral("Last 7 days"), QStringLiteral("week"));
     m_date->addItem(QStringLiteral("Last 30 days"), QStringLiteral("month"));
@@ -809,6 +814,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_sort->addItem(QStringLiteral("Oldest first"), QStringLiteral("oldest"));
     m_sort->addItem(QStringLiteral("Most turns"), QStringLiteral("longest"));
     m_sort->addItem(QStringLiteral("Fewest turns"), QStringLiteral("shortest"));
+    m_sort->addItem(QStringLiteral("Most tokens"), QStringLiteral("tokens_desc"));
+    m_sort->addItem(QStringLiteral("Fewest tokens"), QStringLiteral("tokens"));
     m_sort->addItem(QStringLiteral("Most open requests"), QStringLiteral("requests_desc"));
     m_sort->addItem(QStringLiteral("Fewest open requests"), QStringLiteral("requests"));
     m_sort->addItem(QStringLiteral("Title A→Z"), QStringLiteral("title"));
@@ -853,10 +860,10 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
 
     m_tree = new QTreeWidget;
     m_tree->setObjectName(QStringLiteral("sessionsTree"));
-    m_tree->setColumnCount(6);
+    m_tree->setColumnCount(7);
     m_tree->setHeaderLabels({QStringLiteral("Session"), QStringLiteral("Updated"),
                              QStringLiteral("Turns"), QStringLiteral("Requests"),
-                             QStringLiteral("Model"), QStringLiteral("Recap")});
+                             QStringLiteral("Model"), QStringLiteral("Tokens"), QStringLiteral("Recap")});
     m_tree->headerItem()->setToolTip(3, QStringLiteral("User requests that still need completion"));
     m_tree->setRootIsDecorated(true);
     m_tree->setUniformRowHeights(false);
@@ -867,7 +874,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    m_tree->header()->setSectionResizeMode(5, QHeaderView::Stretch);
+    m_tree->header()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(6, QHeaderView::Stretch);
     m_tree->setColumnWidth(0, 260);
     m_tree->setExpandsOnDoubleClick(false);
     m_tree->setItemDelegateForColumn(0, new RowDelegate(m_tree));
@@ -1782,6 +1790,9 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     row->setText(4, terminal ? QStringLiteral("terminal")
                  : isGuestSource(source) ? guestLabel(source)
                                          : rowModelName(item));
+    const qint64 tokens = item.value(QStringLiteral("tokens")).toVariant().toLongLong();
+    row->setText(5, tokens > 0 ? compactTokens(tokens) : QStringLiteral("—"));
+    row->setToolTip(5, tokens > 0 ? QStringLiteral("%1 recorded tokens").arg(tokens) : QStringLiteral("No usage reported"));
     decorate(row, item);
     // An arrow to unfold the quick look: the row needs a child before it has one.
     auto *placeholder = new QTreeWidgetItem(row);
@@ -1828,9 +1839,9 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
 
     if (!thread) {
         const QString recap = item.value(QStringLiteral("summary")).toString().simplified();
-        row->setText(5, recap.isEmpty() ? QStringLiteral("No recap saved") : recap);
-        row->setToolTip(5, recap);
-        row->setForeground(5, recap.isEmpty() ? m_tree->palette().color(QPalette::PlaceholderText)
+        row->setText(6, recap.isEmpty() ? QStringLiteral("No recap saved") : recap);
+        row->setToolTip(6, recap);
+        row->setForeground(6, recap.isEmpty() ? m_tree->palette().color(QPalette::PlaceholderText)
                                                 : m_tree->palette().color(QPalette::Text));
     }
 
@@ -2067,7 +2078,8 @@ void SessionManager::rebuildTree(const QString &keep) {
     m_filling = false;
     for (int column = 1; column < m_tree->columnCount(); ++column)
         header->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(5, QHeaderView::Stretch);
+    header->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(6, QHeaderView::Stretch);
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
     // Selecting a session under a collapsed group can expand its parent in Qt. Restore the
     // reader's group choice after restoring the current row, including when that row is hidden.
