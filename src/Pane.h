@@ -4160,7 +4160,45 @@ public:
         return out;
     }
 
+    void restorePrePlanSelection() {
+        if (m_prePlanRole.isEmpty()) return;
+        const QString role = m_prePlanRole;
+        const auto pick = m_prePlanPick;
+        m_prePlanRole.clear();
+        m_prePlanPick = {};
+        // Send even if the last worker event still names this role: the High request
+        // may be in flight. Use the normal switch path so the conversation survives.
+        if (m_configured) {
+            QString preset, model;
+            if (role == QStringLiteral("main") &&
+                relay::models::Catalog::splitKey(pick.key, &preset, &model)) {
+                // Main is not a pinned role: its protocol is set_model, not resolve_entry.
+                QJsonObject request{{"type", "set_model"}, {"preset", preset},
+                    {"model", model}, {"effort", pick.effort}, {"use_stored_key", true}};
+                if (!guestOfPreset(preset).isEmpty())
+                    request.insert(QStringLiteral("guest"), QJsonObject{{"model", model}, {"effort", pick.effort}});
+                send(request);
+            } else sendAgentRole(role, pick);
+        }
+        else {
+            m_agentRole = role;
+            m_effort = pick.effort;
+        }
+    }
+
     void setAgentMode(const QString &mode) {
+        if (m_configured || !m_deferredPreset.isEmpty() || m_configuring) {
+            if (mode == QStringLiteral("plan") && m_prePlanRole.isEmpty()) {
+                m_prePlanRole = m_agentRole;
+                const QString tier = relay::modelrows::roleTier(m_agentRole);
+                m_prePlanPick = {tier == QStringLiteral("main") ? currentEntryKey()
+                                    : m_modePick.value(tier).key, m_effort};
+                if (m_prePlanPick.key.isEmpty() && !rolePreset(m_agentRole).isEmpty())
+                    m_prePlanPick.key = relay::models::Catalog::keyFor(rolePreset(m_agentRole), m_model);
+            } else if (mode == QStringLiteral("build")) {
+                restorePrePlanSelection();
+            }
+        }
         if (!m_configured && (!m_deferredPreset.isEmpty() || m_configuring)) {
             if (mode == QStringLiteral("plan")) setAgentRole(QStringLiteral("high"), false);
             // Picking Plan is not a prompt: keep lazy harness startup, but remember the
@@ -8538,6 +8576,8 @@ private:
         }
         if (type == QStringLiteral("mode_changed")) {
             const QString mode = event.value(QStringLiteral("mode")).toString();
+            // Also covers exit_plan_mode and Execute, which leave Plan in the worker.
+            if (mode == QStringLiteral("build")) restorePrePlanSelection();
             const bool changedMode = mode != m_agentMode;
             m_agentMode = mode;
             if (changedMode)
@@ -19242,6 +19282,8 @@ private:
     QPointer<QProcess> m_remoteCompletion;
     relay::Completion m_tabCompletion;
     QString m_effort = QStringLiteral("high"), m_agentMode = QStringLiteral("build"), m_sessionId, m_sessionDir, m_forkTitle;
+    QString m_prePlanRole;
+    relay::modelrows::ModePick m_prePlanPick;
     QString m_aiGhost, m_aiGhostKind, m_suggestionId, m_savedPlaceholder;
     QJsonObject m_initialState;
     // saved window layout: the preset and conversation this pane was restored with

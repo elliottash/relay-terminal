@@ -871,6 +871,9 @@ void aTerminalPanesOwnQueueResumesOnEnterToo()
     CHECK(sent.isEmpty());
 }
 
+void leavingPlanRestoresExactSelection();
+void leavingPlanBeforeConfigurationRestoresRole();
+
 void enteringPlanSelectsHigh()
 {
     StubContext context;
@@ -894,9 +897,92 @@ void enteringPlanSelectsHigh()
     CHECK_EQ(sent.last().value("type").toString(), QStringLiteral("set_mode"));
     sent.clear();
     console.setAgentMode(QStringLiteral("build"));
-    CHECK_EQ(sent.size(), 1);
+    CHECK_EQ(sent.size(), 2);
+    CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("set_agent_role"));
+    CHECK_EQ(sent.first().value("role").toString(), QStringLiteral("main"));
     CHECK_EQ(sent.last().value("mode").toString(), QStringLiteral("build"));
-    CHECK_EQ(console.paneMode(), QStringLiteral("high"));
+    sent.clear();
+    console.deliverWorkerEvent(QJsonObject{{"event", "mode_changed"}, {"mode", "build"}});
+    CHECK(sent.isEmpty()); // The acknowledgement must not restore a second time.
+    leavingPlanRestoresExactSelection();
+    leavingPlanBeforeConfigurationRestoresRole();
+}
+
+void leavingPlanRestoresExactSelection()
+{
+    for (const QString role : {QStringLiteral("main"), QStringLiteral("flash"),
+                               QStringLiteral("local"), QStringLiteral("high")}) {
+        for (const bool workerExit : {false, true}) {
+            StubContext context;
+            context.workspace = home->path();
+            Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+            QList<QJsonObject> sent;
+            console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+            console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "original"}});
+            console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"model", "original"},
+                {"preset", "original-provider"}, {"effort", "high"}});
+            console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"model", "original"},
+                {"preset", "original-provider"}, {"agent_role", role}, {"effort", "high"}});
+            const QString capture = qEnvironmentVariable("RELAY_PLAN_RESTORE_CAPTURE");
+            const auto screenshot = [&](const QString &stage) {
+                if (capture.isEmpty() || role != QStringLiteral("main") || workerExit) return;
+                console.resize(950, 500);
+                console.show();
+                QApplication::processEvents();
+                CHECK(console.grab().save(capture + QLatin1Char('/') + stage + QStringLiteral(".png")));
+            };
+            screenshot(QStringLiteral("01-before"));
+            console.setAgentMode(QStringLiteral("plan"));
+            console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"model", "planner"},
+                {"preset", "other-provider"}, {"agent_role", "high"}, {"effort", "max"}});
+            console.deliverWorkerEvent(QJsonObject{{"event", "mode_changed"}, {"mode", "plan"}});
+            screenshot(QStringLiteral("02-plan"));
+            console.setAgentMode(QStringLiteral("plan")); // Must not replace the original snapshot.
+            sent.clear();
+            if (workerExit)
+                console.deliverWorkerEvent(QJsonObject{{"event", "mode_changed"}, {"mode", "build"}});
+            else
+                console.setAgentMode(QStringLiteral("build"));
+            CHECK_EQ(sent.size(), workerExit ? 1 : 2);
+            CHECK_EQ(sent.first().value("type").toString(), role == QStringLiteral("main")
+                ? QStringLiteral("set_model") : QStringLiteral("set_agent_role"));
+            if (role != QStringLiteral("main")) CHECK_EQ(sent.first().value("role").toString(), role);
+            CHECK_EQ(sent.first().value("preset").toString(), QStringLiteral("original-provider"));
+            CHECK_EQ(sent.first().value("model").toString(), QStringLiteral("original"));
+            CHECK_EQ(sent.first().value("effort").toString(), QStringLiteral("high"));
+            // The switch request carries no new session, reset, or conversation mutation.
+            CHECK(!sent.first().contains("session_id"));
+            sent.clear();
+            console.deliverWorkerEvent(QJsonObject{{"event", "mode_changed"}, {"mode", "build"}});
+            CHECK(sent.isEmpty());
+            console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"model", "original"},
+                {"preset", "original-provider"}, {"agent_role", role}, {"effort", "high"}});
+            CHECK_EQ(console.paneMode(), role);
+            screenshot(QStringLiteral("03-restored"));
+        }
+    }
+}
+
+void leavingPlanBeforeConfigurationRestoresRole()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent(QJsonObject{{"event", "presets"}, {"presets", QJsonArray{
+        QJsonObject{{"id", "test"}, {"model", "test"}, {"local", true},
+                    {"base_url", "http://localhost:1/v1"}}}}});
+    console.setAgentMode(QStringLiteral("plan"));
+    console.setAgentMode(QStringLiteral("build"));
+    CHECK_EQ(console.paneMode(), QStringLiteral("main"));
+    sent.clear();
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}, {"agent_role", "main"}});
+    CHECK(std::none_of(sent.cbegin(), sent.cend(), [](const QJsonObject &m) {
+        return m.value("type").toString() == QStringLiteral("set_agent_role") &&
+               m.value("role").toString() == QStringLiteral("high");
+    }));
+    CHECK_EQ(console.agentMode(), QStringLiteral("build"));
 }
 
 void clickingPlanLeavesModeAndPreservesDraft()

@@ -183,7 +183,10 @@ the finish time is unknown.
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
 - Plan mode locks nothing (owner, 2026-09-22, #PLDG): every tool stays available and callable — file writes, board and app writes, `set_keybinding`, delegation. Plan mode is the turn's plan-mode note (investigate without changing anything, ask what is ambiguous, finish with `write_plan`) plus the `planning` role's model and reasoning below. The note is an instruction, not an enforced rule.
 - Entering plan mode puts the pane on `/high` (#PH9G): the High list picks the model and its level,
-  which need not be the pane's Main model. A plan turn adds nothing on top — no per-turn swap and no
+  which need not be the pane's Main model. Leaving Plan restores the pane's pre-plan role, model
+  and effort through the normal conversation-preserving switch path (#PBKR), including worker-driven
+  exits. A switch during a running guest turn follows the normal deferred-switch rules.
+  A plan turn adds nothing on top — no per-turn swap and no
   effort boost (owner, 2026-09-22) — unless the `planning` role (13.11) is hand-pinned, when that turn
   is swapped to the pin and then put back, with `plan_route` / `plan_route_ended` saying so.
 - Tool `exit_plan_mode {reason}` (plan mode only, card #XP7N) leaves plan mode on the agent's own

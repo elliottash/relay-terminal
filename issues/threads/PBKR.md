@@ -1,0 +1,14 @@
+<!-- relay:entry 20260923T025056Z-wr author=agent kind=progress model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+Claimed through the file fallback. Confirmed #PH9G intentionally leaves High selected; implementing temporary selection with restoration on exit.
+
+<!-- relay:entry 20260923T025625Z-g4 author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+- ✦ agent updated this card · replaced `## Execution Summary`
+
+<!-- relay:entry 20260923T025653Z-hz author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260923T025653Z-m2 author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+- ✦ agent moved this card · Executing → Needs verification · Restoration and context-handover regressions pass; real Pane screenshots recorded. Independent live verification remains. · evidence docs/qa_evidence/2026-09-22-plan-restore/README.md · implemented_by openai/gpt-6-astra via codex
+
+<!-- relay:entry 20260923T025827Z-pm author=agent kind=event model=gpt-6-astra pane=8ba024bd turn=dec989d1df4642ed81f1f34f9b12a36f/b95563e260874320bf4c7a6c98540632 -->
+- ✦ agent updated this card · appended to `## Tests`
