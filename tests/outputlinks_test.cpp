@@ -399,6 +399,17 @@ private slots:
                  {QStringLiteral("relay://session/008c2701cc448d7b")});
     }
 
+    void bareSessionIdsLinkOnlyAsWholeTokens()
+    {
+        const QString relayId = QStringLiteral("008c2701cc448d7b008c2701cc448d7b");
+        const QString guestId = QStringLiteral("3478d988-a618-47c5-a4f4-7196fdc7261f");
+        QCOMPARE(targets(QStringLiteral("open ") + relayId + QStringLiteral(" and ") + guestId + QLatin1Char('.')),
+                 (QStringList{sessionTarget(relayId), sessionTarget(guestId)}));
+        QVERIFY(targets(QStringLiteral("https://example.test/") + guestId).size() == 1);
+        QVERIFY(targets(QStringLiteral("prefix") + relayId).isEmpty());
+        QVERIFY(targets(relayId + QStringLiteral("suffix")).isEmpty());
+    }
+
     void schemesThatAreNotLinks()
     {
         // The typo: one letter more is not the scheme.

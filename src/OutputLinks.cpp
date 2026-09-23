@@ -290,6 +290,26 @@ QVector<Candidate> candidates(const QString &text)
         claim.take(c.start, c.length);
     }
 
+    // Saved Relay sessions use 32 hex digits; Claude and Codex use dashed UUIDs. Only whole
+    // tokens are offered, and activation checks the index before opening anything. Claim after
+    // URLs so a UUID inside one remains part of that URL.
+    static const QRegularExpression bareSessionRe(QStringLiteral(
+        "(?:^|(?<=[\\s\"'`([{<,;]))([0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})(?![0-9a-zA-Z_/-])"));
+    for (auto it = bareSessionRe.globalMatch(text); it.hasNext();) {
+        const QRegularExpressionMatch m = it.next();
+        const int at = m.capturedStart(1);
+        const QString id = m.captured(1);
+        if (!claim.free(at, id.size())) continue;
+        Candidate c;
+        c.start = at;
+        c.length = id.size();
+        c.kind = Kind::Session;
+        c.text = id;
+        c.path = id;
+        out.append(c);
+        claim.take(at, id.size());
+    }
+
     // 3. Card references: `#K7Q2` in a recap, in the agent's prose, or in a board-activity
     //    line (design section 5). Claimed before the path stages so the bare-token pass cannot
     //    read the span as a relative path, which also means an unknown id is left as plain text

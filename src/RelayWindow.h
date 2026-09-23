@@ -8746,6 +8746,9 @@ private:
         pane->onOpenDocument = [guard](const QString &path) { if (auto *w = windowOf(guard)) w->openDocument(path, guard, false); };
         pane->onForkState = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title); };
         pane->onOpenSessionInNewPane = [guard](const QJsonObject &state, const QString &title) { if (auto *w = windowOf(guard)) w->openFork(guard, state, title, false); };
+        pane->onOpenSessionRow = [guard](const QJsonObject &item) {
+            if (guard) guard->openSavedSession(item, true);
+        };
         // A guest session resumed in a new pane launches through that pane's own launch path (26.9):
         // the guest id and its arguments travel, not a finished command line.
         pane->onOpenGuestPane = [guard](const QString &guest, const QStringList &extra, const QString &cwd) {
@@ -8999,6 +9002,11 @@ private:
         };
         console->onOpenSessions = [guard](const QString &query) {
             if (auto *w = windowOf(guard)) w->openSessions(QString(), query);
+        };
+        console->onOpenSessionRow = [guard](const QJsonObject &item) {
+            if (auto *w = windowOf(guard)) {
+                if (auto *owner = w->paneForConsoleOpen(guard)) owner->openSavedSession(item, true);
+            }
         };
         console->onOpenMemorySuggestion = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openMemorySuggestion(id); };
         console->onMemorySuggestionDecided = [] { refreshVisibleGlobals(); };

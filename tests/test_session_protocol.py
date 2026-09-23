@@ -272,6 +272,22 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.sup.submit(text_, 'now')
         self.rec.wait(lambda e: e['event'] == 'agent_finished' and len(self.rec.of('agent_finished')) > before)
 
+    def test_clicked_session_id_resolves_exact_saved_row(self):
+        session_id = '008c2701cc448d7b008c2701cc448d7b'
+        row = {'session_id': session_id, 'source': 'agent', 'title': 'Earlier work',
+               'session_dir': str(Path(self.temp.name) / 'sessions')}
+        index = mock.Mock()
+        index.search.return_value = {'items': [row]}
+        with mock.patch.object(self.cmds, 'index', return_value=index):
+            self.cmds.handle('conversation_open', {'id': 'output-session', 'session_id': session_id})
+        event = self.rec.of('conversation_open')[-1]
+        self.assertEqual(event['item']['session_id'], session_id)
+        index.search.assert_called_once_with('', scope='all', session_ids=[session_id], limit=1)
+        index.search.return_value = {'items': []}
+        with mock.patch.object(self.cmds, 'index', return_value=index):
+            with self.assertRaisesRegex(ValueError, 'No saved conversation'):
+                self.cmds.handle('conversation_open', {'session_id': session_id})
+
     def test_compact_resume_recap_and_plan_execute(self):
         provider = ScriptedProvider(side_reply='{"summary": "Did three things.", "next_action": "Ship it"}')
         agent = self.make_agent(provider)

@@ -62,7 +62,7 @@ TYPES = {"set_model", "set_effort", "context", "context_breakdown", "compact", "
          # request ledger and todos (protocol section 12)
          "requests", "request_get", "request_set", "request_reask", "todos",
          # conversation list and full-text search (protocol section 14)
-         "conversations", "conversation_get", "conversation_delete", "conversation_rename",
+         "conversations", "conversation_get", "conversation_open", "conversation_delete", "conversation_rename",
          "conversation_pin", "terminal_history", "terminal_context_update", "terminal_context_preview", "index_rebuild",
          # session info and the thread history (protocol section 25)
          "session_info"}
@@ -1317,6 +1317,15 @@ class SessionCommands:
         data = self.index().conversation(session_id, turn, request.get("query", "") or "",
                                          request.get("limit", 400))
         self.emit({"event": "conversation", "id": request.get("id"), **data})
+
+    def _conversation_open(self, request):
+        """Resolve a clicked output ID to the same row the Sessions list opens."""
+        session_id = self._conversation_id(request.get("session_id"))
+        result = self.index().search("", scope="all", session_ids=[session_id], limit=1)
+        rows = guest_sessions.annotate_items(result.get("items") or [])
+        if not rows or rows[0].get("session_id", rows[0].get("id")) != session_id:
+            raise ValueError("No saved conversation with that session ID.")
+        self.emit({"event": "conversation_open", "id": request.get("id"), "item": rows[0]})
 
     def _conversation_delete(self, request):
         session_id = self._conversation_id(request.get("session_id"))

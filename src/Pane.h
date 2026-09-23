@@ -3331,10 +3331,11 @@ public:
             }
         }
         // What this console is about gets first refusal (#AGNT step 3): a card page resolves
-        // `card:` to itself, Options reveals an `option:` row, Sessions opens a `session:`.
+        // `card:` to itself and Options reveals an `option:` row. Session links always take the
+        // saved-conversation path below, including from the Sessions helper.
         // A terminal context resolves nothing, so every link below travels exactly the path it
         // did before — which is the property this step is measured on.
-        if (m_context) {
+        if (m_context && relay::links::sessionIdOf(target).isEmpty()) {
             QString section, row;
             relay::links::Target activated;
             activated.valid = true;
@@ -3398,9 +3399,8 @@ public:
                 return;
             }
             // `option:sec/row` and `session:<id>` (#AGNT step 8): an answer that names a setting
-            // or a saved conversation is one click from it, in any pane's transcript. The context
-            // had first refusal above — Options reveals its own row without opening a second pane
-            // — so this is the window's path, which is what a terminal pane uses.
+            // or a saved conversation is one click from it, in any pane's transcript. Options
+            // may reveal its own row above; a session resolves to an indexed row here.
             if (url.host() == QStringLiteral("option")) {
                 QString section, row;
                 if (relay::links::optionOf(target, &section, &row) && onOpenOption) onOpenOption(section, row);
@@ -3408,7 +3408,12 @@ public:
             }
             if (url.host() == QStringLiteral("session")) {
                 const QString id = relay::links::sessionIdOf(target);
-                if (!id.isEmpty() && onOpenSessions) onOpenSessions(id);
+                if (!id.isEmpty()) {
+                    if (m_workerReady)
+                        send({{"type", "conversation_open"}, {"id", QStringLiteral("output-session")},
+                              {"session_id", id}});
+                    else status(QStringLiteral("The session index is still starting."));
+                }
                 return;
             }
             return;
@@ -8944,6 +8949,11 @@ private:
                 m_conversations->setResults(event);
             return true;
         }
+        if (type == QStringLiteral("conversation_open")) {
+            const QJsonObject item = event.value(QStringLiteral("item")).toObject();
+            if (onOpenSessionRow && !item.isEmpty()) onOpenSessionRow(item);
+            return true;
+        }
         if (type == QStringLiteral("conversation")) {
             // A conversation resumed with no saved terminal text, drawn from its entries (#0TJ9).
             // Its own request id, so the sessions manager's preview never sees this answer.
@@ -9218,6 +9228,7 @@ public:
     // The window opens (or brings forward) its session manager pane and binds it to this pane:
     // queries go to this pane's worker, Enter resumes here (cards #CCKY, #R6J0).
     std::function<void(const QString &query)> onOpenSessions;
+    std::function<void(const QJsonObject &item)> onOpenSessionRow;
     // An `option:sec/row` link in this pane's output (#AGNT step 8): the window puts Options on
     // that section and zooms to the row, which is exactly what `app_open {target: "options"}`
     // already does. `onOpenOptions` above opens a section and cannot name a row, so this is its
