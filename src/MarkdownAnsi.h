@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
+#include <QSize>
 #include <QString>
 #include <QStringList>
 
@@ -80,6 +81,44 @@ public:
     void setLinkAnchor(const QString &anchorUri) { m_linkAnchor = anchorUri; }
     QString linkAnchor() const { return m_linkAnchor; }
 
+    // Inline images (card #1MGS). Off by default, and then `![alt](target)` is `!` and a link,
+    // the bytes it always was. On, an image whose target is a local image file — an absolute
+    // path, `file://`, `~/`, or a path relative to setImageBaseDir() — prints as a line of its
+    // alt text (dim; the file name when there is none), then a kitty graphics escape for the file
+    // at the start of its own line (imageEscape()); the engine turns that into the picture
+    // (engine/core/InlineImage.h). The escape is only ever emitted whole: the image is held back
+    // until its `)` arrives, like a link. An `http(s)` image is never fetched: it is a link with
+    // its alt text as the label. A target that names no file prints the alt text and the target,
+    // dimmed, and no escape. Code spans, fences and table cells are left exactly as before.
+    //
+    // A caller that has somewhere to anchor text (the pane's prose runs) has to write the escape
+    // outside them: find it in the output with kImageEscapeStart.
+    void setInlineImages(bool on) { m_images = on; }
+    bool inlineImages() const { return m_images; }
+    void setImageBaseDir(const QString &dir) { m_imageBase = dir; }
+    // The pane's width in columns: a picture is fitted into min(columns, kImageMaxColumns).
+    void setImageColumns(int columns) { m_imageColumns = columns; }
+    // The pixel size of one cell, when the caller knows it; else kImageCellPixels.
+    void setImageCellPixels(QSize pixels) { m_imageCell = pixels; }
+
+    static constexpr int kImageMaxColumns = 80;
+    static constexpr int kImageMaxRows = 20;       // a picture in a reply
+    static constexpr int kThumbnailRows = 6;       // a prompt's attachment, a tool's image
+    static const QSize kImageCellPixels;           // 8 x 16: the 1:2 cell of a terminal font
+    static const QString kImageEscapeStart;        // "\x1b_G": the head of imageEscape()'s output
+
+    // The file a Markdown image target names, made absolute, or an empty string when the target
+    // is a URL other than file:// or names nothing on this machine that is a file.
+    static QString resolveImageTarget(const QString &target, const QString &baseDir);
+    // The cells a picture of `pixels` takes, fitted within maxColumns x maxRows keeping its
+    // aspect ratio — the rule relay::inlineimage::cellsFor applies on the engine side.
+    static QSize imageCells(QSize pixels, QSize cellPixels, int maxColumns, int maxRows);
+    // `ESC _ G a=T,t=f,[f=100,]q=2,c=<cols>,r=<rows> ; <base64 path> ESC \` for the image file at
+    // `absolutePath` (f=100 only when the file is a PNG: the engine sniffs any other format).
+    // Its size is read from the file's header. Empty when the file is not an image.
+    static QString imageEscape(const QString &absolutePath, int maxColumns, int maxRows,
+                               QSize cellPixels = QSize());
+
     QString feed(const QString &text);
     // Emits whatever is held back, closes open styles and a pending table, and resets all state
     // (a new text segment starts fresh). Never adds a newline of its own.
@@ -104,9 +143,18 @@ private:
     QString renderInline(const QString &text, bool bold) const;
     void resetInline();
     void flushBoldHold(QString &out);
+    bool imageStep(QString &out, int &i);
 
     Palette m_palette;
     QString m_linkAnchor;   // #MDKN; a setting like the palette, so reset() leaves it alone
+    // #1MGS: settings too, so reset() leaves them alone.
+    bool m_images = false;
+    QString m_imageBase;
+    int m_imageColumns = 0;
+    QSize m_imageCell;
+    // An image's escape was the last thing on this line: whatever else the line holds starts a
+    // new row under the picture.
+    bool m_afterImage = false;
     QString m_pending;
     QStringList m_table;
     // Set on the inner renderer a table cell (or a row that turned out not to be a table) is drawn

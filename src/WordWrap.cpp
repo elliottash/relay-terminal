@@ -218,7 +218,13 @@ QString WordWrap::feed(const QString &text) {
             target += c;
             const ushort u = c.unicode();
             switch (m_esc) {
-            case Esc::Start: m_esc = u == '[' ? Esc::Csi : u == ']' ? Esc::Osc : Esc::None; break;
+            // APC (`ESC _`: an inline image's kitty escape, #1MGS), DCS, PM and SOS end in ST
+            // like an OSC, and are as wide: zero.
+            case Esc::Start:
+                m_esc = u == '[' ? Esc::Csi
+                      : (u == ']' || u == '_' || u == 'P' || u == '^' || u == 'X') ? Esc::Osc
+                      : Esc::None;
+                break;
             case Esc::Csi: if (u >= 0x40 && u <= 0x7e) m_esc = Esc::None; break;
             case Esc::Osc: if (u == 0x07) m_esc = Esc::None; else if (c == kEsc) m_esc = Esc::OscEsc; break;
             case Esc::OscEsc: m_esc = u == '\\' ? Esc::None : Esc::Osc; break;

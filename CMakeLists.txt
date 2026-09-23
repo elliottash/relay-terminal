@@ -463,7 +463,9 @@ target_compile_options(relay-agentcontext PRIVATE ${RELAY_WARNINGS})
 add_library(relay-markdown STATIC src/MarkdownAnsi.cpp src/MarkdownAnsi.h src/WordWrap.cpp src/WordWrap.h
                                   src/LabelLinks.h)
 target_include_directories(relay-markdown PUBLIC src)
-target_link_libraries(relay-markdown PUBLIC ${RELAY_QT}::Core)
+# relay-images: an inline image in a reply (#1MGS) is drawn only when the file is one, and its
+# size in cells comes from the file's header (QImageReader, QtGui).
+target_link_libraries(relay-markdown PUBLIC relay-images ${RELAY_QT}::Core)
 target_compile_options(relay-markdown PRIVATE ${RELAY_WARNINGS})
 
 # Aliases: saved commands and prompts (issue G8DK): turning an alias's template into composer

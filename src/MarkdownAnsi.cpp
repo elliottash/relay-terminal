@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "MarkdownAnsi.h"
 
+#include "Images.h"
 #include "LabelLinks.h"
 
+#include <QDir>
+#include <QFileInfo>
+#include <QImageReader>
 #include <QRegularExpression>
+#include <QUrl>
 #include <QVector>
 
 #include <algorithm>
+#include <cmath>
 
 namespace relay {
 
@@ -81,7 +87,70 @@ const QStringList kNeedWords = {QStringLiteral("need"), QStringLiteral("needs"),
 // cannot stall the stream for longer than this.
 constexpr int kBoldHoldMax = 32;
 
+// Card #1MGS: an image target that is a URL of some other scheme (`https:`, `data:`) is never
+// fetched. A single letter before the colon is a Windows drive, not a scheme.
+bool isForeignUrl(const QString &target) {
+    static const QRegularExpression scheme(QStringLiteral("^[A-Za-z][A-Za-z0-9+.-]+:"));
+    return scheme.match(target).hasMatch() && !target.startsWith(QStringLiteral("file:"), Qt::CaseInsensitive);
+}
+
+// `<path>` and a trailing `"title"` are Markdown's, not the path's.
+QString bareTarget(QString target) {
+    target = target.trimmed();
+    static const QRegularExpression title(QStringLiteral("\\s+(\"[^\"]*\"|'[^']*')$"));
+    target.remove(title);
+    if (target.size() >= 2 && target.startsWith(QLatin1Char('<')) && target.endsWith(QLatin1Char('>')))
+        target = target.mid(1, target.size() - 2);
+    return target;
+}
+
 }  // namespace
+
+const QSize MarkdownAnsi::kImageCellPixels(8, 16);
+const QString MarkdownAnsi::kImageEscapeStart = QStringLiteral("\x1b_G");
+
+QString MarkdownAnsi::resolveImageTarget(const QString &target, const QString &baseDir) {
+    QString path = bareTarget(target);
+    if (path.isEmpty() || isForeignUrl(path)) return QString();
+    if (path.startsWith(QStringLiteral("file:"), Qt::CaseInsensitive)) path = QUrl(path).toLocalFile();
+    else if (path == QStringLiteral("~") || path.startsWith(QStringLiteral("~/"))) path = QDir::homePath() + path.mid(1);
+    else if (QDir::isRelativePath(path)) {
+        if (baseDir.isEmpty()) return QString();
+        path = QDir(baseDir).filePath(path);
+    }
+    if (path.isEmpty()) return QString();
+    QFileInfo info(path);
+    if (!info.isFile() && path.contains(QLatin1Char('%'))) info = QFileInfo(QUrl::fromPercentEncoding(path.toUtf8()));
+    return info.isFile() ? info.absoluteFilePath() : QString();
+}
+
+QSize MarkdownAnsi::imageCells(QSize pixels, QSize cellPixels, int maxColumns, int maxRows) {
+    if (!cellPixels.isValid() || cellPixels.isEmpty()) cellPixels = kImageCellPixels;
+    maxColumns = std::max(1, maxColumns);
+    maxRows = std::max(1, maxRows);
+    const double pw = std::max(1, pixels.width()), ph = std::max(1, pixels.height());
+    double cols = pw / cellPixels.width(), rows = ph / cellPixels.height();
+    const double scale = std::min({1.0, maxColumns / cols, maxRows / rows});
+    cols *= scale;
+    rows *= scale;
+    return QSize(std::clamp(int(std::ceil(cols - 1e-6)), 1, maxColumns),
+                 std::clamp(int(std::ceil(rows - 1e-6)), 1, maxRows));
+}
+
+QString MarkdownAnsi::imageEscape(const QString &absolutePath, int maxColumns, int maxRows, QSize cellPixels) {
+    const QString type = images::mediaTypeOf(absolutePath);
+    if (type.isEmpty()) return QString();
+    QSize pixels = QImageReader(absolutePath).size();
+    // A format this build cannot decode still has a picture in it for the engine to try: a
+    // square, as tall as it may be.
+    if (!pixels.isValid() || pixels.isEmpty()) pixels = QSize(1024, 1024);
+    const QSize cells = imageCells(pixels, cellPixels, maxColumns, maxRows);
+    return QStringLiteral("\x1b_Ga=T,t=f,%1q=2,c=%2,r=%3;%4\x1b\\")
+        .arg(type == QStringLiteral("image/png") ? QStringLiteral("f=100,") : QString())
+        .arg(cells.width())
+        .arg(cells.height())
+        .arg(QString::fromLatin1(absolutePath.toUtf8().toBase64()));
+}
 
 MarkdownAnsi::MarkdownAnsi(const QString &baseSgr) { m_palette.base = baseSgr; }
 MarkdownAnsi::MarkdownAnsi(const Palette &palette) : m_palette(palette) {}
@@ -102,6 +171,7 @@ void MarkdownAnsi::resetInline() {
     m_bold = m_italic = m_strike = false;
     m_codeRun = 0;
     m_prev = QChar();
+    m_afterImage = false;
     m_boldHold.clear();
     m_boldRole = BoldRole::None;
 }
@@ -114,7 +184,8 @@ int MarkdownAnsi::visibleWidth(const QString &rendered) {
             // An OSC (a label's link, #MDKN) runs to BEL or ST and its body is full of letters:
             // the CSI rule below would stop at the `r` of `relay://…` and count the rest of the
             // URI as text, which is what a table cell's width is measured with.
-            if (i + 1 < rendered.size() && rendered.at(i + 1) == QLatin1Char(']')) {
+            // An image's kitty escape (APC, `ESC _`, #1MGS) is a string of the same shape.
+            if (i + 1 < rendered.size() && (rendered.at(i + 1) == QLatin1Char(']') || rendered.at(i + 1) == QLatin1Char('_'))) {
                 i += 2;
                 while (i < rendered.size() && rendered.at(i) != QChar(0x07) && rendered.at(i) != QChar(0x1b)) ++i;
                 if (i < rendered.size() && rendered.at(i) == QChar(0x1b)) ++i;   // ST: ESC \, both
@@ -357,6 +428,13 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
             || c == QLatin1Char('~') || c == QLatin1Char('[') || c == QLatin1Char('\\')))
         flushBoldHold(out);
 
+    // Card #1MGS: the rest of a line an image ended starts on a row of its own, under the picture.
+    if (m_afterImage) {
+        if (c == QLatin1Char(' ') || c == QLatin1Char('\t')) { ++i; return true; }
+        m_afterImage = false;
+        out += QLatin1Char('\n') + style();
+    }
+
     if (c == QLatin1Char('\\') && m_codeRun == 0) {
         if (atEnd(i + 1) && !m_final) return false;
         const QChar escaped = next(i + 1);
@@ -376,6 +454,12 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
         return true;
     }
     if (m_codeRun > 0) { out += c; m_prev = c; ++i; return true; }
+
+    if (c == QLatin1Char('!') && m_images && !m_inlineOnly) {
+        const int at = i;
+        if (!imageStep(out, i)) return false;
+        if (i != at) return true;   // handled: the `!` is gone
+    }
 
     if (c == QLatin1Char('*') || c == QLatin1Char('_')) {
         const int run = runLength(text, i, c);
@@ -467,6 +551,49 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
     }
 
     out += c; m_prev = c; ++i;
+    return true;
+}
+
+// Card #1MGS: `![alt](target)` at m_pending[i], held on one line and bounded like a link. False
+// when it needs more input. Otherwise i has moved past whatever it handled — the whole image, or
+// just the `!` of an image that is to print as a link — or, when this is no image, not at all.
+bool MarkdownAnsi::imageStep(QString &out, int &i) {
+    const QString &text = m_pending;
+    const int lineEnd = text.indexOf(QLatin1Char('\n'), i);
+    const int limit = lineEnd < 0 ? text.size() : lineEnd;
+    const bool open = lineEnd < 0 && !m_final && limit - i < 400;
+    if (i + 1 >= limit) return !open;
+    if (text.at(i + 1) != QLatin1Char('[')) return true;
+    const int close = text.indexOf(QLatin1Char(']'), i + 2);
+    if (close < 0 || close >= limit || close + 1 >= limit) return !open;
+    if (text.at(close + 1) != QLatin1Char('(')) return true;
+    const int paren = text.indexOf(QLatin1Char(')'), close + 2);
+    if (paren < 0 || paren >= limit) return !open;
+
+    const QString alt = text.mid(i + 2, close - i - 2).trimmed();
+    const QString target = bareTarget(text.mid(close + 2, paren - close - 2));
+    const QString path = isForeignUrl(target) ? QString() : resolveImageTarget(target, m_imageBase);
+    const int columns = m_imageColumns > 0 ? std::min(m_imageColumns, int(kImageMaxColumns)) : int(kImageMaxColumns);
+    const QString escape = path.isEmpty() ? QString() : imageEscape(path, columns, kImageMaxRows, m_imageCell);
+    if (isForeignUrl(target) || (!path.isEmpty() && escape.isEmpty())) {
+        ++i;   // a web image, or a file that is no picture: its link is what follows the `!`
+        return true;
+    }
+    flushBoldHold(out);
+    if (escape.isEmpty()) {
+        // Names nothing here: say what it would have shown, and where it looked.
+        if (!alt.isEmpty()) out += alt;
+        if (!target.isEmpty()) out += sgr(m_palette.dim) + (alt.isEmpty() ? QString() : QStringLiteral(" ")) + QLatin1Char('(') + target + QLatin1Char(')') + style();
+    } else {
+        // The picture takes rows of its own: a line of its alt text, then the escape at the start
+        // of the next row. Text before it on the line ends that line first.
+        if (!m_prev.isNull()) out += kReset + QLatin1Char('\n');
+        out += sgr(QStringLiteral("0;") + m_palette.dim) + (alt.isEmpty() ? QFileInfo(path).fileName() : alt) + kReset
+               + QLatin1Char('\n') + escape;
+        m_afterImage = true;
+    }
+    m_prev = QLatin1Char(')');
+    i = paren + 1;
     return true;
 }
 

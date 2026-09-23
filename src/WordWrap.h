@@ -80,9 +80,10 @@ QVector<Row> rows(const QVector<int> &widths, const QVector<char> &startsWord,
 // hanging indent of its first line — the leading spaces plus a list or quote marker — so a wrapped
 // bullet lines up under its text, the way Warp and a Markdown viewer lay it out.
 //
-// Escape sequences pass through with zero width (CSI and OSC, split across chunks or not). '\r'
-// and '\n' return the column to 0; the output keeps '\n' for the caller to turn into "\r\n". A
-// word longer than the line is left to the terminal to break. columns <= 0 turns wrapping off.
+// Escape sequences pass through with zero width (CSI, OSC and the other ST-terminated strings —
+// APC carries an inline image, #1MGS — split across chunks or not). '\r' and '\n' return the
+// column to 0; the output keeps '\n' for the caller to turn into "\r\n". A word longer than the
+// line is left to the terminal to break. columns <= 0 turns wrapping off.
 class WordWrap {
 public:
     void setColumns(int columns) { m_columns = columns; }

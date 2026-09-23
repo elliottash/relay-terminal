@@ -138,6 +138,12 @@ private slots:
         const QString link = QStringLiteral("\x1b]8;;relay://x\x1b\\link\x1b]8;;\x1b\\");
         QCOMPARE(shown(wrap(QStringLiteral("aaaa ") + link + QStringLiteral(" b\n"), 9)).remove(QRegularExpression(QStringLiteral("\x1b\\]8;;[^\x1b]*\x1b\\\\"))),
                  QStringLiteral("aaaa link\nb\n"));
+        // An inline image's kitty escape (APC, #1MGS) is a string with letters in it: none of it
+        // is a cell, split into single characters or not.
+        const QString image = QStringLiteral("\x1b_Ga=T,t=f,q=2,c=4,r=2;L3RtcC9hLnBuZw==\x1b\\");
+        const QString text2 = QStringLiteral("aaaa ") + image + QStringLiteral("bbbb cc\n");
+        QCOMPARE(wrap(text2, 9), QStringLiteral("aaaa ") + image + QStringLiteral("bbbb\ncc\n"));
+        QCOMPARE(wrap(text2, 9, true), wrap(text2, 9));
     }
 
     void bulletsHangUnderTheirText() {

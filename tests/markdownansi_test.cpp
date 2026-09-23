@@ -4,8 +4,13 @@
 
 #include "LabelLinks.h"
 
+#include <QDir>
+#include <QFile>
+#include <QImage>
 #include <QRegularExpression>
+#include <QTemporaryDir>
 #include <QTest>
+#include <QUrl>
 
 using relay::MarkdownAnsi;
 
@@ -38,6 +43,30 @@ QString plain(const QString &rendered) {
 QString plainer(const QString &rendered) {
     static const QRegularExpression osc(QStringLiteral("\x1b\\][^\x07\x1b]*(\x07|\x1b\\\\)"));
     return plain(QString(rendered).remove(osc));
+}
+
+// Card #1MGS: a renderer with inline images on, run whole or a character at a time.
+QString renderImages(const QString &markdown, const QString &base = QString(), bool streamed = false) {
+    MarkdownAnsi md;
+    md.setInlineImages(true);
+    md.setImageBaseDir(base);
+    QString out;
+    if (streamed) for (const QChar c : markdown) out += md.feed(QString(c));
+    else out = md.feed(markdown);
+    out += md.finish();
+    return out;
+}
+
+QString writePng(const QString &path, int width, int height) {
+    QImage image(width, height, QImage::Format_RGB32);
+    image.fill(Qt::darkCyan);
+    return image.save(path, "PNG") ? path : QString();
+}
+
+// The kitty escape for a PNG at `path` placed as `cols` x `rows` cells.
+QString kitty(const QString &path, int cols, int rows) {
+    return QStringLiteral("\x1b_Ga=T,t=f,f=100,q=2,c=%1,r=%2;").arg(cols).arg(rows)
+           + QString::fromLatin1(path.toUtf8().toBase64()) + QStringLiteral("\x1b\\");
 }
 
 }  // namespace
@@ -301,6 +330,134 @@ private slots:
                  plainer(plainMd.feed(md) + plainMd.finish()));
         QCOMPARE(MarkdownAnsi::visibleWidth(QStringLiteral("\x1b]8;;relay://prose/p/1\x1b\\x")), 1);
         QCOMPARE(MarkdownAnsi::visibleWidth(QStringLiteral("\x1b]8;;u\ay")), 1);
+    }
+
+    // ----- inline images (card #1MGS) --------------------------------------------------------
+
+    // A standalone image of a local file: the alt text dim on a line of its own, then the kitty
+    // escape — base64 of the absolute path, the size in cells from the file's pixels at 8 x 16 a
+    // cell — at the start of the next row.
+    void anAbsolutePathImageIsAKittyEscape() {
+        QTemporaryDir dir;
+        const QString png = writePng(dir.filePath(QStringLiteral("shot.png")), 160, 64);
+        QVERIFY(!png.isEmpty());
+        const QString out = renderImages(QStringLiteral("![the chart](") + png + QStringLiteral(")\n"));
+        QCOMPARE(out, QStringLiteral("\x1b[0;97m\x1b[0;2;97mthe chart\x1b[0m\n") + kitty(png, 20, 4)
+                          + QStringLiteral("\x1b[0m\n"));
+        QCOMPARE(MarkdownAnsi::visibleWidth(kitty(png, 20, 4)), 0);
+        // No alt text: the file's name is the line above the picture.
+        QVERIFY(plain(renderImages(QStringLiteral("![](") + png + QStringLiteral(")\n")))
+                    .startsWith(QStringLiteral("shot.png\n\x1b_G")));
+        // Off — the default, and every surface but the pane — it is the `!` and a link it always was.
+        QCOMPARE(plain(render(QStringLiteral("![the chart](") + png + QStringLiteral(")\n"))),
+                 QStringLiteral("!the chart (") + png + QStringLiteral(")\n"));
+    }
+
+    void aRelativePathResolvesAgainstTheBaseDir() {
+        QTemporaryDir dir;
+        QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("out")));
+        const QString png = writePng(dir.filePath(QStringLiteral("out/plot.png")), 80, 32);
+        QVERIFY(!png.isEmpty());
+        QVERIFY(renderImages(QStringLiteral("![p](out/plot.png)\n"), dir.path()).contains(kitty(png, 10, 2)));
+        QVERIFY(renderImages(QStringLiteral("![p](./out/plot.png)\n"), dir.path()).contains(kitty(png, 10, 2)));
+        // With no base dir a relative path names nothing.
+        QVERIFY(!renderImages(QStringLiteral("![p](out/plot.png)\n")).contains(QStringLiteral("\x1b_G")));
+    }
+
+    void fileUrlsAndTheHomeDirectoryResolve() {
+        QTemporaryDir dir;
+        const QString png = writePng(dir.filePath(QStringLiteral("with space.png")), 16, 16);
+        QVERIFY(!png.isEmpty());
+        const QString url = QUrl::fromLocalFile(png).toString(QUrl::FullyEncoded);
+        QVERIFY(url.contains(QStringLiteral("%20")));
+        QVERIFY(renderImages(QStringLiteral("![a](") + url + QStringLiteral(")\n")).contains(kitty(png, 2, 1)));
+        QVERIFY(renderImages(QStringLiteral("![a](<") + png + QStringLiteral("> \"a title\")\n")).contains(kitty(png, 2, 1)));
+
+        const QByteArray home = qgetenv("HOME");
+        qputenv("HOME", dir.path().toUtf8());
+        const QString out = renderImages(QStringLiteral("![a](~/with%20space.png)\n"));
+        qputenv("HOME", home);
+        QVERIFY2(out.contains(kitty(png, 2, 1)), qPrintable(out));
+    }
+
+    // Deltas arrive in any pieces: the escape is emitted whole once the `)` is in, and the bytes
+    // are the same as the whole reply rendered at once.
+    void aStreamedImageIsTheSameBytes() {
+        QTemporaryDir dir;
+        const QString png = writePng(dir.filePath(QStringLiteral("a.png")), 1600, 400);
+        QVERIFY(!png.isEmpty());
+        const QString md = QStringLiteral("Here it is:\n\n![**chart**](a.png)\n- see ![a](a.png) and **Done:** that\n"
+                                          "Wow! [x](y) ![gone](nope.png) !\n");
+        const QString whole = renderImages(md, dir.path());
+        QCOMPARE(renderImages(md, dir.path(), true), whole);
+        QCOMPARE(whole.count(QStringLiteral("\x1b_G")), 2);
+        // A wide picture is fitted into 80 columns, keeping its aspect ratio.
+        QVERIFY(whole.contains(kitty(png, 80, 10)));
+        MarkdownAnsi md2;
+        md2.setInlineImages(true);
+        md2.setImageBaseDir(dir.path());
+        QString streamed;
+        const QString line = QStringLiteral("![a](a.png)\n");
+        for (int n = 0; n < line.size(); ++n) {
+            streamed += md2.feed(line.mid(n, 1));
+            if (n < line.indexOf(QLatin1Char(')'))) QVERIFY(!streamed.contains(QStringLiteral("\x1b_G")));
+        }
+        QVERIFY(streamed.contains(kitty(png, 80, 10)));
+        // A picture mid-line ends the line before it, and what follows it starts a row under it.
+        const QString mid = renderImages(QStringLiteral("see ![a](a.png) there\n"), dir.path());
+        QCOMPARE(plain(mid), QStringLiteral("see \na\n") + kitty(png, 80, 10) + QStringLiteral("\nthere\n"));
+        // A narrower pane is a narrower picture.
+        MarkdownAnsi narrow;
+        narrow.setInlineImages(true);
+        narrow.setImageBaseDir(dir.path());
+        narrow.setImageColumns(40);
+        QVERIFY(QString(narrow.feed(line) + narrow.finish()).contains(kitty(png, 40, 5)));
+    }
+
+    // A web image is never fetched: it is a link with its alt text as the label.
+    void anHttpImageIsALink() {
+        const QString out = renderImages(QStringLiteral("![logo](https://example.com/logo.png)\n"));
+        QVERIFY(!out.contains(QStringLiteral("\x1b_G")));
+        QCOMPARE(out, render(QStringLiteral("[logo](https://example.com/logo.png)\n")));
+    }
+
+    void aMissingFileIsItsAltTextAndPath() {
+        const QString out = renderImages(QStringLiteral("![the plot](/nonexistent/relay/plot.png)\n"));
+        QVERIFY(!out.contains(QStringLiteral("\x1b_G")));
+        QCOMPARE(plain(out), QStringLiteral("the plot (/nonexistent/relay/plot.png)\n"));
+        QVERIFY(out.contains(QStringLiteral("\x1b[2;97m (/nonexistent/relay/plot.png)")));
+        // A file that is there but no picture is a link to it.
+        QTemporaryDir dir;
+        QFile text(dir.filePath(QStringLiteral("notes.txt")));
+        QVERIFY(text.open(QIODevice::WriteOnly));
+        text.write("not an image");
+        text.close();
+        QCOMPARE(renderImages(QStringLiteral("![n](notes.txt)\n"), dir.path()),
+                 render(QStringLiteral("[n](notes.txt)\n")));
+    }
+
+    void imageSyntaxInCodeIsUnchanged() {
+        QTemporaryDir dir;
+        QVERIFY(!writePng(dir.filePath(QStringLiteral("a.png")), 16, 16).isEmpty());
+        const QString md = QStringLiteral("```\n![a](a.png)\n```\nand `![a](a.png)` inline\n    ![a](a.png)\n");
+        const QString out = renderImages(md, dir.path());
+        QVERIFY(out.contains(QStringLiteral("\x1b_G")));   // only the indented line (not a code block here)
+        QCOMPARE(out.count(QStringLiteral("\x1b_G")), 1);
+        const QString fenced = QStringLiteral("```\n![a](a.png)\n```\nand `![a](a.png)` inline\n");
+        QCOMPARE(renderImages(fenced, dir.path()), render(fenced));
+        QCOMPARE(renderImages(fenced, dir.path(), true), render(fenced));
+        // A table cell is inline content: an image there stays text.
+        const QString table = QStringLiteral("| a |\n|---|\n| ![a](a.png) |\n");
+        QCOMPARE(renderImages(table, dir.path()), render(table));
+    }
+
+    void imageCellsFitAndKeepTheAspect() {
+        const QSize cell(8, 16);
+        QCOMPARE(MarkdownAnsi::imageCells(QSize(160, 64), cell, 80, 20), QSize(20, 4));
+        QCOMPARE(MarkdownAnsi::imageCells(QSize(1920, 1080), cell, 80, 20), QSize(72, 20));
+        QCOMPARE(MarkdownAnsi::imageCells(QSize(1920, 1080), cell, 80, MarkdownAnsi::kThumbnailRows), QSize(22, 6));
+        QCOMPARE(MarkdownAnsi::imageCells(QSize(1, 1), cell, 80, 20), QSize(1, 1));
+        QCOMPARE(MarkdownAnsi::imageCells(QSize(160, 64), QSize(), 80, 20), QSize(20, 4));   // the 1:2 default
     }
 };
 
