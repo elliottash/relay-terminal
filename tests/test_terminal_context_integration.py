@@ -1,6 +1,7 @@
 """Terminal evidence through real native Agent and guest bridge adapters (#TCXT)."""
 import json
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -147,6 +148,47 @@ class TerminalContextIntegrationTests(unittest.TestCase):
         self.assertEqual(len(observed), 2)
         self.assertTrue(observed[0]['results'][0]['ok'])
         self.assertEqual(observed[1]['results'][0]['error'], 'revoked')
+
+    def test_unaccepted_steer_formats_without_changing_current_grants(self):
+        agent, _ = self.native()
+        current, incoming = record(output='ACTIVE_OUTPUT'), record('steer', output='STEER_OUTPUT')
+        agent.terminal_context.update(snapshot(current, incoming))
+        agent.terminal_context.set_snapshot(snapshot(current))
+        entry = {'prompt': 'Read the attached command',
+                 'context': {'terminal_context': snapshot(incoming)}}
+        ctx = {'opening': [], 'requests': [], 'turn_id': 'active'}
+        preview = agent._steer_message([entry], ctx, {'turn': 1}, record=False)
+        self.assertIn('STEER_OUTPUT', preview['content'])
+        self.assertEqual(agent.terminal_context.execute('terminal_read', {'command_id': 'one'})['output'], 'ACTIVE_OUTPUT')
+        self.assertFalse(agent.terminal_context.execute('terminal_read', {'command_id': 'steer'})['ok'])
+        agent._steer_message([entry], ctx, {'turn': 1}, record=True)
+        self.assertEqual(agent.terminal_context.execute('terminal_read', {'command_id': 'steer'})['output'], 'STEER_OUTPUT')
+        self.assertFalse(agent.terminal_context.execute('terminal_read', {'command_id': 'one'})['ok'])
+
+    def test_guest_repeated_request_key_cannot_replay_revoked_terminal_evidence(self):
+        agent, harness, _ = self.guest([])
+        bridge = agent.provider.board_bridge
+        cap = {'socket': bridge.path, 'token': bridge.token}
+        for tool_name, arguments in (('terminal_read', {'command_id': 'one'}), ('terminal_history', {})):
+            for revoke in ('off', 'end'):
+                with self.subTest(tool=tool_name, revoke=revoke):
+                    agent.terminal_context.update(snapshot(record(output='PRIVATE_OUTPUT', command='PRIVATE_COMMAND')))
+                    agent.terminal_context.set_snapshot(snapshot(record(output='PRIVATE_OUTPUT', command='PRIVATE_COMMAND')))
+                    bridge.begin(threading.Event())
+                    key = f'{tool_name}-{revoke}'
+                    params = {'name': tool_name, 'arguments': arguments}
+                    first = exchange(cap, 'tools/call', params, key)
+                    self.assertTrue(first['ok'])
+                    if revoke == 'off':
+                        agent.terminal_context.update(snapshot(mode='off'))
+                    else:
+                        bridge.end()
+                    repeated = exchange(cap, 'tools/call', params, key)
+                    self.assertNotIn('PRIVATE_OUTPUT', json.dumps(repeated))
+                    self.assertNotIn('PRIVATE_COMMAND', json.dumps(repeated))
+                    self.assertEqual(repeated.get('error') if revoke == 'off' else repeated.get('code'),
+                                     'revoked' if revoke == 'off' else 'unavailable')
+                    bridge.end()
 
     def test_remote_branch_preserves_context_and_short_profile_offers_tools(self):
         agent, provider = self.native(profile='short')

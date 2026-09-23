@@ -170,6 +170,27 @@ class TerminalContextTests(unittest.TestCase):
         self.service.set_snapshot(snapshot(r))
         self.assertEqual(self.read()['output'], r['output'])
 
+    def test_preview_is_nonmutating_and_applies_live_policy_and_identity(self):
+        active, proposed = record(), record('steer', output='token=x')
+        self.service.update(snapshot(active, proposed))
+        self.service.set_snapshot(snapshot(active))
+        preview = self.service.preview_snapshot(snapshot(proposed))
+        self.assertEqual(preview['records'][0]['command_id'], 'steer')
+        self.assertNotIn('token=x', str(preview))
+        self.assertEqual(self.read()['output'], 'hello')
+        self.assertFalse(self.read('steer')['ok'])
+        preview['records'].clear()
+        self.assertEqual(self.service.snapshot()['records'][0]['command_id'], 'one')
+        self.service.update(snapshot(active, record('steer', generation='other')))
+        self.assertEqual(self.service.preview_snapshot(snapshot(proposed))['records'], [])
+        self.service.update(snapshot(active, proposed, mode='manual'))
+        self.assertEqual(self.service.preview_snapshot(snapshot(proposed))['records'], [])
+        self.assertEqual(self.service.preview_snapshot(snapshot(proposed, mode='manual'))['records'][0]['command_id'], 'steer')
+        self.service.update(snapshot(mode='off'))
+        self.assertEqual(self.service.preview_snapshot(snapshot(proposed, mode='manual')),
+                         {'mode': 'off', 'records': []})
+        self.assertEqual(self.service.preview_snapshot(None), {'mode': 'off', 'records': []})
+
     def test_tool_specs_follow_relay_function_contract(self):
         self.assertEqual([spec['function']['name'] for spec in TOOL_SPECS],
                          ['terminal_history', 'terminal_read'])

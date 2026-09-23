@@ -190,6 +190,26 @@ class Service:
             self._snapshot_mode = snapshot['mode']
             self._grants = {r['command_id']: r for r in snapshot['records']}
 
+    def preview_snapshot(self, payload):
+        """Sanitize a proposed turn grant without changing the active turn.
+
+        Guest steering formats a proposal before the harness accepts it. Only
+        set_snapshot() commits that proposal. The same live sharing and identity
+        checks as snapshot() apply, including to queued proposals after Off.
+        """
+        proposed = validate_snapshot(payload)
+        with self._lock:
+            mode = proposed['mode']
+            if self._mode == 'off' or mode == 'off' or (self._mode == 'manual' and mode == 'automatic'):
+                return {'mode': 'off', 'records': []}
+            records = []
+            for record in proposed['records']:
+                current = self._live.get(record['command_id'])
+                if current is not None and (current['pane_id'], current['generation']) != (record['pane_id'], record['generation']):
+                    continue
+                records.append(_evidence(record))
+            return {'mode': mode, 'records': records}
+
     def snapshot(self):
         """Return the effective pinned grant for provider formatting after revocation.
 
