@@ -1540,6 +1540,10 @@ private:
                 sessions->setHelperTabId(tab);
                 sessions->setHelperWorkspace(workspace);
             }
+            if (auto *models = modelsViewOf(tool)) {
+                models->setHelperTabId(tab);
+                models->setHelperWorkspace(workspace);
+            }
         }
         // And the **worker** is told, so the tab's consoles stop talking about a project they no
         // longer work in. This is the GUI's half of the bargain the backend's `helper_file`
@@ -1607,7 +1611,8 @@ private:
         if (tool && tool->settings()) { tool->settings()->focusHelper(); return; }
         if (tool && tool->board()) { tool->board()->focusChat(); return; }
         if (auto *sessions = sessionsViewOf(tool)) { sessions->focusHelper(); return; }
-        notice(QStringLiteral("The helper agent is in Options, Actions, Sessions and the "
+        if (auto *models = modelsViewOf(tool)) { models->focusHelper(); return; }
+        notice(QStringLiteral("The helper agent is in Options, Actions, Sessions, Models and the "
                               "Board — open one of those and ask it there."), 5000);
     }
 
@@ -1712,6 +1717,11 @@ private:
         relay::SettingsWatch::instance().listen(tool, [guard] {
             if (auto *w = windowOf(guard)) w->refreshModelsPane(guard);
         });
+        // The helper agent at the foot of all four tabs (owner, 2026-09-22: "there needs to be a
+        // helper agent on the model page"), wired exactly as Options' and Sessions' are: the pane
+        // owns the collapsed row and asks for a console on first expand; Alt+Q reaches it through
+        // `focusHelperOfActiveLeaf`.
+        wireConsoleHost(view, tool, QStringLiteral("models.ask"));
         return tool;
     }
 

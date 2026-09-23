@@ -45,6 +45,15 @@
 //
 // It knows nothing about `Pane`, `RelayWindow` or the worker — every one of those arrives as a
 // `std::function` — so tests/modelspane_test.cpp drives the whole surface without a window.
+//
+// **A helper agent at its foot, across all four tabs** (owner, 2026-09-22: "there needs to be a
+// helper agent on the model page"). It is the Options and Sessions helper, name for name: the
+// collapsed "Helper Agent (Alt+Q)" row at the bottom right, a console the window builds through
+// `onCreateConsole` on the first expand, the fold back to one row, and the same height rules
+// (src/SettingsPane.cpp). The context is `ModelsContext` in ModelsPane.cpp — what this pane is
+// showing — and the providers tab's embedded `SettingsPane` is never given a factory, so it has
+// no row of its own: one helper per pane.
+#include "AgentContext.h"
 #include "JobsTab.h"
 #include "ModelCatalog.h"
 #include "ModelPicker.h"
@@ -60,10 +69,18 @@
 class QEvent;
 class QKeyEvent;
 class QLabel;
+class QResizeEvent;
+class QShowEvent;
 class QStackedWidget;
 class QTabBar;
+class QToolButton;
+class QVBoxLayout;
 
 namespace relay {
+
+// What this pane's helper agent is about: the tab, the filter, the pane it serves. Defined in
+// ModelsPane.cpp, as `OptionsContext` is in SettingsPane.cpp.
+class ModelsContext;
 
 class ModelsPane final : public QWidget, public PaneView {
 public:
@@ -110,6 +127,7 @@ public:
     // section Options › Models draws, so it is one renderer with two hosts. With no callback the
     // providers tab is empty, which is what a test that is not about providers wants.
     explicit ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget *parent = nullptr);
+    ~ModelsPane() override;
 
     // Point it at a pane. A target with a token this pane is already serving keeps the picker and
     // its undo stack and only re-reads; any other token rebuilds it around the new pane.
@@ -125,6 +143,9 @@ public:
     // The class the priorities page's highlight is in. Reading it is how a test says "it opened on
     // the served pane's mode"; it was the class tab in front until the page became sections.
     QString tier() const;
+    // The filter line's text on the tab in front: the picker's on available and priorities, the
+    // embedded Options search on providers, nothing on jobs (it has no filter line).
+    QString filterText() const;
 
     ModelPicker *picker() const { return m_picker; }
     JobsTab *jobs() const { return m_jobs; }
@@ -137,15 +158,42 @@ public:
     void focusView() override { focusFilter(); }
     void setHeaderRightInset(int pixels) override;
 
+    // ----- the helper agent (owner, 2026-09-22) ------------------------------------------------
+    // The same seam as `SettingsPane`'s and `SessionManager`'s, member for member, so the window
+    // wires it with the same `wireConsoleHost` lines. With no factory there is no row at all,
+    // which is what keeps this library and its tests free of a window.
+    relay::agent::ConsoleFactory onCreateConsole;
+    // Where the conversation is kept: the tab's id, sent as `persist {scope: "helper", key}`.
+    void setHelperTabId(const QString &tabId);
+    // The project this pane's agent works in; empty is a board-less helper, which is supported.
+    void setHelperWorkspace(const QString &workspace);
+    // The live key for the collapsed row's text, and the hint a *click* on the row earns.
+    void setHelperShortcut(const QString &hintId, const QString &keys);
+    std::function<void()> onHelperHint;
+    // Open the helper and put the cursor in it — Alt+Q, and what a click on the row does.
+    void focusHelper();
+    void helperDraft(const QString &text);
+    const relay::agent::ConsoleHandle &agentConsole() const { return m_console; }
+    relay::agent::Context *agentContext() const;
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void buildPicker();
     void updateHeader();
     void stepTab(int delta);
     bool handleShortcut(QKeyEvent *event);
+    // The helper's own half, as SettingsPane has it: the row, the console, the fold between.
+    void buildHelperRow(QVBoxLayout *into);
+    void ensureConsole();               // builds it, once, on the first expand
+    void applyHelperCollapsed();
+    void updateHelperRow();             // the live key in the button's own text
+    void updateConsoleHeight();         // ~40 % of the pane, never less than a few lines
+    void helperScreenMoved();           // what `screen` answers has changed
 
     std::function<QList<SettingsSection>()> m_sections;
     Target m_target;
@@ -166,6 +214,17 @@ private:
     // worker had not answered `presets` when it was first pointed at a pane — needs a rebuild and
     // not a re-read (card #MDL1 t:a11).
     bool m_pickerHasFill = false;
+    // ----- the helper agent (owner, 2026-09-22) ------------------------------------------------
+    ModelsContext *m_context = nullptr;    // owned; outlives the console, as §33 requires
+    relay::agent::ConsoleHandle m_console;
+    QWidget *m_helper = nullptr;           // the foot of the pane: the row and the console
+    QWidget *m_askRow = nullptr;           // collapsed: one button, bottom right
+    QWidget *m_helperBody = nullptr;       // expanded: the fold row and the console
+    QToolButton *m_ask = nullptr;
+    QLabel *m_helperHead = nullptr;
+    QString m_askKeys;
+    QString m_askHintId;   // the hint a click on the row earns (onHelperHint)
+    bool m_helperCollapsed = true;
 };
 
 }  // namespace relay

@@ -32,7 +32,7 @@ class ParsingTests(unittest.TestCase):
         self.assertFalse(spec.is_console())
 
     def test_every_other_context_defaults_to_a_console_with_no_shell(self):
-        for name in ("switchboard", "options", "actions", "sessions", "projects", "globals"):
+        for name in ("switchboard", "options", "actions", "sessions", "projects", "globals", "models"):
             spec = AC.ContextSpec.from_json({"name": name})
             self.assertEqual(spec.scope, "console", name)
             self.assertEqual(spec.routing, "agent", name)
@@ -164,6 +164,19 @@ class BriefTests(unittest.TestCase):
         for spec in (projects, globals_):
             self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
             self.assertEqual(spec.scope, "console")
+
+    def test_the_models_pane_has_a_brief_of_its_own(self):
+        # Owner, 2026-09-22: "there needs to be a helper agent on the model page". The Models
+        # pane's console names itself `models`, which the worker must accept rather than refuse,
+        # and its brief says what the four tabs are and which of them the option tools reach.
+        spec = AC.ContextSpec.from_json({"name": "models", "persist": {"scope": "helper", "key": "t1"},
+                                         "brief": {"key": "models", "title": "Models helper"}})
+        self.assertEqual(spec.scope, "console")
+        text = spec.brief_text()
+        for word in ("providers", "available", "priorities", "jobs", "app_option_get", "secret"):
+            self.assertIn(word, text)
+        self.assertIn("Say what you are doing", text)
+        self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
 
     def test_an_unknown_brief_key_is_no_brief_rather_than_an_error(self):
         # The GUI may name a context this worker is older than; a console with no brief still works.

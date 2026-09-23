@@ -1804,11 +1804,15 @@ named — is one more class implementing `Context`, and nothing else.
 | **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / `<tab id>/card:<ID>` | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
 | **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
 | **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
+| **Models** (`ModelsContext`) | `src/ModelsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | none of its own (`option:` goes to the window) | the transcript |
 
 Each context answers `spec()` fresh, so `screen` is what that surface is showing right now — the open
 Options section and the visible row ids, the Sessions query and the filters actually narrowing, the
 board's filter and its section counts — and the busy state of a card is a `changed()` rather than a
-pushed label. `OptionsContext` is one class for both modes: `setMode` calls `changed()` and the name,
+pushed label. The Models pane's helper (owner, 2026-09-22: "there needs to be a helper agent on the
+model page") sits under all four of its tabs and says which tab, the filter, the pane it serves and
+the class or job in focus; the providers tab's embedded `SettingsPane` gets no factory, so it draws
+no second row. `OptionsContext` is one class for both modes: `setMode` calls `changed()` and the name,
 the brief and the placeholder all read `mode()`, so Options and Actions swap without swapping consoles.
 
 **A card turn is an ordinary console turn** (card #CTRN, owner 2026-09-21: *"that sounds sensible to

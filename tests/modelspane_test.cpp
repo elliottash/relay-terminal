@@ -31,6 +31,7 @@
 #include <QTabBar>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 #include <QTreeWidget>
 
 #include <functional>
@@ -512,6 +513,113 @@ private Q_SLOTS:
         QVERIFY(pane.jobs()->clearOverride());
         QCOMPARE(resends, 1);
         QCOMPARE(pane.jobs()->overrideText(QStringLiteral("subagent")), QStringLiteral("follows main"));
+    }
+
+    // ----- the helper agent (owner, 2026-09-22: "there needs to be a helper agent on the model
+    // page") ------------------------------------------------------------------------------------
+
+    void theHelperIsOneRowUnderAllFourTabsAndBuildsOneConsole() {
+        // With no factory — a pane with no window, which is every other test here — there is no
+        // row at all: an ask row that does nothing is worse than none.
+        ModelsPane unwired(providerSections());
+        unwired.resize(700, 600);
+        unwired.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&unwired));
+        auto *unwiredPanel = unwired.findChild<QWidget *>(QStringLiteral("boardChatPanel"), Qt::FindDirectChildrenOnly);
+        QVERIFY(unwiredPanel);
+        QVERIFY(!unwiredPanel->isVisible());
+        QVERIFY(!unwired.agentConsole());
+
+        int builds = 0, focused = 0;
+        relay::agent::Context *built = nullptr;
+        QWidget *console = nullptr;
+        ModelsPane pane(providerSections());
+        pane.onCreateConsole = [&](relay::agent::Context *context, QWidget *parent) {
+            ++builds;
+            built = context;
+            console = new QWidget(parent);
+            relay::agent::ConsoleHandle handle;
+            handle.widget = console;
+            handle.focusComposer = [&] { ++focused; };
+            return handle;
+        };
+        pane.setHelperTabId(QStringLiteral("tab-7"));
+        pane.setHelperShortcut(QStringLiteral("models.ask"), QStringLiteral("Alt+Q"));
+        Served served;
+        pane.setTarget(targetFor(&served, QStringLiteral("flash")));
+        pane.resize(700, 600);
+        pane.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&pane));
+
+        auto *panel = pane.findChild<QWidget *>(QStringLiteral("boardChatPanel"), Qt::FindDirectChildrenOnly);
+        QVERIFY(panel);
+        auto *ask = panel->findChild<QToolButton *>(QStringLiteral("boardChatAsk"));
+        auto *body = panel->findChild<QWidget *>(QStringLiteral("boardChatBody"));
+        QVERIFY(ask && body);
+        QCOMPARE(ask->text(), QStringLiteral("Helper Agent (Alt+Q)"));
+        QCOMPARE(panel->findChild<QLabel *>(QStringLiteral("boardChatHead"))->text(), QStringLiteral("Models helper"));
+
+        // One row on every tab — the pane's own, under the tabs — and the providers tab's embedded
+        // Options renderer has none of its own: one helper per pane.
+        const auto visibleAskRows = [&pane] {
+            int n = 0;
+            for (QToolButton *button : pane.findChildren<QToolButton *>(QStringLiteral("boardChatAsk")))
+                if (button->isVisible()) ++n;
+            return n;
+        };
+        for (const QString &tab : ModelsPane::tabIds()) {
+            pane.showTab(tab);
+            QCoreApplication::processEvents();
+            QVERIFY2(panel->isVisible(), qPrintable(tab));
+            QVERIFY2(ask->isVisible(), qPrintable(tab));
+            QCOMPARE(visibleAskRows(), 1);
+        }
+        QVERIFY(!pane.providers()->onCreateConsole);
+        QVERIFY(!pane.providers()->findChild<QWidget *>(QStringLiteral("boardChatPanel"))->isVisible());
+        QCOMPARE(builds, 0);   // nothing is built until somebody asks
+
+        // A click builds the console once, unfolds it and hands it the cursor; asking again reuses it.
+        ask->click();
+        QCOMPARE(builds, 1);
+        QVERIFY(body->isVisible());
+        QVERIFY(!ask->isVisible());
+        QVERIFY(body->isAncestorOf(console));
+        QCOMPARE(focused, 1);
+        QCOMPARE(built, pane.agentContext());
+        pane.focusHelper();
+        QCOMPARE(builds, 1);
+        QCOMPARE(focused, 2);
+        QVERIFY(!pane.providers()->agentConsole());
+
+        // What the worker is told: the models context, kept per tab, with no shell.
+        pane.showTab(ModelsPane::prioritiesTab());
+        pane.setFilter(QStringLiteral("glm"));
+        const relay::agent::ContextSpec spec = pane.agentContext()->spec();
+        QCOMPARE(spec.name, QStringLiteral("models"));
+        QCOMPARE(spec.surface, QStringLiteral("models"));
+        QCOMPARE(spec.briefKey, QStringLiteral("models"));
+        QCOMPARE(spec.briefTitle, QStringLiteral("Models helper"));
+        QCOMPARE(spec.scope, QStringLiteral("console"));
+        QCOMPARE(spec.persistScope, QStringLiteral("helper"));
+        QCOMPARE(spec.persistKey, QStringLiteral("tab-7"));
+        QCOMPARE(spec.routing, QStringLiteral("agent"));
+        QVERIFY(!spec.shell);
+        QCOMPARE(pane.agentContext()->placeholder(), QStringLiteral("Ask the Models helper…"));
+        // And what is on screen: the tab, the pane it serves, the filter, the class in focus.
+        QVERIFY2(spec.screen.contains(QStringLiteral("Models › priorities")), qPrintable(spec.screen));
+        QVERIFY2(spec.screen.contains(QStringLiteral("Serving: relay-terminal")), qPrintable(spec.screen));
+        QVERIFY2(spec.screen.contains(QStringLiteral("Filter: glm")), qPrintable(spec.screen));
+        QVERIFY2(spec.screen.contains(QStringLiteral("Class in focus: ")), qPrintable(spec.screen));
+        pane.showTab(ModelsPane::jobsTab());
+        QVERIFY(pane.agentContext()->spec().screen.contains(QStringLiteral("Models › jobs")));
+
+        // The fold puts it back to one row and keeps the console.
+        auto *fold = body->findChild<QToolButton *>(QStringLiteral("boardChatFold"));
+        QVERIFY(fold);
+        fold->click();
+        QVERIFY(!body->isVisible());
+        QVERIFY(ask->isVisible());
+        QCOMPARE(builds, 1);
     }
 
     void withNoTargetItSaysSoRatherThanPretending() {

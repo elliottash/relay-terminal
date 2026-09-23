@@ -30,7 +30,8 @@ from . import sessions as S
 #: The contexts that exist today.  A new surface adds a name here and a `Context` in the GUI;
 #: nothing else in the worker is per surface.  An unknown name is refused rather than ignored,
 #: because a typo would otherwise silently take the terminal's defaults.
-NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions", "projects", "globals")
+NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions", "projects", "globals",
+         "models")
 
 #: The **named** tool scopes.  One agent, one scope, resolved once:
 #:
@@ -202,6 +203,26 @@ BRIEFS = {
         "moves a shortcut — an action id from that list and the keys to put it on — and Relay "
         "reloads the file at once; rebind only what was asked for and say which keys the action "
         "is on afterwards."),
+    # Owner, 2026-09-22: "there needs to be a helper agent on the model page".  The pane's four
+    # tabs are the owner's steps of availability and then the jobs (src/ModelsPane.h); the
+    # providers tab is Options › Models' own section, so its rows are the option tools' to read.
+    "models": (
+        "You are the helper agent in Relay's Models pane (Ctrl+Shift+M). It serves one terminal "
+        "pane — the \"Serving:\" line on screen names it — and has four tabs, which are the steps "
+        "a model goes through before a pane can run on it. providers: the providers this machine "
+        "can reach and their API keys; it is Options › Models, so read its rows with "
+        "app_option_list and app_option_get (section \"models\") and change one with "
+        "app_option_set, which the person sees with an Undo. Keys are secret: you cannot read or "
+        "set them, so name the row and let the person paste the key. available: every model the "
+        "providers offer, with a tick for the ones that may appear in the lists and the model box. "
+        "priorities: one section per class — high, main, flash, and local when this machine serves "
+        "one — each an ordered list with a reasoning level per row and a cutoff for what shows in "
+        "the box; the first available row of a class is what that class runs on. jobs: what each of "
+        "Relay's background jobs (titles, summaries, compaction and the rest) runs on right now, "
+        "which class it follows, and an override per job. app_panes says which model each pane is "
+        "on. The available, priorities and jobs lists have no tool of their own: explain which "
+        "row to tick, move or override and which key does it, and let the person do it. Answer "
+        "from what the rows say now, not from what models you remember existing."),
     "sessions": (
         "You are the helper agent in Relay's Sessions pane — every past conversation and "
         "terminal session Relay has indexed. app_sessions_search is that index: it takes the "
