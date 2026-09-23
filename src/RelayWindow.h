@@ -617,7 +617,16 @@ public:
     int currentTabIndex() const { return m_tabs->currentIndex(); }
     QStringList openSessionIds() const {
         QStringList ids;
-        for (Pane *pane : allPanes()) if (pane && !pane->sessionId().isEmpty()) ids.append(pane->sessionId());
+        for (QWidget *top : QApplication::topLevelWidgets())
+            if (auto *window = dynamic_cast<RelayWindow *>(top))
+                for (Pane *pane : window->allPanes()) {
+                    if (!pane->sessionId().isEmpty()) ids.append(pane->sessionId());
+                    const QString source = pane->sessionTextSource();
+                    if (relay::conversations::isGuestSource(source) && !pane->guestSessionId().isEmpty())
+                        ids.append(source + QLatin1Char(':') + pane->guestSessionId());
+                }
+        std::sort(ids.begin(), ids.end());
+        ids.removeDuplicates();
         return ids;
     }
 
@@ -10735,13 +10744,17 @@ private:
             it = pages.contains(it.key()) ? std::next(it) : m_tabUsage.erase(it);
         // The session manager shows the same reading as a tag on each open conversation's row
         // (issue #D03W). It never looks at a window itself; like setOpenSessions, this feeds it.
-        if (!liveUsage.isEmpty() || m_fedLiveUsage)
-            for (int i = 0; i < m_tabs->count(); ++i)
-                for (QWidget *leaf : leavesIn(m_tabs->widget(i)))
-                    if (auto *tool = dynamic_cast<ToolPane *>(leaf);
-                        tool && tool->kind() == ToolPane::Kind::Sessions)
-                        if (auto *manager = dynamic_cast<relay::conversations::SessionManager *>(tool->hosted()))
-                            manager->setLiveUsage(liveUsage);
+        QStringList openIds;
+        bool readOpenIds = false;
+        for (int i = 0; i < m_tabs->count(); ++i)
+            for (QWidget *leaf : leavesIn(m_tabs->widget(i)))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                    tool && tool->kind() == ToolPane::Kind::Sessions)
+                    if (auto *manager = dynamic_cast<relay::conversations::SessionManager *>(tool->hosted())) {
+                        if (!readOpenIds) { openIds = openSessionIds(); readOpenIds = true; }
+                        manager->setOpenSessions(openIds);
+                        if (!liveUsage.isEmpty() || m_fedLiveUsage) manager->setLiveUsage(liveUsage);
+                    }
         m_fedLiveUsage = !liveUsage.isEmpty();
     }
 

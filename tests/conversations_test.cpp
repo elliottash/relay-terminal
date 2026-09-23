@@ -1090,6 +1090,28 @@ private slots:
         QVERIFY(said);
     }
 
+    void openBadgeDistinguishesGuestSources() {
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.setOpenSessions({QStringLiteral("claude:shared-id")});
+        manager.show();
+        manager.setResults({{QStringLiteral("items"), QJsonArray{
+            guestItem(QStringLiteral("claude"), QStringLiteral("shared-id"), QStringLiteral("Claude session")),
+            guestItem(QStringLiteral("codex"), QStringLiteral("shared-id"), QStringLiteral("Codex session")),
+            sessionItem(QStringLiteral("shared-id"), QStringLiteral("Relay session"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        auto isOpen = [tree](const QString &title) {
+            QTreeWidgetItem *row = rowTitled(tree, title);
+            return row && row->data(0, kBadgeRole).toStringList().contains(QStringLiteral("open"));
+        };
+        QVERIFY(isOpen(QStringLiteral("Claude session")));
+        QVERIFY(!isOpen(QStringLiteral("Codex session")));
+        QVERIFY(!isOpen(QStringLiteral("Relay session")));
+        manager.setOpenSessions({QStringLiteral("codex:shared-id")});
+        QVERIFY(!isOpen(QStringLiteral("Claude session")));
+        QVERIFY(isOpen(QStringLiteral("Codex session")));
+    }
+
     // "closed N min ago" is a clock. It has to keep up while the pane sits open, and go when the
     // item is reopened or falls off the end of the list — without asking the worker again.
     void theClosedTagAgesAndThenGoes() {

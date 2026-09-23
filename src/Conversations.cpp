@@ -351,6 +351,15 @@ bool isGuestItem(const QJsonObject &item) {
     return isGuestSource(item.value(QStringLiteral("source")).toString());
 }
 
+// A guest UUID belongs to its tool. Relay's own session ids keep their existing bare key so
+// the closed list and live usage tags still use the same index (#J8QP).
+static QString openSessionKey(const QJsonObject &item) {
+    const QString id = item.value(QStringLiteral("session_id")).toString();
+    if (id.isEmpty()) return {};
+    const QString source = item.value(QStringLiteral("source")).toString();
+    return isGuestSource(source) ? source + QLatin1Char(':') + id : id;
+}
+
 // Lower-case, like every other label Relay writes (card #MDL1, rule 1). `conv_index._MODEL_KEY`
 // spells these the same way, because the Model sort has to order the column the eye reads.
 QString guestLabel(const QString &source) {
@@ -1814,7 +1823,7 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
     if (const auto it = m_closed.constFind(sessionId); it != m_closed.constEnd())
         closedText = closedAgo(it->second, QDateTime::currentMSecsSinceEpoch());
     row->setData(0, kBadgeRole, thread ? QStringList()
-                                        : badges(item, m_openSessions.contains(sessionId), closedText,
+                                        : badges(item, m_openSessions.contains(openSessionKey(item)), closedText,
                                                  m_liveUsage.value(sessionId)));
 
     QString tip = item.value(QStringLiteral("workspace")).toString();
@@ -2062,7 +2071,7 @@ void SessionManager::updateStatus() {
         : QStringLiteral("%1, %2 match(es) in %3 · %4 ms").arg(counted).arg(m_matches).arg(scope).arg(m_elapsed);
     // The "open" tag means a pane already holds it; resuming would load it twice, so Enter goes
     // to that pane instead. Say so rather than letting the key surprise anyone.
-    if (m_openSessions.contains(selectedId()))
+    if (m_openSessions.contains(openSessionKey(selectedItem())))
         text += QStringLiteral(" · already open: Enter goes to that pane");
     else if (m_closed.contains(selectedId()))
         text += QStringLiteral(" · Alt+Enter reopens it where it was");
@@ -2340,7 +2349,7 @@ void SessionManager::updateButtons() {
                                        .arg(guestCommand(item),
                                             guestCwd(item).isEmpty() ? QStringLiteral("this pane's directory") : guestCwd(item),
                                             guestLabel(item.value(QStringLiteral("source")).toString()))
-                         : m_openSessions.contains(selectedId())
+                         : m_openSessions.contains(openSessionKey(item))
                              ? QStringLiteral("This conversation is already open: Relay goes to that pane rather than loading it twice.")
                              : QStringLiteral("Open this conversation in a new pane (Enter) · Shift+Enter keeps this list open."));
     const QString sessionId = item.value(QStringLiteral("session_id")).toString();
@@ -2584,7 +2593,7 @@ void SessionManager::setLiveUsage(const QHash<QString, QString> &usage) {
                 const auto closed = m_closed.constFind(sessionId);
                 const QString closedText = closed != m_closed.constEnd()
                                                ? closedAgo(closed->second, now) : QString();
-                const QStringList tags = badges(item, m_openSessions.contains(sessionId), closedText,
+                const QStringList tags = badges(item, m_openSessions.contains(openSessionKey(item)), closedText,
                                                 usage.value(sessionId));
                 if (row->data(0, kBadgeRole).toStringList() == tags) continue;
                 row->setData(0, kBadgeRole, tags);
@@ -2616,12 +2625,11 @@ void SessionManager::refreshClosedAges() {
     bool redraw = false;
     for (auto it = m_closed.cbegin(); it != m_closed.cend(); ++it) {
         const QString text = closedAgo(it->second, now);
-        const bool open = m_openSessions.contains(it.key());
         for (QTreeWidgetItem *row : m_rows.values(it.key())) {
             if (!row || row->data(0, kKindRole).toString() != QLatin1String("session")) continue;
             const QJsonObject item =
                 QJsonDocument::fromJson(row->data(0, kItemRole).toString().toUtf8()).object();
-            const QStringList tags = badges(item, open, text);
+            const QStringList tags = badges(item, m_openSessions.contains(openSessionKey(item)), text);
             if (row->data(0, kBadgeRole).toStringList() == tags) continue;
             row->setData(0, kBadgeRole, tags);
             redraw = true;
