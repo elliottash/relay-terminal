@@ -111,7 +111,8 @@ from .presets import model_name as _model_name
 # v6 (2026-09-20, #0TJ9): the `terminal_text` and `rewound` entry kinds and the `session_sidecars`
 # table that records what the files they come from looked like when they were read. No new column;
 # v1–v5 migrate in place and the rows are backfilled by the next `reconcile()`, as v3's were.
-SCHEMA_VERSION = 6
+# v7 (2026-09-23, #D2PX): link Relay sessions to the guest transcripts they wrap.
+SCHEMA_VERSION = 7
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
 MAX_SUMMARY = 4000           # per-conversation cap for a summary
@@ -191,7 +192,9 @@ CREATE TABLE IF NOT EXISTS conversations(
     cost         REAL,
     file_mtime   REAL,
     entry_count  INTEGER NOT NULL DEFAULT 0,
-    entry_digest TEXT NOT NULL DEFAULT ''
+    entry_digest TEXT NOT NULL DEFAULT '',
+    guest_source TEXT NOT NULL DEFAULT '',
+    guest_session TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS conversations_by_owner ON conversations(owner_session);
 CREATE TABLE IF NOT EXISTS entries(
@@ -326,6 +329,8 @@ V4_COLUMNS = (("raw_cwd", "TEXT NOT NULL DEFAULT ''"),)
 # digest of them (`entry_digests`). A row migrated from v4 has `''` for the digest, which says
 # "unknown" and costs it one full re-index at its next save — no reconcile is needed for these.
 V5_COLUMNS = (("entry_count", "INTEGER NOT NULL DEFAULT 0"), ("entry_digest", "TEXT NOT NULL DEFAULT ''"))
+V7_COLUMNS = (("guest_source", "TEXT NOT NULL DEFAULT ''"),
+              ("guest_session", "TEXT NOT NULL DEFAULT ''"))
 # v6 (#0TJ9) adds no column: its rows are entries, and `session_sidecars` is a table the schema
 # creates on its own. What it does ask for is the v3 backfill — every agent and subagent row is
 # marked behind, so the next reconcile reads each conversation's sidecars once.
@@ -1205,7 +1210,7 @@ class ConversationIndex:
         except sqlite3.DatabaseError:
             version = None
         self.migrated_from = None
-        if version in (1, 2, 3, 4, 5) and version < SCHEMA_VERSION:
+        if version in (1, 2, 3, 4, 5, 6) and version < SCHEMA_VERSION:
             try:
                 self._migrate(db, version)
                 self.migrated_from = version
@@ -1250,7 +1255,7 @@ class ConversationIndex:
 
     @staticmethod
     def _migrate(db, version: int) -> None:
-        """v1..v5 -> v6 in place, because terminal-history rows have no file to be rebuilt
+        """v1..v6 -> v7 in place, because terminal-history rows have no file to be rebuilt
         from — and, since v4, neither have the guest rows.
 
         v1 -> v2 adds the thread columns and moves user titles and pins to the session files, where
@@ -1260,10 +1265,11 @@ class ConversationIndex:
         incremental-index fingerprint, which every conversation fills itself at its next save, so
         it is the one migration that does not ask for a re-read. v5 -> v6 adds no column at all:
         `session_sidecars` is created with the schema, empty, and the rows the sidecars hold are
-        backfilled by the next reconcile the way v3's columns were.
+        backfilled by the next reconcile the way v3's columns were. v6 -> v7 adds the Relay
+        session's linked guest source and id, also backfilled from its file on reconcile.
         """
         columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
-        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS:
+        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS + V7_COLUMNS:
             if name not in columns:
                 db.execute(f"ALTER TABLE conversations ADD COLUMN {name} {kind}")
         if version < 2:
@@ -1273,10 +1279,10 @@ class ConversationIndex:
                 if row["session_dir"]:
                     write_user_fields(Path(row["session_dir"]), row["session_id"],
                                       custom_title=row["custom_title"], pinned=bool(row["pinned"]))
-        if version < 6:
+        if version < 7:
             # The columns v2, v3 and v4 added are backfilled by re-reading the session files, and
-            # so are v6's sidecar rows. (v5's fingerprint was the one that needed no re-read: a
-            # v4 database was spared this line, and v5 -> v6 is what puts it back.)
+            # so are v6's sidecar rows and v7's guest links. (v5's fingerprint was the one that
+            # needed no re-read.)
             db.execute("UPDATE conversations SET indexed_version=0 WHERE source IN ('agent', 'subagent')")
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
         db.commit()
@@ -1545,6 +1551,10 @@ class ConversationIndex:
             title = " ".join(first.split())[:80]
 
         derived = _derived(data)
+        guest_source = str(data.get("guest") or "")
+        guest_session = str(data.get("guest_session") or "")
+        if guest_source not in GUEST_SOURCES or not guest_session:
+            guest_source = guest_session = ""
 
         def work(db):
             # What is indexed is read and rewritten under one write lock (#TZWF): two workers may
@@ -1573,8 +1583,8 @@ class ConversationIndex:
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
                     " model, preset, created, updated, turns, open_requests, session_dir, pinned, models, tokens, cost,"
                     " summary, first_prompt, last_prompt, files, files_count, has_edits, branch, unfinished, mode,"
-                    " todos, indexed_version, entry_count, entry_digest)"
-                    " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " todos, indexed_version, entry_count, entry_digest, guest_source, guest_session)"
+                    " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (session_id, workspace, project_name(workspace), title,
                      keep["custom_title"] if keep else None,
                      str(data.get("model") or ""), str(data.get("preset") or ""),
@@ -1583,7 +1593,8 @@ class ConversationIndex:
                      str(session_dir or ""), int(keep["pinned"]) if keep else 0, _models(data), tokens, cost,
                      summary, derived["first_prompt"], derived["last_prompt"], derived["files"],
                      derived["files_count"], derived["has_edits"], derived["branch"], derived["unfinished"],
-                     derived["mode"], derived["todos"], SCHEMA_VERSION, len(rows), digest))
+                     derived["mode"], derived["todos"], SCHEMA_VERSION, len(rows), digest,
+                     guest_source, guest_session))
                 written = header_entries((keep["custom_title"] if keep else None) or title, summary) + added
                 db.executemany(
                     "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
@@ -2243,6 +2254,13 @@ class ConversationIndex:
             add("COALESCE(c.updated, 0) <= ?", float(until))
         if kinds:
             add("c.source IN (%s)" % ",".join("?" * len(kinds)), *kinds)
+        # A Relay pane running a guest has two durable transcripts, but is one session in the
+        # combined list. A guest-only source filter still exposes its native transcript and
+        # resume action. When the Relay session is deleted, its guest row reappears automatically.
+        if "agent" in kinds and any(source in kinds for source in GUEST_SOURCES):
+            add("NOT (c.source IN ('claude','codex') AND EXISTS ("
+                "SELECT 1 FROM conversations owner WHERE owner.source='agent'"
+                " AND owner.guest_source=c.source AND owner.guest_session=c.session_id))")
         for flag, column in ((has_edits, "c.has_edits"), (unfinished, "c.unfinished"), (pinned, "c.pinned")):
             if flag is not None:
                 add(f"{column} = ?", 1 if flag else 0)

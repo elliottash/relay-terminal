@@ -816,7 +816,9 @@ class MigrationTests(unittest.TestCase):
         """Turn the database back into an older one: drop the columns that version did not have
         (and, below v3, the header entries it did not write)."""
         db = sqlite3.connect(str(path))
-        dropped = conv_index.V5_COLUMNS
+        dropped = conv_index.V7_COLUMNS
+        if version < 5:
+            dropped += conv_index.V5_COLUMNS
         if version < 4:
             dropped += conv_index.V4_COLUMNS
         if version < 3:
@@ -877,6 +879,27 @@ class MigrationTests(unittest.TestCase):
         row = fingerprint()
         self.assertGreater(row["entry_count"], 0)
         self.assertTrue(row["entry_digest"])
+
+    def test_a_v6_index_backfills_the_link_to_its_guest_session(self):
+        guest_id = "ea11ece1-7ec2-4597-8639-32fb1f43f073"
+        data = session("a" * 32)
+        data.update(guest="codex", guest_session=guest_id)
+        self.write(data)
+        index = ConversationIndex(self.root / "index.db")
+        index.reconcile(self.root / "sessions")
+        index.close()
+        self.downgrade(self.root / "index.db", version=6)
+
+        index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(index.close)
+        self.assertEqual(6, index.migrated_from)
+        self.assertFalse(index.recovered)
+        self.assertEqual(0, index._db.execute(
+            "SELECT indexed_version FROM conversations WHERE session_id=?", (data["id"],)).fetchone()[0])
+        self.assertEqual(1, index.reconcile(self.root / "sessions")["backfilled"])
+        row = index._db.execute(
+            "SELECT guest_source, guest_session FROM conversations WHERE session_id=?", (data["id"],)).fetchone()
+        self.assertEqual(("codex", guest_id), tuple(row))
 
     def test_a_v2_index_is_migrated_and_reconcile_backfills_the_new_columns(self):
         data = session("a" * 32, workspace="/tmp/alpha", branch="main", summary="the summary",
@@ -1041,6 +1064,26 @@ class GuestRowTests(unittest.TestCase):
         rows = {item["session_id"]: item for item in
                 self.index.search("", scope="all", sources=list(conv_index.GUEST_SOURCES))["items"]}
         return rows.get(session_id or self.CLAUDE)
+
+    def test_linked_relay_session_appears_once_in_combined_list(self):
+        links = [("claude", self.CLAUDE, "a" * 32),
+                 ("codex", "01a0ce9a-41c6-75a2-9ffc-1036534eafd3", "b" * 32)]
+        for source, guest_id, relay_id in links:
+            self.index.update_guest(self.record(guest_id, source=source))
+            relay = session(relay_id)
+            relay.update(guest=source, guest_session=guest_id)
+            self.index.update_session(relay, self.root)
+        both = dict(scope="all", sources=["agent", "claude", "codex"])
+        combined = self.index.search("", **both)
+        self.assertEqual({"a" * 32, "b" * 32},
+                         {item["session_id"] for item in combined["items"]})
+        self.assertEqual(2, combined["total"])
+        for source, guest_id, _relay_id in links:
+            self.assertEqual([guest_id], [item["session_id"] for item in
+                                          self.index.search("", scope="all", sources=[source])["items"]])
+        self.index.delete_session("a" * 32)
+        self.assertEqual({self.CLAUDE, "b" * 32},
+                         {item["session_id"] for item in self.index.search("", **both)["items"]})
 
     # ----- the meta store ------------------------------------------------------------
     def test_a_name_and_a_pin_are_written_beside_the_database(self):
