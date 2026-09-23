@@ -271,6 +271,10 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     m_view->installEventFilter(this);
     m_view->viewport()->installEventFilter(this);
     m_filter->installEventFilter(this);
+    // Alt+Up is the parent folder here (eventFilter), not the window's focus-the-pane-above: the
+    // window's dispatcher reads this property and gives the key way (#KYPR).
+    m_view->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up")});
+    m_filter->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up")});
     setRoot(root.isEmpty() ? QDir::homePath() : root);
 }
 

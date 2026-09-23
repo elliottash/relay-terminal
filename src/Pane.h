@@ -3163,7 +3163,7 @@ public:
         if (!m_native) setNative(true);
         // A full-screen or remote program hands the prompt box back by itself when it exits.
         m_hideReason = m_altScreen ? HideReason::AltScreen : m_remoteProgram ? HideReason::Remote : HideReason::Manual;
-        toast(QStringLiteral("You're in control · %1 for the prompt").arg(Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
+        toast(QStringLiteral("You're in control · %1 for the prompt").arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
     }
 
     // Back to the prompt. While a program runs, the prompt talks to the agent, which is in control.
@@ -9983,15 +9983,13 @@ private:
         else if (name == QStringLiteral("fork")) requestFork();
         else if (name == QStringLiteral("resume") || name == QStringLiteral("sessions")) {
             openResume(args);
-            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume")); !keys.isEmpty())
-                hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions")));
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("sessions.open")); !keys.isEmpty())
+                hint(QStringLiteral("resume.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions & projects")));
         } else if (name == QStringLiteral("conversations")) {
             openConversations(args);
-            // One pane now: the key that opens it is agent.resume's (conversations.open is unbound).
-            QString keys = Keymap::instance().shortcutText(QStringLiteral("conversations.open"));
-            if (keys.isEmpty()) keys = Keymap::instance().shortcutText(QStringLiteral("agent.resume"));
-            if (!keys.isEmpty())
-                hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions")));
+            // One pane now: the key that opens it is sessions.open's (#SPSG).
+            if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("sessions.open")); !keys.isEmpty())
+                hint(QStringLiteral("conversations.slash"), relay::ShortcutHints::nextTime(keys, QStringLiteral("sessions & projects")));
         } else if (name == QStringLiteral("status") || name == QStringLiteral("info")) {
             openInfo();
             if (const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.info")); !keys.isEmpty())
@@ -10771,23 +10769,24 @@ public:
             row(keys.shortcutText(QStringLiteral("agent.requests")).isEmpty() ? QStringLiteral("/tasks")
                                                                              : keys.shortcutText(QStringLiteral("agent.requests")),
                 QStringLiteral("tasks in this session"));
-            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("every action, in a list you can filter"));
+            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("Actions: search every action"));
             row(keys.shortcutText(QStringLiteral("app.settings")), QStringLiteral("options"));
             row(keys.shortcutText(QStringLiteral("agent.modelBox")).isEmpty() ? QStringLiteral("/model")
                                                                              : keys.shortcutText(QStringLiteral("agent.modelBox")),
                 QStringLiteral("pick a model (%1: the models pane)").arg(keys.shortcutText(QStringLiteral("agent.modelOptions")).isEmpty()
                                                                              ? QStringLiteral("/model") : keys.shortcutText(QStringLiteral("agent.modelOptions"))));
-            row(keys.shortcutText(QStringLiteral("agent.resume")).isEmpty() ? QStringLiteral("/resume")
-                                                                           : keys.shortcutText(QStringLiteral("agent.resume")),
-                QStringLiteral("resume a saved session"));
-            row(keys.shortcutText(QStringLiteral("control.human")), QStringLiteral("type into the terminal"));
+            row(keys.shortcutText(QStringLiteral("sessions.open")).isEmpty() ? QStringLiteral("/resume")
+                                                                            : keys.shortcutText(QStringLiteral("sessions.open")),
+                QStringLiteral("Sessions & Projects (again to close)"));
+            row(keys.shortcutText(QStringLiteral("prompt.clear")), QStringLiteral("clear the prompt box (Ctrl+Z brings it back)"));
+            row(keys.shortcutText(QStringLiteral("control.human")), QStringLiteral("type into the terminal, and back"));
             row(QStringLiteral("Esc"), QStringLiteral("stop the agent or the program"));
             // Ctrl+? is Ctrl+Shift+/ on most keyboards, so the popup names every key that works
             // rather than only the first spelling (#T9ZS).
             const QStringList helpKeys = keys.shortcutTexts(QStringLiteral("help.shortcuts"));
             row(helpKeys.value(0), helpKeys.size() > 1
-                    ? QStringLiteral("show all shortcuts (also %1)").arg(helpKeys.mid(1).join(QStringLiteral(", ")))
-                    : QStringLiteral("show all shortcuts"));
+                    ? QStringLiteral("Actions, with their shortcuts (also %1)").arg(helpKeys.mid(1).join(QStringLiteral(", ")))
+                    : QStringLiteral("Actions, with their shortcuts"));
             auto *hide = new QLabel(QStringLiteral("?  to hide this"));
             hide->setObjectName(QStringLiteral("helpFooter"));
             box->addWidget(hide);
@@ -11331,7 +11330,7 @@ private:
     void requestRoute(bool submit, const QString &overrideMode) {
         if (m_native) {
             if (submit) status(QStringLiteral("Native input is active. Press %1 or F12 to return to the prompt box.")
-                                   .arg(Keymap::instance().shortcutText(QStringLiteral("control.prompt"))));
+                                   .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
             return;
         }
         if (submit) {
@@ -12526,7 +12525,10 @@ private:
     }
 
 public:
-    // Ctrl+Shift+R: restart whatever stopped in this pane.
+    // Whether restartStopped() has something to restart: the Actions palette's "For this pane"
+    // offers it then (#MAGP).
+    bool hasStopped() const { return m_shellStopped || (m_bannerCallback && m_banner && m_banner->isVisible()); }
+    // pane.restartShell (the banner's button, the palette): restart whatever stopped in this pane.
     void restartStopped() {
         if (m_bannerCallback && m_banner && m_banner->isVisible()) { auto run = m_bannerCallback; run(); return; }
         if (!m_backend || m_shellStopped) { restartShell(); return; }

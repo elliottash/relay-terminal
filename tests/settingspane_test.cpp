@@ -18,6 +18,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
+#include <QKeySequence>
 #include <QLineEdit>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -427,6 +428,33 @@ private slots:
         pane.setSearch(QStringLiteral("/clear"));
         QCOMPARE(pane.visibleRowIds(), QStringList{fresh.key});
         QVERIFY(!relay::actionSlashCommands(QStringLiteral("agent.requests")).contains(QStringLiteral("/todos")));
+        // `/board` is the Board's command; `/switchboard` is a hidden alias and not advertised (#ACDG).
+        QCOMPARE(relay::actionSlashCommands(QStringLiteral("board.open")), QStringLiteral("/board"));
+    }
+
+    // Ctrl+N / Ctrl+P walk the results while the search has the keyboard (#KYPR). The window's
+    // dispatcher gives those presses way because the search lists them in `relayLocalKeys`; here
+    // the declaration is checked, and so is the handler it defers to.
+    void ctrlNAndCtrlPWalkTheResultsAndAreDeclaredLocal() {
+        State state;
+        SettingsPane pane(SettingsPane::Mode::Actions, [&] { return catalog(&state); }, [&] { return actions(&state); });
+        pane.show();
+        pane.focusSearch();
+        auto *search = pane.findChild<QLineEdit *>(QStringLiteral("settingsSearch"));
+        QVERIFY(search);
+        const QStringList local = search->property("relayLocalKeys").toStringList();
+        QVERIFY(local.contains(QStringLiteral("Ctrl+N")));
+        QVERIFY(local.contains(QStringLiteral("Ctrl+P")));
+        // What the dispatcher compares: the pressed chord as PortableText.
+        QCOMPARE(QKeySequence(int(Qt::ControlModifier) | Qt::Key_N).toString(QKeySequence::PortableText), QStringLiteral("Ctrl+N"));
+        QVERIFY(pane.visibleRowIds().size() > 2);
+        press(search, Qt::Key_Down);
+        const int first = pane.currentRow();
+        press(search, Qt::Key_N, Qt::ControlModifier);
+        QCOMPARE(pane.currentRow(), first + 1);
+        press(search, Qt::Key_P, Qt::ControlModifier);
+        QCOMPARE(pane.currentRow(), first);
+        QVERIFY(search->text().isEmpty());   // nothing was typed
     }
 
     void sectionSearchClearsAndNavigatesWithoutRunningActions() {

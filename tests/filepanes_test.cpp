@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QImage>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -88,6 +89,29 @@ private slots:
         explorer.goUp();
         QCOMPARE(QDir(explorer.root()), QDir(temp.path()));
         QCOMPARE(changes.size(), 2);
+    }
+
+    // Alt+Up is the parent folder in the list and the filter (#KYPR). The window's dispatcher binds
+    // Alt+Up to the pane above and gives way because both widgets list it in `relayLocalKeys`.
+    void altUpIsTheParentFolderAndIsDeclaredLocal() {
+        QTemporaryDir temp;
+        QVERIFY(QDir(temp.path()).mkpath(QStringLiteral("inner")));
+        const QString inner = QDir(temp.path()).filePath(QStringLiteral("inner"));
+        FileExplorer explorer(inner);
+        explorer.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&explorer));
+        QTreeView *view = explorer.findChild<QTreeView *>(QStringLiteral("fileExplorerView"));
+        QLineEdit *filter = explorer.findChild<QLineEdit *>(QStringLiteral("fileExplorerFilter"));
+        QVERIFY(view && filter);
+        QVERIFY(view->property("relayLocalKeys").toStringList().contains(QStringLiteral("Alt+Up")));
+        QVERIFY(filter->property("relayLocalKeys").toStringList().contains(QStringLiteral("Alt+Up")));
+        QCOMPARE(QKeySequence(int(Qt::AltModifier) | Qt::Key_Up).toString(QKeySequence::PortableText), QStringLiteral("Alt+Up"));
+        QTest::keyClick(view, Qt::Key_Up, Qt::AltModifier);
+        QCOMPARE(QDir(explorer.root()), QDir(temp.path()));
+        QVERIFY(QDir(temp.path()).mkpath(QStringLiteral("inner/deeper")));
+        explorer.setRoot(QDir(inner).filePath(QStringLiteral("deeper")));
+        QTest::keyClick(filter, Qt::Key_Up, Qt::AltModifier);
+        QCOMPARE(QDir(explorer.root()), QDir(inner));
     }
 
     void filterNarrowsRows() {

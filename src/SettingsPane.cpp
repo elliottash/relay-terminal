@@ -83,7 +83,7 @@ QString actionSlashCommands(const QString &key) {
         {QStringLiteral("agent.subagentPane"), QStringLiteral("/agents")},
         {QStringLiteral("menu:agents"), QStringLiteral("/agents")},
         {QStringLiteral("agent.agentsMenu"), QStringLiteral("/agents")},
-        {QStringLiteral("board.open"), QStringLiteral("/switchboard")},
+        {QStringLiteral("board.open"), QStringLiteral("/board")},
         {QStringLiteral("project.init"), QStringLiteral("/init")},
         {QStringLiteral("remote.join"), QStringLiteral("/join · /connect")},
         {QStringLiteral("app.update"), QStringLiteral("/update")},
@@ -494,6 +494,9 @@ SettingsPane::SettingsPane(Mode mode, std::function<QList<SettingsSection>()> se
     m_search->setObjectName(QStringLiteral("settingsSearch"));
     m_search->setClearButtonEnabled(true);
     m_search->installEventFilter(this);
+    // Ctrl+N / Ctrl+P walk the results (eventFilter below); the window's own Ctrl+N (New window)
+    // gives way while the search has the keyboard, because the widget says so here (#KYPR).
+    m_search->setProperty("relayLocalKeys", QStringList{QStringLiteral("Ctrl+N"), QStringLiteral("Ctrl+P")});
     header->addWidget(m_search, 1);
     // No close button of its own: the pane's × in the chrome row closes it, as it closes every
     // other pane. It used to keep the ✕ from its days as an overlay, and the two landed on top of

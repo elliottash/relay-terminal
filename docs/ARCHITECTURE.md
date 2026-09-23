@@ -773,8 +773,8 @@ drags, dragging a divider between two panes (→ `pane.equalize`, "auto-resize",
 from the link or palette (→ `/continue` or `agent.continue`), wrong-mode submissions (section 5,
 "Wrong-mode hints": a request that failed in terminal mode or a failing shell command in agent
 mode → `input.toggle`, with the mode chip flashing), dropping an image on the prompt box (→ the
-paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`,
-Ctrl+Shift+G), running an alias from the palette (→ `/name`, and for a command the name typed in
+paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screenshotPane`, when a
+key is bound to it), running an alias from the palette (→ `/name`, and for a command the name typed in
 terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 starting a card edit in the Board with the Edit button, a click on the title or a
 double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Board (→ `y`; #FT77),
@@ -812,10 +812,19 @@ Symbol keys match with or without Shift, because shifted punctuation differs by 
 Dispatch: `RelayWindow::eventFilter` handles `ShortcutOverride` and `KeyPress` for widgets in
 its window and runs `runAction(id)`, which the toolbar and palette also use.
 
-- `control.human` (Ctrl+H), `input.toggle` (Ctrl+I) and `agent.interrupt` (Ctrl+Alt+Enter)
-  act only from the composer. In the terminal those keys stay Backspace, Tab and Enter.
+- Plain Ctrl+H (`control.human`), Ctrl+Q (`prompt.clear`), `input.toggle` (Ctrl+I) and
+  `agent.interrupt` (Ctrl+Alt+Enter) act only from the composer. In the terminal those keys stay
+  Backspace, Ctrl+Q, Tab and Enter. Ctrl+Shift+H and Ctrl+Shift+Q act from anywhere, a program's
+  keyboard included: Ctrl+Shift is Relay's layer (#QWAS).
 - While a foreground program owns the focused terminal, only keys allowed by
-  `program_keys` act. The default lets Ctrl+Shift combinations and F-keys through to Relay.
+  `program_keys` act. The default lets Ctrl+Shift combinations and F-keys through to Relay; no
+  F-key is bound by default, so a program's F1 help reaches the program (#KYPR).
+- A widget's own keys come first where it declares them (#KYPR): a widget lists them in its
+  `relayLocalKeys` property (PortableText) beside the handler, and the dispatcher passes those
+  presses on untouched. The Actions and Options search declares Ctrl+N / Ctrl+P (next and
+  previous result, not New window); the file explorer's list and filter declare Alt+Up (parent
+  folder, not the pane above). The models pane's priorities editor keeps Alt+Up/Down by its own
+  check. The Actions palette answers every key pressed inside it itself, its own chord included.
 - Terminal clipboard: Ctrl+C invokes the display's `copyToClipboard` slot and treats a
   clipboard change as proof of a selection (a backend need not have a selection query); otherwise
   the key reaches the shell. Ctrl+V pastes at a prompt and passes through inside programs.
@@ -874,23 +883,25 @@ Default window shortcuts:
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
 | Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+Z |
-| New tab | Ctrl+T | Actions pane / Options pane | Ctrl+Shift+A / Ctrl+Shift+O |
-| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control (from composer) | Ctrl+H |
-| Split right | Ctrl+P | Back to the prompt | Ctrl+Shift+H |
+| New tab | Ctrl+T | Actions palette / Options pane | Ctrl+Shift+P (and Ctrl+?) / Ctrl+Shift+O |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control, or back to the prompt (a toggle) | Ctrl+H (composer), Ctrl+Shift+H |
+| Split right | Ctrl+E | Clear the prompt box (Ctrl+Z undoes) | Ctrl+Q (composer), Ctrl+Shift+Q |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
-| Toggle terminal/agent input | Ctrl+I | Restart stopped shell/agent | Ctrl+Shift+R |
+| Toggle terminal/agent input | Ctrl+I | Board / Sessions & Projects / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+D |
 | Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
 
-The session manager (`/resume`, `agent.resume`), inside the Projects and Sessions pane, is Ctrl+Shift+Y, Warp's key for
-its conversations menu. It was Ctrl+Shift+M for one day (2026-09-19) until the owner gave M to the
-model options (`agent.modelOptions`, 2026-09-20: "models are more central than sessions"; since
-card #MDP1 t:a11 that key opens the **models pane**, and the model box is Alt+M — Ctrl+Alt+M went
-with the modal picker). The key is a
-**toggle** (owner, 2026-09-20): pressed again with the manager focused it closes the pane, as Esc
-does; pressed while the focus is elsewhere it brings the open manager forward instead, so the key
-never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). The slash
+Sessions & Projects (`sessions.open`) is Ctrl+Shift+S (#SPSG, #QWAS, 2026-09-22): one pane and one
+key for sessions, projects, background work, recently closed and globals, opened on the tab it was
+last on. It was Ctrl+Shift+Y (sessions), Ctrl+Shift+P (projects) and Ctrl+Shift+G (globals) until
+the owner called them "a single function". `agent.resume`, `conversations.open`, `projects.open` and
+`globals.open` stay registered with no default key and open the same pane on their tab; in the
+palette they are the children of the one "Sessions & Projects" row. The key is a
+**toggle** (owner, 2026-09-20): pressed again with the pane focused it closes the pane, as Esc
+does; pressed while the focus is elsewhere it brings the open pane forward instead, so the key
+never closes a pane the user is not looking at (`RelayWindow::toggleSessionsPane`). A per-tab id
+pressed with the pane focused on another tab switches to its tab rather than closing. The slash
 commands stay plain openers — they are typed in a pane's prompt box, which is never the manager.
 
 The ⓘ view (`agent.info`, `/status`, `/info`) is **Alt+I** (owner, 2026-09-18). Alt+I is the mnemonic
@@ -899,16 +910,28 @@ preset's Ctrl+Alt+I and VS Code's Ctrl+Shift+Alt+I are different combinations), 
 M-i unbound, so a shell keeps the key. Like Alt+A and Alt+R it steps aside for a program that owns
 the keyboard.
 
-Unbound by default: `conversations.open`, `files.open`, `terminal.interrupt`, `agent.newChat`,
-`agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `input.mode*`, `keybindings.edit`,
-`keybindings.reload`. (`agent.provider` was in this list until 2026-09-21: it opened the "Advanced
+Unbound by default: `agent.resume`, `conversations.open`, `projects.open`, `globals.open`,
+`control.prompt`, `pane.restartShell` (the stopped-pane banner and the palette), `agent.stopAllSubagents`
+(the subagents UI and the palette), `agent.screenshotPane`, `files.open`, `terminal.interrupt`,
+`agent.newChat`, `agent.stop`, `agent.clearQueue`, `agent.resumeQueue`, `input.mode*`,
+`keybindings.edit`, `keybindings.reload`. (`agent.provider` was in this list until 2026-09-21: it opened the "Advanced
 provider settings" dialog, and card #MDP1 retired the action with it — providers, keys and custom
 endpoints are the models pane's first tab, on `agent.modelOptions`.)
 
-**Actions** (Ctrl+Shift+A or Ctrl+?). The action catalog (`rootItems()` in
-`src/RelayWindow.h`) is the same list the palette overlay used to render: items with a stable key and
-either a run function or a submenu (Model, Input mode, Reasoning effort, Aliases, Agents, Log
-detail). Since 2026-09-18 it is rendered by the Actions pane (section 12, "Actions pane and Options
+**Actions** (Ctrl+Shift+P or Ctrl+?; #MAGP). The action catalog (`rootItems()` in
+`src/RelayWindow.h`) is items with a stable key and either a run function or a submenu (Model,
+Input mode, Reasoning effort, Aliases, Agents, Sessions & Projects). It covers every registered
+action (#ACDG): after the hand-made rows, `appendRegisteredActions()` adds a plain row, labelled
+from the Keymap description, for each registered id no row or submenu child has, so a new action
+is findable the day it is added; `catalogEquivalents()` names the few ids deliberately left out
+because another row does the same thing, and `tests/test_action_catalog.py` checks that list. The
+chord opens the **Actions palette** (`relay::ActionPalette`, `src/ActionPalette.{h,cpp}`): a modal
+over the window with a search box, a button per section and the result list — Recent (the same
+`palette/recent` store), For this pane (`RelayWindow::paletteForThisPane()`: restart what stopped,
+stop a running turn or its subagents, take control or back to the prompt, clear a full prompt box),
+then every section. The same catalog is rendered by the Actions pane, which is now the shortcut
+list: the palette's "Shortcut list" row (`help.shortcutList`) opens it. Since 2026-09-18 it was the
+destination of the chord, rendered by the Actions pane (section 12, "Actions pane and Options
 pane"): one list of every item with its keys — Recent (from `palette/recent`) first, then Agent,
 Terminal, Panes and tabs, Relay (Options…, Reload themes, Open your themes folder, Open the log
 folder, Reset shortcut hints), Shortcuts, submenus opened inline under their own header — and the
@@ -1380,7 +1403,7 @@ native mode.
 | Full-screen program (alternate screen) or `ssh`/`mosh`/`telnet` | The prompt box keeps the keyboard. A floating **"Take control (Ctrl+H)"** button appears over the terminal (`updateTakeControl`, `relay::input::offerTakeControl`). Policy `human` restores the old automatic hand-over |
 | Program exits (`ready`) | Automatic human control ends; the composer returns; masked input and the button are cleared |
 | Ctrl+H from the composer, or the button | Human control: composer hidden, keys go to the terminal. Started from a full-screen or remote program, the prompt box comes back when the program exits |
-| Ctrl+Shift+H | Composer back. While a program runs, submissions go to the agent |
+| Ctrl+H or Ctrl+Shift+H again (`control.human` is a toggle, #QWAS; Ctrl+Shift+H works from the terminal too) | Composer back. While a program runs, submissions go to the agent |
 | Ctrl+Shift+J (`program.delegate`), the banner button, the palette | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
 | F12 (`terminal.native`) | Toggles native input, unchanged, for people who want the old behaviour |
 | A guest holds the pane's keyboard (`#W5N2`, protocol 10.3) | One driver per pane, and it is the same token: "the agent is driving" and "alice is driving" are one state. The owner's physical keystroke always takes it back, without asking — `Pane::takeBackFromGuest()` sends `control_take` and is called from exactly the two places `endDelegation()` is, `setNative()` and the key filter, which never swallows the key that did it |
@@ -1609,9 +1632,9 @@ the only place the tab's panes are re-pointed — and `set_board` (protocol 19.1
 worker **without ending its conversation**. Nothing on the tab header names the attachment (the
 attached-project chip went with the theme swatch and the ⧉ button; owner, 2026-09-19); "Detach
 this tab from <project>" in the palette is the one way to detach, and it closes nothing — an open
-Board stays open. An unattached tab shows nothing at all. Ctrl+Shift+S always opens the Board: the attached project's board, the terminal's candidate
+Board stays open. An unattached tab shows nothing at all. Ctrl+Shift+A always opens the Board: the attached project's board, the terminal's candidate
 project, or an empty board for its current directory. Opening an empty board creates no files.
-Project selection lives only in the shared Projects tab (Ctrl+Shift+P); the legacy project-picker
+Project selection lives only in the shared Projects tab (Sessions & Projects, Ctrl+Shift+S); the legacy project-picker
 page was removed (#P7SJ followup). A loose `/card` request is held there until Attach this tab or
 Initialize supplies the destination. Options links to Projects; Forget changes only the registry.
 
@@ -1666,7 +1689,7 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
   from iPhone"). All of it is refused, and nothing forwarded, while remote control is off.
   `tests/boardremote_test.cpp`.
 
-Opening: **Ctrl+Shift+S** (`board.open`) splits it in beside the anchor pane, focuses the one the
+Opening: **Ctrl+Shift+A** (`board.open`) splits it in beside the anchor pane, focuses the one the
 tab already has, or, pressed on it, returns to the last terminal pane. Also the palette
 ("Board") and `/board` (`/switchboard` is a silent alias). `/card <text>` adds a card to the Inbox verbatim without
 opening anything. Both attach the tab to the pane's candidate project; a candidate with no board
@@ -2053,9 +2076,9 @@ window, cut at the next `OSC 133;A` so the redrawn prompt is not part of the out
 sequences stripped by `relay::conversations::stripAnsi`). Commands typed straight into the terminal
 in native mode never pass through Relay and are not indexed.
 
-The shared Projects and Sessions pane has three primary tabs (card #P7SJ): Projects
-(`projects.open`, Ctrl+Shift+P), Sessions (`agent.resume`, Ctrl+Shift+Y), and Globals
-(`globals.open`, Ctrl+Shift+G). Each shortcut selects its tab in the existing pane. The
+The shared Sessions & Projects pane (`sessions.open`, Ctrl+Shift+S; #SPSG) has three primary tabs
+(card #P7SJ): Projects (`projects.open`), Sessions (`agent.resume`, `conversations.open`) and Globals
+(`globals.open`). Those ids have no default key; each selects its tab in the existing pane. The
 Projects page (`ProjectsPane`) manages known/pinned projects, attachment, Board access,
 and live panes including No project; its Sessions action applies the matching project filter.
 Options links to this page rather than repeating the project registry. Globals (`GlobalsPane`)
@@ -2074,7 +2097,7 @@ The GUI side is `src/Conversations.{h,cpp}`: the **session manager pane**
 cards #CCKY, #R6J0), which replaced both the conversation dialog and the resume picker, and the
 Ctrl+F find bar, which searches the terminal through `TerminalBackend::find()` and counts matches
 in the pane's conversation with `conversation_get {query}`. `/resume`, `/conversations`,
-Ctrl+Shift+Y and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)` (the key and
+Ctrl+Shift+S and the palette rows all reach `RelayWindow::openSessionsFor(pane, query)` (the key and
 `conversations.open` through `toggleSessionsPane`, which closes the manager when it already has the
 focus): one manager per tab, bound to the pane that asked (its queries go to that pane's worker). Its
 **Project** chooser beside the Kind filter (#916B) lists the projects Relay knows, fed by the window
@@ -2821,7 +2844,7 @@ has gone, gives the prompt box back empty.
 `src/Images.{h,cpp}` and protocol section 17 (issue EM1E). Four inputs, one path: pasting or dropping
 a picture into the prompt box writes it to `$XDG_CACHE_HOME/relay/images` and inserts an `@path`
 token, an image file named by a drop or by `@path` is attached where it is, and
-`agent.screenshotPane` (Ctrl+Shift+G, Actions › "Screenshot this pane") grabs the pane as drawn.
+`agent.screenshotPane` (no default key; Actions › "Screenshot this pane") grabs the pane as drawn.
 Everything after that is the existing `ask {attachments}` plumbing.
 
 The worker recognises an image by its first bytes, sends it as an OpenAI-compatible `image_url`
@@ -3078,8 +3101,9 @@ effort" for this pane is an action. A verb never sits in Options as a button row
 opens the editor of something that persists (API keys, Model roles, Instructions, Skills,
 keybindings.json).
 
-- **Actions** — Ctrl+Shift+A (`palette.open`), Ctrl+? (`help.shortcuts`). A search box over one
-  filterable list, no tabs: `rootItems()` as described in section 5.
+- **Actions** — the palette's "Shortcut list" row (`help.shortcutList`). A search box over one
+  filterable list, no tabs: `rootItems()` as described in section 5. Ctrl+Shift+P (`palette.open`)
+  and Ctrl+? (`help.shortcuts`) open the Actions palette over the same catalog instead (#MAGP).
 - **Options** — Ctrl+Shift+O and Ctrl+, (`app.settings`), and the gear in the title bar. One sub-tab
   per section (General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard) and the rows as
   real controls.
@@ -3190,7 +3214,7 @@ a temporary config root (`tests/escapeecaps_test.cpp`).
 
 Detection, once a second: an increase in the shell scope's `memory.events` `oom_kill` shows
 "A command in this pane was stopped because it ran out of memory"; a dead shell PID or
-`Result=oom-kill` shows a banner with Restart shell (Ctrl+Shift+R), which replaces the terminal
+`Result=oom-kill` shows a banner with Restart shell (`pane.restartShell`, also in the palette), which replaces the terminal
 in the same pane. A stopped worker shows Restart agent. Failed scopes are `reset-failed`.
 Scrollback is capped at 20,000 lines.
 
@@ -3601,7 +3625,7 @@ of the platform and of the engine itself.
 | `src/ModelsPane.*` | the models pane (Ctrl+Shift+M, `/model`, `/models`): providers · available · priorities · jobs, beside the pane it serves |
 | `src/SettingsPane.*` | the Actions pane and the Options pane: one widget, two modes |
 | `src/AgentUi.*` | pickers and instructions dialog |
-| `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+Y) and the Ctrl+F find bar |
+| `src/Conversations.*` | the session manager pane (`/resume`, `/conversations`, Ctrl+Shift+S) and the Ctrl+F find bar |
 | `src/SessionInfo.*`, `src/PaneView.h` | the ⓘ conversation info pane (`/status`) and its painted button; the interface `ToolPane` hosts both through |
 | `src/FileIndex.*` | the `@` picker's file listing: the asynchronous git chain, the changed set, the non-git walk |
 | `src/Logging.*` | the GUI's rotating `relay.log` (section 13a) |
