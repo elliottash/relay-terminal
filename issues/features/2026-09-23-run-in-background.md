@@ -9,7 +9,7 @@ session: b9142532-7085-4094-aa52-9b0d7dcb36c2
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
-links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3, 676961d64fba9dc43f9337e174cce97d23856a1d], evidence: [docs/qa_evidence/2026-09-23-bgrn/, docs/qa_evidence/2026-09-23-bgrn-shortcut/], related: [RG0Z], github: null}
+links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3, 676961d64fba9dc43f9337e174cce97d23856a1d, 5c57dde24ea1502eec0f9d9cb7ebf3a4044b1bfd], evidence: [docs/qa_evidence/2026-09-23-bgrn/, docs/qa_evidence/2026-09-23-bgrn-shortcut/], related: [RG0Z], github: null}
 ---
 # Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done
 
@@ -28,6 +28,7 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 > put the run in background button just to the left of the mode picker (auto / agent terminal).
 >
 > how about ctrl alt enter also triggers run in the background
+> and make the hover on the run-in-background button show the shortcut
 
 ## Decisions
 - **Both entry points, Board first.** Board **Run** (today's Execute) goes to the background by default, with **Run in pane** as the alternative. In a pane, backgrounding is an explicit handoff: **Run in background** for a new task, **Move to background** for one already running. Both share one background list, one set of header counts and one notification path, and opening from either reveals the same live session with its context.
@@ -99,6 +100,7 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 ## Execution Summary
 Implemented live-pane background ownership with request-linked working, needs-you, done, failed and interrupted states, header counts, one notification per state change, and open/stop navigation. Board Run now backgrounds by default, with Run in pane as the visible alternative; pane composer, header and Actions expose background handoff. Claude task tools are disabled, and Codex plan updates feed Relay todos. Restored background windows appear interrupted after restart. See `docs/qa_evidence/2026-09-23-bgrn/` for the isolated UI probe.
 Followup: placed the composer button immediately before the mode picker, moved Ctrl+Alt+Enter from send-now to `pane.runInBackground`, and kept the shortcut active only in the composer. The button and shortcut use the same pane action.
+Tooltip followup: the Run in background button displays the current shortcut as “Ctrl+Alt+Enter” on hover and refreshes when the keybinding changes. An unbound action shows only “Run in background”.
 
 ## Tests
 - `scripts/relay-build --target relay-requests-tests --target relay` — built successfully.
@@ -109,3 +111,5 @@ Followup: placed the composer button immediately before the mode picker, moved C
 - `scripts/relay-build --target relay` — passed for composer placement and shortcut routing.
 - `scripts/relay-build --target relay-keymap-tests` and `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^keymap$' --output-on-failure` — passed, including cross-preset Ctrl+Alt+Enter ownership.
 - `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn-shortcut/drive.sh` — isolated screenshot of adjacent controls and the no-agent shortcut guard; see `docs/qa_evidence/2026-09-23-bgrn-shortcut/`.
+- `scripts/relay-build --target relay` and the exact committed-tree build in `scripts/land.py` passed for the tooltip update.
+- `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn-shortcut/drive.sh` passed; `tooltip.png` visibly shows “Run in background (Ctrl+Alt+Enter)” on hover.

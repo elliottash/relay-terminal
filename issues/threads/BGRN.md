@@ -70,3 +70,23 @@ Owner: “put the run in background button just to the left of the mode picker (
 
 <!-- relay:entry 20260923T195218Z-ct author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/b14f78e0cc41480f9e27dc4b93853267 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272… → {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272…
+
+<!-- relay:entry 20260923T203000Z-kf author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f -->
+- ✦ agent claimed this card · Needs verification → Executing
+
+<!-- relay:entry 20260923T203000Z-kg author=agent kind=progress model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f pane_token=b9142532-7085-4094-aa52-9b0d7dcb36c2 -->
+Claimed (b9142532) · working on it from a terminal pane
+
+Make the Run in background tooltip show Ctrl+Alt+Enter and follow live keybinding changes.
+
+<!-- relay:entry 20260923T203056Z-nw author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f -->
+- ✦ agent updated this card · appended to `## Issue`
+
+<!-- relay:entry 20260923T203240Z-az author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T203339Z-6s author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272… → {"plans": [], "commits": ["854c097de2cf7d2903aa55738529185c63415f7e", "3ac63e272…; appended to `## Tests`
+
+<!-- relay:entry 20260923T203343Z-b4 author=agent kind=event model=gpt-6-sol pane=b9142532 turn=a7740578e6674cdea34c8be534de20ad/e7cfedfaba7b4c83ade259a79ab9211f -->
+- ✦ agent moved this card · Executing → Needs verification · The hover now shows Ctrl+Alt+Enter and tracks keybinding changes; the exact-tree build and isolated hover screenshot passed. · evidence docs/qa_evidence/2026-09-23-bgrn-shortcut/ · implemented_by openai/gpt-6-sol via codex
