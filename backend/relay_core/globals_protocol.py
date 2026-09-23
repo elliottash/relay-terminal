@@ -6,7 +6,7 @@ from . import filelock as fcntl
 import hashlib
 import os
 from pathlib import Path
-from . import aliases, board, instructions, memories
+from . import aliases, board, instructions, memories, memory_suggestions
 
 MAX_TEXT = 128 * 1024
 
@@ -17,7 +17,8 @@ class GlobalsCommands:
         self.author = author
 
     def handles(self, kind):
-        return kind in ('globals_list', 'globals_get', 'globals_save', 'globals_retire')
+        return kind in ('globals_list', 'globals_get', 'globals_save', 'globals_retire',
+                        'globals_suggestions', 'globals_suggestion_accept', 'globals_suggestion_reject')
 
     def _records(self, workspace):
         root = aliases.global_root()
@@ -27,7 +28,12 @@ class GlobalsCommands:
         local_memories = {memories.identity(c) for c in memories.cards(memories.project_root(workspace))
                           if c.front.get('scope') != 'team'}
         for kind, folder in (('memory', 'memory'), ('alias', 'aliases')):
-            for path in sorted((root / folder).glob('**/*.md'))[:memories.MAX_CARDS]:
+            # Pending and rejected memory suggestions (#MEMS) have their own list and requests.
+            paths = [p for p in sorted((root / folder).glob('**/*.md'))
+                     if not (kind == 'memory' and p.parent.name in (memory_suggestions.SUGGESTIONS,
+                                                                    memory_suggestions.REJECTED)
+                             and p.parent.parent == root / folder)]
+            for path in paths[:memories.MAX_CARDS]:
                 try:
                     if not path.resolve().is_relative_to(root.resolve()) or path.stat().st_size > MAX_TEXT:
                         raise ValueError('File is outside HQ or exceeds the editor size limit.')
@@ -93,6 +99,22 @@ class GlobalsCommands:
                 records, problems = self._records(workspace)
                 self.emit(dict(event='globals_state', id=ident, root=str(aliases.global_root()),
                                records=records, problems=problems))
+                return
+            if action == 'globals_suggestions':
+                self.emit(dict(event='globals_suggestions', id=ident,
+                               pending=memory_suggestions.pending(),
+                               rejected=memory_suggestions.rejected()))
+                return
+            if action == 'globals_suggestion_accept':
+                record = memory_suggestions.accept(request.get('sid'), fact=request.get('text'),
+                                                   title=request.get('title'), author=self.author)
+                self.emit(dict(event='globals_suggestion_accepted', id=ident,
+                               sid=str(request['sid']).strip().lstrip('#').upper(), record=record))
+                return
+            if action == 'globals_suggestion_reject':
+                record = memory_suggestions.reject(request.get('sid'), reason=request.get('reason'))
+                self.emit(dict(event='globals_suggestion_rejected', id=ident, sid=record['id'],
+                               record=record))
                 return
             if kind not in ('memory', 'alias', 'instruction'):
                 raise ValueError('Unknown Globals record kind.')

@@ -70,3 +70,31 @@ class UserMemoryToolsTest(unittest.TestCase):
         key = events[-1]['record']['key']
         self.assertEqual(self.call('list')['records'], [])
         self.assertIn('error', self.call('get', key=key))
+
+    def test_suggest_needs_no_write_permission_and_waits_for_the_user(self):
+        self.tools.set_catalog(app_tools.AppCatalog.from_request({'writes_enabled': False}))
+        result = self.call('suggest', fact='Prefers pytest over unittest.', name='test-runner')
+        self.assertEqual(result['status'], 'pending')
+        self.assertTrue(result['id'])
+        self.assertEqual(result['fact'], 'Prefers pytest over unittest.')
+        self.assertIn('Keep', result['text'])
+        self.assertEqual(result['rejections'], '')
+        self.assertEqual(self.call('list')['records'], [])
+        self.assertNotIn('pytest', memories.prompt_section(self.tools.workspace))
+        self.assertEqual([r['id'] for r in self.call('suggestions')['pending']], [result['id']])
+
+    def test_suggest_reports_a_rejection_and_lists_them(self):
+        from relay_core import memory_suggestions
+        memory_suggestions.reject(self.call('suggest', fact='Likes verbose logs.')['id'])
+        result = self.call('suggest', fact='likes verbose logs')
+        self.assertEqual((result['status'], result['id']), ('declined', None))
+        self.assertIn('Do not suggest', result['text'])
+        self.assertIn('Likes verbose logs.', result['rejections'])
+        self.assertEqual(len(self.call('suggestions')['rejected']), 1)
+        self.assertIn('error', self.call('suggest', fact=''))
+
+    def test_suggest_reports_what_is_already_remembered(self):
+        saved = self.call('save', text=MEMORY, base_hash='')['record']
+        result = self.call('suggest', fact='Explain decisions concisely.')
+        self.assertEqual((result['status'], result['matched']['id']), ('duplicate', saved['key']))
+        self.assertIn('Already remembered', result['text'])

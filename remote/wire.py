@@ -125,6 +125,7 @@ NEVER_FROM_CLIENT = frozenset({
     "keybindings", "presets", "model_roles", "agent_options", "load_state", "fork", "reset",
     "rewind", "scan_instructions", "index_rebuild", "conversation_delete",
     "globals_list", "globals_get", "globals_save", "globals_retire",
+    "globals_suggestions", "globals_suggestion_accept", "globals_suggestion_reject",
 }) | OWNER_ONLY
 
 # ---- what a participant may send (section 10.1) ------------------------------------------------
@@ -455,6 +456,9 @@ WITHHELD_EVENTS: dict[str, str] = {
     "globals_record": "global memory, alias or instruction source contents",
     "globals_saved": "global memory, alias or instruction source contents",
     "globals_error": "desktop-local editor errors can contain local paths",
+    "globals_suggestions": "pending and rejected facts about the user, with local paths (#MEMS)",
+    "globals_suggestion_accepted": "a saved user memory and its local path",
+    "globals_suggestion_rejected": "a rejected fact about the user and its local path",
     "aliases": "alias definitions and local file paths",
     "alias_expanded": "a command line built for this desktop's shell",
     "alias_saved": "local file paths",

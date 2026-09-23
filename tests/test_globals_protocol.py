@@ -31,6 +31,31 @@ class GlobalsTests(unittest.TestCase):
         self.assertEqual(result['event'], 'globals_saved', result)
         return result['record']
 
+    def test_suggestions_have_their_own_list_accept_and_reject(self):
+        from relay_core import memory_suggestions
+        keep = memory_suggestions.suggest('Prefers reviews as a numbered list.')['id']
+        drop = memory_suggestions.suggest('Works weekends.')['id']
+        state = self.ask('suggestions')
+        self.assertEqual(state['event'], 'globals_suggestions')
+        self.assertEqual(sorted(r['id'] for r in state['pending']), sorted([keep, drop]))
+        self.assertEqual(state['rejected'], [])
+        # The editor list shows neither folder, and the id stays free for a normal record.
+        self.assertEqual([r for r in self.ask('list')['records'] if r['kind'] == 'memory'], [])
+        accepted = self.ask('suggestion_accept', sid='#' + keep.lower(), text='Prefers numbered reviews.')
+        self.assertEqual(accepted['event'], 'globals_suggestion_accepted', accepted)
+        self.assertEqual(accepted['sid'], keep)
+        self.assertEqual(accepted['record']['status'], 'active')
+        self.assertIn('Prefers numbered reviews.', accepted['record']['text'])
+        rejected = self.ask('suggestion_reject', sid=drop, reason='private')
+        self.assertEqual((rejected['event'], rejected['sid']), ('globals_suggestion_rejected', drop))
+        state = self.ask('suggestions')
+        self.assertEqual((state['pending'], [r['id'] for r in state['rejected']]), ([], [drop]))
+        self.assertEqual(state['rejected'][0]['reason'], 'private')
+        memory_rows = [r for r in self.ask('list')['records'] if r['kind'] == 'memory']
+        self.assertEqual([r['key'] for r in memory_rows], [accepted['record']['key']])
+        self.assertEqual(self.ask('suggestion_accept', sid=drop)['event'], 'globals_error')
+        self.assertEqual(self.ask('suggestion_reject', sid='')['event'], 'globals_error')
+
     def test_read_is_side_effect_free_and_create_bootstraps(self):
         self.assertEqual(self.ask('list')['event'], 'globals_state')
         self.assertFalse(aliases.global_root().exists())

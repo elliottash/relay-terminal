@@ -650,17 +650,28 @@ TOOL_SPECS = [
          ["what", "name"]),
     spec("app_user_memory",
          "Review and maintain what Relay remembers about the user across projects, in Globals > User memory. "
-         "List first to avoid duplicates, get a record before changing it, then save its full Markdown "
-         "with the returned base_hash. New records omit key and use base_hash ''. Memory cards need "
-         "type: memory, status: active, a stable name, scope: user, pinned: true, a # title and a concise fact. "
-         "Save only facts/preferences the user explicitly asks to remember or confirms in an interview; "
-         "never infer personal traits or store credentials. Preserve id on edits. Retire stops future "
-         "loading but keeps the source and history; it is not erasure. Read/get do not write. "
+         "When you learn a durable fact about the user — a preference, a recurring correction, their work "
+         "or tools — call suggest with that one fact: it waits for the user's Keep / Edit / No, so do not "
+         "ask them about it yourself, and do not save it. suggest declines a fact the user has already "
+         "rejected or that is already remembered; its result lists their rejections, so do not offer "
+         "those again. Never infer sensitive traits (health, beliefs, relationships and the like) and "
+         "never suggest or store credentials. save is only for an explicit \"remember this\" from the user "
+         "or a fact they confirm in an interview: list first to avoid duplicates, get a record before "
+         "changing it, then save its full Markdown with the returned base_hash. New records omit key and "
+         "use base_hash ''. Memory cards need type: memory, status: active, a stable name, scope: user, "
+         "pinned: true, a # title and a concise fact. Preserve id on edits. Retire stops future loading "
+         "but keeps the source and history; it is not erasure. list, get and suggestions do not write. "
          "Writes use the same validation and conflict checks as the Globals editor.",
-         {"action": {"type": "string", "enum": ["list", "get", "save", "retire"]},
+         {"action": {"type": "string",
+                     "enum": ["list", "get", "suggest", "suggestions", "save", "retire"]},
           "key": {"type": "string", "description": "Memory id from list/get; omit for new memory."},
           "text": {"type": "string", "description": "Full memory Markdown, including front matter."},
-          "base_hash": {"type": "string", "description": "Hash from get; empty string for new records."}},
+          "base_hash": {"type": "string", "description": "Hash from get; empty string for new records."},
+          "fact": {"type": "string",
+                   "description": "suggest: the one fact, as a short sentence about the user."},
+          "name": {"type": "string",
+                   "description": "suggest: a stable kebab-case name for the fact (optional)."},
+          "title": {"type": "string", "description": "suggest: a short heading (optional)."}},
          ["action"]),
     spec("app_sessions_search",
          "Search the person's past Relay conversations — the same index the Sessions pane uses. "
@@ -827,8 +838,11 @@ class AppTools:
         from . import board
         from .globals_protocol import GlobalsCommands
         action = args.get('action')
+        if action in ('suggest', 'suggestions'):
+            return self._memory_suggestion(action, args)
         if action not in ('list', 'get', 'save', 'retire'):
-            raise AppToolError('Choose list, get, save or retire.', code='invalid_value')
+            raise AppToolError('Choose list, get, suggest, suggestions, save or retire.',
+                               code='invalid_value')
         if action in ('save', 'retire'):
             self._need_writes('changing user memory')
         events = []
@@ -858,6 +872,31 @@ class AppTools:
                                  and r.get('memory_scope') == 'user'],
                         problems=result['problems'], root=result['root'])
         return dict(ok=True, record=result['record'])
+
+    def _memory_suggestion(self, action: str, args: dict) -> dict:
+        """#MEMS: a learned fact is a suggestion the user confirms, never a write of its own, so
+        it needs no write permission. The GUI draws Keep / Edit / No from a completed `suggest`
+        whose result has status `pending` and an `id`: keep those, and `fact`, at the top level."""
+        from . import memory_suggestions
+        if action == 'suggestions':
+            return dict(pending=memory_suggestions.pending(), rejected=memory_suggestions.rejected())
+        try:
+            result = memory_suggestions.suggest(
+                args.get('fact'), name=args.get('name'), title=args.get('title'), source='agent',
+                origin=f'agent in {self.workspace}' if self.workspace else 'agent')
+        except (OSError, ValueError) as exc:
+            raise AppToolError(str(exc), code='invalid_value') from exc
+        matched = result['matched'] or {}
+        result['text'] = {
+            'pending': "Suggested. The user is shown it with Keep / Edit / No; do not ask them about "
+                       "it and do not save it yourself.",
+            'declined': f"Declined: the user rejected this on {matched.get('date') or 'an earlier day'}. "
+                        "Do not suggest or save it again.",
+            'duplicate': (f"Already remembered as #{matched.get('id')}." if matched.get('kind') == 'active'
+                          else f"Already suggested as #{matched.get('id')} and waiting for the user."),
+        }[result['status']]
+        result['rejections'] = memory_suggestions.rejection_digest()
+        return result
 
     # ---- options ---------------------------------------------------------------
     def _option_list(self, args: dict) -> dict:

@@ -8032,6 +8032,9 @@ local desktop, not remote peers.
 | `globals_get` | `kind,key` | `globals_record {id,record}` |
 | `globals_save` | `kind,key?,text,base_hash` | `globals_saved {id,record}` |
 | `globals_retire` | `kind,key,base_hash` | `globals_saved {id,record}` |
+| `globals_suggestions` | — | `globals_suggestions {id,pending,rejected}` |
+| `globals_suggestion_accept` | `sid,text?,title?` | `globals_suggestion_accepted {id,sid,record}` |
+| `globals_suggestion_reject` | `sid,reason?` | `globals_suggestion_rejected {id,sid,record}` |
 
 `kind` is `memory`, `alias`, or `instruction`. A record contains `kind,key,title,path,scope,
 status,shadowed,exists`; reads and saves also contain `text,hash`. Card keys are their IDs;
@@ -8054,10 +8057,11 @@ previews facts before saving the user's selections. It does not automatically mi
 or infer personal characteristics. Explicit requests to remember something already authorize
 the save. The interview uses the configured helper model and ordinary conversation storage.
 
-The `app_user_memory {action: list|get|save|retire, key?, text?, base_hash?}` agent tool
-uses this same editor service and local store, restricted to user-scope memory. List returns
-`records,problems,root`; other successful operations return `ok,record`, including the fresh
-hash. Writes require the app-writes option, retain identity/history, and use the same size,
+The `app_user_memory {action: list|get|suggest|suggestions|save|retire, key?, text?,
+base_hash?, fact?, name?, title?}` agent tool uses this same editor service and local store,
+restricted to user-scope memory. List returns `records,problems,root`; `save`, `get` and
+`retire` return `ok,record`, including the fresh hash; `suggest` and `suggestions` are below.
+`save` and `retire` require the app-writes option, retain identity/history, and use the same size,
 duplicate-name and optimistic-concurrency checks as the editor. It does not write project
 work cards. Retirement prevents future memory loading but does not erase original files,
 thread history or context already sent to models. Refresh reloads helper edits into the view
@@ -8074,6 +8078,34 @@ Files over 128 KiB and binary content are rejected. Retirement preserves card id
 and history and moves the file to its existing format's `archive/` folder. Every card
 write appends a thread event. An active duplicate name in the same global category is
 rejected.
+
+**Memory suggestions (#MEMS).** Owner, 2026-09-22: "new memories are suggestions that the user
+confirms. and if the user rejects, rejections are remembered so that, new potentialy memories
+will be declined if they trigger that same suggestion again." A fact an agent learns is not
+saved: `app_user_memory {action: suggest, fact, name?, title?}` (no app-writes option needed,
+since it writes only a pending suggestion) calls `relay_core.memory_suggestions.suggest`, which
+writes a `type: memory` card with `status: suggested` to `memory/suggestions/<ID>.md` in the
+global root. A **Keep** (`globals_suggestion_accept`, optionally with an edited `text` and
+`title`) writes the ordinary active user memory through the `globals_save` path — `scope: user`,
+`pinned: true`, `paths: []`, the suggestion's `source` and a `reviewed` date — and removes the
+suggestion; a **No** (`globals_suggestion_reject`) moves it to `memory/rejected/<ID>.md` with
+`status: rejected`, a `rejected` date and an optional `reason`. Both folders sit below
+`memory/`, so neither is ever loaded into a prompt, and `globals_state` leaves them out of
+`records`. Suggestion and rejection rows carry `id,name,title,fact,source,origin,date,path`
+(and `reason` when given).
+
+`suggest` returns `{status, id, name, fact, source, matched}` at the top level, and the tool adds
+`text` (what to tell the agent) and `rejections` (`rejection_digest()`, one line per rejected
+fact). `status` is `pending` (a new file; `id` is its card id), `declined` (it repeats a
+rejection) or `duplicate` (it repeats an active user memory or a pending suggestion); for the
+last two `id` is null, no file is written, and `matched` is `{id,kind,name,fact,date}` with
+`kind` `rejected`, `active` or `pending`. A repeat is the same caller-given `name` (casefolded),
+the same normalised fact (casefolded, punctuation stripped, whitespace collapsed), or a word-set
+Jaccard of at least 0.8 after dropping a short stopword list. A name derived from the fact is
+not compared, since it is only the fact's first words. The pane draws Keep / Edit / No from a
+completed `suggest` call whose result has `status: pending` and an `id`; `{action:
+suggestions}` returns `{pending, rejected}`. Writes to either folder hold the
+`memory/suggestions/` directory lock; Keep takes the Globals save lock inside it.
 
 Before each built-in agent prompt is refreshed, Relay reads active project and global
 memory cards. Pinned cards and cards whose `paths` glob matches the workspace are

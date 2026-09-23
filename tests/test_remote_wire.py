@@ -57,11 +57,14 @@ class AllowListTests(unittest.TestCase):
             self.assertIn(name, wire.WITHHELD_EVENTS)
 
     def test_globals_editor_stays_on_the_desktop(self):
-        for name in ("globals_list", "globals_get", "globals_save", "globals_retire"):
+        for name in ("globals_list", "globals_get", "globals_save", "globals_retire",
+                     "globals_suggestions", "globals_suggestion_accept", "globals_suggestion_reject"):
             self.assertIn(name, wire.NEVER_FROM_CLIENT)
             self.assertNotIn(name, wire.CLIENT_TYPES)
             self.assertNotIn(name, wire.GUEST_TYPES)
-        for name in ("globals_state", "globals_record", "globals_saved", "globals_error"):
+        for name in ("globals_state", "globals_record", "globals_saved", "globals_error",
+                     "globals_suggestions", "globals_suggestion_accepted",
+                     "globals_suggestion_rejected"):
             self.assertIn(name, wire.WITHHELD_EVENTS)
             self.assertFalse(wire.may_forward(name))
 
