@@ -9,7 +9,7 @@ verified_by: openai/gpt-6-sol via codex
 rank: zzzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [tests/consolemode_test.cpp], related: [], github: null}
+links: {plans: [], commits: [64dddfff7e7c787f817a48f62b95a6bdcb6ae331], evidence: [tests/consolemode_test.cpp], related: [], github: null}
 ---
 # Restore pending pane queue after exit
 
