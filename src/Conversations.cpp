@@ -879,8 +879,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_tree->setColumnWidth(0, 260);
     m_tree->setExpandsOnDoubleClick(false);
     m_tree->setItemDelegateForColumn(0, new RowDelegate(m_tree));
-    // Qt's own tree sort stays off forever: it would reorder the group rows ("Continue", the
-    // date groups) and sort the display text ("14 min ago"). Sorting is asked of the worker —
+    // Qt's own tree sort stays off forever: it would reorder the date groups and sort the
+    // display text ("14 min ago"). Sorting is asked of the worker —
     // a header click is the Sort combo in another form (the sectionClicked wiring below).
     m_tree->setSortingEnabled(false);
     m_tree->header()->setSectionsClickable(true);
@@ -1939,24 +1939,6 @@ void SessionManager::rebuildTree(const QString &keep) {
         if (!keep.isEmpty() && item.value(QStringLiteral("session_id")).toString() == keep) wanted = row;
     };
 
-    // "Continue": with nothing typed, what this project was in the middle of — pinned, unfinished
-    // or just closed — above everything else. Grouped by project it is not repeated below (it would
-    // sit two rows from itself); grouped by date it is, because a date group with a hole in it lies.
-    QSet<QString> continued;
-    if (m_search->text().trimmed().isEmpty()) {
-        QSet<QString> closedIds;
-        for (auto it = m_closed.cbegin(); it != m_closed.cend(); ++it) closedIds.insert(it.key());
-        const QJsonArray top = continueItems(m_items, m_project, closedIds);
-        if (!top.isEmpty()) {
-            QTreeWidgetItem *group = groupFor(QStringLiteral("Continue"));
-            for (const auto &value : top) {
-                const QJsonObject item = value.toObject();
-                note(addSessionRow(group, item), item);
-                if (grouping == QLatin1String("project"))
-                    continued.insert(item.value(QStringLiteral("session_id")).toString());
-            }
-        }
-    }
     // Grouped by date the buckets read in their own order, not in the order the rows arrive.
     if (grouping == QLatin1String("date")) {
         QSet<QString> used;
@@ -1972,7 +1954,6 @@ void SessionManager::rebuildTree(const QString &keep) {
         if (isThread(item)) continue;
         ++sessions;
         matches += item.value(QStringLiteral("match_count")).toInt();
-        if (continued.contains(item.value(QStringLiteral("session_id")).toString())) continue;
         QTreeWidgetItem *parent = nullptr;
         if (grouping == QLatin1String("project")) parent = groupFor(item.value(QStringLiteral("project")).toString());
         else if (grouping == QLatin1String("date")) parent = groupFor(dateGroup(item.value(QStringLiteral("updated")).toDouble(), now));

@@ -413,7 +413,7 @@ private slots:
         // Terminal history cannot be resumed.
         tree->setCurrentItem(tree->topLevelItem(1)->child(0));
         bool resumed = false;
-        dialog.onResume = [&resumed](const QJsonObject &row, bool) {
+        dialog.onResume = [&resumed](const QJsonObject &row, bool, bool) {
             resumed = row.value(QStringLiteral("session_id")).toString().startsWith(QLatin1Char('a'));
         };
         auto buttons = dialog.findChildren<QPushButton *>();
@@ -480,7 +480,7 @@ private slots:
         QJsonObject opened;
         bool resumed = false;
         manager.onOpenThread = [&opened](const QJsonObject &row) { opened = row; };
-        manager.onResume = [&resumed](const QJsonObject &, bool) { resumed = true; };
+        manager.onResume = [&resumed](const QJsonObject &, bool, bool) { resumed = true; };
         tree->setCurrentItem(threadRow);
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(opened.value(QStringLiteral("session_id")).toString(), thread);
@@ -533,7 +533,7 @@ private slots:
         QJsonObject opened;
         bool resumed = false;
         manager.onOpenThread = [&opened](const QJsonObject &item) { opened = item; };
-        manager.onResume = [&resumed](const QJsonObject &, bool) { resumed = true; };
+        manager.onResume = [&resumed](const QJsonObject &, bool, bool) { resumed = true; };
         tree->setCurrentItem(row);
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(opened.value(QStringLiteral("session_id")).toString(), mine);
@@ -1001,31 +1001,6 @@ private slots:
         QVERIFY(words.startsWith(QStringLiteral("a very")));
     }
 
-    void continueSectionPicksWhatIsUnfinished() {
-        QJsonObject pinned = sessionItem(QStringLiteral("p"), QStringLiteral("Pinned"));
-        pinned.insert(QStringLiteral("pinned"), 1);
-        pinned.insert(QStringLiteral("updated"), 100.0);
-        QJsonObject unfinished = sessionItem(QStringLiteral("u"), QStringLiteral("Unfinished"));
-        unfinished.insert(QStringLiteral("unfinished"), true);
-        unfinished.insert(QStringLiteral("updated"), 300.0);
-        QJsonObject closed = sessionItem(QStringLiteral("c"), QStringLiteral("Closed"));
-        closed.insert(QStringLiteral("updated"), 200.0);
-        QJsonObject plain = sessionItem(QStringLiteral("x"), QStringLiteral("Plain"));
-        QJsonObject elsewhere = sessionItem(QStringLiteral("e"), QStringLiteral("Other project"), QStringLiteral("other"));
-        elsewhere.insert(QStringLiteral("pinned"), 1);
-        QJsonObject terminal = sessionItem(QStringLiteral("t"), QStringLiteral("Terminal"));
-        terminal.insert(QStringLiteral("source"), QStringLiteral("terminal"));
-        terminal.insert(QStringLiteral("pinned"), 1);
-        const QJsonArray items{pinned, unfinished, closed, plain, elsewhere, terminal};
-        const QJsonArray picked = continueItems(items, QStringLiteral("relay"), {QStringLiteral("c")});
-        QCOMPARE(picked.size(), 3);
-        QCOMPARE(picked.at(0).toObject().value(QStringLiteral("session_id")).toString(), QStringLiteral("u"));
-        QCOMPARE(picked.at(1).toObject().value(QStringLiteral("session_id")).toString(), QStringLiteral("c"));
-        QCOMPARE(picked.at(2).toObject().value(QStringLiteral("session_id")).toString(), QStringLiteral("p"));
-        QCOMPARE(continueItems(items, QStringLiteral("relay"), {}, 1).size(), 1);
-        QCOMPARE(continueItems(items, QStringLiteral("nothing-here"), {}).size(), 0);
-    }
-
     // Card #MDL1, rule 1: history recorded the id the API took and that stays on disk, but every
     // cell a person reads prints the model's name.
     void theModelColumnAndTheInfoPanelPrintNames() {
@@ -1112,10 +1087,9 @@ private slots:
         QJsonObject closed = sessionItem(QStringLiteral("c"), QStringLiteral("Just closed"));
         manager.setResults({{QStringLiteral("items"), QJsonArray{withSummary, open, closed}}});
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
-        // The just-closed one is what "Continue" is for, so it heads the list; the others sit in
-        // their project's group.
-        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
-        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("relay"));
+        // A recently closed session remains in its project's group.
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("relay"));
         QTreeWidgetItem *indexed = rowTitled(tree, QStringLiteral("Index work"));
         QTreeWidgetItem *opened = rowTitled(tree, QStringLiteral("Open elsewhere"));
         QTreeWidgetItem *justClosed = rowTitled(tree, QStringLiteral("Just closed"));
@@ -1544,7 +1518,7 @@ private slots:
         QCOMPARE(asked.last().value(QStringLiteral("branch")).toString(), QStringLiteral("work"));
     }
 
-    void groupingByDateAndTheContinueSection() {
+    void groupingKeepsUnfinishedSessionsInTheirRegularPlace() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};
         manager.setProject(QStringLiteral("relay"));
@@ -1557,24 +1531,28 @@ private slots:
         older.insert(QStringLiteral("updated"), double(now.addDays(-40).toSecsSinceEpoch()));
         manager.setResults({{QStringLiteral("items"), QJsonArray{today, older}}});
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
-        // Grouped by project, the unfinished one heads the list and is not repeated below it.
-        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
-        QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
-        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("relay"));
-        QCOMPARE(tree->topLevelItem(1)->childCount(), 1);
-        QCOMPARE(tree->topLevelItem(1)->child(0)->text(0), QStringLiteral("Last month"));
+        // Both sessions sit under their project, including the unfinished one.
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("relay"));
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 2);
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(0), QStringLiteral("Today's work"));
+        QCOMPARE(tree->topLevelItem(0)->child(1)->text(0), QStringLiteral("Last month"));
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-by-project.png")));
         // Grouped by date it is in its date group too: a date group with a hole in it would lie.
         auto *group = manager.findChild<QComboBox *>(QStringLiteral("sessionsGroup"));
         group->setCurrentIndex(group->findData(QStringLiteral("date")));
-        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
-        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Today"));
-        QCOMPARE(tree->topLevelItem(1)->child(0)->text(0), QStringLiteral("Today's work"));
-        QCOMPARE(tree->topLevelItem(2)->text(0), QStringLiteral("Older"));
-        // No grouping: the rows stand on their own, the Continue group still first.
+        QCOMPARE(tree->topLevelItemCount(), 2);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today"));
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(0), QStringLiteral("Today's work"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Older"));
+        // With no grouping, each session is a top-level row.
         group->setCurrentIndex(group->findData(QStringLiteral("none")));
-        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Continue"));
-        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Today's work"));
-        // With something typed there is nothing to continue: the query is what matters.
+        QCOMPARE(tree->topLevelItemCount(), 2);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Last month"));
+        // The supplied search results keep the same grouping.
         manager.setQuery(QStringLiteral("month"));
         manager.setResults({{QStringLiteral("items"), QJsonArray{today, older}}});
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
@@ -1708,7 +1686,7 @@ private slots:
         int previewHints = 0;
         manager.onPreviewHint = [&previewHints] { ++previewHints; };
         QStringList resumed;
-        manager.onResume = [&resumed](const QJsonObject &item, bool) {
+        manager.onResume = [&resumed](const QJsonObject &item, bool, bool) {
             resumed << item.value(QStringLiteral("session_id")).toString();
         };
         manager.resize(900, 650);
@@ -1794,17 +1772,24 @@ private slots:
         manager.setResults({{QStringLiteral("items"), QJsonArray{item}}});
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         auto *search = manager.findChild<QLineEdit *>(QStringLiteral("sessionsSearch"));
-        int resumed = 0, newPane = 0;
+        int resumed = 0, newPane = 0, keptOpen = 0;
         QString forked, reopened, pinned;
-        manager.onResume = [&resumed, &newPane](const QJsonObject &, bool other) { other ? ++newPane : ++resumed; };
+        manager.onResume = [&resumed, &newPane, &keptOpen](const QJsonObject &, bool other, bool keepOpen) {
+            other ? ++newPane : ++resumed;
+            if (keepOpen) ++keptOpen;
+        };
         manager.onFork = [&forked](const QJsonObject &row) { forked = row.value(QStringLiteral("session_id")).toString(); };
         manager.onReopenClosed = [&reopened](const QString &id) { reopened = id; };
         manager.onPin = [&pinned](const QString &id, bool on) { pinned = id + (on ? QStringLiteral(" on") : QStringLiteral(" off")); };
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(resumed, 0);
         QCOMPARE(newPane, 1);
+        QCOMPARE(keptOpen, 0);
+        // Shift+Enter (card #R6J0 follow-up): still a new pane, but the caller is told to leave
+        // this list open, so several conversations can be reattached in a row.
         QTest::keyClick(tree, Qt::Key_Return, Qt::ShiftModifier);
         QCOMPARE(newPane, 2);
+        QCOMPARE(keptOpen, 1);
         QPushButton *resume = nullptr;
         for (auto *button : manager.findChildren<QPushButton *>()) {
             QVERIFY(button->text() != QStringLiteral("Resume here"));
@@ -1814,9 +1799,11 @@ private slots:
         QVERIFY(resume);
         resume->click();
         QCOMPARE(newPane, 3);
+        QCOMPARE(keptOpen, 1);   // the button does not offer the keep-open variant
         QTest::keyClick(search, Qt::Key_Return);
         QCOMPARE(newPane, 4);
         QCOMPARE(resumed, 0);
+        QCOMPARE(keptOpen, 1);
         QTest::keyClick(tree, Qt::Key_Return, Qt::ControlModifier);
         QCOMPARE(forked, QStringLiteral("a"));
         QTest::keyClick(tree, Qt::Key_Return, Qt::AltModifier);
@@ -2004,7 +1991,7 @@ private slots:
         // Enter and Shift+Enter request a new pane; Ctrl+Enter forks — all with the row,
         // which is what carries the argv.
         QString resumed, newPaned, forked;
-        manager.onResume = [&resumed, &newPaned](const QJsonObject &item, bool other) {
+        manager.onResume = [&resumed, &newPaned](const QJsonObject &item, bool other, bool) {
             (other ? newPaned : resumed) = guestCommand(item, false);
         };
         manager.onFork = [&forked](const QJsonObject &item) { forked = guestCommand(item, true); };
