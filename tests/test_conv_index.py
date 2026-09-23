@@ -359,11 +359,11 @@ class IndexTests(unittest.TestCase):
         """The Sessions pane's header clicks (#EV45): fewest turns, and A→Z / Z→A over the title
         and over what the Model column shows, ties broken newest first, pinned still ahead."""
         self.index.update_session(session("a" * 32, title="capybara", turns=9, updated=1000.0,
-                                          model="zeta"), self.root)
+                                          model="zeta", summary="Zebra recap"), self.root)
         self.index.update_session(session("b" * 32, title="Capybara", turns=1, updated=2000.0,
-                                          model="alpha"), self.root)
+                                          model="alpha", summary="alpha recap"), self.root)
         self.index.update_session(session("c" * 32, title="wombat", turns=4, updated=3000.0,
-                                          model="m"), self.root)
+                                          model="m", summary="Middle recap"), self.root)
         ids = lambda result: [i["session_id"][0] for i in result["items"]]  # noqa: E731
         self.assertEqual(ids(self.index.search("", scope="all", sort="shortest")), ["b", "c", "a"])
         # Case-insensitive over the shown title, ties newest first, and a rename re-keys the row.
@@ -374,6 +374,10 @@ class IndexTests(unittest.TestCase):
         # The Model column's own text: a terminal row sorts as "terminal", not its (empty) model.
         self.assertEqual(ids(self.index.search("", scope="all", sort="model")), ["b", "c", "a"])
         self.assertEqual(ids(self.index.search("", scope="all", sort="model_desc")), ["a", "c", "b"])
+        self.assertEqual(ids(self.index.search("", scope="all", sort="summary")), ["b", "c", "a"])
+        self.assertEqual(ids(self.index.search("", scope="all", sort="summary_desc")), ["a", "c", "b"])
+        self.index.set_summary("c" * 32, "aardvark recap")
+        self.assertEqual(ids(self.index.search("", scope="all", sort="summary")), ["c", "b", "a"])
         self.index.record_commands("/tmp/alpha", [{"command": "git status", "exit_status": 0}])
         terminal = conv_index.terminal_id("/tmp/alpha")
         order = [i["session_id"] for i in self.index.search("", scope="all", sort="model")["items"]]

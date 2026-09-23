@@ -1073,7 +1073,8 @@ private slots:
         QTreeWidgetItem *justClosed = rowTitled(tree, QStringLiteral("Just closed"));
         QVERIFY(indexed && opened && justClosed);
         QCOMPARE(justClosed->parent(), tree->topLevelItem(0));
-        QCOMPARE(indexed->data(0, Qt::UserRole + 4).toString(), QStringLiteral("Rebuilt the conversation index."));
+        QCOMPARE(indexed->text(4), QStringLiteral("Rebuilt the conversation index."));
+        QCOMPARE(indexed->data(0, Qt::UserRole + 4).toString(), QString());
         QVERIFY(indexed->data(0, kBadgeRole).toStringList().contains(QStringLiteral("edits · 2 files")));
         // No summary yet: the first prompt says what it was about instead.
         QCOMPARE(opened->data(0, Qt::UserRole + 4).toString(), QStringLiteral("make the list nicer"));
@@ -1182,7 +1183,7 @@ private slots:
         manager.show();
         manager.setResults({{QStringLiteral("items"), QJsonArray{sessionItem(QStringLiteral("a"), QStringLiteral("First")),
                                                                 sessionItem(QStringLiteral("b"), QStringLiteral("Second"))}}});
-        QCOMPARE(asked, QStringList{QStringLiteral("a")});      // the selected row, not both
+        QVERIFY(asked.isEmpty());      // selecting a row no longer loads its full preview
         asked.clear();
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         QTreeWidgetItem *second = tree->topLevelItem(0)->child(1);
@@ -1294,10 +1295,13 @@ private slots:
         QCOMPARE(nextHeaderSort(0, QStringLiteral("title_desc")), QStringLiteral("title"));
         QCOMPARE(nextHeaderSort(3, QStringLiteral("model")), QStringLiteral("model_desc"));
         QCOMPARE(nextHeaderSort(3, QStringLiteral("relevance")), QStringLiteral("model"));
+        QCOMPARE(nextHeaderSort(4, QStringLiteral("summary")), QStringLiteral("summary_desc"));
+        QCOMPARE(nextHeaderSort(4, QStringLiteral("relevance")), QStringLiteral("summary"));
         QCOMPARE(headerSortColumn(QStringLiteral("recent")), 1);
         QCOMPARE(headerSortColumn(QStringLiteral("shortest")), 2);
         QCOMPARE(headerSortColumn(QStringLiteral("title_desc")), 0);
         QCOMPARE(headerSortColumn(QStringLiteral("model")), 3);
+        QCOMPARE(headerSortColumn(QStringLiteral("summary_desc")), 4);
         QCOMPARE(headerSortColumn(QStringLiteral("relevance")), -1);
         QCOMPARE(int(headerSortOrder(QStringLiteral("title"))), int(Qt::AscendingOrder));
         QCOMPARE(int(headerSortOrder(QStringLiteral("longest"))), int(Qt::DescendingOrder));
@@ -1342,7 +1346,7 @@ private slots:
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("title"));
         QCOMPARE(header->sortIndicatorSection(), 0);
 
-        // Turns and Model reach their own pairs too.
+        // Turns, Model and Recap reach their own pairs too.
         emit header->sectionClicked(2);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("longest"));
         emit header->sectionClicked(2);
@@ -1351,6 +1355,11 @@ private slots:
         emit header->sectionClicked(3);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("model"));
         QCOMPARE(header->sortIndicatorSection(), 3);
+        emit header->sectionClicked(4);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("summary"));
+        QCOMPARE(header->sortIndicatorSection(), 4);
+        emit header->sectionClicked(4);
+        QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("summary_desc"));
     }
 
     void filtersSendTheirOwnFieldsAndClear() {
@@ -1548,11 +1557,13 @@ private slots:
         QVERIFY(alphaGroup->isExpanded());
     }
 
-    void mouseSelectionPreviewsBeforeExplicitResume() {
+    void sessionsTableShowsRecapAndPreviewsOnDemand() {
         SessionManager manager;
         manager.onQuery = [](const QJsonObject &) {};
         QStringList previews;
         manager.onPreview = [&previews](const QString &id, const QString &) { previews << id; };
+        int previewHints = 0;
+        manager.onPreviewHint = [&previewHints] { ++previewHints; };
         QStringList resumed;
         manager.onResume = [&resumed](const QJsonObject &item, bool) {
             resumed << item.value(QStringLiteral("session_id")).toString();
@@ -1560,21 +1571,39 @@ private slots:
         manager.resize(900, 650);
         manager.show();
         QVERIFY(QTest::qWaitForWindowExposed(&manager));
+        QJsonObject first = sessionItem(QStringLiteral("a"), QStringLiteral("First"));
+        first.insert(QStringLiteral("summary"), QStringLiteral("A final recap of the first conversation."));
         manager.setResults({{QStringLiteral("items"), QJsonArray{
-            sessionItem(QStringLiteral("a"), QStringLiteral("First")),
-            sessionItem(QStringLiteral("b"), QStringLiteral("Second"))}}});
+            first, sessionItem(QStringLiteral("b"), QStringLiteral("Second"))}}});
 
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         auto *preview = manager.findChild<QTextBrowser *>(QStringLiteral("conversationPreview"));
-        QVERIFY(tree && preview);
+        auto *stack = manager.findChild<QStackedWidget *>(QStringLiteral("sessionsViewStack"));
+        auto *button = manager.findChild<QPushButton *>(QStringLiteral("sessionsPreviewButton"));
+        auto *back = manager.findChild<QPushButton *>(QStringLiteral("sessionsPreviewBack"));
+        QVERIFY(tree && preview && stack && button && back);
+        QCOMPARE(stack->currentWidget(), tree);
+        QCOMPARE(tree->headerItem()->text(4), QStringLiteral("Recap"));
+        QCOMPARE(rowTitled(tree, QStringLiteral("First"))->text(4),
+                 QStringLiteral("A final recap of the first conversation."));
         QTreeWidgetItem *second = rowTitled(tree, QStringLiteral("Second"));
         QVERIFY(second);
+        QCOMPARE(second->text(4), QStringLiteral("No recap saved"));
         tree->scrollToItem(second);
         const QPoint point = tree->visualItemRect(second).center();
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
         QCOMPARE(tree->currentItem(), second);
-        QCOMPARE(previews.last(), QStringLiteral("b"));
+        QVERIFY(previews.isEmpty());
         QCOMPARE(resumed.size(), 0);
+        QCOMPARE(stack->currentWidget(), tree);
+        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+        if (!shotDir.isEmpty())
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/list.png")));
+
+        button->click();
+        QCOMPARE(previewHints, 1);
+        QCOMPARE(stack->currentWidget(), preview->parentWidget());
+        QCOMPARE(previews, QStringList{QStringLiteral("b")});
         const QJsonObject previewTurn{{QStringLiteral("turn"), 1},
                                       {QStringLiteral("kind"), QStringLiteral("prompt")},
                                       {QStringLiteral("text"), QStringLiteral("Read this before resuming")}};
@@ -1584,11 +1613,25 @@ private slots:
                                                                          QStringLiteral("Preview summary")}}},
                             {QStringLiteral("items"), QJsonArray{previewTurn}}});
         QVERIFY(preview->toPlainText().contains(QStringLiteral("Read this before resuming")));
-        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
         QCOMPARE(resumed.size(), 0);
-        const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
         if (!shotDir.isEmpty())
-            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/sessions-click-preview.png")));
+            QVERIFY(manager.grab().save(shotDir + QStringLiteral("/preview.png")));
+        back->click();
+        QCOMPARE(stack->currentWidget(), tree);
+        QCOMPARE(tree->currentItem(), second);
+        QCOMPARE(resumed.size(), 0);
+
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        QCOMPARE(stack->currentWidget(), preview->parentWidget());
+        QCOMPARE(previewHints, 2);
+        QCOMPARE(resumed.size(), 0);
+        QTest::keyClick(preview, Qt::Key_Escape);
+        QCOMPARE(stack->currentWidget(), tree);
+        QTest::keyClick(tree, Qt::Key_P);
+        QCOMPARE(stack->currentWidget(), preview->parentWidget());
+        QCOMPARE(previewHints, 2);
+        button->click();
+        QCOMPARE(stack->currentWidget(), tree);
 
         QTest::keyClick(tree, Qt::Key_Return);
         QCOMPARE(resumed, QStringList{QStringLiteral("b")});
@@ -1868,7 +1911,7 @@ private slots:
         QVERIFY(!button->isEnabled());
         manager.setSummary({{QStringLiteral("session_id"), QStringLiteral("a")},
                             {QStringLiteral("summary"), QStringLiteral("It did the thing.")}});
-        QCOMPARE(row->data(0, Qt::UserRole + 4).toString(), QStringLiteral("It did the thing."));
+        QCOMPARE(row->text(4), QStringLiteral("It did the thing."));
         QVERIFY(unfoldedText(row).contains(QStringLiteral("It did the thing.")));
         QVERIFY(!button->isVisibleTo(&manager));            // it has one now
         // An error says so on the row rather than disappearing.
@@ -1902,7 +1945,7 @@ private slots:
         manager.setSummariseProgress({{QStringLiteral("done"), 1}, {QStringLiteral("total"), 4},
                                       {QStringLiteral("session_id"), QStringLiteral("b")},
                                       {QStringLiteral("summary"), QStringLiteral("Live from the batch.")}});
-        QCOMPARE(tree->topLevelItem(0)->child(0)->data(0, Qt::UserRole + 4).toString(), QStringLiteral("Live from the batch."));
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(4), QStringLiteral("Live from the batch."));
         bool progress = false;
         for (QLabel *label : manager.findChildren<QLabel *>())
             progress = progress || label->text() == QStringLiteral("Summarising 1 of 4…");
@@ -1914,7 +1957,7 @@ private slots:
         // `session_summary` for the conversation a pane is holding updates its row where it stands.
         manager.setSessionSummary({{QStringLiteral("session_id"), QStringLiteral("b")},
                                    {QStringLiteral("summary"), QStringLiteral("From the pane.")}, {QStringLiteral("turn"), 3}});
-        QCOMPARE(tree->topLevelItem(0)->child(0)->data(0, Qt::UserRole + 4).toString(), QStringLiteral("From the pane."));
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(4), QStringLiteral("From the pane."));
     }
 
     void findBarCountsBothSides() {
@@ -2110,8 +2153,9 @@ private slots:
             QVERIFY(row->child(0)->isFirstColumnSpanned());
         }
         // The narrow columns are back to sizing themselves once the list is filled.
-        for (int column = 1; column < tree->columnCount(); ++column)
+        for (int column = 1; column < 4; ++column)
             QCOMPARE(tree->header()->sectionResizeMode(column), QHeaderView::ResizeToContents);
+        QCOMPARE(tree->header()->sectionResizeMode(4), QHeaderView::Stretch);
     }
 
     // The list as it is drawn, written out as a PNG so the same page can be compared pixel for

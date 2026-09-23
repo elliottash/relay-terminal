@@ -6575,6 +6575,10 @@ public:
                 relay::ShortcutHints::nextTime(QKeySequence(Qt::Key_Return).toString(QKeySequence::NativeText),
                                                QStringLiteral("resume selected session")));
         };
+        view->onPreviewHint = [windowGuard] {
+            if (windowGuard) windowGuard->hint(QStringLiteral("sessions.preview"),
+                relay::ShortcutHints::nextTime(QStringLiteral("P"), QStringLiteral("preview selected session")));
+        };
         view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
             auto *w = windowOf(guard);
             if (!w || !ownerGuard) return;

@@ -176,6 +176,8 @@ QString nextHeaderSort(int column, const QString &current) {
                                                             : QStringLiteral("longest");
         case 3:  return current == QLatin1String("model") ? QStringLiteral("model_desc")
                                                           : QStringLiteral("model");
+        case 4:  return current == QLatin1String("summary") ? QStringLiteral("summary_desc")
+                                                            : QStringLiteral("summary");
         default: return current;
     }
 }
@@ -185,12 +187,14 @@ int headerSortColumn(const QString &sort) {
     if (sort == QLatin1String("longest") || sort == QLatin1String("shortest")) return 2;
     if (sort == QLatin1String("title") || sort == QLatin1String("title_desc")) return 0;
     if (sort == QLatin1String("model") || sort == QLatin1String("model_desc")) return 3;
+    if (sort == QLatin1String("summary") || sort == QLatin1String("summary_desc")) return 4;
     return -1;
 }
 
 Qt::SortOrder headerSortOrder(const QString &sort) {
     return sort == QLatin1String("oldest") || sort == QLatin1String("shortest")
                    || sort == QLatin1String("title") || sort == QLatin1String("model")
+                   || sort == QLatin1String("summary")
                ? Qt::AscendingOrder
                : Qt::DescendingOrder;
 }
@@ -789,6 +793,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_sort->addItem(QStringLiteral("Title Z→A"), QStringLiteral("title_desc"));
     m_sort->addItem(QStringLiteral("Model A→Z"), QStringLiteral("model"));
     m_sort->addItem(QStringLiteral("Model Z→A"), QStringLiteral("model_desc"));
+    m_sort->addItem(QStringLiteral("Recap A→Z"), QStringLiteral("summary"));
+    m_sort->addItem(QStringLiteral("Recap Z→A"), QStringLiteral("summary_desc"));
     m_sort->addItem(QStringLiteral("Best match"), QStringLiteral("relevance"));
 
     // The three-state filters of protocol 14.3, as a menu so the filter row stays one line in a
@@ -825,17 +831,20 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
 
     m_tree = new QTreeWidget;
     m_tree->setObjectName(QStringLiteral("sessionsTree"));
-    m_tree->setColumnCount(4);
+    m_tree->setColumnCount(5);
     m_tree->setHeaderLabels({QStringLiteral("Session"), QStringLiteral("Updated"),
-                             QStringLiteral("Turns"), QStringLiteral("Model")});
+                             QStringLiteral("Turns"), QStringLiteral("Model"), QStringLiteral("Recap")});
     m_tree->setRootIsDecorated(true);
     m_tree->setUniformRowHeights(false);
     m_tree->setAllColumnsShowFocus(true);
     m_tree->header()->setStretchLastSection(false);
-    m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_tree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
     m_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_tree->header()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_tree->setColumnWidth(0, 260);
+    m_tree->setExpandsOnDoubleClick(false);
     m_tree->setItemDelegateForColumn(0, new RowDelegate(m_tree));
     // Qt's own tree sort stays off forever: it would reorder the group rows ("Continue", the
     // date groups) and sort the display text ("14 min ago"). Sorting is asked of the worker —
@@ -857,6 +866,12 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_tree, &QTreeWidget::itemExpanded, this,
             [rememberGroup](QTreeWidgetItem *item) { rememberGroup(item, true); });
     m_tree->installEventFilter(this);
+    connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *row) {
+        if (row && !row->data(0, kIdRole).toString().isEmpty()) {
+            if (onPreviewHint) onPreviewHint();
+            openPreview();
+        }
+    });
 
     m_header = new QLabel;
     m_header->setWordWrap(true);
@@ -872,19 +887,24 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_summarise, &QPushButton::clicked, this, &SessionManager::summariseSelected);
 
     auto *right = new QWidget;
+    right->setObjectName(QStringLiteral("sessionsPreviewPage"));
     auto *rightBox = new QVBoxLayout(right);
     rightBox->setContentsMargins(0, 0, 0, 0);
     auto *headerRow = new QHBoxLayout;
+    m_previewBack = new QPushButton(QStringLiteral("← Sessions"));
+    m_previewBack->setObjectName(QStringLiteral("sessionsPreviewBack"));
+    connect(m_previewBack, &QPushButton::clicked, this, &SessionManager::closePreview);
+    headerRow->addWidget(m_previewBack);
     headerRow->addWidget(m_header, 1);
-    headerRow->addWidget(m_summarise, 0, Qt::AlignTop);
     rightBox->addLayout(headerRow);
     rightBox->addWidget(m_preview, 1);
 
-    auto *splitter = new QSplitter(Qt::Horizontal);
-    splitter->addWidget(m_tree);
-    splitter->addWidget(right);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
+    m_viewStack = new QStackedWidget;
+    m_viewStack->setObjectName(QStringLiteral("sessionsViewStack"));
+    m_viewStack->addWidget(m_tree);
+    m_viewStack->addWidget(right);
+    m_preview->installEventFilter(this);
+    m_preview->viewport()->installEventFilter(this);
 
     m_status = new QLabel;
     m_status->setTextFormat(Qt::PlainText);
@@ -941,6 +961,15 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
 
     m_resume = new QPushButton(QStringLiteral("Resume"));
     m_resume->setDefault(true);
+    m_previewButton = new QPushButton(QStringLiteral("Preview (P)"));
+    m_previewButton->setObjectName(QStringLiteral("sessionsPreviewButton"));
+    connect(m_previewButton, &QPushButton::clicked, this, [this] {
+        if (m_viewStack->currentIndex() == 0) {
+            if (onPreviewHint) onPreviewHint();
+            openPreview();
+        }
+        else closePreview();
+    });
     m_info = new QPushButton(QStringLiteral("Info"));
     m_info->setToolTip(QStringLiteral("Its ⓘ view: model, tokens, file and history with subagent threads (Ctrl+I)"));
     m_rename = new QPushButton(QStringLiteral("Rename…"));
@@ -1005,6 +1034,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     buttons->addWidget(m_delete);
     buttons->addStretch(1);
     buttons->addWidget(m_reopen);
+    buttons->addWidget(m_summarise);
+    buttons->addWidget(m_previewButton);
     buttons->addWidget(m_resume);
     buttons->addWidget(close);
 
@@ -1020,8 +1051,8 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     box->addLayout(statusRow);
     box->addWidget(m_confirm);
     box->addWidget(m_emptyRow);
-    box->addWidget(splitter, 1);
-    auto *hint = new QLabel(QStringLiteral("Enter resumes · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
+    box->addWidget(m_viewStack, 1);
+    auto *hint = new QLabel(QStringLiteral("Enter resumes · P previews · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
     hint->setObjectName(QStringLiteral("dialogHint"));
     hint->setWordWrap(true);
     box->addWidget(hint);
@@ -1498,6 +1529,7 @@ void SessionManager::updateConsoleHeight() {
 // picks the row out when the results land.
 void SessionManager::revealSession(const QString &sessionId) {
     showTab(QStringLiteral("sessions"));
+    closePreview();
     if (sessionId.isEmpty()) return;
     if (QTreeWidgetItem *row = m_rows.value(sessionId)) {
         m_tree->setCurrentItem(row);
@@ -1764,9 +1796,17 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
     row->setText(0, title);            // the plain text a screen reader and the tests read
     row->setData(0, kTitleRole, title);
 
-    // What the conversation was about, in one muted line: its summary, else how it opened.
-    QString sub = item.value(QStringLiteral("summary")).toString().simplified();
-    if (sub.isEmpty()) sub = item.value(QStringLiteral("first_prompt")).toString().simplified();
+    if (!thread) {
+        const QString recap = item.value(QStringLiteral("summary")).toString().simplified();
+        row->setText(4, recap.isEmpty() ? QStringLiteral("No recap saved") : recap);
+        row->setToolTip(4, recap);
+        row->setForeground(4, recap.isEmpty() ? m_tree->palette().color(QPalette::PlaceholderText)
+                                                : m_tree->palette().color(QPalette::Text));
+    }
+
+    // The saved summary has its own Recap column. Keep the opening prompt under the title so
+    // the two columns tell different parts of the story.
+    QString sub = item.value(QStringLiteral("first_prompt")).toString().simplified();
     if (sub.isEmpty()) sub = item.value(QStringLiteral("snippet")).toString().simplified();
     row->setData(0, kSubRole, thread ? QString() : sub);
 
@@ -1951,7 +1991,7 @@ void SessionManager::rebuildTree(const QString &keep) {
                 // Muted, not italic: one mark is enough and italic muted text is hard to read
                 // (docs/ARCHITECTURE.md, "Legible text").
                 parent = new QTreeWidgetItem(groupFor(item.value(QStringLiteral("project")).toString()),
-                                             {owner.value(QStringLiteral("title")).toString(), QString(), QString(), QString()});
+                                             {owner.value(QStringLiteral("title")).toString(), QString(), QString(), QString(), QString()});
                 parent->setForeground(0, m_tree->palette().color(QPalette::PlaceholderText));
                 parent->setData(0, kIdRole, ownerId);
                 parent->setData(0, kItemRole, QString::fromUtf8(QJsonDocument(owner).toJson(QJsonDocument::Compact)));
@@ -1966,7 +2006,7 @@ void SessionManager::rebuildTree(const QString &keep) {
             auto *row = new QTreeWidgetItem(parent, {QString(),
                 whenText(item.value(QStringLiteral("updated")).toDouble(), now),
                 status.isEmpty() ? QStringLiteral("thread") : status,
-                rowModelName(item)});
+                rowModelName(item), QString()});
             row->setForeground(0, m_tree->palette().color(QPalette::PlaceholderText));
             parent->setExpanded(true);
             decorate(row, item);
@@ -1996,6 +2036,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     m_filling = false;
     for (int column = 1; column < m_tree->columnCount(); ++column)
         header->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(4, QHeaderView::Stretch);
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
     // Selecting a session under a collapsed group can expand its parent in Qt. Restore the
     // reader's group choice after restoring the current row, including when that row is hidden.
@@ -2101,11 +2142,26 @@ void SessionManager::selectionChanged() {
         sub = QStringLiteral("Subagent thread of “%1”<br>%2")
                   .arg(item.value(QStringLiteral("owner_title")).toString().toHtmlEscaped(), sub);
     m_header->setText(QStringLiteral("<b>%1</b><br>%2").arg(item.value(QStringLiteral("title")).toString().toHtmlEscaped(), sub));
-    if (!same) requestPreview(id);
+    if (!same && m_viewStack->currentIndex() == 1) requestPreview(id);
 }
 
-// One request per conversation: the side preview and an unfolded row are the same `conversation`
-// reply, so selecting a row and unfolding it does not ask twice.
+void SessionManager::openPreview() {
+    if (selectedId().isEmpty()) return;
+    m_viewStack->setCurrentIndex(1);
+    m_previewButton->setText(QStringLiteral("Back to list"));
+    selectionChanged();
+    m_preview->setFocus(Qt::OtherFocusReason);
+}
+
+void SessionManager::closePreview() {
+    if (m_viewStack->currentIndex() == 0) return;
+    m_viewStack->setCurrentIndex(0);
+    m_previewButton->setText(QStringLiteral("Preview (P)"));
+    m_tree->setFocus(Qt::OtherFocusReason);
+}
+
+// One request per conversation: the full preview and an unfolded row are the same `conversation`
+// reply, so previewing and unfolding do not ask twice.
 void SessionManager::requestPreview(const QString &sessionId) {
     if (sessionId.isEmpty() || !onPreview || m_previewPending == sessionId) return;
     m_previewPending = sessionId;
@@ -2271,6 +2327,7 @@ void SessionManager::updateButtons() {
     // has nothing to read.
     const bool guest = isGuestItem(item);
     m_resume->setEnabled(has && !terminal);
+    m_previewButton->setEnabled(has || m_viewStack->currentIndex() == 1);
     m_resume->setText(thread ? QStringLiteral("Open history") : QStringLiteral("Resume"));
     m_info->setEnabled(has && !terminal && !guest);
     m_rename->setEnabled(has);
@@ -2646,6 +2703,14 @@ void SessionManager::remove() {
 
 bool SessionManager::eventFilter(QObject *object, QEvent *event) {
     if (event->type() != QEvent::KeyPress) return QWidget::eventFilter(object, event);
+    if (object == m_preview || object == m_preview->viewport()) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (key->key() == Qt::Key_Escape || key->key() == Qt::Key_Backspace) {
+            closePreview();
+            return true;
+        }
+        return QWidget::eventFilter(object, event);
+    }
     if (object != m_search && object != m_tree) return QWidget::eventFilter(object, event);
     auto *key = static_cast<QKeyEvent *>(event);
     const bool plain = !(key->modifiers() & ~Qt::KeypadModifier);
@@ -2664,6 +2729,7 @@ bool SessionManager::eventFilter(QObject *object, QEvent *event) {
         return true;
     }
     if (key->key() == Qt::Key_P && key->modifiers() == Qt::ControlModifier) { togglePin(); return true; }
+    if (object == m_tree && key->key() == Qt::Key_P && plain) { openPreview(); return true; }
     if (key->key() == Qt::Key_F2 && plain) { rename(); return true; }
 
     if (object == m_search) {

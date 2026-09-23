@@ -263,7 +263,7 @@ SOURCES = ("agent", "terminal", "subagent", "claude", "codex")
 # own transcripts, never from Relay's session files, so a rebuild leaves them to `guest_reconcile`.
 GUEST_SOURCES = ("claude", "codex")
 SORTS = ("recent", "oldest", "longest", "shortest", "title", "title_desc", "model", "model_desc",
-         "relevance")
+         "summary", "summary_desc", "relevance")
 # The keys the alphabetical sorts order by. `title` keys on the name the GUI shows — a custom
 # rename over the stored title — and `model` on what the Sessions pane's Model column displays
 # (`addSessionRow` in src/Conversations.cpp): the terminal rows say "terminal", the guest sources
@@ -272,6 +272,7 @@ SORTS = ("recent", "oldest", "longest", "shortest", "title", "title_desc", "mode
 _TITLE_KEY = "COALESCE(NULLIF(c.custom_title, ''), c.title, '') COLLATE NOCASE"
 _MODEL_KEY = ("CASE c.source WHEN 'terminal' THEN 'terminal' WHEN 'claude' THEN 'claude code'"
               " WHEN 'codex' THEN 'codex' ELSE relay_model_name(c.model) END COLLATE NOCASE")
+_SUMMARY_KEY = "COALESCE(c.summary, '') COLLATE NOCASE"
 
 
 def _sql_model_name(value):
@@ -2321,7 +2322,8 @@ class ConversationIndex:
         when every word or phrase occurs somewhere in it, and an excluded word must occur nowhere
         in it. `sort` is "recent" (default), "oldest", "longest" (most turns), "shortest" (fewest),
         "title"/"title_desc" (the custom title over the stored one, A→Z or Z→A), "model"/
-        "model_desc" (what the GUI's Model column shows, A→Z or Z→A) or "relevance" (the
+        "model_desc" (what the GUI's Model column shows, A→Z or Z→A), "summary"/
+        "summary_desc" (the saved Recap column, A→Z or Z→A), or "relevance" (the
         best kind matched first — title, then summary, then prompt, then reply, then tool and
         terminal output — then the number of matching entries, then recency); the alphabetical
         orders break ties by recency, pinned rows come
@@ -2372,6 +2374,8 @@ class ConversationIndex:
                  "title_desc": _TITLE_KEY + " DESC, COALESCE(c.updated, 0) DESC",
                  "model": _MODEL_KEY + " ASC, COALESCE(c.updated, 0) DESC",
                  "model_desc": _MODEL_KEY + " DESC, COALESCE(c.updated, 0) DESC",
+                 "summary": _SUMMARY_KEY + " ASC, COALESCE(c.updated, 0) DESC",
+                 "summary_desc": _SUMMARY_KEY + " DESC, COALESCE(c.updated, 0) DESC",
                  "relevance": "best DESC, hits DESC, COALESCE(c.updated, 0) DESC"}[sort]
 
         def work(db):

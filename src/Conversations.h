@@ -284,6 +284,7 @@ public:
     void setHelperShortcut(const QString &hintId, const QString &keys);
     std::function<void()> onHelperHint;
     std::function<void()> onResumeHint;
+    std::function<void()> onPreviewHint;
     // Open the helper and put the cursor in it — the pane's ask key, and what a click on the row
     // does. `helperDraft` prefills the composer without sending.
     void focusHelper();
@@ -331,6 +332,8 @@ private:
     void spanFirstColumn(QTreeWidgetItem *row);
     void decorate(QTreeWidgetItem *row, const QJsonObject &item);
     void selectionChanged();
+    void openPreview();
+    void closePreview();
     void requestPreview(const QString &sessionId);
     void unfold(QTreeWidgetItem *row);
     void fillUnfolded(QTreeWidgetItem *row, const QJsonObject &overview);
@@ -402,11 +405,13 @@ private:
     QWidget *m_chipRow = nullptr;
     QLabel *m_ignored = nullptr;
     QTreeWidget *m_tree = nullptr;
+    QStackedWidget *m_viewStack = nullptr;
     QTextBrowser *m_preview = nullptr;
     QLabel *m_status = nullptr, *m_header = nullptr, *m_empty = nullptr;
     QWidget *m_emptyRow = nullptr;
     QPushButton *m_searchAll = nullptr, *m_clearFilters = nullptr;
-    QPushButton *m_resume = nullptr, *m_info = nullptr, *m_rename = nullptr,
+    QPushButton *m_resume = nullptr, *m_previewButton = nullptr, *m_previewBack = nullptr,
+                *m_info = nullptr, *m_rename = nullptr,
                 *m_pin = nullptr, *m_delete = nullptr, *m_more = nullptr, *m_summarise = nullptr,
                 *m_cancelBatch = nullptr, *m_reopen = nullptr;
     QFrame *m_confirm = nullptr;
@@ -423,7 +428,7 @@ private:
     QHash<QString, QString> m_liveUsage;   // session id → "cpu 12% · mem 3%" (issue #D03W)
     QHash<QString, QPair<QString, qint64>> m_closed;
     QString m_project, m_pendingSelect, m_previewPending, m_batchScope, m_note;
-    QString m_previewFor, m_previewHtml;      // the side preview as last filled, and for which row
+    QString m_previewFor, m_previewHtml;      // the full preview as last filled, and for which row
     int m_nextOffset = -1, m_matches = 0, m_sessions = 0, m_threadCount = 0;
     double m_elapsed = 0;
     QTimer *m_debounce = nullptr, *m_ages = nullptr;
