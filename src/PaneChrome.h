@@ -691,6 +691,8 @@ public:
         button(m_row, QStringLiteral("⊞"), QStringLiteral("pane.newByMouse"), QStringLiteral("New pane (drag its header to place it)"))
             ->setProperty("keysFrom", QStringLiteral("pane.splitRight"));
         button(m_row, QStringLiteral("⇱"), QStringLiteral("pane.moveToNewTab"), QStringLiteral("Move to new tab"));
+        if (dynamic_cast<Pane *>(leaf))
+            button(m_row, QStringLiteral("↗"), QStringLiteral("pane.moveToBackground"), QStringLiteral("Move to background"));
         button(m_row, QStringLiteral("×"), QStringLiteral("pane.close"), QStringLiteral("Close pane"));
         // The header gives up exactly this much room for good, so the title and the folder line
         // never re-elide.

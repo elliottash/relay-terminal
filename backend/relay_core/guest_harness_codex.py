@@ -151,6 +151,7 @@ _NOTIFICATIONS = {
     "item/fileChange/patchUpdated": "_on_item_fileChange_patchUpdated",
     "item/started": "_on_item_started",
     "item/completed": "_on_item_completed",
+    "turn/plan/updated": "_on_turn_plan_updated",
     "thread/tokenUsage/updated": "_on_thread_tokenUsage_updated",
     "account/rateLimits/updated": "_on_account_rateLimits_updated",
     "thread/compacted": "_on_thread_compacted",
@@ -636,6 +637,13 @@ class CodexHarness:
         text = params.get("delta")
         if text:
             self._emit(turn, "delta", {"text": text})
+
+    def _on_turn_plan_updated(self, turn, params):
+        plan = params.get("plan") or []
+        if isinstance(plan, dict):
+            plan = plan.get("steps") or []
+        if isinstance(plan, list):
+            self._emit(turn, "plan_updated", {"steps": plan})
 
     def _on_item_reasoning_textDelta(self, turn, params):
         text = params.get("delta")

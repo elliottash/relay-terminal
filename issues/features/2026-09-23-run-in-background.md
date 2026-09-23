@@ -1,12 +1,14 @@
 ---
 id: BGRN
 type: work
-status: planned
+status: executing
 labels: [feature, panes, switchboard, notifications]
+assignee: codex
+implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
-links: {plans: [], commits: [], evidence: [], related: [RG0Z], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-bgrn/], related: [RG0Z], github: null}
 ---
 # Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done
 
@@ -86,3 +88,13 @@ links: {plans: [], commits: [], evidence: [], related: [RG0Z], github: null}
 - `Pane.h` and `RelayWindow.h` are heavily shared. Land through `scripts/land.py` in small commits, one step at a time.
 
 **Verify:** a `backgroundtasks` unit test for the lifecycle, dedup and readiness gate; pytest for the request event, the Claude `--disallowedTools` argv, and Codex `turn/plan/updated` mirroring, with the fake harness; targeted `panes` and `panestatus` tests; an Xvfb run with an isolated config showing hide, counts, a question going amber and being answered, done then cleared on open, failure, hiding the last pane, restore into a changed layout, a notification click, and Board Run (`r`) versus Run in pane; one built-in and one guest agent live; `rg -g '!issues/' '"Execute'` finding no UI string.
+
+## Execution Summary
+Implemented live-pane background ownership with request-linked working, needs-you, done, failed and interrupted states, header counts, one notification per state change, and open/stop navigation. Board Run now backgrounds by default, with Run in pane as the visible alternative; pane composer, header and Actions expose background handoff. Claude task tools are disabled, and Codex plan updates feed Relay todos. Restored background windows appear interrupted after restart. See `docs/qa_evidence/2026-09-23-bgrn/` for the isolated UI probe.
+
+## Tests
+- `scripts/relay-build --target relay-requests-tests --target relay` — built successfully.
+- `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R '^(requests|board)$' --output-on-failure` — 2/2 passed.
+- `PYTHONPATH=backend python3 -m unittest tests.test_guest_harness_claude tests.test_guest_harness_codex tests.test_background_plan -q` — 150 passed.
+- `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn/drive.sh` — isolated Board screenshot and no-agent guard, evidence in `docs/qa_evidence/2026-09-23-bgrn/`.
+- Full `boardexecute` C++ case currently fails on its stale `QPushButton` lookup for Plan/Run/Verify after the existing action row changed to `QToolButton`; that pre-existing failure is tracked separately.

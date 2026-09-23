@@ -100,7 +100,8 @@ BINARY = "claude"                  # what `start()` looks for on PATH
 # The flags that never change. `--verbose` is what makes -p emit anything but the final answer;
 # `--include-partial-messages` is what makes it stream deltas rather than whole messages.
 BASE_FLAGS = ("-p", "--input-format", "stream-json", "--output-format", "stream-json",
-              "--verbose", "--include-partial-messages")
+              "--verbose", "--include-partial-messages",
+              "--disallowedTools", "TaskCreate TaskGet TaskUpdate TaskList TodoWrite")
 
 # `--effort <level>`, as `claude --help` lists them (2.1.278). Checked here rather than passed
 # through, because an effort the CLI does not know makes the process exit at startup — and the

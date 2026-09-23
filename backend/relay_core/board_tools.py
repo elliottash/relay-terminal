@@ -314,13 +314,13 @@ TOOL_SPECS = [
           "text": {"type": "string"},
           "pane_token": {"type": "string",
                          "description": "The pane's session token, when this entry records a "
-                                        "hand-off to a terminal pane (Execute, #HKAP): the thread "
+                                        "hand-off to a terminal pane (Run, #HKAP): the thread "
                                         "draws it as a link that reveals that pane. At most 64 "
                                         "characters, no whitespace or '>'."}},
          ["id", "kind", "text"]),
     spec("board_claim",
          "Take a card: this terminal pane is the session working on it. One call does what the "
-         "Board's Execute button does — assignee agent, status executing, the card's "
+         "Board's Run button does — assignee agent, status executing, the card's "
          "`session` set to this pane's token, a progress entry that links back to this pane — and "
          "returns the whole card (front matter, body, tasks, recent thread), so you need no second "
          "read. Claim before you change any code, and only a card whose request is the one you are "
@@ -491,7 +491,7 @@ WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "boa
 CLAIMED_STATUSES = ("executing", "in-progress")
 
 #: What a claim writes as the first line of its progress entry.  The token's first 8 characters
-#: are what the GUI draws as the link, exactly as Execute's `Executing (xxxxxxxx) · …` does.
+#: are what the GUI draws as the link, exactly as Run's `Running (xxxxxxxx) · …` does.
 CLAIM_LINE = "Claimed ({short}) · working on it from a terminal pane"
 CLAIM_LINE_NO_TOKEN = "Claimed · working on it from a terminal pane"
 
@@ -893,8 +893,8 @@ def cleanup_brief() -> str:
 
 # ------------------------------------------------------------ card turns (protocol 19.10)
 #
-# A card's "Ask the agent" became Discuss / Plan / Execute (#XS6Q, owner 2026-09-18). Discuss
-# and Plan are one `board_ask` turn each, told apart by `mode`; Execute hands the card to a
+# A card's "Ask the agent" became Discuss / Plan / Run (#XS6Q, owner 2026-09-18). Discuss
+# and Plan are one `board_ask` turn each, told apart by `mode`; Run hands the card to a
 # terminal pane and is not a turn here at all. What a mode may touch is enforced below, not
 # left to the brief: a card turn runs on the Board worker, whose executor would otherwise
 # offer the whole pane tool set (commands, file writes, subagents).
@@ -994,7 +994,7 @@ class ConsoleScope:
     cleanup-only fence in `run`: merging duplicates is this conversation's headline job.
 
     **It fences nothing off.** Until 2026-09-20 this scope withheld the shell and the file
-    writes (§19.18: "No shell, no file writes: code is a card's Execute"), which predates the
+    writes (§19.18: "No shell, no file writes: code is a card's Run"), which predates the
     owner's rule that a context specialises an agent without fencing it — *"agents are
     specialized for the given pane context, but the general rule/approach is that agents have
     access to all systems and can work across panes and contexts"* — and which a board-less
@@ -1048,7 +1048,7 @@ class CardScope:
     file tools, which is what the turn was *offered*.  A card turn is an ordinary console turn
     now: it is offered the console's list, every turn, and what the stage forbids is refused when
     it is called (`Agent.set_card_turn`, `_check_card_scope`, and `refusal` below, which names
-    Execute).  `allows` and `refusal` did not move an inch; only the list did.
+    Run).  `allows` and `refusal` did not move an inch; only the list did.
     """
     mode: str
     card_id: str
@@ -1061,7 +1061,7 @@ class CardScope:
         what = "Plan" if self.mode == "plan" else "Discuss"
         return (f"{name} is not available in a {what} turn on #{self.card_id}: it reads the "
                 "repository (read_file, list_directory, search_files) and writes only through the "
-                "board tools. Writing code is Execute's job — the owner hands the card to a "
+                "board tools. Writing code is Run's job — the owner hands the card to a "
                 "terminal pane for that.")
 
 
@@ -2627,7 +2627,7 @@ class BoardTools:
                 'A decision entry quotes the user\'s own words in quotation marks, e.g. '
                 '2026-09-17, owner: "cloud is fine" → default to the cloud model. Quote them, '
                 "then repeat the call.", code="board_refused", requires="verbatim_quote")
-        # The pane an Execute hand-off landed in (#HKAP): carried in the entry's attrs so the
+        # The pane a Run hand-off landed in (#HKAP): carried in the entry's attrs so the
         # GUI can draw the entry as a link that reveals that pane. Kept to what the entry
         # marker can hold — short, no whitespace, no '>' closing it early.
         pane_token = check_pane_token(args.get("pane_token")) or ""
@@ -2644,7 +2644,7 @@ class BoardTools:
     def _claim(self, args: dict) -> dict:
         """`board_claim`: this terminal pane takes the card, in one call (protocol 19.19, #R9G7).
 
-        The same four writes the Board's Execute button makes, in the same order —
+        The same four writes the Board's Run button makes, in the same order —
         `assignee: agent`, status `executing`, the card's `session` set to this pane's token, and
         a `progress` entry carrying that token so the thread draws it as a link back to this
         pane — plus the card itself in the result, so the turn that claimed it has the front

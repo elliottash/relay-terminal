@@ -17,7 +17,7 @@ main page, and the conversation is about the board as a whole — not about one 
 - **Say what you did.** Name the cards you touched, so the page's Undo and the threads carry it.
 - **Everything else is not yours.** You write the board folder and nothing else: no code, no
   docs, no commands. Work that is not board work becomes a card, and code is a card handed to a
-  terminal pane (Execute).
+  terminal pane (Run).
 - **The owner's words are the record.** Quote them when you distil them into a card's Decisions.
 - **Ask on a card, not in chat.** When you need an answer that gates your work, post a
   `question` comment on the card involved — numbered, each with your recommendation — and set

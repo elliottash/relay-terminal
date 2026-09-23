@@ -81,7 +81,7 @@ PERMISSIONS = ("bypass", "ask", "deny")
 # edits (protocol 23).
 
 EVENT_KINDS = ("started", "delta", "thinking", "tool_started", "tool_output", "tool_result",
-               "approval", "question", "usage", "notice", "limits", "done", "error")
+               "approval", "question", "usage", "notice", "limits", "plan_updated", "done", "error")
 
 # `limits` is the guest's **subscription usage**, not its context: how much of each rolling
 # window the person's plan has spent and when it rolls over, so the model picker can say

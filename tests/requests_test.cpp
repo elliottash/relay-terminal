@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RequestLedger.h"
+#include "BackgroundTasks.h"
 #include "RequestsPanel.h"
 
 #include <QJsonArray>
@@ -32,6 +33,36 @@ const char *kTodos = R"({'event':'todos','turn_id':'q1','open':1,'items':[
 class RequestsTests : public QObject {
     Q_OBJECT
 private slots:
+    void backgroundTaskSettlesOnlyWithItsRequestsAndCard() {
+        RequestLedgerModel model;
+        relay::background::Facts facts;
+        using relay::background::State;
+        QCOMPARE(relay::background::resolve(facts, model), State::Working);
+        QVERIFY(model.handle(json("{'event':'requests','total':1,'items':[{'id':'R1','status':'done','text_preview':'build it','requires_completion':true}]}")));
+        QCOMPARE(relay::background::resolve(facts, model), State::Done);
+        facts.cardStatus = QStringLiteral("executing");
+        QCOMPARE(relay::background::resolve(facts, model), State::Working);
+        facts.cardStatus = QStringLiteral("needs-verification");
+        QCOMPARE(relay::background::resolve(facts, model), State::Done);
+        QVERIFY(model.handle(json("{'event':'todos','turn_id':'q1','items':[{'id':'T1','text':'test it','status':'pending','request_ids':['R1']}]}")));
+        QCOMPARE(relay::background::resolve(facts, model), State::Working);
+        facts.liveSubagents = 1;
+        QVERIFY(model.handle(json("{'event':'todos','turn_id':'q1','items':[{'id':'T1','text':'test it','status':'completed','request_ids':['R1']}]}")));
+        QCOMPARE(relay::background::resolve(facts, model), State::Working);
+        facts.liveSubagents = 0;
+        QCOMPARE(relay::background::resolve(facts, model), State::Done);
+        QVERIFY(model.handle(json("{'event':'todos','turn_id':'q1','items':[{'id':'T1','text':'test it','status':'blocked','note':'needs credentials','request_ids':['R1']}]}")));
+        QCOMPARE(relay::background::resolve(facts, model), State::NeedsYou);
+        facts.interrupted = true;
+        QCOMPARE(relay::background::resolve(facts, model), State::Interrupted);
+        facts.interrupted = false;
+        model.clear();
+        QVERIFY(model.handle(json("{'event':'requests','total':2,'items':[{'id':'R1','status':'blocked','text_preview':'old work'},"
+                                 "{'id':'R2','status':'done','text_preview':'this task'}]}")));
+        facts.minRequestNumber = 2;
+        QCOMPARE(relay::background::resolve(facts, model), State::Done);
+    }
+
     void parsesRequestsAndTodos() {
         RequestLedgerModel model;
         int changes = 0;

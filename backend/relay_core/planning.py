@@ -237,7 +237,7 @@ def read_plan(path) -> str:
     return data.decode("utf-8")
 
 
-# Appended to every Execute prompt (#K3TY): an Orchestration block in the plan is the plan's own
+# Appended to every Run prompt (#K3TY): an Orchestration block in the plan is the plan's own
 # decision about how the work is executed, so the executing agent follows it rather than re-planning.
 ORCHESTRATION_NOTE = (
     "Where the plan carries an Orchestration block, follow it: start the subagents it lists "
@@ -246,4 +246,4 @@ ORCHESTRATION_NOTE = (
 
 
 def execution_prompt(path: str, content: str) -> str:
-    return f"Execute the plan in {path}:\n\n{content}\n\n{ORCHESTRATION_NOTE}"
+    return f"Run the plan in {path}:\n\n{content}\n\n{ORCHESTRATION_NOTE}"

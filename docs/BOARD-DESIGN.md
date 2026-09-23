@@ -102,7 +102,7 @@ needing QA would live in two places. Deferred and Done are cross-category status
 planning, planned, executing, needs-verification, needs-qa, done. The moves between them are made
 by Relay at the stage events, not left to an agent's judgment: inbox on entry; discussing on the
 thread's first entry; planning when a Plan turn starts; planned when a Plan turn leaves its
-`## Plan` on the card; executing when Execute is pressed; needs-verification when the executing
+`## Plan` on the card; executing when Run is pressed; needs-verification when the executing
 agent lands the card; then QA on a passed verification, or an earlier stage back on a failed one.
 Old statuses and columns stay valid, so a board configured before them is untouched.
 
@@ -137,7 +137,7 @@ and there is no project to talk about.
   whenever it is needed and never cached on the pane: the nearest ancestor with a board, else the nearest with `.git`.
   A candidate is an offer, not an attachment.
 - **Terminal commands never attach.** Only an explicit project action does: opening the Board, `/card`, picking
-  a card with `#`, Execute-from-card. Each is one of the closed set of reasons in `src/Projects.h`, and that reason is
+  a card with `#`, Run-from-card. Each is one of the closed set of reasons in `src/Projects.h`, and that reason is
   what the known-projects registry records.
 - Attachment is **sticky until detached**, and a tab never switches project silently: a pane that has `cd`-ed into
   another checkout says so ("This tab's Board is A; … belongs to B") instead of re-pointing. Detaching is the
@@ -475,11 +475,11 @@ add, `board_create_card`, and any `replace_section` naming either spelling. Read
 (`relay_core.board.ISSUE_HEADINGS`), so the ~96 cards already filed keep saying `## Request` until
 something edits them — there is no rewriting commit, and `check` does not care which a card says.
 
-### 4.9 Discuss, Plan, Execute instead of "Ask the agent" (owner, 2026-09-18)
+### 4.9 Discuss, Plan, Run instead of "Ask the agent" (owner, 2026-09-18)
 
 Owner (#XS6Q): *"rather than "ask the agent", lets have: plan / edit / discuss"*. Decided as three
 buttons under a card's reply box, after **Comment**: **Discuss** (the accent button), **Plan**,
-**Execute** (outlined in the agent colour: it leaves the board). Protocol: 19.10. Evidence:
+**Run** (outlined in the agent colour: it leaves the board). Protocol: 19.10. Evidence:
 `docs/qa_evidence/2026-09-18-card-discuss-plan-execute/`.
 
 - **Discuss** is the old ask, and it edits: the agent may retitle the card, rewrite its `## Issue`,
@@ -490,32 +490,33 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
 - **Plan** has the agent read the code (`read_file`, `list_directory`, and `search_files`, which was
   added for this) and write or revise the card's `## Plan`. It touches no code and no other card, and
   the tools refuse if it tries — since 2026-09-21 by refusing the *call*, in a sentence that names
-  Execute, rather than by hiding the tool: a Plan turn is offered the same list every console turn is
+  Run, rather than by hiding the tool: a Plan turn is offered the same list every console turn is
   (#CTRN, protocol 19.10). Words in the reply box go with it as the owner's note; an empty box is
   fine. **`p`** on the card or the list, or **Ctrl+Enter** in the reply box.
-- **Execute** hands the card to a new terminal pane split beside the board, in the board's
-  workspace, on the main agent: the card goes to In progress and to the agent, a progress note goes
+- **Run** hands the card to a new terminal pane in the board's workspace, on the main agent. The
+  pane moves to the background after the agent starts; **Run in pane** keeps it visible beside the
+  board. The card goes to In progress and to the agent, a progress note goes
   in the thread, and the pane's agent gets the card attached with a task that tells it the board's
   conventions (`implemented_by`, `#ID` in every commit message, the hashes in `links.commits`, the
   QA lane when it lands). A card with neither a plan nor an `acceptance` line asks once, on the
-  card, in the error line under it ("Execute again (x) … or Plan (p) first") — no dialog. **`x`**.
+  card, in the error line under it ("Run again (r) … or Plan (p) first") — no dialog. **`r`**.
 - **A second prompt queues** (#CTRN, owner 2026-09-21). A card turn is an ordinary console turn on
   that card's own queue, so Enter while a Discuss runs sends the next prompt to the §12 strip and it
   runs when the first finishes; Ctrl+Enter during a Discuss queues a **Plan**, with the Plan's brief
   and the Plan's stage rule, and the strip goes on naming the turn that is *running*. Until that day
-  the page refused it and the worker answered `board_busy`. Execute and Verify still wait for the
+  the page refused it and the worker answered `board_busy`. Run and Verify still wait for the
   turn to end, because they hand the card to a terminal pane. *(Until #VZ69 the running mode's own
   button became **Stop**; since 4.12 it is the strip over the reply box, and Discuss and Comment have
   no buttons at all.)* The cleanup/busy interplay of 4.8 applies to both modes.
 - **The thread names the mode** on every entry that has one: "owner  Plan · 2 min ago",
   "✦ agent  Discuss · glm-5". Entries from before carry no mode and read as they did.
 - **Keys** (card view): `e` edit, `d` or Tab to the reply box, Enter discuss, `p` / Ctrl+Enter plan,
-  `x` execute, Ctrl+Shift+Enter comment only. On the list, `p` and `x` open the selected card and
+  `r` run, Ctrl+Shift+Enter comment only. On the list, `p` and `r` open the selected card and
   do the same. A click on a button shows its key once (WARP.md hint rule; hint ids `board.plan`,
   `board.execute`, `board.verify`, and `board.edit` for the pencil. `board.discuss` went with the
   Discuss button in 4.12: Enter *is* the fast path, so there is no slow path left to teach).
 - **Before this**, the card's ask ran on a worker with every pane tool, so "ask the agent" could run
-  commands and write files from a card thread. Discuss and Plan still cannot; that is Execute's job.
+  commands and write files from a card thread. Discuss and Plan still cannot; that is Run's job.
   What moved on 2026-09-21 is only *where* that is said: the turn is offered the console's whole
   list and the call is refused, so the refusal is a sentence the agent reads rather than a tool it
   never saw.
@@ -544,7 +545,7 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   Verify is then disabled and its tooltip says that same sentence. With a recommendation the muted
   line stands and the note follows it in amber as a warning — a same-lineage verifier, or a local
   model below the floor for judging code — and Verify still works: a weaker check is still a check.
-- **Verify (v)** stands beside Execute, in the same agent outline — it also leaves the board — and
+- **Verify (v)** stands beside Run, in the same agent outline — it also leaves the board — and
   is on screen only in a QA lane, enabled only when a runner exists.
 - **What it writes.** One `board_comment` of kind `progress`: *"Verify · handed to a new terminal
   pane on Codex · <why the ranking chose it>"*, with the reply box's words after it as the owner's
@@ -569,7 +570,7 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   on the thread, and sign the evidence commit `Verified-By: <provider/model>`. **Never fix the code
   yourself** — a verifier that edits the code becomes its implementer and the card would need
   verifying again; what it finds goes on the thread or into a new bug card.
-- **The other half of the signature.** The Execute brief asks for an `Implemented-By:` trailer on
+- **The other half of the signature.** The Run brief asks for an `Implemented-By:` trailer on
   every commit for the card, and says the card's own `implemented_by` is stamped by the board, so no
   agent is asked to type a signature it can only guess at.
 - **Both briefs ask for the exact model** (owner, 2026-09-19: *"lets try to record the model
@@ -633,7 +634,7 @@ folds.
   tooltip: *"Cards the agent finished and closed itself, without a verifier. Enter or → to show
   them."* Unfolded it reads `▾ 3 closed by the agent` and its cards follow it as ordinary rows,
   with every ordinary row behaviour — open, move, flags, chips.
-- **It is not a card.** It carries no card id, so Execute, Verify, `m`, Delete, drag and the flag
+- **It is not a card.** It carries no card id, so Run, Verify, `m`, Delete, drag and the flag
   clicks all step over it, and it is never counted as one. The **section header's count still
   holds its cards** — DONE says 5 whether three of them are put away or not — because folding is
   presentation.
@@ -772,7 +773,7 @@ enter in teh top row thing makes the title, not the issue content."* Evidence:
   text). Bolder ink alone was what the owner could not see.
 - **Discuss and Comment have no buttons.** They are what the box does: **Enter** discusses,
   **Ctrl+Shift+Enter** leaves a comment with no model call, and the placeholder says both. What is
-  left is what is *not* typing into the box — **Plan (p)**, **Execute (x)** and, in a QA lane,
+  left is what is *not* typing into the box — **Plan (p)**, **Run (r)** and, in a QA lane,
   **Verify (v)** — and since 2026-09-20 those three are a row of their own **above** the reply
   frame — the console's action row, built from `CardContext::actions()` since #AGNT (4.13) — and
   not inside it: "move those buttons out of there (plan / execute / etc), because they actually
@@ -816,8 +817,8 @@ pane's.
   **Stop** while it runs, which is one `Context::changed()` and not a second widget.
 - **The card's reply box.** A card page embeds its own console (`board::CardContext`) and the reply
   box *is* that console's composer, so the per-card draft, the prompt history, `restoreReply` and Esc
-  all go on reading one box. Its action row is **Plan (p)**, **Execute (x)** and, in a QA lane,
-  **Verify (v)**, above the box and never in it (4.12); Execute and Verify wear the accent outline,
+  all go on reading one box. Its action row is **Plan (p)**, **Run (r)** and, in a QA lane,
+  **Verify (v)**, above the box and never in it (4.12); Run and Verify wear the accent outline,
   which is the `leaves` flag of a `relay::agent::Action` — they hand the card to a terminal pane. The
   console shortens its own row when the page is narrow, so `CardDetail::fitButtons` is gone.
 - **The console draws the turn; the thread settles** (#CTRN, owner 2026-09-21). A Discuss or a Plan
@@ -904,12 +905,12 @@ and every other box in the app is that control:
 - **No Send button anywhere.** Enter sends, as it always has in a pane, and the placeholder says
   so. A turn is stopped by the busy strip's `✕ Stop` or by **Esc** in the box.
 - **Nothing else in the box.** An action that needs no typing goes in the row **above** it: Check
-  and Clean up on the Board's head row, Plan / Execute / Verify above the card's box, all
+  and Clean up on the Board's head row, Plan / Run / Verify above the card's box, all
   wearing one face so every action row in the app reads the same.
 - **An action row is left-aligned buttons and nothing else** (owner, 2026-09-20: "the plan /
   execute buttons etc, would those work better at the left?" — "yes, lets do both left-aligned,
   drop the label"). The buttons start at the row's left edge and the space is behind them, in the
-  order the work is done: Plan, Execute, Verify on a card; Check, Clean up, Tests, Profile on the
+  order the work is done: Plan, Run, Verify on a card; Check, Clean up, Tests, Profile on the
   Board. The Board's **agent label is gone** from that row — the box's
   placeholder names the agent, and the busy strip names it again while a turn runs, carrying the
   turn clock and the `· survey` word that used to sit beside the label. A panel that folds
@@ -1117,8 +1118,8 @@ deletes converted paragraphs and logs a thread event per card. `TODO:` comments 
   shared layer of a request ledger (policy rule 1); a within-turn todo list (Claude Code tasks, opencode `todowrite`)
   still covers steps inside a turn and must not create cards. Reconcile when that research lands.
 - **Plans.** `/plan` in a card runs plan mode in the board worker; `plan_written` adds `links.plans` and a thread event;
-  Execute runs in a chosen terminal pane with `cards: [{id}]`. A plan big enough to split may carry an Orchestration
-  block (subagents, parallel and dependent steps) and the Execute task says to follow it (#K3TY). `.relay/plans` is not
+  Run runs in a chosen terminal pane with `cards: [{id}]`. A plan big enough to split may carry an Orchestration
+  block (subagents, parallel and dependent steps) and the Run task says to follow it (#K3TY). `.relay/plans` is not
   gitignored; see question 4.
 - **QA lanes.** Same semantics; the Needs QA column is the lane. QA sweeps use `board_list {status: needs-qa-llm}` and
   `board_move_card`, so the worker, not memory, enforces the verdict contract (any pane may

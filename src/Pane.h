@@ -59,6 +59,7 @@
 #include "SubagentsPanel.h"
 #include "JobsPanel.h"
 #include "RequestLedger.h"
+#include "BackgroundTasks.h"
 #include "RequestsPanel.h"
 #include "Conversations.h"
 #include "SessionInfo.h"
@@ -902,6 +903,7 @@ public:
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
+    bool agentReady() const { return m_configured; }
     // Only on close/list refresh, not on the input poll. Foreground state alone misses a
     // shell's `command &`, stopped jobs, and worker jobs left running after an agent turn.
     bool hasCloseWork() const {
@@ -935,6 +937,47 @@ public:
         facts.lastAsked = m_lastAsked;
         facts.questionOpen = m_ask.open();
         return facts;
+    }
+    // A background job is the request, not the last turn. The ledger carries guest and Relay
+    // requests alike; linked tasks and live subagents keep it open after a model stops speaking.
+    void markBackgroundTask(bool newPrompt) {
+        setProperty("backgroundMarked", true);
+        setProperty("backgroundInterrupted", false);
+        int latest = 0;
+        QString turn;
+        for (const auto &request : m_ledger.requests()) {
+            const int number = relay::background::requestNumber(request.id);
+            if (number > latest) { latest = number; turn = request.turnId; }
+        }
+        m_backgroundMinRequest = newPrompt ? latest + 1 : std::max(1, latest);
+        if (!newPrompt && !turn.isEmpty())
+            for (const auto &request : m_ledger.requests())
+                if (request.turnId == turn)
+                    m_backgroundMinRequest = std::min(m_backgroundMinRequest,
+                        relay::background::requestNumber(request.id));
+    }
+    QString backgroundTaskState() const {
+        relay::background::Facts facts;
+        facts.interrupted = property("backgroundInterrupted").toBool();
+        facts.asking = m_ask.open() || !m_guestQuestions.isEmpty();
+        facts.lastAsked = m_lastAsked;
+        facts.agentBusy = m_agentBusy;
+        facts.guestBusy = m_guestBusy;
+        facts.liveSubagents = m_subagents.liveCount();
+        if (!facts.agentBusy && !facts.guestBusy && !facts.liveSubagents) facts.otherWork = hasCloseWork();
+        facts.lastOutcome = m_lastOutcome;
+        facts.minRequestNumber = std::max(1, m_backgroundMinRequest);
+        // A pane backgrounded from Close may contain a shell job without an agent request.
+        // Its process tree is the only completion signal; once it drains, show Done.
+        if (m_ledger.requests().isEmpty() && !facts.interrupted && !facts.asking
+            && !facts.agentBusy && !facts.guestBusy && !facts.liveSubagents)
+            return facts.otherWork ? QStringLiteral("working") : QStringLiteral("done");
+        const QString backgroundCard = property("backgroundCard").toString();
+        if (!backgroundCard.isEmpty()) {
+            const auto *card = m_cardIndex.card(backgroundCard);
+            facts.cardStatus = card ? card->status : QStringLiteral("unknown");
+        }
+        return relay::background::name(relay::background::resolve(facts, m_ledger));
     }
     // This pane's share of the machine (issue #D03W): CPU and memory summed over the shell's
     // process tree and the pane's agent worker, sampled by the window's status poll so every
@@ -4333,7 +4376,7 @@ public:
         // An agent-bound action the user took, so it gets the agent echo: violet, and the ✦ glyph
         // the site and BoardPane already use for agent lines (› is the shell glyph).
         ensureLineStart();
-        printInline(QStringLiteral("✦ Execute the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::UserAgent);
+        printInline(QStringLiteral("✦ Run the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::UserAgent);
         focusInput();
     }
     void keepPlanning() {
@@ -4446,7 +4489,7 @@ public:
         m_ask.current = 0;
         if (inQueueSelection()) leaveQueueSelection();
         printQuestion();
-        if (!watched())
+        if (!watched() && !(window() && window()->property("backgroundSession").toBool()))
             notify(QStringLiteral("Agent needs you"), questionAt(0).value(QStringLiteral("question")).toString(),
                    relay::NotificationCenter::kindWarning);
         refreshBackgroundWait();
@@ -5416,6 +5459,16 @@ private:
         m_shareChip->setAccessibleName(QStringLiteral("Share this pane with a phone"));
         connect(m_shareChip, &QToolButton::clicked, this, [this] { shareChipPressed(); });
         routeRow->addWidget(m_shareChip);
+        auto *backgroundSend = new QToolButton;
+        backgroundSend->setObjectName(QStringLiteral("runInBackgroundButton"));
+        backgroundSend->setText(QStringLiteral("↗"));
+        backgroundSend->setToolTip(QStringLiteral("Run the prompt in background"));
+        backgroundSend->setAccessibleName(QStringLiteral("Run in background"));
+        backgroundSend->setFocusPolicy(Qt::TabFocus);
+        connect(backgroundSend, &QToolButton::clicked, this, [this] {
+            if (onWindowAction) onWindowAction(QStringLiteral("runBackground"));
+        });
+        routeRow->addWidget(backgroundSend);
         updateShareChip();
         m_modeChip = new QToolButton;
         m_modeChip->setObjectName(QStringLiteral("stripChip"));
@@ -12306,10 +12359,12 @@ private:
             if (outcome == QStringLiteral("done")) {
                 ++m_turnsCompleted;
                 if (window() && !window()->isActiveWindow()) m_finishedWhileAway = true;
-                if (!watched() && !moreTurnsPending())
+                if (!watched() && !moreTurnsPending()
+                    && !(window() && window()->property("backgroundSession").toBool()))
                     notify(m_lastAsked ? QStringLiteral("Agent needs you") : QStringLiteral("Agent finished"), turnSummary(),
                            m_lastAsked ? relay::NotificationCenter::kindWarning : relay::NotificationCenter::kindSuccess);
-            } else if (outcome == QStringLiteral("error") && !watched()) {
+            } else if (outcome == QStringLiteral("error") && !watched()
+                       && !(window() && window()->property("backgroundSession").toBool())) {
                 notify(QStringLiteral("Agent turn failed"), turnSummary(), relay::NotificationCenter::kindError);
             }
             if (!m_agentBusy && !moreTurnsPending()) { ensureLineStart(); closeInline(); }
@@ -13126,6 +13181,7 @@ public:
     // that was only just created runs it once its agent is configured.
     void startBoardTask(const QString &text, const QString &cardId) {
         m_boardTask = text; m_boardTaskCard = cardId;
+        setProperty("backgroundCard", cardId);
         refreshCardChip();   // the header names the card from the moment it is handed (#C7PF)
         if (m_configured) runBoardTask();
         else if (m_configuring || !startDeferred())
@@ -19791,6 +19847,7 @@ private:
     // request ledger UI
     relay::RequestLedgerModel m_ledger;
     QString m_boardTask, m_boardTaskCard;   // Execute's task, until the agent is configured (#XS6Q)
+    int m_backgroundMinRequest = 1;
     // The running agent turn's cards (#C7PF): the first is the header chip's #id, the rest ride
     // in its tooltip. `m_turnCardAsk` is the request id the turn was sent under and
     // `m_turnCardItem` the queue item the worker made of it, so the agent_finished that ends
@@ -19801,7 +19858,7 @@ private:
         if (m_boardTask.isEmpty()) return;
         QueueEntry entry;
         entry.agent = true; entry.boardTask = true; entry.text = m_boardTask;
-        entry.why = QStringLiteral("Board · Execute #%1").arg(m_boardTaskCard);
+        entry.why = QStringLiteral("Board · Run #%1").arg(m_boardTaskCard);
         entry.cards = QJsonArray{QJsonObject{{QStringLiteral("id"), m_boardTaskCard}}};
         noteWorkCard(m_boardTaskCard);
         m_boardTask.clear();   // the card ID stays in the header until this entry starts

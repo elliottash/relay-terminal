@@ -97,8 +97,10 @@ inline QJsonArray WindowManager::captureWindows() {
         const QJsonArray tabs = window->restorableTabs(&titles, &current);
         if (tabs.isEmpty()) continue;
         const QScreen *screen = window->screen();
-        windows.append(relay::windowstate::windowRecord(window->geometry(), screen ? screen->name() : QString(),
-                                                        tabs, current, titles));
+        QJsonObject record = relay::windowstate::windowRecord(window->geometry(), screen ? screen->name() : QString(),
+                                                              tabs, current, titles);
+        if (window->property("backgroundSession").toBool()) record.insert(QStringLiteral("background_session"), true);
+        windows.append(record);
     }
     return windows;
 }
@@ -176,7 +178,7 @@ inline int WindowManager::restoreSavedLayout() {
     // Wayland clients cannot place their own windows; the compositor decides, so only the size is
     // worth asking for and even that may be ignored.
     const bool wayland = QGuiApplication::platformName().startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
-    int opened = 0;
+    int opened = 0, visibleOpened = 0;
     for (const auto &value : windows) {
         const QJsonObject record = value.toObject();
         QRect geometry = relay::windowstate::clampToScreens(relay::windowstate::geometryOf(record),
@@ -185,8 +187,14 @@ inline int WindowManager::restoreSavedLayout() {
                                         wayland ? QRect() : geometry);
         if (!window) continue;
         ++opened;
+        if (record.value(QStringLiteral("background_session")).toBool()) {
+            window->setProperty("backgroundSession", true);
+            for (Pane *pane : window->allPanes()) pane->setProperty("backgroundInterrupted", true);
+            window->hide();
+        } else ++visibleOpened;
         if (wayland && geometry.isValid()) window->resize(geometry.size());
     }
+    if (opened && !visibleOpened) newWindowAt(m_workspace);
     if (opened > 0)
         m_restoreNote = QStringLiteral("Reopened %1 window(s) where you left off. Actions › Start a fresh window set, or relay --fresh.")
                             .arg(opened);
@@ -247,6 +255,41 @@ inline QList<Pane *> WindowManager::backgroundPanes() const {
     for (const auto &window : m_windows)
         if (window && window->property("backgroundSession").toBool()) panes += window->allPanes();
     return panes;
+}
+
+inline void WindowManager::refreshBackgroundTasks() {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_backgroundRefreshedAt < 300) return;
+    m_backgroundRefreshedAt = now;
+    QSet<QString> live;
+    for (Pane *pane : backgroundPanes()) {
+        const QString token = pane->sessionToken();
+        live.insert(token);
+        const QString state = pane->backgroundTaskState();
+        const QString previous = m_backgroundStates.value(token);
+        if (state == previous) continue;
+        m_backgroundStates.insert(token, state);
+        if (state == QStringLiteral("working")) continue;
+        const QString title = pane->paneTitle().isEmpty() ? pane->cwd() : pane->paneTitle();
+        const QString label = state == QStringLiteral("interrupted") ? QStringLiteral("Interrupted: ")
+                            : state == QStringLiteral("done") ? QStringLiteral("Done: ")
+                            : state == QStringLiteral("failed") ? QStringLiteral("Failed: ")
+                            : QStringLiteral("Needs you: ");
+        const QString kind = state == QStringLiteral("done") ? relay::NotificationCenter::kindSuccess
+                            : state == QStringLiteral("failed") ? relay::NotificationCenter::kindError
+                            : relay::NotificationCenter::kindWarning;
+        relay::NotificationCenter::instance().post(label + title, QString(), kind, token);
+    }
+    for (auto it = m_backgroundStates.begin(); it != m_backgroundStates.end(); )
+        if (!live.contains(it.key())) it = m_backgroundStates.erase(it);
+        else ++it;
+}
+
+inline int WindowManager::backgroundCount(const QString &state) const {
+    int count = 0;
+    for (const QString &value : m_backgroundStates)
+        if (value == state || (state == QStringLiteral("failed") && value == QStringLiteral("interrupted"))) ++count;
+    return count;
 }
 
 inline bool WindowManager::lastVisibleWindow(const RelayWindow *closing) const {

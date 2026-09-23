@@ -1600,7 +1600,7 @@ class SessionCommands:
         content = planning.read_plan(path)
         prompt = planning.execution_prompt(path, content)
         if len(prompt.encode("utf-8")) > 131072:
-            prompt = (f"Execute the plan in {path}. It is too long to include here; read it with run_command "
+            prompt = (f"Run the plan in {path}. It is too long to include here; read it with run_command "
                       f"(for example `cat {path}`) before starting.")
         fresh = request.get("fresh", False)
         if type(fresh) is not bool:

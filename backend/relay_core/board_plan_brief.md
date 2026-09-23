@@ -5,7 +5,7 @@
 
 This is a **Plan** turn on #{card}: write the plan for this card, or revise the one it has, into
 the card's `## {plan_heading}` section, and the expectations into its `## Done means`. The plan is
-what a terminal-pane agent will be handed when the owner presses **Execute**, so write it for that
+what a terminal-pane agent will be handed when the owner presses **Run**, so write it for that
 reader.
 
 1. **Read first.** `board_read` #{card} for its current text and `hash`. Then read the code the card
@@ -30,7 +30,7 @@ reader.
    - **Orchestration** — only when the work is big enough to split across subagents: each subagent
      (its type and a one-line task), which steps run in parallel, and which wait for which. Only
      steps that touch no shared files may run in parallel; writes stay with the main agent that
-     Execute hands the card to. A small plan gets no block.
+     Run hands the card to. A small plan gets no block.
    - **Risks** — what could break, and anything the owner has to decide (as a question).
    - **Verify** — the tests to run or add, and how to see it working.
 5. **Nothing else changes.** You cannot run commands, write files, or change another card, and

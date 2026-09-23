@@ -1913,10 +1913,10 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
     layout->addWidget(m_editor, 1);
     m_planActions = new QWidget;
     auto *actions = new QHBoxLayout(m_planActions); actions->setContentsMargins(0, 0, 0, 0);
-    auto *execute = new QPushButton(QStringLiteral("Execute"));
+    auto *execute = new QPushButton(QStringLiteral("Run"));
     execute->setObjectName(QStringLiteral("planExecute"));
     execute->setToolTip(QStringLiteral("Switch to build mode and carry out this plan (your edits are saved first)"));
-    auto *fresh = new QPushButton(QStringLiteral("Execute in fresh context"));
+    auto *fresh = new QPushButton(QStringLiteral("Run in fresh context"));
     fresh->setToolTip(QStringLiteral("Start a new conversation that only has this plan"));
     auto *keep = new QPushButton(QStringLiteral("Keep planning"));
     actions->addWidget(execute); actions->addWidget(fresh); actions->addStretch(1); actions->addWidget(keep);

@@ -994,6 +994,43 @@ class _Turn:
             _log.debug("guest harness event %s could not be translated", event.kind, exc_info=True)
 
     # ----- text ---------------------------------------------------------------------------
+    def _on_plan_updated(self, data: dict) -> None:
+        """Codex's built-in plan is a Relay task list unless it used Relay's list itself."""
+        agent = self.agent
+        ctx = getattr(agent, "_turn_ctx", None) if agent is not None else None
+        steps = data.get("steps")
+        if not ctx or ctx.get("todos_touched") or not isinstance(steps, list) or not steps:
+            return
+        requests = list(ctx.get("requests") or [])
+        if not requests:
+            return
+        existing = agent.todos.snapshot()
+        current = set(requests)
+        keep = [item for item in existing if not current.intersection(item.get("request_ids") or [])]
+        prior = [item for item in existing if current.intersection(item.get("request_ids") or [])]
+        items = list(keep)
+        statuses = {"pending": "pending", "inProgress": "in_progress", "completed": "completed"}
+        for index, step in enumerate(steps[:max(0, 50 - len(keep))]):
+            if not isinstance(step, dict):
+                continue
+            title = str(step.get("step") or step.get("text") or "").strip()[:500]
+            status = statuses.get(step.get("status"))
+            if not title or status is None:
+                continue
+            item = {"text": title, "status": status, "request_ids": requests}
+            before = next((row for row in prior if row.get("text") == title), None)
+            if before is None and index < len(prior):
+                before = prior[index]
+            if before is not None:
+                item["id"] = before["id"]
+            items.append(item)
+        if len(items) == len(keep):
+            return
+        updated = agent.todos.replace({"items": items}, agent.requests.ids(), ctx["turn_id"], ctx["opening"])
+        agent.requests.apply_todos(updated)
+        ctx["since_todos"] = 0
+        agent.emit(agent.todos.event(ctx["turn_id"]))
+
     def _on_started(self, data: dict) -> None:
         session_id = str(data.get("session_id") or "")
         model = str(data.get("model") or "")

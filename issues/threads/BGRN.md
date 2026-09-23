@@ -14,3 +14,18 @@ Owner: "1 yes, and you can go ahead and remove x." Run moves to `r`, and `x` is 
 
 <!-- relay:entry 20260923T120107Z-zq author=agent kind=note model=claude-opus-5-5 pane=520ccb90 turn=a7740578e6674cdea34c8be534de20ad/7accc7d4bb9a487c85dbe5ad2627817f -->
 Rewrote step 7 and its findings after checking the installed guests. Claude Code 2.1.280 uses TaskCreate/TaskGet/TaskUpdate/TaskList, not TodoWrite. They are off by default on current models, and `--disallowedTools` can guarantee that, so Relay's `update_todos` becomes Claude's only list. Codex 0.156.0 has no switch to disable `update_plan`, so the harness will mirror its `turn/plan/updated` notifications into Relay todos for the current request. Owner asked: "is there a way to force claude and codex to use relay tasks natively".
+
+<!-- relay:entry 20260923T164414Z-59 author=agent kind=event model=gpt-6-sol pane=661abafc turn=a7740578e6674cdea34c8be534de20ad/f9132d0ee2db4c4a96f9e492e011bb07 -->
+- ✦ agent moved this card · Planned → Executing · Implementing the approved Run in background plan in this pane. · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T164417Z-v2 author=agent kind=event model=gpt-6-sol pane=661abafc turn=a7740578e6674cdea34c8be534de20ad/f9132d0ee2db4c4a96f9e492e011bb07 -->
+- ✦ agent updated this card · assignee: (unset) → codex
+
+<!-- relay:entry 20260923T181553Z-xe author=agent kind=progress model=gpt-6-sol pane=6e4865f9 turn=a7740578e6674cdea34c8be534de20ad/36297f8d0a514ae29ba79e7494449a87 -->
+Implemented the live-pane background path, Board Run default and Run in pane, request-linked state/counts/notifications, interrupted restore, Claude task-tool disable, and Codex plan mirroring. The main build and board/request tests are being checked; GUI evidence and landing remain.
+
+<!-- relay:entry 20260923T182921Z-qy author=agent kind=event model=gpt-6-sol pane=6e4865f9 turn=a7740578e6674cdea34c8be534de20ad/36297f8d0a514ae29ba79e7494449a87 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["RG0Z"], "github": null… → {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-bgrn/"], …; appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T182929Z-gr author=agent kind=event model=gpt-6-sol pane=6e4865f9 turn=a7740578e6674cdea34c8be534de20ad/36297f8d0a514ae29ba79e7494449a87 -->
+- ✦ agent updated this card · appended to `## Tests`

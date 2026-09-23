@@ -725,9 +725,9 @@ void BoardRemote::act(const Pending &pending, const QJsonObject &card)
                                                                       pending.device, id, QString()})},
                                      {QStringLiteral("card"), id},
                                      {QStringLiteral("pane_token"), token},
-                                     {QStringLiteral("text"), QStringLiteral("Execute pressed on %1.").arg(name)}});
+                                     {QStringLiteral("text"), QStringLiteral("Run pressed on %1.").arg(name)}});
         if (host.status)
-            host.status(QStringLiteral("Execute on #%1 from %2").arg(id, name));
+            host.status(QStringLiteral("Run on #%1 from %2").arg(id, name));
         actionResult(pending, true, token, QStringLiteral("#%1 is executing in a new pane.").arg(id));
         return;
     }

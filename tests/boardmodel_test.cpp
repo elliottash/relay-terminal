@@ -2675,11 +2675,11 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QVERIFY(!button(view, QStringLiteral("Discuss")));
     QVERIFY(!button(view, QStringLiteral("Comment")));
     QVERIFY(button(view, QStringLiteral("Plan")));
-    QVERIFY(button(view, QStringLiteral("Execute")));
+    QVERIFY(button(view, QStringLiteral("Run")));
     QVERIFY(!button(view, QStringLiteral("Ask the agent")));
     // Every button that has a key shows it in parentheses (#QG60).
     QCOMPARE(button(view, QStringLiteral("Plan"))->text(), QStringLiteral("Plan (p)"));
-    QCOMPARE(button(view, QStringLiteral("Execute"))->text(), QStringLiteral("Execute (x)"));
+    QCOMPARE(button(view, QStringLiteral("Run"))->text(), QStringLiteral("Run (r)"));
     auto *strip = view.findChild<QWidget *>(QStringLiteral("boardBusyStrip"));
     auto *busy = view.findChild<QLabel *>(QStringLiteral("boardBusyLabel"));
     auto *stop = view.findChild<QToolButton *>(QStringLiteral("boardStop"));
@@ -2707,7 +2707,7 @@ void BoardModelTests::theBoxDiscussesAndTheRowPlansOrLeavesTheBoard()
     QCOMPARE(busy->text(), QStringLiteral("✦ Switchboarding · discussing…"));
     QCOMPARE(stop->text(), QStringLiteral("✕ Stop discussing"));
     QTRY_VERIFY(button(view, QStringLiteral("Plan"))->isEnabled());
-    QVERIFY(!button(view, QStringLiteral("Execute"))->isEnabled());
+    QVERIFY(!button(view, QStringLiteral("Run"))->isEnabled());
     sent.clear();
     reply->setPlainText(QStringLiteral("and this as well"));
     QTest::keyClick(reply, Qt::Key_Return);
@@ -2858,7 +2858,8 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QString handedCard, handedTask;
     int opened = 0;
-    view.onExecuteCard = [&](const QString &id, const QString &task) {
+    view.onExecuteCard = [&](const QString &id, const QString &task, bool background) {
+        Q_ASSERT(background);
         ++opened;
         handedCard = id;
         handedTask = task;
@@ -2880,10 +2881,10 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     // `board_claim` instead of the three writes Execute sent by hand — the worker does the
     // assignee, the move to Executing, the `session` field and the progress entry naming the pane
     // in one write, so a second agent reading the board cannot catch the card half claimed.
-    button(view, QStringLiteral("Execute"))->click();
+    button(view, QStringLiteral("Run"))->click();
     QCOMPARE(opened, 1);
     QCOMPARE(handedCard, QStringLiteral("K7Q2"));
-    QVERIFY(handedTask.startsWith(QStringLiteral("Execute #K7Q2: Voice mode")));
+    QVERIFY(handedTask.startsWith(QStringLiteral("Run #K7Q2: Voice mode")));
     QStringList types;
     for (const QJsonObject &message : std::as_const(sent))
         types << message.value("type").toString();
@@ -2920,7 +2921,8 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     // No pane — the window could open none — so there is nothing to claim the card for and the
     // writes Execute has always made stand: the hash-checked assignee, the move to Executing, and
     // a progress entry that names no pane because there is none to name.
-    view.onExecuteCard = [&](const QString &id, const QString &task) {
+    view.onExecuteCard = [&](const QString &id, const QString &task, bool background) {
+        Q_ASSERT(background);
         ++opened;
         handedCard = id;
         handedTask = task;
@@ -2942,14 +2944,14 @@ void BoardModelTests::executeHandsTheCardToAPaneAndMovesItToExecuting()
     QCOMPARE(sent.at(1).value("status").toString(), QStringLiteral("executing"));
     QVERIFY(!sent.at(2).contains(QStringLiteral("pane_token")));
     QVERIFY(sent.at(2).value("text").toString().startsWith(
-        QStringLiteral("Execute · handed to a new terminal pane")));
+        QStringLiteral("Run · handed to a new terminal pane")));
 }
 
 void BoardModelTests::theExecuteTaskCarriesTheBoardsConventions()
 {
     const QString task = relay::board::executeTask(QStringLiteral("XS6Q"), QStringLiteral("Modes"),
                                                    true, true, QStringLiteral("backend first"));
-    QVERIFY(task.startsWith(QStringLiteral("Execute #XS6Q: Modes\n")));
+    QVERIFY(task.startsWith(QStringLiteral("Run #XS6Q: Modes\n")));
     QVERIFY(task.contains(QStringLiteral("until the acceptance holds")));
     // #K3TY: where the plan has one, Execute says to follow its Orchestration block — and a
     // card with no plan cannot carry one, so the no-plan wordings never mention it.
@@ -3861,14 +3863,15 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QStringList labels;
     for (const relay::agent::Action &action : console->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)")}));
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane")}));
     // Execute and Verify hand the card to a pane, and that is what the accent outline means.
     QVERIFY(!console->actions().at(0).leaves);
     QVERIFY(console->actions().at(1).leaves);
 
     // What is typed in the console's composer is Execute's note: the box is the reply box.
     QString handedCard, handedTask;
-    view.onExecuteCard = [&](const QString &id, const QString &task) {
+    view.onExecuteCard = [&](const QString &id, const QString &task, bool background) {
+        Q_ASSERT(background);
         handedCard = id;
         handedTask = task;
         return QStringLiteral("tok");
@@ -3970,10 +3973,10 @@ void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
     QStringList labels;
     for (const relay::agent::Action &action : consoles.card()->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)"),
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane"),
                                   QStringLiteral("Verify (v)"), QStringLiteral("Try it (y)")}));
-    QVERIFY(consoles.card()->actions().at(2).leaves);
-    QVERIFY(!consoles.card()->actions().at(3).leaves);
+    QVERIFY(consoles.card()->actions().at(3).leaves);
+    QVERIFY(!consoles.card()->actions().at(4).leaves);
 
     // Back on an ordinary card the action is gone from the list, not merely greyed out.
     QJsonObject plain = card("M3XJ", "M3XJ card", "the issue", "h2");
@@ -3982,7 +3985,7 @@ void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
     labels.clear();
     for (const relay::agent::Action &action : consoles.card()->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Execute (x)")}));
+    QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Run (r)"), QStringLiteral("Run in pane")}));
 }
 
 // A link in an answer is offered to the context before the console opens it the ordinary way
@@ -4064,7 +4067,8 @@ void BoardModelTests::aBoardWithNoConsoleFactoryStillWorks()
     QVERIFY(view.detailOpen());
     QVERIFY(!replyBox(view));
     QString handed;
-    view.onExecuteCard = [&handed](const QString &id, const QString &) {
+    view.onExecuteCard = [&handed](const QString &id, const QString &, bool background) {
+        Q_ASSERT(background);
         handed = id;
         return QStringLiteral("tok");
     };

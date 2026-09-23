@@ -225,6 +225,8 @@ public:
     RelayWindow *newWindowAt(const QString &cwd);
     RelayWindow *newEmptyWindow(const QRect &geometry, bool background = false);   // the caller adopts a tab into it
     QList<Pane *> backgroundPanes() const;
+    void refreshBackgroundTasks();
+    int backgroundCount(const QString &state) const;
     bool lastVisibleWindow(const RelayWindow *window) const;
     void cycle(RelayWindow *from, int delta);
     // ----- recently closed (src/ClosedStack.h) --------------------------------------------------
@@ -316,6 +318,8 @@ private:
     bool m_projectsLoaded = false;
     QSet<QString> m_initSnoozed;            // asked, or "Not now", since this Relay started
     QList<QPointer<RelayWindow>> m_windows;
+    QHash<QString, QString> m_backgroundStates;
+    qint64 m_backgroundRefreshedAt = 0;
     QList<ClosedItem> m_closed;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_closedWatchers;
     // Windows remembered since the last settle. When the whole set goes (a quit) they are what the
@@ -1309,6 +1313,8 @@ private:
         // toward (#Q7Y9); otherwise it moves the pane down as it always did.
         else if (id == QStringLiteral("pane.moveDown")) { if (!dockBeneathNeighbor()) moveActive(relay::panes::Direction::Down); }
         else if (id == QStringLiteral("pane.moveToNewTab")) { if (m_activeLeaf) moveLeafToNewTab(m_activeLeaf); }
+        else if (id == QStringLiteral("pane.moveToBackground")) moveBackgroundPane(pane);
+        else if (id == QStringLiteral("pane.runInBackground")) runBackgroundPane(pane);
         else if (id == QStringLiteral("pane.equalize")) equalizeActivePage();
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
@@ -5054,6 +5060,8 @@ private:
         items << actionItem(panes, QStringLiteral("Dim while working"), QStringLiteral("Dim working agents"), QStringLiteral("pane.autoDim"), relay::settings::boolValue(QStringLiteral("appearance/auto_dim"), false));
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
+        items << actionItem(panes, QStringLiteral("Move to background"), QStringLiteral("Keep the agent running outside the layout"), QStringLiteral("pane.moveToBackground"));
+        items << actionItem(panes, QStringLiteral("Run in background"), QStringLiteral("Send the prompt, then free this pane's space"), QStringLiteral("pane.runInBackground"));
         {
             // "Auto-resize" is what the owner calls it (#GSJ7), so the name is searchable and the
             // detail says it: this is the entry the "?" list shows, and the drag hint teaches it.
@@ -5194,7 +5202,7 @@ private:
                                    "terminal.promptPrevious terminal.promptNext links.step terminal.clear").split(' ')},
             {panes, QStringLiteral("tab.new window.new pane.splitRight pane.splitDown pane.splitLeft pane.splitUp "
                                    "tab.next tab.previous pane.equalize pane.moveLeft pane.moveRight pane.moveUp pane.moveDown "
-                                   "pane.moveToNewTab tab.moveToNewWindow pane.close closed.restore closed.list").split(' ')},
+                                   "pane.moveToNewTab pane.moveToBackground pane.runInBackground tab.moveToNewWindow pane.close closed.restore closed.list").split(' ')},
             {QStringLiteral("Files and projects"), QStringLiteral("files.explorer files.open board.open tests.open "
                                    "project.pick project.init project.detach").split(' ')},
             {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.splitSameHost remote.pair "
@@ -8071,7 +8079,7 @@ public:
         for (QWidget *leaf : leavesIn(page))
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
                 relay::BoardView *view = tool->board();
-                if (runner.isEmpty()) return view->onExecuteCard ? view->onExecuteCard(card, task) : QString();
+                if (runner.isEmpty()) return view->onExecuteCard ? view->onExecuteCard(card, task, true) : QString();
                 return view->onVerifyCard ? view->onVerifyCard(card, runner, task) : QString();
             }
         const QString workspace = boardWorkspaceOfTab(page);
@@ -8209,7 +8217,7 @@ public:
         // the main agent (it builds the card), handed the card as its first task. The pane's
         // session token comes back (#HKAP) so the card's thread can link to it; an empty string
         // says no pane was opened.
-        view->onExecuteCard = [guard, workspace](const QString &card, const QString &task) {
+        view->onExecuteCard = [guard, workspace](const QString &card, const QString &task, bool runInBackground) {
             auto *w = windowOf(guard);
             if (!w) return QString();
             Pane *pane = nullptr;
@@ -8220,8 +8228,29 @@ public:
             w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
             w->setActive(pane);
             focusLeaf(pane);
+            if (runInBackground) pane->markBackgroundTask(true);
             pane->startBoardTask(task, card);
             w->updateTitles();
+            if (runInBackground) {
+                // A new pane configures asynchronously. Keep it visible until its agent accepts
+                // the task; a failed start leaves the reason and the pane on screen.
+                auto attempts = std::make_shared<int>(0);
+                QPointer<Pane> pending(pane);
+                QPointer<RelayWindow> owner(w);
+                auto *timer = new QTimer(pane);
+                timer->setInterval(250);
+                QObject::connect(timer, &QTimer::timeout, pane, [timer, attempts, pending, owner] {
+                    if (!pending || !owner || ++*attempts > 80) {
+                        timer->stop(); timer->deleteLater(); return;
+                    }
+                    if (*attempts >= 4 && pending->agentBusy()
+                        && pending->backgroundTaskState() == QStringLiteral("working")) {
+                        timer->stop(); timer->deleteLater();
+                        owner->backgroundPane(pending);
+                    }
+                });
+                timer->start();
+            }
             return pane->sessionToken();
         };
         // And the card wears that token (#R9G7): the chip on the row and on the card page says
@@ -10083,6 +10112,35 @@ private:
         auto *rightRow = new QHBoxLayout(right);
         rightRow->setContentsMargins(6, 0, 6, 0);
         rightRow->setSpacing(2);
+        for (const QString &state : {QStringLiteral("working"), QStringLiteral("needs-you"),
+                                     QStringLiteral("done"), QStringLiteral("failed")}) {
+            auto *count = new QToolButton(right);
+            count->setObjectName(QStringLiteral("backgroundCount-") + state);
+            count->setFocusPolicy(Qt::StrongFocus);
+            count->setAutoRaise(true);
+            count->hide();
+            connect(count, &QToolButton::clicked, this, [this, state, count] {
+                auto *menu = new QMenu(this);
+                menu->setAttribute(Qt::WA_DeleteOnClose);
+                for (Pane *pane : m_manager->backgroundPanes()) {
+                    if (pane->backgroundTaskState() != state
+                        && !(state == QStringLiteral("failed")
+                             && pane->backgroundTaskState() == QStringLiteral("interrupted"))) continue;
+                    const QString token = pane->sessionToken();
+                    const QString title = pane->paneTitle().isEmpty() ? pane->cwd() : pane->paneTitle();
+                    connect(menu->addAction(title), &QAction::triggered, this,
+                            [this, token] { m_manager->focusPane(token); });
+                    auto *stop = menu->addAction(QStringLiteral("Stop %1").arg(title));
+                    stop->setEnabled(pane->agentBusy());
+                    QPointer<Pane> target(pane);
+                    connect(stop, &QAction::triggered, this, [target] { if (target) target->stopAgent(); });
+                }
+                if (menu->actions().isEmpty()) { menu->deleteLater(); return; }
+                menu->popup(count->mapToGlobal(QPoint(0, count->height())));
+            });
+            m_backgroundCountButtons.insert(state, count);
+            rightRow->addWidget(count);
+        }
         m_bell = new ChromeButton(ChromeButton::Glyph::Bell);
         // The one chrome button something outside this row has to name. Every other one is a
         // `windowChromeButton` and is reached by its neighbours; the bell is what a GUI drive
@@ -10669,6 +10727,24 @@ private:
     static constexpr qint64 kSeenAfterMs = 1500;
 
     void refreshPaneStatus() {
+        m_manager->refreshBackgroundTasks();
+        const bool light = QApplication::cursorFlashTime() <= 0
+                           || relay::panestatus::pulsePhaseNow() % 2 == 0;
+        for (auto it = m_backgroundCountButtons.begin(); it != m_backgroundCountButtons.end(); ++it) {
+            QToolButton *button = it.value();
+            if (!button) continue;
+            const int count = m_manager->backgroundCount(it.key());
+            button->setVisible(count > 0);
+            if (!count) continue;
+            button->setText(QString::number(count));
+            button->setToolTip(QStringLiteral("%1 background task(s)").arg(it.key()));
+            QColor color = it.key() == QStringLiteral("working") ? relay::theme::Agent
+                         : it.key() == QStringLiteral("needs-you") ? relay::theme::Warning
+                         : it.key() == QStringLiteral("failed") ? relay::theme::Error : relay::theme::Success;
+            if (it.key() != QStringLiteral("done") && !light) color.setAlpha(130);
+            button->setStyleSheet(QStringLiteral("QToolButton { color: %1; font-weight: bold; padding: 2px 5px; }")
+                                      .arg(color.name(QColor::HexArgb)));
+        }
         refreshPaneDimming();
         namespace ps = relay::panestatus;
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -11492,7 +11568,11 @@ public:
                 for (Pane *pane : manager->backgroundPanes()) {
                     auto *item = new QListWidgetItem(QStringLiteral("%1 · %2 · %3")
                         .arg(pane->paneTitle().isEmpty() ? pane->cwd() : pane->paneTitle(),
-                             pane->hasCloseWork() ? QStringLiteral("Running") : QStringLiteral("Finished"),
+                             pane->property("backgroundInterrupted").toBool() ? QStringLiteral("Interrupted")
+                                 : pane->backgroundTaskState() == QStringLiteral("done") ? QStringLiteral("Done")
+                                 : pane->backgroundTaskState() == QStringLiteral("needs-you") ? QStringLiteral("Needs you")
+                                 : pane->backgroundTaskState() == QStringLiteral("failed") ? QStringLiteral("Failed")
+                                 : QStringLiteral("Working"),
                              pane->sessionToken().left(8)), list);
                     item->setData(Qt::UserRole, pane->sessionToken());
                     if (pane->sessionToken() == selected) list->setCurrentItem(item);
@@ -11516,6 +11596,42 @@ public:
 
 private:
 
+    void runBackgroundPane(Pane *pane) {
+        if (!pane || !pane->agentReady()) { notice(QStringLiteral("Choose an agent before running in background.")); return; }
+        if (pane->agentBusy()) { notice(QStringLiteral("This agent is already running. Use Move to background.")); return; }
+        const QString task = pane->composerText().trimmed();
+        if (task.isEmpty()) { notice(QStringLiteral("Type a task before running in background.")); return; }
+        pane->markBackgroundTask(true);
+        pane->askAgent(task);
+        pane->draftInComposer(QString());
+        QPointer<Pane> pending(pane);
+        QPointer<RelayWindow> owner(this);
+        auto attempts = std::make_shared<int>(0);
+        auto *timer = new QTimer(pane);
+        timer->setInterval(250);
+        connect(timer, &QTimer::timeout, pane, [timer, pending, owner, attempts] {
+            if (!pending || !owner || ++*attempts > 80) {
+                timer->stop(); timer->deleteLater(); return;
+            }
+            // A prompt that immediately returns for clarification stays visible. Once the turn
+            // has continued working, the ordinary live-pane move retains the exact session.
+            if (*attempts >= 4 && pending->agentBusy()
+                && pending->backgroundTaskState() == QStringLiteral("working")) {
+                timer->stop(); timer->deleteLater(); owner->backgroundPane(pending);
+            }
+        });
+        timer->start();
+    }
+
+    void moveBackgroundPane(Pane *pane) {
+        if (!pane || !pane->agentBusy()) { notice(QStringLiteral("No running agent to move to background.")); return; }
+        if (pane->backgroundTaskState() == QStringLiteral("needs-you")) {
+            notice(QStringLiteral("Answer the agent's question before moving it to background.")); return;
+        }
+        pane->markBackgroundTask(false);
+        backgroundPane(pane);
+    }
+
     void closeActive() {
         QWidget *pane = m_activeLeaf;
         if (!pane) return;
@@ -11528,6 +11644,7 @@ private:
     bool backgroundPane(Pane *pane) {
         QWidget *page = pageOf(pane);
         if (!page) return false;
+        if (!pane->property("backgroundMarked").toBool()) pane->markBackgroundTask(false);
         const QString project = tabProject(page);
         // Leave a reachable window when the last pane is backgrounded. No desktop tray is
         // required, and Qt's last-window exit cannot silently kill the session just retained.
@@ -11850,6 +11967,7 @@ private:
     static constexpr int kFrameMargin = 5;
     bool m_nativeFrame = false;
     QPointer<ChromeButton> m_bell, m_minimize, m_maximize, m_close;
+    QHash<QString, QPointer<QToolButton>> m_backgroundCountButtons;
     QPointer<ChromeButton> m_connect;   // the plug: join a shared session
     // The tool-pane buttons, by the pane type each owns (relay::panestatus::toolButtons()).
     QHash<QString, QPointer<ChromeButton>> m_toolButtons;

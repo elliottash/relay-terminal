@@ -196,8 +196,12 @@ Layout rules:
   worker, output and callbacks remain alive. Sessions → Background (also in Actions) reopens that
   same window; it does not resume a saved conversation or start a replacement process. The last
   pane leaves a fresh terminal open so background sessions remain reachable without a system tray.
-  Background sessions last for this Relay process. Closing the final visible window warns that
-  it will stop them; explicitly quitting Relay destroys them as it does visible sessions.
+  Background agents appear in four counts beside the bell: working, needs you, done and failed.
+  Each count opens a list with Open and Stop. Request and linked task status, running subagents,
+  and a card's verification lane decide when a task is done; opening a done pane clears its count.
+  Background sessions run only while Relay is open. Layout restoration lists any that were
+  running at shutdown as interrupted, with their saved conversation available to reopen.
+  Closing the final visible window warns that it will stop the live work.
 - **Pane button row** (`PaneChrome`, a child of each leaf created in `syncChrome()`): shown for
   the leaf under the mouse (application event filter, Enter/MouseMove). There is **one** new-pane
   button, ⊞ (card #803C; it replaced ⬓+ and ◫+). It runs `pane.newByMouse`, which is not a
@@ -777,7 +781,7 @@ paste shortcut) and "Screenshot this pane" from the palette (→ `agent.screensh
 key is bound to it), running an alias from the palette (→ `/name`, and for a command the name typed in
 terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 starting a card edit in the Board with the Edit button, a click on the title or a
-double-click in the text (→ `e`), a card's Discuss, Plan, Execute and Verify buttons (→ Enter, `p`, `x`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Board (→ `y`; #FT77),
+double-click in the text (→ `e`), a card's Discuss, Plan, Run and Verify buttons (→ Enter, `p`, `r`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Board (→ `y`; #FT77),
 the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share button on a pane that is already shared (→ the palette, then "Sharing", because
@@ -1629,7 +1633,7 @@ derived fresh from its live terminal directory (`projects::candidateFor`) and is
 attachment; the pane's own `workspace()` is never consulted, because it is frozen at creation and
 inherited from the directory Relay was launched in — the reason one project's board used to appear
 in every pane of every window. Only an explicit project action attaches: opening the Board,
-`/card`, picking a card with `#`, Execute-from-card. `RelayWindow::attachTab()` is the one funnel —
+`/card`, picking a card with `#`, Run-from-card. `RelayWindow::attachTab()` is the one funnel —
 the only writer of the tab → project map, the only caller of `projects::Registry::remember()` and
 the only place the tab's panes are re-pointed — and `set_board` (protocol 19.11) re-points a pane's
 worker **without ending its conversation**. Nothing on the tab header names the attachment (the
@@ -1683,7 +1687,7 @@ Initialize supplies the destination. Options links to Projects; Forget changes o
   `helperWorker(page, true)`, started on demand, never a second worker. It **taps** that worker's
   `onEvent` (the window's handler runs first, unchanged) and writes the allow-listed events back as
   `board_event {rid|null, event}` with every path field removed. `board_action` is GUI-level like
-  `x` and `v`: it reads the card, builds `board::executeTask` / `verifyTask`, opens the pane through
+  `r` and `v`: it reads the card, builds `board::executeTask` / `verifyTask`, opens the pane through
   the board pane's own `onExecuteCard` / `onVerifyCard` (or the same pane beside the last active
   one when the tab has no Board pane), sends the `board_claim` / Verify note, and answers
   `board_action_result`. A device stays on the board its last `board_open` found; the bridge
@@ -1827,7 +1831,7 @@ named — is one more class implementing `Context`, and nothing else.
 |---|---|---|---|---|---|---|---|
 | **Terminal** (`Pane::TerminalContext`) | `src/Pane.h` | the pane's own (`main`/`flash`/`local`) | yes | `pane` / the pane's scrollback id | — | path, url, `#ID` | the transcript |
 | **Board** (`board::BoardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / the tab id | Hygiene (k), Tests, Performance | `option:`, `session:`, `card:` | the transcript |
-| **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / `<tab id>/card:<ID>` | Plan (p), Execute (x), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
+| **Card** (`board::CardContext`) | `src/BoardPane.cpp` | `switchboard` | no | `helper` / `<tab id>/card:<ID>` | Plan (p), Run (r), Verify (v) in a QA lane | as the board | the answer is appended to `issues/threads/<ID>.md` by the worker |
 | **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
 | **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
 | **Models** (`ModelsContext`) | `src/ModelsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | none of its own (`option:` goes to the window) | the transcript |
@@ -1951,7 +1955,7 @@ than a fence around a surface: no board means no `board_*` tools (there is nothi
 `switchboard` ask in a board-less tab is answered in a sentence); a guest harness cannot run Relay's
 own tools, so a helper never runs on one and never starts one (#GH5T, #4NXH); and a card's Plan turn
 may write only its own `## Plan`, which is the stage machine of protocol 19.20 and is refused **when
-the tool is called**, in a sentence that names Execute, rather than by narrowing what the turn was
+the tool is called**, in a sentence that names Run, rather than by narrowing what the turn was
 offered. What came **down** with
 this card was the fences: `ChatScope`'s "no shell, no file writes" (owner decision 3 — yes, with the
 workspace it has, and never for a card's Plan turn), `session_info` and `activity` being the pane
@@ -3613,7 +3617,7 @@ of the platform and of the engine itself.
 | `src/BoardModel.*`, `src/BoardPane.*`, `src/BoardWorker.*` | the Board: card rows, tabs, columns, filters; the pane and card detail; the per-tab worker that serves every agent console of the tab (the board, a card, Options, Actions and Sessions). `BoardContext` and `CardContext` live in `src/BoardPane.cpp` |
 | `src/AgentContext.*`, `src/AgentHost.h` | an agent is the prompt box (card #AGNT, protocol 33): `relay::agent::Context` — what an agent is about (spec, action row, `submit`, link resolution, `turnFinished`, placeholder; **no tool list, ever**) — with `ContextSpec`, `Action`, `TurnRecord`, `ConsoleHandle` and `ConsoleFactory`; and `relay::agent::Host`, what a console is drawn on. Library `relay-agentcontext`, QtCore only, so a pane library can supply a context without naming a window |
 | `src/AppCommands.*` | the agent drives the app (protocol 30): the `app` catalog the window sends its workers, what is settable and which actions are agent-safe, the executor that carries out an `app_command`, and the change log behind Undo. No window is named here, so it is a library tested headless |
-| `src/BoardRemote.*` | the Board on the owner's paired devices (#SWPH): `board_request` lines allow-listed and rebuilt into the tab worker's messages, the worker's events tapped and sent back as `board_event`, Execute/Verify through the board pane's hooks |
+| `src/BoardRemote.*` | the Board on the owner's paired devices (#SWPH): `board_request` lines allow-listed and rebuilt into the tab worker's messages, the worker's events tapped and sent back as `board_event`, Run/Verify through the board pane's hooks |
 | `src/BoardWorkspace.*` | which project's Board a pane is looking at: the walk up to `/`, trying every folder of `projects::boardFolders()` (`board/board.yaml`, `.switchboard/board.yaml`, `switchboard/board.yaml`, `issues/board.yaml`) at each level |
 | `src/Projects.*` | which project a pane is in (`candidateFor`, a filesystem walk with no `git` subprocess), where its board folder is or would be, and the removable registry of known projects in `state/projects.json` |
 | `src/Theme.*` | live tokens, palette, stylesheet, the theme switch |

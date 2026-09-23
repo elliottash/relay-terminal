@@ -40,7 +40,7 @@
 //   name           host                    shell  persist key        action row
 //   "terminal"     src/Pane.h              yes    the pane's session  -
 //   "switchboard"  src/BoardPane.cpp       no     (workspace, tab)   Check (k), Clean up (u), Tests, Profile
-//   "card"         src/BoardPane.cpp       no     (workspace, card)  Plan (p), Execute (x), Verify (v)
+//   "card"         src/BoardPane.cpp       no     (workspace, card)  Plan (p), Run (r), Verify (v)
 //   "options"      src/SettingsPane.cpp    no     (workspace, tab)   -
 //   "actions"      src/SettingsPane.cpp    no     (workspace, tab)   -
 //   "sessions"     src/Conversations.cpp   no     (workspace, tab)   -
@@ -93,18 +93,18 @@ struct Action {
     // One letter, or empty for a keyless action. The row does not invent one, and it does not
     // answer a letter two actions claim: see `withUniqueLetters`.
     QString letter;
-    // What the button says, without its letter: "Check", "Clean up", "Execute". `fullLabel()`
+    // What the button says, without its letter: "Check", "Clean up", "Run". `fullLabel()`
     // adds the " (k)".
     QString label;
     QString tooltip;
-    // True for an action that **leaves the surface** the console is on — Execute and Verify hand
+    // True for an action that **leaves the surface** the console is on — Run and Verify hand
     // the card to a terminal pane. Those two wear the accent outline on the card page today, and
     // the flag is what carries that meaning to a row built from this list rather than by hand
     // (owner, 2026-09-20, of the row's shape: "make the buttons consistent, can you use the
     // styling from the card agent" — "(not the colors though)").
     bool leaves = false;
     // False greys the button out and makes its letter do nothing — the key can do no more than
-    // the mouse can. The label is unaffected: a busy card still says "Execute (x)".
+    // the mouse can. The label is unaffected: a busy card still says "Run (r)".
     bool enabled = true;
     std::function<void()> run;
 
@@ -126,7 +126,7 @@ QList<Action> withUniqueLetters(QList<Action> actions);
 // own tool row, which this replaces.
 int actionForLetter(const QList<Action> &actions, const QString &letter);
 
-// A label without its key: "Execute (x)" -> "Execute". What a narrow action row shows once the
+// A label without its key: "Run (r)" -> "Run". What a narrow action row shows once the
 // keys no longer fit (`CardDetail::fitButtons`); the key itself does not vanish, it is in the
 // tooltip and the pane's key legend either way.
 QString labelWithoutKey(const QString &label);
@@ -311,7 +311,7 @@ class Context {
 
     // The console sets this when it takes the context; the context calls `changed()` when
     // anything `spec()` or `actions()` would now answer differently has moved — a card going busy
-    // and its Execute becoming "Executing (a1b2c3d4)", Options swapping mode, a project being
+    // and its Run becoming "Running (a1b2c3d4)", Options swapping mode, a project being
     // attached to the tab. There is no signal because this library is QtCore-only and a context is
     // not a QObject; a `std::function` is what the rest of these surfaces already use.
     std::function<void()> onChanged;

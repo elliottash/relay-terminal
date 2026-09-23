@@ -145,7 +145,7 @@ public:
     // with card `id` attached. The board has already moved the card to In progress. Returns the
     // pane's session token — empty when no pane could be opened — so the hand-off note can name
     // and link it (#HKAP).
-    std::function<QString(const QString &id, const QString &task)> onExecuteCard;
+    std::function<QString(const QString &id, const QString &task, bool background)> onExecuteCard;
     // Whether a pane with this session token is still open in this window (#R9G7). A claimed
     // card wears its pane's token as a chip; a closed pane's chip says so and stops linking.
     // Unset — a test, or a window that cannot look — means every token reads as live.
@@ -495,7 +495,7 @@ private:
     // One `board_update` for what the card detail's editor changed, against the hash the card
     // was read at. The worker writes the file; a stale hash comes back as `board_conflict`.
     void saveCardEdit(const QJsonObject &patch, const QString &baseHash);
-    void executeCard(const QString &note);
+    void executeCard(const QString &note, bool background = true);
     void verifyCard(const QString &note);
     void send(QJsonObject message);
     QString nextRequestId();

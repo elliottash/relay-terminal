@@ -2224,7 +2224,7 @@ public:
     // `mode` is "discuss" or "plan" for an agent turn (protocol 19.10), empty for a plain comment.
     std::function<void(const QString &text, const QString &mode)> onReply;
     // Execute: hand the card to a terminal pane. `note` is what was in the reply box.
-    std::function<void(const QString &note)> onExecute;
+    std::function<void(const QString &note, bool background)> onExecute;
     // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
     // different provider family from the one that implemented it. `note` is the reply box again.
     std::function<void(const QString &note)> onVerify;
@@ -2595,10 +2595,10 @@ public:
 
     // Execute: hand the card to a terminal pane's agent. A card with neither a plan nor an
     // acceptance line asks once, here on the card rather than in a dialog: the pane's agent would
-    // be working from the issue text alone. The second press (or `x`) goes ahead.
-    void execute()
+    // be working from the issue text alone. The second press (or `r`) goes ahead.
+    void execute(bool background = true)
     {
-        if (paneExecuting()) {         // `x` on a card a pane is executing reveals it (#48S3)
+        if (paneExecuting()) {         // `r` on a card a pane is running reveals it (#48S3)
             if (onFocusPane)
                 onFocusPane(m_sessionToken);
             return;
@@ -2613,14 +2613,14 @@ public:
         if (!hasPlan() && !hasAcceptance() && m_executeArmed != m_id) {
             m_executeArmed = m_id;
             showError(QStringLiteral("#%1 has no plan and no acceptance yet, so the pane's agent "
-                                     "would work from the issue alone. Execute again (x) to hand "
+                                     "would work from the issue alone. Run again (r) to hand "
                                      "it over as it is, or Plan (p) first.").arg(m_id));
             return;
         }
         m_executeArmed.clear();
         const QString note = takeReply();
         m_error->hide();
-        onExecute(note);
+        onExecute(note, background);
     }
 
     // Verify (#T71W): hand the card to a pane on the recommended verifier. Unlike Execute it
@@ -3008,13 +3008,13 @@ protected:
                 beginEdit(false);
                 return true;
             }
-            // `p` plans, `x` executes, `d` marks the card done.
+            // `p` plans, `r` runs, `d` marks the card done.
             if (object == m_doc && !m_editing && mods == Qt::NoModifier) {
                 if (key->text() == QStringLiteral("p")) {
                     plan();
                     return true;
                 }
-                if (key->text() == QStringLiteral("x")) {
+                if (key->text() == QStringLiteral("r")) {
                     execute();
                     return true;
                 }
@@ -3139,20 +3139,19 @@ public:
 
         relay::agent::Action execute;
         execute.key = QStringLiteral("boardExecute");
-        execute.letter = QStringLiteral("x");
+        execute.letter = QStringLiteral("r");
         execute.leaves = true;            // it hands the card to a pane: the accent outline
         if (paneExecuting()) {
             // A pane already holds the card (#48S3): the button names it — the same eight
             // characters every other surface shows of the token — and the click reveals the
             // pane instead of handing the card to a second one.
-            execute.label = QStringLiteral("Executing (%1)").arg(m_sessionToken.left(8));
+            execute.label = QStringLiteral("Running (%1)").arg(m_sessionToken.left(8));
             execute.letter.clear();
-            execute.tooltip = QStringLiteral("A pane is already executing this card — the click reveals it");
+            execute.tooltip = QStringLiteral("A pane is already running this card — the click reveals it");
         } else {
-            execute.label = QStringLiteral("Execute");
+            execute.label = QStringLiteral("Run");
             execute.enabled = !m_busy;
-            execute.tooltip = QStringLiteral("Hand the card to a new terminal pane beside the board: "
-                                             "its agent builds it, and the card moves to In progress (x)");
+            execute.tooltip = QStringLiteral("Run the card in the background; its agent builds it and the card moves to In progress (r)");
         }
         execute.run = [self] {
             const ActionGuard guard;
@@ -3166,6 +3165,15 @@ public:
             self->execute();
         };
         actions << execute;
+        if (!paneExecuting()) {
+            relay::agent::Action inPane = execute;
+            inPane.key = QStringLiteral("boardRunInPane");
+            inPane.letter.clear();
+            inPane.label = QStringLiteral("Run in pane");
+            inPane.tooltip = QStringLiteral("Run the card in a visible terminal pane beside the Board");
+            inPane.run = [self] { const ActionGuard guard; self->execute(false); };
+            actions << inPane;
+        }
 
         // Verify is on the row only in a QA lane (#T71W): on any other card it would be a control
         // for a question nobody has asked yet. That is the visibility the old button had, and an
@@ -4939,7 +4947,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
               {QStringLiteral("card"), card},
               {QStringLiteral("surface"), QStringLiteral("card:") + card}});
     };
-    m_detail->onExecute = [this](const QString &note) { executeCard(note); };
+    m_detail->onExecute = [this](const QString &note, bool background) { executeCard(note, background); };
     m_detail->onVerify = [this](const QString &note) { verifyCard(note); };
     // The Tests strip's Check and its three actions (#7BM4, protocol 31.1): the card builds the
     // request, the view stamps it with a request id and puts it on the board worker's stdin.
@@ -4974,7 +4982,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (mode == QStringLiteral("plan"))
             onHint(QStringLiteral("board.plan"), QStringLiteral("p"));
         else if (mode == QStringLiteral("execute"))
-            onHint(QStringLiteral("board.execute"), QStringLiteral("x"));
+            onHint(QStringLiteral("board.execute"), QStringLiteral("r"));
         else if (mode == QStringLiteral("done"))
             onHint(QStringLiteral("board.done"), QStringLiteral("d"));
         else if (mode == QStringLiteral("verify"))
@@ -7937,7 +7945,7 @@ void BoardView::updateDetailLayout()
     // The key line says what the keys do in what is on screen: the list, or a card that has the
     // pane to itself.
     static const QString boardKeys = QStringLiteral(
-        "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>x</b> execute &nbsp; "
+        "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>r</b> run &nbsp; "
         "<b>v</b> verify &nbsp; <b>d</b> done &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
@@ -7946,7 +7954,7 @@ void BoardView::updateDetailLayout()
         "<b>o</b> file &nbsp; <b>Ctrl+Z</b> undo");
     static const QString cardKeys = QStringLiteral(
         "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b> done &nbsp; <b>Tab</b> reply &nbsp; "
-        "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>x</b> execute "
+        "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>r</b> run "
         "&nbsp; <b>v</b> verify &nbsp; <b>Del</b> delete &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
     const bool stacked = width() < board::kCardSplitWidth;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
@@ -8188,7 +8196,7 @@ void BoardView::editSelected()
     openSelected();
 }
 
-// `p` / `x`: Plan or Execute the open card, or the selected one once it has been read (the
+// `p` / `r`: Plan or Run the open card, or the selected one once it has been read (the
 // buttons need its sections and front matter to know whether it has a plan).
 void BoardView::cardAction(const QString &action)
 {
@@ -8219,7 +8227,7 @@ void BoardView::cardAction(const QString &action)
 // stand: the card still records the hand-off, it just has no pane to name.
 //
 // Nothing here is a model turn, so the Switchboard worker stays free for the next Discuss or Plan.
-void BoardView::executeCard(const QString &note)
+void BoardView::executeCard(const QString &note, bool background)
 {
     const QString card = m_detail->cardId();
     if (card.isEmpty())
@@ -8237,10 +8245,10 @@ void BoardView::executeCard(const QString &note)
     // claim, and the progress entry it makes, read "Claimed (<first 8 characters>) · …" and
     // draw as a link that reveals that pane.
     const QString paneToken = onExecuteCard(card, board::executeTask(card, m_detail->title(), m_detail->hasPlan(),
-                                                                     m_detail->hasAcceptance(), note));
+                                                                     m_detail->hasAcceptance(), note), background);
     if (!paneToken.isEmpty()) {
         const QString id = nextRequestId();
-        m_pendingNotes.insert(id, QStringLiteral("Claimed #%1 · Execute").arg(card));
+        m_pendingNotes.insert(id, QStringLiteral("Claimed #%1 · Run").arg(card));
         send({{QStringLiteral("type"), QStringLiteral("board_claim")}, {QStringLiteral("id"), id},
               {QStringLiteral("card"), card}, {QStringLiteral("pane_token"), paneToken},
               {QStringLiteral("text"), note}});
@@ -8255,15 +8263,15 @@ void BoardView::executeCard(const QString &note)
                                                      QJsonObject{{QStringLiteral("assignee"), QStringLiteral("agent")}}}}}});
     if (status != QStringLiteral("executing") && status != QStringLiteral("in-progress")) {
         const QString id = nextRequestId();
-        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to Executing · Execute").arg(card));
+        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to Executing · Run").arg(card));
         send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), id},
               {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("executing")},
-              {QStringLiteral("reason"), QStringLiteral("Execute: handed to a terminal pane")}});
+              {QStringLiteral("reason"), QStringLiteral("Run: handed to a terminal pane")}});
     }
     // No pane to name, so no `pane_token` and nothing for the thread to link to: the plain
     // Execute wording, which is what the entry said before panes were linked at all.
     const QString entry =
-            QStringLiteral("Execute · handed to a new terminal pane beside the Board, whose "
+            QStringLiteral("Run · handed to a new terminal pane beside the Board, whose "
                            "agent works on it and records its commits in `links.commits`.");
     send({{QStringLiteral("type"), QStringLiteral("board_comment")}, {QStringLiteral("card"), card},
           {QStringLiteral("kind"), QStringLiteral("progress")},
@@ -8733,9 +8741,9 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         doneSelected();
         return true;
     }
-    // `p` plans, `x` executes and `v` verifies the open card, or the selected one (opening it
+    // `p` plans, `r` runs and `v` verifies the open card, or the selected one (opening it
     // first) (#XS6Q; `v` is #T71W).
-    if ((text == QStringLiteral("p") || text == QStringLiteral("x") || text == QStringLiteral("v"))
+    if ((text == QStringLiteral("p") || text == QStringLiteral("r") || text == QStringLiteral("v"))
         && (detailOpen() || !m_selected.isEmpty())) {
         cardAction(text == QStringLiteral("p") ? QStringLiteral("plan")
                    : text == QStringLiteral("v") ? QStringLiteral("verify")

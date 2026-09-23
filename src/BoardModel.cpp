@@ -341,7 +341,7 @@ QString modeTitle(const QString &mode)
     if (mode == QStringLiteral("plan"))
         return QStringLiteral("Plan");
     if (mode == QStringLiteral("execute"))
-        return QStringLiteral("Execute");
+        return QStringLiteral("Run");
     return {};
 }
 
@@ -363,7 +363,7 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
 {
     const QString ref = QStringLiteral("#") + id;
     QStringList lines;
-    lines << QStringLiteral("Execute %1: %2").arg(ref, title) << QString();
+    lines << QStringLiteral("Run %1: %2").arg(ref, title) << QString();
     QString what = QStringLiteral("The Board card %1 is attached");
     if (hasPlan && hasAcceptance)
         what += QStringLiteral(" with its issue, its `## Plan` and its acceptance. Carry out the plan "

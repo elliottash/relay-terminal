@@ -252,6 +252,8 @@ private:
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
+        add("pane.moveToBackground", "pane", "Move the running agent to background", {QStringLiteral("Ctrl+Alt+B")});
+        add("pane.runInBackground", "pane", "Run the prompt in background", {});
         add("pane.brighten", "pane", "Brighten pane", {QStringLiteral("Alt++"), QStringLiteral("Alt+="), QStringLiteral("Alt+Shift+=")});
         add("pane.darken", "pane", "Dim pane", {QStringLiteral("Alt+-")});
         add("pane.dimToggle", "pane", "Toggle manual pane dimming", {QStringLiteral("Alt+D")});
