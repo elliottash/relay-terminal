@@ -9,7 +9,7 @@ Three jobs, all pure except the two probes at the bottom:
   `deepseek/deepseek-v4.1-flash` signs `deepseek/deepseek-v4.1-flash`, because what QA needs to know
   is whose model wrote the code, not whose invoice it lands on.
 * **`family(text)`** — the vendor family of any signature *or* of the free text that
-  `implemented_by` held before this card ("Claude Opus 5 (pane 2)").  Both spellings must land on
+  `implemented_by` held before this card ("Claude Opus 5.5 (pane 2)").  Both spellings must land on
   the same family, or the `qa` recommendation would rank Claude as a verifier of Claude's own card.
 * **`recommend(...)`** — the ranked verifier for a card, from `VERIFIER_RANK`: the implementer's
   own family is skipped, the rest of its lineage is moved behind every other lineage but still
@@ -40,10 +40,10 @@ from . import presets
 
 #: What a token in a model id or in free text says about the vendor.  Matched against the tokens of
 #: the *model* segment first and the provider segment second, so `openrouter/deepseek-v4.1-flash` is
-#: DeepSeek and `anthropic/claude-opus-5` is Anthropic.  Prefix rules, in order; the first token that
+#: DeepSeek and `anthropic/claude-opus-5-5` is Anthropic.  Prefix rules, in order; the first token that
 #: matches anything wins.
 _VENDOR_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("claude", "anthropic"),        # claude-opus-5, claude-code, claude-sonnet-5
+    ("claude", "anthropic"),        # claude-opus-5-5, claude-code, claude-sonnet-5
     ("anthropic", "anthropic"),
     ("gpt", "openai"),              # gpt-6-astra, gpt-5-codex
     ("chatgpt", "openai"),
@@ -74,7 +74,7 @@ _VENDOR_TOKENS: tuple[tuple[re.Pattern, str], ...] = (
 #: `presets.TIER_DEFAULTS` (see `runner_model`), so this table never decides anything.
 RUNNER_LABELS: dict[str, str] = {
     "guest:codex": "Codex", "guest:claude": "Claude Code",
-    "preset:openai": "GPT-6 Astra", "preset:anthropic": "Claude Opus 5",
+    "preset:openai": "GPT-6 Astra", "preset:anthropic": "Claude Opus 5.5",
     "preset:glm-coding": "GLM-5.3", "preset:glm": "GLM-5.3",
     "preset:kimi-code": "Kimi K3", "preset:kimi": "Kimi K3",
     "preset:openrouter": "DeepSeek V4.1", "preset:gemini": "Gemini 3.1 Pro",
@@ -87,7 +87,7 @@ GUEST_MODELS: dict[str, str] = {"codex": "codex", "claude": "claude-code"}
 
 _TOKENS = re.compile(r"[a-z0-9.]+")
 _PARENS = re.compile(r"\([^)]*\)")
-#: `anthropic/claude-opus-5-20260514 via claude-code` — a guest CLI signs the model it actually ran
+#: `anthropic/claude-opus-5-5-20260514 via claude-code` — a guest CLI signs the model it actually ran
 #: *and* the harness that ran it, because the harness is the thing a person reopens.
 _VIA = re.compile(r"\s+via\s+([a-z0-9._-]+)\s*$")
 
@@ -135,7 +135,7 @@ def relay_free_upstream(role: str = RELAY_FREE_DEFAULT_ROLE) -> tuple[str, str]:
 def family(text: str | None) -> str:
     """The vendor family of a signature, a model id, a preset id or legacy free text.
 
-    `anthropic/claude-opus-5`, `Claude Opus 5 (pane 2)` and `claude-code` are all `anthropic`;
+    `anthropic/claude-opus-5-5`, `Claude Opus 5.5 (pane 2)` and `claude-code` are all `anthropic`;
     `openrouter/deepseek-v4.1-flash` is `deepseek`, not `openrouter`; `gpt-5-codex` and a bare
     `codex` are `openai`; `relay-free/relay-main` is the family of the gateway's upstream for that
     role (`glm` today), because Relay Free is a route, not a lab.  An unrecognized string falls back
@@ -172,7 +172,7 @@ def guest_signature(guest_id: str, observed_model: str | None = "") -> str:
     The owner, 2026-09-19: *"lets try to record the model used."*  So when Relay can see which model
     the guest is on — the harness reports it and keeps it current (`guest_harness_provider` puts it
     in the pane's `config.model`) — the signature names it and the harness both:
-    `anthropic/claude-opus-5 via claude-code`, `openai/gpt-5.6-codex via codex`.  When it cannot be
+    `anthropic/claude-opus-5-5 via claude-code`, `openai/gpt-5.6-codex via codex`.  When it cannot be
     seen, the signature is the harness alone, `anthropic/claude-code` or `openai/codex`, which is
     all that was ever observable from outside.  `family()` reads both.
     """

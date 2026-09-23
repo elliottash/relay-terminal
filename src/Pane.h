@@ -1714,7 +1714,7 @@ public:
         const relay::models::Catalog catalog = modelCatalog();
         if (!model.isEmpty()) {
             // Through the catalog (card #MDL1, rule 3): Claude Code is started with `opus` and
-            // reports `claude-opus-5`, so the raw pair named an entry no list holds — /swap could
+            // reports `claude-opus-5-5`, so the raw pair named an entry no list holds — /swap could
             // not tell where the pane was, and the same model was counted twice in models/recent
             // and models/uses. `resolveKey` answers `guest:claude|opus`. An id the catalog knows
             // nothing about — a hand-typed model, a guest whose scan is still running — still
@@ -1730,7 +1730,7 @@ public:
     // "Every place that prints a model to a person prints its name, through one function." This is
     // that function for a site that holds only a preset and a model id — a status line, a toast, a
     // tooltip, an export header. The catalog answers first, through `resolveKey`, so Claude Code's
-    // `opus` and the `claude-opus-5` its harness reports are one model, and `kimi-code|k3` is
+    // `opus` and the `claude-opus-5-5` its harness reports are one model, and `kimi-code|k3` is
     // "kimi-k3"; a model no row covers — a hand-typed id, an older worker, a model heard before the
     // catalog arrived — gets the same derivation off the id alone.
     QString modelNameFor(const QString &preset, const QString &model) const {
@@ -2966,7 +2966,7 @@ private:
         if (!m_guestChip) return;
         if (m_guest.isEmpty()) { m_guestChip->hide(); return; }
         // The model the harness reports, by its catalog name (card #MDL1, rule 1): Claude Code
-        // says "opus" and calls itself "Opus 5", neither of which is a name Relay uses anywhere
+        // says "opus" and calls itself "Opus 5.5", neither of which is a name Relay uses anywhere
         // else. With nothing reported yet the chip is the harness, lower-case.
         const QString named = modelNameFor(QStringLiteral("guest:") + m_guest, m_guestModel);
         const QString model = named.isEmpty() ? guestName(m_guest) : named;
@@ -9374,7 +9374,7 @@ private:
             // The popup `?` shows in an empty prompt box. `/help` is what people type when they do
             // not know `?` yet, and it is where an unknown command points them (issue #Q4SD).
             {QStringLiteral("help"), QString(), QStringLiteral("The keys and prefixes Relay answers to (same as ?)")},
-            {QStringLiteral("model"), QStringLiteral("[name][@provider]"), QStringLiteral("Switch model by name — /model gpt-5.6-sol, or gpt-5.6-sol@openrouter for one provider's row — keeping the conversation; alone, the models pane (same as Ctrl+Shift+M)")},
+            {QStringLiteral("model"), QStringLiteral("[name][@provider]"), QStringLiteral("Switch model by name — /model gpt-6-sol, or gpt-6-sol@openrouter for one provider's row — keeping the conversation; alone, the models pane (same as Ctrl+Shift+M)")},
             {QStringLiteral("swap"), QString(), QStringLiteral("Swap to the fallback model, or back to the main one")},
             {QStringLiteral("main"), QString(), QStringLiteral("Run this pane on the main model")},
             {QStringLiteral("high"), QString(), QStringLiteral("Run this pane on the high model (same as Alt+H)")},
@@ -9756,9 +9756,9 @@ private:
                 // first. relay::modelrows::resolve is that match, so /model in a helper agent's
                 // composer answers the same word with the same model (#PK5Q).
                 const relay::models::Catalog catalog = modelCatalog();
-                // The model's own name first (card #MDL1, rules 1 and 2): `/model gpt-5.6-sol`
+                // The model's own name first (card #MDL1, rules 1 and 2): `/model gpt-6-sol`
                 // names one model however many providers serve it, and `/model
-                // gpt-5.6-sol@openrouter` names which of them takes it. `findByName` folds the
+                // gpt-6-sol@openrouter` names which of them takes it. `findByName` folds the
                 // shown rows into one group per name and answers the part after the "@"; the
                 // older matches below still take a preset id, a key or words of a label.
                 // The rows must outlive the pointer into them: `findByName` returns an entry of
@@ -13337,7 +13337,7 @@ private:
         // condition and the label was read from freed memory (an Xvfb run crashed in malloc).
         const relay::models::Catalog catalog = modelCatalog();
         if (const relay::models::Entry *entry = catalog.find(currentEntryKey()))
-            return entry->label;   // a guest too: "gpt-5.6-sol", not "Codex" (owner, 2026-09-21)
+            return entry->label;   // a guest too: "gpt-6-sol", not "Codex" (owner, 2026-09-21)
         // Not in the catalog at all — a hand-typed id, a model heard before the catalog arrived:
         // the same naming rule off the id alone (card #MDL1, rule 1). `conciseModel` used to
         // answer here and fell back to the *preset's* label, which is a preset and not a model.
@@ -13917,7 +13917,7 @@ private:
     // `conciseModel` was here, and is gone with card #MDL1 (rule 1: "one function names a model").
     // It was the second naming function — the id after its last "/", except for a guest or Relay
     // Free, where it returned the *preset label* instead, which is how the picker came to say
-    // "Codex" for gpt-5.6-sol. `modelNameFor` is the one that stayed.
+    // "Codex" for gpt-6-sol. `modelNameFor` is the one that stayed.
 
     // Chip tooltip: the pane's model plus every role's effective model (protocol 13).
     QString modelTooltip(const QString &extra = QString()) const {

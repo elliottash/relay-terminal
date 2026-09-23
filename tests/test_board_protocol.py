@@ -488,7 +488,7 @@ class WriteTests(ProtocolTest):
         # read. Availability is fixed here so the test says nothing about the machine it runs on.
         card_id = self.make_card()
         self.commands.tools.context.preset = "anthropic"
-        self.commands.tools.context.model = "claude-opus-5"
+        self.commands.tools.context.model = "claude-opus-5-5"
         self.send(type="board_move", card=card_id, status="needs-qa-llm", reason="landed",
                   evidence="docs/qa_evidence/x/")
         here = {"installed_guests": {"codex"}, "keys": {"glm-coding": True},
@@ -496,7 +496,7 @@ class WriteTests(ProtocolTest):
         with unittest.mock.patch.object(QA, "availability", lambda *a, **k: dict(here)):
             detail = [e for e in self.send(type="board_card_get", id="q1", card=card_id)
                       if e["event"] == "board_card"][0]
-        self.assertEqual(detail["front"]["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(detail["front"]["implemented_by"], "anthropic/claude-opus-5-5")
         block = detail["qa"]
         self.assertEqual(block["implementer_family"], "anthropic")
         self.assertEqual(block["recommended"]["runner"], "guest:codex")
@@ -504,7 +504,7 @@ class WriteTests(ProtocolTest):
         self.assertIn("commits", block)
         board = [e for e in self.send(type="board_open") if e["event"] == "board"][0]
         row = [r for r in board["cards"] if r["id"] == card_id][0]
-        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5-5")
         self.assertIn("verified_by", row)
         self.assertNotIn("qa", row)                # the rows stay light; the block is per card
 

@@ -38,7 +38,7 @@ class PresetTableTests(unittest.TestCase):
             # Verified 2026-09-17; the doc URL for each sits next to the entry in presets.py.
             "minimax": ("https://api.minimax.io/v1", "MiniMax-M3"),
             "openai": ("https://api.openai.com/v1", "gpt-6-astra"),
-            "anthropic": ("https://api.anthropic.com/v1", "claude-opus-5"),
+            "anthropic": ("https://api.anthropic.com/v1", "claude-opus-5-5"),
             "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.1-pro-preview"),
         }
         for preset_id, (base_url, model) in expected.items():
@@ -396,7 +396,7 @@ class TierTableTests(unittest.TestCase):
             "openrouter": ("deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash",
                            "google/gemini-3.5-flash-lite"),
             "minimax": ("MiniMax-M3", "MiniMax-M2.7-highspeed", "google/gemini-3.8-flash"),
-            "anthropic": ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"),
+            "anthropic": ("claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"),
             "gemini": ("gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-3.5-flash-lite"),
         }
         for provider, (main, flash, lite) in expected.items():
@@ -589,14 +589,14 @@ class ModelCatalogTests(unittest.TestCase):
                     self.assertRegex(row["name"], self.NAME_RE)
                     self.assertEqual(row["label"], row["name"])
         listing = openrouter_catalog.parse_rows({"data": [
-            {"id": "openai/gpt-5.6-sol", "name": "OpenAI: GPT-5.6 Sol", "context_length": 400000},
+            {"id": "openai/gpt-6-sol", "name": "OpenAI: GPT-6 Sol", "context_length": 400000},
             {"id": "anthropic/claude-haiku-4.5", "name": "Anthropic: Claude Haiku 4.5"},
             {"id": "moonshotai/kimi-k3:batch", "name": "MoonshotAI: Kimi K3 (batch)"},
             {"id": "~openai/gpt-sol-latest", "name": "OpenAI: GPT Sol (latest)"},
             {"id": "z-ai/glm-5.3", "name": "Z.AI: GLM 5.3"},
         ]})
         self.assertEqual([row["name"] for row in listing],
-                         ["gpt-5.6-sol", "claude-haiku-4.5", "kimi-k3:batch", "gpt-sol-latest", "glm-5.3"])
+                         ["gpt-6-sol", "claude-haiku-4.5", "kimi-k3:batch", "gpt-sol-latest", "glm-5.3"])
         for row in listing:
             self.assertRegex(row["name"], self.NAME_RE)
             self.assertEqual(row["label"], row["name"])
@@ -608,13 +608,13 @@ class ModelCatalogTests(unittest.TestCase):
         self.assertEqual(P.model_name("anthropic", "claude-haiku-4-5"), "claude-haiku-4.5")
         self.assertEqual(P.model_name("anthropic", "claude-fable-5-1"), "claude-fable-5.1")
         self.assertEqual(P.model_name("minimax", "MiniMax-M3"), "minimax-m3")  # capitals never reach a person
-        self.assertEqual(P.model_name("openai", "gpt-5.6-sol"), "gpt-5.6-sol")
-        self.assertEqual(P.model_name("guest:codex", "gpt-5.6-sol"), "gpt-5.6-sol")
-        self.assertEqual(P.model_name("openrouter", "openai/gpt-5.6-sol"), "gpt-5.6-sol")
+        self.assertEqual(P.model_name("openai", "gpt-6-sol"), "gpt-6-sol")
+        self.assertEqual(P.model_name("guest:codex", "gpt-6-sol"), "gpt-6-sol")
+        self.assertEqual(P.model_name("openrouter", "openai/gpt-6-sol"), "gpt-6-sol")
         # A guest alias is named after the model it points at (owner, 2026-09-21).
         for alias, model in P.GUEST_MODEL_ALIASES.items():
             self.assertEqual(P.model_name("guest:claude", alias), P.model_name("anthropic", model), alias)
-        self.assertEqual(P.model_name("guest:claude", "opus"), "claude-opus-5")
+        self.assertEqual(P.model_name("guest:claude", "opus"), "claude-opus-5-5")
         self.assertEqual(P.model_name("guest:claude", "fable"), "claude-fable-5.1")
         # Relay Free's three are role names and keep them, hyphenated (design 3.5).
         self.assertEqual([r["name"] for r in P.catalog_rows("relay-free")],
@@ -626,7 +626,7 @@ class ModelCatalogTests(unittest.TestCase):
         # A moving alias loses OpenRouter's "~" and nothing else (design 3.4).
         self.assertEqual(P.derived_name("~openai/gpt-sol-latest"), "gpt-sol-latest")
         # A hand-typed id with capitals and spaces is still a name (design 3.13).
-        self.assertEqual(P.derived_name("  OpenAI/GPT 5.6 Sol "), "gpt-5.6-sol")
+        self.assertEqual(P.derived_name("  OpenAI/GPT 6 Sol "), "gpt-6-sol")
         # Nothing at all is nothing, not a crash.
         for junk in ("", "   ", None, 7):
             self.assertEqual(P.model_name("openai", junk), "")
@@ -648,7 +648,7 @@ class ModelCatalogTests(unittest.TestCase):
         # one entry — they used to be two hand-kept 44s. The numbers the GUI reads are unchanged.
         was = {("kimi-code", "k3"): 44, ("kimi", "kimi-k3"): 44, ("glm", "glm-5.3"): 45,
                ("glm-coding", "glm-5.3"): 45, ("openai", "gpt-6-astra"): 53,
-               ("openai", "gpt-5.6-sol"): 47, ("anthropic", "claude-opus-5"): 51,
+               ("openai", "gpt-6-sol"): 47, ("anthropic", "claude-opus-5-5"): 51,
                ("anthropic", "claude-fable-5-1"): 53, ("anthropic", "claude-sonnet-5"): None,
                ("relay-free", "relay-main"): None}
         for (preset_id, model_id), score in was.items():

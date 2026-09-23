@@ -4,7 +4,7 @@
 - **Component**: gui
 - **Milestone**: desktop-alpha
 - **Acceptance evidence**: a non-Claude model QA session on a real desktop runs the checklist and records it under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (GUI F1 worker), 2026-09-17
+- **Assignee**: implemented by Claude Opus 5.5 (GUI F1 worker), 2026-09-17
 - **Source**: owner decisions (intake batch 2) relayed by the coordinator; `docs/AGENT-SESSIONS-PROTOCOL.md` section 11
 - **Workstream**: keyboard
 

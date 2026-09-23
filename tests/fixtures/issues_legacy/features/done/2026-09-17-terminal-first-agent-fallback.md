@@ -6,7 +6,7 @@
 - **Workstream**: routing
 - **Acceptance evidence**: a model QA session from a non-Claude family drives the built app
   and records the checks below under `docs/qa_evidence/`
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session), 2026-09-16
+- **Assignee**: implemented by Claude Opus 5.5 (Claude Code session), 2026-09-16
 - **Source**: `issues/feature_intake.txt`, "try something as a terminal command first, if it fails, run it as the agent"
 
 ## Behavior as implemented

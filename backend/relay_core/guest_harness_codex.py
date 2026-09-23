@@ -1181,7 +1181,7 @@ def catalog_rows(entries, current: str = "") -> list[dict]:
     adapter and the worker's background scan (`guest_harness_provider`).
 
     `name` is `presets.model_name` of the id, not codex's `displayName`: the owner's picker says
-    `gpt-5.6-sol`, not "GPT-5.6-Sol" and not "Codex" (card #MDL1), and that is also what folds the
+    `gpt-6-sol`, not "GPT-6-Sol" and not "Codex" (card #MDL1), and that is also what folds the
     row into the one the OpenAI API and OpenRouter serve. `label` is the same string.
     """
     rows: list[dict] = []

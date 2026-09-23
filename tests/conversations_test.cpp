@@ -949,7 +949,7 @@ private slots:
                 QJsonObject{{QStringLiteral("session_id"), QStringLiteral("aaaaaaaa")},
                             {QStringLiteral("title"), QStringLiteral("On OpenRouter")},
                             {QStringLiteral("project"), QStringLiteral("relay")},
-                            {QStringLiteral("model"), QStringLiteral("openai/gpt-5.6-sol")},
+                            {QStringLiteral("model"), QStringLiteral("openai/gpt-6-sol")},
                             {QStringLiteral("updated"), 1000.0}},
                 // The worker names the one the derivation cannot reach: the Kimi Coding Plan's
                 // "k3" is Kimi K3, and only its catalog row says so.
@@ -963,9 +963,9 @@ private slots:
         for (QTreeWidgetItem *row : manager.findChildren<QTreeWidget *>().first()->findItems(
                  QString(), Qt::MatchContains | Qt::MatchRecursive))
             if (!row->text(3).isEmpty()) cells << row->text(3);
-        QVERIFY(cells.contains(QStringLiteral("gpt-5.6-sol")));    // no vendor prefix
+        QVERIFY(cells.contains(QStringLiteral("gpt-6-sol")));    // no vendor prefix
         QVERIFY(cells.contains(QStringLiteral("kimi-k3")));        // the coding plan's "k3"
-        QVERIFY(!cells.contains(QStringLiteral("openai/gpt-5.6-sol")));
+        QVERIFY(!cells.contains(QStringLiteral("openai/gpt-6-sol")));
         QVERIFY(!cells.contains(QStringLiteral("k3")));
         // The ⓘ panel names it the same way, and lists one model once however it was spelled.
         const QString html = relay::sessioninfo::renderInfo(
@@ -974,9 +974,9 @@ private slots:
                         {QStringLiteral("model"), QStringLiteral("MiniMax-M3")},
                         {QStringLiteral("models"), QJsonArray{QStringLiteral("k3"),
                                                               QStringLiteral("kimi-k3"),
-                                                              QStringLiteral("openai/gpt-5.6-sol")}},
+                                                              QStringLiteral("openai/gpt-6-sol")}},
                         {QStringLiteral("models_named"), QJsonArray{QStringLiteral("kimi-k3"),
-                                                                    QStringLiteral("gpt-5.6-sol")}}},
+                                                                    QStringLiteral("gpt-6-sol")}}},
             QDateTime::currentDateTime());
         QVERIFY(html.contains(QStringLiteral("minimax-m3")));
         // The provider beside it says which key is spending, and does not name the model again:
@@ -990,7 +990,7 @@ private slots:
         QVERIFY(withProvider.contains(QStringLiteral("z.ai · standard api (glm)")));
         QVERIFY(!withProvider.contains(QStringLiteral("z.ai · glm-5.3 · standard api")));
         QVERIFY(!html.contains(QStringLiteral("MiniMax-M3")));
-        QVERIFY(html.contains(QStringLiteral("kimi-k3, gpt-5.6-sol")));
+        QVERIFY(html.contains(QStringLiteral("kimi-k3, gpt-6-sol")));
     }
 
     void estimateSentenceAlwaysAsksFirst() {

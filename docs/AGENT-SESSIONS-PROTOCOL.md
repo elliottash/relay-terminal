@@ -40,10 +40,10 @@ after `configured`, before the queued first `ask` (#MDP1).
 a model carries the name beside the id — `configured` and `model_changed` carry `model_name`,
 `model_changed` also `in_flight_model_name`, and `model_applied` carries `model_name` and
 `from_model_name`. The id is what the API takes and never changes (`MiniMax-M3`, `k3`,
-`openai/gpt-5.6-sol`); the name is what a person reads and is lower-case, has no spaces and no
-vendor prefix (`minimax-m3`, `kimi-k3`, `gpt-5.6-sol`). The worker computes it once
+`openai/gpt-6-sol`); the name is what a person reads and is lower-case, has no spaces and no
+vendor prefix (`minimax-m3`, `kimi-k3`, `gpt-6-sol`). The worker computes it once
 (`presets.model_name(preset_id, model_id)`: the model's own catalog `name`, then a guest alias —
-Claude Code's `opus` is `claude-opus-5` — then the derivation), and it is the same string the
+Claude Code's `opus` is `claude-opus-5-5` — then the derivation), and it is the same string the
 `presets` answer puts on each catalog row as `name`. A surface prefers it and derives its own only
 for an older worker that sends none: the desktop through `Pane::modelNameFor`, the phone through
 `app/modelname.js`. It is never sent upstream.
@@ -1322,7 +1322,7 @@ buttons only apply one of them and send it back as `tiers`:
   same model twice, a blank score last and ties broken by the provider's `order` then the name.
   Two presets of one company (`glm` and `glm-coding`) are **one provider**, and the plan wins the
   tie, so the credit already paid for is spent first. A guest's models are scored by **name** like
-  anyone else's (`opus` is `claude-opus-5`, `gpt-6-astra` through codex scores what the OpenAI API's
+  anyone else's (`opus` is `claude-opus-5-5`, `gpt-6-astra` through codex scores what the OpenAI API's
   does) and a guest is offered for `high`, `main` and `flash` — the tiers a guest entry may serve
   (`roles.GUEST_TIERS`; `flash` since 2026-09-21, owner: "the worker should allow the harness for
   flash, and defaults should be the same across plans / apis / harnesses") — and never for `lite`,
@@ -1351,7 +1351,7 @@ buttons only apply one of them and send it back as `tiers`:
   live listing prices its completion at or under
   `presets.OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK` = **$3.00 per million tokens** (on 2026-09-20:
   `z-ai/glm-5.3` at $2.86 and `minimax/minimax-m3` at $1.20 are in; `moonshotai/kimi-k3` at $8.50,
-  `openai/gpt-6-astra` and `anthropic/claude-opus-5` are out). A twin whose price is unknown (no listing
+  `openai/gpt-6-astra` and `anthropic/claude-opus-5-5` are out). A twin whose price is unknown (no listing
   fetched yet) is left out of `main` and `high` and kept in `flash` and `lite`. A `flash` or `lite` twin
   says `low` like the rest of its list, unless the listing says the model takes no level. `lite`
   **starts with OpenRouter's own Lite pick** — the `## Provider picks` row in the ranking file,
@@ -1376,8 +1376,8 @@ sits next to the entry in `backend/relay_core/presets.py`):
 | `kimi-code` | `k3` | `kimi-for-coding-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
 | `openrouter` | `deepseek/deepseek-v4.1-flash` | `deepseek/deepseek-v4.1-flash` | `google/gemini-3.5-flash-lite` |
 | `minimax` | `MiniMax-M3` | `MiniMax-M2.7-highspeed` | `google/gemini-3.8-flash` on OpenRouter |
-| `anthropic` | `claude-opus-5` | `claude-sonnet-5` | `claude-haiku-4-5` |
-| `openai` | `gpt-6-astra` | `gpt-5.6-terra` | `gpt-5.6-luna` |
+| `anthropic` | `claude-opus-5-5` | `claude-sonnet-5` | `claude-haiku-4-5` |
+| `openai` | `gpt-6-astra` | `gpt-5.6-terra` | `gpt-6-luna` |
 | `gemini` | `gemini-3.1-pro-preview` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` |
 | custom / unknown endpoint | the pane's model | the pane's model | the pane's model |
 
@@ -1446,19 +1446,19 @@ list is the probe's (28, `{id, context_window, tools, thinking}`) and it serves 
 the GUI names that one entry off the row's own `model` with the same rule.
 
 **`name`: one model, one name** (v3.11, card `#MDP1`, 2026-09-21, owner: "model names should always
-be lowercase, no spaces … the picker should say gpt-5.6-sol, not Codex"). Every `models` row of
+be lowercase, no spaces … the picker should say gpt-6-sol, not Codex"). Every `models` row of
 every row that carries one — the built-in table, OpenRouter's live listing, a guest's own list
 (29.3) and a custom provider's — carries `name`: lower-case, no spaces, no vendor prefix, and
 **never sent on the wire** (the API still gets `MiniMax-M3`). `presets.model_name(preset_id,
 model_id)` computes it, in order: the `name` its MODEL_CATALOG row carries, for the three ids that
 cannot be derived (`kimi-code`'s `k3` is `kimi-k3`; Anthropic writes `claude-haiku-4-5` and
 `claude-fable-5-1` where OpenRouter writes the version with a dot); then a guest alias through
-`presets.GUEST_MODEL_ALIASES`, so Claude Code's `opus` is `claude-opus-5`; else the id with
+`presets.GUEST_MODEL_ALIASES`, so Claude Code's `opus` is `claude-opus-5-5`; else the id with
 everything up to the last `/` and a leading `~` removed, lower-cased, whitespace turned into `-`.
 Serving variants keep their own names (`-highspeed`, `:batch`, `k3-256k`, `-pro`) because they are
 different models to the person picking one, and Relay Free's three are `relay-main` / `relay-flash`
 / `relay-lite`. `label` is the same string on every row, so a GUI or a phone that predates `name`
-shows the name too; the prettified spellings ("glm-5.3 flash", "GPT-5.6-Sol") are gone. A GUI
+shows the name too; the prettified spellings ("glm-5.3 flash", "GPT-6-Sol") are gone. A GUI
 reading a row from an older worker derives the same name off the id (`relay::models::nameOf`), so
 the two fold together. `presets.INTELLIGENCE` is keyed by the name rather than the id, which is
 what stops one model being scored twice by hand. The point of all of it is the picker: it shows one
@@ -1504,7 +1504,7 @@ has one, mapped into this provider's own vocabulary, and otherwise Main is the p
 default, High the level a plan turn uses (`xhigh`, not `ultra`, on a codex model), and Flash and
 Lite the lowest level. A tier is `null` where neither the file nor the model states a level there,
 and the GUI then stores no level at all — the model's own default applies at run time. The GUI takes the worker's answer rather than the top of `efforts` because
-Main's and High's rules are not readable off a row (owner, 2026-09-21: a hand-added gpt-5.6-sol
+Main's and High's rules are not readable off a row (owner, 2026-09-21: a hand-added gpt-6-sol
 "defaulted effort to ultra reasoning").
 
 The event also carries `tier_list_defaults`, the two default fillings of Options › Models' five lists
@@ -1577,7 +1577,7 @@ and the model-switch ceiling all read the same value.
 |---|---|---|
 | GLM-5.3 (`glm`, `glm-coding`) | 131,072 | https://docs.z.ai/guides/llm/glm-5.3 |
 | Kimi K3 (`kimi`, `kimi-code`) | 131,072 | https://platform.kimi.ai/docs/guide/kimi-k3-quickstart |
-| Claude Opus 5 (`anthropic`) | 131,072 | https://platform.claude.com/docs/en/models/opus-5/overview |
+| Claude Opus 5.5 (`anthropic`) | 131,072 | https://platform.claude.com/docs/en/models/opus-5-5/overview |
 | MiniMax M3 (`minimax`) | 131,072 | https://platform.minimax.io/docs/guides/text-generation |
 | GPT-6 Astra (`openai`) | 128,000 | https://developers.openai.com/api/docs/models/gpt-6-astra |
 | Gemini 3.1 Pro (`gemini`) | **65,536** | https://ai.google.dev/gemini-api/docs/gemini-3 |
@@ -1949,7 +1949,7 @@ Kimi Coding Plan's `k3` is `kimi-k3`) is not re-derived, wrongly, in the GUI. `s
 providers served is one entry in "Models used".
 
 `facets.models` holds model **names**, not the ids history recorded (card #MDP1, rule 1): the rows
-written as `k3` and as `kimi-k3` are one entry, and `openai/gpt-5.6-sol` is `gpt-5.6-sol`. The
+written as `k3` and as `kimi-k3` are one entry, and `openai/gpt-6-sol` is `gpt-6-sol`. The
 stored ids are untouched — nothing is migrated — and the `model` filter and the `model:` operator
 match either, so picking the one menu entry selects every row of that model and a query saved with
 a raw id still works.
@@ -3052,7 +3052,7 @@ Every agent write (and every write from the pane) emits, before its `board_chang
 
 ```json
 {"event": "board_activity", "write_id": "w-1a0b", "id": "K7Q2", "action": "move",
- "actor": "agent", "model": "anthropic/claude-opus-5", "pane": "2", "turn_id": "t-14",
+ "actor": "agent", "model": "anthropic/claude-opus-5-5", "pane": "2", "turn_id": "t-14",
  "summary": "In progress to Needs QA (LLM)", "path": "issues/features/x.md", "undo_seconds": 30}
 ```
 
@@ -3520,13 +3520,13 @@ and this machine's availability probe. The GUI computes none of it.
 the aggregator that routed to it: OpenRouter serving `deepseek/deepseek-v4.1-flash` signs
 `deepseek/deepseek-v4.1-flash`, a local endpoint signs `local/<model>`, and Relay Free signs the
 route it was asked for, `relay-free/relay-main`. A guest CLI signs the model it actually ran *and*
-the harness that ran it — `anthropic/claude-opus-5-20260514 via claude-code`,
+the harness that ran it — `anthropic/claude-opus-5-5-20260514 via claude-code`,
 `openai/gpt-5.6-codex via codex` (owner, 2026-09-19: *"lets try to record the model used"*) — and
 falls back to `anthropic/claude-code` / `openai/codex` when the model cannot be seen. The model
 comes from the harness, which reports it on start and keeps it current in the pane's
 `config.model` (29.3); `family()` reads the ` via <harness>` suffix and uses the harness's vendor
 when the model id itself is unknown. Free text in parentheses after the slug is allowed and
-ignored, so the older hand-typed `Claude Opus 5 (pane 2)` still reads as `anthropic`.
+ignored, so the older hand-typed `Claude Opus 5.5 (pane 2)` still reads as `anthropic`.
 
 The **worker writes it**, from its own preset and model (`ToolContext.preset`/`.model`, set each
 turn by `Agent.sign_board`): `board_move_card` stamps `implemented_by` when a card enters
@@ -3582,7 +3582,7 @@ every work card that has an `implemented_by`; nothing else does, and it is **not
 it costs a PATH and keyring probe per card, and a board has hundreds of rows.
 
 ```json
-"qa": {"implemented_by": "anthropic/claude-opus-5", "implementer_family": "anthropic",
+"qa": {"implemented_by": "anthropic/claude-opus-5-5", "implementer_family": "anthropic",
        "recommended": {"family": "openai", "label": "Codex", "runner": "guest:codex",
                        "model": "codex", "available": "installed", "same_lineage": false,
                        "why": "first available verifier outside the implementer's lineage (anthropic)"},
@@ -3593,7 +3593,7 @@ it costs a PATH and keyring probe per card, and a board has hundreds of rows.
        "unavailable": [{"family": "kimi", "label": "Kimi", "why": "no key"},
                        {"family": "relay-free", "label": "Relay Free",
                         "why": "verifying is not available on Relay Free"}],
-       "commits": [{"hash": "1a2b3c4", "trailer": "anthropic/claude-opus-5", "agrees": true}],
+       "commits": [{"hash": "1a2b3c4", "trailer": "anthropic/claude-opus-5-5", "agrees": true}],
        "note": "…only when there is no verifier at all, or the recommendation is same-lineage or local…",
        "verified_by": "glm/glm-5.3", "verifier_family": "glm"}
 ```

@@ -49,10 +49,10 @@ QJsonArray presets() {
                        {QStringLiteral("model"), QStringLiteral("glm-5.3")}, {QStringLiteral("has_stored_key"), true},
                        {QStringLiteral("models"), QJsonArray{model(QStringLiteral("glm-5.3"), QStringLiteral("glm-5.3"), QStringLiteral("main"), {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")}, 45),
                                                              model(QStringLiteral("glm-5.3-flash"), QStringLiteral("glm-5.3 flash"), QStringLiteral("flash"), {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")}, 30)}}};
-    out << QJsonObject{{QStringLiteral("id"), QStringLiteral("anthropic")}, {QStringLiteral("label"), QStringLiteral("anthropic · claude opus 5")},
+    out << QJsonObject{{QStringLiteral("id"), QStringLiteral("anthropic")}, {QStringLiteral("label"), QStringLiteral("anthropic · claude opus 5.5")},
                        {QStringLiteral("provider"), QStringLiteral("anthropic (claude)")}, {QStringLiteral("plan"), QStringLiteral("pay-as-you-go")},
-                       {QStringLiteral("model"), QStringLiteral("claude-opus-5")}, {QStringLiteral("has_stored_key"), true},
-                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("claude-opus-5"), QStringLiteral("claude opus 5"), QStringLiteral("main"), {}, 51)}}};
+                       {QStringLiteral("model"), QStringLiteral("claude-opus-5-5")}, {QStringLiteral("has_stored_key"), true},
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("claude-opus-5-5"), QStringLiteral("claude opus 5.5"), QStringLiteral("main"), {}, 51)}}};
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("guest:claude")}, {QStringLiteral("label"), QStringLiteral("Claude Code")},
                        {QStringLiteral("provider"), QStringLiteral("Claude Code")}, {QStringLiteral("model"), QString()},
                        {QStringLiteral("harness"), true},
@@ -67,7 +67,7 @@ QJsonArray presets() {
     return out;
 }
 
-// The same catalog plus gpt-5.6-sol from three providers, which is the design's own example of one
+// The same catalog plus gpt-6-sol from three providers, which is the design's own example of one
 // model with several ways in (rule 2): codex the harness, the OpenAI API, and OpenRouter's slug.
 QJsonArray solPresets() {
     QJsonArray out = presets();
@@ -76,16 +76,16 @@ QJsonArray solPresets() {
                        {QStringLiteral("harness"), true},
                        // Codex's own words (card #MDL1, 2026-09-21): it says xhigh where the API row says max.
                        {QStringLiteral("models"), QJsonArray{QJsonObject{
-                           {QStringLiteral("id"), QStringLiteral("gpt-5.6-sol")},
+                           {QStringLiteral("id"), QStringLiteral("gpt-6-sol")},
                            {QStringLiteral("efforts"), QJsonArray{QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("xhigh")}}}}}};
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openai")}, {QStringLiteral("label"), QStringLiteral("openai")},
                        {QStringLiteral("provider"), QStringLiteral("openai")}, {QStringLiteral("plan"), QStringLiteral("pay-as-you-go")},
-                       {QStringLiteral("model"), QStringLiteral("gpt-5.6-sol")}, {QStringLiteral("has_stored_key"), true},
-                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QStringLiteral("main"), {QStringLiteral("low"), QStringLiteral("high")}, 60)}}};
+                       {QStringLiteral("model"), QStringLiteral("gpt-6-sol")}, {QStringLiteral("has_stored_key"), true},
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QStringLiteral("main"), {QStringLiteral("low"), QStringLiteral("high")}, 60)}}};
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openrouter")}, {QStringLiteral("label"), QStringLiteral("openrouter")},
                        {QStringLiteral("provider"), QStringLiteral("openrouter")}, {QStringLiteral("has_stored_key"), true},
-                       {QStringLiteral("model"), QStringLiteral("openai/gpt-5.6-sol")},
-                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("openai/gpt-5.6-sol"), QStringLiteral("openai: gpt-5.6 sol"), QString(), {QStringLiteral("low"), QStringLiteral("high")}, 60)}}};
+                       {QStringLiteral("model"), QStringLiteral("openai/gpt-6-sol")},
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("openai/gpt-6-sol"), QStringLiteral("openai: gpt-6 sol"), QString(), {QStringLiteral("low"), QStringLiteral("high")}, 60)}}};
     return out;
 }
 
@@ -111,7 +111,7 @@ QJsonArray codexPresets() {
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("guest:codex")}, {QStringLiteral("label"), QStringLiteral("Codex")},
                        {QStringLiteral("provider"), QStringLiteral("codex")}, {QStringLiteral("model"), QString()},
                        {QStringLiteral("harness"), true},
-                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(),
+                       {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QString(),
                                                                    {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
                                                                     QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")})}}};
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("openai")}, {QStringLiteral("label"), QStringLiteral("openai")},
@@ -232,7 +232,7 @@ private Q_SLOTS:
         // main model, so glm's flash row would no longer sit second.
         QSettings().setValue(QStringLiteral("models/priority"),
                              QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("glm-coding|glm-5.3-flash"),
-                                         QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus")});
+                                         QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("guest:claude|opus")});
     }
 
     // ----- the tabs -----------------------------------------------------------------------------
@@ -300,10 +300,10 @@ private Q_SLOTS:
 
     void aTierTabIsTheListNumberedInOrderAndRankOneSaysWhatItIs() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QStringLiteral("high")}});
         ModelPicker picker(context());
-        QCOMPARE(rowKeys(picker.list()), (QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("anthropic|claude-opus-5"),
+        QCOMPARE(rowKeys(picker.list()), (QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("anthropic|claude-opus-5-5"),
                                                       QStringLiteral("guest:claude|opus")}));
         QTreeWidgetItem *first = picker.list()->topLevelItem(0);
         QCOMPARE(first->text(ColRank), QStringLiteral("1"));
@@ -332,7 +332,7 @@ private Q_SLOTS:
     void anUnusableOrExhaustedRankIsGreyedInPlaceWithTheReason() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("gemini|gemini-3.8-flash"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("kimi|kimi-k3"), QString()}});
         ModelPicker::Context ctx = context();
         ctx.now = QDateTime(QDate(2026, 9, 20), QTime(9, 0)).toSecsSinceEpoch();
@@ -357,24 +357,24 @@ private Q_SLOTS:
         QTreeWidgetItem *live = picker.list()->topLevelItem(0);
         QVERIFY(live->foreground(ColModel).style() == Qt::NoBrush);
         // …and the user may still insist on the spent one.
-        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         picker.use();
         QVERIFY(picker.pick().accepted);
-        QCOMPARE(picker.pick().key, QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(picker.pick().key, QStringLiteral("anthropic|claude-opus-5-5"));
     }
 
     // ----- prioritizing -----------------------------------------------------------------------------
 
     void altDownMovesARowAndTheListRemembers() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         ModelPicker picker(context());
         int told = 0;
         picker.onListsChanged = [&told] { ++told; };
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
         QTest::keyClick(picker.filter(), Qt::Key_Down, Qt::AltModifier);
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("glm-coding|glm-5.3"),
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("glm-coding|glm-5.3"),
                                                                 QStringLiteral("guest:claude|opus")}));
         QCOMPARE(told, 1);
         // The row moved with it, keeps its level, and is still the selected one.
@@ -393,17 +393,17 @@ private Q_SLOTS:
 
     void deleteTakesARowOutAndCtrlZPutsItBack() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()}});
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         ModelPicker picker(context());
         int told = 0;
         picker.onListsChanged = [&told] { ++told; };
-        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QTest::keyClick(picker.filter(), Qt::Key_Delete);
         QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("glm-coding|glm-5.3")});
         QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("glm-coding|glm-5.3")});
         QCOMPARE(told, 1);
         QTest::keyClick(picker.filter(), Qt::Key_Z, Qt::ControlModifier);
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("anthropic|claude-opus-5")}));
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("anthropic|claude-opus-5-5")}));
         QCOMPARE(rowKeys(picker.list()).size(), 2);
         QCOMPARE(picker.list()->topLevelItem(0)->text(ColReasoning), QStringLiteral("max"));   // the level came back too
         QCOMPARE(told, 2);
@@ -424,7 +424,7 @@ private Q_SLOTS:
         picker.onListsChanged = [&told] { ++told; };
         picker.filter()->setText(QStringLiteral("opus"));
         // The list's own matches first, then the rule, then the rest of the catalog, folded.
-        QCOMPARE(keys(picker.list()), (QStringList{QStringLiteral("[not in this list]"), QStringLiteral("anthropic|claude-opus-5"),
+        QCOMPARE(keys(picker.list()), (QStringList{QStringLiteral("[not in this list]"), QStringLiteral("anthropic|claude-opus-5-5"),
                                                    QStringLiteral("guest:claude|opus")}));
         QVERIFY(picker.list()->topLevelItem(1)->text(ColRank).contains(QStringLiteral("+ add")));
         picker.selectKey(QStringLiteral("guest:claude|opus"));
@@ -441,7 +441,7 @@ private Q_SLOTS:
         // rule Options › Models' "+ add a model…" applies.
         picker.setTier(QStringLiteral("lite"));
         picker.filter()->setText(QStringLiteral("opus"));
-        QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("anthropic|claude-opus-5-5")});
         // Nothing at all matches: the rule says so instead of an empty box.
         picker.filter()->setText(QStringLiteral("zzz"));
         QCOMPARE(keys(picker.list()), QStringList{QStringLiteral("[no model matches “zzz”]")});
@@ -476,7 +476,7 @@ private Q_SLOTS:
 
     void aDragRewritesTheListInTheOrderTheRowsNowRead() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("x")},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("x")},
                                          {QStringLiteral("guest:claude|opus"), QStringLiteral("high")}});
         ModelPicker picker(context());
         int told = 0;
@@ -485,7 +485,7 @@ private Q_SLOTS:
         QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(0);
         picker.list()->insertTopLevelItem(2, moved);
         picker.commitDragOrder();
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus"),
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("guest:claude|opus"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         QCOMPARE(curation::tierList(QStringLiteral("main")).at(1).effort, QStringLiteral("high"));   // levels travel with the rows
         QCOMPARE(told, 1);
@@ -496,7 +496,7 @@ private Q_SLOTS:
     // something.
     void theMoveButtonsMoveARowAndAreDisabledAtTheEnds() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         ModelPicker picker(context());
         int told = 0;
@@ -527,7 +527,7 @@ private Q_SLOTS:
     // target list at the dropped rank. (It used to snap back in silence, which is what "the rank
     // can't be changed" was, #YX8Q.)
     void aDragAcrossASectionHeaderMovesTheModelBetweenLists() {
-        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         ModelPicker::Context ctx = context();
@@ -540,14 +540,14 @@ private Q_SLOTS:
         QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(3);
         picker.list()->insertTopLevelItem(2, moved);
         picker.commitDragOrder();
-        QCOMPARE(listKeys(QStringLiteral("high")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+        QCOMPARE(listKeys(QStringLiteral("high")), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("guest:claude|opus")});
         QCOMPARE(curation::tierList(QStringLiteral("high")).at(1).effort, QStringLiteral("max"));   // the level travels across
         QCOMPARE(told, 1);
         // Both lists redraw from storage: the moved row sits in the high section now.
         QCOMPARE(pageRows(picker.list()), (QStringList{
-            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("glm-coding|glm-5.3"),
+            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("glm-coding|glm-5.3"),
             QStringLiteral("#main"), QStringLiteral("guest:claude|opus"),
             QStringLiteral("#flash"), QStringLiteral("[nothing in flash — type a model's name, then ctrl+enter adds it here]")}));
     }
@@ -574,7 +574,7 @@ private Q_SLOTS:
     // in silence (#YX8Q).
     void aDropWithRowsFilteredAwayIsRefusedAndSaysWhy() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         ModelPicker picker(context());
         int told = 0;
@@ -584,7 +584,7 @@ private Q_SLOTS:
         picker.list()->insertTopLevelItem(1, moved);   // among the "not in this list" rows now
         picker.commitDragOrder();
         QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("glm-coding|glm-5.3"),
-                                                                QStringLiteral("anthropic|claude-opus-5"),
+                                                                QStringLiteral("anthropic|claude-opus-5-5"),
                                                                 QStringLiteral("guest:claude|opus")}));
         QCOMPARE(told, 0);
         QCOMPARE(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text(),
@@ -612,11 +612,11 @@ private Q_SLOTS:
     // sections. remove the lite section."
 
     void thePrioritiesPageIsOneSectionPerClassAndNeverLite() {
-        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
-        setList(QStringLiteral("lite"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("lite"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         ModelPicker::Context ctx = context();
         ctx.tier = ModelPicker::classesTier();
         ModelPicker picker(ctx);
@@ -625,11 +625,11 @@ private Q_SLOTS:
         QCOMPARE(picker.sectionTiers(), (QStringList{QStringLiteral("high"), QStringLiteral("main"),
                                                      QStringLiteral("flash")}));
         QCOMPARE(pageRows(picker.list()), (QStringList{
-            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5"),
+            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5-5"),
             QStringLiteral("#main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("guest:claude|opus"),
             QStringLiteral("#flash"), QStringLiteral("glm-coding|glm-5.3-flash")}));
         // The lite list is untouched underneath: only the page stopped drawing it.
-        QCOMPARE(listKeys(QStringLiteral("lite")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(listKeys(QStringLiteral("lite")), QStringList{QStringLiteral("anthropic|claude-opus-5-5")});
         // Each header carries its class's "show this class in the box" switch and a one-line note.
         QTreeWidgetItem *mainHead = classHeader(picker.list(), QStringLiteral("main"));
         QVERIFY(mainHead != nullptr);
@@ -651,13 +651,13 @@ private Q_SLOTS:
 
     // "↑/↓ move across sections": the one key that has to cross a header, and it steps over them.
     void upAndDownWalkTheRowsAcrossTheSections() {
-        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
         ModelPicker::Context ctx = context();
         ctx.tier = ModelPicker::classesTier();
         ModelPicker picker(ctx);
-        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QCOMPARE(picker.currentClass(), QStringLiteral("high"));
         QTest::keyClick(picker.list(), Qt::Key_Down);
         QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
@@ -671,13 +671,13 @@ private Q_SLOTS:
         QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
         // …and from the filter line, which forwards them.
         QTest::keyClick(picker.filter(), Qt::Key_Up);
-        QCOMPARE(picker.selectedKey(), QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(picker.selectedKey(), QStringLiteral("anthropic|claude-opus-5-5"));
     }
 
     // Alt+↑/↓ reorders **inside** a section and stops at its edge: pushing the last flash row down
     // must not drop the model into another class.
     void altUpAndDownMoveARowInsideItsOwnSection() {
-        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
@@ -692,7 +692,7 @@ private Q_SLOTS:
         QTest::keyClick(picker.list(), Qt::Key_Up, Qt::AltModifier);
         QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("guest:claude|opus"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
-        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("anthropic|claude-opus-5-5")});
         // The only flash row cannot leave flash either.
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3-flash"));
         QTest::keyClick(picker.list(), Qt::Key_Down, Qt::AltModifier);
@@ -709,41 +709,41 @@ private Q_SLOTS:
     // own "not in <class>" block, so the highlight's section is the list it lands in and there is
     // no fourth place with a rule of its own.
     void ctrlEnterAddsIntoTheSectionTheHighlightIsIn() {
-        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("high"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
         ModelPicker::Context ctx = context();
         ctx.tier = ModelPicker::classesTier();
         ModelPicker picker(ctx);
         picker.filter()->setText(QStringLiteral("opus"));
-        // claude-opus-5 is already in high, so high shows it as a rank; main and flash offer it.
+        // claude-opus-5-5 is already in high, so high shows it as a rank; main and flash offer it.
         QCOMPARE(pageRows(picker.list()), (QStringList{
-            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5"),
+            QStringLiteral("#high"), QStringLiteral("anthropic|claude-opus-5-5"),
             QStringLiteral("[not in high — ctrl+enter adds it here]"), QStringLiteral("guest:claude|opus"),
             QStringLiteral("#main"), QStringLiteral("[not in main — ctrl+enter adds it here]"),
-            QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus"),
+            QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("guest:claude|opus"),
             QStringLiteral("#flash"), QStringLiteral("[not in flash — ctrl+enter adds it here]"),
-            QStringLiteral("anthropic|claude-opus-5")}));
+            QStringLiteral("anthropic|claude-opus-5-5")}));
         // A guest harness is offered where it can be a whole agent — high and main — and nowhere
         // else, so flash's block holds the API row alone. The rule is `addableToTier`, per section.
         QVERIFY(rowFor(picker.list(), QStringLiteral("guest:claude|opus"), QStringLiteral("flash")) == nullptr);
         // The flash one: the row under the flash header, and ctrl+enter puts it in flash.
-        QTreeWidgetItem *offered = rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("flash"));
+        QTreeWidgetItem *offered = rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("flash"));
         QVERIFY(offered != nullptr);
         picker.list()->setCurrentItem(offered);
         QCOMPARE(picker.currentClass(), QStringLiteral("flash"));
         QTest::keyClick(picker.list(), Qt::Key_Return, Qt::ControlModifier);
         QCOMPARE(listKeys(QStringLiteral("flash")), (QStringList{QStringLiteral("glm-coding|glm-5.3-flash"),
-                                                                 QStringLiteral("anthropic|claude-opus-5")}));
+                                                                 QStringLiteral("anthropic|claude-opus-5-5")}));
         QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("glm-coding|glm-5.3")});
-        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(listKeys(QStringLiteral("high")), QStringList{QStringLiteral("anthropic|claude-opus-5-5")});
     }
 
     // Each section's header tick is that class's switch and the ticks under it are its cutoff —
     // one column, one question, read down. Two classes on one page keep their own answers.
     void everySectionCarriesItsOwnSwitchAndCutoff() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
         ModelPicker::Context ctx = context();
@@ -778,7 +778,7 @@ private Q_SLOTS:
     // this test used to assert is what read as "the rank can't be changed", #YX8Q).
     void aDragInsideASectionRewritesItAndACrossingDragMovesItThere() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("high")}});
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("high")}});
         setList(QStringLiteral("flash"), {{QStringLiteral("glm-coding|glm-5.3-flash"), QString()}});
         ModelPicker::Context ctx = context();
         ctx.tier = ModelPicker::classesTier();
@@ -787,7 +787,7 @@ private Q_SLOTS:
         QTreeWidgetItem *moved = picker.list()->takeTopLevelItem(mainAt);
         picker.list()->insertTopLevelItem(mainAt + 1, moved);
         picker.commitDragOrder();
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("high"));
         // Now drag main's last row past the flash header: it leaves main and lands at the end of
@@ -796,7 +796,7 @@ private Q_SLOTS:
         QTreeWidgetItem *crossed = picker.list()->takeTopLevelItem(last);
         picker.list()->addTopLevelItem(crossed);
         picker.commitDragOrder();
-        QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("anthropic|claude-opus-5-5")});
         QCOMPARE(listKeys(QStringLiteral("flash")), (QStringList{QStringLiteral("glm-coding|glm-5.3-flash"),
                                                                  QStringLiteral("glm-coding|glm-5.3")}));
     }
@@ -824,13 +824,13 @@ private Q_SLOTS:
     void theAllTabShowsOneRowPerModelAndRightPicksTheProvider() {
         ModelPicker picker(solContext(QStringLiteral("glm-coding|glm-5.3")));
         QCOMPARE(picker.tier(), QStringLiteral("all"));
-        // gpt-5.6-sol is served by codex, the OpenAI API and OpenRouter: one row, "+2" beside it.
+        // gpt-6-sol is served by codex, the OpenAI API and OpenRouter: one row, "+2" beside it.
         const QStringList rows = rowKeys(picker.list());
-        QCOMPARE(rows.count(QStringLiteral("openai|gpt-5.6-sol")) + rows.count(QStringLiteral("guest:codex|gpt-5.6-sol"))
-                     + rows.count(QStringLiteral("openrouter|openai/gpt-5.6-sol")), 1);
-        picker.selectKey(QStringLiteral("openai|gpt-5.6-sol"));
+        QCOMPARE(rows.count(QStringLiteral("openai|gpt-6-sol")) + rows.count(QStringLiteral("guest:codex|gpt-6-sol"))
+                     + rows.count(QStringLiteral("openrouter|openai/gpt-6-sol")), 1);
+        picker.selectKey(QStringLiteral("openai|gpt-6-sol"));
         QTreeWidgetItem *sol = picker.list()->currentItem();
-        QCOMPARE(sol->text(ColModel), QStringLiteral("gpt-5.6-sol"));
+        QCOMPARE(sol->text(ColModel), QStringLiteral("gpt-6-sol"));
         QVERIFY(sol->text(ColVia).endsWith(QStringLiteral("+2")));
         QCOMPARE(picker.viaList()->count(), 3);
         // → opens the providers; choosing one is what this row will run, and the levels follow it
@@ -840,18 +840,18 @@ private Q_SLOTS:
         QCOMPARE(picker.selectedKey(), chosen);
         QVERIFY(sol->text(ColVia).startsWith(picker.viaList()->currentItem()->text()));
         for (int i = 0; i < picker.viaList()->count(); ++i)
-            if (picker.viaList()->item(i)->data(Qt::UserRole).toString() == QStringLiteral("guest:codex|gpt-5.6-sol")) {
+            if (picker.viaList()->item(i)->data(Qt::UserRole).toString() == QStringLiteral("guest:codex|gpt-6-sol")) {
                 picker.viaList()->setCurrentRow(i);
                 break;
             }
-        QCOMPARE(picker.selectedKey(), QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QCOMPARE(picker.selectedKey(), QStringLiteral("guest:codex|gpt-6-sol"));
         QCOMPARE(picker.levelList()->count(), 3);
         QCOMPARE(picker.levelList()->item(2)->text(), QStringLiteral("xhigh"));   // the provider's word
         picker.use();
-        QCOMPARE(picker.pick().key, QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QCOMPARE(picker.pick().key, QStringLiteral("guest:codex|gpt-6-sol"));
         // A row with one provider only has no "via" list to open.
         ModelPicker plain(solContext());
-        plain.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        plain.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QVERIFY(plain.viaList()->count() <= 1);
     }
 
@@ -861,12 +861,12 @@ private Q_SLOTS:
     // — and no longer puts a block of rows above the providers.
     void theAvailableTabIsFavoritesThenProvidersAlphabetically() {
         curation::toggleFavorite(QStringLiteral("guest:claude|opus"));
-        curation::noteUse(QStringLiteral("anthropic|claude-opus-5"));
+        curation::noteUse(QStringLiteral("anthropic|claude-opus-5-5"));
         ModelPicker::Context ctx = context();
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
         QCOMPARE(keys(picker.list()), (QStringList{QStringLiteral("[favorites]"), QStringLiteral("guest:claude|opus"),
-                                                   QStringLiteral("[anthropic (claude)]"), QStringLiteral("anthropic|claude-opus-5"),
+                                                   QStringLiteral("[anthropic (claude)]"), QStringLiteral("anthropic|claude-opus-5-5"),
                                                    QStringLiteral("[z.ai (glm)]"), QStringLiteral("glm-coding|glm-5.3"),
                                                    QStringLiteral("glm-coding|glm-5.3-flash"),
                                                    QStringLiteral("[+ add a model by id…]")}));
@@ -875,13 +875,13 @@ private Q_SLOTS:
         picker.filter()->setText(QStringLiteral("flash"));
         QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("glm-coding|glm-5.3-flash")});
         picker.filter()->setText(QStringLiteral("claude"));
-        QCOMPARE(rowKeys(picker.list()), (QStringList{QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("guest:claude|opus")}));
+        QCOMPARE(rowKeys(picker.list()), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("guest:claude|opus")}));
         picker.filter()->clear();
         QCOMPARE(keys(picker.list()).size(), 8);   // …and "+ add a model by id…" at the end
         const int intelligence = picker.sortBox()->findData(QStringLiteral("intelligence"));
         picker.sortBox()->setCurrentIndex(intelligence);
         emit picker.sortBox()->activated(intelligence);
-        QCOMPARE(rowKeys(picker.list()).first(), QStringLiteral("anthropic|claude-opus-5"));   // 51 beats 45
+        QCOMPARE(rowKeys(picker.list()).first(), QStringLiteral("anthropic|claude-opus-5-5"));   // 51 beats 45
         QCOMPARE(curation::sort(), Sort::Intelligence);
         ModelPicker again(ctx);
         QCOMPARE(again.sortBox()->currentData().toString(), QStringLiteral("intelligence"));
@@ -904,7 +904,7 @@ private Q_SLOTS:
         picker.levelList()->setCurrentRow(2);
         QCOMPARE(picker.selectedEffort(), QStringLiteral("max"));                 // a separate pick
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("low"));   // and no list edit
-        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QCOMPARE(picker.selectedEffort(), QString());                             // no knob
         QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().isEmpty());
         picker.selectKey(QStringLiteral("guest:claude|opus"));
@@ -982,7 +982,7 @@ private Q_SLOTS:
 
     void levelsAreTheModelsOwnListInTheProvidersWords() {
         curation::addToTier(QStringLiteral("main"), QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"));
-        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"), QStringLiteral("max"));
+        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("max"));
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
         picker.selectKey(QStringLiteral("glm-coding|glm-5.3"));
@@ -996,11 +996,11 @@ private Q_SLOTS:
 
     // "so xhigh shows up for codex for example": six rows, in codex's order, `ultra` included.
     void aCodexRowListsXhighAndUltra() {
-        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"));
+        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5-5"));
         ctx.catalog = catalogFrom(codexPresets());
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
-        picker.selectKey(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        picker.selectKey(QStringLiteral("guest:codex|gpt-6-sol"));
         QStringList offered;
         for (int i = 0; i < picker.levelList()->count(); ++i) offered << picker.levelList()->item(i)->text();
         QCOMPARE(offered, (QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
@@ -1012,7 +1012,7 @@ private Q_SLOTS:
     // "for no knob models, the effort box should be grayed out. same for relay free." In the
     // dialog that is an empty level list with the reason in it, and nothing to pick.
     void aRelayFreeRowListsNothingAndSaysWhy() {
-        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5"));
+        ModelPicker::Context ctx = context(QStringLiteral("anthropic|claude-opus-5-5"));
         ctx.catalog = catalogFrom(codexPresets());
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
@@ -1022,15 +1022,15 @@ private Q_SLOTS:
         QVERIFY(!(picker.levelList()->item(0)->flags() & Qt::ItemIsSelectable));
         QVERIFY(picker.selectedEffort().isEmpty());
         // A model with no knob at all says the other half of the same rule, naming the model.
-        picker.selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QCOMPARE(picker.levelList()->count(), 1);
-        QCOMPARE(picker.levelList()->item(0)->text(), QStringLiteral("claude-opus-5 has no reasoning level"));
+        QCOMPARE(picker.levelList()->item(0)->text(), QStringLiteral("claude-opus-5-5 has no reasoning level"));
     }
 
     // Rule 3: a level the row does not take is preselected as the nearest one it does — the level
     // the pick would really run at — rather than being dropped.
     void aLevelTheRowDoesNotTakeSnapsInThePreselect() {
-        ModelPicker::Context ctx = context(QStringLiteral("guest:codex|gpt-5.6-sol"), QStringLiteral("xhigh"));
+        ModelPicker::Context ctx = context(QStringLiteral("guest:codex|gpt-6-sol"), QStringLiteral("xhigh"));
         ctx.catalog = catalogFrom(codexPresets());
         ctx.tier = QStringLiteral("all");
         ModelPicker picker(ctx);
@@ -1047,11 +1047,11 @@ private Q_SLOTS:
         // The live lists and the current profile are one thing, so "admin work" is named first and
         // *then* given its own list — editing while "ai work" was current would have edited it.
         curation::saveProfile(QStringLiteral("admin work"));
-        setList(QStringLiteral("main"), {{QStringLiteral("anthropic|claude-opus-5"), QString()}});
+        setList(QStringLiteral("main"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         ModelPicker picker(context());
         QVERIFY(picker.profileBox() != nullptr);
         QCOMPARE(picker.profileBox()->currentData().toString(), QStringLiteral("admin work"));
-        QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("anthropic|claude-opus-5")});
+        QCOMPARE(rowKeys(picker.list()), QStringList{QStringLiteral("anthropic|claude-opus-5-5")});
         int told = 0;
         picker.onListsChanged = [&told] { ++told; };
         const int other = picker.profileBox()->findData(QStringLiteral("ai work"));
@@ -1083,7 +1083,7 @@ private Q_SLOTS:
     void theShowInBoxColumnIsACutoffBothWays() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("kimi|kimi-k3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
                                          {QStringLiteral("guest:claude|opus"), QString()}});
         ModelPicker picker(context());
         const auto checks = [&picker] {

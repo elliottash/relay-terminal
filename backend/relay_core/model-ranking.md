@@ -73,7 +73,7 @@ the list, they run on Relay Free's role for the tier instead.
   code: the model's top level for `high`, the provider's own default for `main`, its lowest for
   `flash` and `lite`. A model with no reasoning knob ignores its row. The table is keyed by name
   and one name can be served two ways, so a cell is mapped onto whichever provider is about to run
-  the model (`presets.nearest_effort`): `gpt-5.6-luna | high = max` is `max` through codex and
+  the model (`presets.nearest_effort`): `gpt-6-luna | high = max` is `max` through codex and
   `xhigh` through the OpenAI API, which is that model's top there. `check()` reports a level no
   provider that serves the model offers.
 - **Models** — one row per **name** (design rule 1: one model has one name, lower-case, no spaces,
@@ -119,8 +119,8 @@ the list, they run on Relay Free's role for the tier instead.
 |---|---|---|---|
 | claude-fable-5.1 | high | 53 | claude code's `fable`, and `anthropic`'s `claude-fable-5-1`. No built-in tier names it, so it is a default for nothing until `high, main` is written here |
 | gpt-6-astra | high, main | 53 | `openai`'s main model, and the one codex lists first |
-| claude-opus-5 | main | 51 | `anthropic`'s main model; claude code's `opus` is the same model |
-| gpt-5.6-sol | - | 47 | codex lists it and the OpenAI API serves it; no tier names it |
+| claude-opus-5-5 | main | 51 | `anthropic`'s main model; claude code's `opus` is the same model |
+| gpt-6-sol | - | 47 | codex lists it and the OpenAI API serves it; no tier names it |
 | glm-5.3 | high, main | 45 | one row for `glm` and `glm-coding`; the coding plan wins the tie on `order` |
 | kimi-k3 | high, main | 44 | `kimi`'s main model; kimi code serves the same one as `k3` |
 | claude-haiku-4.5 | - | | `anthropic`'s lite (its own API spells the version with a hyphen) |
@@ -133,8 +133,8 @@ the list, they run on Relay Free's role for the tier instead.
 | gemini-flash-latest | main, flash | | google's moving alias for its current Flash. It **moves**: the model behind it changes without this file changing |
 | gemini-pro-latest | high | | google's moving alias for its current Pro. It **moves** too; `gemini`'s high |
 | glm-5.3-flash | flash | | z.ai's flash, on both the standard API and the coding plan |
-| gpt-5.6-luna | flash | | `openai`'s lite |
 | gpt-5.6-terra | - | | `openai`'s flash |
+| gpt-6-luna | flash | | `openai`'s lite |
 | k3-256k | - | | kimi code's K3 at a wider window: a serving variant with its own row, a default for nothing |
 | kimi-for-coding | - | | kimi code's moving alias for whatever it currently serves; no tier names it |
 | kimi-for-coding-highspeed | flash | | kimi code's flash; no reasoning knob at all |
@@ -170,10 +170,10 @@ provider shows the level in its own vocabulary (codex says `xhigh` for max). Pre
 | name | high | main | flash | lite | notes |
 |---|---|---|---|---|---|
 | claude-fable-5.1 | high | low | low  |  | levels only through claude code; the anthropic API row has no knob |
-| claude-opus-5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
+| claude-opus-5-5 | xhigh | high | low  |  | claude code's levels; the API row has no knob |
 | claude-sonnet-5 | max | high | low |  |  |
 | gpt-6-astra | xhigh | medium | low  |  | the API's default is high; codex's own is medium |
-| gpt-5.6-luna | max | high | low |  |  |
+| gpt-6-luna | max | high | low |  |  |
 | kimi-k3 | max | high | low |  |  |
 | kimi-k2.7-code-highspeed |  |  |  |  | no knob |
 | kimi-for-coding-highspeed |  |  |  |  | no knob |

@@ -398,11 +398,11 @@ QString executeTask(const QString &id, const QString &title, bool hasPlan, bool 
                             "`Implemented-By: <vendor>/<your exact model id>` on its own line at "
                             "the end of the message: lower case, the vendor of the *model* and the "
                             "id you are actually running, not the family — "
-                            "`anthropic/claude-opus-5`, `openai/gpt-6-astra`, `glm/glm-5.3`. The "
+                            "`anthropic/claude-opus-5-5`, `openai/gpt-6-astra`, `glm/glm-5.3`. The "
                             "card's `implemented_by` is stamped for you; the trailer is not.")
           << QStringLiteral("- If you are Claude Code or Codex, append ` via claude-code` or "
                             "` via codex` to that signature and still name the model you are on "
-                            "(`anthropic/claude-opus-5 via claude-code`). Only when you cannot see "
+                            "(`anthropic/claude-opus-5-5 via claude-code`). Only when you cannot see "
                             "which model you are is `anthropic/claude-code` or `openai/codex` on "
                             "its own the right answer.")
           << QStringLiteral("- Post progress, questions and decisions on %1 with board_comment, "
@@ -482,23 +482,30 @@ QString modelWord(const QString &word, bool *acronym)
     return word.at(0).toUpper() + word.mid(1);
 }
 
-// "claude-opus-5" -> "Claude Opus 5", "glm-5.3" -> "GLM-5.3", "gpt-6-astra" -> "GPT-6 Astra".
+// "claude-opus-5-5" -> "Claude Opus 5.5", "glm-5.3" -> "GLM-5.3", "gpt-6-astra" -> "GPT-6 Astra".
 // The hyphen survives only between an acronym and its version number, which is where a person
 // writes one; every other `-` in a model id is a word break.
 QString modelLabel(const QString &model)
 {
     const QStringList words = model.split(QLatin1Char('-'), Qt::SkipEmptyParts);
     QString out;
+    // Anthropic spells a version's dot as a dash: `claude-opus-5-5` is Opus 5.5, so a short number
+    // straight after a number is its minor version. A date suffix (`-20260514`) is not.
+    static const QRegularExpression minor(QStringLiteral("^[0-9]{1,2}$"));
     bool previousWasAcronym = false;
+    bool previousWasNumber = false;
     for (const QString &word : words) {
         bool acronym = false;
         const QString text = modelWord(word, &acronym);
+        const bool number = minor.match(word).hasMatch();
         if (!out.isEmpty())
-            out += (previousWasAcronym && !word.isEmpty() && word.at(0).isDigit())
+            out += (previousWasNumber && number) ? QStringLiteral(".")
+                   : (previousWasAcronym && !word.isEmpty() && word.at(0).isDigit())
                        ? QStringLiteral("-")
                        : QStringLiteral(" ");
         out += text;
         previousWasAcronym = acronym;
+        previousWasNumber = number;
     }
     return out;
 }
@@ -527,7 +534,7 @@ QString runnerWord(const QString &runner)
 QString signatureLabel(const QString &signature)
 {
     static const QRegularExpression parenthetical(QStringLiteral("\\([^)]*\\)"));
-    // `anthropic/claude-opus-5 via claude-code`: the harness the model actually ran under, which
+    // `anthropic/claude-opus-5-5 via claude-code`: the harness the model actually ran under, which
     // is the thing a person reopens, so it is named beside the model rather than instead of it.
     static const QRegularExpression via(QStringLiteral("\\s+via\\s+([A-Za-z0-9._-]+)$"));
     QString text = signature;
@@ -737,7 +744,7 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
                             "end: lower case, the vendor of the *model* and the id you are "
                             "actually running — `openai/gpt-6-astra`, `glm/glm-5.3`. If you "
                             "are Claude Code or Codex, append ` via claude-code` or ` via codex` "
-                            "and still name the model (`anthropic/claude-opus-5 via claude-code`); "
+                            "and still name the model (`anthropic/claude-opus-5-5 via claude-code`); "
                             "`anthropic/claude-code` or `openai/codex` alone is right only when "
                             "you cannot see which model you are.").arg(ref)
           << QStringLiteral("- Never fix the code yourself. Anything you find goes on %1's thread "

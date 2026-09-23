@@ -63,12 +63,12 @@ QJsonArray presets() {
                             model(QStringLiteral("glm-5.3-flash"), QStringLiteral("glm-5.3 flash"), QStringLiteral("flash"),
                                   {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")}, 30)}}};
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("anthropic")},
-                       {QStringLiteral("label"), QStringLiteral("anthropic · claude opus 5")},
+                       {QStringLiteral("label"), QStringLiteral("anthropic · claude opus 5.5")},
                        {QStringLiteral("provider"), QStringLiteral("anthropic (claude)")},
                        {QStringLiteral("plan"), QStringLiteral("pay-as-you-go")},
-                       {QStringLiteral("model"), QStringLiteral("claude-opus-5")}, {QStringLiteral("has_stored_key"), true},
+                       {QStringLiteral("model"), QStringLiteral("claude-opus-5-5")}, {QStringLiteral("has_stored_key"), true},
                        {QStringLiteral("models"), QJsonArray{
-                            model(QStringLiteral("claude-opus-5"), QStringLiteral("claude opus 5"), QStringLiteral("main"), {}, 51)}}};
+                            model(QStringLiteral("claude-opus-5-5"), QStringLiteral("claude opus 5.5"), QStringLiteral("main"), {}, 51)}}};
     return out;
 }
 
@@ -152,7 +152,7 @@ private Q_SLOTS:
         QSettings().clear();
         QSettings().setValue(QStringLiteral("models/priority"),
                              QStringList{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("glm-coding|glm-5.3-flash"),
-                                         QStringLiteral("anthropic|claude-opus-5")});
+                                         QStringLiteral("anthropic|claude-opus-5-5")});
     }
 
     // ----- the four tabs --------------------------------------------------------------------
@@ -366,15 +366,15 @@ private Q_SLOTS:
 
     void enterUsesTheRowInTheServedPane() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max")},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()}});
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served));
         pane.showTab(ModelsPane::prioritiesTab());
-        pane.picker()->selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        pane.picker()->selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QTest::keyClick(pane.picker()->list(), Qt::Key_Return);
         QCOMPARE(served.uses, 1);
-        QCOMPARE(served.key, QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(served.key, QStringLiteral("anthropic|claude-opus-5-5"));
         // The "use" button is the same door, and so is Enter in the filter line.
         pane.picker()->selectKey(QStringLiteral("glm-coding|glm-5.3"));
         QTest::keyClick(pane.picker()->filter(), Qt::Key_Return);
@@ -385,7 +385,7 @@ private Q_SLOTS:
 
     void aClickOnlyHighlights() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()}});
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served));
@@ -393,13 +393,13 @@ private Q_SLOTS:
         QTreeWidget *list = pane.picker()->list();
         QTreeWidgetItem *opus = nullptr;
         for (int i = 0; i < list->topLevelItemCount() && !opus; ++i)
-            if (list->topLevelItem(i)->data(0, Qt::UserRole).toString() == QStringLiteral("anthropic|claude-opus-5"))
+            if (list->topLevelItem(i)->data(0, Qt::UserRole).toString() == QStringLiteral("anthropic|claude-opus-5-5"))
                 opus = list->topLevelItem(i);
         QVERIFY(opus != nullptr);
         emit list->itemClicked(opus, ColModel);
         list->setCurrentItem(opus);
         QCOMPARE(served.uses, 0);
-        QCOMPARE(pane.picker()->selectedKey(), QStringLiteral("anthropic|claude-opus-5"));
+        QCOMPARE(pane.picker()->selectedKey(), QStringLiteral("anthropic|claude-opus-5-5"));
     }
 
     // "Escape returns focus to the pane it serves and leaves it open" (design 5.8).
@@ -423,20 +423,20 @@ private Q_SLOTS:
 
     void prioritiesKeepsReorderDeleteAndUndo() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
-                                         {QStringLiteral("anthropic|claude-opus-5"), QString()}});
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
         Served served;
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served));
         pane.showTab(ModelsPane::prioritiesTab());
         ModelPicker *picker = pane.picker();
-        picker->selectKey(QStringLiteral("anthropic|claude-opus-5"));
+        picker->selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
         QTest::keyClick(picker->list(), Qt::Key_Up, Qt::AltModifier);
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         QTest::keyClick(picker->list(), Qt::Key_Delete);
         QCOMPARE(listKeys(QStringLiteral("main")), QStringList{QStringLiteral("glm-coding|glm-5.3")});
         QTest::keyClick(picker->list(), Qt::Key_Z, Qt::ControlModifier);
-        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5"),
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{QStringLiteral("anthropic|claude-opus-5-5"),
                                                                 QStringLiteral("glm-coding|glm-5.3")}));
         // Every one of those is a list edit the window has to hear about.
         QVERIFY(served.listEdits >= 3);
@@ -505,10 +505,10 @@ private Q_SLOTS:
         pane.setTarget(target);
         pane.showTab(ModelsPane::jobsTab());
         QVERIFY(pane.jobs()->selectRole(QStringLiteral("subagent")));
-        QVERIFY(rolestore::setOverride(QStringLiteral("subagent"), QStringLiteral("anthropic|claude-opus-5"),
+        QVERIFY(rolestore::setOverride(QStringLiteral("subagent"), QStringLiteral("anthropic|claude-opus-5-5"),
                                        QString()));
         pane.setTarget(target);   // a worker report, or any re-read
-        QCOMPARE(pane.jobs()->overrideText(QStringLiteral("subagent")), QStringLiteral("claude-opus-5"));
+        QCOMPARE(pane.jobs()->overrideText(QStringLiteral("subagent")), QStringLiteral("claude-opus-5-5"));
         QVERIFY(pane.jobs()->clearOverride());
         QCOMPARE(resends, 1);
         QCOMPARE(pane.jobs()->overrideText(QStringLiteral("subagent")), QStringLiteral("follows main"));

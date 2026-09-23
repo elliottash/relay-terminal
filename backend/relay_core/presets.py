@@ -330,10 +330,10 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
     # https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk — the OpenAI-compatible
     # layer lives at https://api.anthropic.com/v1 and accepts the key as an Authorization: Bearer header.
     # It ignores reasoning_effort, so Relay sends no effort parameters to it.
-    Preset("anthropic", "anthropic · claude opus 5", "https://api.anthropic.com/v1", "claude-opus-5", {},
+    Preset("anthropic", "anthropic · claude opus 5.5", "https://api.anthropic.com/v1", "claude-opus-5-5", {},
            1_000_000, "none", "payg", "https://console.anthropic.com/settings/keys",
            "Anthropic's OpenAI-compatible endpoint; effort is the model's own default.",
-           # 1M context, 128k max output (https://platform.claude.com/docs/en/models/opus-5/overview);
+           # 1M context, 128k max output (https://platform.claude.com/docs/en/models/opus-5-5/overview);
            # the 300k output beta is the Message Batches API, not this one.
            provider="anthropic (claude)", plan="pay-as-you-go", max_output=131_072),
     # https://ai.google.dev/gemini-api/docs/openai — base URL is .../v1beta/openai (stored without the
@@ -428,12 +428,12 @@ TIER_DEFAULTS: dict[str, dict[str, tuple[str, str, dict]]] = {
                 "flash": ("minimax", "MiniMax-M2.7-highspeed", {}),
                 "lite": _LITE_VIA_OPENROUTER},
     # https://platform.claude.com/docs/en/models/overview
-    "anthropic": {"main": ("anthropic", "claude-opus-5", {}),
+    "anthropic": {"main": ("anthropic", "claude-opus-5-5", {}),
                   "flash": ("anthropic", "claude-sonnet-5", {}),
                   "lite": ("anthropic", "claude-haiku-4-5", {})},
     "openai": {"main": ("openai", "gpt-6-astra", {"reasoning_effort": "high"}),
                "flash": ("openai", "gpt-5.6-terra", {"reasoning_effort": "medium"}),
-               "lite": ("openai", "gpt-5.6-luna", {"reasoning_effort": "low"})},
+               "lite": ("openai", "gpt-6-luna", {"reasoning_effort": "low"})},
     "gemini": {"main": ("gemini", "gemini-3.1-pro-preview", {"reasoning_effort": "high"}),
                "flash": ("gemini", "gemini-3.8-flash", {}),
                "lite": ("gemini", "gemini-3.5-flash-lite", {})},
@@ -528,15 +528,15 @@ MODEL_CATALOG: dict[str, list[dict]] = {
     # The four codex-cli 0.155.1 lists first (#E516); every one takes reasoning_effort.
     "openai": [
         {"id": "gpt-6-astra", "tier": "main", "efforts": None},
-        {"id": "gpt-5.6-sol", "tier": None, "efforts": None},
+        {"id": "gpt-6-sol", "tier": None, "efforts": None},
         {"id": "gpt-5.6-terra", "tier": "flash", "efforts": None},
-        {"id": "gpt-5.6-luna", "tier": "lite", "efforts": None},
+        {"id": "gpt-6-luna", "tier": "lite", "efforts": None},
     ],
     # https://platform.claude.com/docs/en/models/overview — the compat layer has no effort knob.
     # Anthropic's API spells two versions with a hyphen where everyone else (and OpenRouter) uses a
     # dot, so those two carry a `name`: without it the same model would sit in the picker twice.
     "anthropic": [
-        {"id": "claude-opus-5", "tier": "main", "efforts": None},
+        {"id": "claude-opus-5-5", "tier": "main", "efforts": None},
         {"id": "claude-sonnet-5", "tier": "flash", "efforts": None},
         {"id": "claude-haiku-4-5", "name": "claude-haiku-4.5", "tier": "lite", "efforts": None},
         {"id": "claude-fable-5-1", "name": "claude-fable-5.1", "tier": None, "efforts": None},
@@ -569,8 +569,8 @@ MODEL_CATALOG: dict[str, list[dict]] = {
 
 # --- one model, one name (card #MDL1, docs/MODEL-PICKING-DESIGN.md rule 1) -----------------------
 # Claude Code names its models by family ("fable", "opus"), so a guest reporting "opus" and the
-# `anthropic` preset's "claude-opus-5" are one model. This is the only table that says so.
-GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5",
+# `anthropic` preset's "claude-opus-5-5" are one model. This is the only table that says so.
+GUEST_MODEL_ALIASES = {"fable": "claude-fable-5-1", "opus": "claude-opus-5-5",
                        "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5"}
 
 # The `name` a MODEL_CATALOG row carries, by model id, for the alias step below: the alias resolves
@@ -583,7 +583,7 @@ def derived_name(model_id) -> str:
     """The name of a model id nothing knows anything else about: lower-case, no vendor prefix, no
     spaces (owner, 2026-09-21: "model names should always be lowercase, no spaces").
 
-    Everything up to the last "/" goes (``openai/gpt-5.6-sol`` and ``gpt-5.6-sol`` are one model,
+    Everything up to the last "/" goes (``openai/gpt-6-sol`` and ``gpt-6-sol`` are one model,
     and stripping the prefix collides on none of OpenRouter's 446 ids), a leading "~" goes
     (OpenRouter writes a moving alias ``~openai/gpt-sol-latest``), and any whitespace becomes "-".
     A serving variant keeps whatever marks it: ``-highspeed``, ``:batch``, ``k3-256k``, ``-pro``
@@ -600,7 +600,7 @@ def model_name(preset_id, model_id) -> str:
     In order (design rule 1): the ``name`` its own MODEL_CATALOG row carries, for the handful that
     cannot be derived (``kimi-code``'s "k3" is "kimi-k3"; Anthropic spells two versions with a
     hyphen where OpenRouter uses a dot); then a guest alias through GUEST_MODEL_ALIASES, so Claude
-    Code's "opus" is "claude-opus-5"; else `derived_name`.
+    Code's "opus" is "claude-opus-5-5"; else `derived_name`.
     """
     text = (model_id or "").strip() if isinstance(model_id, str) else ""
     if not text:
@@ -676,11 +676,11 @@ OPENROUTER_TWINS: dict[str, str] = {
     "MiniMax-M2.5": "minimax/minimax-m2.5",
     # openai
     "gpt-6-astra": "openai/gpt-6-astra",
-    "gpt-5.6-sol": "openai/gpt-5.6-sol",
+    "gpt-6-sol": "openai/gpt-6-sol",
     "gpt-5.6-terra": "openai/gpt-5.6-terra",
-    "gpt-5.6-luna": "openai/gpt-5.6-luna",
+    "gpt-6-luna": "openai/gpt-6-luna",
     # anthropic (OpenRouter spells the version with a dot)
-    "claude-opus-5": "anthropic/claude-opus-5",
+    "claude-opus-5-5": "anthropic/claude-opus-5-5",
     "claude-sonnet-5": "anthropic/claude-sonnet-5",
     "claude-haiku-4-5": "anthropic/claude-haiku-4.5",
     "claude-fable-5-1": "anthropic/claude-fable-5.1",
@@ -843,7 +843,7 @@ def model_efforts(preset_id, model: str) -> list[str] | None:
 # appends a twin whose completion price, as OpenRouter's live listing gives it, is at or under this
 # many US dollars per million tokens. On 2026-09-20 that admits z-ai/glm-5.3 ($2.86),
 # minimax/minimax-m3 ($1.20) and the flash models, and leaves out moonshotai/kimi-k3 ($8.50),
-# openai/gpt-6-astra and anthropic/claude-opus-5 ($25-50). A twin whose price is unknown (no
+# openai/gpt-6-astra and anthropic/claude-opus-5-5 ($25-50). A twin whose price is unknown (no
 # listing fetched yet) is left out of Main and High, where a wrong guess is expensive, and kept in
 # Flash and Lite, where every twin there is cheap.
 OPENROUTER_TWIN_MAX_COMPLETION_USD_PER_MTOK = 3.0
@@ -933,7 +933,7 @@ def tier_start_efforts(efforts, default_effort: str | None = None, guest_id: str
     ``model-ranking.md``'s **Levels** table first, by the model's ``name`` — the owner asked for
     "a similar defaults file for the reasoning levels across model X class" and then filled it in,
     so a cell there is the answer, mapped into this model's own vocabulary (`nearest_effort`,
-    because one name can be served by two providers and `claude-opus-5` is `xhigh` through Claude
+    because one name can be served by two providers and `claude-opus-5-5` is `xhigh` through Claude
     Code and has no level at all through Anthropic's compat layer).
 
     A blank cell, or no ``name`` to look up, is the rule that was there before it, which is also
@@ -1036,7 +1036,7 @@ def provider_model_id(preset_id: str, name: str) -> str | None:
 def levels_for_name(name: str) -> tuple[str, ...]:
     """Every reasoning level any built-in provider offers for this model name, weakest first.
 
-    One name, several providers, several vocabularies (design rule 1): `gpt-5.6-luna` takes `max`
+    One name, several providers, several vocabularies (design rule 1): `gpt-6-luna` takes `max`
     through codex and stops at `xhigh` through the OpenAI API. Only `model-ranking.md`'s `check()`
     asks this — "is `max` a level this model has anywhere?" — because a Levels cell is keyed by
     name and has no provider to be checked against. Guests are added by the caller, which is the
@@ -1111,7 +1111,7 @@ def _usable_guest(row) -> bool:
 def _guest_candidates(row: dict, rank) -> list[_Candidate]:
     """A guest harness's own models, scored by **name** through the same table as everyone else's
     (owner, 2026-09-21): `gpt-6-astra` through codex scores what `gpt-6-astra` through the OpenAI
-    API scores, and claude code's `opus` is `claude-opus-5`.
+    API scores, and claude code's `opus` is `claude-opus-5-5`.
 
     Only the classes a guest may serve (GUEST_CLASSES). A guest whose list the file has never heard
     of — codex's catalogue is whatever the CLI ships — falls back to the first model its own list
@@ -1188,7 +1188,7 @@ def _class_effort(candidate: _Candidate, cls: str) -> str | None:
     Lite the lowest.
 
     The file's word is mapped onto this provider's own list (`nearest_effort`): the table is keyed
-    by name and one name can be served two ways, so `gpt-5.6-luna | high = max` is `max` through
+    by name and one name can be served two ways, so `gpt-6-luna | high = max` is `max` through
     codex and `xhigh` through the OpenAI API, which is the level that model actually has there.
     """
     listed = nearest_effort(model_ranking.load().level(candidate.name, cls), _candidate_levels(candidate))
@@ -1409,7 +1409,7 @@ def nearest_effort(level, levels) -> str | None:
     """``level`` expressed in the vocabulary of ``levels``, or None when there is no knob at all.
 
     This is the whole of the compatibility read. One model name can be served by two providers
-    with two vocabularies — `gpt-5.6-luna` is `max` through codex and has no `max` through the
+    with two vocabularies — `gpt-6-luna` is `max` through codex and has no `max` through the
     OpenAI API — and an older GUI still holds Relay's four words and will ask codex for `max`. So
     a level that the list does not have becomes **the weakest listed level that is at least as
     much work**, and the top of the list when there is none: `max` on the OpenAI API is `xhigh`,

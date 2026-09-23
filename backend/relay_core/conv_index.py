@@ -277,11 +277,11 @@ _MODEL_KEY = ("CASE c.source WHEN 'terminal' THEN 'terminal' WHEN 'claude' THEN 
 def _sql_model_name(value):
     """`relay_model_name(<a stored model id>)`: the one name that model has (card #MDL1, rule 1).
 
-    History records the id the API took — "k3", "openai/gpt-5.6-sol", "MiniMax-M3" — and those
+    History records the id the API took — "k3", "openai/gpt-6-sol", "MiniMax-M3" — and those
     stay on disk exactly as they were written. This is the name a person reads, and registering it
     on the connection is what lets the Model filter and the Model sort work on names without a
     second table: the menu lists each name once, so `k3` and `kimi-k3` are one entry that selects
-    both, and `openai/gpt-5.6-sol` sorts beside `gpt-5.6-sol` rather than under "o".
+    both, and `openai/gpt-6-sol` sorts beside `gpt-6-sol` rather than under "o".
     """
     if not isinstance(value, str) or not value:
         return value

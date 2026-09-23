@@ -35,8 +35,8 @@ constexpr auto kScheme = "relay-info";
 QString esc(const QString &text) { return text.toHtmlEscaped(); }
 
 // The one name a model has (card #MDL1, rule 1). A saved conversation records the id the API took
-// — "k3", "openai/gpt-5.6-sol", "MiniMax-M3" — and that stays on disk; this panel reads to a
-// person, so it prints "kimi-k3", "gpt-5.6-sol", "minimax-m3". No preset is recorded per model
+// — "k3", "openai/gpt-6-sol", "MiniMax-M3" — and that stays on disk; this panel reads to a
+// person, so it prints "kimi-k3", "gpt-6-sol", "minimax-m3". No preset is recorded per model
 // here, so it is the derivation off the id, which is the same answer for every id a catalog row
 // does not override.
 QString modelName(const QString &modelId) { return relay::models::nameOf(modelId); }

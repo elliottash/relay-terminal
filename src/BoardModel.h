@@ -225,7 +225,7 @@ QString familyLabel(const QString &family);
 // the model used", so these say the *model*, not only its vendor):
 //   "openai/codex"                            -> "Codex"
 //   "glm/glm-5.3"                             -> "GLM-5.3"
-//   "anthropic/claude-opus-5 via claude-code" -> "Claude Opus 5 · Claude Code"
+//   "anthropic/claude-opus-5-5 via claude-code" -> "Claude Opus 5.5 · Claude Code"
 // A trailing parenthetical is free text and is ignored, as the worker's own reader ignores it.
 // Only the capitalisation is invented: an acronym goes upper case and keeps the hyphen to its
 // version, everything else keeps the model id's own words, so a model this file has never heard

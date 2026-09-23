@@ -28,7 +28,7 @@ class SignatureTests(unittest.TestCase):
                          "gemini/gemini-3.8-flash")
 
     def test_each_preset_signs_with_its_own_vendor(self):
-        self.assertEqual(Q.signature("anthropic", "claude-opus-5"), "anthropic/claude-opus-5")
+        self.assertEqual(Q.signature("anthropic", "claude-opus-5-5"), "anthropic/claude-opus-5-5")
         self.assertEqual(Q.signature("openai", "gpt-6-astra"), "openai/gpt-6-astra")
         self.assertEqual(Q.signature("glm-coding", "glm-5.3"), "glm/glm-5.3")
         self.assertEqual(Q.signature("kimi-code", "k3"), "kimi/k3")
@@ -37,8 +37,8 @@ class SignatureTests(unittest.TestCase):
 
     def test_a_guest_signs_the_model_it_ran_and_the_harness_that_ran_it(self):
         # Owner, 2026-09-19: "lets try to record the model used."
-        self.assertEqual(Q.signature("guest:claude", "claude-opus-5-20260514"),
-                         "anthropic/claude-opus-5-20260514 via claude-code")
+        self.assertEqual(Q.signature("guest:claude", "claude-opus-5-5-20260514"),
+                         "anthropic/claude-opus-5-5-20260514 via claude-code")
         self.assertEqual(Q.signature("guest:codex", "gpt-5.6-codex"),
                          "openai/gpt-5.6-codex via codex")
         self.assertEqual(Q.guest_signature("codex", "gpt-5.6-codex"), "openai/gpt-5.6-codex via codex")
@@ -68,8 +68,8 @@ class FamilyTests(unittest.TestCase):
     def test_the_signature_and_the_legacy_free_text_land_on_one_family(self):
         # The whole point of the table: before #T71W these were "anthropic" and "claude", so each
         # could close what the other wrote.
-        self.assertEqual(Q.family("anthropic/claude-opus-5"), Q.family("Claude Opus 5 (pane 2)"))
-        self.assertEqual(Q.family("anthropic/claude-opus-5"), "anthropic")
+        self.assertEqual(Q.family("anthropic/claude-opus-5-5"), Q.family("Claude Opus 5.5 (pane 2)"))
+        self.assertEqual(Q.family("anthropic/claude-opus-5-5"), "anthropic")
 
     def test_the_o_series_the_codex_cli_and_gpt_are_all_openai(self):
         for text in ("gpt-5-codex", "codex", "openai/gpt-6-astra", "o3", "o4-mini", "chatgpt-4o"):
@@ -92,9 +92,9 @@ class FamilyTests(unittest.TestCase):
         self.assertEqual(Q.family("relay-free/relay-lite"), "gemini")
 
     def test_the_via_suffix_reads_as_the_model_and_falls_back_to_the_harness(self):
-        self.assertEqual(Q.family("anthropic/claude-opus-5-20260514 via claude-code"), "anthropic")
+        self.assertEqual(Q.family("anthropic/claude-opus-5-5-20260514 via claude-code"), "anthropic")
         self.assertEqual(Q.family("openai/gpt-5.6-codex via codex"), "openai")
-        self.assertEqual(Q.family("anthropic/claude-opus-5 via claude-code (pane 2)"), "anthropic")
+        self.assertEqual(Q.family("anthropic/claude-opus-5-5 via claude-code (pane 2)"), "anthropic")
         # A model id this table has never seen is still OpenAI's CLI and OpenAI's harness prompt.
         self.assertEqual(Q.family("acme/mystery-1 via codex"), "openai")
         self.assertEqual(Q.lineage(Q.family("openai/gpt-5.6-codex via codex")), "openai")
@@ -153,14 +153,14 @@ class RecommendTests(unittest.TestCase):
         self.assertEqual(deepseek["recommended"]["family"], "deepseek")
 
     def test_claude_gets_codex_first(self):
-        result = Q.recommend("anthropic/claude-opus-5",
+        result = Q.recommend("anthropic/claude-opus-5-5",
                              **avail(guests=("codex", "claude"), keys=("glm-coding",)))
         self.assertEqual(result["recommended"]["runner"], "guest:codex")
         self.assertEqual(result["recommended"]["label"], "Codex")
         self.assertEqual([s["family"] for s in result["skipped"]], ["anthropic"])
 
     def test_the_legacy_free_text_implementer_is_skipped_just_as_the_signature_is(self):
-        result = Q.recommend("Claude Opus 5 (pane 2)", **avail(guests=("codex", "claude")))
+        result = Q.recommend("Claude Opus 5.5 (pane 2)", **avail(guests=("codex", "claude")))
         self.assertEqual(result["recommended"]["runner"], "guest:codex")
         self.assertEqual([s["family"] for s in result["skipped"]], ["anthropic"])
 
@@ -186,7 +186,7 @@ class RecommendTests(unittest.TestCase):
             self.assertIn("same lineage as the implementer (cn-open)", entry["why"])
 
     def test_a_machine_with_only_relay_free_has_no_verifier_and_is_told_what_to_add(self):
-        result = Q.recommend("anthropic/claude-opus-5", **avail())
+        result = Q.recommend("anthropic/claude-opus-5-5", **avail())
         self.assertIsNone(result["recommended"])
         self.assertEqual(result["alternates"], [])
         self.assertEqual(result["note"], Q.NO_VERIFIER_NOTE)
@@ -196,7 +196,7 @@ class RecommendTests(unittest.TestCase):
         self.assertTrue([u for u in result["unavailable"] if u["family"] == "openai"])
 
     def test_relay_free_is_reported_unavailable_even_when_a_verifier_was_found(self):
-        result = Q.recommend("anthropic/claude-opus-5", **avail(guests=("codex",)))
+        result = Q.recommend("anthropic/claude-opus-5-5", **avail(guests=("codex",)))
         self.assertEqual(result["recommended"]["runner"], "guest:codex")
         self.assertIn(dict(Q.RELAY_FREE_ROW), result["unavailable"])
         self.assertNotIn("note", result)
@@ -216,11 +216,11 @@ class RecommendTests(unittest.TestCase):
 
     def test_a_local_endpoint_is_offered_last_and_carries_its_own_note(self):
         local = (("local:bonsai", "bonsai-2-27b", "Bonsai 2 27B"),)
-        result = Q.recommend("anthropic/claude-opus-5", **avail(guests=("codex",), local=local))
+        result = Q.recommend("anthropic/claude-opus-5-5", **avail(guests=("codex",), local=local))
         self.assertEqual(result["recommended"]["runner"], "guest:codex")
         self.assertEqual(result["alternates"][-1]["family"], "local")
         self.assertEqual(result["alternates"][-1]["model"], "bonsai-2-27b")
-        only_local = Q.recommend("anthropic/claude-opus-5", **avail(local=local))
+        only_local = Q.recommend("anthropic/claude-opus-5-5", **avail(local=local))
         self.assertEqual(only_local["recommended"]["runner"], "preset:local:bonsai")
         self.assertIn("capability floor", only_local["note"])
 
@@ -238,7 +238,7 @@ class RecommendTests(unittest.TestCase):
         self.assertTrue(result["unavailable"])
 
     def test_each_runner_carries_the_model_it_would_actually_run(self):
-        result = Q.recommend("anthropic/claude-opus-5",
+        result = Q.recommend("anthropic/claude-opus-5-5",
                              **avail(guests=("codex",), keys=("glm-coding", "openrouter")))
         models = {entry["runner"]: entry["model"]
                   for entry in [result["recommended"], *result["alternates"]]}
@@ -247,7 +247,7 @@ class RecommendTests(unittest.TestCase):
         self.assertEqual(models["preset:openrouter"], presets.TIER_DEFAULTS["openrouter"]["main"][1])
 
     def test_the_summary_line_reads_as_one_sentence(self):
-        line = Q.summary_line(Q.recommend("anthropic/claude-opus-5",
+        line = Q.summary_line(Q.recommend("anthropic/claude-opus-5-5",
                                           **avail(guests=("codex",), keys=("glm-coding",))), "K7Q2")
         self.assertTrue(line.startswith("Verify #K7Q2 with Codex (installed)"))
         self.assertIn("then GLM-5.3 (key)", line)
@@ -271,7 +271,7 @@ class CommitTrailerTests(unittest.TestCase):
         (self.repo / "a.txt").write_text("one\n", encoding="utf-8")
         self.git(["add", "a.txt"])
         self.git(["commit", "-q", "-m",
-                  "Do the thing (#K7Q2)\n\nImplemented-By: anthropic/claude-opus-5\n"])
+                  "Do the thing (#K7Q2)\n\nImplemented-By: anthropic/claude-opus-5-5\n"])
         self.first = self.git(["rev-parse", "--short", "HEAD"]).strip()
         (self.repo / "a.txt").write_text("two\n", encoding="utf-8")
         self.git(["commit", "-q", "-am", "Follow-up on #K7Q2\n\nImplemented-By: openai/codex\n"])
@@ -292,16 +292,16 @@ class CommitTrailerTests(unittest.TestCase):
         return done.stdout
 
     def test_a_trailer_that_matches_the_card_agrees_and_one_that_does_not_says_so(self):
-        rows = Q.commit_trailers(self.repo, [self.first, self.second], "anthropic/claude-opus-5")
+        rows = Q.commit_trailers(self.repo, [self.first, self.second], "anthropic/claude-opus-5-5")
         self.assertEqual([r["trailer"] for r in rows],
-                         ["anthropic/claude-opus-5", "openai/codex"])
+                         ["anthropic/claude-opus-5-5", "openai/codex"])
         self.assertEqual([r["agrees"] for r in rows], [True, False])
 
     def test_the_commits_of_a_card_are_found_by_its_id(self):
         found = Q.commits_for(self.repo, "K7Q2")
         self.assertEqual(len(found), 2)
         rows = Q.card_commits(self.repo, "#k7q2", {"commits": [self.first]},
-                              "anthropic/claude-opus-5")
+                              "anthropic/claude-opus-5-5")
         self.assertEqual(rows[0]["hash"], self.first)      # links.commits first, then the search
         self.assertEqual(len(rows), 2)                     # and the same commit is not listed twice
 

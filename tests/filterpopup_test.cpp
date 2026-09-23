@@ -57,7 +57,7 @@ QList<FilterRow> classRows(bool expandMain = false)
     rows << head(QStringLiteral("main"), expandMain ? QStringLiteral("\u2304") : QStringLiteral("\u203a"));
     rows << model(QStringLiteral("main"), QStringLiteral("kimi-k3"), QStringLiteral("kimi"));
     rows << model(QStringLiteral("main"), QStringLiteral("glm-5.3"), QStringLiteral("z.ai +1"));
-    if (expandMain) rows << model(QStringLiteral("main"), QStringLiteral("claude-opus-5"), QStringLiteral("anthropic"));
+    if (expandMain) rows << model(QStringLiteral("main"), QStringLiteral("claude-opus-5-5"), QStringLiteral("anthropic"));
     rows << head(QStringLiteral("flash"), QString());
     rows << model(QStringLiteral("flash"), QStringLiteral("glm-5.3-flash"), QStringLiteral("z.ai"));
     rows << FilterRow{{}, {}, {}, true, false, {}, {}, false};
@@ -462,7 +462,7 @@ private slots:
         QCOMPARE(asked, QStringList({QStringLiteral("+main")}));
         QVERIFY(popup.isVisible());                          // nothing closed, nothing was picked
         QCOMPARE(popup.visibleCount(), 6);                   // the third main model joined the list
-        QVERIFY(popup.rows().at(5).data.endsWith(QStringLiteral("claude-opus-5")));
+        QVERIFY(popup.rows().at(5).data.endsWith(QStringLiteral("claude-opus-5-5")));
         // The highlight is still on the row it was on, found by its data rather than its index.
         QCOMPARE(popup.rows().at(popup.currentRow()).data, QStringLiteral("pick:main|kimi-k3"));
         // And the header now says so the other way round.
@@ -541,7 +541,7 @@ private slots:
         popup.expandCurrent(1);
         popup.moveCurrent(2);
         popup.activate();
-        QCOMPARE(picked.last(), QStringLiteral("pick:main|claude-opus-5"));
+        QCOMPARE(picked.last(), QStringLiteral("pick:main|claude-opus-5-5"));
 
         bool cancelled = false;
         popup.onCancelled = [&cancelled] { cancelled = true; };
@@ -647,13 +647,13 @@ private slots:
         FilterPopup second;
         second.setRows(classRows(), kMainModelRow);
         second.onQueryRows = popup.onQueryRows;
-        QVERIFY(!hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5")));
+        QVERIFY(!hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5-5")));
         second.setFilterText(QStringLiteral("opus"));
-        QVERIFY(hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5")));
+        QVERIFY(hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5-5")));
         // …and clearing the filter puts the box back exactly as it was.
         second.setFilterText(QString());
         QCOMPARE(second.rows().size(), classRows().size());
-        QVERIFY(!hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5")));
+        QVERIFY(!hasData(second.rows(), QStringLiteral("pick:main|claude-opus-5-5")));
     }
 
     // No hook — the Alt+E level box, and every other list — and typing narrows what is there.

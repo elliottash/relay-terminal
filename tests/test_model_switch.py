@@ -143,8 +143,8 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
 
         The pane's status line and the phone's both read "model: kimi-k3 · conversation kept", so
         the name is computed once, by the worker, and sent beside the id the API takes. Claude
-        Code's `opus` is "claude-opus-5"; "MiniMax-M3" is "minimax-m3"; "openai/gpt-5.6-sol" and
-        "gpt-5.6-sol" are one name.
+        Code's `opus` is "claude-opus-5-5"; "MiniMax-M3" is "minimax-m3"; "openai/gpt-6-sol" and
+        "gpt-6-sol" are one name.
         """
         seen, ref = [], []
         step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))
@@ -154,10 +154,10 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         self.sup.submit('look around', 'now')
         self.assertTrue(entered.wait(5))
         self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1',
-                                       'model': 'openai/gpt-5.6-sol', 'id': 'm1'})
+                                       'model': 'openai/gpt-6-sol', 'id': 'm1'})
         changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
         # The id is what the API takes; the name is what a person reads. Both, side by side.
-        self.assertEqual((changed['model'], changed['model_name']), ('openai/gpt-5.6-sol', 'gpt-5.6-sol'))
+        self.assertEqual((changed['model'], changed['model_name']), ('openai/gpt-6-sol', 'gpt-6-sol'))
         # And the model still answering, so "· this turn finishes on kimi-k3" is a name too. `k3`
         # is the Kimi Coding Plan's id for Kimi K3 and cannot be derived, so it is a catalog name.
         self.assertEqual(changed['in_flight_model'], 'k3')
@@ -165,7 +165,7 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         gate.set()
         self.rec.wait(lambda e: e['event'] == 'agent_finished')
         applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
-        self.assertEqual((applied['model'], applied['model_name']), ('openai/gpt-5.6-sol', 'gpt-5.6-sol'))
+        self.assertEqual((applied['model'], applied['model_name']), ('openai/gpt-6-sol', 'gpt-6-sol'))
         self.assertEqual((applied['from_model'], applied['from_model_name']), ('k3', 'kimi-k3'))
 
     def test_two_switches_before_the_next_request_last_one_wins(self):

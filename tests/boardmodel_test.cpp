@@ -3043,7 +3043,7 @@ namespace {
 QJsonObject qaBlock()
 {
     const auto json = QByteArrayLiteral(R"({
-      "implemented_by": "anthropic/claude-opus-5", "implementer_family": "anthropic",
+      "implemented_by": "anthropic/claude-opus-5-5", "implementer_family": "anthropic",
       "recommended": {"family": "openai", "label": "Codex", "runner": "guest:codex",
                       "model": "codex",
                       "why": "first in the ranking that is not the implementer and is installed"},
@@ -3051,7 +3051,7 @@ QJsonObject qaBlock()
                       "model": "glm-5.3"}],
       "skipped": [{"family": "anthropic", "why": "implemented this card"}],
       "unavailable": [{"family": "kimi", "why": "no key"}],
-      "commits": [{"hash": "1a2b3c4", "trailer": "anthropic/claude-opus-5", "agrees": true}]
+      "commits": [{"hash": "1a2b3c4", "trailer": "anthropic/claude-opus-5-5", "agrees": true}]
     })");
     return QJsonDocument::fromJson(json).object();
 }
@@ -3064,7 +3064,7 @@ QJsonObject qaCard(const QJsonObject &qa)
     out.insert(QStringLiteral("status"), QStringLiteral("needs-qa-llm"));
     out.insert(QStringLiteral("sections"), QJsonArray{"Issue", "Plan", "QA checklist"});
     out.insert(QStringLiteral("front"),
-               QJsonObject{{"assignee", "agent"}, {"implemented_by", "anthropic/claude-opus-5"}});
+               QJsonObject{{"assignee", "agent"}, {"implemented_by", "anthropic/claude-opus-5-5"}});
     if (!qa.isEmpty())
         out.insert(QStringLiteral("qa"), qa);
     return out;
@@ -3096,7 +3096,7 @@ void BoardModelTests::theVerifyLineNamesTheRecommendedVerifierAndWhatItSkipped()
     QCOMPARE(relay::board::verifyRunner(local), QStringLiteral("preset:local:bonsai"));
 
     // Nothing available: the line says why, family by family, so the reader knows what to install.
-    QJsonObject none{{"implemented_by", "anthropic/claude-opus-5"},
+    QJsonObject none{{"implemented_by", "anthropic/claude-opus-5-5"},
                      {"skipped", QJsonArray{QJsonObject{{"family", "anthropic"}, {"why", "implemented this card"}}}},
                      {"unavailable", QJsonArray{QJsonObject{{"family", "openai"}, {"why", "not installed"}},
                                                 QJsonObject{{"family", "kimi"}, {"why", "no key"}}}}};
@@ -3118,7 +3118,7 @@ void BoardModelTests::theExecuteTaskAsksForTheImplementedByTrailer()
     const QString task = relay::board::executeTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
                                                    true, true);
     QVERIFY2(task.contains(QStringLiteral("Implemented-By: <vendor>/<your exact model id>")), qPrintable(task));
-    QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5")));
+    QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5-5")));
     // The worker stamps the card's own field, so the agent is not asked to type it as well.
     QVERIFY(task.contains(QStringLiteral("`implemented_by` is stamped")));
 }
@@ -3130,13 +3130,13 @@ void BoardModelTests::theVerifyTaskIsTheQaChecklistAndAsksForTheVerifiedByTraile
     // owner's note and a note landing in it silently builds a brief with no note at all.
     const QString task = relay::board::verifyTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
                                                   QStringLiteral("Codex"),
-                                                  QStringLiteral("anthropic/claude-opus-5"),
+                                                  QStringLiteral("anthropic/claude-opus-5-5"),
                                                   QStringLiteral("needs-verification"),
                                                   QStringLiteral("check the Xvfb run too"));
     QVERIFY2(task.contains(QStringLiteral("verify lane (needs-verification)")), qPrintable(task));
     QVERIFY(task.startsWith(QStringLiteral("Verify #T71W: Signatures\n")));
     QVERIFY(task.contains(QStringLiteral("you are its verifier (Codex)")));
-    QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5 implemented it")));
+    QVERIFY(task.contains(QStringLiteral("anthropic/claude-opus-5-5 implemented it")));
     QVERIFY(task.contains(QStringLiteral("`## QA checklist`")));
     QVERIFY(task.contains(QStringLiteral("docs/qa_evidence/")));
     // #WC3E: the checklist is this session's own record, against the `## Done means` the card
@@ -3210,7 +3210,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QVERIFY(handedTask.startsWith(QStringLiteral("Verify #K7Q2: Voice mode")));
     QVERIFY(handedTask.contains(QStringLiteral("Verified-By:")));
     QVERIFY(handedTask.contains(QStringLiteral("#K7Q2")));
-    QVERIFY(handedTask.contains(QStringLiteral("anthropic/claude-opus-5 implemented it")));
+    QVERIFY(handedTask.contains(QStringLiteral("anthropic/claude-opus-5-5 implemented it")));
     QCOMPARE(sent.size(), 1);
     QCOMPARE(sent.at(0).value("type").toString(), QStringLiteral("board_comment"));
     QCOMPARE(sent.at(0).value("kind").toString(), QStringLiteral("progress"));
@@ -3322,18 +3322,21 @@ void BoardModelTests::aSignatureReadsAsItsModelAndItsHarness()
     QCOMPARE(label("anthropic/claude-code"), QStringLiteral("Claude Code"));
     QCOMPARE(label("glm/glm-5.3"), QStringLiteral("GLM-5.3"));
     QCOMPARE(label("openai/gpt-6-astra"), QStringLiteral("GPT-6 Astra"));
-    QCOMPARE(label("anthropic/claude-opus-5"), QStringLiteral("Claude Opus 5"));
+    QCOMPARE(label("anthropic/claude-opus-5-5"), QStringLiteral("Claude Opus 5.5"));
+    // Anthropic writes the version's dot as a dash; a date suffix stays a separate word.
+    QCOMPARE(label("anthropic/claude-haiku-4-5"), QStringLiteral("Claude Haiku 4.5"));
+    QCOMPARE(label("anthropic/claude-sonnet-5-20260514"), QStringLiteral("Claude Sonnet 5 20260514"));
     QCOMPARE(label("deepseek/deepseek-v4.1-flash"), QStringLiteral("DeepSeek V4.1 Flash"));
     QCOMPARE(label("kimi/kimi-k3"), QStringLiteral("Kimi K3"));
     // The owner, 2026-09-19: "lets try to record the model used" — so a guest names the model
     // it ran *and* the harness that ran it, and both are readable.
-    QCOMPARE(label("anthropic/claude-opus-5 via claude-code"),
-             QStringLiteral("Claude Opus 5 \u00b7 Claude Code"));
+    QCOMPARE(label("anthropic/claude-opus-5-5 via claude-code"),
+             QStringLiteral("Claude Opus 5.5 \u00b7 Claude Code"));
     QCOMPARE(label("openai/gpt-5.6-codex via codex"), QStringLiteral("GPT-5.6 Codex \u00b7 Codex"));
     // The harness alone, when the model could not be seen, does not say itself twice.
     QCOMPARE(label("openai/codex via codex"), QStringLiteral("Codex"));
     // Free text after the slug is allowed and ignored, as the worker's own reader ignores it.
-    QCOMPARE(label("anthropic/claude-opus-5 (pane 2)"), QStringLiteral("Claude Opus 5"));
+    QCOMPARE(label("anthropic/claude-opus-5-5 (pane 2)"), QStringLiteral("Claude Opus 5.5"));
     QVERIFY(label("").isEmpty());
 }
 
@@ -3373,11 +3376,11 @@ void BoardModelTests::theBriefsAskForTheExactModelAndTheGuestHarness()
     QVERIFY(execute.contains(QStringLiteral("Implemented-By: <vendor>/<your exact model id>")));
     QVERIFY(execute.contains(QStringLiteral("openai/gpt-6-astra")));
     QVERIFY(execute.contains(QStringLiteral("` via claude-code` or ` via codex`")));
-    QVERIFY(execute.contains(QStringLiteral("anthropic/claude-opus-5 via claude-code")));
+    QVERIFY(execute.contains(QStringLiteral("anthropic/claude-opus-5-5 via claude-code")));
 
     const QString verify = relay::board::verifyTask(QStringLiteral("T71W"), QStringLiteral("Signatures"),
                                                     QStringLiteral("Codex"),
-                                                    QStringLiteral("anthropic/claude-opus-5"));
+                                                    QStringLiteral("anthropic/claude-opus-5-5"));
     QVERIFY(verify.contains(QStringLiteral("Verified-By: <vendor>/<your exact model id>")));
     QVERIFY(verify.contains(QStringLiteral("` via claude-code` or ` via codex`")));
     // A guest has no board tools, so nothing stamps `verified_by` for it: the brief says to write
@@ -4080,27 +4083,27 @@ void BoardModelTests::aSelfClosedCardIsDoneAndStampedByWhoeverImplementedIt()
     };
     using relay::board::selfClosed;
     // Done, and both stamps are the one signature: the agent closed its own card.
-    QVERIFY(selfClosed(card("done", "anthropic/claude-opus-5", "anthropic/claude-opus-5")));
+    QVERIFY(selfClosed(card("done", "anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5")));
     // A stray space is not a second model.
-    QVERIFY(selfClosed(card("done", "anthropic/claude-opus-5 ", "anthropic/claude-opus-5")));
+    QVERIFY(selfClosed(card("done", "anthropic/claude-opus-5-5 ", "anthropic/claude-opus-5-5")));
     // Neither empty field says anything about who closed the card, so neither is a match.
     QVERIFY(!selfClosed(card("done", "", "")));
-    QVERIFY(!selfClosed(card("done", "anthropic/claude-opus-5", "")));
-    QVERIFY(!selfClosed(card("done", "", "anthropic/claude-opus-5")));
+    QVERIFY(!selfClosed(card("done", "anthropic/claude-opus-5-5", "")));
+    QVERIFY(!selfClosed(card("done", "", "anthropic/claude-opus-5-5")));
     // Two different models is the cross-provider check the Verified section is for.
-    QVERIFY(!selfClosed(card("done", "anthropic/claude-opus-5", "openai/codex")));
+    QVERIFY(!selfClosed(card("done", "anthropic/claude-opus-5-5", "openai/codex")));
     // And an open card is not self-closed however its stamps read.
-    QVERIFY(!selfClosed(card("in-progress", "anthropic/claude-opus-5", "anthropic/claude-opus-5")));
-    QVERIFY(!selfClosed(card("dropped", "anthropic/claude-opus-5", "anthropic/claude-opus-5")));
+    QVERIFY(!selfClosed(card("in-progress", "anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5")));
+    QVERIFY(!selfClosed(card("dropped", "anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5")));
 
     // It falls into Done, not Verified: nobody else checked it, and it wears no tick either.
     Model model;
     model.setConfig(config());
     QJsonObject own = row("K7Q2", "done", "features");
-    own.insert("implemented_by", "anthropic/claude-opus-5");
-    own.insert("verified_by", "anthropic/claude-opus-5");
+    own.insert("implemented_by", "anthropic/claude-opus-5-5");
+    own.insert("verified_by", "anthropic/claude-opus-5-5");
     QJsonObject checked = row("M3XJ", "done", "features");
-    checked.insert("implemented_by", "anthropic/claude-opus-5");
+    checked.insert("implemented_by", "anthropic/claude-opus-5-5");
     checked.insert("verified_by", "openai/codex");
     model.reset(rows({own, checked}));
     QCOMPARE(model.sectionOf(*model.card("K7Q2")), QStringLiteral("done"));
@@ -4112,7 +4115,7 @@ void BoardModelTests::aSelfClosedCardIsDoneAndStampedByWhoeverImplementedIt()
         return out;
     };
     QVERIFY(!names(relay::board::badges(*model.card("K7Q2"), false))
-                 .contains(QStringLiteral("✓ Claude Opus 5")));
+                 .contains(QStringLiteral("✓ Claude Opus 5.5")));
     QVERIFY(names(relay::board::badges(*model.card("M3XJ"), false))
                 .contains(QStringLiteral("✓ Codex")));
 
@@ -4126,8 +4129,8 @@ void BoardModelTests::theSelfClosedCardsOfASectionFoldIntoOneRow()
     model.setConfig(config());
     const auto own = [](const char *id, const char *rank) {
         QJsonObject json = row(QString::fromUtf8(id), "done", "features", QString::fromUtf8(rank));
-        json.insert("implemented_by", "anthropic/claude-opus-5");
-        json.insert("verified_by", "anthropic/claude-opus-5");
+        json.insert("implemented_by", "anthropic/claude-opus-5-5");
+        json.insert("verified_by", "anthropic/claude-opus-5-5");
         return json;
     };
     // Two ordinary closed cards and three the agent closed itself, all in Done.
@@ -4194,8 +4197,8 @@ void BoardModelTests::theFoldRowTogglesOnClickEnterAndTheArrowsAndRidesTheLayout
     view.setCollapsedSections(QJsonArray{});   // as a restored pane with everything open
     const auto own = [](const char *id, const char *rank) {
         QJsonObject json = row(QString::fromUtf8(id), "done", "features", QString::fromUtf8(rank));
-        json.insert("implemented_by", "anthropic/claude-opus-5");
-        json.insert("verified_by", "anthropic/claude-opus-5");
+        json.insert("implemented_by", "anthropic/claude-opus-5-5");
+        json.insert("verified_by", "anthropic/claude-opus-5-5");
         return json;
     };
     view.handleEvent(opened({row("AAA1", "done", "features", "a"), own("CCC3", "c"),
@@ -4294,8 +4297,8 @@ void BoardModelTests::aSelfClosedCardReachedByIdUnfoldsItsGroup()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     QJsonObject own = row("CCC3", "done", "features", "c");
-    own.insert("implemented_by", "anthropic/claude-opus-5");
-    own.insert("verified_by", "anthropic/claude-opus-5");
+    own.insert("implemented_by", "anthropic/claude-opus-5-5");
+    own.insert("verified_by", "anthropic/claude-opus-5-5");
     // A brand-new pane: every section folded, and the group inside Done folded too.
     view.handleEvent(opened({own, row("AAA1", "done", "features", "a")}));
     QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);

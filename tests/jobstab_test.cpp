@@ -63,7 +63,7 @@ QJsonArray presets() {
                        {QStringLiteral("guest"), true},
                        {QStringLiteral("harness"), true},
                        {QStringLiteral("models"), QJsonArray{
-                            model(QStringLiteral("opus"), QStringLiteral("claude-opus-5"), QStringLiteral("main"),
+                            model(QStringLiteral("opus"), QStringLiteral("claude-opus-5-5"), QStringLiteral("main"),
                                   {QStringLiteral("high"), QStringLiteral("xhigh")})}}};
     return out;
 }
@@ -370,7 +370,7 @@ private Q_SLOTS:
         QStringList names;
         for (int i = 1; i < rows.size(); ++i) names << rows.at(i).text;
         QVERIFY2(names.contains(QStringLiteral("glm-5.3")), qPrintable(names.join(',')));
-        QVERIFY(names.contains(QStringLiteral("claude-opus-5")));
+        QVERIFY(names.contains(QStringLiteral("claude-opus-5-5")));
         QCOMPARE(names.size(), QSet<QString>(names.begin(), names.end()).size());   // one row per model
     }
 

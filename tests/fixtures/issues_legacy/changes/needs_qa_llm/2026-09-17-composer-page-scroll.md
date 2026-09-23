@@ -4,7 +4,7 @@
 - **Component**: gui
 - **Workstream**: terminal
 - **Milestone**: desktop-alpha
-- **Assignee**: implemented by Claude Opus 5 (Claude Code session, pane UX subagent), 2026-09-17
+- **Assignee**: implemented by Claude Opus 5.5 (Claude Code session, pane UX subagent), 2026-09-17
 - **Acceptance evidence**: a non-Claude model QA session runs the checklist and records it under `docs/qa_evidence/`
 - **Source**: `issues/feature_intake.txt` ("check that page up and page down scroll the terminal window up and down")
 

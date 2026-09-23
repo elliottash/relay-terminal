@@ -348,9 +348,9 @@ class AvailabilityTest(HarnessCase):
         self.assertEqual(proc.sent("initialize")[0]["params"]["clientInfo"]["name"], "relay")
         self.assertEqual(proc.sent("initialized")[0].get("params"), {})
         self.assertEqual(start.session_id, "01a0ba5c-89bb-7fb2-9e5b-e96f7f6f07e4")
-        self.assertEqual(start.model, "gpt-5.6-sol")
+        self.assertEqual(start.model, "gpt-6-sol")
         self.assertEqual(harness.session_id, start.session_id)
-        self.assertEqual(harness.model, "gpt-5.6-sol")
+        self.assertEqual(harness.model, "gpt-6-sol")
 
     def test_resume_and_fork_pick_the_right_method(self):
         for fork, method in ((False, "thread/resume"), (True, "thread/fork")):
@@ -376,7 +376,7 @@ class PlainTurnTest(HarnessCase):
         self.assertEqual(self.kinds(), ["started", "delta", "limits", "usage"])
         self.assertEqual(self.only("started")[0],
                          {"session_id": "01a0ba5c-89bb-7fb2-9e5b-e96f7f6f07e4",
-                          "model": "gpt-5.6-sol"})
+                          "model": "gpt-6-sol"})
         self.assertEqual(self.only("delta")[0], {"text": "ok"})
         self.assertEqual(result.text, "ok")
         self.assertEqual(result.stop_reason, "end")
@@ -390,7 +390,7 @@ class PlainTurnTest(HarnessCase):
         usage = self.only("usage")[0]
         self.assertEqual(usage["input_tokens"], 13312)
         self.assertEqual(usage["output_tokens"], 5)
-        self.assertEqual(usage["model"], "gpt-5.6-sol")
+        self.assertEqual(usage["model"], "gpt-6-sol")
         self.assertEqual(usage["context_pct"], round(100.0 * 13317 / 258400, 1))
         self.assertNotIn("cost_usd", usage)
         self.assertEqual(result.usage, usage)
@@ -526,8 +526,8 @@ class ModelsTest(HarnessCase):
 
     def test_the_running_model_is_marked_current(self):
         harness, rows = self._models()
-        self.assertEqual([row["id"] for row in rows if row.get("current")], ["gpt-5.6-sol"])
-        self.assertEqual(harness.model, "gpt-5.6-sol")
+        self.assertEqual([row["id"] for row in rows if row.get("current")], ["gpt-6-sol"])
+        self.assertEqual(harness.model, "gpt-6-sol")
 
     def test_models_is_empty_when_the_harness_is_not_up(self):
         harness = gh.CodexHarness(codex_path=self.fake_codex)

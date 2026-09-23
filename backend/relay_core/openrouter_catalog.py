@@ -22,8 +22,8 @@ Row shape, the same keys `catalog_rows` gives a built-in row plus `context_windo
 prices: ``{"id", "name", "label", "tier": None, "efforts", "effort_fixed", "intelligence": None,
 "openrouter": None, "context_window", "price_prompt_per_mtok", "price_completion_per_mtok"}``.
 `name` is `presets.model_name` of the slug — the vendor prefix stripped, lower-case, no spaces, so
-``openai/gpt-5.6-sol`` folds into the one `gpt-5.6-sol` row (card #MDL1) — and `label` is the same
-string; the API's own `name` ("OpenAI: GPT-5.6 Sol") is not carried, because a model has one name
+``openai/gpt-6-sol`` folds into the one `gpt-6-sol` row (card #MDL1) — and `label` is the same
+string; the API's own `name` ("OpenAI: GPT-6 Sol") is not carried, because a model has one name
 and this is not it. `efforts` is
 the openrouter endpoint's own levels (low, medium, high, xhigh), narrowed to `[]` for a model
 whose `supported_parameters` says it takes no `reasoning`, and `effort_fixed` is true for exactly

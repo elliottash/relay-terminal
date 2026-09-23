@@ -59,7 +59,7 @@ QJsonArray presets() {
     QJsonObject guest{{QStringLiteral("id"), QStringLiteral("guest:claude")}, {QStringLiteral("label"), QStringLiteral("Claude Code")},
                       {QStringLiteral("provider"), QStringLiteral("Claude Code")}, {QStringLiteral("model"), QString()},
                       {QStringLiteral("harness"), true},
-                      {QStringLiteral("models"), QJsonArray{model(QStringLiteral("opus"), QStringLiteral("claude-opus-5"), QString(), {QStringLiteral("low"), QStringLiteral("high")}),
+                      {QStringLiteral("models"), QJsonArray{model(QStringLiteral("opus"), QStringLiteral("claude-opus-5-5"), QString(), {QStringLiteral("low"), QStringLiteral("high")}),
                                                             model(QStringLiteral("sonnet"), QStringLiteral("claude-sonnet-5"), QString(), {})}},
                       {QStringLiteral("limits"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("5h")}, {QStringLiteral("used_percent"), 38.0}, {QStringLiteral("resets_at"), 0}},
                                                             QJsonObject{{QStringLiteral("kind"), QStringLiteral("weekly")}, {QStringLiteral("used_percent"), 60.0}, {QStringLiteral("resets_at"), 0}}}}};
@@ -73,7 +73,7 @@ QJsonArray presets() {
 
 
 // ----- one name, one row (card #MDL1) ----------------------------------------------------------
-// The same three models served several ways: gpt-5.6-sol through Codex, the OpenAI API and
+// The same three models served several ways: gpt-6-sol through Codex, the OpenAI API and
 // OpenRouter; glm-5.3 on a coding plan and on the metered API; and a bonsai the local box serves
 // and OpenRouter also lists. Relay Free is there to be ranked last.
 QJsonObject provider(const QString &id, const QString &providerName, const QString &plan,
@@ -89,7 +89,7 @@ QJsonObject provider(const QString &id, const QString &providerName, const QStri
 QJsonArray groupPresets() {
     QJsonArray out;
     out << provider(QStringLiteral("guest:codex"), QStringLiteral("codex"), QString(),
-                    {model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(), {QStringLiteral("low")}),
+                    {model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QString(), {QStringLiteral("low")}),
                      model(QStringLiteral("gpt-6-astra"), QStringLiteral("gpt-6-astra"), QString(), {QStringLiteral("low")})},
                     true);
     out << provider(QStringLiteral("glm-coding"), QStringLiteral("z.ai (glm)"), QStringLiteral("coding plan"),
@@ -99,11 +99,11 @@ QJsonArray groupPresets() {
                     {model(QStringLiteral("glm-5.3"), QStringLiteral("glm-5.3"), QStringLiteral("main"), {QStringLiteral("high")})},
                     true);
     out << provider(QStringLiteral("openai"), QStringLiteral("openai (chatgpt)"), QStringLiteral("pay-as-you-go"),
-                    {model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(), {QStringLiteral("low")})},
+                    {model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QString(), {QStringLiteral("low")})},
                     true);
-    // A worker that predates `name`: the GUI derives "gpt-5.6-sol" off the slug and the row folds in.
+    // A worker that predates `name`: the GUI derives "gpt-6-sol" off the slug and the row folds in.
     out << provider(QStringLiteral("openrouter"), QStringLiteral("openrouter"), QStringLiteral("pay-as-you-go"),
-                    {oldModel(QStringLiteral("openai/gpt-5.6-sol"), QString(), {QStringLiteral("low")}),
+                    {oldModel(QStringLiteral("openai/gpt-6-sol"), QString(), {QStringLiteral("low")}),
                      oldModel(QStringLiteral("prism-ml/bonsai-2-27b"), QString(), {})},
                     true);
     QJsonObject local{{QStringLiteral("id"), QStringLiteral("local:spark")}, {QStringLiteral("label"), QStringLiteral("spark")},
@@ -115,7 +115,7 @@ QJsonArray groupPresets() {
                      {QStringLiteral("provider"), QStringLiteral("relay")}, {QStringLiteral("plan"), QStringLiteral("included")},
                      {QStringLiteral("hosted"), true}, {QStringLiteral("available"), true},
                      {QStringLiteral("model"), QStringLiteral("relay-main")},
-                     {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(), {}),
+                     {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QString(), {}),
                                                            model(QStringLiteral("relay-main"), QStringLiteral("relay-main"), QStringLiteral("main"), {})}}};
     out << free;
     return out;
@@ -521,7 +521,7 @@ private Q_SLOTS:
         const QList<Entry> list = shown(catalog);
         const QList<Entry> alpha = ordered(list, Sort::Alphabetical, catalog);
         QCOMPARE(alpha.first().provider, QStringLiteral("claude code"));
-        QCOMPARE(alpha.first().name, QStringLiteral("claude-opus-5"));
+        QCOMPARE(alpha.first().name, QStringLiteral("claude-opus-5-5"));
         const QList<Entry> smart = ordered(list, Sort::Intelligence, catalog);
         QCOMPARE(smart.first().key, QStringLiteral("glm-coding|glm-5.3"));   // 45 beats 44
         QCOMPARE(smart.at(1).key, QStringLiteral("kimi-code|k3"));
@@ -863,7 +863,7 @@ private Q_SLOTS:
     void theLevelsAreTheModelsOwnListInTheProvidersOrder() {
         QJsonArray rows;
         QJsonArray models;
-        models << model(QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-5.6-sol"), QString(),
+        models << model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QString(),
                         {QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
                          QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")});
         rows << preset(QStringLiteral("guest:codex"), QStringLiteral("Codex"), QStringLiteral("codex"),
@@ -874,7 +874,7 @@ private Q_SLOTS:
                               {QStringLiteral("low"), QStringLiteral("high"), QStringLiteral("max")})},
                        true);
         const Catalog catalog = catalogFrom(rows);
-        const Entry *sol = catalog.find(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        const Entry *sol = catalog.find(QStringLiteral("guest:codex|gpt-6-sol"));
         QVERIFY(sol);
         // Six, in codex's own order and codex's own words — `xhigh` and `ultra` included. Relay's
         // four were what kept them out of every picker until this card.
@@ -918,7 +918,7 @@ private Q_SLOTS:
         QJsonObject knobless = model(QStringLiteral("astra"), QStringLiteral("gpt-6-astra"), QStringLiteral("main"),
                                      {QStringLiteral("low"), QStringLiteral("high")});
         knobless.insert(QStringLiteral("effort_fixed"), true);        // the provider decides it
-        QJsonObject free = model(QStringLiteral("sol"), QStringLiteral("gpt-5.6-sol"), QString(), {});
+        QJsonObject free = model(QStringLiteral("sol"), QStringLiteral("gpt-6-sol"), QString(), {});
         free.insert(QStringLiteral("effort_fixed"), false);           // no levels, but not greyed
         rows << preset(QStringLiteral("openai"), QStringLiteral("openai"), QStringLiteral("openai"),
                        QString(), {knobless, free}, true);
@@ -974,8 +974,8 @@ private Q_SLOTS:
     // and a codex model's High is `xhigh`, not its top level — `ultra`.
     void aHandAddedModelStartsAtTheLevelTheWorkerNamed() {
         QJsonArray models;
-        models << QJsonObject{{QStringLiteral("id"), QStringLiteral("gpt-5.6-sol")},
-                              {QStringLiteral("label"), QStringLiteral("GPT-5.6-Sol")},
+        models << QJsonObject{{QStringLiteral("id"), QStringLiteral("gpt-6-sol")},
+                              {QStringLiteral("label"), QStringLiteral("GPT-6-Sol")},
                               {QStringLiteral("efforts"), QJsonArray::fromStringList(
                                    QStringList{QStringLiteral("low"), QStringLiteral("medium"), QStringLiteral("high"),
                                                QStringLiteral("xhigh"), QStringLiteral("max"), QStringLiteral("ultra")})},
@@ -989,7 +989,7 @@ private Q_SLOTS:
         rows << preset(QStringLiteral("guest:codex"), QStringLiteral("Codex"), QStringLiteral("Codex"),
                        QString(), models, false);
         const Catalog catalog = catalogFrom(rows);
-        const Entry *sol = catalog.find(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        const Entry *sol = catalog.find(QStringLiteral("guest:codex|gpt-6-sol"));
         QVERIFY(sol);
         QCOMPARE(sol->defaultEffort, QStringLiteral("low"));
         QCOMPARE(sol->tierEffort.value(QStringLiteral("high")), QStringLiteral("xhigh"));
@@ -1175,7 +1175,7 @@ private Q_SLOTS:
 
     void aModelIsNamedOnceHoweverItIsSpelled() {
         // The design's section 1.2 table, derived (nothing but the id to go on).
-        QCOMPARE(nameOf(QStringLiteral("openai/gpt-5.6-sol")), QStringLiteral("gpt-5.6-sol"));
+        QCOMPARE(nameOf(QStringLiteral("openai/gpt-6-sol")), QStringLiteral("gpt-6-sol"));
         QCOMPARE(nameOf(QStringLiteral("MiniMax-M3")), QStringLiteral("minimax-m3"));
         QCOMPARE(nameOf(QStringLiteral("minimax/minimax-m3")), QStringLiteral("minimax-m3"));
         QCOMPARE(nameOf(QStringLiteral("anthropic/claude-haiku-4.5")), QStringLiteral("claude-haiku-4.5"));
@@ -1184,19 +1184,19 @@ private Q_SLOTS:
         // A moving alias keeps its own name, without the "~" OpenRouter writes it with.
         QCOMPARE(nameOf(QStringLiteral("~openai/gpt-sol-latest")), QStringLiteral("gpt-sol-latest"));
         // A serving variant is its own model to the person picking one (design 3.3).
-        QCOMPARE(nameOf(QStringLiteral("openai/gpt-5.6-sol:batch")), QStringLiteral("gpt-5.6-sol:batch"));
+        QCOMPARE(nameOf(QStringLiteral("openai/gpt-6-sol:batch")), QStringLiteral("gpt-6-sol:batch"));
         QCOMPARE(nameOf(QStringLiteral("k3-256k")), QStringLiteral("k3-256k"));
         // Lower-case, no spaces, whatever was typed.
-        QCOMPARE(nameOf(QStringLiteral("  GPT-5.6 Sol  ")), QStringLiteral("gpt-5.6-sol"));
+        QCOMPARE(nameOf(QStringLiteral("  GPT-6 Sol  ")), QStringLiteral("gpt-6-sol"));
         QCOMPARE(nameOf(QString()), QString());
 
         const Catalog catalog = catalogFrom(presets());
         // The worker's `name` wins where the id cannot be derived to it.
         QCOMPARE(catalog.find(QStringLiteral("kimi-code|k3"))->name, QStringLiteral("kimi-k3"));
-        QCOMPARE(catalog.find(QStringLiteral("guest:claude|opus"))->name, QStringLiteral("claude-opus-5"));
+        QCOMPARE(catalog.find(QStringLiteral("guest:claude|opus"))->name, QStringLiteral("claude-opus-5-5"));
         // A row with no `name` at all (an older worker) is derived here.
         const Catalog groups = catalogFrom(groupPresets());
-        QCOMPARE(groups.find(QStringLiteral("openrouter|openai/gpt-5.6-sol"))->name, QStringLiteral("gpt-5.6-sol"));
+        QCOMPARE(groups.find(QStringLiteral("openrouter|openai/gpt-6-sol"))->name, QStringLiteral("gpt-6-sol"));
         // A local endpoint whose probe listed nothing: its own model names the one entry.
         QCOMPARE(groups.find(QStringLiteral("local:spark|bonsai-2-27b"))->name, QStringLiteral("bonsai-2-27b"));
     }
@@ -1205,32 +1205,32 @@ private Q_SLOTS:
         const Catalog catalog = catalogFrom(groupPresets());
         const QList<Group> groups = grouped(catalog, allEntries(catalog));
         // One group per name, in the order each name first appeared in the list handed in.
-        QCOMPARE(namesOf(groups), (QStringList{QStringLiteral("gpt-5.6-sol"), QStringLiteral("gpt-6-astra"),
+        QCOMPARE(namesOf(groups), (QStringList{QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-astra"),
                                                QStringLiteral("glm-5.3"), QStringLiteral("bonsai-2-27b"),
                                                QStringLiteral("bonsai-2-27b"), QStringLiteral("relay-main")}));
-        const Group sol = groupNamed(groups, QStringLiteral("gpt-5.6-sol"));
+        const Group sol = groupNamed(groups, QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty());
         // Nothing is ranked yet, so it is the kind of access that decides: the guest harness, then
         // the first-party API, then OpenRouter, then Relay Free.
-        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-5.6-sol"),
-                                                    QStringLiteral("openai|gpt-5.6-sol"),
-                                                    QStringLiteral("openrouter|openai/gpt-5.6-sol"),
-                                                    QStringLiteral("relay-free|gpt-5.6-sol")}));
+        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-6-sol"),
+                                                    QStringLiteral("openai|gpt-6-sol"),
+                                                    QStringLiteral("openrouter|openai/gpt-6-sol"),
+                                                    QStringLiteral("relay-free|gpt-6-sol")}));
     }
 
     void aRankedEntryComesFirstWhateverItIsServedBy() {
         const Catalog catalog = catalogFrom(groupPresets());
         curation::setTierList(QStringLiteral("main"),
-                              {{QStringLiteral("openrouter|openai/gpt-5.6-sol"), QStringLiteral("low")}});
+                              {{QStringLiteral("openrouter|openai/gpt-6-sol"), QStringLiteral("low")}});
         curation::setTierList(QStringLiteral("flash"),
-                              {{QStringLiteral("openai|gpt-5.6-sol"), QString()}});
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+                              {{QStringLiteral("openai|gpt-6-sol"), QString()}});
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty());
         // Main rank 1 first, then the flash list, then the unranked ones in access order.
-        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openrouter|openai/gpt-5.6-sol"),
-                                                    QStringLiteral("openai|gpt-5.6-sol"),
-                                                    QStringLiteral("guest:codex|gpt-5.6-sol"),
-                                                    QStringLiteral("relay-free|gpt-5.6-sol")}));
+        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openrouter|openai/gpt-6-sol"),
+                                                    QStringLiteral("openai|gpt-6-sol"),
+                                                    QStringLiteral("guest:codex|gpt-6-sol"),
+                                                    QStringLiteral("relay-free|gpt-6-sol")}));
     }
 
     // ----- the ranking file decides the fold (card #MDL1, protocol 13.2) ------------------------
@@ -1239,17 +1239,17 @@ private Q_SLOTS:
         const Catalog catalog = catalogFrom(rankedPresets({{QStringLiteral("guest:codex"), 11},
                                                            {QStringLiteral("openai"), 31}},
                                                           {{QStringLiteral("guest:codex"), QStringLiteral("harness")}}));
-        const Entry *codex = catalog.find(QStringLiteral("guest:codex|gpt-5.6-sol"));
+        const Entry *codex = catalog.find(QStringLiteral("guest:codex|gpt-6-sol"));
         QVERIFY(codex != nullptr);
         QCOMPARE(codex->kind, QStringLiteral("harness"));
         QCOMPARE(codex->order, 11);
         // Every row of a preset gets the preset's pair, not just the first.
         QCOMPARE(catalog.find(QStringLiteral("guest:codex|gpt-6-astra"))->order, 11);
-        QCOMPARE(catalog.find(QStringLiteral("openai|gpt-5.6-sol"))->kind, QStringLiteral("api"));
+        QCOMPARE(catalog.find(QStringLiteral("openai|gpt-6-sol"))->kind, QStringLiteral("api"));
         // A worker that sends neither leaves the row at -1, and nothing here invents a number.
         const Catalog old = catalogFrom(groupPresets());
-        QCOMPARE(old.find(QStringLiteral("openai|gpt-5.6-sol"))->order, -1);
-        QVERIFY(old.find(QStringLiteral("openai|gpt-5.6-sol"))->kind.isEmpty());
+        QCOMPARE(old.find(QStringLiteral("openai|gpt-6-sol"))->order, -1);
+        QVERIFY(old.find(QStringLiteral("openai|gpt-6-sol"))->kind.isEmpty());
     }
 
     void theFilesOrderDecidesTheFoldEvenAgainstTheOldRank() {
@@ -1262,12 +1262,12 @@ private Q_SLOTS:
                                                            {QStringLiteral("openrouter"), 20},
                                                            {QStringLiteral("relay-free"), 30}},
                                                           {{QStringLiteral("guest:codex"), QStringLiteral("harness")}}));
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty());
-        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openai|gpt-5.6-sol"),
-                                                    QStringLiteral("openrouter|openai/gpt-5.6-sol"),
-                                                    QStringLiteral("relay-free|gpt-5.6-sol"),
-                                                    QStringLiteral("guest:codex|gpt-5.6-sol")}));
+        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openai|gpt-6-sol"),
+                                                    QStringLiteral("openrouter|openai/gpt-6-sol"),
+                                                    QStringLiteral("relay-free|gpt-6-sol"),
+                                                    QStringLiteral("guest:codex|gpt-6-sol")}));
     }
 
     void aRankedEntryStillBeatsTheFilesOrder() {
@@ -1278,12 +1278,12 @@ private Q_SLOTS:
                                                            {QStringLiteral("openrouter"), 30},
                                                            {QStringLiteral("relay-free"), 40}}));
         curation::setTierList(QStringLiteral("main"),
-                              {{QStringLiteral("relay-free|gpt-5.6-sol"), QString()}});
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
-        QCOMPARE(sol.entries.first().key, QStringLiteral("relay-free|gpt-5.6-sol"));
-        QCOMPARE(keysOf(sol.entries).mid(1), (QStringList{QStringLiteral("guest:codex|gpt-5.6-sol"),
-                                                           QStringLiteral("openai|gpt-5.6-sol"),
-                                                           QStringLiteral("openrouter|openai/gpt-5.6-sol")}));
+                              {{QStringLiteral("relay-free|gpt-6-sol"), QString()}});
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
+        QCOMPARE(sol.entries.first().key, QStringLiteral("relay-free|gpt-6-sol"));
+        QCOMPARE(keysOf(sol.entries).mid(1), (QStringList{QStringLiteral("guest:codex|gpt-6-sol"),
+                                                           QStringLiteral("openai|gpt-6-sol"),
+                                                           QStringLiteral("openrouter|openai/gpt-6-sol")}));
     }
 
     void oneRowWithoutAnOrderSendsThePairBackToTheOldRank() {
@@ -1292,11 +1292,11 @@ private Q_SLOTS:
         // codex carries nothing, and the guest still leads, exactly as it did before the pair
         // existed — the only safe answer when half the rows are from an older worker.
         const Catalog catalog = catalogFrom(rankedPresets({{QStringLiteral("openai"), 10}}));
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
-        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-5.6-sol"),
-                                                    QStringLiteral("openai|gpt-5.6-sol"),
-                                                    QStringLiteral("openrouter|openai/gpt-5.6-sol"),
-                                                    QStringLiteral("relay-free|gpt-5.6-sol")}));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
+        QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-6-sol"),
+                                                    QStringLiteral("openai|gpt-6-sol"),
+                                                    QStringLiteral("openrouter|openai/gpt-6-sol"),
+                                                    QStringLiteral("relay-free|gpt-6-sol")}));
     }
 
     void thePlanIsSpentBeforeTheMeteredApi() {
@@ -1330,12 +1330,12 @@ private Q_SLOTS:
         openai.insert(QStringLiteral("has_stored_key"), false);
         rows.replace(3, openai);
         const Catalog catalog = catalogFrom(rows);
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty());
         // The order is unchanged — the row does not move when a subscription runs out — but the
         // entry the row runs is the first one that is usable and not exhausted.
-        QCOMPARE(sol.entries.first().key, QStringLiteral("guest:codex|gpt-5.6-sol"));
-        QCOMPARE(sol.preferred(catalog, 1'000'000).key, QStringLiteral("openrouter|openai/gpt-5.6-sol"));
+        QCOMPARE(sol.entries.first().key, QStringLiteral("guest:codex|gpt-6-sol"));
+        QCOMPARE(sol.preferred(catalog, 1'000'000).key, QStringLiteral("openrouter|openai/gpt-6-sol"));
         QVERIFY(!sol.spent(catalog, 1'000'000));
     }
 
@@ -1349,30 +1349,30 @@ private Q_SLOTS:
             rows.replace(at, row);
         }
         const Catalog catalog = catalogFrom(rows);
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty() && sol.spent(catalog, 1'000'000));
         // Spent is not empty: the row still answers with something to show as the one it would use.
-        QCOMPARE(sol.preferred(catalog, 1'000'000).key, QStringLiteral("guest:codex|gpt-5.6-sol"));
+        QCOMPARE(sol.preferred(catalog, 1'000'000).key, QStringLiteral("guest:codex|gpt-6-sol"));
         const Group glm = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("glm-5.3"));
         QVERIFY(!glm.name.isEmpty() && !glm.spent(catalog, 1'000'000));
     }
 
     void viaNamesOneProviderOfTheRow() {
         const Catalog catalog = catalogFrom(groupPresets());
-        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-5.6-sol"));
+        const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty());
-        QCOMPARE(sol.via(QStringLiteral("openrouter"))->key, QStringLiteral("openrouter|openai/gpt-5.6-sol"));
-        QCOMPARE(sol.via(QStringLiteral("codex"))->key, QStringLiteral("guest:codex|gpt-5.6-sol"));
-        QCOMPARE(sol.via(QStringLiteral("guest:codex"))->key, QStringLiteral("guest:codex|gpt-5.6-sol"));
-        QCOMPARE(sol.via(QStringLiteral("chatgpt"))->key, QStringLiteral("openai|gpt-5.6-sol"));
+        QCOMPARE(sol.via(QStringLiteral("openrouter"))->key, QStringLiteral("openrouter|openai/gpt-6-sol"));
+        QCOMPARE(sol.via(QStringLiteral("codex"))->key, QStringLiteral("guest:codex|gpt-6-sol"));
+        QCOMPARE(sol.via(QStringLiteral("guest:codex"))->key, QStringLiteral("guest:codex|gpt-6-sol"));
+        QCOMPARE(sol.via(QStringLiteral("chatgpt"))->key, QStringLiteral("openai|gpt-6-sol"));
         QVERIFY(sol.via(QStringLiteral("kimi")) == nullptr);
         QVERIFY(sol.via(QString()) == nullptr);
     }
 
     void aReportedModelResolvesToThePresetsOwnEntry() {
         const Catalog catalog = catalogFrom(presets());
-        // Claude Code is started with the alias `opus` and reports `claude-opus-5`: one entry.
-        QCOMPARE(catalog.resolveKey(QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5")),
+        // Claude Code is started with the alias `opus` and reports `claude-opus-5-5`: one entry.
+        QCOMPARE(catalog.resolveKey(QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5-5")),
                  QStringLiteral("guest:claude|opus"));
         QCOMPARE(catalog.resolveKey(QStringLiteral("guest:claude"), QStringLiteral("opus")),
                  QStringLiteral("guest:claude|opus"));
@@ -1385,24 +1385,24 @@ private Q_SLOTS:
         QCOMPARE(catalog.resolveKey(QString(), QStringLiteral("glm-5.3")), QString());
         // The same model spelled as OpenRouter spells it still lands on this preset's row.
         const Catalog groups = catalogFrom(groupPresets());
-        QCOMPARE(groups.resolveKey(QStringLiteral("openai"), QStringLiteral("openai/gpt-5.6-sol")),
-                 QStringLiteral("openai|gpt-5.6-sol"));
+        QCOMPARE(groups.resolveKey(QStringLiteral("openai"), QStringLiteral("openai/gpt-6-sol")),
+                 QStringLiteral("openai|gpt-6-sol"));
     }
 
     void findByNameTakesTheRowOrOneProviderOfIt() {
         const Catalog catalog = catalogFrom(groupPresets());
         const QList<Entry> rows = allEntries(catalog);
-        const Entry *sol = findByName(catalog, rows, QStringLiteral("gpt-5.6-sol"));
+        const Entry *sol = findByName(catalog, rows, QStringLiteral("gpt-6-sol"));
         QVERIFY(sol);
-        QCOMPARE(sol->key, QStringLiteral("guest:codex|gpt-5.6-sol"));
-        const Entry *via = findByName(catalog, rows, QStringLiteral("gpt-5.6-sol@openrouter"));
+        QCOMPARE(sol->key, QStringLiteral("guest:codex|gpt-6-sol"));
+        const Entry *via = findByName(catalog, rows, QStringLiteral("gpt-6-sol@openrouter"));
         QVERIFY(via);
-        QCOMPARE(via->key, QStringLiteral("openrouter|openai/gpt-5.6-sol"));
+        QCOMPARE(via->key, QStringLiteral("openrouter|openai/gpt-6-sol"));
         // A bare model id works too, and so does the spelling another provider uses.
-        QVERIFY(findByName(catalog, rows, QStringLiteral("openai/gpt-5.6-sol")));
-        QCOMPARE(findByName(catalog, rows, QStringLiteral("GPT-5.6-SOL"))->name, QStringLiteral("gpt-5.6-sol"));
+        QVERIFY(findByName(catalog, rows, QStringLiteral("openai/gpt-6-sol")));
+        QCOMPARE(findByName(catalog, rows, QStringLiteral("GPT-6-SOL"))->name, QStringLiteral("gpt-6-sol"));
         // A provider that does not serve this model is a miss, not a silent fall back to another.
-        QVERIFY(findByName(catalog, rows, QStringLiteral("gpt-5.6-sol@kimi")) == nullptr);
+        QVERIFY(findByName(catalog, rows, QStringLiteral("gpt-6-sol@kimi")) == nullptr);
         QVERIFY(findByName(catalog, rows, QStringLiteral("nothing-like-this")) == nullptr);
         QVERIFY(findByName(catalog, rows, QString()) == nullptr);
     }
@@ -1453,7 +1453,7 @@ private Q_SLOTS:
         QVERIFY(choice.restored);
         QCOMPARE(choice.effort, QStringLiteral("high"));
         // A guest saved the model its CLI reported; the entry the lists name is `opus`.
-        const StartChoice guest = startEntry(catalog, QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5"), 1000);
+        const StartChoice guest = startEntry(catalog, QStringLiteral("guest:claude"), QStringLiteral("claude-opus-5-5"), 1000);
         QCOMPARE(guest.entry.key, QStringLiteral("guest:claude|opus"));
         QVERIFY(guest.restored);
         // An older layout saved a preset and no model: that preset's main model comes back, and

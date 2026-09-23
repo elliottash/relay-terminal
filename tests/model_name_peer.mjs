@@ -7,8 +7,8 @@
 import { nameOf, modelName } from '../app/modelname.js';
 
 // Every shape section 1.2 of docs/MODEL-PICKING-DESIGN.md found in the wild.
-const IDS = ['gpt-5.6-sol', 'openai/gpt-5.6-sol', '~openai/gpt-sol-latest', 'MiniMax-M3',
-             'z-ai/glm-5.3-flashx', 'claude-opus-5', 'moonshotai/kimi-k3:batch',
+const IDS = ['gpt-6-sol', 'openai/gpt-6-sol', '~openai/gpt-sol-latest', 'MiniMax-M3',
+             'z-ai/glm-5.3-flashx', 'claude-opus-5-5', 'moonshotai/kimi-k3:batch',
              'kimi-for-coding-highspeed', 'Some Model', '', '  '];
 
 process.stdout.write(JSON.stringify({
@@ -18,7 +18,7 @@ process.stdout.write(JSON.stringify({
   // The worker's own name wins wherever it sent one: nothing here can know that the Kimi Coding
   // Plan's "k3" is Kimi K3.
   prefers_the_worker: modelName({ model: 'k3', model_name: 'kimi-k3' }),
-  falls_back: modelName({ model: 'openai/gpt-5.6-sol' }),
+  falls_back: modelName({ model: 'openai/gpt-6-sol' }),
   other_field: modelName({ in_flight_model: 'MiniMax-M3' }, 'in_flight_model'),
   other_field_named: modelName({ in_flight_model: 'k3', in_flight_model_name: 'kimi-k3' },
                                'in_flight_model'),

@@ -118,7 +118,7 @@ class FallbackCandidateTests(unittest.TestCase):
             # A missing model means the preset's own.
             self.assertEqual(made.fallback_candidate({'preset': 'kimi'}, 'main', {'glm'}).config.model, 'kimi-k3')
             # Not a spare: no stored key.
-            self.assertIsNone(made.fallback_candidate({'preset': 'anthropic', 'model': 'claude-opus-5'}, 'main', {'glm'}))
+            self.assertIsNone(made.fallback_candidate({'preset': 'anthropic', 'model': 'claude-opus-5-5'}, 'main', {'glm'}))
             # The provider that just failed, and another key on the same host (glm-coding is api.z.ai too).
             self.assertIsNone(made.fallback_candidate({'preset': 'glm', 'model': 'glm-5.3'}, 'main', {'glm'}))
             self.assertIsNone(made.fallback_candidate({'preset': 'glm-coding', 'model': 'glm-5.3'}, 'main', {'glm'}))
@@ -271,16 +271,16 @@ class FailoverTests(unittest.TestCase):
         # "As many as you want, according to priority": four entries, the first three down.
         down = ProviderError('Provider HTTP 503.')
         self.stubs[MAIN.model] = Refuser(down)
-        for model in ('gpt-6-mini', 'kimi-k3', 'claude-opus-5'):
+        for model in ('gpt-6-mini', 'kimi-k3', 'claude-opus-5-5'):
             self.stubs[model] = Refuser(down)
         self.stubs['MiniMax-M3'] = Answerer()
         agent = self.agent(roles=resolver({'openai': 'k', 'kimi': 'k', 'anthropic': 'k', 'minimax': 'k'}),
-                           fallbacks=[OPENAI_MINI, *KIMI, {'preset': 'anthropic', 'model': 'claude-opus-5'},
+                           fallbacks=[OPENAI_MINI, *KIMI, {'preset': 'anthropic', 'model': 'claude-opus-5-5'},
                                       {'preset': 'minimax', 'model': 'MiniMax-M3'}])
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual([(e['attempt'], e['max_attempts'], e['to_model']) for e in self.retries()],
-                         [(1, 4, 'gpt-6-mini'), (2, 4, 'kimi-k3'), (3, 4, 'claude-opus-5'), (4, 4, 'MiniMax-M3')])
+                         [(1, 4, 'gpt-6-mini'), (2, 4, 'kimi-k3'), (3, 4, 'claude-opus-5-5'), (4, 4, 'MiniMax-M3')])
         self.assertEqual(agent.config.model, MAIN.model)
 
     def test_an_entry_that_cannot_take_the_turn_is_skipped_for_the_next(self):
@@ -345,7 +345,7 @@ class FailoverTests(unittest.TestCase):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 503 for glm-5.3.'))
         for model in ('gpt-6-mini', 'kimi-k3', 'z-ai/glm-5.3'):
             self.stubs[model] = Refuser(down)
-        self.stubs['claude-opus-5'] = Answerer()
+        self.stubs['claude-opus-5-5'] = Answerer()
         agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k', 'openrouter': 'k', 'anthropic': 'k'}),
                            fallbacks=[OPENAI_MINI, *KIMI], failover_openrouter=['glm-5.3'])
         agent.ask('hello')
@@ -354,7 +354,7 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual([(e['attempt'], e['max_attempts'], e['to_model']) for e in self.retries()],
                          [(1, 3, 'gpt-6-mini'), (2, 3, 'kimi-k3'), (3, 3, 'z-ai/glm-5.3')])
         self.assertEqual([self.stubs[m].calls for m in ('gpt-6-mini', 'kimi-k3', 'z-ai/glm-5.3')], [1, 1, 1])
-        self.assertEqual(self.stubs['claude-opus-5'].calls, 0)
+        self.assertEqual(self.stubs['claude-opus-5-5'].calls, 0)
         self.assertEqual(agent.config.model, MAIN.model)
 
     def test_the_twin_is_tried_once_even_when_the_list_names_openrouter(self):

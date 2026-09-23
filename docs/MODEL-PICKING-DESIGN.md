@@ -1,7 +1,7 @@
 # Model picking: one name, one row, one default
 
 Card #MDP1, 2026-09-21. A fresh review of how a model is named, listed, picked and defaulted,
-after the owner found that the picker said "Codex" for `gpt-5.6-sol`, that a new pane and `/swap`
+after the owner found that the picker said "Codex" for `gpt-6-sol`, that a new pane and `/swap`
 disagreed about which model comes first, and that `/swap` "seems like it doesn't work".
 
 This document is the review's findings, the rules proposed to replace what it found, the edge
@@ -27,26 +27,26 @@ Around them, raw ids are printed directly by `model_changed` ("Model: glm-5.3-fl
 tooltips, the "this turn" row, session info, the Conversations list and the phone's event lines.
 
 `Entry.label` itself is whatever the worker sent, lower-cased: `glm-5.3 flash`, `relay main`,
-`kimi for coding highspeed`, and for OpenRouter's live listing `openai: gpt-5.6 sol`. 25 of the 31
+`kimi for coding highspeed`, and for OpenRouter's live listing `openai: gpt-6 sol`. 25 of the 31
 built-in labels contain a space. The owner's example is a deliberate branch, not an accident:
 `Pane::roleRowModel` sends a guest entry to `conciseModel`, which returns the preset label, although
-`m_guestModel` and `currentEntryKey()` already hold `gpt-5.6-sol` at that moment. The phone copies
+`m_guestModel` and `currentEntryKey()` already hold `gpt-6-sol` at that moment. The phone copies
 the box's text, so it says "Codex (main)" too.
 
 ### 1.2 One model, several spellings
 
 | the model | first-party | guest harness | OpenRouter |
 |---|---|---|---|
-| GPT-5.6 Sol | `openai` `gpt-5.6-sol` | `guest:codex` `gpt-5.6-sol` | `openai/gpt-5.6-sol` |
+| GPT-6 Sol | `openai` `gpt-6-sol` | `guest:codex` `gpt-6-sol` | `openai/gpt-6-sol` |
 | Kimi K3 | `kimi` `kimi-k3`, `kimi-code` **`k3`** | | `moonshotai/kimi-k3` |
 | GLM-5.3 | `glm` and `glm-coding`, both `glm-5.3` | | `z-ai/glm-5.3` |
-| Claude Opus 5 | `anthropic` `claude-opus-5` | `guest:claude` **`opus`** | `anthropic/claude-opus-5` |
+| Claude Opus 5.5 | `anthropic` `claude-opus-5-5` | `guest:claude` **`opus`** | `anthropic/claude-opus-5-5` |
 | Claude Haiku 4.5 | `claude-haiku-4-5` (hyphen) | `haiku` | `anthropic/claude-haiku-4.5` (dot) |
 | MiniMax M3 | **`MiniMax-M3`** (capitals) | | `minimax/minimax-m3` |
 | Gemini 3.8 Flash | `gemini` `gemini-3.8-flash` | | `google/gemini-3.8-flash`, a built-in `openrouter` row |
 
 The only bridges today are `presets.OPENROUTER_TWINS` (first-party id → slug) and
-`presets.GUEST_MODEL_ALIASES` (`opus` → `claude-opus-5`). Nothing connects `kimi-code|k3` to
+`presets.GUEST_MODEL_ALIASES` (`opus` → `claude-opus-5-5`). Nothing connects `kimi-code|k3` to
 `kimi|kimi-k3`, or Codex's ids to the `openai` preset's although they are byte-identical. The cost
 already shows: `presets.INTELLIGENCE` scores `k3` and `kimi-k3` separately, by hand, at the same 44.
 
@@ -83,23 +83,23 @@ pane start. `provider/preset` is rewritten by every switch in every pane — `se
 `/swap` dispatches and the worker switches every time; what it does is not what anyone would
 expect. Reproduced under Xvfb, and the same sequence is in the owner's own log
 (`~/.local/share/relay/logs/relay.log`, 2026-09-21 10:49): a pane configured on `kimi-k3`, then four
-`/swap`s alternating `gpt-5.6-sol` and `z-ai/glm-5.3-flashx`, never `kimi-k3` again.
+`/swap`s alternating `gpt-6-sol` and `z-ai/glm-5.3-flashx`, never `kimi-k3` again.
 
 1. **It knows two keys and has no memory.** The target is `current == fallback.key ? main :
    fallback` (`Pane.h`, the `swap` branch), where main and fallback are ranks 1 and 2 of the main
    tier list. A pane on any *other* model — the normal case: the owner's working models are
    `kimi|kimi-k3`, `guest:claude|opus`, `glm-coding|glm-5.3`, none of them rank 1 or 2 — is sent to
    rank 2, and every later `/swap` ping-pongs 1↔2. It can never come back to where it was. On the
-   owner's machine rank 1 and 2 are `openrouter|z-ai/glm-5.3-flashx` and `guest:codex|gpt-5.6-sol`,
+   owner's machine rank 1 and 2 are `openrouter|z-ai/glm-5.3-flashx` and `guest:codex|gpt-6-sol`,
    which came from the first-run fill, not from him.
 2. **Its confirmation is overwritten.** "Swapped to … (the fallback)" is replaced 100–300 ms later
    by the generic "Model: … · conversation kept" from `model_changed`, so `/swap` reads like a
    `/model` that picked the wrong thing.
 3. **The pane's own key is sometimes one no list contains.** `currentEntryKey()` is
    `preset|<what the worker last reported>`. Claude Code is started with `opus` and reports
-   `claude-opus-5`; after `/flash` the pane keeps its preset and takes the role's model from another
+   `claude-opus-5-5`; after `/flash` the pane keeps its preset and takes the role's model from another
    one (`openrouter|glm-5.3-flash`, which exists nowhere). The owner's settings hold both
-   `uses/guest:claude|opus=12` and `uses/guest:claude|claude-opus-5=8`. For `/swap` this makes both
+   `uses/guest:claude|opus=12` and `uses/guest:claude|claude-opus-5-5=8`. For `/swap` this makes both
    comparisons false; with two models of one guest at ranks 1 and 2 it would be a no-op forever.
 4. **"Fallback" means two things.** `/swap`'s is rank 2 including guests; the failover chain's
    (`rememberFallback`) excludes them. On the owner's machine they are different models.
@@ -119,7 +119,7 @@ thing for a row that has none (a custom id, an older worker). In order:
 1. an explicit `name` on the `MODEL_CATALOG` row — for the few that cannot be derived:
    `kimi-code|k3` → `kimi-k3`, `claude-haiku-4-5` → `claude-haiku-4.5`, `claude-fable-5-1` →
    `claude-fable-5.1`;
-2. a guest alias through `GUEST_MODEL_ALIASES`: `opus` → `claude-opus-5`;
+2. a guest alias through `GUEST_MODEL_ALIASES`: `opus` → `claude-opus-5-5`;
 3. otherwise the id, lower-cased, with everything up to the last `/` and a leading `~` removed.
 
 `Entry.label` becomes this name. The prettified `label` strings in `presets.py` go; `displayName()`
@@ -149,9 +149,9 @@ Preference order inside a group:
 3. skipping an entry that is unusable (no key) or exhausted.
 
 Picking the row picks the first live entry. The row says which provider that is
-(`gpt-5.6-sol   codex  +2`), the tooltip lists the others, and in the big picker `→` opens a "via"
-list beside the level list so a specific provider can be chosen. `/model gpt-5.6-sol` takes the
-group's first entry; `/model gpt-5.6-sol@openrouter` names one.
+(`gpt-6-sol   codex  +2`), the tooltip lists the others, and in the big picker `→` opens a "via"
+list beside the level list so a specific provider can be chosen. `/model gpt-6-sol` takes the
+group's first entry; `/model gpt-6-sol@openrouter` names one.
 
 The payoff is that de-duplication and failover become the same idea: when the subscription runs
 out, the row stays and quietly uses the next provider. A row is greyed only when every provider in
@@ -177,14 +177,14 @@ it is spent.
   2 when there is none. So from `kimi-k3`: `/swap` → rank 1, `/swap` → `kimi-k3`. Its sentence
   survives `model_changed`, and it says which one it went to.
 - The pane's key is resolved through the catalog, by **name** (Rule 1): `guest:claude` reporting
-  `claude-opus-5` is the `guest:claude|opus` entry, so `/swap`, the "current" mark, recents and
+  `claude-opus-5-5` is the `guest:claude|opus` entry, so `/swap`, the "current" mark, recents and
   usage counts all see one model. A role's model never rewrites the pane's own key.
 - The box and the picker treat an exhausted model the same way: greyed, in place.
 - `models/priority` and `models/effort/*` are retired; `ranked()` stops reading `provider/preset`.
 
 ## 3. Edge cases
 
-1. **A harness is not just another provider.** `gpt-5.6-sol` through Codex is a different agent
+1. **A harness is not just another provider.** `gpt-6-sol` through Codex is a different agent
    (its own tools, loop and permissions) from the Relay agent on the OpenAI API. One row is still
    right, but the row must say which it will use, and the harness must never be reached *silently*
    by failover — which the worker already guarantees ("a guest is never a failover target").
@@ -192,7 +192,7 @@ it is spent.
    `prism-ml/ternary-bonsai-2-27b` would share a name. "Local" is a promise about where the text
    goes, so a local entry only groups with other local entries.
 3. **Serving variants are different models to the person picking**: `-highspeed`, `:batch`,
-   `k3-256k`, `gpt-5.6-sol-pro`. They keep their own names and their own rows. (They may share an
+   `k3-256k`, `gpt-6-sol-pro`. They keep their own names and their own rows. (They may share an
    intelligence score; that is a different table.)
 4. **Moving aliases**: `opus`, `kimi-for-coding`, `~openai/gpt-sol-latest`. Named after what they
    point at only where the worker knows (`GUEST_MODEL_ALIASES`); otherwise the alias is the name.
@@ -212,7 +212,7 @@ it is spent.
     provider's entry from the group rather than the preferred one.
 12. **Two different models, same stripped name** across vendors on OpenRouter: none today (0 of
     446). If one appears, both keep their vendor prefix.
-13. **Hand-typed custom ids** get the derived name, so `openai/gpt-5.6-sol` added by hand folds
+13. **Hand-typed custom ids** get the derived name, so `openai/gpt-6-sol` added by hand folds
     into the existing row instead of making a twin.
 14. **History** (Conversations, session info, exports) recorded raw ids; they are passed through the
     same `name()` on display and left alone on disk.
@@ -226,7 +226,7 @@ it is spent.
    because it happens to be installed is not a default"). *Recommended: yes when the owner ranked it
    first* — being installed is not a default, being put first is — provided the harness process
    starts on the first turn, not when the pane opens.
-2. **The name of a Claude Code alias**: `claude-opus-5` (what it points at; recommended, matches
+2. **The name of a Claude Code alias**: `claude-opus-5-5` (what it points at; recommended, matches
    the OpenAI example) or `opus` (what is typed to the CLI).
 3. **`relay-main` rather than `relay main`**: follows from "always lowercase, no spaces";
    recorded here because an earlier note called the hyphenated form unrecognisable.
@@ -549,7 +549,7 @@ Two rules, both read off the row rather than off a name.
    (`Entry::tier`, what the worker's catalog names it a default for) and `shown`, `allUsable` and
    `curatable` all skip it — every surface a terminal agent picks from. `relay-main` and
    `relay-flash` are ordinary rows, and so is anybody else's lite-classed model: gemini-3.5-flash-
-   lite, gpt-5.6-luna and claude-haiku-4.5 are real models, drawn, available by default and the
+   lite, gpt-6-luna and claude-haiku-4.5 are real models, drawn, available by default and the
    user's to un-tick.
 
 Found with them: a provider serving **one** model could never have that model un-ticked, because

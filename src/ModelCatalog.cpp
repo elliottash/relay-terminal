@@ -188,7 +188,7 @@ QString Catalog::resolveKey(const QString &preset, const QString &reportedModel)
     for (const Entry &entry : entries)
         if (entry.preset == preset && entry.model == reportedModel) return entry.key;
     // The alias knowledge is already in the row: the worker names `guest:claude|opus`
-    // "claude-opus-5", which is what the CLI reports once it is running, so comparing names is
+    // "claude-opus-5-5", which is what the CLI reports once it is running, so comparing names is
     // comparing what the two spellings mean. `reportedModel` is compared as it stands too, for a
     // row whose name is itself the alias (a guest whose family nothing maps).
     const QString wanted = nameOf(reportedModel);
@@ -309,7 +309,7 @@ Catalog catalogFrom(const QJsonArray &presets) {
 // The level a model starts at when it is added to a list by hand (card #TKN7). The worker computes
 // it per row (`tier_effort`, presets.tier_start_efforts) because two of its three rules are not
 // readable off the row: Main is the provider's own default level — codex's `default_reasoning_level`
-// is `low` for gpt-5.6-sol — and a codex model's High is `xhigh`, not its top level, which is
+// is `low` for gpt-6-sol — and a codex model's High is `xhigh`, not its top level, which is
 // `ultra` (a delegation mode, and the owner's report: "it defaulted effort to ultra reasoning").
 QString tierStartEffort(const Entry &entry, const QString &tier) {
     const QString listed = entry.tierEffort.value(tier);
@@ -982,7 +982,7 @@ void setSort(Sort sort) {
 // The rule is read off the row rather than off the name, so a second hosted lane needs no edit
 // here: a **hosted** entry whose ranking class is `lite` and nothing else (`Entry::tier`, the one
 // class the worker's catalog names it a default for). Everybody else's lite-classed models —
-// gemini-3.5-flash-lite, gpt-5.6-luna, claude-haiku-4.5 — are real models a pane can be put on,
+// gemini-3.5-flash-lite, gpt-6-luna, claude-haiku-4.5 — are real models a pane can be put on,
 // so they stay, available by default and the user's to un-tick (`inTerminalList`).
 bool liteOnlyRole(const Entry &entry) {
     return entry.hosted && entry.tier == QStringLiteral("lite");
@@ -1184,7 +1184,7 @@ StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, co
     StartChoice choice;
     // A restored pane comes back on its own model, not on rank 1: the pick it holds was made in
     // that pane. Through resolveKey, so a guest that saved the model its CLI reported
-    // ("claude-opus-5") comes back as the entry the lists name (`guest:claude|opus`).
+    // ("claude-opus-5-5") comes back as the entry the lists name (`guest:claude|opus`).
     if (!restoredPreset.isEmpty()) {
         QString key = catalog.resolveKey(restoredPreset, restoredModel);
         // A layout saved before the model was written down, or by an older Relay: the preset's own

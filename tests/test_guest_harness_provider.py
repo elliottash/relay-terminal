@@ -1034,19 +1034,19 @@ class CatalogueTests(unittest.TestCase):
         # The scan completed empty, so codex's four stand in (#E516), and the first row's own
         # levels are the row's efforts, exactly as for a scanned catalogue.
         self.assertEqual([m["id"] for m in rows["guest:codex"]["models"]],
-                         ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
+                         ["gpt-6-astra", "gpt-6-sol", "gpt-5.6-terra", "gpt-6-luna"])
         self.assertEqual(rows["guest:codex"]["efforts"],
                          ["low", "medium", "high", "xhigh", "max", "ultra"])
         # Where each model starts when it is added to a list by hand (card #TKN7):
         # `model-ranking.md`'s Levels row for that model's name where it has one, and otherwise
-        # codex's own default for Main — `low` for gpt-5.6-sol, never its top level `ultra` — and
-        # `xhigh` for High, the owner's rule for a plan turn. gpt-6-astra and gpt-5.6-luna have
+        # codex's own default for Main — `low` for gpt-6-sol, never its top level `ultra` — and
+        # `xhigh` for High, the owner's rule for a plan turn. gpt-6-astra and gpt-6-luna have
         # rows; the other two do not.
         self.assertEqual({m["id"]: m["tier_effort"] for m in rows["guest:codex"]["models"]},
                          {"gpt-6-astra": {"main": "medium", "high": "xhigh", "flash": "low", "lite": "low"},
-                          "gpt-5.6-sol": {"main": "low", "high": "xhigh", "flash": "low", "lite": "low"},
+                          "gpt-6-sol": {"main": "low", "high": "xhigh", "flash": "low", "lite": "low"},
                           "gpt-5.6-terra": {"main": "medium", "high": "xhigh", "flash": "low", "lite": "low"},
-                          "gpt-5.6-luna": {"main": "high", "high": "max", "flash": "low", "lite": "low"}})
+                          "gpt-6-luna": {"main": "high", "high": "max", "flash": "low", "lite": "low"}})
         self.assertEqual(rows["guest:codex"]["models"][1]["default_effort"], "low")
         ghp.reset_catalog()
         ghp._detected = None

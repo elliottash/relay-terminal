@@ -262,7 +262,7 @@ class ChainTests(unittest.TestCase):
 
     def test_from_the_top_for_a_model_picked_by_hand(self):
         made = resolver({}, {'main': self.MAIN})
-        self.assertEqual(made.failover_chain('main', 'anthropic', 'claude-opus-5'), self.MAIN)
+        self.assertEqual(made.failover_chain('main', 'anthropic', 'claude-opus-5-5'), self.MAIN)
         self.assertEqual(made.failover_chain('main', 'glm', 'glm-5.3-flash'), self.MAIN)   # same preset, another model
 
     def test_fallbacks_alone_is_the_main_chain_and_the_main_list_wins(self):
@@ -282,7 +282,7 @@ class ChainTests(unittest.TestCase):
         self.assertEqual(resolver({}).failover_chain('high', 'glm', 'glm-5.3'), [])  # High's default has no chain
         self.assertEqual(made.turn_tier('glm', 'glm-5.3-flash'), 'flash')
         self.assertEqual(made.turn_tier('glm', 'glm-5.3'), 'main')
-        self.assertEqual(made.turn_tier('anthropic', 'claude-opus-5', 'main'), 'main')
+        self.assertEqual(made.turn_tier('anthropic', 'claude-opus-5-5', 'main'), 'main')
 
     def test_a_candidate_runs_at_its_entrys_level_and_a_guest_is_never_one(self):
         made = resolver({'kimi': 'k', 'openai': 'k'})
@@ -310,7 +310,7 @@ class ChainTests(unittest.TestCase):
 # ----- turns ----------------------------------------------------------------------------------
 class TurnCase(unittest.TestCase):
     MAIN = [{'preset': 'kimi', 'model': 'kimi-k3'}, {'preset': 'glm', 'model': 'glm-5.3'},
-            {'preset': 'guest:codex', 'model': ''}, {'preset': 'anthropic', 'model': 'claude-opus-5'},
+            {'preset': 'guest:codex', 'model': ''}, {'preset': 'anthropic', 'model': 'claude-opus-5-5'},
             {'preset': 'openai', 'model': 'gpt-6-astra', 'effort': 'low'}]
 
     def setUp(self):
@@ -383,7 +383,7 @@ class TurnTests(TurnCase):
 
     HIGH = {'high': [{'preset': 'openai', 'model': 'gpt-6-astra', 'effort': 'max'},
                      {'preset': 'guest:claude', 'model': 'fable', 'effort': 'max'},
-                     {'preset': 'anthropic', 'model': 'claude-opus-5'},       # no key
+                     {'preset': 'anthropic', 'model': 'claude-opus-5-5'},       # no key
                      {'preset': 'kimi', 'model': 'kimi-k3', 'effort': 'max'}],
             'main': [{'preset': 'glm', 'model': 'glm-5.3'}, {'preset': 'minimax', 'model': 'MiniMax-M3'}]}
 
@@ -422,25 +422,25 @@ class TurnTests(TurnCase):
     def test_a_side_call_walks_its_tiers_list(self):
         tiers = {'lite': [{'preset': 'openrouter', 'model': 'google/gemini-3.8-flash'},
                           {'preset': 'guest:claude', 'model': 'haiku'},
-                          {'preset': 'openai', 'model': 'gpt-5.6-luna', 'effort': 'low'}]}
+                          {'preset': 'openai', 'model': 'gpt-6-luna', 'effort': 'low'}]}
         self.stubs.update({'glm-5.3': Answerer(), 'google/gemini-3.8-flash': Refuser(),
-                           'gpt-5.6-luna': Answerer('a title')})
+                           'gpt-6-luna': Answerer('a title')})
         agent = self.agent(resolver({'openrouter': 'k', 'openai': 'k'}, tiers))
         provider = agent.side_provider(cheap=True, role='chores', max_tokens=64)
         self.assertEqual(provider.config.model, 'google/gemini-3.8-flash')
         reply = provider.complete([], [], lambda event: None, mock.Mock(is_set=lambda: False))
         self.assertEqual(reply['content'], 'a title')
-        self.assertEqual(provider.config.model, 'gpt-5.6-luna')
+        self.assertEqual(provider.config.model, 'gpt-6-luna')
         self.assertEqual(provider.config.max_tokens, 64)                  # the spare keeps the call's budget
 
     def test_a_side_call_with_nowhere_to_go_fails_with_its_own_models_error(self):
         tiers = {'lite': [{'preset': 'openrouter', 'model': 'google/gemini-3.8-flash'},
-                          {'preset': 'openai', 'model': 'gpt-5.6-luna'}]}
-        self.stubs.update({'glm-5.3': Answerer(), 'google/gemini-3.8-flash': Refuser(), 'gpt-5.6-luna': Refuser()})
+                          {'preset': 'openai', 'model': 'gpt-6-luna'}]}
+        self.stubs.update({'glm-5.3': Answerer(), 'google/gemini-3.8-flash': Refuser(), 'gpt-6-luna': Refuser()})
         provider = self.agent(resolver({'openrouter': 'k', 'openai': 'k'}, tiers)).side_provider(role='chores')
         with self.assertRaises(ProviderError):
             provider.complete([], [], lambda event: None, mock.Mock(is_set=lambda: False))
-        self.assertEqual(self.stubs['gpt-5.6-luna'].calls, 1)
+        self.assertEqual(self.stubs['gpt-6-luna'].calls, 1)
         # One entry, or no list: the provider a side call always got, not a chain.
         bare = self.agent(resolver({'openrouter': 'k'})).side_provider(role='chores')
         self.assertIs(bare, self.stubs['google/gemini-3.8-flash'])
@@ -503,7 +503,7 @@ LISTING = [{'id': 'z-ai/glm-5.3', 'efforts': ['low'], 'price_completion_per_mtok
            {'id': 'moonshotai/kimi-k3', 'efforts': ['low'], 'price_completion_per_mtok': 8.5},
            {'id': 'openai/gpt-6-astra', 'efforts': ['low'], 'price_completion_per_mtok': 50.0},
            {'id': 'openai/gpt-5.6-terra', 'efforts': ['low'], 'price_completion_per_mtok': 12.0},
-           {'id': 'openai/gpt-5.6-luna', 'efforts': [], 'price_completion_per_mtok': 1.2},
+           {'id': 'openai/gpt-6-luna', 'efforts': [], 'price_completion_per_mtok': 1.2},
            {'id': 'minimax/minimax-m3', 'efforts': [], 'price_completion_per_mtok': 3.0}]
 GUESTS = [{'id': 'guest:claude', 'harness': True, 'logged_in': None, 'guest': 'claude',
            'efforts': ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -534,11 +534,11 @@ class DefaultsTests(unittest.TestCase):
         # "no providers" means, never one of them (card #MDL1, design 5.4).
         plain = self.defaults(self.USABLE, guests=GUESTS, local=[('local:bonsai', 'bonsai-2-27b')],
                               custom=[('custom:acme', 'acme-1')])['plain']
-        # By score (model-ranking.md), one per provider: gpt-6-astra 53, then claude-opus-5 51 —
+        # By score (model-ranking.md), one per provider: gpt-6-astra 53, then claude-opus-5-5 51 —
         # which is what the guest's `opus` is, so it is ranked by name like anyone else's model.
         # Each at the level the file's Levels table gives it for that class: the owner wrote
         # `gpt-6-astra | main = medium` ("the API's default is high; codex's own is medium") and
-        # `claude-opus-5 | main = high`, so those are the levels, not the providers' defaults.
+        # `claude-opus-5-5 | main = high`, so those are the levels, not the providers' defaults.
         self.assertEqual(pairs(plain['main']),
                          [('openai', 'gpt-6-astra', 'medium'), ('guest:claude', 'opus', 'high')])
         # And the file's `high` cells, each in the vocabulary of the provider that will run it.
@@ -651,7 +651,7 @@ class DefaultsTests(unittest.TestCase):
 
 # ----- where a hand-added model starts (card #TKN7) ---------------------------------------------
 # Options › Models' `+ add a model…` used to start every new entry at the model's top level, so
-# gpt-5.6-sol went into Main at codex's `ultra` (owner report, 2026-09-21). One rule decides it
+# gpt-6-sol went into Main at codex's `ultra` (owner report, 2026-09-21). One rule decides it
 # now, `tier_start_efforts`, and every `models` row carries its answer as `tier_effort`.
 class StartEffortTests(unittest.TestCase):
     CODEX_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
@@ -695,7 +695,7 @@ class StartEffortTests(unittest.TestCase):
         rows = {r['id']: r for r in P.catalog_rows('openai')}
         self.assertEqual(rows['gpt-5.6-terra']['default_effort'], 'medium')
         self.assertEqual(rows['gpt-5.6-terra']['tier_effort']['main'], 'medium')
-        self.assertEqual(rows['gpt-5.6-luna']['default_effort'], 'low')
+        self.assertEqual(rows['gpt-6-luna']['default_effort'], 'low')
         # Anthropic's models carry no levels at all: no default, no tier level.
         self.assertEqual({r['default_effort'] for r in P.catalog_rows('anthropic')}, {None})
 

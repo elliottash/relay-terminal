@@ -824,7 +824,7 @@
    "component": null,
    "created": "2026-09-12",
    "id": "SQXA",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [
     "bug"
    ],
@@ -843,7 +843,7 @@
    "topic": null,
    "type": "work",
    "updated": "2026-09-20T12:00:00Z",
-   "verified_by": "anthropic/claude-opus-5",
+   "verified_by": "anthropic/claude-opus-5-5",
    "waiting_on": null
   },
   {
@@ -851,7 +851,7 @@
    "component": null,
    "created": "2026-09-13",
    "id": "8F5B",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [
     "feature",
     "remote"
@@ -871,7 +871,7 @@
    "topic": null,
    "type": "work",
    "updated": "2026-09-20T13:00:00Z",
-   "verified_by": "anthropic/claude-opus-5",
+   "verified_by": "anthropic/claude-opus-5-5",
    "waiting_on": null
   },
   {
@@ -879,7 +879,7 @@
    "component": null,
    "created": "2026-09-14",
    "id": "Q6DB",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [],
    "milestone": null,
    "priority": 0,
@@ -896,7 +896,7 @@
    "topic": null,
    "type": "work",
    "updated": "2026-09-20T14:00:00Z",
-   "verified_by": "anthropic/claude-opus-5",
+   "verified_by": "anthropic/claude-opus-5-5",
    "waiting_on": null
   },
   {
@@ -904,7 +904,7 @@
    "component": null,
    "created": "2026-09-15",
    "id": "6YMB",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [],
    "milestone": "beta",
    "priority": 0,
@@ -929,7 +929,7 @@
    "component": null,
    "created": "2026-09-16",
    "id": "NNWB",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [
     "feature",
     "remote"
@@ -957,7 +957,7 @@
    "component": null,
    "created": "2026-09-17",
    "id": "4D4C",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [],
    "milestone": "beta",
    "priority": 0,
@@ -982,7 +982,7 @@
    "component": null,
    "created": "2026-09-18",
    "id": "K4CC",
-   "implemented_by": "anthropic/claude-opus-5",
+   "implemented_by": "anthropic/claude-opus-5-5",
    "labels": [],
    "milestone": null,
    "priority": 0,

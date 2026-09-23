@@ -3,8 +3,8 @@
 //
 // The owner, 2026-09-21: "we need to organize and reconcile how model names are listed across the
 // app … model names should always be lowercase, no spaces." A model id is what the API takes and
-// is not it: `MiniMax-M3`, `openai/gpt-5.6-sol`, `~openai/gpt-sol-latest` are all ids of models a
-// person calls `minimax-m3` and `gpt-5.6-sol`.
+// is not it: `MiniMax-M3`, `openai/gpt-6-sol`, `~openai/gpt-sol-latest` are all ids of models a
+// person calls `minimax-m3` and `gpt-6-sol`.
 //
 // The worker computes the name (`presets.model_name`) and sends it on every event that names a
 // model — `model_name`, `in_flight_model_name`, `from_model_name`, and `model_name` on a saved

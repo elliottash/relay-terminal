@@ -79,7 +79,7 @@ labels: [voice, mvp]
 component: [gui, worker]
 milestone: desktop-alpha
 assignee: agent
-implemented_by: Claude Opus 5 (pane 2)
+implemented_by: Claude Opus 5.5 (pane 2)
 rank: 0i
 created: '2026-09-17'
 acceptance: holding Right Alt records speech and inserts the transcript into the composer
@@ -162,9 +162,9 @@ outside the range is clamped on every write.
   provider segment is the *model's* vendor, never the aggregator that routed to it, so a card served
   `deepseek/deepseek-v4.1-flash` through OpenRouter reads `deepseek/deepseek-v4.1-flash` and a local
   endpoint reads `local/<model>`. A guest CLI names the model it ran and the harness that ran it,
-  `anthropic/claude-opus-5-20260514 via claude-code`, falling back to `anthropic/claude-code` or
+  `anthropic/claude-opus-5-5-20260514 via claude-code`, falling back to `anthropic/claude-code` or
   `openai/codex` when the model cannot be seen. Free text in parentheses is allowed and ignored
-  (`anthropic/claude-opus-5 (pane 2)`), which is how the hand-typed values written before 2026-09-19
+  (`anthropic/claude-opus-5-5 (pane 2)`), which is how the hand-typed values written before 2026-09-19
   keep working. The pair is what `relay-board.py verifier <ID>` answers from. `verified_by` is never `relay-free/…`: verifying is
   not available on the free plan (owner, 2026-09-19), and a close signed by it is refused.
 - A **self-closed** card (2026-09-20, `#93WR`) is one whose status is `done` and whose `verified_by`

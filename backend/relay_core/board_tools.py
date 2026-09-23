@@ -541,10 +541,10 @@ def model_family(model: str | None) -> str:
 
     One line since card #T71W: `relay_core.qa_verifiers.family` is the single table, so the
     signature form and the free-text form of the same model land on the same family
-    (`anthropic/claude-opus-5` and `Claude Opus 5 (pane 2)` are both `anthropic`) and an
+    (`anthropic/claude-opus-5-5` and `Claude Opus 5.5 (pane 2)` are both `anthropic`) and an
     aggregator's route is read as the model's vendor (`openrouter/deepseek-…` is `deepseek`).
-    Before that this split on the slash and took the first word, so `Claude Opus 5` was
-    `claude` and `anthropic/claude-opus-5` was `anthropic` — two names for one lab, and the
+    Before that this split on the slash and took the first word, so `Claude Opus 5.5` was
+    `claude` and `anthropic/claude-opus-5-5` was `anthropic` — two names for one lab, and the
     independence rule let each close what the other wrote.
     """
     return QA.family(model)

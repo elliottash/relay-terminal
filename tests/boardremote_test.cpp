@@ -432,7 +432,7 @@ void BoardRemoteTests::verifyGoesThroughTheWindowsHookOnTheRecommendedRunner()
     rig.request(1, {{"type", "board_open"}});
     rig.toWorker.clear();
     rig.toHub.clear();
-    const QJsonObject qa{{"implemented_by", "anthropic/claude-opus-5"},
+    const QJsonObject qa{{"implemented_by", "anthropic/claude-opus-5-5"},
                          {"recommended", QJsonObject{{"runner", "guest:codex"}, {"label", "Codex"},
                                                      {"available", true}, {"why", "a different family"}}}};
     rig.request(12, {{"type", "board_action"}, {"id", "K7Q2"}, {"action", "verify"}});

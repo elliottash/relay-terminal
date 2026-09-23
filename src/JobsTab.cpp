@@ -285,7 +285,7 @@ void JobsTab::setData(const Data &data) {
 QString JobsTab::nameFor(const QString &preset, const QString &model) const {
     if (model.isEmpty() && preset.isEmpty()) return QString();
     // The catalog's own name wherever it has one — the worker computes it and it is the only name
-    // a model has (rule 1) — resolved through `resolveKey`, so a guest reporting `claude-opus-5`
+    // a model has (rule 1) — resolved through `resolveKey`, so a guest reporting `claude-opus-5-5`
     // reads as the row it is (`guest:claude|opus`).
     const QString key = m_data.catalog.resolveKey(preset, model);
     if (const models::Entry *entry = m_data.catalog.find(key.isEmpty()

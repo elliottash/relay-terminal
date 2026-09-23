@@ -2340,8 +2340,8 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   next model that takes one. Evidence:
   `docs/qa_evidence/2026-09-21-effort-by-model`.
 - **One name, one row (card #MDP1, 2026-09-21).** A model has exactly one name — lower-case, no
-  spaces, no vendor prefix — and everything that prints a model prints it: `gpt-5.6-sol`, never
-  "Codex" and never "GPT-5.6 Sol". The worker computes it (`presets.model_name`) and sends it as
+  spaces, no vendor prefix — and everything that prints a model prints it: `gpt-6-sol`, never
+  "Codex" and never "GPT-6 Sol". The worker computes it (`presets.model_name`) and sends it as
   `name` on every catalog row; `relay::models::nameOf` derives the same string for a row that has
   none (an id typed by hand, an older worker), so the two fold together. `Entry::name` is it,
   `Entry::label` is the same string (the old prettified spelling is gone) and `displayName()` is
@@ -2350,10 +2350,10 @@ measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not mo
   name, entries inside it in preference order — where the user ranked them in the tier lists first,
   then a plan before a guest harness before a pay-as-you-go API before OpenRouter before Relay
   Free — and `Group::preferred` / `spent` / `via` answer which provider the row runs, whether every
-  one of them is spent, and which one `gpt-5.6-sol@openrouter` names. A local entry never joins a
+  one of them is spent, and which one `gpt-6-sol@openrouter` names. A local entry never joins a
   cloud group: "local" is a promise about where the text goes. `Catalog::resolveKey(preset,
   reportedModel)` maps what a worker reports back onto the preset's own entry by name, so Claude
-  Code started as `opus` and reporting `claude-opus-5` is one model to `/swap`, recents and the
+  Code started as `opus` and reporting `claude-opus-5-5` is one model to `/swap`, recents and the
   usage counts. The rules, the edge cases they have to survive and what is still the owner's are in
   **docs/MODEL-PICKING-DESIGN.md**.
 - **Usage limits and an exhausted subscription (owner, 2026-09-20).** `Catalog.limits` (one
@@ -2510,7 +2510,7 @@ provider's own documentation on 2026-09-17, and the doc URL sits beside the entr
 | `glm` | pay-as-you-go | `https://api.z.ai/api/paas/v4` | `glm-5.3` | `glm` |
 | `kimi` | pay-as-you-go | `https://api.moonshot.ai/v1` | `kimi-k3` | `kimi` |
 | `openai` | pay-as-you-go | `https://api.openai.com/v1` | `gpt-6-astra` | `openai` |
-| `anthropic` | pay-as-you-go | `https://api.anthropic.com/v1` | `claude-opus-5` | `none` |
+| `anthropic` | pay-as-you-go | `https://api.anthropic.com/v1` | `claude-opus-5-5` | `none` |
 | `gemini` | pay-as-you-go | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.1-pro-preview` | `gemini` |
 
 Provider quirks the effort styles encode: Z.AI rejects `thinking.type: "disabled"` on GLM-5.3 and

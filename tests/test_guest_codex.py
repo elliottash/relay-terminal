@@ -303,7 +303,7 @@ class EnableDisable(unittest.TestCase):
 
     def test_a_tui_table_is_created_when_there_is_none_and_removed_again(self):
         # The real config has `[tui.model_availability_nux]` but no `[tui]` of its own.
-        for text in ('model = "gpt-5.6-sol"\n', fixture(REAL_CONFIG)):
+        for text in ('model = "gpt-6-sol"\n', fixture(REAL_CONFIG)):
             with self.subTest(text=text[:20]):
                 rendered = enable(text)
                 self.assertIn(f"[tui]  # {guest_codex.MARKER}", rendered)
@@ -633,11 +633,11 @@ class TailStateFacts(unittest.TestCase):
         self.assertEqual({"thread_id": THREAD_ID, "idle_seconds": 0, "stale": False}, data)
 
     def test_the_statusline_data_carries_the_numbers_the_chips_read(self):
-        state = self.state(thread_id=THREAD_ID, cwd=WORKSPACE, model="gpt-5.6-sol",
+        state = self.state(thread_id=THREAD_ID, cwd=WORKSPACE, model="gpt-6-sol",
                            context_window=WINDOW, last_request={"input_tokens": LAST_REQUEST},
                            turn_usage={"total_tokens": 14726},
                            thread_usage={"total_tokens": 14726}, updated=1000.0)
-        self.assertEqual({"thread_id": THREAD_ID, "cwd": WORKSPACE, "model": "gpt-5.6-sol",
+        self.assertEqual({"thread_id": THREAD_ID, "cwd": WORKSPACE, "model": "gpt-6-sol",
                           "context_pct": LAST_REQUEST_PCT, "context_window": WINDOW,
                           "last_request_tokens": {"input_tokens": LAST_REQUEST},
                           "turn_tokens": {"total_tokens": 14726},
@@ -665,7 +665,7 @@ class RolloutTailTests(unittest.TestCase):
         self.assertEqual(["state", "statusline"], [name for name, _ in events])
         self.assertEqual({"busy": False, "turn": TURN_ID}, events_of(events)["state"])
         statusline = events_of(events)["statusline"]
-        self.assertEqual("gpt-5.6-sol", statusline["model"])       # the model last in force
+        self.assertEqual("gpt-6-sol", statusline["model"])       # the model last in force
         self.assertEqual(THREAD_ID, statusline["thread_id"])
         self.assertEqual(WORKSPACE, statusline["cwd"])
         self.assertEqual(WINDOW, statusline["context_window"])

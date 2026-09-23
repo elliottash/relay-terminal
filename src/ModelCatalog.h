@@ -49,8 +49,8 @@ struct Entry {
     QString preset;       // "glm-coding", "guest:claude", "local:spark", "relay-free"
     QString model;        // the id the API or CLI takes
     // What a person reads, and the only name this model has (card #MDL1, rule 1): lower-case, no
-    // spaces, no vendor prefix — "glm-5.3-flash", "claude-opus-5" for Claude Code's `opus`,
-    // "gpt-5.6-sol" whether it comes from codex, the OpenAI API or "openai/gpt-5.6-sol" on
+    // spaces, no vendor prefix — "glm-5.3-flash", "claude-opus-5-5" for Claude Code's `opus`,
+    // "gpt-6-sol" whether it comes from codex, the OpenAI API or "openai/gpt-6-sol" on
     // OpenRouter. The worker computes it (`presets.model_name`) and sends it as the row's `name`;
     // a row without one — a custom id, an older worker — gets `nameOf(model)`.
     QString name;
@@ -106,7 +106,7 @@ struct Entry {
 // up to the last "/" removed, a leading "~" removed (OpenRouter's moving aliases are written
 // `~openai/gpt-sol-latest`), lower-cased, whitespace turned into "-". The worker's `name` wins
 // wherever there is one; this is what a hand-typed id and an older worker's row get, and it is the
-// same derivation, so `openai/gpt-5.6-sol` typed by hand folds into the existing gpt-5.6-sol row.
+// same derivation, so `openai/gpt-6-sol` typed by hand folds into the existing gpt-6-sol row.
 QString nameOf(const QString &modelId);
 
 // ----- reasoning levels: the model's list is the vocabulary (card #MDL1, 2026-09-21) ------------
@@ -153,7 +153,7 @@ struct Catalog {
     const Entry *tierEntry(const QString &preset, const QString &tier) const;
     // The key of this preset's entry for a model the worker has just reported running (card #MDL1,
     // rule 3): its model id if the preset lists it, else the entry whose *name* is that model's
-    // name — so `guest:claude` reporting `claude-opus-5` resolves to `guest:claude|opus`, and the
+    // name — so `guest:claude` reporting `claude-opus-5-5` resolves to `guest:claude|opus`, and the
     // pane's key, the "current" mark, recents and usage counts all see one model. Empty when this
     // preset has no such entry: the caller decides what that means, and no key is invented.
     QString resolveKey(const QString &preset, const QString &reportedModel) const;
@@ -461,7 +461,7 @@ struct StartChoice {
 };
 // `restoredPreset`/`restoredModel` are what a restored pane saved, empty for a new one. The saved
 // entry wins while it is still usable and not exhausted — resolved through `Catalog::resolveKey`,
-// so a guest that saved `claude-opus-5` comes back as `guest:claude|opus`. Otherwise rank 1 of the
+// so a guest that saved `claude-opus-5-5` comes back as `guest:claude|opus`. Otherwise rank 1 of the
 // main list, **guests included** (owner, 2026-09-21: a harness ranked first is what a new pane
 // starts on; the harness process starts on the first turn, which is the caller's half of it).
 StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, const QString &restoredModel,
@@ -502,7 +502,7 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now);
 bool matches(const Entry &entry, const QString &query);
 
 // ----- groups: the small picker shows a model once (card #MDL1, rule 2) -------------------------
-// One name, one row. `gpt-5.6-sol` is served by Codex, the OpenAI API and OpenRouter; the box and
+// One name, one row. `gpt-6-sol` is served by Codex, the OpenAI API and OpenRouter; the box and
 // the Ctrl+Alt+M picker show it once and the row says which provider it will use. Options › Models
 // and the tier lists keep working on entries, because that is where the order between providers is
 // expressed.
@@ -518,7 +518,7 @@ struct Group {
     // out therefore does not remove the row — the next provider in it takes the turn — and only
     // when every one is spent does the row go grey (rule 2, "the payoff").
     bool spent(const Catalog &catalog, qint64 now = 0) const;
-    // The entry a "via" names: `/model gpt-5.6-sol@openrouter`, or clicking a provider in the
+    // The entry a "via" names: `/model gpt-6-sol@openrouter`, or clicking a provider in the
     // picker's via list. Matches a preset id ("guest:codex" and plain "codex" both), or the
     // provider's words ("openrouter", "claude code"). Null when this group has no such entry; the
     // pointer is into `entries` and lives as long as the group.

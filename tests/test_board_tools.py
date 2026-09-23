@@ -46,7 +46,7 @@ class BoardToolsTest(unittest.TestCase):
         self.events = []
         self.tools = T.BoardTools(
             self.board, emit=self.events.append, autonomy=self.autonomy,
-            context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5", pane="2"),
+            context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5-5", pane="2"),
             state_path=self.repo / ".relay" / "board-rate.json", pane_token=self.pane_token)
         self.tools.begin_turn("t-1")
 
@@ -121,11 +121,11 @@ class SpecTests(unittest.TestCase):
         # Since #T71W the signature form and the free-text form of one model are one family: this
         # asserted "claude" for the free text and "anthropic" for the signature, which is exactly
         # the hole the independence rule fell through — each could close what the other wrote.
-        self.assertEqual(T.model_family("anthropic/claude-opus-5"), "anthropic")
-        self.assertEqual(T.model_family("Claude Opus 5 (pane 2)"),
-                         T.model_family("anthropic/claude-opus-5"))
+        self.assertEqual(T.model_family("anthropic/claude-opus-5-5"), "anthropic")
+        self.assertEqual(T.model_family("Claude Opus 5.5 (pane 2)"),
+                         T.model_family("anthropic/claude-opus-5-5"))
         self.assertEqual(T.model_family(None), "")
-        self.assertNotEqual(T.model_family("openai/gpt-5"), T.model_family("anthropic/claude-opus-5"))
+        self.assertNotEqual(T.model_family("openai/gpt-5"), T.model_family("anthropic/claude-opus-5-5"))
         # The aggregator is read through to the model it routes to.
         self.assertEqual(T.model_family("openrouter/deepseek-v4.1-flash"), "deepseek")
 
@@ -211,7 +211,7 @@ class CreateTests(BoardToolsTest):
         text = self.thread_text(card_id)
         self.assertIn("author=agent", text)
         self.assertIn("kind=event", text)
-        self.assertIn("model=anthropic/claude-opus-5", text)
+        self.assertIn("model=anthropic/claude-opus-5-5", text)
         self.assertIn("pane=2", text)
         self.assertIn("turn=t-1", text)
 
@@ -654,11 +654,11 @@ class MoveTests(BoardToolsTest):
         self.assertEqual(self.board.card_by_id(self.card_id).status, "inbox")
         ok = self.tools.run("board_move_card", {
             "id": self.card_id, "status": "needs-qa-llm", "reason": "landed",
-            "evidence": "docs/qa_evidence/2026-09-17-voice/", "implemented_by": "anthropic/claude-opus-5"})
+            "evidence": "docs/qa_evidence/2026-09-17-voice/", "implemented_by": "anthropic/claude-opus-5-5"})
         self.assertNotIn("error", ok)
         card = self.board.card_by_id(self.card_id)
         self.assertEqual(card.path.parent, self.root / "features" / "needs_qa_llm")
-        self.assertEqual(card.front["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(card.front["implemented_by"], "anthropic/claude-opus-5-5")
         self.assertIn("docs/qa_evidence/2026-09-17-voice/", card.front["links"]["evidence"])
         self.assertIn("evidence docs/qa_evidence", self.thread_text(self.card_id))
 
@@ -695,7 +695,7 @@ class MoveTests(BoardToolsTest):
 
     def test_the_same_model_family_closes_it_once_the_verdict_is_there(self):
         # Owner, 2026-09-20 (#76DJ): the verdict is the gate, not the closer's model family.
-        self._into_qa("anthropic/claude-opus-5")
+        self._into_qa("anthropic/claude-opus-5-5")
         current = self.tools.run("board_read", {"id": self.card_id})["hash"]
         self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
                                              "append_section": {"heading": "Verdict", "text": "pass"}})
@@ -704,7 +704,7 @@ class MoveTests(BoardToolsTest):
         self.assertNotIn("error", result)
         card = self.board.card_by_id(self.card_id)
         self.assertEqual(card.status, "done")
-        self.assertEqual(card.front["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(card.front["verified_by"], "anthropic/claude-opus-5-5")
 
     def test_a_different_model_family_closes_it_with_a_verdict(self):
         self._into_qa("openai/gpt-5")
@@ -763,12 +763,12 @@ class SignatureTests(BoardToolsTest):
         self.assertIn("implemented_by deepseek/deepseek-v4.1-flash", self.thread_text(self.card_id))
 
     def test_the_worker_stamp_wins_over_what_the_agent_typed(self):
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {
             "id": self.card_id, "status": "needs-qa-llm", "reason": "landed",
             "evidence": "docs/qa_evidence/x/", "implemented_by": "a friendly robot"})
         self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
-                         "anthropic/claude-opus-5")
+                         "anthropic/claude-opus-5-5")
 
     def test_a_guest_writing_through_the_bridge_still_names_itself(self):
         self.sign(None, None)
@@ -848,22 +848,22 @@ class SignatureTests(BoardToolsTest):
         self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-qa-llm")
 
     def test_a_guest_pane_signs_the_model_the_harness_reported(self):
-        self.sign("guest:claude", "claude-opus-5-20260514")
+        self.sign("guest:claude", "claude-opus-5-5-20260514")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "in-progress",
                                            "reason": "starting"})
         self.assertEqual(self.board.card_by_id(self.card_id).front["implemented_by"],
-                         "anthropic/claude-opus-5-20260514 via claude-code")
+                         "anthropic/claude-opus-5-5-20260514 via claude-code")
         # Claude Code is still Anthropic, so the verifier is chosen outside Anthropic.
         block = self.tools.run("board_read", {"id": self.card_id})["qa"]
         self.assertEqual(block["implementer_family"], "anthropic")
         self.assertEqual(block["recommended"]["runner"], "guest:codex")
 
     def test_board_read_names_the_verifier_for_a_card_that_has_an_implementer(self):
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "needs-qa-llm",
                                            "reason": "landed", "evidence": "docs/qa_evidence/x/"})
         block = self.tools.run("board_read", {"id": self.card_id})["qa"]
-        self.assertEqual(block["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(block["implemented_by"], "anthropic/claude-opus-5-5")
         self.assertEqual(block["implementer_family"], "anthropic")
         self.assertEqual(block["recommended"]["runner"], "guest:codex")
         self.assertEqual(block["recommended"]["model"], "codex")
@@ -877,11 +877,11 @@ class SignatureTests(BoardToolsTest):
         self.assertNotIn("qa", self.tools.run("board_read", {"id": self.card_id}))
 
     def test_the_row_carries_both_signatures_but_not_the_recommendation(self):
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "in-progress",
                                            "reason": "starting"})
         row = next(r for r in self.tools.run("board_list", {})["cards"] if r["id"] == self.card_id)
-        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5-5")
         self.assertIsNone(row["verified_by"])
         self.assertNotIn("qa", row)
 
@@ -910,23 +910,23 @@ class SelfCloseTests(BoardToolsTest):
                     if r["id"] == self.card_id)
 
     def test_an_agent_close_from_executing_stamps_verified_by_with_its_own_signature(self):
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                            "reason": "taking it"})
-        self.assertEqual(self.front()["implemented_by"], "anthropic/claude-opus-5")
+        self.assertEqual(self.front()["implemented_by"], "anthropic/claude-opus-5-5")
         self.assertIsNone(self.front().get("verified_by"))
         result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
                                                    "reason": "landed in abc1234"})
         self.assertNotIn("error", result)
         front = self.front()
         self.assertEqual(front["status"], "done")
-        self.assertEqual(front["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(front["verified_by"], "anthropic/claude-opus-5-5")
         self.assertEqual(front["verified_by"], front["implemented_by"])   # i.e. self-closed
-        self.assertIn("verified_by anthropic/claude-opus-5", self.thread_text(self.card_id))
+        self.assertIn("verified_by anthropic/claude-opus-5-5", self.thread_text(self.card_id))
         # And the row the GUI folds on carries both, with nothing else to ask for.
         row = self.row()
-        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5")
-        self.assertEqual(row["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(row["implemented_by"], "anthropic/claude-opus-5-5")
+        self.assertEqual(row["verified_by"], "anthropic/claude-opus-5-5")
         # It is not a broken card: it never entered a QA lane, so there is nothing to report.
         self.assertEqual(self.board.check(), [])
 
@@ -963,12 +963,12 @@ class SelfCloseTests(BoardToolsTest):
         self.sign("openai", "gpt-6-astra")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                            "reason": "taking it"})
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
                                            "reason": "finished it off"})
         front = self.front()
         self.assertEqual(front["implemented_by"], "openai/gpt-6-astra")
-        self.assertEqual(front["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(front["verified_by"], "anthropic/claude-opus-5-5")
         self.assertNotEqual(front["verified_by"], front["implemented_by"])
 
     def test_the_owners_hand_close_from_the_switchboard_stamps_nothing(self):
@@ -976,7 +976,7 @@ class SelfCloseTests(BoardToolsTest):
         # (`board_protocol._build` versus `Agent.sign_board`), so a drag onto Done leaves the card
         # unsigned and unfolded. Both halves of the test matter: with no signature *and* with one,
         # in case an owner-side context ever learns its model.
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                            "reason": "taking it"})
         self.tools.context.actor = T.OWNER_ACTOR
@@ -986,7 +986,7 @@ class SelfCloseTests(BoardToolsTest):
         self.assertIsNone(self.front().get("verified_by"))
         self.assertNotIn("verified_by", self.thread_text(self.card_id))
         # Reopened and hand-closed again by an owner who does have a signature: still unstamped.
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                           "reason": "reopened in the Board"})
         self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
@@ -996,7 +996,7 @@ class SelfCloseTests(BoardToolsTest):
     def test_dropping_a_card_stamps_nothing(self):
         # A dropped card verifies nothing — it was abandoned, not shipped — here as in the QA
         # branch, where `dropped` has never been stamped either.
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                            "reason": "taking it"})
         self.tools.run("board_move_card", {"id": self.card_id, "status": "dropped",
@@ -1015,17 +1015,17 @@ class SelfCloseTests(BoardToolsTest):
     def test_undo_takes_the_stamp_back_with_the_status(self):
         # The stamp rides the status change's own write, so Ctrl+Z on the move puts both back —
         # there is no way to be left `executing` and verified, or `done` and not.
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                            "reason": "taking it"})
         result = self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
                                                    "reason": "landed"})
-        self.assertEqual(self.front()["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(self.front()["verified_by"], "anthropic/claude-opus-5-5")
         self.tools.undo(result["write_id"])
         front = self.front()
         self.assertEqual(front["status"], "executing")
         self.assertIsNone(front.get("verified_by"))
-        self.assertEqual(front["implemented_by"], "anthropic/claude-opus-5")   # the earlier write
+        self.assertEqual(front["implemented_by"], "anthropic/claude-opus-5-5")   # the earlier write
 
     def test_a_qa_lane_close_is_unchanged_and_the_verdict_gate_still_holds(self):
         # The self-close branch is reached only when the card did *not* come out of a QA lane, so
@@ -1056,7 +1056,7 @@ class SelfCloseTests(BoardToolsTest):
             lambda *a, **k: {"installed_guests": {"codex"}, "keys": {}, "local_models": ()})
         patch.start()
         self.addCleanup(patch.stop)
-        self.sign("anthropic", "claude-opus-5")
+        self.sign("anthropic", "claude-opus-5-5")
         self.tools.run("board_move_card", {"id": self.card_id, "status": "executing",
                                            "reason": "taking it"})
         self.tools.run("board_move_card", {"id": self.card_id, "status": "done",
@@ -1064,7 +1064,7 @@ class SelfCloseTests(BoardToolsTest):
         self.assertEqual(self.board.check(), [])
         block = self.tools.run("board_read", {"id": self.card_id})["qa"]
         self.assertEqual(block["implementer_family"], "anthropic")
-        self.assertEqual(block["verified_by"], "anthropic/claude-opus-5")
+        self.assertEqual(block["verified_by"], "anthropic/claude-opus-5-5")
         self.assertEqual(block["verifier_family"], "anthropic")
         self.assertEqual(block["recommended"]["runner"], "guest:codex")
 
@@ -1991,7 +1991,7 @@ class ActivityEventTests(BoardToolsTest):
         self.assertEqual(activity[0]["action"], "create")
         self.assertEqual(activity[0]["id"], card_id)
         self.assertEqual(activity[0]["actor"], "agent")
-        self.assertEqual(activity[0]["model"], "anthropic/claude-opus-5")
+        self.assertEqual(activity[0]["model"], "anthropic/claude-opus-5-5")
         self.assertEqual(activity[0]["turn_id"], "t-1")
         self.assertEqual(activity[0]["undo_seconds"], T.UNDO_SECONDS)
         self.assertTrue(activity[0]["path"].startswith("issues/"))
@@ -2253,7 +2253,7 @@ class CleanupLogTests(BoardToolsTest):
         self.assertIn("| move |", text)
         self.assertIn(f"#{gone}", text)
         self.assertIn("Merged #%s into #%s." % (gone, keep), text)
-        self.assertIn("anthropic/claude-opus-5", text)
+        self.assertIn("anthropic/claude-opus-5-5", text)
 
     def test_a_refusal_is_kept_so_the_changelog_says_what_was_attempted(self):
         self.tools.begin_cleanup("c-1")

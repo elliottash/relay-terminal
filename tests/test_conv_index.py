@@ -619,8 +619,8 @@ class OperatorSearchTests(unittest.TestCase):
         """One model, one filter entry (card #MDL1, rule 1).
 
         History records the id the API took, and one model has several: `k3` on the Kimi Coding
-        Plan and `kimi-k3` on the Kimi platform, `openai/gpt-5.6-sol` on OpenRouter and
-        `gpt-5.6-sol` first-party. Those stay on disk exactly as written — nothing is migrated —
+        Plan and `kimi-k3` on the Kimi platform, `openai/gpt-6-sol` on OpenRouter and
+        `gpt-6-sol` first-party. Those stay on disk exactly as written — nothing is migrated —
         and the menu folds them into one line per name, which selects every row of that model.
         """
         self.index.update_session(session("e" * 32, workspace="/tmp/alpha", model="k3",
@@ -628,20 +628,20 @@ class OperatorSearchTests(unittest.TestCase):
         self.index.update_session(session("f" * 32, workspace="/tmp/alpha", model="kimi-k3",
                                           updated=6100.0), self.root)
         self.index.update_session(session("g" * 32, workspace="/tmp/alpha",
-                                          model="openai/gpt-5.6-sol", updated=6200.0), self.root)
+                                          model="openai/gpt-6-sol", updated=6200.0), self.root)
         models = self.index.search("", scope="all")["facets"]["models"]
         self.assertEqual(models.count("kimi-k3"), 1)      # `k3` and `kimi-k3` are one entry
         self.assertNotIn("k3", models)
-        self.assertIn("gpt-5.6-sol", models)              # the vendor prefix is not a name
-        self.assertNotIn("openai/gpt-5.6-sol", models)
+        self.assertIn("gpt-6-sol", models)              # the vendor prefix is not a name
+        self.assertNotIn("openai/gpt-6-sol", models)
         # Picking that one entry selects both rows, newest first.
         self.assertEqual(self.ids("", model="kimi-k3"), ["f" * 32, "e" * 32])
-        self.assertEqual(self.ids("", model="gpt-5.6-sol"), ["g" * 32])
+        self.assertEqual(self.ids("", model="gpt-6-sol"), ["g" * 32])
         # A raw id still filters: a query saved before this, and an id no build can name.
         self.assertEqual(self.ids("", model="k3"), ["e" * 32])
         # And so does the `model:` operator, on the name as well as on the id.
         self.assertEqual(self.ids("model:kimi-k3"), ["f" * 32, "e" * 32])
-        self.assertEqual(self.ids("model:gpt-5.6-sol"), ["g" * 32])
+        self.assertEqual(self.ids("model:gpt-6-sol"), ["g" * 32])
 
     def test_item_carries_the_overview_columns(self):
         item = [i for i in self.index.search("", scope="all")["items"] if i["session_id"] == "a" * 32][0]

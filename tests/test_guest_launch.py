@@ -125,8 +125,8 @@ class Argv(unittest.TestCase):
         self.assertNotIn("max", argv)
 
     def test_codex_takes_the_model_and_the_effort_as_a_flag_and_an_override(self):
-        argv = guest_launch.codex_argv("/py", model="gpt-5.6-sol", effort="ultra")
-        self.assertEqual(argv[argv.index("-m") + 1], "gpt-5.6-sol")
+        argv = guest_launch.codex_argv("/py", model="gpt-6-sol", effort="ultra")
+        self.assertEqual(argv[argv.index("-m") + 1], "gpt-6-sol")
         overrides = [argv[i + 1] for i, word in enumerate(argv) if word == "-c"]
         self.assertIn('model_reasoning_effort="ultra"', overrides)
         # The flags stay in front of the bypass pair, which stays last.

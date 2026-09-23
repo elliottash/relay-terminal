@@ -26,7 +26,7 @@ from test_images import RecordingProvider                                      #
 
 KIMI = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "high"}, 8192)
 KIMI_MAX = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "max"}, 8192)
-ANTHROPIC = ProviderConfig("https://api.anthropic.com/v1", "claude-opus-5", "key", {}, 8192)
+ANTHROPIC = ProviderConfig("https://api.anthropic.com/v1", "claude-opus-5-5", "key", {}, 8192)
 
 
 class TrackedProvider(RecordingProvider):
@@ -106,6 +106,10 @@ class PlanTurnTests(unittest.TestCase):
     def served_configs(self):
         return TrackedProvider.served_configs
 
+    # A hand-pinned planning role: the only thing that routes a plan turn since 2026-09-22 (owner:
+    # plan mode "is supposed to go into /high"; the pane goes there itself, #PH9G).
+    PINNED = {"planning": {"preset": "glm", "model": "glm-5.3"}}
+
     # ----- a plan turn swaps, then goes back ------------------------------------------
     def test_plan_keeps_the_selected_high_model_and_preserves_main(self):
         agent = self.plan_agent(KIMI, "kimi", tiers={"high": [
@@ -120,54 +124,48 @@ class PlanTurnTests(unittest.TestCase):
         self.assertNotIn("plan_route", self.kinds())
 
     def test_a_plan_turn_runs_on_the_planning_config_and_comes_back(self):
-        agent = self.plan_agent()
+        agent = self.plan_agent(roles=self.PINNED)
         original = agent.provider
         agent.ask("plan this change")
         route = self.event("plan_route")
         self.assertIsNotNone(route)
         self.assertEqual((route["model"], route["from_model"], route["preset"]),
-                         ("kimi-k3", "kimi-k3", "kimi"))
-        self.assertEqual((route["source"], route["effort"], route["scope"]), ("default", "max", "turn"))
-        self.assertEqual(route["base_url"], "https://api.moonshot.ai/v1")
+                         ("glm-5.3", "kimi-k3", "glm"))
+        self.assertEqual((route["source"], route["scope"]), ("configured", "turn"))
         self.assertIn("plan", route["text"].lower())
-        # The model is unchanged; the reasoning the turn was built with is what moved.
-        self.assertEqual(self.served_configs()[-1][1], {"reasoning_effort": "max"})
-        self.assertEqual(RecordingProvider.served[-1][0], "kimi-k3")
+        self.assertEqual(RecordingProvider.served[-1][0], "glm-5.3")
         ended = self.event("plan_route_ended")
         self.assertIsNotNone(ended)
-        self.assertEqual((ended["model"], ended["was"]), ("kimi-k3", "kimi-k3"))
+        self.assertEqual((ended["model"], ended["was"]), ("kimi-k3", "glm-5.3"))
         self.assertIs(agent.provider, original)
         self.assertEqual(agent.config.extra, {"reasoning_effort": "high"})
         self.assertEqual(self.events[-1]["event"], "done")
 
-    def test_a_filled_high_list_does_not_pull_a_plan_turn_off_the_panes_model(self):
-        # The #HR5E regression: while planning followed the High tier, a filled High list rerouted
-        # every plan turn — a Codex pane on gpt-6-astra planned on glm-5.3 and back, twice per
-        # turn. Planning's default is the pane's own model at max; the High list serves /high.
+    def test_an_unpinned_plan_turn_is_the_panes_own_turn(self):
+        # Plan mode adds no swap and no effort of its own (owner, 2026-09-22): entering it put the
+        # pane on /high, so the turn runs on whatever that gave it, at that level — even with a
+        # filled High list, which only /high reads.
         agent = self.plan_agent(KIMI, "kimi",
                                 tiers={"high": [{"preset": "glm", "model": "glm-5.3", "effort": "high"}]})
+        original = agent.provider
         agent.ask("plan this change")
-        route = self.event("plan_route")
-        self.assertIsNotNone(route)
-        self.assertEqual((route["model"], route["from_model"], route["preset"], route["effort"]),
-                         ("kimi-k3", "kimi-k3", "kimi", "max"))
-        self.assertEqual(self.served_configs()[-1],
-                         ("kimi-k3", {"reasoning_effort": "max"}, KIMI.base_url))
-        self.assertIsNotNone(self.event("plan_route_ended"))
+        self.assertNotIn("plan_route", self.kinds())
+        self.assertEqual(self.served_configs()[-1], ("kimi-k3", {"reasoning_effort": "high"}, KIMI.base_url))
+        self.assertIs(agent.provider, original)
         self.assertEqual(self.events[-1]["event"], "done")
 
-    def test_the_turn_after_a_plan_turn_is_back_on_the_panes_own_effort(self):
-        agent = self.plan_agent()
+    def test_the_turn_after_a_plan_turn_is_back_on_the_panes_own_model(self):
+        agent = self.plan_agent(roles=self.PINNED)
         agent.ask("plan this change")
         agent.set_mode("build")
         agent.ask("now do it")
         self.assertEqual(len(RecordingProvider.served), 2)
-        self.assertEqual(self.served_configs()[-1][1], {"reasoning_effort": "high"})
+        self.assertEqual(self.served_configs()[-1][0], "kimi-k3")
         self.assertEqual(self.kinds().count("plan_route"), 1)
         self.assertEqual(self.kinds().count("plan_route_ended"), 1)
 
     def test_the_provider_comes_back_even_when_the_plan_turn_fails(self):
-        agent = self.plan_agent()
+        agent = self.plan_agent(roles=self.PINNED)
         original = agent.provider
         with mock.patch.object(TrackedProvider, "complete", side_effect=RuntimeError("boom")):
             agent.ask("plan this change")
@@ -212,8 +210,8 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(RecordingProvider.windows[-1], PRESETS["kimi"].context_window)
         # ... and the pane is measured against its own window again once the turn is over.
         self.assertEqual(agent.context.window, PRESETS["anthropic"].context_window)
-        self.assertEqual(agent.config.model, "claude-opus-5")
-        self.assertEqual(agent.provider.config.model, "claude-opus-5")
+        self.assertEqual(agent.config.model, "claude-opus-5-5")
+        self.assertEqual(agent.provider.config.model, "claude-opus-5-5")
 
     def test_a_save_while_a_plan_turn_is_routed_records_the_panes_own_model(self):
         # `_autosave_soon` fires inside the turn, and a title or summary thread saves from its own:
@@ -230,8 +228,8 @@ class PlanTurnTests(unittest.TestCase):
         with mock.patch.object(TrackedProvider, "complete", complete):
             agent.ask("plan this change")
         self.assertEqual(RecordingProvider.served[-1][0], "kimi-k3")
-        self.assertEqual(seen, [("claude-opus-5", "anthropic")])
-        self.assertEqual(agent.session_data()["model"], "claude-opus-5")
+        self.assertEqual(seen, [("claude-opus-5-5", "anthropic")])
+        self.assertEqual(agent.session_data()["model"], "claude-opus-5-5")
 
     def test_a_model_switch_during_a_plan_turn_lands_after_the_restore(self):
         # The switch waits for the turn's end, as it does under a failover (#G9VE): landing it at a
@@ -256,7 +254,7 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(seen["deferred"]["in_flight_model"], "kimi-k3")
         self.assertIsNone(seen["at_step"])                      # not while the swap is in force
         self.assertEqual(seen["model_at_step"], "kimi-k3")
-        self.assertEqual(agent.config.model, "claude-opus-5")   # the restore ran, and kept nothing
+        self.assertEqual(agent.config.model, "claude-opus-5-5")   # the restore ran, and kept nothing
         self.assertEqual(agent.apply_pending_model(at="turn_end")["model"], target.model)
         self.assertEqual((agent.config.model, agent.context.window),
                          (target.model, target.context_window))
@@ -270,14 +268,14 @@ class PlanTurnTests(unittest.TestCase):
         kimi, anthropic = PRESETS["kimi"].label, PRESETS["anthropic"].label
         route = self.event("plan_route")
         self.assertEqual(route["text"], f"Plan mode · this turn runs on kimi-k3 ({kimi}), "
-                                        f"then back to claude-opus-5 ({anthropic}).")
+                                        f"then back to claude-opus-5-5 ({anthropic}).")
         self.assertEqual((route["preset"], route["from_preset"]), ("kimi", "anthropic"))
         ended = self.event("plan_route_ended")
-        self.assertEqual(ended["text"], f"Back to claude-opus-5 ({anthropic}).")
+        self.assertEqual(ended["text"], f"Back to claude-opus-5-5 ({anthropic}).")
         self.assertEqual((ended["preset"], ended["was_preset"]), ("anthropic", "kimi"))
         statuses = [e["text"] for e in self.events if e["event"] == "status"]
         self.assertIn(f"Plan turn · kimi-k3 ({kimi})", statuses)
-        self.assertIn(f"Back to claude-opus-5 ({anthropic})", statuses)
+        self.assertIn(f"Back to claude-opus-5-5 ({anthropic})", statuses)
 
     # ----- nothing to swap: no event, no provider change ------------------------------
     # ----- a planning model whose provider is down (owner, 2026-09-19) -----------------
@@ -308,18 +306,6 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(agent.provider.config.model, "kimi-k3")
         self.assertIsNone(agent._planning)
 
-    def test_the_default_planning_role_drops_its_raised_effort_and_carries_on(self):
-        # The default planning role is the pane's own model at max reasoning — the same provider,
-        # one knob further. When that refuses, the turn continues at the pane's own effort.
-        self.refusing(lambda config: config.extra.get("reasoning_effort") == "max")
-        agent = self.plan_agent()
-        agent.ask("plan this change")
-        self.assertEqual([config[1] for config in self.served_configs()],
-                         [{"reasoning_effort": "max"}, {"reasoning_effort": "high"}])
-        self.assertEqual(self.events[-1]["event"], "done")
-        self.assertEqual(agent.config.extra, {"reasoning_effort": "high"})
-        self.assertEqual(self.kinds().count("plan_route_ended"), 1)
-
     def test_a_build_turn_emits_no_plan_route(self):
         agent = self.build(KIMI, "kimi")
         agent.ask("do this change")
@@ -328,8 +314,7 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(self.events[-1]["event"], "done")
 
     def test_a_plan_turn_on_a_pane_already_at_max_emits_no_plan_route(self):
-        # The default is the main model at max reasoning; there is nothing to raise, so the turn is
-        # simply the pane's own turn (roles.RoleResolver.planning_target returns None).
+        # Unpinned, a plan turn is simply the pane's own turn (planning_target returns None).
         agent = self.plan_agent(KIMI_MAX)
         original = agent.provider
         agent.ask("plan this change")
@@ -339,8 +324,7 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(self.events[-1]["event"], "done")
 
     def test_a_provider_with_no_effort_knob_emits_no_plan_route(self):
-        # Anthropic's compat layer ignores reasoning_effort: the swap would be a request it cannot
-        # make, so plan turns stay on the pane's own model with nothing said.
+        # Unpinned, plan turns stay on the pane's own model with nothing said.
         agent = self.plan_agent(ANTHROPIC, "anthropic")
         original = agent.provider
         agent.ask("plan this change")
@@ -479,15 +463,13 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertIsNotNone(self.event("plan_route_ended"))
         self.assertEqual(agent.config.model, "glm-5.3")
         self.assertIsNone(self.event("plan_written"))
-        # Pinned to the guest alone: the pane's own model plans, pushed to max (#HR5E's default).
+        # Pinned to the guest alone: the pane as it is plans, with no route and no boost.
         self.harness(start_error=HarnessNotAvailable("codex is not installed."))
         agent = self.glm_planner()
         agent.ask("plan splitting the widget")
         self.assertEqual(self.events[-1]["event"], "done")
-        route = self.event("plan_route")
-        self.assertEqual((route["model"], route["from_model"], route["effort"]),
-                         ("glm-5.3", "glm-5.3", "max"))
-        self.assertEqual([c[0] for c in self.served_configs()], ["kimi-k3", "glm-5.3"])
+        self.assertIsNone(self.event("plan_route"))
+        self.assertEqual(self.served_configs()[-1], ("glm-5.3", dict(GLM.extra), GLM.base_url))
 
     def test_a_guest_whose_turn_fails_hands_the_plan_back_to_the_pane(self):
         # The harness answered the turn with an error: 15.2.3 as for any planning model that is
@@ -514,10 +496,9 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertIsNone(self.event("plan_written"))
         self.assertIsNone(agent.plan_path)
 
-    def test_a_pane_that_is_itself_a_guest_plans_at_its_harnesss_top_level(self):
-        # Card #HR5E (owner: "it should run on codex astra in xhigh"): an unpinned plan turn on a
-        # guest pane is the pane's own harness pushed to its top level for the turn — no second
-        # harness, no provider swap, the level put back afterwards.
+    def test_a_pane_that_is_itself_a_guest_plans_at_its_own_level(self):
+        # Unpinned, a guest pane's plan turn is its own turn: no second harness, no swap, and no
+        # per-turn effort boost (#HR5E's was withdrawn on 2026-09-22 — the /high entry sets it).
         pane = FakeHarness([{"events": [ev("delta", text="the plan")], "result": ("the plan", "end", {})}],
                            guest="claude", session_id="cl-1", model="claude-fake")
         pane.start(cwd=self.temp.name)
@@ -535,17 +516,8 @@ class GuestPlanTurnTests(PlanTurnTests):
         self.assertEqual(self.events[-1]["event"], "done")
         self.assertEqual(other.starts, [])
         self.assertEqual(len(pane.sent), 1)
-        route = self.event("plan_route")
-        self.assertEqual((route["model"], route["from_model"], route["preset"], route["effort"],
-                          route["source"], route["scope"]),
-                         ("claude-fake", "claude-fake", "guest:claude", "max", "default", "turn"))
-        self.assertEqual(route["text"], "Plan mode · this turn runs on claude-fake at max.")
-        self.assertIsNotNone(self.event("plan_route_ended"))
-        # The harness took the turn at its top level, and the pane's own level went back at the
-        # turn's end (the pane never picked one, so the model's own default was restaged).
-        self.assertEqual(pane.calls.count(("set_effort", "max")), 1)
-        self.assertEqual(pane.calls.count(("set_effort", "low")), 1)
-        self.assertIsNone(self.event("plan_written"))       # the pane's own guest: 29.3 as before
+        self.assertIsNone(self.event("plan_route"))
+        self.assertFalse([call for call in pane.calls if call[0] == "set_effort"])
         self.assertIs(agent.provider, provider)
 
 

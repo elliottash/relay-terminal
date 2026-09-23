@@ -67,10 +67,10 @@ for status, count in PLAN:
                "type": "work", "updated": f"2026-09-20T1{n % 10}:00:00Z", "verified_by": None,
                "waiting_on": None}
         if status == "done":
-            row["implemented_by"] = "anthropic/claude-opus-5"
+            row["implemented_by"] = "anthropic/claude-opus-5-5"
             # Three the agent closed itself, two another model verified, two closed by hand.
             if k < 3:
-                row["verified_by"] = "anthropic/claude-opus-5"
+                row["verified_by"] = "anthropic/claude-opus-5-5"
             elif k < 5:
                 row["verified_by"] = "moonshot/kimi-k3"
         if status == "executing" and k == 0:

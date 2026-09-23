@@ -65,11 +65,11 @@ QJsonArray presets()
     // A provider with no key: never a row the box can run, but it is not hidden either — it is
     // greyed in place wherever a list ranks it.
     out << QJsonObject{{QStringLiteral("id"), QStringLiteral("anthropic")},
-                       {QStringLiteral("label"), QStringLiteral("anthropic · claude-opus-5")},
+                       {QStringLiteral("label"), QStringLiteral("anthropic · claude-opus-5-5")},
                        {QStringLiteral("provider"), QStringLiteral("anthropic")},
-                       {QStringLiteral("model"), QStringLiteral("claude-opus-5")},
+                       {QStringLiteral("model"), QStringLiteral("claude-opus-5-5")},
                        {QStringLiteral("models"), QJsonArray{
-                            model(QStringLiteral("claude-opus-5"), QStringLiteral("claude-opus-5"), QStringLiteral("main"))}}};
+                            model(QStringLiteral("claude-opus-5-5"), QStringLiteral("claude-opus-5-5"), QStringLiteral("main"))}}};
     return out;
 }
 
@@ -86,7 +86,7 @@ void seedTierLists()
                                                    entry(QStringLiteral("openrouter|z-ai/glm-5.3")),
                                                    entry(QStringLiteral("openai|gpt-6-astra"))});
     curation::setTierList(QStringLiteral("high"), {entry(QStringLiteral("openai|gpt-6-astra")),
-                                                   entry(QStringLiteral("anthropic|claude-opus-5"))});
+                                                   entry(QStringLiteral("anthropic|claude-opus-5-5"))});
     curation::setTierList(QStringLiteral("flash"), {entry(QStringLiteral("glm-coding|glm-5.3-flash"))});
 }
 
@@ -274,7 +274,7 @@ private slots:
         QCOMPARE(shape.mid(0, 2), QStringList({QStringLiteral("high"), QStringLiteral("  gpt-6-astra")}));
         QCOMPARE(shown.rows.at(shown.current).data, QStringLiteral("pick:high|openai|gpt-6-astra"));
         // Rank 2 of high stays out, and the header offers no expansion: the class is still off.
-        QVERIFY2(!shape.contains(QStringLiteral("  claude-opus-5")), qPrintable(shape.join(QLatin1Char('/'))));
+        QVERIFY2(!shape.contains(QStringLiteral("  claude-opus-5-5")), qPrintable(shape.join(QLatin1Char('/'))));
         const modelrows::Row &head = shown.rows.at(modelrows::indexOf(shown.rows, QStringLiteral("class:high")));
         QCOMPARE(head.trailing, QString());
         QVERIFY(head.tooltip.contains(QStringLiteral("hidden from this box")));
@@ -305,8 +305,8 @@ private slots:
         // The third rank moves up into the room the spent one left: two per class, always two.
         QCOMPARE(shapeOf(rows).mid(2, 3),
                  QStringList({QStringLiteral("main"), QStringLiteral("  glm-5.3"), QStringLiteral("  gpt-6-astra")}));
-        // claude-opus-5 is rank 2 of high and has no stored key: absent, not greyed.
-        QCOMPARE(modelrows::indexOf(rows, QStringLiteral("pick:high|anthropic|claude-opus-5")), -1);
+        // claude-opus-5-5 is rank 2 of high and has no stored key: absent, not greyed.
+        QCOMPARE(modelrows::indexOf(rows, QStringLiteral("pick:high|anthropic|claude-opus-5-5")), -1);
         QVERIFY(modelrows::indexOf(rows, QStringLiteral("pick:high|openai|gpt-6-astra")) > 0);
     }
 
@@ -481,7 +481,7 @@ private slots:
         Catalog catalog = catalogFrom(presets());
         QHash<QString, ModePick> picks;
         picks.insert(QStringLiteral("flash"), ModePick{QStringLiteral("kimi-code|kimi-k3"), QString()});
-        picks.insert(QStringLiteral("high"), ModePick{QStringLiteral("anthropic|claude-opus-5"), QString()});
+        picks.insert(QStringLiteral("high"), ModePick{QStringLiteral("anthropic|claude-opus-5-5"), QString()});
         picks.insert(QStringLiteral("local"), ModePick{QStringLiteral("local:gone|bonsai-2-27b"), QString()});
         const QHash<QString, ModePick> kept = relay::modelrows::usableModePicks(catalog, picks);
         QCOMPARE(kept.keys(), QStringList({QStringLiteral("flash")}));   // no key; not in the catalog
@@ -534,7 +534,7 @@ private slots:
     // on it is a pick of this pane's own model: `pick:main|<key>`, main mode.
     void anAvailableModelInNoListComesUnderOtherModels()
     {
-        // claude-opus-5 has no key: not usable, so not available, so never in the box.
+        // claude-opus-5-5 has no key: not usable, so not available, so never in the box.
         modelrows::Context context = paneContext();
         curation::addCustom(QStringLiteral("kimi-code"), QStringLiteral("kimi-k2-turbo"), context.catalog);
         context.catalog = catalogFrom(presets());

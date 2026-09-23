@@ -442,17 +442,17 @@ class DefaultRulesTests(unittest.TestCase):
         lists = self.defaults(['openai'])
         # The levels are the file's Levels cells, in the endpoint's own words: the owner wrote
         # `gpt-6-astra | high = xhigh, main = medium` ("the API's default is high; codex's own is
-        # medium"), and `gpt-5.6-luna | flash = low`. He also moved openai's flash model from
+        # medium"), and `gpt-6-luna | flash = low`. He also moved openai's flash model from
         # terra to luna and left terra a default for nothing.
         self.assertEqual(pairs(lists['main']), [('openai', 'gpt-6-astra', 'medium')])
         self.assertEqual(pairs(lists['high']), [('openai', 'gpt-6-astra', 'xhigh')])
-        self.assertEqual(pairs(lists['flash']), [('openai', 'gpt-5.6-luna', 'low')])
+        self.assertEqual(pairs(lists['flash']), [('openai', 'gpt-6-luna', 'low')])
         # Lite is Relay Free's, and Relay Free cannot run here, so there is nothing in it.
         self.assertEqual(pairs(lists['lite']), [])
-        # gpt-5.6-sol scores 47 — above terra and luna — and is in no class, so it is a default for
+        # gpt-6-sol scores 47 — above terra and luna — and is in no class, so it is a default for
         # nothing. That is the file's decision to make, and it is written down in it.
-        self.assertEqual(MR.load().score('gpt-5.6-sol'), 47)
-        self.assertNotIn('gpt-5.6-sol', [e['model'] for entries in lists.values() for e in entries])
+        self.assertEqual(MR.load().score('gpt-6-sol'), 47)
+        self.assertNotIn('gpt-6-sol', [e['model'] for entries in lists.values() for e in entries])
 
     def test_one_provider_means_one_company_not_one_key(self):
         # Owner: "dont pick 2 options from the same provider". `glm` and `glm-coding` are both
@@ -495,10 +495,10 @@ class DefaultRulesTests(unittest.TestCase):
 
     def test_a_harness_counts_as_a_provider_and_is_ranked_by_name(self):
         # With Claude Code alone it is the one provider, so one model per class — and its `opus` is
-        # claude-opus-5, which the file scores 51, above `sonnet` and `haiku` and above `fable`,
+        # claude-opus-5-5, which the file scores 51, above `sonnet` and `haiku` and above `fable`,
         # which no class names.
         alone = self.defaults([], guests=[CLAUDE])
-        # `opus` is claude-opus-5, which the file classes for main and scores 51; `fable` is
+        # `opus` is claude-opus-5-5, which the file classes for main and scores 51; `fable` is
         # claude-fable-5.1, which the owner classed for high on 2026-09-21 and scores 53. The
         # levels are his Levels cells, in Claude Code's own words — the vocabulary the guest
         # reports, not Relay's four.
@@ -511,7 +511,7 @@ class DefaultRulesTests(unittest.TestCase):
         self.assertEqual(P.GUEST_CLASSES, ('high', 'main', 'flash'))
         self.assertEqual(pairs(alone['flash']), [('guest:claude', 'sonnet', 'low')])
         self.assertEqual(alone['lite'], [])
-        # Beside one API provider it is two providers, so two each, and claude-opus-5 (51) beats
+        # Beside one API provider it is two providers, so two each, and claude-opus-5-5 (51) beats
         # glm-5.3 (45).
         with_glm = self.defaults(['glm-coding'], guests=[CLAUDE])
         self.assertEqual(pairs(with_glm['main']),
@@ -542,8 +542,8 @@ class DefaultRulesTests(unittest.TestCase):
         self.assertEqual(pairs(lists['high']), [('custom:acme', 'acme-1', None)])
         self.assertEqual((lists['flash'], lists['lite']), ([], []))
         # A custom endpoint serving a model the file *does* know is scored and classed like it.
-        lists = self.defaults(['openai'], custom=[('custom:acme', 'claude-opus-5')])
-        self.assertEqual(names(lists['main']), ['gpt-6-astra', 'claude-opus-5'])
+        lists = self.defaults(['openai'], custom=[('custom:acme', 'claude-opus-5-5')])
+        self.assertEqual(names(lists['main']), ['gpt-6-astra', 'claude-opus-5-5'])
 
     def test_a_local_endpoint_is_not_a_provider_and_fills_local_as_before(self):
         lists = self.defaults(['relay-free'], local=[('local:bonsai', 'bonsai-2-27b'),

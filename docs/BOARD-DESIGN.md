@@ -574,7 +574,7 @@ reads it, so the order can change without touching a widget. Protocol: 19. Evide
   agent is asked to type a signature it can only guess at.
 - **Both briefs ask for the exact model** (owner, 2026-09-19: *"lets try to record the model
   used"*): `<vendor>/<your exact model id>`, the vendor of the *model* and the id actually running,
-  not the family. A guest appends the harness that ran it — `anthropic/claude-opus-5 via
+  not the family. A guest appends the harness that ran it — `anthropic/claude-opus-5-5 via
   claude-code`, `openai/gpt-5.6-codex via codex` — and falls back to `anthropic/claude-code` or
   `openai/codex` alone only when it cannot see which model it is, which is all that was ever
   observable from outside. The pane cannot fill the model in for the guest: the pane that will run
@@ -604,7 +604,7 @@ checkbox agrees by construction.
   model."* Reordering *inside* Verified is ordinary, and moving *out* of it behaves exactly like
   moving out of Done.
 - **The row says who.** A `✓ <verifier>` badge in the success green, from
-  `board::signatureLabel(verified_by)`: *"✓ Codex"*, *"✓ GLM-5.3"*, *"✓ Claude Opus 5 · Claude
+  `board::signatureLabel(verified_by)`: *"✓ Codex"*, *"✓ GLM-5.3"*, *"✓ Claude Opus 5.5 · Claude
   Code"*. In the Verified section every row has one, so the header cannot say it and the badge must.
   The card detail's fields line shows the raw signature, `verified by openai/codex`, beside
   `implemented by`, because on the card the exact string is the point.
@@ -1071,7 +1071,7 @@ the agent typed into `implemented_by`. Three changes, all in
   `implemented_by` on entering `in-progress` or a QA lane and `verified_by` on closing out of one,
   as `provider/model` where the provider is the *model's* vendor (`deepseek/deepseek-v4.1-flash`,
   not `openrouter/…`). A Tier A guest pane records the model the harness reports along with the
-  harness itself — `anthropic/claude-opus-5-20260514 via claude-code` — because "Claude Code" is
+  harness itself — `anthropic/claude-opus-5-5-20260514 via claude-code` — because "Claude Code" is
   not a model and next month's Claude Code is a different reviewer. The agent's own argument
   survives only for a guest writing through the bridge, which is the one case the worker cannot know.
 - **The card names its verifier.** One ranked table (the owner's order: codex → claude → glm → kimi
@@ -1169,7 +1169,7 @@ labels: [voice, mvp]
 component: [gui, worker]
 milestone: desktop-alpha
 assignee: agent
-implemented_by: Claude Opus 5 (pane 2)
+implemented_by: Claude Opus 5.5 (pane 2)
 rank: "0i"
 created: 2026-09-17T09:12:00-04:00
 source: 'issues/feature_intake.txt, 2026-09-17: "add voice transcribe mode (microphone icon). and hold right alt to transcribe. (like warp)"'

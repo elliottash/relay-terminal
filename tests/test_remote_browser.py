@@ -1443,7 +1443,7 @@ def fixed_sentences() -> list[str]:
 BUILT_SENTENCES = [
     "This browser refused the microphone. Allow it for this site and try again.",
     "Alice on the laptop by the window has the keyboard.",
-    "↻ claude-opus-5 takes over once the conversation is compacted to fit its window"
+    "↻ claude-opus-5-5 takes over once the conversation is compacted to fit its window"
     " · kimi-k2 summarises it",
     "this device is paired for agent.",
 ]
@@ -1515,7 +1515,7 @@ class TerminalBarTests(unittest.TestCase):
                     # The longest sentence the client can write there: a model change, in the
                     # desktop's own words (app.js `modelLine`).
                     harness.source._emit("pane-1", {
-                        "event": "model_changed", "model": "claude-opus-5",
+                        "event": "model_changed", "model": "claude-opus-5-5",
                         "applies": "after_compaction", "in_flight_model": "kimi-k2"})
                     note = await self.note_saying(browser, "compacted to fit")
                     self.fits(note, "agent, a model change")
@@ -1549,7 +1549,7 @@ class TerminalBarTests(unittest.TestCase):
                     await shot(browser, "term-bar-full-agent-running")
 
                     harness.source._emit("pane-1", {
-                        "event": "model_changed", "model": "claude-opus-5",
+                        "event": "model_changed", "model": "claude-opus-5-5",
                         "applies": "after_compaction", "in_flight_model": "kimi-k2"})
                     note = await self.note_saying(browser, "compacted to fit")
                     self.fits(note, "full, a model change")

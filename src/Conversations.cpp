@@ -1652,7 +1652,7 @@ void SessionManager::fillFacets(const QJsonObject &facets) {
         return combo->count() - 1;
     };
     // The models facet holds *names*, one per model, since card #MDL1 (rule 1): the worker folds
-    // the ids history recorded — `k3` and `kimi-k3`, `openai/gpt-5.6-sol` and `gpt-5.6-sol` — into
+    // the ids history recorded — `k3` and `kimi-k3`, `openai/gpt-6-sol` and `gpt-6-sol` — into
     // one entry, and takes the name straight back as the filter. So the menu has one line per
     // model rather than one per spelling, and picking it selects every row of that model.
     if (facets.contains(QStringLiteral("models")))

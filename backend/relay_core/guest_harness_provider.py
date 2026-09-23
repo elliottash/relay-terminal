@@ -287,11 +287,11 @@ _CODEX_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
 _CODEX_FALLBACK_MODELS = (
     {"id": "gpt-6-astra", "name": "gpt-6-astra", "label": "gpt-6-astra",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
-    {"id": "gpt-5.6-sol", "name": "gpt-5.6-sol", "label": "gpt-5.6-sol",
+    {"id": "gpt-6-sol", "name": "gpt-6-sol", "label": "gpt-6-sol",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "low"},
     {"id": "gpt-5.6-terra", "name": "gpt-5.6-terra", "label": "gpt-5.6-terra",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
-    {"id": "gpt-5.6-luna", "name": "gpt-5.6-luna", "label": "gpt-5.6-luna",
+    {"id": "gpt-6-luna", "name": "gpt-6-luna", "label": "gpt-6-luna",
      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "medium"},
 )
 
@@ -931,7 +931,7 @@ class _Turn:
             if self.agent is not None:
                 self.agent.config.model = model
             # `model_name` (protocol 13, card #MDL1 rule 1): Claude Code reports "opus" and
-            # Relay calls that model "claude-opus-5" everywhere else, so the name travels with it.
+            # Relay calls that model "claude-opus-5-5" everywhere else, so the name travels with it.
             self.emit({"event": "model_changed", "model": model, "applies": "now",
                        "model_name": model_name(PRESET_PREFIX + self.provider.guest_id, model),
                        "preset": PRESET_PREFIX + self.provider.guest_id,

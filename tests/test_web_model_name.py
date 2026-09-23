@@ -40,7 +40,7 @@ class WebModelNameTests(unittest.TestCase):
     def test_a_name_is_lower_case_with_no_spaces_and_no_vendor_prefix(self):
         derived = self.answers["derived"]
         self.assertEqual(derived["MiniMax-M3"], "minimax-m3")
-        self.assertEqual(derived["openai/gpt-5.6-sol"], "gpt-5.6-sol")
+        self.assertEqual(derived["openai/gpt-6-sol"], "gpt-6-sol")
         self.assertEqual(derived["~openai/gpt-sol-latest"], "gpt-sol-latest")
         self.assertEqual(derived["Some Model"], "some-model")
         for name in derived.values():
@@ -60,7 +60,7 @@ class WebModelNameTests(unittest.TestCase):
         self.assertEqual(self.answers["prefers_the_worker"], presets.model_name("kimi-code", "k3"))
         self.assertEqual(self.answers["other_field_named"], "kimi-k3")
         # And with none sent, the derivation — which is right for every id no row overrides.
-        self.assertEqual(self.answers["falls_back"], "gpt-5.6-sol")
+        self.assertEqual(self.answers["falls_back"], "gpt-6-sol")
         self.assertEqual(self.answers["other_field"], "minimax-m3")
 
     def test_the_phone_prints_names_where_it_used_to_print_ids(self):
