@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex guest in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-prompt-grow/01-expanded.png], related: [], github: null}
+links: {plans: [], commits: [99bcdc01f93a77ad082ab627e71afc2f5d088f1d], evidence: [docs/qa_evidence/2026-09-23-prompt-grow/01-expanded.png], related: [], github: null}
 ---
 # Let the prompt box expand for long prompts
 
