@@ -718,6 +718,26 @@ class SubagentManager:
         except (OSError, ValueError, TypeError):
             pass
 
+    def _report_usage(self, sub: Subagent) -> None:
+        """Put the thread's totals into its owner session's `children_usage` (#0C0V), keyed by
+        thread id so a thread that runs again replaces its entry. Only while the owner is still the
+        session in this pane; a thread of an earlier conversation is counted from its own thread
+        file whenever that session's info is read (`session_protocol._session_fields`)."""
+        main, agent = self._main, sub.agent
+        if (main is None or not sub.thread_id or not sub.owner_session
+                or getattr(main, "session_id", None) != sub.owner_session):
+            return
+        note = getattr(main, "note_child_usage", None)
+        if callable(note):
+            note(sub.thread_id, dict(getattr(agent, "usage_totals", None) or session_files.empty_usage()))
+
+    def thread_usage(self) -> dict[str, dict]:
+        """Every thread this worker ran, with its totals as they stand now: a running thread's
+        file still holds what it had when its run began."""
+        with self._lock:
+            return {sub.thread_id: dict(getattr(sub.agent, "usage_totals", None) or session_files.empty_usage())
+                    for sub in self._agents.values() if sub.thread_id}
+
     def live_thread(self, thread_id: str) -> dict | None:
         """The current state of a thread this worker is running (or ran), or None."""
         with self._lock:
@@ -790,6 +810,7 @@ class SubagentManager:
         sub.finished = self.clock()
         sub.last_activity = outcome
         self._save_thread(sub)
+        self._report_usage(sub)
         if sub.generation == self._generation:   # not a subagent of a conversation that was replaced
             self._todo_event(sub, "finished", outcome)
         self._progress_locked(sub, force=True)

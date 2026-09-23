@@ -20,7 +20,8 @@ Rules, in the order they matter:
 
 Row shape, the same keys `catalog_rows` gives a built-in row plus `context_window` and the two
 prices: ``{"id", "name", "label", "tier": None, "efforts", "effort_fixed", "intelligence": None,
-"openrouter": None, "context_window", "price_prompt_per_mtok", "price_completion_per_mtok"}``.
+"openrouter": None, "context_window", "price_prompt_per_mtok", "price_completion_per_mtok",
+"price_cache_read_per_mtok", "price_cache_write_per_mtok"}``.
 `name` is `presets.model_name` of the slug — the vendor prefix stripped, lower-case, no spaces, so
 ``openai/gpt-6-sol`` folds into the one `gpt-6-sol` row (card #MDL1) — and `label` is the same
 string; the API's own `name` ("OpenAI: GPT-6 Sol") is not carried, because a model has one name
@@ -30,8 +31,10 @@ whose `supported_parameters` says it takes no `reasoning`, and `effort_fixed` is
 those: a model with no knob is a greyed box, not an empty one. The prices are US dollars per million tokens, from the
 API's per-token `pricing.prompt` / `pricing.completion` strings, or None when the listing gives
 no usable number; `presets.tier_list_defaults` reads the completion price to decide which
-OpenRouter twins are cheap enough to be offered as defaults. A cache written before the prices
-were carried has none on any row, and counts as stale so the next worker refreshes it.
+OpenRouter twins are cheap enough to be offered as defaults, and `prices_for` prices the usage
+records' `cost_estimate` (#0C0V; the two cache prices are the listing's `input_cache_read` and
+`input_cache_write`). A cache written before the cache prices were carried has none of them on
+any row, and counts as stale so the next worker refreshes it.
 """
 from __future__ import annotations
 
@@ -103,7 +106,9 @@ def parse_rows(payload) -> list[dict]:
                     "effort_fixed": effort_fixed(efforts),
                     "intelligence": None, "openrouter": None, "context_window": int(window),
                     "price_prompt_per_mtok": _per_mtok(pricing.get("prompt")),
-                    "price_completion_per_mtok": _per_mtok(pricing.get("completion"))})
+                    "price_completion_per_mtok": _per_mtok(pricing.get("completion")),
+                    "price_cache_read_per_mtok": _per_mtok(pricing.get("input_cache_read")),
+                    "price_cache_write_per_mtok": _per_mtok(pricing.get("input_cache_write"))})
     return out
 
 
@@ -167,9 +172,39 @@ def stale(now: float | None = None) -> bool:
     """Whether the rows in hand are older than the TTL (or there are none)."""
     with _lock:
         _load_locked()
-        if not _rows or not any("price_completion_per_mtok" in row for row in _rows):
+        if not _rows or not any("price_cache_read_per_mtok" in row for row in _rows):
             return True             # nothing, or a cache from before the prices were carried
         return (now if now is not None else time.time()) - _fetched_at >= CACHE_TTL_S
+
+
+def prices_for(preset_id, model) -> dict | None:
+    """The list prices of the OpenRouter row for this model, or None when the catalog in hand
+    (memory, else the cache file: never the network) does not list it with a prompt and a
+    completion price. For the usage records' `cost_estimate` (#0C0V decision 1).
+
+    The row is the slug itself, else the one whose `name` is the model's name, so a model served
+    by its own provider or by a guest (`claude-opus-5-5`, codex's `gpt-6-sol`) is priced at its
+    OpenRouter twin's list price. Returns ``{"prompt", "completion", "cache_read"?,
+    "cache_write"?}`` in US dollars per million tokens.
+    """
+    from .presets import model_name
+    if not isinstance(model, str) or not model:
+        return None
+    name = model_name(preset_id, model)
+    listed = rows()
+    for match in (lambda row: row["id"] == model, lambda row: bool(name) and row.get("name") == name):
+        for row in listed:
+            if not match(row):
+                continue
+            prompt, completion = row.get("price_prompt_per_mtok"), row.get("price_completion_per_mtok")
+            if prompt is None or completion is None:
+                continue
+            out = {"prompt": prompt, "completion": completion}
+            for key in ("cache_read", "cache_write"):
+                if row.get(f"price_{key}_per_mtok") is not None:
+                    out[key] = row[f"price_{key}_per_mtok"]
+            return out
+    return None
 
 
 def fetch(url: str = URL, timeout: float = FETCH_TIMEOUT_S):

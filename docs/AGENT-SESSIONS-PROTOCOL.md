@@ -149,6 +149,18 @@ Free's ceiling — and is `""` everywhere else, because nothing is silently sent
   A guest harness reports the pair the same way (29.3); Anthropic counts its cache reads *outside*
   `input_tokens`, so the claude harness's `prompt_tokens` is completed to include them and means what
   every other provider's does.
+  **`cost_estimate`** (2026-09-23, #0C0V decision 1): when the provider reported no `cost`,
+  the request priced at the model's OpenRouter list price — per million tokens, cached tokens at the
+  listing's cache-read price and cache writes at its cache-write price when it gives them, else at
+  the prompt price. Read from the catalog already on disk (never fetched during a turn), matched by
+  slug or by model name, so a first-party or guest model is priced at its OpenRouter twin. Absent
+  when the catalog has no price for the model, and for a model on this machine. Always an
+  estimate; it is summed apart from `cost`, never into it.
+- `turn_summary` carries **`usage`**, the turn's record exactly as it is kept in `turns_usage`
+  (25.2), when the turn made a request or handed a guest a brief.
+- A fresh guest harness handed the conversation so far (#1V4F) says so in a `status` event that
+  also carries **`handover_chars`** and **`handover_tokens`** (the brief's size; tokens estimated at
+  4 characters each). The turn's record carries the same two fields.
 - `context` message → same event on demand.
 - Every path that replaces the conversation emits the new one's `context` too: `load_state`,
   `resume`, a conversation `rewind`, `set_model` and `reset` (new conversation: `/new`, deleting the
@@ -4949,7 +4961,21 @@ sums of the provider's own `usage` reports; `cost` only once a provider reports 
 OpenRouter's `usage.cost`, so its absence means "not reported", never zero — and the two cache
 counters of section 4 follow the same rule) and `instructions`
 (the instruction files loaded). Thread files carry the same `usage` and `models` for the
-subagent. Nothing is estimated.
+subagent. Nothing is estimated, except `cost_estimate` (section 4), which says so in its name.
+
+Two more fields (2026-09-23, #0C0V step 1), absent from older files, which load as empty:
+
+- **`turns_usage`**: one record per turn that made a request, oldest first, the last **200**
+  (older turns are still in `usage`): `{turn, turn_id, model, source: "native"|"guest", requests,
+  prompt_tokens?, completion_tokens?, cached_tokens?, cache_write_tokens?, cost?, cost_estimate?,
+  last_prompt_tokens?, handover_chars?, handover_tokens?}`. The counters are the turn's sums of
+  its requests' `usage`, and any one nobody reported is **absent, never 0**. `model` is the one that
+  served the turn's last request. `last_prompt_tokens` is the latest *single* request's prompt —
+  never a sum; for a guest, whose `usage` is its turn's aggregate (#CP3M), it is the guest's own
+  context reading (`guest_context_tokens`) and absent when the guest gives none. `handover_*` is
+  the brief a fresh guest harness was sent this turn (section 4; a plan turn's opening counts).
+- **`children_usage`**: `{<thread id>: usage}`, each subagent thread's totals as of its last run's
+  end, replaced (never added) when it runs again, so a thread is counted once.
 
 ### 25.3 `session_info`
 
@@ -4965,8 +4991,8 @@ subagent. Nothing is estimated.
 
 `{id, kind: "session", live, session_id, session_dir, file, file_exists, title, workspace,
 git_branch, created, updated, turns, model, models, preset, provider, effort, mode,
-prompt_profile?, prompt_profile_setting?, usage,
-context: {used_tokens, window, limit_tokens, percent, estimated} | null, instructions,
+prompt_profile?, prompt_profile_setting?, usage, turns_usage, children_usage, children_count,
+task_usage, context: {used_tokens, window, limit_tokens, percent, estimated} | null, instructions,
 instructions_bytes?, forked_from?, open_requests, thread_count, history: [{turn, prompt, time,
 ended, files, threads: [link]}], unplaced_threads: [link]}`
 
@@ -4980,6 +5006,14 @@ can be opened in the pane's subagent pane). `context` is `null` for a saved sess
 `prompt_profile` (`full` | `short`, what this pane is sending now) and `prompt_profile_setting`
 (`auto` | `full` | `short`, the option behind it) are on a **live** session only: `auto` resolves
 per model, so a saved file cannot answer it (12.12).
+
+`usage` is the session's own totals and `turns_usage` its per-turn records (25.2).
+`children_usage` is the **sum** of its subagent threads' totals (nested threads included: they all
+live in the session's `*.threads/` folder), `children_count` how many threads that is, and
+`task_usage` = `usage` + `children_usage` — the task's whole spend. Each thread is counted once, by
+id: its thread file is the newer word over the session's `children_usage` entry, and a thread this
+worker is still running is read live. All three are `usage`-shaped, with the same "absent is not
+reported" rule. This is the whole of `/usage`: it asks `session_info`, there is no separate request.
 
 → `session_info` for a thread:
 

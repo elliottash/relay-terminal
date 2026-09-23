@@ -77,7 +77,9 @@ class OpenRouterCatalogTests(unittest.TestCase):
                                    "intelligence": None, "openrouter": None,
                                    "context_window": 1048576,
                                    # Dollars per million tokens, from the API's per-token strings.
-                                   "price_prompt_per_mtok": 0.15, "price_completion_per_mtok": 0.6})
+                                   "price_prompt_per_mtok": 0.15, "price_completion_per_mtok": 0.6,
+                                   # `input_cache_read` / `input_cache_write`, when listed (#0C0V).
+                                   "price_cache_read_per_mtok": None, "price_cache_write_per_mtok": None})
         self.assertEqual(rows[1]["price_completion_per_mtok"], 2.86)
         self.assertEqual(rows[2]["efforts"], [])                           # says it takes no reasoning
         self.assertTrue(rows[2]["effort_fixed"])                           # so the box is greyed
@@ -90,6 +92,27 @@ class OpenRouterCatalogTests(unittest.TestCase):
         self.assertEqual(oc.parse_rows({"data": "nope"}), [])
         self.assertEqual(oc.parse_rows(None), [])
         json.dumps(rows)
+
+    def test_prices_for_reads_the_cached_row_by_slug_or_by_name_and_never_fetches(self):
+        """The usage records' cost estimate (#0C0V): the cache-read and cache-write prices are
+        carried when listed, and a model served elsewhere is priced at its OpenRouter twin."""
+        listing = {"data": [{"id": "anthropic/claude-opus-5.5", "pricing": {
+            "prompt": "0.000005", "completion": "0.000025", "input_cache_read": "0.0000005",
+            "input_cache_write": "0.00000625"}}, *LISTING["data"]]}
+        rows = oc.parse_rows(listing)
+        self.assertEqual((rows[0]["price_cache_read_per_mtok"], rows[0]["price_cache_write_per_mtok"]), (0.5, 6.25))
+        self.assertIsNone(oc.prices_for("openrouter", "anthropic/claude-opus-5.5"))   # nothing cached yet
+        self.cache().parent.mkdir(parents=True)
+        self.cache().write_text(json.dumps({"fetched_at": time.time() - 60, "rows": rows}))
+        oc.reset()                                        # a worker started after the cache was written
+        full = {"prompt": 5.0, "completion": 25.0, "cache_read": 0.5, "cache_write": 6.25}
+        self.assertEqual(oc.prices_for("openrouter", "anthropic/claude-opus-5.5"), full)
+        self.assertEqual(oc.prices_for("anthropic", "claude-opus-5-5"), full)          # by name
+        self.assertEqual(oc.prices_for("openrouter", "z-ai/glm-5.3"), {"prompt": 0.91, "completion": 2.86})
+        self.assertIsNone(oc.prices_for("openrouter", "openrouter/auto"))             # "-1" is no price
+        self.assertIsNone(oc.prices_for("openrouter", "mistralai/mistral-small-4"))   # listed, unpriced
+        self.assertIsNone(oc.prices_for("kimi", "nobody-lists-this"))
+        self.assertIsNone(oc.prices_for("kimi", ""))
 
     def test_nothing_is_known_and_nothing_is_fetched_until_the_refresh_is_started(self):
         self.assertEqual(oc.rows(), [])

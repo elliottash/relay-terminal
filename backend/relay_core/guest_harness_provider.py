@@ -707,6 +707,12 @@ def handover_brief(messages: list[dict]) -> str:
     return f"{CONTEXT_OPEN}\n{HANDOVER_NOTE}\n\n{transcript}\n{CONTEXT_CLOSE}"
 
 
+def handover_tokens(text: str) -> int:
+    """A handover's size in tokens, estimated at 4 characters each: it is sent inside the guest's
+    prompt, and the guest reports that prompt's tokens only summed with the rest of its turn."""
+    return (len(text) + 3) // 4
+
+
 def _recorded(result: dict) -> dict:
     """A guest tool result as it enters `agent.messages`: long text fields cut, still valid JSON."""
     out = dict(result)
@@ -851,20 +857,27 @@ class HarnessProvider:
             prompt = "\n\n".join(text for text, _ in reversed(pending))
             attachments = [image for _, images in reversed(pending) for image in images]
         opening, self.opening = self.opening, None
+        # What this fresh harness is given besides the prompt, for the turn's usage record (#0C0V
+        # step 8): the handover brief, or a plan turn's opening, which carries the transcript too.
+        handover = ""
         if opening is not None:
-            prompt = opening(messages) if callable(opening) else str(opening)
+            prompt = handover = opening(messages) if callable(opening) else str(opening)
         elif not self.briefed and agent is not None:
             # A fresh harness in the middle of a conversation (#1V4F): the model box switched the
             # pane onto this guest, or back onto it after another model. It gets the transcript
             # once, ahead of the prompt; Relay's own transcript is not touched.
-            brief = handover_brief(messages)
-            if brief:
-                prompt = brief + "\n\n" + prompt
+            handover = handover_brief(messages)
+            if handover:
+                prompt = handover + "\n\n" + prompt
                 emit({"event": "status", "text": f"Handed the conversation so far to "
-                                                 f"{guest.spec(self.guest_id).name}."})
+                                                 f"{guest.spec(self.guest_id).name}.",
+                      "handover_chars": len(handover), "handover_tokens": handover_tokens(handover)})
         if not prompt and not attachments:
             raise ProviderError("There is nothing to send to the guest: the last message has no text.")
         record = getattr(agent, "_turn_record", None) if agent is not None else None
+        if handover and isinstance(record, dict):
+            record["handover_chars"] = record.get("handover_chars", 0) + len(handover)
+            record["handover_tokens"] = record.get("handover_tokens", 0) + handover_tokens(handover)
         turn = _Turn(self, agent, record, emit, cancel)
         if self.board_bridge is not None:
             self.board_bridge.begin(cancel)

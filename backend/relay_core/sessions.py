@@ -116,9 +116,10 @@ def add_usage(totals: dict, usage: dict) -> dict:
         value = usage.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             totals[key] = totals.get(key, 0) + value
-    cost = usage.get("cost")
-    if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
-        totals["cost"] = round(totals.get("cost", 0.0) + float(cost), 6)
+    for key in ("cost", "cost_estimate"):
+        cost = usage.get(key)
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
+            totals[key] = round(totals.get(key, 0.0) + float(cost), 6)
     return totals
 
 
@@ -132,9 +133,109 @@ def load_usage(value) -> dict:
         for key in OPTIONAL_USAGE_KEYS:
             if isinstance(value.get(key), int) and not isinstance(value.get(key), bool) and value[key] >= 0:
                 totals[key] = value[key]
-        if isinstance(value.get("cost"), (int, float)) and not isinstance(value.get("cost"), bool):
-            totals["cost"] = float(value["cost"])
+        for key in ("cost", "cost_estimate"):
+            if isinstance(value.get(key), (int, float)) and not isinstance(value.get(key), bool) and value[key] >= 0:
+                totals[key] = float(value[key])
     return totals
+
+
+def sum_usage(parts) -> dict:
+    """Several totals added together (a session and its subagent threads). A key none of them
+    has stays absent, as in `add_usage`."""
+    out = empty_usage()
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        for key, value in part.items():
+            if key in ("cost", "cost_estimate"):
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    out[key] = round(out.get(key, 0.0) + float(value), 6)
+            elif key in USAGE_KEYS or key in OPTIONAL_USAGE_KEYS:
+                if isinstance(value, int) and not isinstance(value, bool):
+                    out[key] = out.get(key, 0) + value
+    return out
+
+
+def estimate_cost(usage: dict, prices: dict | None) -> float | None:
+    """One request's cost at list prices (`openrouter_catalog.prices_for`, US dollars per million
+    tokens), or None when there is no price or no token count to put it on (#0C0V decision 1).
+
+    `prompt_tokens` counts the cached part and the cache writes inside itself (every provider's
+    `usage` is normalised to that, `guest_harness_provider.relay_usage`), so each is taken out of
+    it and priced at its own rate when the listing gives one, else at the prompt rate.
+    """
+    if not isinstance(usage, dict) or not isinstance(prices, dict):
+        return None
+    counts = {}
+    for key in ("prompt_tokens", "completion_tokens", "cached_tokens", "cache_write_tokens"):
+        value = usage.get(key)
+        counts[key] = value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+    if not (counts["prompt_tokens"] or counts["completion_tokens"]):
+        return None
+    cached, written = counts["cached_tokens"], counts["cache_write_tokens"]
+    fresh = max(0, counts["prompt_tokens"] - cached - written)
+    dollars = (fresh * prices["prompt"] + cached * prices.get("cache_read", prices["prompt"])
+               + written * prices.get("cache_write", prices["prompt"])
+               + counts["completion_tokens"] * prices["completion"]) / 1_000_000
+    return round(dollars, 6)
+
+
+# ----- per-turn usage records (#0C0V step 1) --------------------------------------------------
+
+# The turns a session file keeps a usage record for, newest last. Older turns are still counted:
+# every request is in the session's `usage` totals from the moment it is reported.
+MAX_TURN_USAGE = 200
+TURN_USAGE_INTS = ("turn", "requests", "prompt_tokens", "cached_tokens", "cache_write_tokens",
+                   "completion_tokens", "last_prompt_tokens", "handover_chars", "handover_tokens")
+TURN_USAGE_FLOATS = ("cost", "cost_estimate")
+
+
+def turn_usage_entry(turn, turn_id: str, model: str, source: str, usage: dict, extra: dict) -> dict:
+    """One turn's record as the session file keeps it. `usage` is the turn's summed `add_usage`
+    totals; `extra` carries `last_prompt_tokens` and the handover size, when there are any. A
+    counter nobody reported is left out, never written as 0."""
+    entry = {"turn": turn, "turn_id": turn_id, "model": model, "source": source}
+    entry.update({k: usage[k] for k in ("requests", "prompt_tokens", "completion_tokens") if k in usage})
+    entry.update({k: v for k, v in usage.items() if k in OPTIONAL_USAGE_KEYS or k in TURN_USAGE_FLOATS})
+    entry.update(extra)
+    return load_turn_usage(entry)
+
+
+def load_turn_usage(value) -> dict | None:
+    """One record read back from a session file, keeping only well-formed fields, or None."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for key in ("turn_id", "model"):
+        if isinstance(value.get(key), str):
+            out[key] = value[key][:200]
+    if value.get("source") in ("native", "guest"):
+        out["source"] = value["source"]
+    for key in TURN_USAGE_INTS:
+        item = value.get(key)
+        if isinstance(item, int) and not isinstance(item, bool) and item >= 0:
+            out[key] = item
+    for key in TURN_USAGE_FLOATS:
+        item = value.get(key)
+        if isinstance(item, (int, float)) and not isinstance(item, bool) and item >= 0:
+            out[key] = float(item)
+    return out
+
+
+def load_turns_usage(value) -> list[dict]:
+    """The `turns_usage` list of a session file; absent in files written before #0C0V."""
+    if not isinstance(value, list):
+        return []
+    return [e for e in (load_turn_usage(item) for item in value[-MAX_TURN_USAGE:]) if e]
+
+
+def load_children_usage(value) -> dict:
+    """`children_usage`: one subagent thread's totals per thread id, so a thread that runs again
+    replaces its entry rather than being counted twice."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: load_usage(item) for key, item in value.items()
+            if isinstance(key, str) and SESSION_ID.match(key) and isinstance(item, dict)}
 
 
 def note_model(models: list, model: str) -> list:

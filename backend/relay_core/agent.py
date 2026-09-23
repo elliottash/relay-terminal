@@ -794,6 +794,10 @@ class Agent:
         # over the same turns is a duplicate and is skipped instead of printed again.
         self.recap_turn = 0
         self.branch = ""
+        # #0C0V: one usage record per turn (the last MAX_TURN_USAGE), and each subagent thread's
+        # totals by thread id, so the ⓘ view can say which turn and which child spent the tokens.
+        self.turns_usage: list[dict] = []
+        self.children_usage: dict[str, dict] = {}
         self.epoch = 0
         self.snapshots: dict[str, list[dict]] = {}
         self.checkpoints = CheckpointStore(self.store.blob_dir(self.session_id) if self.store else None)
@@ -1756,12 +1760,16 @@ class Agent:
             self._produced_output = True
         if kind == "usage" and isinstance(event.get("usage"), dict):
             self._last_usage = event["usage"]
+            # A request the provider did not price gets a list-price `cost_estimate` (#0C0V), on
+            # the event too, so Activity can show it beside the tokens.
+            event = {**event, "usage": self._priced_usage(event["usage"])}
             sessions_usage.add_usage(self.usage_totals, event["usage"])
             sessions_usage.note_model(self.models_used, self.config.model)
             # The same report, also against the turn it belongs to (30.5). A turn makes several
             # provider calls, so it accumulates exactly as the session totals do.
             if self._turn_record is not None and isinstance(self._turn_record.get("usage"), dict):
                 sessions_usage.add_usage(self._turn_record["usage"], event["usage"])
+                self._note_request(self._turn_record, event["usage"])
         record = self._turn_record
         if record is not None and kind in ("thinking_delta", "thinking_done"):
             event = {**event, "turn_id": record["turn_id"]}
@@ -1772,6 +1780,51 @@ class Agent:
                 record["thinking_ms"] += int(event.get("elapsed_ms") or 0)
                 record["thinking_chars"] += int(event.get("chars") or 0)
         self.emit(event)
+
+    def _priced_usage(self, usage: dict) -> dict:
+        """`usage` with a `cost_estimate` at the model's OpenRouter list price when the provider
+        reported no `cost` (#0C0V decision 1). From the catalog already on disk, never the network;
+        a model the catalog does not price, and a model on this machine, get none."""
+        if "cost" in usage or (self.preset is not None and self.preset.local):
+            return usage
+        from . import openrouter_catalog
+        prices = openrouter_catalog.prices_for(self.preset.id if self.preset else None, self.config.model)
+        estimate = sessions_usage.estimate_cost(usage, prices)
+        return usage if estimate is None else {**usage, "cost_estimate": estimate}
+
+    def _note_request(self, record: dict, usage: dict) -> None:
+        """What a turn's usage record needs from one request besides the sums: who served it, and
+        the latest single prompt. A guest's `usage` is the turn's aggregate, so its prompt is no
+        prompt size; the guest's own context reading (`guest_context_tokens`, #CP3M) is."""
+        guest = self._guest_harness()
+        record["usage_model"] = self.config.model
+        record["usage_source"] = "guest" if guest else "native"
+        last = usage.get("guest_context_tokens" if guest else "prompt_tokens")
+        if isinstance(last, int) and not isinstance(last, bool) and last >= 0:
+            record["last_prompt_tokens"] = last
+
+    def _keep_turn_usage(self, record: dict, checkpoint) -> None:
+        """File the ending turn's usage record (#0C0V step 1), once. A turn that made no request
+        and handed nothing over has none."""
+        if record.get("usage_entry") is not None:
+            return
+        usage = record.get("usage") or {}
+        extra = {key: record[key] for key in ("last_prompt_tokens", "handover_chars", "handover_tokens")
+                 if key in record}
+        if not usage.get("requests") and not extra:
+            return
+        entry = sessions_usage.turn_usage_entry(
+            checkpoint.get("turn") if isinstance(checkpoint, dict) else None, record["turn_id"],
+            record.get("usage_model") or record.get("model") or "",
+            record.get("usage_source") or ("guest" if self._guest_harness() else "native"), usage, extra)
+        record["usage_entry"] = entry
+        self.turns_usage = (self.turns_usage + [entry])[-sessions_usage.MAX_TURN_USAGE:]
+
+    def note_child_usage(self, thread_id: str, usage: dict) -> None:
+        """A subagent thread's totals so far (#0C0V): replaced on every report, never added, so a
+        thread that runs again is still counted once."""
+        if isinstance(thread_id, str) and sessions_usage.SESSION_ID.match(thread_id) and isinstance(usage, dict):
+            self.children_usage = {**self.children_usage, thread_id: sessions_usage.load_usage(usage)}
 
     # ----- turn records (protocol 11) ---------------------------------------------
     def _begin_record(self, turn_id: str, prompt: str) -> dict:
@@ -1835,6 +1888,8 @@ class Agent:
                    "outcome": record["outcome"], "tools": tools}
         if record.get("stop_reason"):
             summary["stop_reason"] = record["stop_reason"]
+        if record.get("usage_entry"):
+            summary["usage"] = record["usage_entry"]      # the turn's record in `turns_usage` (#0C0V)
         return summary
 
     def tool_output(self, turn_id, call_id) -> dict:
@@ -2354,6 +2409,8 @@ class Agent:
                 failed["resets_at"] = reported.resets_at
             self._end_turn(record, failed)
         finally:
+            # A turn that ended without _end_turn (an exception) still files its usage (#0C0V).
+            self._keep_turn_usage(record, turn)
             # Backstop: _end_turn already did all three for every normal end state (issue EM1E).
             self._end_vision_turn()
             self._end_plan_turn()
@@ -3482,6 +3539,7 @@ class Agent:
         # The turn's checkpoint gets its wall-clock end here too - what a recap needs to state
         # the span it covers, and unrecoverable from the monotonic `elapsed_ms` above.
         self.checkpoints.end_turn(self._turn)
+        self._keep_turn_usage(record, self._turn)
         # Every end state (done, cancelled, error, limit) passes through here, which makes it the one
         # place to prove no provider connection outlived the turn.
         leaked = self._ensure_no_open_response(record["turn_id"], record["outcome"])
@@ -4007,6 +4065,9 @@ class Agent:
         except ValueError:
             self.todos = todo_tool.TodoList()
         self.plan_path = data.get("plan_path") if isinstance(data.get("plan_path"), str) else None
+        # #0C0V: absent from a file written before the usage records, which load as empty.
+        self.turns_usage = sessions_usage.load_turns_usage(data.get("turns_usage"))
+        self.children_usage = sessions_usage.load_children_usage(data.get("children_usage"))
         self.mode = mode
         self.title = str(data.get("title") or "")[:session_titles.MAX_USER_TITLE]
         self.title_source = data.get("title_source") if data.get("title_source") in ("user", "model") else ""
@@ -4094,6 +4155,8 @@ class Agent:
                 # target belongs in it; `model` above is the pane's own.
                 "models": sessions_usage.models_with(self.models_used, model),
                 "usage": dict(self.usage_totals),
+                # #0C0V: per-turn records and each subagent thread's totals (protocol 25.3).
+                "turns_usage": list(self.turns_usage), "children_usage": dict(self.children_usage),
                 "instructions": list(self.instructions.loaded) if self.instructions else []}
 
     def autosave(self) -> None:

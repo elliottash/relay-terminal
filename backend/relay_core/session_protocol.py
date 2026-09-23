@@ -1486,12 +1486,17 @@ class SessionCommands:
                 out.append(named)
         return out
 
-    def _session_fields(self, store: SessionStore, data: dict) -> dict:
+    def _session_fields(self, store: SessionStore, data: dict, live_usage: dict | None = None) -> dict:
         session_id = data["id"]
         threads = store.threads(session_id)
         turns, unplaced = session_files.session_history(data, threads)
         user = conv_index.read_user_fields(store.directory, session_id)
         usage = session_files.load_usage(data.get("usage"))
+        # #0C0V: each subagent thread counted once, by thread id. Its own file is the newer word
+        # (it is saved at each run's end), and holds threads of runs the session never heard end.
+        children = session_files.load_children_usage(data.get("children_usage"))
+        children.update({t["id"]: t["usage"] for t in threads if isinstance(t.get("usage"), dict)})
+        children.update({k: v for k, v in (live_usage or {}).items() if k in children})
         return {"event": "session_info", "kind": "session", "session_id": session_id, "session_dir": str(store.directory),
                 "file": str(store.path(session_id)), "file_exists": store.path(session_id).is_file(),
                 "title": user.get("custom_title") or data.get("title") or "",
@@ -1506,6 +1511,10 @@ class SessionCommands:
                                             data.get("models") or ([data["model"]] if data.get("model") else [])),
                 "preset": data.get("preset") or "", "effort": data.get("effort"), "mode": data.get("mode"),
                 "usage": usage, "instructions": data.get("instructions") or [],
+                "turns_usage": session_files.load_turns_usage(data.get("turns_usage")),
+                "children_usage": session_files.sum_usage(children.values()),
+                "children_count": len(children),
+                "task_usage": session_files.sum_usage([usage, *children.values()]),
                 "forked_from": data.get("forked_from"), "history": turns, "unplaced_threads": unplaced,
                 "thread_count": len(threads), "open_requests": data.get("open_requests") or 0}
 
@@ -1513,7 +1522,8 @@ class SessionCommands:
         data = agent.session_data()
         # Threads this worker is still running are saved at start and at each run's end; the live
         # rows here keep their status current without writing the files again.
-        event = self._session_fields(agent.store, data)
+        event = self._session_fields(agent.store, data,
+                                     self.subagents.thread_usage() if self.subagents else None)
         # The turn's `done` goes out before the agent's autosave writes the file (Agent.ask's
         # `finally`), and the ⓘ pane refreshes on `done`: a session with turns is saved or about to
         # be, so it is not "not saved yet" in that gap.
