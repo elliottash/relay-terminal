@@ -72,6 +72,13 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual({s['name'] for s in exchange(self.cap, 'tools/list')['tools']},
                          EXEC_ALLOW | TERMINAL_CONTEXT_ALLOW | PLAN_ALLOW | MEDIA_NAMES | {'type_into_program'})
 
+    def test_guest_media_call_routes_to_bound_worker(self):
+        self.active()
+        with mock.patch.object(self.agent.media, 'run', return_value={'image': {'default_model': 'test'}}) as run:
+            result = exchange(self.cap, 'tools/call', {'name': 'media_catalog', 'arguments': {}}, 'media')
+        run.assert_called_once_with('media_catalog', {})
+        self.assertIn('image', result)
+
     def test_guest_can_write_plan_and_exit_in_same_turn(self):
         self.active()
         self.agent.set_mode('plan')
