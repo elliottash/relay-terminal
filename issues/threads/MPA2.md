@@ -10,3 +10,9 @@ The owner supplied two specific sphinxpad reports, saved separately as #VPR7 and
 > i couldnt get codex to show up in the priorities tab.
 
 The owner did not say whether searching finds these models.
+
+<!-- relay:entry 20260923T002131Z-m1 author=codex kind=progress -->
+Claimed follow-up: user requested tracing, simulations adding/removing models, and a fix. Specific defects already fixed in 3cb7ff33 and 8d03da03; checking those fixes and exercising list operations. Board bridge unavailable; file fallback.
+
+<!-- relay:entry 20260923T002409Z-m2 author=codex kind=evidence -->
+Verified existing fixes: three model CTest targets passed; OpenRouter 13 tests and guest-provider 69 tests passed. Full-app worker-event simulation passed. Add/remove/undo and availability behavior covered with temporary QSettings. Evidence: docs/qa_evidence/2026-09-23-MPA2/. Moved to needs-verification; sphinxpad unreachable, not redeployed.
