@@ -1,13 +1,14 @@
 ---
 id: 7KPN
 type: work
-status: executing
+status: needs-verification
 labels: [feature, models]
 assignee: codex
+implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [], related: [4BPE], github: null}
+links: {plans: [], commits: [07cb34a30b23a3e50da9f96212139a75575351ec, 8d9f24cf36764e54c494a2740c56b0e2cb78768a], evidence: [docs/qa_evidence/2026-09-23-provider-names/], related: [4BPE], github: null}
 ---
 # Name providers, not models, in Add provider
 
@@ -36,3 +37,4 @@ The Add provider preview and picker use company names from the provider field, w
 ## Tests
 `scripts/relay-build --target relay` — passed after final edit.
 `docs/qa_evidence/2026-09-23-provider-names/01-add-provider.png` — isolated Xvfb capture shows provider names and separate plans, without model names.
+`docs/qa_evidence/2026-09-23-provider-names/02-key-prompt.png` — selecting Kimi's pay-as-you-go row opens a prompt headed “Key for kimi.”
