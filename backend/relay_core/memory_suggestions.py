@@ -232,6 +232,7 @@ def suggest(fact: str, *, name: str | None = None, title: str | None = None,
             board.atomic_write(root / board.BOARD_CONFIG, board.CONFIG_TEXT)
         card_id = board.new_id(_taken_ids())
         card = board.Card(front=dict(id=card_id, type='memory', status='suggested', name=name,
+                                     rank=board.initial_ranks(1)[0], created=_today(),
                                      scope='user', source=source, origin=origin,
                                      suggested=_today()),
                           body=f'# {title}\n\n{fact}\n', dirty=True)

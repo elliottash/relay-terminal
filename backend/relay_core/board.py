@@ -195,7 +195,8 @@ WORK_STATUS_FOLDER = {
     "needs-review": "needs_review", "needs-labels": "needs_labels", "needs-ab": "needs_ab",
     "deferred": "deferred", "done": "done", "dropped": "done",
 }
-MEMORY_STATUS_FOLDER = {"active": "", "retired": "archive"}
+#: `suggested` and `rejected` (#MEMS) are memory_suggestions' pending and declined facts; neither is loaded.
+MEMORY_STATUS_FOLDER = {"active": "", "retired": "archive", "suggested": "suggestions", "rejected": "rejected"}
 #: Aliases (issue G8DK): saved commands and prompts, same two states as memory.
 ALIAS_STATUS_FOLDER = {"active": "", "retired": "archive"}
 
@@ -228,7 +229,8 @@ WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemente
                # exists, and a move to a status column is what clears it.
                "section")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
-                 "supersedes", "reviewed", "author")
+                 "supersedes", "reviewed", "author",
+                 "origin", "suggested", "rejected", "reason")
 #: An alias card (issue G8DK): `name` is what you type, `kind` is command or prompt,
 #: `shell` records which shell an imported command came from. The runnable text and the
 #: parameter defaults live in the body, because front matter scalars are single-line and a
