@@ -66,13 +66,16 @@ set(RELAY_ENGINE_SOURCES
     core/VtCore.h core/VtCoreFactory.cpp
     core/LibVtermCore.h core/LibVtermCore.cpp
     core/SequenceScanner.h
+    core/InlineImage.h core/InlineImage.cpp
     pty/Pty.h
     session/TerminalSession.h session/TerminalSession.cpp
+    session/ImageProtocol.h session/ImageProtocol.cpp
     view/ColorScheme.h
     view/FaintInk.h
     view/BoxDrawing.h view/BoxDrawing.cpp
     view/FoldLayer.h view/FoldLayer.cpp
     view/FoldSearch.h view/FoldSearch.cpp
+    view/ImageCache.h view/ImageCache.cpp
     view/ProseSpans.h
     view/KeyMapper.h view/KeyMapper.cpp
     view/TerminalView.h view/TerminalView.cpp
@@ -125,7 +128,7 @@ if(BUILD_TESTING)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Test)
     add_executable(relay-engine-tests
         tests/main.cpp tests/CoreTest.cpp tests/FaintInkTest.cpp tests/FoldLayerTest.cpp
-        tests/FoldSearchTest.cpp tests/PtyTest.cpp tests/SessionTest.cpp tests/ViewTest.cpp)
+        tests/FoldSearchTest.cpp tests/ImageTest.cpp tests/PtyTest.cpp tests/SessionTest.cpp tests/ViewTest.cpp)
     target_link_libraries(relay-engine-tests PRIVATE relay-terminal-engine ${RELAY_QT}::Test)
     add_test(NAME relay-engine-tests COMMAND relay-engine-tests)
     set_tests_properties(relay-engine-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS engine TIMEOUT 120)
