@@ -2047,12 +2047,12 @@ class CleanupToolTests(BoardToolsTest):
         self.assertEqual(offered, set(T.TOOL_NAMES) | set(T.CLEANUP_TOOL_NAMES))
 
     def test_a_cleanup_raises_the_per_turn_ceilings(self):
-        self.assertEqual(self.tools.limit("max_writes_per_turn"), 20)
+        self.assertEqual(self.tools.limit("max_writes_per_turn"), 100)
         self.tools.begin_cleanup("c-1")
         self.assertEqual(self.tools.limit("max_writes_per_turn"),
                          T.CLEANUP_LIMITS["max_writes_per_turn"])
         self.tools.end_cleanup("done")
-        self.assertEqual(self.tools.limit("max_writes_per_turn"), 20)
+        self.assertEqual(self.tools.limit("max_writes_per_turn"), 100)
 
     def test_merging_keeps_both_cards_and_logs_the_change(self):
         keep = self.create("Voice mode", "add voice transcribe mode")

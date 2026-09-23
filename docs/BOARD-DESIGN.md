@@ -1043,7 +1043,7 @@ sentence for a guest that has no `board_*` tools.
 - No delete tool: closing is `done`/`dropped` with a reason. Owner text (`## Issue`, owner thread entries) is
   hash-recorded and edits to it are refused. Every agent write appends a thread event (actor, model, pane, turn id).
   The owner alone may delete — the GUI's confirmed `board_delete` (#CYM9), never an agent tool.
-- Limits: 5 creates and 20 other writes per turn, 30 creates per hour per workspace; beyond them `board_rate_limited`
+- Limits: 5 creates and 100 other writes per turn, 30 creates per hour per workspace; beyond them `board_rate_limited`
   and the agent summarizes in chat. Writes are atomic and hash-checked like `write_file`.
 - Autonomy in `board.yaml` (`off`; `suggest` = writes become proposals accepted in the Board; `auto`) with a per-user
   local override. This repo: `auto` (owner decision); new boards: `suggest`.

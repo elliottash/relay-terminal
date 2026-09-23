@@ -89,7 +89,7 @@ UNINITIALIZED_TOOLS = ("board_create_card",)
 #: Per-turn and per-hour ceilings (design 6.3).  `board.yaml` may lower the create ceiling.
 DEFAULT_LIMITS = {
     "max_creates_per_turn": 5,
-    "max_writes_per_turn": 20,
+    "max_writes_per_turn": 100,
     "max_creates_per_hour": 30,
 }
 
@@ -711,7 +711,7 @@ class RateState:
 # --------------------------------------------------------------- whole-board cleanup
 
 #: A cleanup rewrites many cards in one turn, so it runs on its own ceilings rather than a
-#: pane turn's five creates and twenty writes.  They are still ceilings: a run that wants
+#: pane turn's five creates and a hundred writes.  They are still ceilings: a run that wants
 #: more than this has lost the plot and should stop and report.
 CLEANUP_LIMITS = {
     "max_creates_per_turn": 60,
