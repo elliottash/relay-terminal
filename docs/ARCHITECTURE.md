@@ -3190,8 +3190,7 @@ rotated by another worker reopens it.
 **Nothing about content is logged**: no prompts, model answers, reasoning, tool arguments, tool
 output, file contents, terminal output, API keys or password-mode input. Identifiers, model and
 host, event types, counts, durations and error types only; `scrub()` masks credential-shaped text
-in every record as a second line of defence. There is still no telemetry: the files never leave the
-machine.
+in every record as a second line of defence. These local log files are separate from hosted request handling.
 
 **Which build this is** (owner, 2026-09-19: "where does relay say what build it is? put that in
 settings", then "do 2026-09-10.14H.01 (where XXH is the 24-H time)"). `scripts/build-id.py` runs as
