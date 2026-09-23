@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-preview-click/], related: [EV45], github: null}
+links: {plans: [], commits: [1c9807662a1463f14d03e4ef1edd43f88b4f3a74], evidence: [docs/qa_evidence/2026-09-23-sessions-preview-click/], related: [EV45], github: null}
 ---
 # Preview Sessions rows on mouse click before resuming
 

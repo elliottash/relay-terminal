@@ -10,3 +10,6 @@ Claimed this request. I found that selection already updates the preview; I will
 
 <!-- relay:entry 20260923T113209Z-sq author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/277a9804fc7846b588f52c3d9f3542b1 -->
 - ✦ agent moved this card · Executing → Needs verification · Mouse click and double-click test passes with preview shown; the conversations suite passes, and Enter/Resume remain explicit open actions. · evidence docs/qa_evidence/2026-09-23-sessions-preview-click/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T113301Z-wx author=agent kind=event model=gpt-6-sol pane=d3adcb62 turn=f4520a5d8d7b4fed83890c56e50a4052/277a9804fc7846b588f52c3d9f3542b1 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-sessions-… → {"plans": [], "commits": ["1c9807662a1463f14d03e4ef1edd43f88b4f3a74"], "evidence…
