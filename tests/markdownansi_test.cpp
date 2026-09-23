@@ -150,6 +150,16 @@ private slots:
                                      "a    │    1\nlong │  200\nafter\n"));
     }
 
+    void inlineTableKeepsTextAndAddsSortableRow() {
+        const QString md = QStringLiteral("| name | value |\n|---|---:|\n| small | 2 |\n| large | 10 |\n");
+        const QString out = renderImages(md);
+        QVERIFY(out.contains(QStringLiteral("small")));
+        QVERIFY(out.contains(QStringLiteral("large")));
+        QVERIFY(out.contains(MarkdownAnsi::kMediaEscapeStart));
+        QCOMPARE(out.count(MarkdownAnsi::kMediaEscapeStart), 1);
+        QCOMPARE(renderImages(md, QString(), true), out);
+    }
+
     // A row that is not a table used to kill the process. renderTable() decided "not a table after
     // all" and sent the row back through renderInline(); the inner renderer saw a line starting
     // with `|`, collected it as a table of its own, and called renderTable() again when it
@@ -450,7 +460,9 @@ private slots:
         QCOMPARE(renderImages(fenced, dir.path(), true), render(fenced));
         // A table cell is inline content: an image there stays text.
         const QString table = QStringLiteral("| a |\n|---|\n| ![a](a.png) |\n");
-        QCOMPARE(renderImages(table, dir.path()), render(table));
+        const QString renderedTable = renderImages(table, dir.path());
+        QVERIFY(renderedTable.startsWith(render(table)));  // same readable cells, then the sortable row
+        QVERIFY(renderedTable.contains(MarkdownAnsi::kMediaEscapeStart));
     }
 
     void localAudioLinkBecomesOneMediaRow()
