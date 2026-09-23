@@ -4144,6 +4144,28 @@ private:
             row.aliases = QStringLiteral("claude codex guest sessions index transcripts history privacy search");
             privacy.rows << row;
         }
+        {
+            // #MEMS (owner, 2026-09-22: "guests use relay memory, and thats the default"). Read by
+            // relay_core.guest_launch and the harness route (`guest.memory`) at the next start;
+            // their own ~/.claude and ~/.codex are never edited for it.
+            const QString key = QStringLiteral("guests/memory");
+            const QString current = QSettings().value(key).toString().trimmed();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:") + key,
+                QStringLiteral("Guests use memory from"),
+                QStringLiteral("Claude Code and Codex started by Relay. Relay: their own memory is off and they see "
+                               "Relay's user memory, suggesting new facts for you to keep. Both adds Relay's to theirs. "
+                               "Applies from the guest's next start"),
+                {QStringLiteral("relay"), QStringLiteral("own"), QStringLiteral("both")},
+                {QStringLiteral("relay"), QStringLiteral("their own"), QStringLiteral("both")},
+                current.isEmpty() ? QStringLiteral("relay") : current, QStringLiteral("relay"),
+                [this, key](const QString &value) {
+                    if (value.isEmpty() || value == QStringLiteral("relay")) QSettings().remove(key);
+                    else QSettings().setValue(key, value);
+                    refreshSettingsPanes();
+                });
+            row.aliases = QStringLiteral("claude codex guest memory remember auto-memory memories user facts");
+            privacy.rows << row;
+        }
         sections << privacy;
 
         relay::SettingsSection shortcuts;
