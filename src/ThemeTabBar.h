@@ -21,12 +21,19 @@
 #include <QSettings>
 #include <QTabBar>
 #include <QTabWidget>
+#include <functional>
 
 class ThemeTabBar final : public QTabBar {
 public:
     using QTabBar::QTabBar;
+    std::function<void(int)> onMiddleClick;
 
 protected:
+    void mouseReleaseEvent(QMouseEvent *event) override {
+        const int index = event->button() == Qt::MiddleButton ? tabAt(event->pos()) : -1;
+        QTabBar::mouseReleaseEvent(event);
+        if (index >= 0 && onMiddleClick) onMiddleClick(index);
+    }
     void paintEvent(QPaintEvent *event) override {
         QTabBar::paintEvent(event);
         // The same key RelayWindow::perTabThemes() reads. With per-tab themes off a page's

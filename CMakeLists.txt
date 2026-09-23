@@ -1023,6 +1023,11 @@ if(BUILD_TESTING)
     # not fail, it aborts before the first test ("Subprocess aborted", 0.07 s in CI). A developer
     # running ctest under xvfb-run never sees it; CI has no display at all.
     set_tests_properties(themeswitch PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-themetabbar-tests tests/themetabbar_test.cpp)
+    target_include_directories(relay-themetabbar-tests PRIVATE src)
+    target_link_libraries(relay-themetabbar-tests PRIVATE relay-highlight ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    add_test(NAME themetabbar COMMAND relay-themetabbar-tests)
+    set_tests_properties(themetabbar PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # The test also reads the shipped theme files, so it runs from the source tree.
     set_tests_properties(theme PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

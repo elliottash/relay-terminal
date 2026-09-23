@@ -460,6 +460,9 @@ public:
             if (leaf) { setActiveLeaf(leaf); focusLeaf(leaf); }
         });
         connect(m_tabs, &QTabWidget::tabCloseRequested, this, [this](int index) { requestCloseTab(index); });
+        static_cast<ThemeTabBar *>(m_tabs->tabBar())->onMiddleClick = [this](int index) {
+            requestCloseTab(index);
+        };
         connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
             if (QWidget *leaf = leafOf(now); leaf && leaf->window() == this) {
                 const bool byMouse = QApplication::mouseButtons() != Qt::NoButton;
