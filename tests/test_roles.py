@@ -167,22 +167,15 @@ class DefaultTests(unittest.TestCase):
         config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
-            if role in ("planning", "high"):
-                continue   # the two High-tier roles: the main model pushed to max, asserted below
+            if role == "high":
+                continue   # the High tier: the main model pushed to max, asserted below
             self.assertTrue(made.resolve(role).is_main, role)
             self.assertEqual(made.resolve(role).model, "house-model")
-        # Plan mode is the one role that is never "same as the main agent" by default: the pane's
-        # own model pushed to max reasoning (owner, 2026-09-19; not the High tier since #HR5E).
-        # An endpoint Relay cannot name has no preset, so effort_style falls back to "kimi" and the
-        # knob does move. The tier reads "high" (it was "main" before High existed as a tier).
-        planning = made.resolve("planning")
-        self.assertFalse(planning.is_main)
-        self.assertEqual((planning.model, planning.config.base_url, planning.config.api_key),
-                         ("house-model", "https://example.invalid/v1", "k"))
-        self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
-        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "high", "max"))
-        # /high puts the pane itself on that same tier (card #MDL1): one more role, resolved by the
-        # one rule, so the mode row and a plan turn can never name two different models.
+        # Plan mode adds nothing of its own (owner, 2026-09-22): entering it puts the pane on
+        # /high (#PH9G), so the unpinned planning role is the pane as it is.
+        self.assertIsNone(made.planning_target())
+        # /high puts the pane itself on the High tier (card #MDL1), which with no list is the
+        # main model pushed to max.
         high = made.resolve("high")
         self.assertEqual((high.model, high.tier, high.effort, high.source),
                          ("house-model", "high", "max", "default"))
@@ -329,10 +322,10 @@ class DefaultTests(unittest.TestCase):
 
 # ----- plan mode (owner, 2026-09-19) --------------------------------------------------------------
 class PlanRoleTests(unittest.TestCase):
-    """The planning role: a plan-mode turn runs on the pane's own model pushed to max reasoning
-    (owner, 2026-09-19). It followed the High tier from 2026-09-20 until card #HR5E (owner,
-    2026-09-21): a default-filled High list rerouted every plan turn to another provider, so the
-    default is the pane's own model again and only a hand-pinned entry routes a plan turn off it."""
+    """The planning role (owner, 2026-09-22: plan mode "is supposed to go into /high"; "it doesnt
+    need to be the same model"). Entering plan mode puts the pane on /high (#PH9G), so the unpinned
+    role adds no swap and no effort boost; only a hand-pinned `roles.planning` entry routes a plan
+    turn. Before this it was the pane's own model at max (2026-09-19, again after #HR5E)."""
 
     def plan_resolver(self, preset="kimi", extra=None, roles=None, keys=("kimi",), tiers=None):
         endpoint = PRESETS[preset]
@@ -342,21 +335,16 @@ class PlanRoleTests(unittest.TestCase):
                             key_lookup=lambda pid: store.get(pid, ""), main_effort="high",
                             tiers=model_roles.validate_tiers(tiers))
 
-    def test_the_default_is_the_main_model_at_max_reasoning(self):
+    def test_the_unpinned_default_is_the_pane_as_it_is(self):
         made = self.plan_resolver("kimi", extra={})
         planning = made.resolve("planning")
-        self.assertFalse(planning.is_main)
-        self.assertEqual((planning.model, planning.config.base_url, planning.config.api_key),
-                         ("kimi-k3", "https://api.moonshot.ai/v1", "kimi-key"))
-        self.assertEqual(planning.config.extra, {"reasoning_effort": "max"})
-        # The tier is "high", not "main", since 2026-09-20: the same Resolved as before, now
-        # produced by the High tier rather than a planning special case.
-        self.assertEqual((planning.source, planning.tier, planning.effort), ("default", "high", "max"))
-        self.assertIs(made.planning_target(), planning)
+        self.assertTrue(planning.is_main)
+        self.assertEqual((planning.model, planning.config.extra, planning.effort), ("kimi-k3", {}, "high"))
+        self.assertIsNone(made.planning_target())
 
     def test_the_high_tier_is_the_main_model_at_max_by_default(self):
         made = self.plan_resolver("kimi", extra={})
-        high = made.resolve("planning")
+        high = made.resolve("high")
         summary = made.tier_summary()["high"]
         self.assertEqual((summary["model"], summary["preset"], summary["effort"], summary["source"],
                           summary["using"]), ("kimi-k3", "kimi", "max", "default", "high"))
@@ -370,57 +358,26 @@ class PlanRoleTests(unittest.TestCase):
                 self.assertIsNone(tier_default(provider, "high"), provider)
 
     def test_planning_is_not_tiered(self):
-        # Card #HR5E: planning follows no tier. Its default is the `_high_default` resolution —
-        # the pane's own model at max reasoning — never the High tier's list.
         self.assertIsNone(model_roles.ROLE_TIERS["planning"])
-        made = self.plan_resolver("kimi", extra={})
-        planning = made.resolve("planning")
-        probe = made._high_default("planning", "default")
-        self.assertEqual((planning.model, planning.config.extra, planning.effort, planning.tier),
-                         (probe.model, probe.config.extra, probe.effort, probe.tier))
+        self.assertTrue(self.plan_resolver("kimi", extra={}).resolve("planning").is_main)
         self.assertEqual(model_roles.action_catalog()[1]["role"], "planning")
         self.assertIsNone(model_roles.action_catalog()[1]["tier"])
 
-    def test_a_high_override_does_not_move_planning(self):
-        # The #HR5E regression: a filled High list rerouted every plan turn to another provider —
-        # a Codex pane on gpt-6-astra planned on glm-5.3 and back, twice per turn. Planning's
-        # default stays the pane's own model at max; the override serves the High role alone.
+    def test_a_high_override_serves_high_and_plan_adds_nothing(self):
+        # The High list decides what a plan turn runs on, through /high: the planning role itself
+        # stays on the pane, whatever the list names and whether or not its key is stored.
+        for keys, tiers in ((("kimi", "glm"), {"high": {"preset": "glm", "model": "glm-5.3", "effort": "high"}}),
+                            (("kimi", "glm"), {"high": {"preset": "glm"}}),
+                            (("kimi",), {"high": {"preset": "glm"}})):
+            with self.subTest(keys=keys, tiers=tiers):
+                made = self.plan_resolver("kimi", extra={}, keys=keys, tiers=tiers)
+                self.assertTrue(made.resolve("planning").is_main)
+                self.assertIsNone(made.planning_target())
         made = self.plan_resolver("kimi", extra={}, keys=("kimi", "glm"),
                                   tiers={"high": {"preset": "glm", "model": "glm-5.3", "effort": "high"}})
-        planning = made.resolve("planning")
-        self.assertEqual((planning.preset_id, planning.model, planning.source, planning.effort),
-                         ("kimi", "kimi-k3", "default", "max"))
-        self.assertEqual(planning.config.extra["reasoning_effort"], "max")
-        self.assertIs(made.planning_target(), planning)
         high = made.resolve("high")
         self.assertEqual((high.preset_id, high.model, high.tier, high.effort),
                          ("glm", "glm-5.3", "high", "high"))
-        summary = made.tier_summary()["high"]
-        self.assertEqual((summary["model"], summary["preset"], summary["source"], summary["using"]),
-                         ("glm-5.3", "glm", "configured", "high"))
-
-    def test_a_high_override_naming_only_a_provider_still_leaves_planning_on_main(self):
-        # No provider has a High row, so "High on Z.AI" is Z.AI's Main model (provider_tier_model) —
-        # for the High role. Planning is the pane's own model at max either way.
-        made = self.plan_resolver("kimi", extra={}, keys=("kimi", "glm"), tiers={"high": {"preset": "glm"}})
-        planning = made.resolve("planning")
-        self.assertEqual((planning.preset_id, planning.model, planning.effort), ("kimi", "kimi-k3", "max"))
-        high = made.resolve("high")
-        self.assertEqual((high.preset_id, high.model, high.tier), ("glm", "glm-5.3", "high"))
-
-    def test_a_high_override_without_a_key_still_leaves_planning_on_main(self):
-        made = self.plan_resolver("kimi", extra={}, keys=("kimi",), tiers={"high": {"preset": "glm"}})
-        planning = made.resolve("planning")
-        self.assertFalse(planning.is_main)
-        self.assertEqual((planning.tier, planning.model), ("high", "kimi-k3"))
-        self.assertIs(made.planning_target(), planning)
-        # The High role itself still steps down to main, with its note — a step-down, not a
-        # misconfiguration.
-        high = made.resolve("high")
-        self.assertTrue(high.is_main)
-        self.assertIn("No stored key for the high model; using main.", high.note)
-        self.assertEqual(made.warnings, [])
-        self.assertEqual(made.tier_summary()["high"]["using"], "main")
 
     def test_a_planning_role_pinned_to_another_tier_still_wins(self):
         made = self.plan_resolver("kimi", extra={}, roles={"planning": {"tier": "flash"}})
@@ -434,17 +391,9 @@ class PlanRoleTests(unittest.TestCase):
         self.assertEqual((subagent.model, subagent.tier, subagent.effort, subagent.config.extra),
                          ("kimi-k3", "high", "high", {"reasoning_effort": "high"}))
 
-    def test_the_default_raises_whatever_effort_the_pane_already_has(self):
-        # Kimi's "high" and "max" are different requests, so the pane's own effort is the floor.
+    def test_plan_mode_adds_no_effort_of_its_own(self):
         made = self.plan_resolver("kimi", extra={"reasoning_effort": "high"})
-        self.assertEqual(made.resolve("planning").config.extra, {"reasoning_effort": "max"})
-
-    def test_a_pane_already_at_max_has_nothing_to_swap(self):
-        made = self.plan_resolver("kimi", extra={"reasoning_effort": "max"})
-        planning = made.resolve("planning")
-        self.assertTrue(planning.is_main)
-        self.assertEqual((planning.source, planning.tier), ("main", "high"))
-        self.assertIsNone(made.planning_target())
+        self.assertEqual(made.resolve("planning").config.extra, {"reasoning_effort": "high"})
 
     def test_a_provider_with_no_effort_knob_stays_on_the_main_agent(self):
         # Anthropic's compat layer ignores reasoning_effort (presets.EFFORT_MAP["none"]), so
@@ -743,13 +692,10 @@ class TierTests(unittest.TestCase):
         config = ProviderConfig("https://example.invalid/v1", "house-model", "k", {}, 8192)
         made = RoleResolver(config, None, {}, key_lookup=lambda pid: "")
         for role in model_roles.ROLES:
-            if role in ("planning", "high"):
+            if role == "high":
                 continue   # the High tier: the main model at max reasoning (see DefaultTests)
             self.assertTrue(made.resolve(role).is_main, role)
         self.assertEqual(made.warnings, [])
-        # Was "main" until High became a tier (2026-09-20): the same model at max, now labelled
-        # with the tier that asked for it. /high (card #MDL1) is a pane on that same tier.
-        self.assertEqual(made.resolve("planning").tier, "high")
         self.assertEqual(made.resolve("high").tier, "high")
 
     def test_minimax_flash_is_its_own_highspeed_model(self):

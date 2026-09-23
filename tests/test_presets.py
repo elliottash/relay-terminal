@@ -441,7 +441,7 @@ class TierTableTests(unittest.TestCase):
     def test_role_tiers_cover_every_role(self):
         self.assertEqual(sorted(model_roles.ROLE_TIERS), sorted(model_roles.ROLES))
         # The High tier serves the pane role /high switches to (card #MDL1) alone: planning left
-        # the tier with card #HR5E, so a plan turn is always the pane's own model at max.
+        # the tier with card #HR5E; plan mode puts the pane on /high itself (#PH9G).
         self.assertEqual(sorted(r for r, t in model_roles.ROLE_TIERS.items() if t == "high"),
                          ["high"])
         self.assertEqual([role for role, tier in model_roles.ROLE_TIERS.items() if tier == "main"],

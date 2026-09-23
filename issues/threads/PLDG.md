@@ -13,3 +13,7 @@ Owner: "i thought i wanted nothing to be locked in plan mode. its just an extra 
 <!-- relay:entry 20260923T024000Z-c4 author=claude-code kind=evidence -->
 ### Claude Code · 2026-09-22 22:40
 Plan-mode locks removed; targeted unittest modules listed on the card are green (test_system_prompt fails on #TCXT's uncommitted prompt text, not this change).
+
+<!-- relay:entry 20260923T031000Z-c5 author=claude-code kind=decision -->
+### Claude Code · 2026-09-22 23:10
+Owner: "re the effort. thats not what its supposed to do.its suppsoed to go into /high" · "check for any model-specific hard-coding, which i really dont want." · "it doesnt need to be the same model either". Plan mode = /high (#PH9G already switches the pane); the per-turn effort boost and #HR5E's guest top-level boost are removed. Only a hand-pinned roles.planning routes a plan turn.

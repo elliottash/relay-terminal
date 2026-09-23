@@ -198,10 +198,9 @@ class ResolutionTests(unittest.TestCase):
                          ('guest:claude', 'harness://claude', 'fable', 'max', 'high', 'default'))
         self.assertEqual(high.config.api_key, '')
         self.assertIsNone(high.note)
-        # Planning's default is the pane's own model at max (#HR5E) — the High list is not
-        # consulted — and a pin onto the tier restores the guest for plan turns.
-        planning = made.resolve('planning')
-        self.assertEqual((planning.preset_id, planning.effort), ('glm', 'max'))
+        # Unpinned planning is the pane as it is (plan mode puts the pane on /high itself, owner
+        # 2026-09-22); a pin onto the tier routes each plan turn to the guest.
+        self.assertTrue(made.resolve('planning').is_main)
         pinned = resolver({'kimi': 'k'}, self.GUESTED, roles={'planning': {'tier': 'high'}},
                           guests=('claude',))
         target = pinned.resolve('planning')
@@ -221,9 +220,9 @@ class ResolutionTests(unittest.TestCase):
         high = made.resolve('high')
         self.assertEqual(high.preset_id, 'kimi')
         self.assertIn('guest that cannot run here', high.note)
-        # Planning never saw the list at all: the pane's own model at max (#HR5E).
+        # Unpinned planning never reads the list: it is the pane as it is.
         planning = made.resolve('planning')
-        self.assertEqual((planning.preset_id, planning.effort), ('glm', 'max'))
+        self.assertTrue(planning.is_main)
         self.assertIsNone(planning.note)
         summary = made.tier_summary()
         self.assertEqual([e['usable'] for e in summary['high']['list']], [False, True])
@@ -239,7 +238,7 @@ class ResolutionTests(unittest.TestCase):
         for role in ('planning', 'flash', 'chores', 'local', 'subagent'):
             with self.subTest(role=role):
                 self.assertEqual(bare.resolve(role).to_dict(), listed.resolve(role).to_dict())
-        self.assertEqual((bare.resolve('planning').effort, bare.resolve('planning').config.model), ('max', 'glm-5.3'))
+        self.assertTrue(bare.resolve('planning').is_main)
         self.assertEqual(bare.resolve('chores').config.model, 'google/gemini-3.8-flash')
 
     def test_main_is_the_panes_own_model_whatever_the_main_list_says(self):

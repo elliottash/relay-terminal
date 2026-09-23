@@ -2121,8 +2121,8 @@ because every tiered role follows a tier:
   `presets.PROVIDER_TIERS` stays three wide (`main`, `flash`, `lite`) |
 
 `vision`, `route_assist` and `planning` are outside the tiers (`roles.py`'s tier map gives all three
-`None`): vision uses the provider's image model, plan mode runs on the pane's own model pushed to max
-reasoning (protocol 13.11), and route
+`None`): vision uses the provider's image model, plan mode puts the pane on /high and adds nothing per turn
+unless `roles.planning` is pinned (protocol 13.11), and route
 assist is pinned to `google/gemini-3.5-flash-lite` because routing has a sub-second budget (0.5–0.6 s
 measured, against 2.3–4.9 s for Gemini 3.8 Flash), so the Lite row must not move it.
 

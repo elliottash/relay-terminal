@@ -70,6 +70,9 @@ def _preset(preset_id):
 # 2026-09-20 it followed the High tier instead, but once the tier lists are filled by defaults
 # that rerouted every plan turn to another provider (card #HR5E), so the owner put it back on
 # 2026-09-21: only a hand-pinned `roles.planning` entry routes a plan turn off the pane's model.
+# Since 2026-09-22 (owner: "its supposed to go into /high"; "it doesnt need to be the same model")
+# entering plan mode puts the pane on /high (#PH9G), so the unpinned default adds nothing on top:
+# no per-turn effort boost, no swap. The High list decides the model and its level.
 # "high" (2026-09-21, card #MDL1) is the pane role /high switches to, exactly as "flash" is the
 # one /flash switches to and "local" the one /local does: the box's modes are high, main, flash and
 # local, so each of the three that is not the pane's own model needs a role a pane can be put on.
@@ -111,7 +114,7 @@ def canonical_role(role):
 # after the job rather than the protocol id (owner, 2026-09-17). The GUI mirrors this table.
 ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("main", "Agent turns", "the main conversation in this pane"),
-    ("planning", "Plan mode", "investigating and writing plans; the pane's own model at max reasoning by default"),
+    ("planning", "Plan mode", "investigating and writing plans; plan mode puts the pane on /high unless overridden here"),
     ("high", "Panes on the High tier (/high)", "the hardest turns; empty, the pane's own model at its top level"),
     ("subagent", "Subagents", "agents the main agent starts"),
     ("terminal_use", "Driving programs in the terminal", "answering prompts, fixing failed commands"),
@@ -136,7 +139,7 @@ MAX_URL = 400
 # Roles are grouped into tiers (presets.TIERS, protocol 13.7): a role either follows the pane's own
 # model ("main"), the High tier above it (main at max reasoning unless `tiers.high` picks a model;
 # owner, 2026-09-20), or takes the provider's Flash or Lite model. "planning" is not tiered (None):
-# its default is the pane's own model at max reasoning, decided in `_default` (card #HR5E).
+# unpinned it is the pane as it is, because entering plan mode puts the pane on /high (#PH9G).
 ROLE_TIERS: dict[str, str | None] = {
     "planning": None, "high": "high",
     "main": "main", "subagent": "main", "switchboard": "main",
@@ -886,11 +889,10 @@ class RoleResolver:
         if tier is not None:
             return self._main(role, tier="main") if tier == "main" else self._tier(role, tier, "default")
         if role == "planning":
-            # Plan mode's default is the pane's own model pushed to max reasoning (owner,
-            # 2026-09-19; restored by card #HR5E, 2026-09-21) — never the High tier's list, whose
-            # default-filled entries rerouted every plan turn to another provider. Only a
-            # hand-pinned `roles.planning` entry routes a plan turn off the pane's own model.
-            return self._high_default(role, "default")
+            # Plan mode puts the pane on /high itself (#PH9G, owner 2026-09-22), so the unpinned
+            # role is the pane as it is. Only a hand-pinned `roles.planning` entry routes a plan
+            # turn elsewhere.
+            return self._main(role)
         if role == "vision":
             candidates = [VISION_DEFAULTS.get(self.main_preset_id or "")]
         elif role == "route_assist":
@@ -1192,13 +1194,11 @@ class RoleResolver:
     def planning_target(self, guests: bool = True) -> Resolved | None:
         """Where a plan-mode turn goes when the planning role is not the main agent (owner, 2026-09-19).
 
-        The default is the pane's own model pushed to max reasoning (card #HR5E, owner 2026-09-21):
-        None means there is nothing to swap — the provider has no effort knob, or the pane's
-        effort is already max. The High tier's list is never consulted: a default-filled list
-        rerouted every plan turn to another provider's model. Only a hand-pinned `roles.planning`
-        entry routes the turn elsewhere, and a `guest:` pin starts that guest's harness for the
-        turn (protocol 13.7). ``guests=False`` is the agent's second ask when the harness would
-        not start: the same pin with the guest entries left out.
+        Unpinned it is None: plan mode has already put the pane on /high (#PH9G, owner
+        2026-09-22), and a plan turn adds no swap or effort boost of its own. Only a hand-pinned
+        `roles.planning` entry routes the turn elsewhere, and a `guest:` pin starts that guest's
+        harness for the turn (protocol 13.7). ``guests=False`` is the agent's second ask when the
+        harness would not start: the same pin with the guest entries left out.
         """
         entry = self.roles.get("planning")
         if entry and not guests:
@@ -1208,8 +1208,8 @@ class RoleResolver:
                 resolved = self._tier("planning", entry["tier"], "configured", entry.get("effort"),
                                       guests=False)
             elif is_guest_preset(str(entry.get("preset") or "")):
-                # The pinned harness itself would not start: the pane's own model at max instead.
-                resolved = self._high_default("planning", "default")
+                # The pinned harness itself would not start: the pane as it is instead.
+                return None
             else:
                 resolved = self.resolve("planning")     # a pinned endpoint is never a guest to skip
         else:

@@ -19,3 +19,7 @@ Plan now selects High using the existing /high role-selection path. Covers both 
 
 <!-- relay:entry 20260923T002101Z-b8 author=agent kind=event model=gpt-6-astra pane=d7842bf4 turn=ce657bf0ce1c4ffdb058b09550fd57b7/622785c0555a4c9ca886a4e82b7a56c7 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-22-plan-high… → {"plans": [], "commits": ["1b05786b10754c5ffc81b8f7bcc47718b8965639"], "evidence…
+
+<!-- relay:entry 20260923T031100Z-c1 author=claude-code kind=comment -->
+### Claude Code · 2026-09-22 23:11
+For the verifier: #PLDG (owner, 2026-09-22: plan mode "is supposed to go into /high"; "it doesnt need to be the same model") removed the backend's per-turn planning boost on top of this card's switch, including the resolver rebuild in `Agent._begin_plan_turn` that "follows the active High model". An unpinned plan turn now runs exactly what /high gave the pane, at that entry's level, with no `plan_route`.

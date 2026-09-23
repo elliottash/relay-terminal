@@ -152,7 +152,7 @@ const QList<JobsTab::Job> &JobsTab::jobs() {
          QStringLiteral("main"), true},
 
         {QStringLiteral("planning"), QStringLiteral("plan mode"),
-         QStringLiteral("investigating and writing a plan; the pane's own model at its top level "
+         QStringLiteral("investigating and writing a plan; plan mode puts the pane on /high "
                         "unless overridden here"),
          QStringLiteral("high"), true},
         {QStringLiteral("high"), QStringLiteral("/high panes"),

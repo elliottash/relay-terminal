@@ -182,9 +182,10 @@ the finish time is unknown.
 
 - `set_mode {mode: "build"|"plan"}` → `mode_changed {mode}`.
 - Plan mode locks nothing (owner, 2026-09-22, #PLDG): every tool stays available and callable — file writes, board and app writes, `set_keybinding`, delegation. Plan mode is the turn's plan-mode note (investigate without changing anything, ask what is ambiguous, finish with `write_plan`) plus the `planning` role's model and reasoning below. The note is an instruction, not an enforced rule.
-- Plan-mode turns run on the `planning` role (13.11): by default the pane's own model at `max`
-  reasoning, swapped for that turn only and then put back, with `plan_route` / `plan_route_ended` saying
-  so in the pane.
+- Entering plan mode puts the pane on `/high` (#PH9G): the High list picks the model and its level,
+  which need not be the pane's Main model. A plan turn adds nothing on top — no per-turn swap and no
+  effort boost (owner, 2026-09-22) — unless the `planning` role (13.11) is hand-pinned, when that turn
+  is swapped to the pin and then put back, with `plan_route` / `plan_route_ended` saying so.
 - Tool `exit_plan_mode {reason}` (plan mode only, card #XP7N) leaves plan mode on the agent's own
   decision, Warp-style (owner 2026-09-21): no ask. It switches the session to build mode at once,
   emits `mode_changed {mode: "build"}`, and the agent continues implementation with build tools in
@@ -990,8 +991,8 @@ tests: `tests/test_roles.py`. Source: `issues/features/needs_qa_llm/2026-09-17-m
 2026-09-17); the `planning` role (13.11):
 `issues/features/needs_qa_llm/2026-09-19-plan-mode-turns-run-on-the-main-model-pushed-to.md` (owner, 2026-09-19). All
 additive: existing fields keep their meaning, and a worker that gets no `roles` behaves exactly as before.
-The newest role is `planning`, which serves plan-mode turns: by default the pane's own model pushed to
-`max` reasoning, so a plan is investigated harder without changing the pane's model (13.11).
+The newest role is `planning`, which serves plan-mode turns: unpinned it is the pane as it is, because
+entering plan mode puts the pane on `/high` (13.11).
 
 ### 13.1 Roles
 
@@ -1010,7 +1011,7 @@ The newest role is `planning`, which serves plan-mode turns: by default the pane
 | `loop_check` | the loop double-check (12.10): asked only when a turn repeats itself, before it is stopped | Lite tier |
 | `vision` | image turns on presets without image support | GLM main → `glm-5.3-flash`, otherwise main |
 | `route_assist` | the routing assist call (section 11) | `google/gemini-3.5-flash-lite` on OpenRouter when a key is stored, else main |
-| `planning` | plan-mode turns (section 6) | the pane's own model at max reasoning; no swap when the effort is already max or the provider has no effort knob (13.11) |
+| `planning` | plan-mode turns (section 6) | the pane as it is — plan mode already put it on `/high` — so no swap and no boost; only a hand pin routes a plan turn (13.11) |
 
 Side calls by role: compaction summaries and recaps use `summaries`; next-command/next-prompt suggestions
 use `suggestions`; the request audit uses `audit`; the loop double-check uses `loop_check`, and only
@@ -1033,7 +1034,7 @@ protocol name, the stored settings, the model box and its Main default are uncha
 the only thing that moved.
 
 `planning` is not a side call: it serves a plan-mode **turn** of the pane's own agent, the way `vision`
-serves an image turn, and its default is the pane's own model with `max` reasoning applied (13.11). Like
+serves an image turn; unpinned it is the pane as it is, already on `/high` (13.11). Like
 `vision` and `route_assist` it is not tiered (13.7).
 
 `summaries`, `suggestions` and `audit` were split out of `flash` and `chores` on 2026-09-17 so the roles
@@ -1602,7 +1603,15 @@ change nothing (#G5MK).
 the old default, which was also the old top of the range — migrates to 0 once at startup
 (`migrateOutputTokenCeiling`); any other stored number was chosen on purpose and is left alone.
 
-### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19; default restored 2026-09-21, card #HR5E)
+### 13.11 The `planning` role: what serves a plan-mode turn (v3.4, 2026-09-19; unpinned default is the pane on `/high` since 2026-09-22)
+
+**Current rule (owner, 2026-09-22: "its supposed to go into /high"; "it doesnt need to be the same
+model").** Entering plan mode puts the pane on `/high` (card #PH9G, `Pane::setAgentMode`), so the High
+list decides the model and its level — any model, not necessarily the pane's Main one. The unpinned
+`planning` role therefore resolves to the main agent as it is (`RoleResolver._default`): a plan turn adds
+no swap and no effort boost of its own, and says nothing. Only a hand-pinned `roles.planning` entry
+routes a plan turn, as below. The history that follows explains the earlier defaults.
+
 
 Owner, 2026-09-19: "allow a separate planning agent with higher reasoning. change to max reasoning by
 default." A plan-mode turn (section 6) runs on the `planning` role, decided once per turn before the
@@ -1626,14 +1635,12 @@ default unreachable and producing an apparently phantom cross-provider swap. The
 or upgraded installation immediately; an override picked afterward in Options › Models › Jobs is therefore
 an explicit current choice and survives later launches.
 
-When the effort knob cannot move — the provider has no effort parameter at all (Anthropic, MiniMax;
-effort style `none`, section 3) or the pane's own effort is already `max` — the role resolves back to
-the main agent, and that is not a swap at all. Two outcomes, as for images:
+Two outcomes, as for images:
 
 | Case | What happens |
 |---|---|
-| The role resolves to the main agent (effort already max, or no provider effort knob) | nothing changes; no event |
-| It resolves elsewhere (the default at raised effort, or a hand-picked model) | **that turn only** runs on it, then the pane goes back |
+| The role resolves to the main agent (unpinned, or a pin that resolves back to the pane) | nothing changes; no event |
+| A hand-pinned model resolves elsewhere | **that turn only** runs on it, then the pane goes back |
 
 New events:
 
@@ -1674,15 +1681,11 @@ other: `plan_route` carries `preset: "guest:<id>"`, `base_url: "harness://<id>"`
 `plan_route_ended` — the harness ended with it — puts the pane back. A guest that **will not start**
 (not installed, an effort it does not take) is said on a `status` ("Codex could not start for this
 plan turn (…); planning without it.") and the turn plans as if the pin had no guest entries
-(`RoleResolver.planning_target(guests=False)`): the entry below a tier pin, or the pane's own model at
-`max`.
+(`RoleResolver.planning_target(guests=False)`): the entry below a tier pin, or the pane as it is.
 A guest whose turn **fails** is a planning model that is not answering (15.2.3): `route_dropped`, the
 harness ended, the pane's own model finishes the turn. A pane whose own agent *is* a guest (an injected
-provider) plans on its own harness — no second harness is started — pushed to the harness's top level
-for the turn (#HR5E: the default's "own model at max" has no request-body knob on a guest, so
-`Agent._begin_guest_plan_boost` stages the top level of the running model's own list — `xhigh` for
-codex's astra — through the harness's `set_effort`, says it as a same-model `plan_route`, and puts the
-pane's own level back at the turn's end). Tests: `tests/test_plan_turns.py` (`GuestPlanTurnTests`, on the scripted fake harness) and
+provider) plans on its own harness at its own level — no second harness, no swap and no per-turn
+boost (#HR5E's `_begin_guest_plan_boost` was withdrawn on 2026-09-22: the `/high` entry sets the level). Tests: `tests/test_plan_turns.py` (`GuestPlanTurnTests`, on the scripted fake harness) and
 `tests/test_tier_lists.py`.
 
 **The swap is a model change, not a swapped socket**, on the same terms as a failover's (15.2.2): the
