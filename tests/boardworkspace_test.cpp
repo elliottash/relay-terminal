@@ -57,6 +57,7 @@ private slots:
     void eitherFolderNameIsABoardAndTheNearestOneWins();
     void theWindowsRuleAsksThePaneAndNothingElse();
     void attachTabIsTheOnlyWriterOfTheTabsProject();
+    void movedBoardKeepsItsProjectInANewTab();
     void theConfigureFunnelAlwaysSendsABoardBlock();
     void theHelpersConfigureCarriesTheKeybindings();
     void theHelperOutlivesItsPanelsAndOnlyTheTabEndsIt();
@@ -296,6 +297,18 @@ void BoardWorkspaceTests::attachTabIsTheOnlyWriterOfTheTabsProject()
     QVERIFY(settings.contains(QStringLiteral("QStringLiteral(\"attach\"), false")));
     QVERIFY(settings.contains(QStringLiteral("uninitialized")));
     QVERIFY(settings.contains(QStringLiteral("boardDirOf(project)")));
+}
+
+void BoardWorkspaceTests::movedBoardKeepsItsProjectInANewTab()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const QString adopt = bodyOf(text, QStringLiteral("void adoptLeafAsTab(QWidget *leaf, int index = -1) {"));
+    QVERIFY2(!adopt.isEmpty(), "RelayWindow::adoptLeafAsTab() is gone");
+    QVERIFY(adopt.contains(QStringLiteral("board->board()->workspace()")));
+    QVERIFY(adopt.contains(QStringLiteral("attachTab(page, boardProject")));
+    QVERIFY(adopt.contains(QStringLiteral("board->board()->setTabId(tabIdOf(page))")));
+    QVERIFY(adopt.contains(QStringLiteral("repointTabPanes(page)")));
 }
 
 // The pane's one configure funnel carries the board block, so a pane can never reach the worker

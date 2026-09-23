@@ -11169,6 +11169,11 @@ private:
 
 public:
     void adoptLeafAsTab(QWidget *leaf, int index = -1) {
+        // A Board pane names its own project. Moving it into a fresh tab must attach that tab
+        // before its helper is started; otherwise the view shows cards while the helper has no
+        // board tools. Ordinary panes still create unattached tabs (#JN7X).
+        auto *board = dynamic_cast<ToolPane *>(leaf);
+        const QString boardProject = board && board->board() ? board->board()->workspace() : QString();
         auto *page = new QWidget;
         auto *layout = new QVBoxLayout(page); layout->setContentsMargins(0, 0, 0, 0);
         layout->addWidget(leaf);
@@ -11176,10 +11181,12 @@ public:
         index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
         m_tabs->insertTab(index, page, QString());
         m_tabs->setCurrentIndex(index);
-        // The new tab is attached to nothing, so a pane that came out of an attached one loses
-        // its board here rather than keeping the card tools of a project its tab no longer has
-        // (#JN7X). Opening the Switchboard, or `/card`, attaches this tab on its own terms.
-        repointTabPanes(page);
+        if (!boardProject.isEmpty()) {
+            attachTab(page, boardProject, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+            board->board()->setTabId(tabIdOf(page));
+        } else {
+            repointTabPanes(page);
+        }
         setActiveLeaf(leaf);
         QTimer::singleShot(0, leaf, [leaf] { focusLeaf(leaf); });
         updateTitles();
