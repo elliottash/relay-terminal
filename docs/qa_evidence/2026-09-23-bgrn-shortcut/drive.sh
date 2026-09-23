@@ -29,6 +29,9 @@ sleep 1
 xdotool mousemove 1122 59 click 1
 sleep 1
 import -window root "$evidence_dir/composer.png"
+xdotool mousemove 1050 785
+sleep 3
+import -window root "$evidence_dir/tooltip.png"
 sleep 12
 xdotool mousemove 140 785 click 1 type --clearmodifiers 'background shortcut check'
 xdotool key ctrl+alt+Return

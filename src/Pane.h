@@ -5482,8 +5482,14 @@ private:
         auto *backgroundSend = new QToolButton;
         backgroundSend->setObjectName(QStringLiteral("runInBackgroundButton"));
         backgroundSend->setText(QStringLiteral("↗"));
-        backgroundSend->setToolTip(QStringLiteral("Run in background (%1)")
-                                       .arg(Keymap::instance().shortcutText(QStringLiteral("pane.runInBackground"))));
+        auto refreshBackgroundSendTip = [backgroundSend] {
+            const QString key = Keymap::instance().shortcutText(QStringLiteral("pane.runInBackground"))
+                                    .replace(QStringLiteral("Return"), QStringLiteral("Enter"));
+            backgroundSend->setToolTip(key.isEmpty() ? QStringLiteral("Run in background")
+                                                     : QStringLiteral("Run in background (%1)").arg(key));
+        };
+        refreshBackgroundSendTip();
+        Keymap::instance().listen(backgroundSend, refreshBackgroundSendTip);
         backgroundSend->setAccessibleName(QStringLiteral("Run in background"));
         backgroundSend->setFocusPolicy(Qt::TabFocus);
         connect(backgroundSend, &QToolButton::clicked, this, [this] {

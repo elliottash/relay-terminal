@@ -6,6 +6,7 @@ shows the single disposable pane.
 
 `composer.png` shows the Run in background button immediately left of the
 **auto** mode picker. The script typed a draft and pressed Ctrl+Alt+Return;
+`tooltip.png` shows the button's hover text with **Ctrl+Alt+Enter**.
 `shortcut.png` shows Relay's **Choose an agent before running in background**
 guard while the draft remains in the composer. This proves the key reached the
 same action without starting an unconfigured agent.
