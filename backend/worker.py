@@ -733,6 +733,11 @@ def main():
             # --- end program control ---
             elif kind == "agents_status":
                 emit({"event": "agents_status", "items": subagents.list()})
+            elif kind == "memory_import":
+                # Protocol 34 (#MEMS): the same switch as `configure.memory_import`, for a pane whose
+                # configure waits for its first prompt (a guest ranked first, or no provider yet),
+                # so the import still runs when Relay starts.
+                memory_startup.configure(request.get("enabled", True))
             # --- end subagents ---
             # --- the agent drives the app (protocol section 30) ---
             elif app.handles(kind):

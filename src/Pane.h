@@ -11790,6 +11790,9 @@ private:
                 send(m_lastConfigure);
             }
             send({{"type", "presets"}});
+            // Protocol 34 (#MEMS): Claude Code and Codex memories are offered when Relay starts,
+            // not at this pane's first configure, which a guest ranked first defers to its first prompt.
+            send({{"type", "memory_import"}, {"enabled", QSettings().value(QStringLiteral("memory/import_guests"), true).toBool()}});
             refreshAliases();   // the palette and `/name` need the list before anything is typed
         } else if (type == QStringLiteral("route")) {
             const QString id = event.value(QStringLiteral("id")).toString();

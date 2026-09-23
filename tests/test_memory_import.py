@@ -303,6 +303,37 @@ class MemoryImportTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             skipped.configure("yes")
 
+    def test_worker_request_imports_without_a_configure(self):
+        # #MEMS: a pane whose configure waits for its first prompt sends `memory_import` at ready,
+        # and the real worker imports and says how many, with no configure at all.
+        import subprocess, threading
+        root = Path(__file__).resolve().parents[1]
+        env = {**os.environ, "HOME": str(self.home), "RELAY_KEYRING": "off"}
+        proc = subprocess.Popen([sys.executable, "-S", "-u", str(root / "backend" / "worker.py")],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, cwd=self.tmp.name, env=env)
+        timer = threading.Timer(30, proc.kill)
+        timer.start()
+        events = []
+        try:
+            proc.stdin.write(json.dumps({"type": "memory_import", "enabled": True}) + "\n")
+            proc.stdin.flush()
+            for line in proc.stdout:
+                events.append(json.loads(line))
+                if events[-1].get("event") in ("memory_import", "error"):
+                    break
+            proc.stdin.write(json.dumps({"type": "shutdown"}) + "\n")
+            proc.stdin.flush()
+        finally:
+            timer.cancel()
+            proc.wait(timeout=10)
+            proc.stdin.close()
+            proc.stdout.close()
+        told = [e for e in events if e.get("event") == "memory_import"]
+        self.assertEqual(len(told), 1, events)
+        self.assertGreater(told[0]["claude"], 0)
+        self.assertGreater(len(memory_suggestions.pending()), 0)
+
     def test_start_never_raises(self):
         with mock.patch.object(memory_import, "import_all", side_effect=RuntimeError("boom")):
             events = []

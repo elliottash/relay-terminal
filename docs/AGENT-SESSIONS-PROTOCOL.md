@@ -8148,8 +8148,10 @@ the memories from claude and codex and import them." A worker's first `configure
 `relay_core.memory_import` once for the life of the process, on a daemon thread; a failure is one
 log line and never delays the answer. `configure` takes an optional `memory_import` boolean:
 `false` skips the import (the GUI's option to turn it off), `true` runs it and asks for the event
-below, and absent runs it without the event. `RELAY_MEMORY_IMPORT=off` (also `0`, `false`, `no`)
-in the worker's environment skips it whatever `configure` says. It reads `~/.claude/CLAUDE.md`
+below, and absent runs it without the event. The request `{type: "memory_import", enabled}` is
+the same switch without a `configure`: a pane sends it at `ready`, because a pane whose
+first-ranked model is a guest (or that has no provider yet) configures only at its first prompt.
+`RELAY_MEMORY_IMPORT=off` (also `0`, `false`, `no`) in the worker's environment skips it whatever `configure` says. It reads `~/.claude/CLAUDE.md`
 and `~/.codex/AGENTS.md` / `AGENTS.override.md` (one fact per top-level bullet or plain paragraph;
 headings, code, tables, `@` imports, lead-ins ending in `:` and anything over 400 characters are
 left out), `~/.claude/projects/*/memory/*.md` whose front matter `type` or `metadata.type` is
