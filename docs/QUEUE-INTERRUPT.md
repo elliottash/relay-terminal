@@ -1,5 +1,9 @@
 # Interrupt vs. queue for new submissions
 
+> **Shortcut update (2026-09-23).** Ctrl+Enter sends now, interrupting a busy agent.
+> Ctrl+Alt+Enter now runs the composer prompt in background. The older binding notes below
+> describe the original 2026-09-17 design.
+
 > **Status (2026-09-17).** The GUI now uses this protocol; the sentence below saying it does
 > not is from before that change. Every agent prompt is sent with `when: "queue"` (or `"now"`
 > while the queue is paused); Ctrl+Alt+Enter (`agent.interrupt`, from the prompt box) sends

@@ -98,7 +98,8 @@ that conflict.
 | Key | Action |
 |---|---|
 | Enter | Submit: commands to the terminal, everything else to the agent |
-| Ctrl+Enter | Always the agent; while the agent is busy, interrupt it and send now (Ctrl+Alt+Enter also works) |
+| Ctrl+Enter | Always the agent; while the agent is busy, interrupt it and send now |
+| Ctrl+Alt+Enter | Run the prompt in background |
 | Ctrl+Shift+Enter | Always the terminal; the agent fixes an invalid or failing command. A line that reads like a request runs nothing and suggests Ctrl+I instead |
 | Esc (prompt box) | Stop the agent while it is busy |
 | @ | Pick a file: `@name` alone opens it in a preview pane; inside an agent prompt it attaches the file |

@@ -253,7 +253,7 @@ private:
         add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
         add("pane.moveToBackground", "pane", "Move the running agent to background", {QStringLiteral("Ctrl+Alt+B")});
-        add("pane.runInBackground", "pane", "Run the prompt in background", {});
+        add("pane.runInBackground", "pane", "Run the prompt in background", {QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("pane.brighten", "pane", "Brighten pane", {QStringLiteral("Alt++"), QStringLiteral("Alt+="), QStringLiteral("Alt+Shift+=")});
         add("pane.darken", "pane", "Dim pane", {QStringLiteral("Alt+-")});
         add("pane.dimToggle", "pane", "Toggle manual pane dimming", {QStringLiteral("Alt+D")});
@@ -394,7 +394,7 @@ private:
         // (owner, 2026-09-18). No default key: /join CODE in any prompt box is the fast path.
         add("remote.join", "terminal", "Join a shared session: type the meeting code and PIN someone gave you", {});
         add("agent.interrupt", "agent", "Send to the agent; while it is busy, interrupt it and send now; on an empty box, send the prompt \"Continue\" (prompt box)",
-            {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter"), QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
+            {QStringLiteral("Ctrl+Return"), QStringLiteral("Ctrl+Enter")});
         // `agent.provider` was here until 2026-09-21 and is **gone**, not merely unbound: it opened
         // the "Advanced provider settings" dialog, which card #MDL1 retired along with the row that
         // opened it (design 5.8). Providers, keys and custom endpoints are the models pane's first

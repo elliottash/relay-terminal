@@ -66,6 +66,18 @@ private slots:
         QVERIFY(keymap.conflicts().isEmpty());
     }
 
+    void backgroundRunOwnsCtrlAltEnterAcrossPresets() {
+        Keymap &keymap = Keymap::instance();
+        keymap.clearOverrides();
+        for (const auto &preset : Keymap::presets()) {
+            keymap.setPreset(preset.first);
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Alt+Return")), QStringLiteral("pane.runInBackground"));
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Alt+Enter")), QStringLiteral("pane.runInBackground"));
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Enter")), QStringLiteral("agent.interrupt"));
+            QVERIFY(keymap.conflicts().isEmpty());
+        }
+    }
+
     void cleanupTestCase() { QFile::remove(Keymap::instance().path()); }
 };
 

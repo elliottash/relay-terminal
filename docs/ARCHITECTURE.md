@@ -816,8 +816,8 @@ Symbol keys match with or without Shift, because shifted punctuation differs by 
 Dispatch: `RelayWindow::eventFilter` handles `ShortcutOverride` and `KeyPress` for widgets in
 its window and runs `runAction(id)`, which the toolbar and palette also use.
 
-- Plain Ctrl+H (`control.human`), Ctrl+Q (`prompt.clear`), `input.toggle` (Ctrl+I) and
-  `agent.interrupt` (Ctrl+Alt+Enter) act only from the composer. In the terminal those keys stay
+- Plain Ctrl+H (`control.human`), Ctrl+Q (`prompt.clear`), `input.toggle` (Ctrl+I),
+  `agent.interrupt` (Ctrl+Enter) and `pane.runInBackground` (Ctrl+Alt+Enter) act only from the composer. In the terminal those keys stay
   Backspace, Ctrl+Q, Tab and Enter. Ctrl+Shift+H and Ctrl+Shift+Q act from anywhere, a program's
   keyboard included: Ctrl+Shift is Relay's layer (#QWAS).
 - While a foreground program owns the focused terminal, only keys allowed by
@@ -892,7 +892,7 @@ Default window shortcuts:
 | Split right | Ctrl+E | Clear the prompt box (Ctrl+Z undoes) | Ctrl+Q (composer), Ctrl+Shift+Q |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Board / Sessions / Projects / Globals / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+P / Ctrl+Shift+G / Ctrl+Shift+D |
-| Interrupt agent with prompt | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
+| Run prompt in background | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
 
@@ -969,7 +969,7 @@ Pasting never submits.
 | Enter | selected input mode (`auto`, `shell`, `agent`); a program reading a line gets it instead (section 9) |
 | Ctrl+Enter | `agent`; on an empty prompt box with the agent idle, the ordinary prompt `Continue` (card #SXF1) |
 | Ctrl+Shift+Enter | `shell` (terminal mode) |
-| Ctrl+Alt+Enter | agent, `when: "interrupt"` (section 11) |
+| Ctrl+Alt+Enter | Run the composer prompt in background; the pane hides once the agent starts |
 | Shift+Enter | newline |
 | Esc | skip the question on an ask that is up (sessions protocol 27.4), else stop the agent turn, or interrupt the running program; Esc Esc in an empty box opens Rewind. It never takes control of the terminal (Ctrl+H or the "Take control" button do) |
 | PageUp / PageDown | scroll the terminal scrollback one page |
