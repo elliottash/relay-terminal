@@ -33,17 +33,23 @@ __relay_osc7() {
 }
 
 __relay_mark_precmd() {
-    local status=$?
+    local command_status=$?
     if (( ${__relay_mark_ran:-0} )); then
-        printf '\033]133;D;%s\007' "$status"
+        printf '\033]133;D;%s\007' "$command_status"
     fi
-    __relay_mark_ran=1
+    __relay_mark_ran=0
     __relay_osc7
     printf '\033]133;A\007'
 }
 
 __relay_mark_preexec() {
+    __relay_mark_ran=1
     printf '\033]133;C\007'
+    if [[ -n ${RELAY_SESSION_TOKEN:-} ]]; then
+        printf '\033]777;notify;relay-command;%s;%s;%s\007' "$RELAY_SESSION_TOKEN" \
+            "$(printf %s "$1" | base64 | tr -d '\n')" \
+            "$(printf %s "$PWD" | base64 | tr -d '\n')"
+    fi
 }
 
 add-zsh-hook precmd __relay_mark_precmd

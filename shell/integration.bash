@@ -226,13 +226,36 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
 fi
 
 __relay_event() {
-    command "${RELAY_PYTHON:-python3}" -S "$RELAY_SHELL_EVENT" "$1" "${2:-0}" "$PWD" "$$"
+    command "${RELAY_PYTHON:-python3}" -S "$RELAY_SHELL_EVENT" "$1" "${2:-0}" "$PWD" "$$" "${3-}"
 }
 
 # Replacing an existing DEBUG trap breaks several prompt/preexec frameworks.
 # Fail into native mode instead of silently replacing user shell behavior.
 if [[ -n $(trap -p DEBUG) ]]; then
     __relay_event unsupported 0 < /dev/null
+    # PS0 can delimit unavailable native commands without replacing the user's trap
+    # or enabling composer control. Older Bash has no safe pre-execution fallback.
+    if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+        __relay_unavailable_start() {
+            printf '\033]777;notify;relay-command;%s;;%s\007' "$RELAY_SESSION_TOKEN" \
+                "$(printf %s "$PWD" | base64 | tr -d '\n')"
+        }
+        __relay_unavailable_prompt() {
+            local command_status=$?
+            if [[ ${__relay_unavailable_ran:-0} == 1 ]]; then
+                printf '\033]133;D;%s\007' "$command_status"
+            fi
+            __relay_unavailable_ran=1
+            printf '\033]133;A\007'
+            return "$command_status"
+        }
+        PS0='$(__relay_unavailable_start)'${PS0-}
+        if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == 'declare -a'* ]]; then
+            PROMPT_COMMAND=(__relay_unavailable_prompt "${PROMPT_COMMAND[@]}")
+        else
+            PROMPT_COMMAND=(__relay_unavailable_prompt "${PROMPT_COMMAND:-:}")
+        fi
+    fi
     return
 fi
 
@@ -255,21 +278,48 @@ __relay_rows_for() {
     printf '%s' "$rows"
 }
 
-# The rows a hand-typed command's echo occupies, estimated from history. A staged count wins:
-# Relay knows that text exactly. History joins a typed multi-line command with ';' (lithist
-# off), which under-marks; a line HISTCONTROL kept out of history can mis-count, which caps
-# below make harmless at worst.
+# Only accepted Readline input can supply text; never inspect shell history.
 __relay_command_rows() {
     if [[ -n $__relay_staged_rows ]]; then
         printf '%s' "$__relay_staged_rows"
-        return
+    elif [[ -n $__relay_accepted_line ]]; then
+        __relay_rows_for "$__relay_accepted_line"
+    else
+        printf 1
     fi
-    local h num cmd
-    h=$(HISTTIMEFORMAT= builtin history 1 2>/dev/null) || return 1
-    read -r num cmd <<< "$h"
-    [[ $num =~ ^[0-9]+$ && -n $cmd ]] || return 1
-    __relay_rows_for "$cmd"
 }
+
+# Capture at acceptance, never while a foreground program is reading input. Multiple
+# acceptances before a prompt (PS2 input) are deliberately unavailable. Syntax checking
+# also prevents an incomplete first line being reused if a different binding finishes it.
+__relay_accept() {
+    ((__relay_accept_count += 1))
+    __relay_accepted_line=
+    if (( __relay_accept_count == 1 )) && [[ $READLINE_LINE != *\\ ]]; then
+        local diagnostics
+        if diagnostics=$(printf '%s\n' "$READLINE_LINE" | command bash --noprofile --norc -n 2>&1) && [[ -z $diagnostics ]]; then
+            __relay_accepted_line=$READLINE_LINE
+        fi
+    fi
+}
+
+# Wrap only default Enter bindings, and only when both private chords are unused.
+# User macros/functions and alternative accept keys remain untouched (unavailable text).
+for __relay_map in emacs-standard vi-insert vi-move; do
+    __relay_bindings=$(bind -m "$__relay_map" -p; bind -m "$__relay_map" -s; bind -m "$__relay_map" -X)
+    if [[ $__relay_bindings != *'"\e[777;1~"'* && $__relay_bindings != *'"\e[777;2~"'* ]]; then
+        bind -m "$__relay_map" -x '"\e[777;1~":__relay_accept'
+        bind -m "$__relay_map" '"\e[777;2~": accept-line'
+        for __relay_enter in '\C-m' '\C-j'; do
+            if printf '%s\n' "$__relay_bindings" | command grep -Fqx "\"$__relay_enter\": accept-line"; then
+                bind -m "$__relay_map" "\"$__relay_enter\": \"\\e[777;1~\\e[777;2~\""
+            fi
+        done
+    fi
+done
+unset __relay_map __relay_bindings __relay_enter
+__relay_accept_count=0
+__relay_accepted_line=
 
 # First simple command of a line just entered: the cursor sits on the fresh row below the
 # command's echo, so the echo's rows are directly above. Mark each with Relay's row role
@@ -294,12 +344,19 @@ __relay_mark_typed_rows() {
 __relay_prompt_begin() {
     __relay_status=$?
     __relay_in_prompt=1
+    if [[ -n ${__relay_command_active+set} ]]; then
+        printf '\033]133;D;%s\007' "$__relay_status"
+    fi
+    unset __relay_command_active
+    __relay_accept_count=0
+    __relay_accepted_line=
     __relay_staged_rows=   # a staged line that was cleared never marks a later command
     return "$__relay_status"
 }
 
 __relay_prompt_end() {
     compgen -A alias -A function | __relay_event ready "$__relay_status"
+    printf '\033]133;A\007'
     __relay_at_prompt=1
     __relay_in_prompt=0
 }
@@ -307,11 +364,11 @@ __relay_prompt_end() {
 __relay_debug() {
     if [[ $__relay_at_prompt == 1 && $__relay_in_prompt == 0 && $BASH_COMMAND != __relay_* ]]; then
         __relay_at_prompt=0
-        __relay_mark_typed_rows
-        # Separate the echoed command from its output, after marking only the input rows.
-        printf '\n'
-        __relay_staged_rows=
-        __relay_event running 0 < /dev/null
+        # Bash >= 4.4 starts at PS0, before even a subshell/pipeline can print.
+        if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+            __relay_command_active=1
+            __relay_event running 0 "" < /dev/null
+        fi
     fi
     return 0
 }
@@ -351,6 +408,15 @@ bind -m vi-move -x '"\C-x\C-r":__relay_load'
 bind -m emacs-standard -x '"\C-x\C-p":__relay_redraw'
 bind -m vi-insert -x '"\C-x\C-p":__relay_redraw'
 bind -m vi-move -x '"\C-x\C-p":__relay_redraw'
+__relay_command_start() {
+    __relay_event running 0 "$__relay_accepted_line" < /dev/null
+    __relay_mark_typed_rows
+}
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
+    # Assignment expands to an empty string but persists in the parent shell; the
+    # command substitution alone could not mark a subshell-only command as active.
+    PS0='${__relay_command_active-$(__relay_command_start)'$'\n''}${__relay_command_active=}'${PS0-}
+fi
 trap '__relay_debug' DEBUG
 
 # Leave a blank row between the folder prompt and what you type, matching agent prompt spacing.

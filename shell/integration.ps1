@@ -100,7 +100,13 @@ Set-PSReadLineKeyHandler -Chord 'Ctrl+x,Ctrl+p' -ScriptBlock {
 $global:__relay_readline = (Get-Command PSConsoleHostReadLine).ScriptBlock
 function global:PSConsoleHostReadLine {
     $line = & $global:__relay_readline
-    if (![string]::IsNullOrWhiteSpace($line)) { __relay_event 'running' }
+    if (![string]::IsNullOrWhiteSpace($line)) {
+        __relay_event 'running'
+        $command64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($line))
+        $cwd64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($PWD.Path))
+        [Console]::Write("`e]777;notify;relay-command;$($env:RELAY_SESSION_TOKEN);$command64;$cwd64`a")
+        $global:__relay_command_active = $true
+    }
     return $line
 }
 $global:__relay_prompt = (Get-Command prompt).ScriptBlock
@@ -108,8 +114,11 @@ function global:prompt {
     $succeeded = $?
     $nativeStatus = $global:LASTEXITCODE
     $status = if ($succeeded) { 0 } elseif ($nativeStatus) { $nativeStatus } else { 1 }
+    if ($global:__relay_command_active) { [Console]::Write("`e]133;D;$status`a") }
+    $global:__relay_command_active = $false
     $rendered = & $global:__relay_prompt
     __relay_event 'ready' $status
+    [Console]::Write("`e]133;A`a")
     return $rendered
 }
 function global:relay {

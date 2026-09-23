@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Write atomic shell-state events in Relay's private per-session directory."""
+import base64
 import hashlib
 import json
 import os
@@ -18,6 +19,12 @@ def main():
     pid = int(sys.argv[4]) if len(sys.argv) > 4 else os.getppid()
     event = {"token": os.environ["RELAY_SESSION_TOKEN"], "sequence": str(time.time_ns()),
              "event": stage, "status": status, "cwd": cwd, "shell_pid": pid}
+    if stage == "running":
+        # Text comes from shell acceptance/preexec, never BASH_COMMAND or history.
+        command = sys.argv[5] if len(sys.argv) > 5 else ""
+        encode = lambda value: base64.b64encode(value.encode("utf-8")).decode("ascii")
+        sys.stdout.write(f"\033]777;notify;relay-command;{event['token']};{encode(command)};{encode(cwd)}\007")
+        sys.stdout.flush()
     if stage == "ready":
         event["known_commands"] = [s for s in sys.stdin.read(131072).splitlines() if not s.startswith("__relay_")][:20000]
         event["path"] = os.environ.get("PATH", os.defpath)

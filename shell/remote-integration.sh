@@ -8,7 +8,6 @@ unset RELAY_REMOTE_TOKEN
 __relay_r_h=${HOSTNAME:-${HOST:-$(hostname 2>/dev/null)}}
 case $__relay_r_h in *[!A-Za-z0-9.-]*) __relay_r_h=$(printf %s "$__relay_r_h" | tr -cd 'A-Za-z0-9.-');; esac
 [ -n "$__relay_r_h" ] || __relay_r_h=remote
-# Multiplexers require wrapped OSCs.
 __relay_r_e= __relay_r_f= __relay_r_l=
 if [ -n "${TMUX-}" ]; then
 __relay_r_e='\033Ptmux;\033' __relay_r_f='\033\\'
@@ -17,6 +16,8 @@ case $(tmux show -gv allow-passthrough 2>/dev/null) in on|all) ;;
 else case ${STY:+screen}${TERM-} in screen*) __relay_r_e='\033P' __relay_r_f='\033\\' __relay_r_l=200;; esac
 fi
 __relay_r_o() { printf "$__relay_r_e\033]%s\007$__relay_r_f" "$1"; }
+# Bash text is unavailable; preserve login bindings.
+__relay_r_command() { [ -n "${__relay_r_token-}" ] && __relay_r_o "777;notify;relay-command;$__relay_r_token;$(printf %s "${1-}" | base64 | tr -d '\n');$(printf %s "$PWD" | base64 | tr -d '\n')"; return 0; }
 __relay_r_confirm() { [ -n "${__relay_r_token-}" ] && __relay_r_o "777;notify;relay-shell;$__relay_r_token;$(printf %s "$PATH" | base64 | tr -d '\n')"; return 0; }
 __relay_r_rows_for() {
 local text=$1 line width rows=0 cols=${COLUMNS:-80}
@@ -34,7 +35,7 @@ __relay_r_gap() {
 local text=${1-} rows=${__relay_r_rows-} i
 if [ -z "$rows" ]; then
 if [ -n "${BASH_VERSION-}" ]; then
-text=$(HISTTIMEFORMAT= builtin history 1); text=${text#*[0-9]  }
+text= # Bash has no exact acceptance hook.
 fi
 rows=$(__relay_r_rows_for "$text")
 fi
@@ -46,6 +47,7 @@ while [ "$i" -le "$rows" ]; do
 __relay_r_o '7772;shell'; printf '\033[B'; i=$((i+1))
 done
 printf '\n'; __relay_r_o '133;C'
+__relay_r_command "$text"
 }
 __relay_r_7() {
 local s="$PWD" o= c i=0 LC_ALL=C
@@ -58,7 +60,6 @@ case $__relay_r_l in ?*) [ ${#o} -gt $__relay_r_l ] && return 0;; esac
 __relay_r_o "$o"
 }
 if [ -n "${BASH_VERSION-}" ]; then
-# Respect existing redraw bindings and read-only prompt hooks.
 __relay_r_k=
 case $(bind -X 2>/dev/null; bind -p 2>/dev/null) in *'"\C-x\C-p"'*) __relay_r_k=key;; esac
 case " $(readonly -p 2>/dev/null | tr '\n' ' ')" in *' PROMPT_COMMAND='*) __relay_r_k=prompt;; esac
@@ -72,13 +73,12 @@ __relay_r_pc() { local s=$?; __relay_r_rows=; unset __relay_r_once; [ -n "${__re
 __relay_r_ps() { local s=$?; case $PS1 in *133\;A*) ;; *) case $PS1 in *$'\n') ;; *) PS1=$PS1$'\n';; esac; case $PS1 in *$'\n\n') ;; *) PS1=$PS1$'\n';; esac; PS1='\['$__relay_r_e'\033]133;A\007'$__relay_r_f'\]'$PS1'\['$__relay_r_e'\033]133;B\007'$__relay_r_f'\]';; esac; __relay_r_a=1; return $s; }
 __relay_r_c() { [ -n "${__relay_r_a-}" ] && case $BASH_COMMAND in __relay_r_*) ;; *) __relay_r_a=; __relay_r_gap;; esac; }
 __relay_r_redraw() { __relay_r_rows=$(__relay_r_rows_for "$READLINE_LINE"); }
-shopt -s lithist # preserve multiline history for echoed command row counts
+shopt -s lithist
 __relay_r_q=$(declare -p PROMPT_COMMAND 2>/dev/null)
 case $__relay_r_q in 'declare -a'*) eval 'PROMPT_COMMAND=(__relay_r_pc "${PROMPT_COMMAND[@]}" __relay_r_ps)';;
 *) PROMPT_COMMAND="__relay_r_pc
 ${PROMPT_COMMAND-}
 __relay_r_ps";; esac
-# Don't export hooks to later shells.
 case ${__relay_r_q%% PROMPT_COMMAND*} in *x*) export -n PROMPT_COMMAND;; esac
 case :${HISTCONTROL-}: in *:ignorespace:*|*:ignoreboth:*) ;; *) HISTCONTROL=${HISTCONTROL:+$HISTCONTROL:}ignorespace;; esac
 __relay_r_n=$(HISTTIMEFORMAT= history 1)
@@ -89,9 +89,8 @@ for __relay_r_m in emacs-standard vi-insert vi-move; do bind -m $__relay_r_m -x 
 fi
 else
 setopt HIST_IGNORE_SPACE
-# Hide bootstrap history.
 case ${HISTORY_IGNORE-} in '') HISTORY_IGNORE='*| gzip -dc)*';; *) HISTORY_IGNORE="(${HISTORY_IGNORE})|(*| gzip -dc)*)";; esac
-__relay_r_p=$(printf "$__relay_r_e") __relay_r_s=$(printf "$__relay_r_f")  # zsh's PS1 wants bytes
+__relay_r_p=$(printf "$__relay_r_e") __relay_r_s=$(printf "$__relay_r_f")
 PROMPT_EOL_MARK="%{$__relay_r_p"$'\e]7772;end-output\a'"$__relay_r_s%}"${PROMPT_EOL_MARK-'%B%S%#%s%b'}
 __relay_r_pc() { local s=$?; [ -n "${__relay_r_off-}" ] && return $s
 [ -n "${__relay_r_x-}" ] && __relay_r_o "133;D;$s"; __relay_r_x=; __relay_r_7; __relay_r_confirm
