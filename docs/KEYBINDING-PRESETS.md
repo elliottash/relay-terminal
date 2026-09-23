@@ -1,6 +1,7 @@
 # Keyboard shortcut presets: Warp, VS Code, Konsole
 
-Researched 2026-09-17 against official docs and default-keymap source. "none" = the program has no
+Researched 2026-09-17 against official docs and default-keymap source; tables revised for the
+QWEASDZXC map on 2026-09-22 (§0). "none" = the program has no
 default for that action. "adapt" = not the program's own default; explained in the row.
 Key strings are Qt portable text. The JSON is written for Relay's exact `(key, modifiers)` matcher.
 
@@ -11,6 +12,52 @@ keys. The JSON uses the forms Qt reports. Other layouts differ (see §5).
 
 **Keys Relay already uses** (presets avoid them): Enter, Ctrl+Enter, Ctrl+Shift+Enter (send to
 auto/agent/terminal), Esc (native input), and Ctrl+Shift+C/V plus Ctrl+C/V (copy/paste/interrupt).
+
+## 0. The Relay preset and the rules every preset keeps (#QWAS, 2026-09-22)
+
+**Modifier rule (owner).** Ctrl+Shift+<letter> is Relay's layer. Plain Ctrl+<letter> is bound to
+the *same* command only where the key has no editing or terminal meaning: W, E, N, T, I, F, H, and
+Q in the prompt box. For A S Z X C D P plain Ctrl is left to the editor or the program.
+
+**Pairing rule.** No action may hold Ctrl+<L> while a *different* action holds Ctrl+Shift+<L>, in
+any preset. Together with "no chord bound twice" it is checked for all four presets by
+`tests/test_keybindings.py` (`test_ctrl_and_ctrl_shift_of_a_letter_are_one_action`,
+`test_no_preset_has_a_conflict`).
+
+The Relay preset after the move (action → keys; everything not listed is unchanged):
+
+| action id | keys | was |
+|---|---|---|
+| board.open | Ctrl+Shift+A | Ctrl+Shift+S |
+| sessions.open (new) | Ctrl+Shift+S | — : "Sessions & Projects: sessions, projects, recently closed and globals" |
+| files.explorer | Ctrl+Shift+D | Ctrl+B, Ctrl+Shift+B (Ctrl+D is never bound: end-of-input) |
+| palette.open | Ctrl+Shift+P | Ctrl+Shift+A (Ctrl+P is never bound) |
+| help.shortcuts | Ctrl+?, Ctrl+Shift+/, Ctrl+/ | also F1, removed by #KYPR: F-keys act inside programs, and F1 is help in nano, mc and htop |
+| prompt.clear (new) | Ctrl+Shift+Q, Ctrl+Q | — : clears the prompt box, Ctrl+Z brings it back (#CPRQ). Plain Ctrl+Q never acts while a program has the keyboard, in any `program_keys` mode |
+| control.human | Ctrl+H, Ctrl+Shift+H | Ctrl+H only; now a toggle: take control, and again to go back to the Relay prompt |
+| control.prompt | — | Ctrl+Shift+H |
+| pane.restartShell | — | Ctrl+Shift+R (the stopped pane's banner and the palette remain) |
+| agent.stopAllSubagents | — | Ctrl+Shift+X (the subagents UI and the palette remain) |
+| agent.resume, conversations.open, projects.open, globals.open | — | Ctrl+Shift+Y, —, Ctrl+Shift+P, Ctrl+Shift+G. Still registered, for slash commands and keybindings.json; each opens the Sessions & Projects pane on its tab |
+| closed.restore, pane.close, pane.splitRight | Ctrl+Shift+Z; Ctrl+W, Ctrl+Shift+W; Ctrl+E, Ctrl+Shift+E | unchanged |
+
+Freed in the Relay preset: Ctrl+Shift+Y, G, B, R, X and Ctrl+B.
+
+**What the move did to the other presets** (each change keeps the two rules above):
+
+| preset | action | now | why |
+|---|---|---|---|
+| warp | palette.open | Ctrl+Shift+P | was Ctrl+Shift+A, now the Board's key |
+| warp | files.explorer | Ctrl+Shift+B | the Relay default Ctrl+Shift+D is Warp's split-right here |
+| warp | input.toggle | Ctrl+I, Ctrl+Shift+I | was Ctrl+I alone, with Ctrl+Shift+I on `input.modeTerminal`: two actions on one letter breaks the pairing rule |
+| warp | input.modeTerminal | — | as above; the palette remains |
+| vscode | palette.open | Ctrl+Shift+P | was Ctrl+Shift+A; Ctrl+Shift+P is VS Code's own Show Command Palette (V1) |
+| vscode | files.explorer | Ctrl+Shift+E | VS Code's Show Explorer (V1); free here because split-right is Ctrl+Shift+5 / Ctrl+\ |
+| vscode | agent.newChat | — | was Ctrl+N, while Ctrl+Shift+N is window.new: the pairing rule. `/new` and the palette remain |
+| konsole | palette.open | Ctrl+Alt+I, Ctrl+Shift+P | Ctrl+Shift+P added so Actions is on the Relay layer (and reachable from inside a program) as in the other presets; Ctrl+Alt+I kept |
+
+The Board (Ctrl+Shift+A), Sessions & Projects (Ctrl+Shift+S) and prompt.clear inherit the Relay
+default in all four presets; no preset binds those chords to anything else.
 
 ## 1. Warp (Linux)
 
@@ -33,16 +80,20 @@ Sources:
 | pane.focusLeft/Right/Up/Down | Ctrl+Alt+Left/Right/Up/Down | W1 "Switch Panes", W3 |
 | pane.close | Ctrl+Shift+W | W3 closes the pane, W2 closes the tab |
 | closed.restore | Ctrl+Alt+T | W1/W2 "Reopen Closed Tab" (Ctrl+Shift+T is taken by new tab) |
-| palette.open | Ctrl+Shift+A | W1 Toggle Command Palette |
+| palette.open | Ctrl+Shift+P | **adapt.** Relay's Actions key (#QWAS). It was Ctrl+Shift+A, which is the Board's now |
+| board.open | Ctrl+Shift+A | Relay default (#QWAS) |
+| sessions.open | Ctrl+Shift+S | Relay default (#QWAS) |
+| files.explorer | Ctrl+Shift+B | **adapt.** The Relay default Ctrl+Shift+D is Warp's split-right, so the explorer keeps its old B here |
+| prompt.clear | Ctrl+Shift+Q, Ctrl+Q | Relay default (#CPRQ) |
 | terminal.native | F12 | none in Warp. Kept Relay default: an F-key still works inside programs |
 | terminal.interrupt | — | Warp uses contextual Ctrl+C (W4). Unbound: Ctrl+C already reaches the shell |
-| agent.resume | Ctrl+Shift+Y | W5 Conversations menu. Relay's own default again since 2026-09-20 (it was Ctrl+Shift+M for one day; M is now `agent.modelOptions`, Options › Models). A toggle: pressed again with the Sessions pane focused it closes it, and from anywhere else it brings it forward |
+| agent.resume | Ctrl+Shift+Y | W5 Conversations menu. Only this preset binds it: the Relay default has had no key since #QWAS (sessions.open, Ctrl+Shift+S, opens the same pane). A toggle: pressed again with the Sessions pane focused it closes it, and from anywhere else it brings it forward |
 | agent.newChat | — | Warp's own new-conversation keys are taken: Ctrl+Shift+Enter is Relay's send-to-terminal key, Ctrl+Shift+N is window.new |
 | agent.stop | — | Warp: Ctrl+C while the agent responds (W4). Left unbound (same reason as interrupt) |
 | input.modeAuto | — | none (auto-detection is a setting, W4) |
 | input.modeAgent | — | Superseded 2026-09-17: Relay added `input.toggle`, which now takes Ctrl+I |
-| input.toggle | Ctrl+I | W4: Ctrl+I toggles shell ↔ agent (acts from the prompt box only) |
-| input.modeTerminal | Ctrl+Shift+I | **adapt:** Shift = the other direction. In Warp this key toggles auto-approve (Relay has no such action). Esc (Warp's "back to terminal") is taken by Relay |
+| input.toggle | Ctrl+I, Ctrl+Shift+I | W4: Ctrl+I toggles shell ↔ agent (acts from the prompt box only). Ctrl+Shift+I is the Relay default's twin |
+| input.modeTerminal | — | Was Ctrl+Shift+I (an adaptation: in Warp that key toggles auto-approve) until #QWAS: with Ctrl+I on input.toggle it broke the pairing rule. Esc (Warp's "back to terminal") is taken by Relay |
 | keybindings.edit | Ctrl+, | **adapt.** W1's Linux column says `Ctrl+⌘+K`, which is a macOS key; the keybindings page has a macOS-only binding. Ctrl+, opens Warp Settings, where the shortcuts live |
 | keybindings.reload | — | none |
 
@@ -75,10 +126,14 @@ the registrations that "Preferences: Open Default Keyboard Shortcuts (JSON)" is 
 | pane.focusRight / focusDown | Alt+Right / Alt+Down | V2 `terminal.focusNextPane`. Chords for editor groups: `Ctrl+K Ctrl+←/→/↑/↓` (V1, V4); VS Code's single-key versions are these Alt+arrow terminal keys |
 | pane.close | Ctrl+W | V1, V5 `closeActiveEditor`, V2 `terminal.killEditor`. The panel terminal's kill has no default |
 | closed.restore | Ctrl+Shift+T | V1, V4 `reopenClosedEditor` |
-| palette.open | Ctrl+Shift+A | V1. F1 was left out on purpose: F-keys act inside programs and would take F1 (help) from nano, mc and htop |
+| palette.open | Ctrl+Shift+P | V1 Show Command Palette (#QWAS; it was Ctrl+Shift+A). F1 was left out on purpose: F-keys act inside programs and would take F1 (help) from nano, mc and htop |
+| board.open | Ctrl+Shift+A | Relay default (#QWAS) |
+| sessions.open | Ctrl+Shift+S | Relay default (#QWAS) |
+| files.explorer | Ctrl+Shift+E | V1 Show Explorer. Free here: split-right is Ctrl+Shift+5 / Ctrl+\, and Ctrl+E is unbound, so the pairing rule holds |
+| prompt.clear | Ctrl+Shift+Q, Ctrl+Q | Relay default (#CPRQ) |
 | terminal.native | Ctrl+`, F12 | **adapt:** Ctrl+` is "toggle/focus terminal" (V1, V3). F12 is kept from Relay (in VS Code it is Go to Definition, which has nothing to do with the terminal) |
 | terminal.interrupt | — | none |
-| agent.newChat | Ctrl+N | V9 `chat.newChat` (in chat; secondary Ctrl+L left out because it clears the shell screen) |
+| agent.newChat | — | V9 `chat.newChat` is Ctrl+N (in chat; secondary Ctrl+L left out because it clears the shell screen). Unbound since #QWAS: Ctrl+Shift+N is window.new, and one letter may not carry two actions |
 | agent.stop | Ctrl+Esc | V10 `chat.cancel` while a request is running (Windows uses Alt+Backspace) |
 | input.modeAuto | — | none (Ctrl+. opens the chat mode picker, V10, but there is no auto mode) |
 | input.modeTerminal | — | none |
@@ -109,13 +164,19 @@ Sources:
 | pane.focusLeft/Right/Up/Down | Ctrl+Shift+Left/Right/Up/Down | K2 `focus-view-left/right/above/below` |
 | pane.close | Ctrl+Shift+W | K1, K4 `close-session` (closes the focused session/view) |
 | closed.restore | — | none: Konsole has no undo-close (no such action in K2–K4) |
-| palette.open | Ctrl+Alt+I | K6 KCommandBar "Find Action…" (`open_kcommand_bar`), inherited by Konsole |
+| palette.open | Ctrl+Alt+I, Ctrl+Shift+P | K6 KCommandBar "Find Action…" (`open_kcommand_bar`), inherited by Konsole. Ctrl+Shift+P added by #QWAS: the Relay-layer key, which also acts inside programs |
+| board.open | Ctrl+Shift+A | Relay default (#QWAS) |
+| sessions.open | Ctrl+Shift+S | Relay default (#QWAS) |
+| files.explorer | Ctrl+Shift+D | Relay default (#QWAS); Konsole binds nothing to it |
+| prompt.clear | Ctrl+Shift+Q, Ctrl+Q | Relay default (#CPRQ). Konsole's own Ctrl+Shift+Q (quit) does not apply inside Relay |
 | terminal.native | F12 | none (Konsole is always native). Kept Relay default |
 | terminal.interrupt, agent.*, input.* | — | none |
 | keybindings.edit | Ctrl+Alt+, | K1 Settings → Configure Keyboard Shortcuts; K7 `KeyBindings = CTRLALT(Comma)` |
 | keybindings.reload | — | none |
 
 ## 4. Machine-readable presets
+
+The JSON Relay ships is `Keymap::presetJson()` in `src/Keymap.h`; this copy mirrors it.
 
 ```json
 {
@@ -124,10 +185,12 @@ Sources:
     "tab.new": ["Ctrl+Shift+T"], "tab.next": ["Ctrl+PgDown", "Ctrl+Tab"], "tab.previous": ["Ctrl+PgUp", "Ctrl+Shift+Tab"],
     "pane.splitRight": ["Ctrl+Shift+D"], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Ctrl+Alt+Left"], "pane.focusRight": ["Ctrl+Alt+Right"], "pane.focusUp": ["Ctrl+Alt+Up"], "pane.focusDown": ["Ctrl+Alt+Down"],
-    "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+A"],
+    "pane.moveLeft": [], "pane.moveRight": [], "pane.moveUp": [], "pane.moveDown": [],
+    "pane.close": ["Ctrl+Shift+W"], "closed.restore": ["Ctrl+Alt+T"], "palette.open": ["Ctrl+Shift+P"],
+    "files.explorer": ["Ctrl+Shift+B"], "agent.resume": ["Ctrl+Shift+Y"], "app.settings": ["Ctrl+Shift+O"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
-    "agent.newChat": [], "agent.stop": [],
-    "input.modeAuto": [], "input.modeTerminal": ["Ctrl+Shift+I"], "input.modeAgent": [], "input.toggle": ["Ctrl+I"],
+    "agent.newChat": [], "agent.stop": [], "agent.requests": [],
+    "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": [], "input.toggle": ["Ctrl+I", "Ctrl+Shift+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
   "vscode": {
@@ -135,9 +198,10 @@ Sources:
     "tab.new": ["Ctrl+Shift+~"], "tab.next": ["Ctrl+PgDown", "Ctrl+Tab"], "tab.previous": ["Ctrl+PgUp", "Ctrl+Shift+Tab"],
     "pane.splitRight": ["Ctrl+Shift+%", "Ctrl+\\"], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Alt+Left"], "pane.focusRight": ["Alt+Right"], "pane.focusUp": ["Alt+Up"], "pane.focusDown": ["Alt+Down"],
-    "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": ["Ctrl+Shift+A"],
+    "pane.close": ["Ctrl+W"], "closed.restore": ["Ctrl+Shift+T"], "palette.open": ["Ctrl+Shift+P"],
+    "files.explorer": ["Ctrl+Shift+E"], "app.settings": ["Ctrl+Shift+O"],
     "terminal.native": ["Ctrl+`", "F12"], "terminal.interrupt": [],
-    "agent.newChat": ["Ctrl+N"], "agent.stop": ["Ctrl+Esc"],
+    "agent.newChat": [], "agent.stop": ["Ctrl+Esc"], "agent.requests": [],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": ["Ctrl+Shift+Alt+I"],
     "keybindings.edit": ["Ctrl+,"], "keybindings.reload": []
   },
@@ -146,9 +210,10 @@ Sources:
     "tab.new": ["Ctrl+Shift+T"], "tab.next": ["Ctrl+PgDown"], "tab.previous": ["Ctrl+PgUp"],
     "pane.splitRight": ["Ctrl+Shift+(", "Ctrl+("], "pane.splitDown": [], "pane.splitLeft": [], "pane.splitUp": [],
     "pane.focusLeft": ["Ctrl+Shift+Left"], "pane.focusRight": ["Ctrl+Shift+Right"], "pane.focusUp": ["Ctrl+Shift+Up"], "pane.focusDown": ["Ctrl+Shift+Down"],
-    "pane.close": ["Ctrl+Shift+W"], "closed.restore": [], "palette.open": ["Ctrl+Alt+I"],
+    "pane.close": ["Ctrl+Shift+W"], "closed.restore": [], "palette.open": ["Ctrl+Alt+I", "Ctrl+Shift+P"],
+    "app.settings": ["Ctrl+Shift+O"],
     "terminal.native": ["F12"], "terminal.interrupt": [],
-    "agent.newChat": [], "agent.stop": [],
+    "agent.newChat": [], "agent.stop": [], "agent.requests": [],
     "input.modeAuto": [], "input.modeTerminal": [], "input.modeAgent": [],
     "keybindings.edit": ["Ctrl+Alt+,"], "keybindings.reload": []
   }
@@ -177,8 +242,10 @@ drag onto a pane's bottom edge, and Actions, are the ways to dock a pane beneath
 
 **Collisions resolved (no preset has a duplicate key):**
 - Options: `app.settings` is Ctrl+Shift+O in every preset (2026-09-18). The Relay default also keeps Ctrl+,; the Warp and VS Code presets give Ctrl+, to `keybindings.edit`, so there it is Ctrl+Shift+O alone.
-- Warp new conversation: its Ctrl+Shift+N is also Warp's new window (the docs list both on Linux), and its Ctrl+Shift+Enter is Relay's send-to-terminal key; new chat is unbound in the Warp preset (`/new`, or Actions). Ctrl+Shift+Y is the Relay default for `agent.resume` (it was Ctrl+Shift+M for one day, 2026-09-19; M went to `agent.modelOptions`, Options › Models, on 2026-09-20; the picker is Ctrl+Alt+M and the model box Alt+M), so the Warp preset needs no override for it.
-- Warp Esc (back to terminal mode) is Relay's native-input key. Used Ctrl+Shift+I.
+- Warp new conversation: its Ctrl+Shift+N is also Warp's new window (the docs list both on Linux), and its Ctrl+Shift+Enter is Relay's send-to-terminal key; new chat is unbound in the Warp preset (`/new`, or Actions). Warp keeps Ctrl+Shift+Y for `agent.resume`, its conversations key; the Relay default binds nothing there since #QWAS.
+- Warp Esc (back to terminal mode) is Relay's native-input key. Ctrl+Shift+I was used for it until #QWAS; it is now input.toggle's twin (pairing rule), and terminal mode has no key in this preset.
+- Warp split-right (Ctrl+Shift+D) against the explorer's new default: the explorer is Ctrl+Shift+B in the Warp preset.
+- VS Code new chat (Ctrl+N) against window.new (Ctrl+Shift+N): the pairing rule leaves new chat unbound.
 - Warp and VS Code Ctrl+C (interrupt, stop agent) and VS Code Ctrl+L (new chat): left unbound so they still reach the shell.
 - VS Code F1: dropped.
 - Konsole Shift+Left/Right: dropped (text selection). Konsole's closed.restore is unbound because Relay's Ctrl+Shift+W would collide with close-session.
@@ -187,7 +254,7 @@ drag onto a pane's bottom edge, and Actions, are the ways to dock a pane beneath
 
 **Keys that do not act inside vim or nano** (the default `program_keys: "shift-only"` lets only Ctrl+Shift combos and F-keys act). While a program runs, these reach the program:
 - Warp: Ctrl+PgUp/PgDown, Ctrl+Tab, Ctrl+Alt+arrows, Ctrl+Alt+T, Ctrl+I (vim: jump forward), Ctrl+,
-- VS Code: Ctrl+PgUp/PgDown, Ctrl+Tab, Ctrl+\, Alt+arrows, Ctrl+W (vim: window commands), Ctrl+` (sends NUL), Ctrl+N, Ctrl+Esc, Ctrl+Alt+., Ctrl+,
+- VS Code: Ctrl+PgUp/PgDown, Ctrl+Tab, Ctrl+\, Alt+arrows, Ctrl+W (vim: window commands), Ctrl+` (sends NUL), Ctrl+Esc, Ctrl+,
 - Konsole: Ctrl+PgUp/PgDown, the unshifted `Ctrl+(`/`Ctrl+)` forms, Ctrl+Alt+I, Ctrl+Alt+,
 
 Everything else, including the F12 bindings, still acts inside programs.
@@ -215,7 +282,8 @@ a program owns the terminal under the default `program_keys: "shift-only"`.
 - **Super combos:** none of the presets use Super/Meta. GNOME and Plasma reserve most of them (overview, tiling, workspaces), so keep presets free of Meta.
 - **Ctrl+Alt+Del, Ctrl+Alt+Backspace, Ctrl+Alt+F1–F12** (session, VT): not used.
 
-Card #P7SJ: all built-in presets reserve Ctrl+Shift+P for Projects, Ctrl+Shift+Y for Sessions,
-and Ctrl+Shift+G for Globals, selecting tabs in one shared pane. Warp/VS Code presets use
-Ctrl+Shift+A for Actions to avoid the Projects collision. Pane screenshot capture is unbound
-by default. Explicit user overrides still take precedence.
+Card #P7SJ put Projects, Sessions and Globals in one shared pane on Ctrl+Shift+P, Y and G. Since
+#QWAS (2026-09-22) that pane has one key, `sessions.open` on Ctrl+Shift+S, in every preset;
+`projects.open`, `globals.open` and `agent.resume` have no default key (Warp keeps Ctrl+Shift+Y for
+`agent.resume`), and Ctrl+Shift+P is Actions everywhere. Pane screenshot capture is unbound by
+default. Explicit user overrides still take precedence.

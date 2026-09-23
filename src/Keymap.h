@@ -97,9 +97,13 @@ public:
 
     // True when a shortcut should act even though a program has keyboard focus.
     bool actsInsidePrograms(const QKeyEvent *event) const {
-        if (m_programKeys == QStringLiteral("all")) return true;
         if (m_programKeys == QStringLiteral("none")) return false;
         const auto mods = event->modifiers();
+        const QString action = match(event);
+        // Plain Ctrl+Q clears the prompt box from the prompt box only (#CPRQ); a program keeps it
+        // even under "all", because clearing a box that has no focus is never what it meant.
+        if (action == QStringLiteral("prompt.clear") && !(mods & Qt::ShiftModifier)) return false;
+        if (m_programKeys == QStringLiteral("all")) return true;
         const bool fkey = event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F35;
         // Alt+arrows move between panes. A terminal cannot send Ctrl+Shift+letter to a program, and
         // few TUIs use Alt+arrows, so these stay Relay's while a program owns the keyboard —
@@ -108,7 +112,6 @@ public:
         const bool arrow = event->key() == Qt::Key_Left || event->key() == Qt::Key_Right
                            || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down;
         const bool altArrow = arrow && (mods & Qt::AltModifier) && !(mods & Qt::ControlModifier);
-        const QString action = match(event);
         const bool dimmer = action == QStringLiteral("pane.brighten") || action == QStringLiteral("pane.darken")
                             || action == QStringLiteral("pane.dimToggle") || action == QStringLiteral("pane.autoDim");
         return dimmer || fkey || altArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
@@ -209,9 +212,10 @@ private:
         add("tab.new", "tab", "New tab", {QStringLiteral("Ctrl+T"), QStringLiteral("Ctrl+Shift+T")});
         add("tab.next", "tab", "Next tab", {QStringLiteral("Ctrl+Tab")});
         add("tab.previous", "tab", "Previous tab", {QStringLiteral("Ctrl+Shift+Tab")});
-        // SSH (#S5SH). No default keys: of the Ctrl+Shift letters still free, U belongs to the
-        // input method's Unicode entry, Q quits other terminals and M says nothing about hosts.
-        // Bind one in keybindings.json and the shortcut hints start teaching it.
+        // SSH (#S5SH). No default keys: the Ctrl+Shift letters #QWAS freed (B, G, R, X, Y) are
+        // left free on purpose, U belongs to the input method's Unicode entry, and none of them
+        // says anything about hosts. Bind one in keybindings.json and the shortcut hints start
+        // teaching it.
         add("ssh.connect", "tab", "Connect to host…: a new tab running ssh to a host from ~/.ssh/config or a recent one", {});
         // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
@@ -263,25 +267,38 @@ private:
         // Jump to the newest notification's pane (#NQP9): 1 is the newest entry, again within the
         // window walks to the 2nd, and so on. Ctrl+Shift because a program that owns the terminal
         // must not swallow it (actsInsidePrograms) — the moment a bell entry matters is exactly
-        // when the user is heads-down somewhere else. No letter is left: every Ctrl+Shift letter
-        // is bound (M is agent.modelOptions, the models pane, since 2026-09-20) or
-        // reserved (C/V copy and paste, Q quits other terminals, U is the input method's Unicode
-        // entry, D/P/Y are claimed in the preset tables), so the digit counts the walk: 1, 2, 3…
-        // Free in the default table and all four presets.
+        // when the user is heads-down somewhere else. It took a digit when no Ctrl+Shift letter was
+        // left (2026-09-20); #QWAS has since freed B, G, R, X and Y, but the digit also counts the
+        // walk: 1, 2, 3… Free in the default table and all four presets.
         add("notifications.jump", "window", "Go to the newest notification's pane (again for the next older)",
             {QStringLiteral("Ctrl+Shift+1")});
-        add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
-        // One key opens and closes the explorer (issue #D60R). Ctrl+B is VS Code's sidebar key and
-        // is free in all four Relay presets; Ctrl+Shift+B is the twin a program cannot swallow.
+        // The QWEASDZXC map (#QWAS, owner 2026-09-22): Ctrl+Shift+<letter> is Relay's layer, and
+        // plain Ctrl+<letter> is the same command only where the key means nothing to an editor or
+        // a program (W E N T I F H, and Q in the prompt box). For A S Z X C D P plain Ctrl is left
+        // to the editor or the program, so these have no plain twin: Ctrl+P is VS Code's quick
+        // open and a shell's previous-history, Ctrl+D is end-of-input, Ctrl+A line-start, Ctrl+S
+        // save or XOFF. No action may hold Ctrl+<L> while another holds Ctrl+Shift+<L>, in any
+        // preset (tests/test_keybindings.py checks it). P is the palette, as in VS Code.
+        add("palette.open", "palette", "Actions: every action and its keys, in a filterable list (again to close it)", {QStringLiteral("Ctrl+Shift+P")});
+        // One key opens and closes the explorer (issue #D60R). D for directory (#QWAS); it was
+        // Ctrl+B and Ctrl+Shift+B until 2026-09-22. Ctrl+D is never bound: it is end-of-input.
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
-            {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
+            {QStringLiteral("Ctrl+Shift+D")});
         add("files.open", "pane", "Open a file in a preview pane", {});
         // Word wrap in the file preview or the editable file pane, VS Code's key (#—: owner request
         // 2026-09-21). Alt+Z is free in the default table and in all four preset tables, and a
         // bare Alt+letter never reaches a program through actsInsidePrograms, so nothing owns it.
         add("files.toggleWrap", "pane", "Toggle word wrap in the file preview or editor pane",
             {QStringLiteral("Alt+Z")});
-        add("board.open", "pane", "Board: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
+        // A for the Board, S for Sessions, D for files: the left hand's home row (#QWAS). The Board
+        // was Ctrl+Shift+S until 2026-09-22.
+        add("board.open", "pane", "Board: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
+        // One entry for the shared Sessions & Projects pane (#SPSG): sessions, projects, recently
+        // closed and globals are its tabs. agent.resume, conversations.open, projects.open and
+        // globals.open stay registered, with no default keys, because slash commands and a user's
+        // keybindings.json may name them; each opens the same pane on its own tab.
+        add("sessions.open", "pane", "Sessions & Projects: sessions, projects, recently closed and globals (again to close it)",
+            {QStringLiteral("Ctrl+Shift+S")});
         // The Test suites pane (card #7BM4): the project's tests, their history and the runs, in a
         // pane beside the Board. **No default key.** The obvious one, Ctrl+Shift+T, is New
         // tab in the default table and in all four presets, and a tests pane is not worth taking a
@@ -296,16 +313,24 @@ private:
         // the three panes it works in hold none — and the panes' own search boxes swallow letters.
         add("helper.ask", "agent", "Ask the helper agent about this pane (Options, Actions, Sessions)",
             {QStringLiteral("Alt+Q")});
-        // Compatibility action: project selection opens the shared Projects tab (#P7SJ).
-        add("projects.open", "pane", "Projects: manage projects and their active sessions", {QStringLiteral("Ctrl+Shift+P")});
-        add("globals.open", "pane", "Globals: global memories, aliases and instructions", {QStringLiteral("Ctrl+Shift+G")});
+        // Compatibility actions: the Projects and Globals tabs of the Sessions & Projects pane
+        // (#P7SJ). No default keys since #QWAS: Ctrl+Shift+S (sessions.open) opens the pane, and
+        // Ctrl+Shift+P is the palette's.
+        add("projects.open", "pane", "Projects: manage projects and their active sessions", {});
+        add("globals.open", "pane", "Globals: global memories, aliases and instructions", {});
         add("project.pick", "pane", "Projects: attach this tab to a project Relay knows, or initialize one here", {});
-        add("control.human", "terminal", "Take control of the terminal (the only way keys reach it; works from the prompt box)", {QStringLiteral("Ctrl+H")});
-        add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {QStringLiteral("Ctrl+Shift+H")});
+        // One key both ways (#QWAS): Ctrl+H takes control of the terminal and, pressed again, hands
+        // it back to the Relay prompt; Ctrl+Shift+H is the same toggle, the twin a program cannot
+        // swallow. control.prompt stays registered for keybindings.json, with no default key.
+        add("control.human", "terminal", "Take control of the terminal, or give it back to the Relay prompt (a toggle; works from the prompt box)",
+            {QStringLiteral("Ctrl+H"), QStringLiteral("Ctrl+Shift+H")});
+        add("control.prompt", "terminal", "Back to the Relay prompt (the agent is in control)", {});
         add("program.delegate", "terminal", "Let the agent drive the program in this pane (with text in the prompt box, ask it now)",
             {QStringLiteral("Ctrl+Shift+J")});
         add("terminal.native", "terminal", "Toggle native terminal input (keys go straight to the terminal)", {QStringLiteral("F12")});
-        add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {QStringLiteral("Ctrl+Shift+R")});
+        // No default key since #QWAS (it was Ctrl+Shift+R): the stopped pane's banner and the
+        // palette are the ways in.
+        add("pane.restartShell", "terminal", "Restart this pane's shell or agent after it stopped", {});
         add("terminal.interrupt", "terminal", "Interrupt the running command (Esc)", {});
         add("agent.newChat", "agent", "Start a new agent conversation and clear the terminal", {});
         // Keyboard walk over the files, folders and links in the output (issue GWXM). Free in
@@ -313,9 +338,14 @@ private:
         add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves)",
             {QStringLiteral("Ctrl+Shift+L")});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
+        // Ctrl+Q empties the prompt box, and Ctrl+Z in the box brings the text back (#CPRQ). Plain
+        // Ctrl+Q acts only from the prompt box: under a program it is the program's (XON in a
+        // terminal), in every program_keys mode (actsInsidePrograms). Ctrl+Shift+Q is the twin.
+        add("prompt.clear", "agent", "Clear the prompt box (Ctrl+Z brings it back)",
+            {QStringLiteral("Ctrl+Shift+Q"), QStringLiteral("Ctrl+Q")});
         add("agent.resumeQueue", "agent", "Resume the paused agent queue", {});
         add("agent.stop", "agent", "Stop the agent turn", {});
-        add("agent.stopAllSubagents", "agent", "Stop all running subagents", {QStringLiteral("Ctrl+Shift+X")});   // subagents UI
+        add("agent.stopAllSubagents", "agent", "Stop all running subagents", {});   // subagents UI and palette; Ctrl+Shift+X until #QWAS
         add("agent.agentsMenu", "agent", "Agents: definitions and running subagents", {});
         // The tabbed subagent pane (card #WD83): from the prompt box it opens (or brings forward)
         // this pane's subagent pane; from the subagent pane it closes it and returns to the main agent. A for
@@ -402,10 +432,10 @@ private:
         add("agent.rewind", "agent", "Rewind chat to an earlier turn; files are not changed (Esc Esc in an empty prompt box)", {});
         add("agent.rewindCode", "agent", "Rewind code: restore files the agent changed since an earlier turn (/rewind-code)", {});
         add("agent.fork", "agent", "Fork the conversation into a new pane", {});
-        // Ctrl+Shift+Y: Warp's key for its conversations menu, and the free Ctrl+Shift letter with a
-        // mnemonic (historY). It was Ctrl+Shift+M from 2026-09-19 to 2026-09-20, until the owner gave
-        // M to models: "models are more central than sessions". The pane is titled "Sessions" again.
-        add("agent.resume", "agent", "Sessions: resume a saved session, search, subagent threads (/resume)", {QStringLiteral("Ctrl+Shift+Y")});
+        // No default key since #QWAS: sessions.open (Ctrl+Shift+S) opens the same pane. It was
+        // Ctrl+Shift+Y (Warp's conversations key, which the warp preset keeps) and, for one day,
+        // Ctrl+Shift+M, until the owner gave M to models.
+        add("agent.resume", "agent", "Sessions: resume a saved session, search, subagent threads (/resume)", {});
         // The ⓘ view from the keyboard (owner, 2026-09-18: "the (i) view hotkey could be alt+i or
         // alt+1?"). Alt+I, because it says what it opens, and it is free: Relay's only other
         // Alt+letters are Alt+A (subagents), Alt+F (Flash) and Alt+R (reasoning); no preset table
@@ -427,9 +457,9 @@ private:
         // shortcut for showing / hiding the reasoning traces, maybe an F# key -- ... or alt+R").
         // Alt+R is his suggestion and no preset binds it: the only Alt+letter Relay has is Alt+F
         // (fast agent), and the four preset tables override no Alt+letter at all, so all of them
-        // inherit this default. No Ctrl+Shift twin (Ctrl+Shift+R is pane.restartShell) and no
-        // F-key twin yet: which F-keys Relay should claim is docs/F-KEYS.md's question, not a thing
-        // to settle one action at a time.
+        // inherit this default. No Ctrl+Shift twin (Ctrl+Shift+R was pane.restartShell's until
+        // #QWAS and is left free) and no F-key twin yet: which F-keys Relay should claim is
+        // docs/F-KEYS.md's question, not a thing to settle one action at a time.
         add("agent.thinkingPanel", "agent", "Reasoning: fold or unfold this pane's latest reasoning",
             {QStringLiteral("Alt+R")});
         // The Activity pane (card #QT8C, renamed from "agent internals" by #4X53): the reasoning
@@ -441,15 +471,17 @@ private:
         add("agent.continue", "agent", "Continue the agent turn: Ctrl+Enter on an empty prompt box, or /continue", {});
         add("agent.instructions", "agent", "Choose agent instruction files", {});
         add("agent.export", "agent", "Export the conversation as Markdown", {});
-        // Screenshot remains an action; the owner gave its old G shortcut to Globals (#P7SJ).
+        // Screenshot remains an action with no default key (its old G went to Globals in #P7SJ,
+        // and Globals gave it up in #QWAS).
         add("agent.screenshotPane", "agent", "Screenshot this pane and attach it to the next prompt",
             {});
         // "Ctrl+?" is one gesture with several spellings. Qt reports the main-row key as
         // Key_Question on a US layout and as Key_Slash on others and on the keypad, with Shift
         // held either way, so all of them are bound: Ctrl+Shift+? reaches Ctrl+? and Ctrl+Shift+/
-        // on a Key_Slash layout reaches Ctrl+/ through match()'s shifted-symbol fallback.
+        // on a Key_Slash layout reaches Ctrl+/ through match()'s shifted-symbol fallback. F1 is not
+        // bound (#KYPR): F-keys act inside programs, and F1 is help in nano, mc and htop.
         add("help.shortcuts", "palette", "Actions: every action and the keys it answers to",
-            {QStringLiteral("Ctrl+?"), QStringLiteral("Ctrl+Shift+/"), QStringLiteral("Ctrl+/"), QStringLiteral("F1")});
+            {QStringLiteral("Ctrl+?"), QStringLiteral("Ctrl+Shift+/"), QStringLiteral("Ctrl+/")});
         add("keybindings.edit", "terminal", "Edit keyboard shortcuts", {});
         add("keybindings.reload", "terminal", "Reload keyboard shortcuts", {});
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -513,7 +545,7 @@ private:
 
     // Filled from docs/KEYBINDING-PRESETS.md research. Missing actions fall back to Relay defaults.
     static QByteArray presetJson() {
-        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"agent.resume":["Ctrl+Shift+Y"],"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+A"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":["Ctrl+Shift+I"],"input.modeAgent":[],"input.toggle":["Ctrl+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"vscode":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+A"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":["Ctrl+N"],"agent.stop":["Ctrl+Esc"],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[]},"konsole":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
+        return QByteArrayLiteral(R"PRESETS({"relay":{},"warp":{"agent.resume":["Ctrl+Shift+Y"],"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+D"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Alt+Left"],"pane.focusRight":["Ctrl+Alt+Right"],"pane.focusUp":["Ctrl+Alt+Up"],"pane.focusDown":["Ctrl+Alt+Down"],"pane.moveLeft":[],"pane.moveRight":[],"pane.moveUp":[],"pane.moveDown":[],"pane.close":["Ctrl+Shift+W"],"closed.restore":["Ctrl+Alt+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"input.toggle":["Ctrl+I","Ctrl+Shift+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[],"files.explorer":["Ctrl+Shift+B"]},"vscode":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+~"],"tab.next":["Ctrl+PgDown","Ctrl+Tab"],"tab.previous":["Ctrl+PgUp","Ctrl+Shift+Tab"],"pane.splitRight":["Ctrl+Shift+%","Ctrl+\\"],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Alt+Left"],"pane.focusRight":["Alt+Right"],"pane.focusUp":["Alt+Up"],"pane.focusDown":["Alt+Down"],"pane.close":["Ctrl+W"],"closed.restore":["Ctrl+Shift+T"],"palette.open":["Ctrl+Shift+P"],"terminal.native":["Ctrl+`","F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":["Ctrl+Esc"],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":["Ctrl+Shift+Alt+I"],"keybindings.edit":["Ctrl+,"],"keybindings.reload":[],"agent.requests":[],"files.explorer":["Ctrl+Shift+E"]},"konsole":{"app.settings":["Ctrl+Shift+O"],"window.new":["Ctrl+Shift+N"],"window.next":[],"window.previous":[],"tab.new":["Ctrl+Shift+T"],"tab.next":["Ctrl+PgDown"],"tab.previous":["Ctrl+PgUp"],"pane.splitRight":["Ctrl+Shift+(","Ctrl+("],"pane.splitDown":[],"pane.splitLeft":[],"pane.splitUp":[],"pane.focusLeft":["Ctrl+Shift+Left"],"pane.focusRight":["Ctrl+Shift+Right"],"pane.focusUp":["Ctrl+Shift+Up"],"pane.focusDown":["Ctrl+Shift+Down"],"pane.close":["Ctrl+Shift+W"],"closed.restore":[],"palette.open":["Ctrl+Alt+I","Ctrl+Shift+P"],"terminal.native":["F12"],"terminal.interrupt":[],"agent.newChat":[],"agent.stop":[],"input.modeAuto":[],"input.modeTerminal":[],"input.modeAgent":[],"keybindings.edit":["Ctrl+Alt+,"],"keybindings.reload":[],"agent.requests":[]}})PRESETS");
     }
     QFileSystemWatcher m_watcher;
     QList<QPair<QPointer<QObject>, std::function<void()>>> m_listeners;

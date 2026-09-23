@@ -318,20 +318,122 @@ class GuiDefaultsTests(unittest.TestCase):
         self.assertIsNotNone(match, f'{action} is not in the action registry')
         return re.findall(r'QStringLiteral\("([^"]+)"\)', match.group(1))
 
-    def test_workspace_views_have_dedicated_keys_without_preset_collisions(self):
-        expected = {'projects.open': 'Ctrl+Shift+P', 'globals.open': 'Ctrl+Shift+G'}
+    def registry(self):
+        """Every registered action and its default keys, in registry order."""
         source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
-        for action, key in expected.items():
-            self.assertEqual(self.defaults(action), [key])
-        self.assertEqual(self.defaults('agent.screenshotPane'), [])
-        defaults = {action: re.findall(r'QStringLiteral\("([^\"]+)"\)', block)
-                    for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^\"]*",\s*\{(.*?)\}\);', source, re.S)}
+        return {action: re.findall(r'QStringLiteral\("([^"]+)"\)', block)
+                for action, block in re.findall(r'add\("([a-zA-Z.]+)", "[a-z]+", "[^"]*",\s*\{(.*?)\}\);', source, re.S)}
+
+    def presets(self):
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
         presets = re.search(r'R"PRESETS\((.*?)\)PRESETS"', source, re.S)
-        for name, table in {'default': {}, **json.loads(presets.group(1))}.items():
-            effective = {**defaults, **table}
-            for owner, key in expected.items():
-                self.assertEqual([action for action, keys in effective.items() if key in keys],
-                                 [owner], f'{name} must reserve {key} for {owner}')
+        self.assertIsNotNone(presets, 'the preset tables are not where this test looks for them')
+        return json.loads(presets.group(1))
+
+    def effective(self, preset):
+        """What Keymap::reload() binds under a preset with no user overrides: the preset's row
+        where it has one, the Relay default otherwise; rows for unregistered ids are ignored."""
+        table = self.presets()[preset]
+        return {action: table.get(action, keys) for action, keys in self.registry().items()}
+
+    @staticmethod
+    def chord(key):
+        # Keymap::parse() compares (key, modifiers), and reads Backtab as Shift+Tab.
+        text = normalize_key(key)
+        if text.endswith('+Backtab') or text == 'Backtab':
+            mods = set(text.split('+')[:-1]) | {'Shift'}
+            text = '+'.join([m for m in ('Ctrl', 'Alt', 'Shift', 'Meta') if m in mods] + ['Tab'])
+        return text
+
+    def owners(self, preset):
+        """chord -> every action that binds it under the preset (m_conflicts' input)."""
+        owners = {}
+        for action, keys in self.effective(preset).items():
+            for key in keys:
+                owners.setdefault(self.chord(key), []).append(action)
+        return owners
+
+    def test_qwas_defaults(self):
+        # #QWAS / #KYPR / #CPRQ / #SPSG: the Relay preset after the QWEASDZXC move.
+        expected = {
+            'board.open': ['Ctrl+Shift+A'],
+            'sessions.open': ['Ctrl+Shift+S'],
+            'files.explorer': ['Ctrl+Shift+D'],
+            'palette.open': ['Ctrl+Shift+P'],
+            'help.shortcuts': ['Ctrl+?', 'Ctrl+Shift+/', 'Ctrl+/'],
+            'prompt.clear': ['Ctrl+Shift+Q', 'Ctrl+Q'],
+            'closed.restore': ['Ctrl+Shift+Z'],
+            'pane.close': ['Ctrl+W', 'Ctrl+Shift+W'],
+            'pane.splitRight': ['Ctrl+E', 'Ctrl+Shift+E'],
+            'control.human': ['Ctrl+H', 'Ctrl+Shift+H'],
+        }
+        for action, keys in expected.items():
+            self.assertEqual(self.defaults(action), keys, action)
+        # Registered, so slash commands and keybindings.json can name them, but with no keys.
+        for action in ('pane.restartShell', 'agent.stopAllSubagents', 'agent.resume', 'conversations.open',
+                       'projects.open', 'globals.open', 'control.prompt', 'agent.screenshotPane'):
+            self.assertEqual(self.defaults(action), [], f'{action} keeps no default key')
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        self.assertRegex(source, r'add\("sessions\.open", "pane", "Sessions & Projects: ')
+        self.assertIn('add("prompt.clear", "agent", "Clear the prompt box (Ctrl+Z brings it back)"', source)
+        self.assertRegex(source, r'add\("control\.human", "terminal", "[^"]*give it back to the Relay prompt[^"]*toggle')
+        # Freed by the move, and left free in the Relay preset.
+        owners = self.owners('relay')
+        for key in ('Ctrl+Shift+Y', 'Ctrl+Shift+G', 'Ctrl+Shift+B', 'Ctrl+Shift+R', 'Ctrl+Shift+X', 'Ctrl+B'):
+            self.assertNotIn(key, owners, f'{key} was freed by #QWAS')
+
+    def test_plain_ctrl_is_left_to_the_editor_for_asdzxcp(self):
+        owners = self.owners('relay')
+        for letter in 'ASZXCDP':
+            self.assertNotIn(f'Ctrl+{letter}', owners, f'plain Ctrl+{letter} belongs to the editor or program')
+
+    def test_f1_is_not_bound(self):
+        # #KYPR: F-keys act inside programs, and F1 is help in nano, mc and htop.
+        for preset in self.presets():
+            self.assertNotIn('F1', self.owners(preset), f'the {preset} preset binds F1')
+
+    def test_no_preset_has_a_conflict(self):
+        # The same check as Keymap::reload()'s m_conflicts, for each built-in preset.
+        self.assertEqual(set(self.presets()), {'relay', 'warp', 'vscode', 'konsole'})
+        for preset in self.presets():
+            clashes = {key: actions for key, actions in self.owners(preset).items() if len(actions) > 1}
+            self.assertEqual(clashes, {}, f'the {preset} preset binds one chord to two actions')
+
+    def test_ctrl_and_ctrl_shift_of_a_letter_are_one_action(self):
+        # The pairing rule (#QWAS): no action may hold Ctrl+<L> while a different one holds
+        # Ctrl+Shift+<L>, in any preset.
+        for preset in self.presets():
+            owners = self.owners(preset)
+            for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                plain, shifted = owners.get(f'Ctrl+{letter}'), owners.get(f'Ctrl+Shift+{letter}')
+                if plain and shifted:
+                    self.assertEqual(plain, shifted, f'{preset}: Ctrl+{letter} and Ctrl+Shift+{letter}')
+
+    def test_the_presets_doc_mirrors_the_shipped_tables(self):
+        # docs/KEYBINDING-PRESETS.md §4 is the reviewable copy of Keymap::presetJson().
+        doc = (ROOT / 'docs/KEYBINDING-PRESETS.md').read_text(encoding='utf-8')
+        block = re.search(r'```json\n(.*?)\n```', doc, re.S)
+        self.assertIsNotNone(block)
+        shipped = self.presets()
+        for name, table in json.loads(block.group(1)).items():
+            self.assertEqual(table, shipped[name], f'the {name} table in the doc differs from src/Keymap.h')
+
+    def test_plain_ctrl_q_never_reaches_past_a_program(self):
+        # #CPRQ: plain Ctrl+Q clears the prompt box from the prompt box only, in every
+        # program_keys mode, so actsInsidePrograms() refuses it before the "all" shortcut.
+        source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
+        body = re.search(r'bool actsInsidePrograms\(const QKeyEvent \*event\) const \{(.*?)\n    \}', source, re.S).group(1)
+        guard = body.find('action == QStringLiteral("prompt.clear") && !(mods & Qt::ShiftModifier)')
+        self.assertGreater(guard, 0, 'actsInsidePrograms() lets plain Ctrl+Q through')
+        self.assertLess(guard, body.find('m_programKeys == QStringLiteral("all")'))
+
+    def test_workspace_views_have_dedicated_keys_without_preset_collisions(self):
+        # The Board, the Sessions & Projects pane and the palette hold their chords in every preset.
+        expected = {'Ctrl+Shift+A': 'board.open', 'Ctrl+Shift+S': 'sessions.open', 'Ctrl+Shift+P': 'palette.open'}
+        for preset in self.presets():
+            owners = self.owners(preset)
+            for key, owner in expected.items():
+                self.assertEqual(owners.get(key), [owner], f'{preset} must reserve {key} for {owner}')
 
     def test_the_shortcuts_overlay_binds_every_spelling_of_ctrl_question(self):
         # #T9ZS: "Ctrl+?" is one gesture with several spellings. Qt reports the main-row key as
@@ -340,7 +442,7 @@ class GuiDefaultsTests(unittest.TestCase):
         keys = self.defaults('help.shortcuts')
         for spelling in ('Ctrl+?', 'Ctrl+Shift+/', 'Ctrl+/'):
             self.assertIn(spelling, keys)
-        self.assertIn('F1', keys, 'F1 must keep working')
+        self.assertNotIn('F1', keys, 'F1 is not bound (#KYPR)')
         for key in keys:
             normalize_key(key)
         self.assertLessEqual(len(keys), MAX_KEYS, 'the agent tool caps an action at MAX_KEYS keys')
