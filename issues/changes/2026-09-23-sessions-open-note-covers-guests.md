@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-focus-open/], related: [E7FP, R6J0], github: null}
+links: {plans: [], commits: [b81cc1145d5c70c3540e786e7feccdb12d739b89], evidence: [docs/qa_evidence/2026-09-23-sessions-focus-open/], related: [E7FP, R6J0], github: null}
 ---
 # Sessions open note covers guest sessions and other windows
 

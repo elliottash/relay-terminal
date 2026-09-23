@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: User in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-sessions-focus-open/], related: [R6J0], github: null}
+links: {plans: [], commits: [7856c1d312ded13e7c13168be6927cd7d93b82f7], evidence: [docs/qa_evidence/2026-09-23-sessions-focus-open/], related: [R6J0], github: null}
 ---
 # Shift+Enter keeps focus in the Sessions manager
 
