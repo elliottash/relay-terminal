@@ -29,6 +29,7 @@
 #include <QLayout>
 #include <QPlainTextEdit>
 #include <QToolButton>
+#include <QScreen>
 
 #include <cstdio>
 
@@ -1008,6 +1009,61 @@ void repeatedEnterKeepsTheFirstQueuedPrompt()
     CHECK_EQ(console.queuedPrompts(), 1);
 }
 
+void queueRowArrowSendsOnlyThatPrompt()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.resize(1000, 650);
+    console.show();
+    QList<QJsonObject> sent;
+    console.onWorkerLine = [&sent](const QJsonObject &message) { sent << message; };
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent({{"event", "agent_started"}, {"id", "running"}});
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor);
+    if (!editor) return;
+    for (const QString &text : {QStringLiteral("First queued prompt"), QStringLiteral("Second queued prompt")}) {
+        console.draftInComposer(text);
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(editor, &enter);
+    }
+    console.draftInComposer(QStringLiteral("An unrelated draft stays here"));
+    { QEventLoop wait; QTimer::singleShot(150, &wait, &QEventLoop::quit); wait.exec(); }
+    auto *list = console.findChild<QListWidget *>(QStringLiteral("queueList"));
+    CHECK(list && list->count() == 2);
+    if (!list || list->count() != 2) return;
+    const QModelIndex index = list->model()->index(1, 0);
+    CHECK(index.data(QueueRowDelegate::SendNowRole).toBool());
+    const QPoint point = QueueRowDelegate::sendNowRect(list->visualRect(index)).center();
+    QHelpEvent hover(QEvent::ToolTip, point, list->viewport()->mapToGlobal(point));
+    QCoreApplication::sendEvent(list->viewport(), &hover);
+    CHECK_EQ(QToolTip::text(), QStringLiteral("Send now (%1)").arg(
+        Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"))
+            .replace(QStringLiteral("Return"), QStringLiteral("Enter"))));
+    const QString capture = qEnvironmentVariable("RELAY_QUEUE_ARROW_CAPTURE");
+    if (!capture.isEmpty()) {
+        { QEventLoop wait; QTimer::singleShot(100, &wait, &QEventLoop::quit); wait.exec(); }
+        CHECK(console.screen()->grabWindow(0).save(capture));
+    }
+    QToolTip::hideText();
+    sent.clear();
+    QMouseEvent press(QEvent::MouseButtonPress, point, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(list->viewport(), &press);
+    QMouseEvent click(QEvent::MouseButtonRelease, point, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(list->viewport(), &click);
+    QList<QJsonObject> asks;
+    for (const auto &message : sent) if (message.value("type") == "ask") asks << message;
+    CHECK_EQ(asks.size(), 1);
+    if (!asks.isEmpty()) {
+        CHECK_EQ(asks.first().value("text").toString(), QStringLiteral("Second queued prompt"));
+        CHECK_EQ(asks.first().value("when").toString(), QStringLiteral("interrupt"));
+    }
+    CHECK_EQ(console.composerText(), QStringLiteral("An unrelated draft stays here"));
+    CHECK_EQ(console.queuedPrompts(), 1);
+    CHECK_EQ(list->item(0)->text(), QStringLiteral("First queued prompt"));
+}
+
 void answersBypassQueuedPrompts()
 {
     for (int gesture = 0; gesture < 3; ++gesture) {
@@ -1198,6 +1254,14 @@ int main(int argc, char **argv)
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--queue-arrow-only"))) {
+        QTemporaryDir queueScratch;
+        CHECK(queueScratch.isValid());
+        home = &queueScratch;
+        relay::theme::applyTheme(app);
+        cases::queueRowArrowSendsOnlyThatPrompt();
+        return failures ? 1 : 0;
+    }
     QTemporaryDir scratch;
     CHECK(scratch.isValid());
     qputenv("HOME", scratch.path().toUtf8());
@@ -1217,6 +1281,7 @@ int main(int argc, char **argv)
     cases::relayingStatusSitsOutsideEveryPromptFrame();
     cases::theActionRowIsBuiltFromTheContext();
     cases::aChangedContextRebuildsTheRow();
+    cases::queueRowArrowSendsOnlyThatPrompt();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
     cases::everyChordReachesTheContextWithItsOwnRoute();

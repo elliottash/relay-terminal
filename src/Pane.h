@@ -193,7 +193,20 @@ public:
     static constexpr int KindRole = Qt::UserRole + 2;       // "steer", "agent" or "command"
     static constexpr int RowIdRole = Qt::UserRole + 3;      // "steer:<request id>" or "entry:<id>"
     static constexpr int PendingRole = Qt::UserRole + 4;    // a steer being withdrawn
+    static constexpr int SendNowRole = Qt::UserRole + 5;
+    static QRect sendNowRect(const QRect &row) { return QRect(row.right() - 48, row.top(), 22, row.height()); }
     using QStyledItemDelegate::QStyledItemDelegate;
+    bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option,
+                   const QModelIndex &index) override {
+        if (index.data(SendNowRole).toBool() && sendNowRect(option.rect).contains(event->pos())) {
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"))
+                                     .replace(QStringLiteral("Return"), QStringLiteral("Enter"));
+            QToolTip::showText(event->globalPos(), keys.isEmpty() ? QStringLiteral("Send now")
+                : QStringLiteral("Send now (%1)").arg(keys), view->viewport());
+            return true;
+        }
+        return QStyledItemDelegate::helpEvent(event, view, option, index);
+    }
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         painter->save();
         const QRect r = option.rect;
@@ -219,12 +232,14 @@ public:
         painter->drawText(QRect(left, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
         left += 22;
         const QString suffix = pending ? QStringLiteral("  withdrawing…") : QString();
-        const int room = std::max(20, r.right() - 28 - left - option.fontMetrics.horizontalAdvance(suffix));
+        const bool sendNow = index.data(SendNowRole).toBool();
+        const int room = std::max(20, r.right() - (sendNow ? 54 : 28) - left - option.fontMetrics.horizontalAdvance(suffix));
         painter->setPen(pending ? relay::theme::TextMuted : (steer ? relay::theme::Agent : relay::theme::Text));
         const QString text = option.fontMetrics.elidedText(index.data(Qt::DisplayRole).toString().simplified(), Qt::ElideRight, room) + suffix;
         painter->drawText(QRect(left, r.top(), r.right() - 26 - left, r.height()), Qt::AlignVCenter | Qt::AlignLeft, text);
         if (!pending) {
             painter->setPen(relay::theme::TextMuted);
+            if (sendNow) painter->drawText(sendNowRect(r), Qt::AlignCenter, QStringLiteral("→"));
             painter->drawText(QRect(r.right() - 22, r.top(), 18, r.height()), Qt::AlignCenter, QStringLiteral("×"));
         }
         painter->restore();
@@ -4978,11 +4993,19 @@ protected:
             && (static_cast<QMouseEvent *>(event)->pos() - m_clickOrigin).manhattanLength() < 6)
             hint(QStringLiteral("terminal.click"), QStringLiteral("The prompt box is the input · %1 types into the terminal")
                      .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
-        if (m_queueList && object == m_queueList->viewport() && event->type() == QEvent::MouseButtonRelease) {
+        if (m_queueList && object == m_queueList->viewport() && event->type() == QEvent::MouseButtonRelease
+            && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
             // The × at the right edge of a queue row removes it; on a steer it withdraws it. A steer
             // already being withdrawn has no × to click.
             const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
             const QModelIndex index = m_queueList->indexAt(pos);
+            if (index.isValid() && index.data(QueueRowDelegate::SendNowRole).toBool()
+                && QueueRowDelegate::sendNowRect(m_queueList->visualRect(index)).contains(pos)) {
+                sendQueueRowNow(index.data(QueueRowDelegate::RowIdRole).toString());
+                hint(QStringLiteral("queue.send-now.mouse"), relay::ShortcutHints::nextTime(
+                    Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"))));
+                return true;
+            }
             if (index.isValid() && pos.x() >= m_queueList->viewport()->width() - 26) {
                 if (index.data(QueueRowDelegate::PendingRole).toBool()) return true;
                 const bool steer = index.data(QueueRowDelegate::KindRole).toString() == QStringLiteral("steer");
@@ -10264,6 +10287,36 @@ private:
         if (!sendSteerNow(requestId)) return false;
         leaveQueueSelection();
         return true;
+    }
+
+    // Send the row's saved prompt, keeping the composer's unrelated draft and the other rows.
+    void sendQueueRowNow(const QString &rowId) {
+        if (m_ask.open()) return;
+        if (rowId.startsWith(QStringLiteral("steer:"))) {
+            sendSteerNow(rowId.mid(6));
+            return;
+        }
+        if (!rowId.startsWith(QStringLiteral("entry:")) || !m_configured) return;
+        const quint64 id = rowId.mid(6).toULongLong();
+        for (int i = 0; i < m_entries.size(); ++i) {
+            if (m_entries[i].id != id) continue;
+            if (!m_entries[i].agent || m_entries[i].written() || !m_entries[i].guest.isEmpty()) return;
+            const quint64 selected = selectedEntryId();
+            QueueEntry entry = m_entries.takeAt(i);
+            if (selected == id) {
+                if (!m_editor->toPlainText().trimmed().isEmpty()) entry.text = m_editor->toPlainText();
+                m_selected = -1;
+                m_editor->clear();
+            } else if (selected) {
+                // Keep the selected row's index without replacing its in-progress edit.
+                if (m_selected > i) --m_selected;
+            }
+            m_entriesPaused = false; m_pauseReason.clear();
+            if (m_agentBusy) m_interruptPending = true;
+            startAgentEntry(entry, false, m_agentBusy ? QStringLiteral("interrupt") : QStringLiteral("now"));
+            rebuildQueueStrip(); changed();
+            return;
+        }
     }
 
     // How long a pane must sit unwatched with finished work before an away recap is written.
@@ -18114,6 +18167,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             item->setData(Row::KindRole, QStringLiteral("steer"));
             item->setData(Row::RowIdRole, QStringLiteral("steer:") + steer.requestId);
             item->setData(Row::PendingRole, steer.withdraw);
+            item->setData(Row::SendNowRole, !steer.withdraw && m_agentBusy && !m_ask.open());
             item->setToolTip(steer.withdraw
                 ? QStringLiteral("Withdrawing · unless the agent reaches its next tool call first")
                 : QStringLiteral("Delivered inside the running turn at the agent's next tool call\n%1\n\n"
@@ -18156,6 +18210,8 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             item->setData(Row::AgentRole, entry.agent);
             item->setData(Row::KindRole, entry.agent ? QStringLiteral("agent") : QStringLiteral("command"));
             item->setData(Row::RowIdRole, QStringLiteral("entry:%1").arg(entry.id));
+            item->setData(Row::SendNowRole, entry.agent && !entry.written() && entry.guest.isEmpty()
+                                          && m_configured && !m_ask.open());
             item->setToolTip(entry.text);
             item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
             if (i == m_selected) current = item;
