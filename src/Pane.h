@@ -1182,6 +1182,10 @@ public:
     // is not a *conversation's* — the card's conversation is the worker's file and outlives this.
     static QString surfaceTextOpenMark() { return QStringLiteral("— what was said here before —"); }
     static QString surfaceTextCloseMark() { return QStringLiteral("— end of what was said here before —"); }
+    static QStringList restoreMarks() {
+        return {scrollbackOpenMark(), scrollbackLegacyOpenMark(), scrollbackCloseMark(), sessionTextOpenMark(),
+                sessionTextCloseMark(), surfaceTextOpenMark(), surfaceTextCloseMark()};
+    }
     // Which pair of rules a queued replay is printed between.
     enum class RestoredKind { Scrollback, Conversation, Surface };
 
@@ -1307,7 +1311,10 @@ public:
         // been cleared, or the terminal may already be gone at shutdown. The per-pane store removes
         // its file in this case, because a restarted pane must not restore stale output; the
         // conversation's file is the conversation's record, so it is left as it is.
-        if (lines.isEmpty()) return;
+        // Nor is a pane holding only a prompt and a replay's rules: one that came up without the
+        // conversation's text would otherwise write that over the record, and every later open
+        // would replay nothing instead of falling back to the transcript.
+        if (!relay::sessiontext::hasContent(lines, restoreMarks())) return;
         QString error;
         if (!relay::sessiontext::write(path, lines, &error) && !error.isEmpty())
             fprintf(stderr, "relay: could not save this conversation's terminal text: %s\n", qPrintable(error));
@@ -1355,7 +1362,11 @@ public:
     // whose shell is live, and a busy shell has to finish first. The once-only latch is released
     // here rather than at start-up: a pane that opens one conversation after another replays each.
     // False when there is nothing saved, which is what sends the caller to the transcript.
-    bool queueSessionTextReplay(const QString &path) { return queueTextReplay(relay::sessiontext::read(path)); }
+    // Text with nothing of the conversation in it (sessiontext::hasContent) counts as none.
+    bool queueSessionTextReplay(const QString &path) {
+        const QStringList lines = relay::sessiontext::read(path);
+        return relay::sessiontext::hasContent(lines, restoreMarks()) && queueTextReplay(lines);
+    }
     bool queueTextReplay(const QStringList &lines, RestoredKind kind = RestoredKind::Conversation) {
         if (lines.isEmpty()) return false;
         m_restoredScrollback = lines;

@@ -243,6 +243,13 @@ QStringList read(const QString &path, int maxLines = windowstate::kScrollbackMax
 // take with it, and what a test asserts over.
 QStringList sidecars(const QString &sessionDir, const QString &id);
 
+// Whether saved text holds anything the conversation printed. False when, with formatting,
+// whitespace and line breaks gone, all that is left is Relay's own restore rules (`marks`) and
+// shell prompts (`user@host:path$`): what a pane that never showed the conversation saves. Joined
+// before matching, because a narrow pane wraps a rule or a prompt over several lines. Such text
+// must neither overwrite a real record nor stand in for one — the transcript is drawn instead.
+bool hasContent(const QStringList &lines, const QStringList &marks);
+
 // Where in a pane's saved lines the turn whose prompt was `prompt` began — what a rewind of that
 // turn undid, from there to the end. Relay prints a turn's first line as `✦ <prompt>`, wrapped at
 // the pane's width, so the anchor is the *last* line that is that marker followed by the start of

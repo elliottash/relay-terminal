@@ -490,6 +490,21 @@ QStringList sidecars(const QString &sessionDir, const QString &id) {
     return found;
 }
 
+bool hasContent(const QStringList &lines, const QStringList &marks) {
+    static const QRegularExpression space(QStringLiteral("\\s+"));
+    static const QRegularExpression osc(QStringLiteral("\\x1b\\][^\\x1b\\x07]*(?:\\x07|\\x1b\\\\)"));
+    static const QRegularExpression prompt(QStringLiteral("[\\w.+-]+@[\\w.+-]+:[^$#%\\s]*[$#%]"));
+    QString text;
+    for (const QString &line : lines) text += stripSgr(line).remove(osc);
+    text.remove(space);
+    for (QString mark : marks) {
+        mark.remove(space);
+        if (!mark.isEmpty()) text.remove(mark);
+    }
+    text.remove(prompt);
+    return !text.isEmpty();
+}
+
 int turnStart(const QStringList &lines, const QString &prompt) {
     static const QString marker = QStringLiteral("✦ ");   // the ✦ a turn's first line wears
     const QString first = prompt.section(QLatin1Char('\n'), 0, 0).trimmed();

@@ -690,6 +690,34 @@ private slots:
         QVERIFY(st::sidecars(root, QStringLiteral("bad")).isEmpty());
     }
 
+    // A pane that came up without the conversation saved only a prompt between a replay's rules,
+    // wrapped at a narrow width — this is the file that made a resumed session open blank. It is
+    // not the conversation's text; one line of real output is.
+    void hasContentIgnoresRulesAndPrompts() {
+        const QStringList marks{QStringLiteral("— saved terminal text from this conversation —"),
+                                QStringLiteral("— end of the conversation's saved text; this shell is new —")};
+        const QString green = QStringLiteral("\x1b[1;38;5;10m"), blue = QStringLiteral("\x1b[1;38;5;12m"),
+                      grey = QStringLiteral("\x1b[38;5;8m"), reset = QStringLiteral("\x1b[0m");
+        const QStringList empty{green + "elliott@spark-dcc9" + reset + ":" + blue + "~" + reset,
+                                blue + "/repos/relay-termina" + reset,
+                                blue + "l" + reset + "$",
+                                QString(),
+                                grey + "— saved terminal tex" + reset,
+                                grey + "t from this conversa" + reset,
+                                grey + "tion —" + reset,
+                                green + "elliott@spark-dcc9" + reset + ":" + blue + "~/repos/relay-terminal" + reset + "$",
+                                grey + "— end of the convers" + reset,
+                                grey + "ation's saved text;" + reset,
+                                grey + "this shell is new —" + reset};
+        QVERIFY(!st::hasContent(empty, marks));
+        QVERIFY(!st::hasContent({}, marks));
+        QVERIFY(!st::hasContent({QString(), QStringLiteral("   ")}, marks));
+        QStringList real = empty;
+        real.insert(4, QStringLiteral("✦ fix the resume"));
+        QVERIFY(st::hasContent(real, marks));
+        QVERIFY(st::hasContent({QStringLiteral("root@box:/tmp# ls"), QStringLiteral("a.txt")}, marks));
+    }
+
     // What a rewind undid starts at the turn's own first line — the ✦ the pane printed the prompt
     // behind — and the pane's other ✦ lines are not turns.
     void turnStartFindsThePromptLine() {
