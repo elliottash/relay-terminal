@@ -716,6 +716,9 @@ void setTierRank(const QString &tier, const QString &key, int rank) {
     if (rank < 1 || rank > 1000) return;
     QList<TierEntry> entries = tierList(tier);
     for (TierEntry &entry : entries) if (entry.key == key) entry.rank = rank;
+    std::stable_sort(entries.begin(), entries.end(), [](const TierEntry &a, const TierEntry &b) {
+        return a.rank < b.rank;
+    });
     setTierList(tier, entries);
 }
 bool inAnyList(const QString &key) {

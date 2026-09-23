@@ -1452,6 +1452,9 @@ private Q_SLOTS:
         QCOMPARE(saved.at(1).effort, QStringLiteral("high"));
         QCOMPARE(drawTier(catalog, tier, 1000, 0.1).key, QStringLiteral("glm-coding|glm-5.3"));
         QCOMPARE(drawTier(catalog, tier, 1000, 0.9).key, QStringLiteral("kimi-code|k3"));
+        curation::setTierRank(tier, QStringLiteral("glm-coding|glm-5.3"), 3);
+        QCOMPARE(curation::tierList(tier).first().key, QStringLiteral("kimi-code|k3"));
+        QCOMPARE(drawTier(catalog, tier, 1000, 0.1).key, QStringLiteral("kimi-code|k3"));
     }
 
     void nearResetAllowanceWeightsOnlyTheBestLiveRank() {
