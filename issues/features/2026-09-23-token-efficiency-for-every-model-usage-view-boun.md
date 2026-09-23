@@ -1,7 +1,7 @@
 ---
 id: 0C0V
 type: work
-status: discussing
+status: planned
 labels: [feature, context, guests, subagents]
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
@@ -19,7 +19,7 @@ Source: `docs/TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md` (9f2055a9). Goal: fewer re
 ### Owner decisions (2026-09-23)
 
 1. **Cost figures**: show provider-reported cost where given (OpenRouter, Claude), and also an *estimate* priced at the OpenRouter list price for any model with an OpenRouter listing, always labelled "estimate". No hand-kept subscription credits table.
-2. **Economic compaction trigger**: OPEN, see Questions below.
+2. **Size-based compaction**: an Options setting "Compact between turns when the last prompt was over N tokens", **off by default**, N = **256k** by default. No cost advice in the UI (no "this context costs ~$X" lines).
 3. **Tool output**: a command result enters model context at 12,000 characters (head + tail, exact byte/line counts, a re-read handle); the user's fold and the job buffer keep everything. Stale tool results are batch-cleared between compactions, **on by default**, conservative threshold, keeping the last few tool groups.
 4. **Cheaper subagents**: yes. See step 5 for how the default and the delegating agent's choice combine.
 5. **Usage view**: extend the ⓘ pane (per-turn table, task total incl. children), `/usage` as its keyboard twin, a tokens sort in the Sessions manager. No new pane.
@@ -42,8 +42,8 @@ Source: `docs/TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md` (9f2055a9). Goal: fewer re
 5. **Cheaper subagents.** The delegating agent decides per task: the delegate tool's `model` description tells it to pass `flash` for search, reading, summarising and checking, `main` for implementation, `high` for hard reasoning. When it names none, a read-only definition defaults to the Flash role and any other to Main; the user's `subagent` role setting, when set, overrides both. Before a batch of ≥3 children, the parent's transcript shows their models; a warning when all inherit the High tier.
 6. **Stable prefix.** Move the Board claims line and the memory section out of the system message into a context note appended at the turn they change (`[Relay context: ...]`, as terminal context already is), so the system message and tool list are byte-identical across a session. Record a prefix hash per request; Activity marks a request whose prefix changed and says which part (system, tools, earlier messages). Extend `tests/test_system_prompt.py` StabilityTests: a claim and a memory change leave the prefix unchanged.
 7. **`/context` breakdown.** Tokens by part: system prompt, Board policy, memory, tool schemas (per loaded group), messages, tool results, attachments. Estimated (4 chars/token) unless the provider can count; says so.
-8. **Guests.** Record the handover brief size in the turn record and Activity; do not resend it after the guest's first turn acknowledges it (already true, add a test). ⓘ shows guest-reported usage separately from Relay's transcript estimate. The economic advice (step 9) points guests at their own `/compact` and new-session controls.
-9. **Economic compaction.** Per model, marginal repeated-input cost of the next N calls = last_prompt × cached rate (or input rate on miss) × N, from the step-1 records. When it exceeds the one-off cost of compacting plus rebuilding the cache, the context chip tooltip and ⓘ say so with the figures. The automatic part waits on the open question below. The 80% window trigger stays the hard backstop.
+8. **Guests.** Record the handover brief size in the turn record and Activity; do not resend it after the guest's first turn acknowledges it (already true, add a test). ⓘ shows guest-reported usage separately from Relay's transcript estimate. 
+9. **Size-based compaction (native).** Options › Agent: "Compact between turns when the last prompt was over N tokens", off by default, N = 256,000 by default. Checked after `done`, never mid-turn; `last_prompt` from step 1 (provider usage, else the estimate). Whichever comes first wins: the 80% window trigger stays the hard backstop, so on windows under ~320k the setting only matters if N is lowered. No cost advice in the chip, ⓘ or anywhere else.
 
 ### Verification
 
@@ -57,12 +57,3 @@ Source: `docs/TOKEN-EFFICIENCY-HARNESSES-RESEARCH.md` (9f2055a9). Goal: fewer re
 - A model may re-read truncated output repeatedly. The replay counts `command_output` range calls.
 - Flash subagents may do worse on "read-only" work that is actually hard; the delegating agent can pass `main`, and the replay compares outcomes.
 - Pane.h / ⓘ are contested files; land each step separately through `scripts/land.py`.
-
-### Question for the owner (blocks step 9's automatic part only)
-
-When a long conversation has a big context (say 100k tokens) that is well below the window, Relay never compacts it, so every later step re-sends those 100k tokens. Cached, they are cheaper, but still paid on every call. Compacting shrinks it to maybe 15k, but costs one summary call and loses detail.
-
-- **(a)** Add an Options setting, off by default: "Compact between turns when the last prompt was over N tokens" (N e.g. 60k). Plus the advice figures.
-- **(b)** Only the advice now ("this context costs ~$X per 100 more steps; /compact would save ~$Y"), and decide on automatic once the replays show the trade-off.
-
-Recommendation: (a), off by default, so it is available for the replay without changing anyone's behaviour.
