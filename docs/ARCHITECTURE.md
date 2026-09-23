@@ -172,8 +172,9 @@ Layout rules:
 - **Recently closed** (`src/ClosedStack.h`, `WindowManager::remember` / `restoreClosed`). The last
   25 closed panes, tabs and windows, newest last, each with when it closed, where it sat (split
   direction, divider sizes, tab position, window geometry), hand-set tab names and what its panes
-  were called. `closed.restore` (Ctrl+Shift+Z) reopens the newest; `closed.list` (Actions › Recently closed…) opens a searchable modal
-  for reopening any of them. Sessions retains a Recently closed tab using the same list widget. The list is written to
+  were called. `closed.restore` (Ctrl+Shift+Z) reopens the newest, except while that key redoes
+  an immediate Ctrl+Z in the focused text field. `closed.list` (Actions › Recently closed…) opens
+  a searchable modal for reopening any of them. Sessions retains a Recently closed tab using the same list widget. The list is written to
   `state/closed.json` (0600, atomic) on every change and read back on start, under the same
   rules as the saved layout: only the Relay that owns the layout reads or writes it, and not at
   all when `windows/restore` is off. A pane that ends because its shell exited (`exit`) is
@@ -886,7 +887,7 @@ Default window shortcuts:
 | Action | Key | Action | Key |
 |---|---|---|---|
 | New window | Ctrl+N | Close pane → tab → window | Ctrl+W |
-| Next / previous window | Alt+Tab / Alt+Shift+Tab | Restore closed | Ctrl+Shift+Z |
+| Next / previous window | Alt+Tab / Alt+Shift+Tab | Redo recent text undo / restore closed | Ctrl+Shift+Z |
 | New tab | Ctrl+T | Actions/help / Options pane | Ctrl+? / Ctrl+Shift+O |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab | Take control, or back to the prompt (a toggle) | Ctrl+H (composer), Ctrl+Shift+H |
 | Split right | Ctrl+E | Clear the prompt box (Ctrl+Z undoes) | Ctrl+Q (composer), Ctrl+Shift+Q |

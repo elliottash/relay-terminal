@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RichEditor.h"
+#include "TextRedoShortcut.h"
 #include "PromptHistory.h"
 #include <QApplication>
 #include <QFile>
@@ -12,11 +13,108 @@
 #include <QTimer>
 #include <QTextBlock>
 #include <QTextCursor>
+#include <QTextEdit>
 #include <QTextLayout>
+
+class RedoShortcutHarness : public QObject {
+public:
+    TextRedoShortcut shortcut{this};
+    int restores = 0;
+    QString redoAction = QStringLiteral("closed.restore");
+
+    bool eventFilter(QObject *object, QEvent *event) override {
+        if (event->type() != QEvent::ShortcutOverride && event->type() != QEvent::KeyPress)
+            return false;
+        auto *widget = qobject_cast<QWidget *>(object);
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (!widget || key->key() != Qt::Key_Z) return false;
+        const auto modifiers = key->modifiers() & ~Qt::KeypadModifier;
+        const QString action = modifiers == (Qt::ControlModifier | Qt::ShiftModifier)
+            ? redoAction : QString();
+        if (shortcut.handle(widget, key, action, event->type())) return true;
+        if (action == QStringLiteral("closed.restore")) {
+            key->accept();
+            if (event->type() == QEvent::KeyPress) ++restores;
+            return true;
+        }
+        return false;
+    }
+};
 
 class EditorTests : public QObject {
     Q_OBJECT
 private Q_SLOTS:
+    void shiftZRedoesOnlyAnImmediateTextUndo() {
+        RedoShortcutHarness harness;
+        qApp->installEventFilter(&harness);
+        QPlainTextEdit plain;
+        QLineEdit line;
+        QTextEdit rich;
+        plain.show(); line.show(); rich.show();
+
+        QTest::keyClicks(&plain, "first");
+        QTest::keyClick(&plain, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(plain.toPlainText(), QString());
+        QTest::keyClick(&plain, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(plain.toPlainText(), QStringLiteral("first"));
+        QCOMPARE(harness.restores, 0);
+        QTest::keyClick(&plain, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(harness.restores, 1);
+
+        QTest::keyClicks(&line, "line");
+        QTest::keyClick(&line, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(line.text(), QString());
+        QTest::keyClick(&line, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(line.text(), QStringLiteral("line"));
+        QCOMPARE(harness.restores, 1);
+
+        QTest::keyClicks(&rich, "rich");
+        QTest::keyClick(&rich, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(rich.toPlainText(), QString());
+        QTest::keyClick(&rich, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(rich.toPlainText(), QStringLiteral("rich"));
+        QCOMPARE(harness.restores, 1);
+
+        QTest::keyClick(&rich, Qt::Key_Z, Qt::ControlModifier);
+        QTest::keyClicks(&rich, "new"); // a new edit invalidates redo
+        QTest::keyClick(&rich, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(rich.toPlainText(), QStringLiteral("new"));
+        QCOMPARE(harness.restores, 2);
+
+        QTest::keyClick(&rich, Qt::Key_Z, Qt::ControlModifier);
+        line.setFocus();
+        QCoreApplication::processEvents();
+        rich.setFocus();
+        QCoreApplication::processEvents();
+        QTest::keyClick(&rich, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(harness.restores, 3);
+
+        QLineEdit empty;
+        empty.show();
+        QTest::keyClick(&empty, Qt::Key_Z, Qt::ControlModifier); // no undo occurred
+        QTest::keyClick(&empty, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(harness.restores, 4);
+        qApp->removeEventFilter(&harness);
+    }
+
+    void unboundShiftZDoesNotRedoAnOldUndo() {
+        RedoShortcutHarness harness;
+        harness.redoAction.clear(); // another preset gives Restore closed a different key
+        qApp->installEventFilter(&harness);
+        QLineEdit line;
+        QLineEdit other;
+        line.show(); other.show();
+        QTest::keyClicks(&line, "old");
+        QTest::keyClick(&line, Qt::Key_Z, Qt::ControlModifier);
+        other.setFocus();
+        QCoreApplication::processEvents();
+        line.setFocus();
+        QCoreApplication::processEvents();
+        QTest::keyClick(&line, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(line.text(), QString());
+        QCOMPARE(harness.restores, 0);
+        qApp->removeEventFilter(&harness);
+    }
     void longDraftFollowsPaneHeightLimit() {
         RichEditor editor;
         editor.resize(420, 64);

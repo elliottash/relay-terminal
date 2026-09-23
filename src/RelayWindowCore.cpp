@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RelayWindow.h"
+#include "TextRedoShortcut.h"
 #include "WindowManagerImpl.h"
 
 bool RelayWindow::eventFilter(QObject *object, QEvent *event) {
@@ -165,9 +166,19 @@ bool RelayWindow::eventFilter(QObject *object, QEvent *event) {
                                                  | key->key()).toString(QKeySequence::PortableText);
             if (local.contains(pressed)) return QMainWindow::eventFilter(object, event);
         }
-        // The Actions palette answers its own keys, the chord that opened it included (#MAGP).
-        if (m_palette && m_palette->isAncestorOf(widget)) return QMainWindow::eventFilter(object, event);
         const QString id = Keymap::instance().match(key);
+        if (key->key() == Qt::Key_Z && (key->modifiers() & Qt::ControlModifier)) {
+            auto *state = static_cast<TextRedoShortcut *>(
+                findChild<QObject *>(QStringLiteral("recentTextRedo"), Qt::FindDirectChildrenOnly));
+            if (!state) {
+                state = new TextRedoShortcut(this);
+                state->setObjectName(QStringLiteral("recentTextRedo"));
+            }
+            if (state->handle(widget, key, id, event->type())) return true;
+        }
+        // The Actions palette answers its own keys, the chord that opened it included (#MAGP).
+        if (m_palette && m_palette->isAncestorOf(widget) && id != QStringLiteral("closed.restore"))
+            return QMainWindow::eventFilter(object, event);
         if (id.isEmpty()) return QMainWindow::eventFilter(object, event);
         // A program such as vim owns its keys, unless the program_keys rule lets this shortcut act.
         Pane *pane = paneOf(widget);

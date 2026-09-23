@@ -122,7 +122,7 @@ that conflict.
 | Ctrl+Shift+L | Step through files, folders and links in the output (Enter opens, Esc leaves) |
 | Alt+Arrows | Move between panes |
 | Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window) |
-| Ctrl+Shift+Z | Reopen the last closed pane, tab or window, with its text and conversation |
+| Ctrl+Shift+Z | Redo immediately after Ctrl+Z in the same text field; otherwise reopen the last closed pane, tab or window |
 | F12 | Toggle native terminal input (same hand-over as Ctrl+H) |
 | Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |
@@ -382,8 +382,8 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   Actions › Start a fresh window set.
 - **Windows, tabs and panes.** Each pane has its own shell, prompt, agent and conversation.
   Closed panes, tabs and windows restore in the same directories with new shells; Ctrl+Shift+Z
-  brings the last one back, and Actions › Recently closed keeps the last 25 — a list that
-  survives a restart. Hovering a
+  brings the last one back unless it is redoing a Ctrl+Z undo in the focused text field.
+  Actions › Recently closed keeps the last 25 — a list that survives a restart. Hovering a
   pane shows a button row: drag grip ⠿, split right, split down, move to a new tab, close. Drag
   the grip onto another pane's edge (a drop zone shows) to move the pane there, or onto a tab bar
   to make it a tab; Ctrl+Alt+Left/Right/Up/Down moves the focused pane, and Ctrl+Alt+Left or
