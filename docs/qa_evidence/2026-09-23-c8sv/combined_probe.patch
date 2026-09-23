@@ -1,0 +1,61 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 515900ce..0f97e0f4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -941,7 +941,7 @@ if(BUILD_TESTING)
+         target_include_directories(${console_target} PRIVATE src engine)
+         target_link_libraries(${console_target} PRIVATE
+             relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands
+-            relay-agentcontext
++            relay-agentcontext relay-globalspane
+             relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker
+             relay-modelspane relay-filterpopup relay-actionpalette
+             relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor
+diff --git a/tests/consolemode_test.cpp b/tests/consolemode_test.cpp
+index 33f4d2c3..b1ff9354 100644
+--- a/tests/consolemode_test.cpp
++++ b/tests/consolemode_test.cpp
+@@ -19,6 +19,7 @@
+ // gate honest: a failed check names its line and the run exits non-zero.
+ 
+ #include "Pane.h"
++#include "GlobalsPane.h"
+ 
+ #include <QApplication>
+ #include <QPointer>
+@@ -1357,6 +1358,10 @@ void rewindRemovesOnlyTheBranchAndLinksItsCompleteText()
+ // same links clicked again send nothing. A declined repeat is a note with no links.
+ void aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript()
+ {
++    relay::globals::GlobalsPane globals;
++    globals.show();
++    QList<QJsonObject> globalsRequests;
++    globals.onRequest = [&globalsRequests](const QJsonObject &message) { globalsRequests << message; };
+     StubContext context;
+     context.workspace = home->path();
+     Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+@@ -1367,7 +1372,7 @@ void aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript()
+     QStringList edited;
+     console.onOpenMemorySuggestion = [&edited](const QString &id) { edited << id; };
+     int decided = 0;
+-    console.onMemorySuggestionDecided = [&decided] { ++decided; };
++    console.onMemorySuggestionDecided = [&decided, &globals] { ++decided; globals.refresh(); };
+     console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+     console.deliverWorkerEvent({{"event", "agent_started"}, {"id", "t1"}});
+     auto suggest = [&](const QString &call, const QJsonObject &result) {
+@@ -1415,6 +1420,15 @@ void aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript()
+     console.deliverWorkerEvent({{"event", "globals_suggestion_accepted"}, {"id", sent.first().value("id")}, {"sid", "S1"},
+                                 {"record", QJsonObject{{"kind", "memory"}, {"key", "M1"}}}});
+     CHECK_EQ(decided, 1);
++    CHECK_EQ(globalsRequests.size(), 2);
++    if (globalsRequests.size() == 2) {
++        CHECK_EQ(globalsRequests.at(0).value("type").toString(), QStringLiteral("globals_suggestions"));
++        CHECK_EQ(globalsRequests.at(1).value("type").toString(), QStringLiteral("globals_list"));
++        globals.handleEvent({{"event", "globals_suggestions"}, {"id", globalsRequests.at(0).value("id")},
++                             {"pending", QJsonArray{}}, {"rejected", QJsonArray{}}});
++        globals.handleEvent({{"event", "globals_state"}, {"id", globalsRequests.at(1).value("id")},
++                             {"records", QJsonArray{}}});
++    }
+     sent.clear();
+     console.openOutputTarget(target(QStringLiteral("no"), QStringLiteral("S2")), 0, true);
+     CHECK_EQ(sent.size(), 1);
