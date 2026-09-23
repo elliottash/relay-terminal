@@ -7,9 +7,9 @@ Offline throughout: providers and guest harnesses are scripted, the OpenRouter p
 in, and every session directory is temporary.
 """
 import json
-import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -17,7 +17,6 @@ from unittest import mock
 from relay_core import openrouter_catalog, sessions
 from relay_core.agent import Agent
 from relay_core.agents_defs import load_catalog
-from relay_core.provider import ProviderConfig
 from relay_core.queue import TurnSupervisor
 from relay_core.session_protocol import SessionCommands
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -272,7 +271,13 @@ class ChildrenInfoTests(Home):
         self.assertEqual(info["children_usage"]["total_tokens"], child["total_tokens"])
         self.assertEqual(info["task_usage"]["total_tokens"],
                          info["usage"]["total_tokens"] + child["total_tokens"])
-        saved = json.loads(self.store.path(agent.session_id).read_text())
+        # `done` goes out before the turn's last autosave (Agent.ask's `finally`), so wait for it.
+        deadline = time.monotonic() + 10
+        while True:
+            saved = json.loads(self.store.path(agent.session_id).read_text())
+            if saved.get("children_usage") or time.monotonic() > deadline:
+                break
+            time.sleep(0.02)
         self.assertEqual(saved["children_usage"], {thread_id: child})
 
 
