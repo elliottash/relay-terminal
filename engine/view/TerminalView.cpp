@@ -26,6 +26,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QMovie>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -2453,8 +2454,7 @@ QRect TerminalView::imageRect(const ImagePlacement &image, QSize natural) const
 void TerminalView::paintImages(QPainter &p, int firstRow, int lastRow)
 {
     imagesOnRows(firstRow, lastRow, &m_imagePlacements);
-    if (m_imagePlacements.empty())
-        return;
+    QSet<QString> visibleAnimation;
     const qreal dpr = devicePixelRatioF();
     for (const ImagePlacement &image : m_imagePlacements) {
         // Only the rows that carry the picture's cells, and only the grid: a picture scrolled half
@@ -2467,7 +2467,30 @@ void TerminalView::paintImages(QPainter &p, int firstRow, int lastRow)
         QRect r;
         if (natural.isValid()) {
             r = imageRect(image, natural);
-            picture = m_images.picture(image.ref.path, r.size(), dpr, &state);
+            const QString path = image.ref.path;
+            if (path.endsWith(QStringLiteral(".gif"), Qt::CaseInsensitive) ||
+                path.endsWith(QStringLiteral(".webp"), Qt::CaseInsensitive)) {
+                QMovie *movie = m_animatedImages.value(path, nullptr);
+                if (!movie && m_animatedImages.size() < 16 && QFileInfo::exists(path)) {
+                    auto *candidate = new QMovie(path, QByteArray(), this);
+                    candidate->setCacheMode(QMovie::CacheNone);
+                    if (candidate->isValid() && candidate->frameCount() != 1) {
+                        movie = candidate;
+                        m_animatedImages.insert(path, movie);
+                        connect(movie, &QMovie::frameChanged, this, [this](int) { update(); });
+                    } else {
+                        candidate->deleteLater();
+                    }
+                }
+                if (movie) {
+                    visibleAnimation.insert(path);
+                    if (movie->state() != QMovie::Running) movie->start();
+                    picture = movie->currentImage();
+                    if (!picture.isNull())
+                        picture = picture.scaled(r.size() * dpr, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                }
+            }
+            if (picture.isNull()) picture = m_images.picture(path, r.size(), dpr, &state);
         }
         if (!picture.isNull()) {
             p.save();
@@ -2489,6 +2512,8 @@ void TerminalView::paintImages(QPainter &p, int firstRow, int lastRow)
                    QStringLiteral("[image: %1]").arg(QFileInfo(image.ref.path).fileName()));
         p.restore();
     }
+    for (auto it = m_animatedImages.cbegin(); it != m_animatedImages.cend(); ++it)
+        if (!visibleAnimation.contains(it.key())) it.value()->stop();
 }
 
 bool TerminalView::imageAt(const QPoint &pos, ImagePlacement *image, bool *missing)
@@ -2626,7 +2651,64 @@ TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
         }
     }
     m_mediaInfo.insert(manifest, info);
+    if (info.valid && info.kind == QStringLiteral("audio") &&
+        (info.durationMs == 0 || info.waveform.isEmpty()) && !m_audioProbes.contains(manifest))
+        probeAudio(manifest, info.path);
     return info;
+}
+
+void TerminalView::probeAudio(const QString &manifest, const QString &path)
+{
+    m_audioProbes.insert(manifest);
+    if (!QFileInfo(path).isFile()) return;
+    const QString ffprobe = QStandardPaths::findExecutable(QStringLiteral("ffprobe"));
+    if (!ffprobe.isEmpty()) {
+        auto *process = new QProcess(this);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process, manifest](int code, QProcess::ExitStatus) {
+            if (code == 0 && m_mediaInfo.contains(manifest)) {
+                bool ok = false;
+                const double seconds = process->readAllStandardOutput().trimmed().toDouble(&ok);
+                if (ok && std::isfinite(seconds) && seconds > 0 && seconds < 7 * 24 * 3600) {
+                    m_mediaInfo[manifest].durationMs = qRound64(seconds * 1000);
+                    update();
+                }
+            }
+            process->deleteLater();
+        });
+        process->start(ffprobe, {QStringLiteral("-v"), QStringLiteral("error"),
+                                 QStringLiteral("-show_entries"), QStringLiteral("format=duration"),
+                                 QStringLiteral("-of"), QStringLiteral("default=noprint_wrappers=1:nokey=1"), path});
+    }
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (!ffmpeg.isEmpty()) {
+        auto *process = new QProcess(this);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process, manifest](int code, QProcess::ExitStatus) {
+            if (code == 0 && m_mediaInfo.contains(manifest)) {
+                const QByteArray pcm = process->readAllStandardOutput().left(480000);
+                QVector<qreal> bars;
+                const int samples = pcm.size() / 2;
+                for (int bar = 0; bar < 64 && samples > 0; ++bar) {
+                    int peak = 0;
+                    for (int i = bar * samples / 64; i < (bar + 1) * samples / 64; ++i) {
+                        const auto lo = static_cast<unsigned char>(pcm.at(i * 2));
+                        const auto hi = static_cast<signed char>(pcm.at(i * 2 + 1));
+                        peak = std::max(peak, std::abs(int(hi) * 256 + int(lo)));
+                    }
+                    bars.append(qreal(peak) / 32768.0);
+                }
+                m_mediaInfo[manifest].waveform = bars;
+                update();
+            }
+            process->deleteLater();
+        });
+        process->start(ffmpeg, {QStringLiteral("-nostdin"), QStringLiteral("-v"), QStringLiteral("error"),
+                                QStringLiteral("-t"), QStringLiteral("30"), QStringLiteral("-i"), path,
+                                QStringLiteral("-ac"), QStringLiteral("1"), QStringLiteral("-ar"),
+                                QStringLiteral("8000"), QStringLiteral("-f"), QStringLiteral("s16le"),
+                                QStringLiteral("-")});
+    }
 }
 
 QRect TerminalView::mediaRect(const MediaPlacement &media) const

@@ -17,6 +17,7 @@
 #include <QHash>
 #include <QPointer>
 #include <QRawFont>
+#include <QSet>
 #include <QTimer>
 #include <QVector>
 #include <QWidget>
@@ -31,6 +32,7 @@ class QLineEdit;
 class QProcess;
 class QMediaPlayer;
 class QAudioOutput;
+class QMovie;
 
 namespace relay {
 
@@ -465,6 +467,7 @@ private:
     void playAudio(const MediaInfo &info, qint64 fromMs);
     void stopAudio(bool preservePosition = false);
     qint64 audioPositionMs() const;
+    void probeAudio(const QString &manifest, const QString &path);
     QString currentDirectory() const;
     bool mouseToProgram(Qt::KeyboardModifiers mods) const;
     void sendMouse(QMouseEvent *e, int action);
@@ -581,8 +584,10 @@ private:
     QHash<QString, inlineimage::ImageRef> m_imageUris;   // an empty path: not a well-formed image URI
     std::vector<ImagePlacement> m_imagePlacements;
     ImageCache m_images;
+    QHash<QString, QMovie *> m_animatedImages;
     std::unordered_map<uint32_t, inlinemedia::MediaRef> m_frameMedia;
     QHash<QString, MediaInfo> m_mediaInfo;
+    QSet<QString> m_audioProbes;
     std::vector<MediaPlacement> m_mediaPlacements;
     QProcess *m_audioProcess = nullptr;
     QMediaPlayer *m_qtPlayer = nullptr;  // Qt 6 Multimedia, when built
