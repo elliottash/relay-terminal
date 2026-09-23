@@ -275,6 +275,11 @@ private:
         add("files.explorer", "pane", "File explorer: open or close this pane's folder in an explorer pane",
             {QStringLiteral("Ctrl+B"), QStringLiteral("Ctrl+Shift+B")});
         add("files.open", "pane", "Open a file in a preview pane", {});
+        // Word wrap in the file preview or the editable file pane, VS Code's key (#—: owner request
+        // 2026-09-21). Alt+Z is free in the default table and in all four preset tables, and a
+        // bare Alt+letter never reaches a program through actsInsidePrograms, so nothing owns it.
+        add("files.toggleWrap", "pane", "Toggle word wrap in the file preview or editor pane",
+            {QStringLiteral("Alt+Z")});
         add("board.open", "pane", "Board: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+S")});
         // The Test suites pane (card #7BM4): the project's tests, their history and the runs, in a
         // pane beside the Board. **No default key.** The obvious one, Ctrl+Shift+T, is New

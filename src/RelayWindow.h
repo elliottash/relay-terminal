@@ -685,6 +685,24 @@ public:
         updateTitles();
     }
 
+    // Alt+Z (files.toggleWrap): word wrap in the preview the user is reading. The one focus sits
+    // in wins; otherwise the active leaf if it is a preview pane, else any preview pane in the
+    // same tab. When nothing can wrap (no preview on screen, a rendered Markdown), nothing acts.
+    void toggleWrapNear(QWidget *leaf) {
+        if (QWidget *focused = QApplication::focusWidget())
+            for (QWidget *w = focused; w; w = w->parentWidget())
+                if (auto *preview = dynamic_cast<relay::FilePreview *>(w); preview && preview->toggleWrap()) return;
+        QWidget *page = pageOf(leaf);
+        if (!page) return;
+        const auto leaves = leavesIn(page);
+        for (QWidget *l : leaves)
+            if (auto *tool = dynamic_cast<ToolPane *>(l);
+                tool && tool->kind() == ToolPane::Kind::Preview && tool == leaf && tool->preview()->toggleWrap()) return;
+        for (QWidget *l : leaves)
+            if (auto *tool = dynamic_cast<ToolPane *>(l);
+                tool && tool->kind() == ToolPane::Kind::Preview && tool->preview()->toggleWrap()) return;
+    }
+
     // "Open items with a single click" (issue #0C7V) reaches every explorer pane that is already
     // open, in every window, not just the next one.
     static void applySingleClickSetting() {
@@ -1263,6 +1281,7 @@ private:
             const QString file = pickFileForPreview();
             if (!file.isEmpty()) openPath(file, 0, m_activeLeaf);
         }
+        else if (id == QStringLiteral("files.toggleWrap")) toggleWrapNear(m_activeLeaf);
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
         else if (id == QStringLiteral("tests.open")) openTestSuitesPane();   // card #7BM4
         else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();
@@ -4654,6 +4673,7 @@ private:
             items << init;
         }
         items << actionItem(panes, QStringLiteral("Open file…"), QStringLiteral("Preview a file in a pane"), QStringLiteral("files.open"));
+        items << actionItem(panes, QStringLiteral("Toggle word wrap"), QStringLiteral("Word wrap in the file preview or editor pane"), QStringLiteral("files.toggleWrap"));
         // The one key makes a pane on the right; all four directions keep an action of their own
         // so they can be run from here or bound (issue #78BN).
         items << actionItem(panes, QStringLiteral("New pane to the right"),

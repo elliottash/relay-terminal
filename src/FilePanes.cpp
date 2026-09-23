@@ -2,6 +2,7 @@
 #include "FilePanes.h"
 #include "CopyOnSelect.h"
 #include "Hints.h"
+#include "Keymap.h"
 #include "RemoteFiles.h"
 #include "Theme.h"
 #include <QBuffer>
@@ -945,6 +946,12 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     m_wrap->setAccessibleName(QStringLiteral("Word wrap"));
     m_wrap->setCheckable(true);
     m_wrap->hide();
+    // The slow path (clicking Word wrap) teaches the fast one (Alt+Z, files.toggleWrap).
+    connect(m_wrap, &QToolButton::clicked, this, [this] {
+        if (relay::ShortcutHints::instance().shouldShow(QStringLiteral("files.wrapToggle")))
+            setNotice(relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("files.toggleWrap")),
+                                                     QStringLiteral("toggle word wrap")));
+    });
     header->addWidget(m_title, 1);
     header->addWidget(m_hostChip);
     header->addWidget(m_edit);
@@ -1791,6 +1798,15 @@ void FilePreview::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
     QTimer::singleShot(0, this, [this] { updateTitleText(); });
     updateImage();
+}
+
+// Alt+Z (files.toggleWrap): the same switch the header's Word wrap button moves, so the state the
+// user sees and the state the key sets can never disagree. A rendered Markdown file has no wrap
+// to toggle; the key then returns false and the window may act on another preview instead.
+bool FilePreview::toggleWrap() {
+    if (!(m_kind == Kind::Text || showingSource())) return false;
+    m_wrap->setChecked(!m_wrap->isChecked());
+    return true;
 }
 
 void FilePreview::goToLine(int line) {

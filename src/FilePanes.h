@@ -218,6 +218,10 @@ public:
     bool save();
     // Scroll a text preview to a 1-based line and highlight it (no-op for other kinds).
     void goToLine(int line);
+    // Word wrap on or off (Alt+Z, files.toggleWrap): the same switch the header button moves.
+    // Returns false for a file whose view does not wrap (image, PDF, rendered Markdown), so the
+    // key can fall through to another preview pane instead of doing nothing silently.
+    bool toggleWrap();
     QString path() const { return m_path; }
     QString title() const;
     Kind kind() const { return m_kind; }

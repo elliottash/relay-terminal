@@ -47,6 +47,7 @@ const QSet<QString> &readActions() {
         QStringLiteral("projects.open"), QStringLiteral("globals.open"),
         QStringLiteral("closed.list"),
         QStringLiteral("files.explorer"),
+        QStringLiteral("files.toggleWrap"),   // toggles a view setting; reversible in one click
         QStringLiteral("agent.info"),
         QStringLiteral("agent.internalsPane"),
         QStringLiteral("agent.requests"),
