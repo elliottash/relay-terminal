@@ -8524,6 +8524,9 @@ private:
             const QString note = event.value(QStringLiteral("note")).toString();
             if (!note.isEmpty()) printInline(note + '\n', Ink::Note);
             closeInline();
+            // The rebuild moved Readline's old prompt. Like saved-text replay, ask the idle
+            // shell for a fresh prompt so a later resize cannot redraw at its stale position.
+            if (collapsed && hasShell() && shellIdleAtPrompt()) sendShellInput(QStringLiteral("\n"));
             const QString prompt = event.value(QStringLiteral("prompt")).toString();
             // Rewind code keeps the chat, so the turn's prompt is not put back.
             if (!prompt.isEmpty() && restore != QStringLiteral("files") && m_editor->toPlainText().isEmpty()) {

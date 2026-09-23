@@ -15,3 +15,14 @@ PASS   : CoreTest::ansiSerializerRetainsLinksOnlyForLiveReplay(libvterm)
 PASS   : CoreTest::cleanupTestCase()
 Totals: 5 passed, 0 failed, 0 skipped, 0 blacklisted, 0ms
 ********* Finished testing of CoreTest *********
+
+Final shell-prompt follow-up:
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 43: consolemode
+1/1 Test #43: consolemode ......................   Passed    1.61 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   1.62 sec
+Live Xvfb driver: PASS, clicked notice opens saved branch after shell prompt refresh.
