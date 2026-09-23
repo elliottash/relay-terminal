@@ -11,7 +11,10 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPalette>
+#include <QPushButton>
+#include <QResizeEvent>
 #include <QSettings>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -264,6 +267,25 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     m_list->installEventFilter(this);
     layout->addWidget(m_list, 1);
 
+    m_compactPanel = new QWidget;
+    auto *compactBox = new QVBoxLayout(m_compactPanel);
+    compactBox->setContentsMargins(0, 0, 0, 0);
+    compactBox->setSpacing(3);
+    m_compactDetails = new QLabel;
+    m_compactDetails->setWordWrap(true);
+    m_compactDetails->setMinimumHeight(3 * m_compactDetails->fontMetrics().lineSpacing() + 4);
+    compactBox->addWidget(m_compactDetails);
+    auto *compactActions = new QHBoxLayout;
+    m_compactChoose = new QPushButton(QStringLiteral("choose model…"));
+    m_compactChoose->setObjectName(QStringLiteral("jobsCompactChoose"));
+    m_compactClear = new QPushButton(QStringLiteral("clear override"));
+    compactActions->addWidget(m_compactChoose);
+    compactActions->addWidget(m_compactClear);
+    compactActions->addStretch(1);
+    compactBox->addLayout(compactActions);
+    m_compactPanel->hide();
+    layout->addWidget(m_compactPanel);
+
     m_footer = new QLabel(QStringLiteral(
         "↑↓ a job · enter picks the model it runs on · delete puts it back on its tier · esc back to the pane"));
     m_footer->setObjectName(QStringLiteral("transcriptHeader"));
@@ -272,7 +294,55 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
 
     connect(m_list, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *, int) { openOverride(); });
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *, int) { openOverride(); });
+    connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { updateCompactDetails(); });
+    connect(m_compactChoose, &QPushButton::clicked, this, [this] { openOverride(); });
+    connect(m_compactClear, &QPushButton::clicked, this, [this] { clearOverride(); });
     rebuild();
+}
+
+void JobsTab::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    // The tree's viewport is laid out after its parent; use its final width for the columns.
+    QTimer::singleShot(0, this, [this] { updateColumns(); });
+}
+
+void JobsTab::updateColumns() {
+    if (!m_list) return;
+    const bool compact = width() < 620;
+    m_list->setColumnHidden(ColWhat, compact);
+    m_list->setColumnHidden(ColOverride, compact);
+    m_list->header()->setSectionResizeMode(ColRuns, compact ? QHeaderView::Stretch : QHeaderView::Interactive);
+    m_compactPanel->setVisible(compact);
+    m_blurb->setText(compact
+        ? QStringLiteral("Each job follows its tier until given its own model. “runs on” is this pane's worker's current answer.")
+        : QStringLiteral("Every job relay does has a model. A job follows the tier it is grouped under — change that "
+                         "tier's list on priorities and every job under it moves — until you give the job a model of "
+                         "its own. “runs on” is what this pane's worker says it is using right now."));
+    if (compact) {
+        const int room = m_list->viewport()->width();
+        m_list->setColumnWidth(ColJob, qBound(130, room * 45 / 100, 200));
+    } else {
+        m_list->setColumnWidth(ColJob, 130);
+        m_list->setColumnWidth(ColOverride, 175);
+        m_list->setColumnWidth(ColRuns, 165);
+    }
+    updateCompactDetails();
+}
+
+void JobsTab::updateCompactDetails() {
+    if (!m_compactDetails) return;
+    const Job *job = jobFor(currentRole());
+    if (!job) {
+        m_compactDetails->setText(QStringLiteral("Select a job to see its override."));
+        m_compactChoose->setEnabled(false);
+        m_compactClear->setVisible(false);
+        return;
+    }
+    m_compactDetails->setText(QStringLiteral("%1 — %2\noverride: %3")
+        .arg(job->name, job->what, overrideText(job->role)));
+    m_compactChoose->setEnabled(job->settable);
+    m_compactClear->setVisible(job->settable &&
+        (!rolestore::overrideKey(job->role).isEmpty() || !rolestore::overrideTier(job->role).isEmpty()));
 }
 
 void JobsTab::setData(const Data &data) {
@@ -416,7 +486,9 @@ void JobsTab::rebuild() {
             item->setText(ColOverride, overrideText(job->role));
 
             const QJsonObject resolved = m_data.roles.value(job->role).toObject();
-            QStringList tip{job->what};
+            QStringList tip{job->what,
+                            QStringLiteral("runs on: %1").arg(item->text(ColRuns)),
+                            QStringLiteral("override: %1").arg(overrideText(job->role))};
             if (runs.isEmpty())
                 tip << QStringLiteral("Nothing is resolved yet: this pane's worker has not reported.");
             if (!str(resolved, "note").isEmpty()) tip << str(resolved, "note");
@@ -458,6 +530,7 @@ void JobsTab::rebuild() {
             m_list->setItemWidget(item, ColOverride, cell);
         }
     }
+    updateCompactDetails();
 }
 
 QString JobsTab::currentRole() const {
@@ -494,9 +567,10 @@ QWidget *JobsTab::anchorForCurrentRow() {
     }
     QTreeWidgetItem *item = m_list->currentItem();
     const QRect rect = item ? m_list->visualItemRect(item) : QRect();
+    const int anchorColumn = m_list->isColumnHidden(ColOverride) ? ColRuns : ColOverride;
     if (rect.isValid())
-        m_anchor->setGeometry(m_list->columnViewportPosition(ColOverride), rect.top(),
-                              std::max(120, m_list->columnWidth(ColOverride)), rect.height());
+        m_anchor->setGeometry(m_list->columnViewportPosition(anchorColumn), rect.top(),
+                              std::max(120, m_list->columnWidth(anchorColumn)), rect.height());
     else
         m_anchor->setGeometry(0, 0, m_list->viewport()->width(), 1);
     m_anchor->show();

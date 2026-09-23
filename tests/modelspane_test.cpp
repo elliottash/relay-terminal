@@ -18,11 +18,13 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QScrollBar>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
@@ -169,12 +171,13 @@ private Q_SLOTS:
                                          QStringLiteral("anthropic|claude-opus-5-5")});
     }
 
-    // ----- the four tabs --------------------------------------------------------------------
+    // ----- the Models tabs ------------------------------------------------------------------
 
-    void theFourTabsAreTheStepsOfAvailabilityAndThenTheJobs() {
+    void theTabsSeparateAvailabilityPrioritiesEffortAndJobs() {
         ModelsPane pane(providerSections());
         QCOMPARE(tabs(pane.tabBar()), (QStringList{QStringLiteral("providers"), QStringLiteral("available"),
-                                                   QStringLiteral("priorities"), QStringLiteral("jobs")}));
+                                                   QStringLiteral("priorities"), QStringLiteral("effort"),
+                                                   QStringLiteral("jobs")}));
         QVERIFY(pane.providers() != nullptr);
         QVERIFY(pane.picker() != nullptr);
         // The providers tab is Options' own renderer, drawing the section it was handed.
@@ -183,6 +186,84 @@ private Q_SLOTS:
         QVERIFY(pane.providers()->visibleRowIds().contains(QStringLiteral("models.key:glm-coding")));
         // …with its own tab row and footer out of the way: this pane draws those.
         QVERIFY(pane.providers()->embedded());
+    }
+
+    void everyTabKeepsItsMainControlsInANarrowPane() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high")}});
+        Served served;
+        ModelsPane pane(providerSections());
+        auto target = targetFor(&served);
+        const QJsonObject resolved{{QStringLiteral("preset"), QStringLiteral("glm-coding")},
+                                   {QStringLiteral("model"), QStringLiteral("glm-5.3")},
+                                   {QStringLiteral("effort"), QStringLiteral("high")}};
+        target.roleSummary.insert(QStringLiteral("subagent"), resolved);
+        target.tierSummary.insert(QStringLiteral("main"), resolved);
+        pane.setTarget(target);
+        pane.resize(420, 720);
+        pane.show();
+        QTest::qWait(40);
+        QVERIFY(pane.width() <= 420);
+        QVERIFY(pane.tabBar()->tabRect(4).right() <= pane.tabBar()->width());
+        const QString evidence = qEnvironmentVariable("RELAY_N4PW_EVIDENCE");
+        if (!evidence.isEmpty()) QDir().mkpath(evidence);
+        const auto capture = [&pane, &evidence](const QString &name) {
+            if (!evidence.isEmpty()) QVERIFY(pane.grab().save(evidence + QLatin1Char('/') + name + QStringLiteral(".png")));
+        };
+
+        pane.showTab(ModelsPane::providersTab());
+        QCoreApplication::processEvents();
+        QVERIFY(pane.providers()->visibleRowIds().contains(QStringLiteral("models.key:glm-coding")));
+        capture(QStringLiteral("01-providers"));
+
+        for (const auto &tab : {ModelsPane::availableTab(), ModelsPane::prioritiesTab(), ModelsPane::effortTab()}) {
+            pane.showTab(tab);
+            QCoreApplication::processEvents();
+            auto *list = pane.picker()->list();
+            QVERIFY(!list->isColumnHidden(ColModel));
+            QVERIFY(list->isColumnHidden(ColVia));
+            QVERIFY(list->isColumnHidden(ColReasoning));
+            QVERIFY(list->viewport()->width() >= 250);
+            QCOMPARE(list->horizontalScrollBar()->maximum(), 0);
+            QCOMPARE(pane.picker()->findChild<QListWidget *>(QStringLiteral("modelLevels"))->isVisible(),
+                     tab == ModelsPane::effortTab());
+            capture(tab == ModelsPane::availableTab() ? QStringLiteral("02-available")
+                    : tab == ModelsPane::prioritiesTab() ? QStringLiteral("03-priorities")
+                                                         : QStringLiteral("04-effort"));
+        }
+        auto *levels = pane.picker()->findChild<QListWidget *>(QStringLiteral("modelLevels"));
+        QVERIFY(levels != nullptr);
+        for (int i = 0; i < levels->count(); ++i)
+            if (levels->item(i)->text() == QStringLiteral("max")) levels->setCurrentRow(i);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QTest::keyClick(pane.picker()->list(), Qt::Key_Delete);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 1);
+
+        pane.showTab(ModelsPane::jobsTab());
+        QTest::qWait(40);
+        auto *jobs = pane.jobs()->list();
+        QVERIFY(pane.jobs()->selectRole(QStringLiteral("subagent")));
+        QCoreApplication::processEvents();
+        QVERIFY(jobs->isColumnHidden(1));
+        QVERIFY(!jobs->isColumnHidden(2));
+        QVERIFY(jobs->isColumnHidden(3));
+        QCOMPARE(jobs->horizontalScrollBar()->maximum(), 0);
+        auto *choose = pane.jobs()->findChild<QPushButton *>(QStringLiteral("jobsCompactChoose"));
+        QVERIFY(choose != nullptr);
+        QVERIFY(choose->isVisible() && choose->isEnabled());
+        capture(QStringLiteral("05-jobs"));
+
+        pane.resize(900, 720);
+        pane.showTab(ModelsPane::availableTab());
+        QTest::qWait(40);
+        QVERIFY(!pane.picker()->list()->isColumnHidden(ColVia));
+        QVERIFY(pane.picker()->list()->isColumnHidden(ColReasoning));
+        pane.showTab(ModelsPane::effortTab());
+        QTest::qWait(40);
+        QVERIFY(!pane.picker()->list()->isColumnHidden(ColReasoning));
+        pane.showTab(ModelsPane::jobsTab());
+        QTest::qWait(40);
+        QVERIFY(!pane.jobs()->list()->isColumnHidden(1));
+        QVERIFY(!pane.jobs()->list()->isColumnHidden(3));
     }
 
     void theHeaderNamesThePaneItServes() {
@@ -261,7 +342,7 @@ private Q_SLOTS:
         QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
         QTest::keyClick(pane.picker()->filter(), Qt::Key_Right);
-        QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
+        QCOMPARE(pane.currentTab(), ModelsPane::effortTab());
     }
 
     void sharedTabNavigationUsesTheModelsBar() {
@@ -273,7 +354,7 @@ private Q_SLOTS:
         pane.show();
         QKeyEvent next(QEvent::KeyPress, Qt::Key_Tab, Qt::NoModifier);
         QVERIFY(relay::paneTabs::handle(pane.picker()->filter(), &next));
-        QCOMPARE(pane.currentTab(), ModelsPane::jobsTab());
+        QCOMPARE(pane.currentTab(), ModelsPane::effortTab());
         QKeyEvent previous(QEvent::KeyPress, Qt::Key_Backtab, Qt::ShiftModifier);
         QVERIFY(relay::paneTabs::handle(pane.jobs()->list(), &previous));
         QCOMPARE(pane.currentTab(), ModelsPane::prioritiesTab());

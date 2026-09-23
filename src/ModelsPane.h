@@ -118,11 +118,12 @@ public:
     static QString providersTab() { return QStringLiteral("providers"); }
     static QString availableTab() { return QStringLiteral("available"); }
     static QString prioritiesTab() { return QStringLiteral("priorities"); }
+    static QString effortTab() { return QStringLiteral("effort"); }
     // Step 5, and the one the other three were always missing: what each **job** runs on
     // (card #MDL1, design 5.9; owner, 2026-09-21: "for the per-job models, i think that should be
     // reviewed and improved and made a 4th tab").
     static QString jobsTab() { return QStringLiteral("jobs"); }
-    static QStringList tabIds() { return {providersTab(), availableTab(), prioritiesTab(), jobsTab()}; }
+    static QStringList tabIds() { return {providersTab(), availableTab(), prioritiesTab(), effortTab(), jobsTab()}; }
 
     // `sections` is what the providers tab draws — `RelayWindow::modelsSection()`, the same
     // section Options › Models draws, so it is one renderer with two hosts. With no callback the

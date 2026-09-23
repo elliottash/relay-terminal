@@ -65,8 +65,10 @@
 class QEvent;
 class QKeyEvent;
 class QLabel;
+class QPushButton;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QResizeEvent;
 
 namespace relay {
 
@@ -176,9 +178,12 @@ public:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void rebuild();
+    void updateColumns();
+    void updateCompactDetails();
     void applyOverride(const QString &role, const QString &key, const QString &effort);
     void openLevels(const QString &role, const QString &key);
     QString nameFor(const QString &preset, const QString &model) const;
@@ -192,6 +197,10 @@ private:
     QLabel *m_blurb = nullptr;
     QTreeWidget *m_list = nullptr;
     QLabel *m_footer = nullptr;
+    QWidget *m_compactPanel = nullptr;
+    QLabel *m_compactDetails = nullptr;
+    QPushButton *m_compactChoose = nullptr;
+    QPushButton *m_compactClear = nullptr;
     FilterPopup *m_popup = nullptr;
     // A one-cell-sized invisible child of the list's viewport, moved over the row being picked
     // for: `FilterPopup::openFor` drops under its anchor, and anchoring on the whole list put the

@@ -17,6 +17,7 @@
 #include <QDialogButtonBox>
 #include <QDropEvent>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -25,6 +26,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSignalBlocker>
 #include <QStringListModel>
 #include <QTabBar>
@@ -68,6 +70,7 @@ constexpr int AddByIdPresetRole = Qt::UserRole + 10;  // the provider a section'
 
 const QString kAll = QStringLiteral("all");
 const QString kClasses = QStringLiteral("classes");
+const QString kEffort = QStringLiteral("effort");
 const QString kLite = QStringLiteral("lite");
 const QString kMain = QStringLiteral("main");
 
@@ -231,11 +234,16 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     m_list->setTabKeyNavigation(false);
     dragList->onDropped = [this] { commitDragOrder(); };
 
-    auto *lists = new QHBoxLayout;
-    lists->addWidget(m_list, 1);
+    m_listsLayout = new QGridLayout;
+    m_listsLayout->setContentsMargins(0, 0, 0, 0);
+    m_listsLayout->setColumnStretch(0, 1);
+    m_listsLayout->setRowStretch(0, 1);
+    m_listsLayout->addWidget(m_list, 0, 0);
     // The right-hand column: which provider this row will use (only when it folds more than one),
     // then the level, each its own pick. Enter anywhere uses the pair.
-    auto *sideColumn = new QVBoxLayout;
+    m_sidePanel = new QWidget;
+    auto *sideColumn = new QVBoxLayout(m_sidePanel);
+    sideColumn->setContentsMargins(0, 0, 0, 0);
     m_viaLabel = new QLabel(QStringLiteral("via"));
     sideColumn->addWidget(m_viaLabel);
     m_vias = new QListWidget;
@@ -260,8 +268,8 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     m_levels->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     sideColumn->addWidget(m_levels);
     sideColumn->addStretch(1);
-    lists->addLayout(sideColumn);
-    layout->addLayout(lists, 1);
+    m_listsLayout->addWidget(m_sidePanel, 0, 1);
+    layout->addLayout(m_listsLayout, 1);
 
     m_limits = new QLabel;
     m_limits->setObjectName(QStringLiteral("modelLimits"));
@@ -360,6 +368,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     });
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int column) {
         if (!item || item->data(0, SectionRole).toBool()) return;
+        if (effortPage()) { if (m_levels->isVisible()) m_levels->setFocus(); return; }
         // A tick is a control: two quick clicks on it are two toggles (or one that would not take,
         // on a row a list pins), never "use". The owner's pane went onto gemini flash lite that
         // way on 2026-09-21 while he was trying to un-tick it.
@@ -378,7 +387,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     connect(m_customize, &QPushButton::clicked, this, [this] { if (openModelsPage) openModelsPage(); });
     connect(m_vias, &QListWidget::currentRowChanged, this, [this](int) { onViaChanged(); });
     connect(m_levels, &QListWidget::currentRowChanged, this, [this](int) { onLevelChanged(); });
-    connect(m_levels, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { use(); });
+    connect(m_levels, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *) { if (!effortPage()) use(); });
     m_vias->installEventFilter(this);
     m_levels->installEventFilter(this);
     m_tabs->installEventFilter(this);
@@ -393,7 +402,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     setTabOrder(m_levels, m_favorite);
     // What it opens on: `classes` (the sectioned priorities page), `all`, or one class alone.
     const QStringList ids = tabIds();
-    m_tier = m_context.tier == kClasses ? kClasses
+    m_tier = m_context.tier == kClasses || m_context.tier == kEffort ? m_context.tier
            : ids.contains(m_context.tier) ? m_context.tier
            : ids.contains(kMain) ? kMain : ids.value(0, kAll);
     syncTabBar();
@@ -442,7 +451,8 @@ QStringList ModelPicker::tabBarIds() const {
     return ids;
 }
 
-bool ModelPicker::sectionsPage() const { return m_tier == kClasses; }
+bool ModelPicker::sectionsPage() const { return m_tier == kClasses || m_tier == kEffort; }
+bool ModelPicker::effortPage() const { return m_tier == kEffort; }
 
 // high · main · flash, then local where this machine serves one. Never lite: it is not a pane mode,
 // the box has never had a row for it (design 5.3), and its list is the jobs tab's business now.
@@ -541,6 +551,7 @@ void ModelPicker::setHosted(bool hosted) {
     // The pane is narrower than the 980 px dialog was, and the side column is fixed width: at 210
     // it took a third of the rows' room. "z.ai (glm) · coding…" still fits at 170.
     if (hosted) { m_vias->setFixedWidth(170); m_levels->setFixedWidth(170); }
+    updateCompactLayout();
     updateFooter();
     rebuild();   // the columns a host hides are decided in rebuild()
 }
@@ -558,7 +569,7 @@ void ModelPicker::syncTabBar() {
 }
 
 void ModelPicker::setTier(const QString &tier) {
-    if (tier == m_tier || !(tier == kClasses || tabIds().contains(tier))) return;
+    if (tier == m_tier || !(tier == kClasses || tier == kEffort || tabIds().contains(tier))) return;
     m_tier = tier;
     syncTabBar();
     m_filter->clear();
@@ -603,7 +614,7 @@ QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
     item->setData(0, ClassHeadRole, true);
     item->setData(0, TierRole, tier);
     item->setFlags(Qt::ItemIsEnabled | (boxClassTier(tier) ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
-    if (boxClassTier(tier))
+    if (boxClassTier(tier) && !effortPage())
         item->setCheckState(ColBox, curation::boxShown(tier) ? Qt::Checked : Qt::Unchecked);
     QFont font = item->font(ColModel);
     font.setBold(true);
@@ -824,6 +835,12 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
         if (!query.isEmpty() && !(entry ? matches(*entry, query) : item.key.contains(query, Qt::CaseInsensitive))) continue;
         addListRow(tier, rank, item, entry);
         ++drawn;
+    }
+    if (effortPage()) {
+        if (drawn == 0)
+            addSection(QStringLiteral("no ranked models in %1%2").arg(
+                tier, query.isEmpty() ? QString() : QStringLiteral(" match this filter")), tier);
+        return;
     }
     // Then every other *available* model this class may hold, always and not only while typing
     // (owner, 2026-09-22: "i thought all available models would be in priority, so searching should
@@ -1184,11 +1201,13 @@ void ModelPicker::rebuild() {
     const QString query = m_filter->text().trimmed();
     m_sortLabel->setVisible(all);
     m_sort->setVisible(all);
+    m_favorite->setVisible(!effortPage());
+    m_use->setVisible(!effortPage());
     syncClassSwitch();
-    m_list->setColumnHidden(ColBox, !(sectionsPage() || boxClassTier(m_tier)));
+    m_list->setColumnHidden(ColBox, effortPage() || !(sectionsPage() || boxClassTier(m_tier)));
     // The ▲▼ belong where an order is written down; the flat tab has none (same rule as the drag
     // below, card #RKP3).
-    m_list->setColumnHidden(ColMove, all);
+    m_list->setColumnHidden(ColMove, all || effortPage());
     // Step 2 is edited in one place: the `all` tab. A tier tab is step 3 and the box column is
     // step 4, and three checkbox columns on one row would say nothing.
     m_list->setColumnHidden(ColAvail, !availabilityTab());
@@ -1202,7 +1221,7 @@ void ModelPicker::rebuild() {
     m_list->setColumnHidden(ColSpeed, m_hosted);
     // Dragging is how a list is reordered — and, across a header, how a model moves to another
     // section (card #RKP3); on the flat tab there is no order to write down.
-    m_list->setDragDropMode(all ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
+    m_list->setDragDropMode(all || effortPage() ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
     if (all) buildAll(query);
     else if (sectionsPage()) buildSections(query);
     else buildTier(m_tier, query);
@@ -1216,8 +1235,41 @@ void ModelPicker::rebuild() {
     if (sectionsPage() && !currentRow() && !m_focusClass.isEmpty()) focusClass(m_focusClass);
     if (!currentRow() && !m_list->currentItem()) selectKey(m_context.currentKey);
     if (!currentRow() && !m_list->currentItem()) selectFirstRow();
-    updateFooter();
     onRowChanged();
+    updateFooter();
+    updateCompactLayout();
+}
+
+void ModelPicker::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+    updateCompactLayout();
+}
+
+void ModelPicker::updateCompactLayout() {
+    if (!m_listsLayout || !m_sidePanel || !m_list) return;
+    const bool compact = m_hosted && width() < 620;
+    if (compact != m_compact) {
+        m_compact = compact;
+        m_listsLayout->removeWidget(m_sidePanel);
+        m_listsLayout->addWidget(m_sidePanel, compact ? 1 : 0, compact ? 0 : 1);
+        m_listsLayout->setColumnStretch(1, 0);
+        for (QListWidget *list : {m_vias, m_levels}) {
+            if (compact) {
+                list->setMinimumWidth(0);
+                list->setMaximumWidth(QWIDGETSIZE_MAX);
+            } else {
+                list->setFixedWidth(m_hosted ? 170 : 210);
+            }
+        }
+        m_vias->setMaximumHeight(compact ? 84 : 130);
+        m_levels->setMaximumHeight(compact ? 110 : 240);
+        onRowChanged();
+        updateFooter();
+    }
+    m_list->setColumnHidden(ColVia, compact);
+    m_list->setColumnHidden(ColReasoning, compact || (m_hosted && !effortPage()));
+    if (compact) m_list->setColumnHidden(ColLeft, true);
+    else m_list->setColumnHidden(ColLeft, sectionsPage());
 }
 
 // ↑/↓ over the **rows**, stepping over the section headers. Qt's own cursor movement makes the
@@ -1286,10 +1338,10 @@ void ModelPicker::onRowChanged() {
     m_filling = true;
     m_vias->clear();
     const QStringList vias = row ? row->data(0, ViaRole).toStringList() : QStringList();
-    const bool several = vias.size() > 1;
-    m_vias->setVisible(several);
-    m_viaLabel->setVisible(several);
-    if (several)
+    const bool showVias = vias.size() > 1 || (m_compact && !vias.isEmpty());
+    m_vias->setVisible(showVias);
+    m_viaLabel->setVisible(showVias);
+    if (showVias)
         for (const QString &each : vias) {
             const Entry *candidate = m_context.catalog.find(each);
             if (!candidate) continue;
@@ -1301,7 +1353,25 @@ void ModelPicker::onRowChanged() {
             if (each == key) m_vias->setCurrentItem(item);
         }
     m_levels->clear();
-    if (!entry) { m_filling = false; m_limits->clear(); return; }
+    QLabel *reasoningLabel = nullptr;
+    for (QLabel *label : m_sidePanel->findChildren<QLabel *>())
+        if (label->text() == QStringLiteral("reasoning")) reasoningLabel = label;
+    if (m_hosted && !effortPage()) {
+        if (reasoningLabel) reasoningLabel->hide();
+        m_levels->hide();
+        m_filling = false;
+        m_limits->clear();
+        return;
+    }
+    if (!entry) {
+        if (reasoningLabel) reasoningLabel->hide();
+        m_levels->hide();
+        m_filling = false;
+        m_limits->clear();
+        return;
+    }
+    if (reasoningLabel) reasoningLabel->show();
+    m_levels->show();
     if (entry->effortFixed || entry->efforts.isEmpty()) {
         // A model with no knob, or Relay Free, where the gateway picks the level for the role
         // whatever anyone asks for (owner, 2026-09-21). The list is empty and says which it is,
@@ -1397,22 +1467,42 @@ void ModelPicker::updateFooter() {
     // everywhere. (It used to say alt+1… — those digits are the window's, and the lie sent the
     // owner hunting for a key that did nothing, card #RKP3.)
     const QString tabs = m_hosted ? QStringLiteral("tab / shift+tab: the pane's tabs · ") : QStringLiteral("←→ tab · ");
-    QString text = m_tier == kAll
-        ? tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
-                                "long tail included · tab, then → : the providers of a folded row, and the levels · "
-                                "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
-                                "to take it out everywhere, tick a row under “more from…” to bring one in")
-        : tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · drag to reorder — or into another section to move it "
-                                "there · del removes · “+ add” or ctrl+enter ranks an available model in its section "
-                                "· typing filters this page; search every model on available · ctrl+z undoes")
-              + (sectionsPage() || boxClassTier(m_tier)
-                     ? QStringLiteral(" · “in box”: how far down a class alt+m shows, and the tick on a section's "
-                                      "own line is whether it shows at all")
-                     : QString());
+    QString text;
+    if (m_tier == kAll) {
+        text = tabs + QStringLiteral("↑↓ row · enter uses it in the pane · type to search every model, openrouter's "
+                                     "long tail included · tab, then → : the providers of a folded row · "
+                                     "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
+                                     "to take it out everywhere, tick a row under “more from…” to bring one in");
+    } else if (effortPage()) {
+        text = tabs + QStringLiteral("↑↓ ranked model · choose its reasoning level below · changes apply to this class's list");
+    } else if (sectionsPage()) {
+        // Everything this page can also do — reorder, add, remove, undo — used to be spelled out
+        // here every time, which was the wall of text card #RKP3 was already trying to shorten.
+        // It is taught once instead, the first few times the page is opened, through the limits
+        // line's own hint mechanism (`ShortcutHints`, the same one "models.move.buttons" already
+        // uses) — the one fact worth saying every time is the one no control on the row spells
+        // out on its own: what the cutoff means.
+        text = tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · “in box”: ranks above the line show in alt+m — the tick on a row moves the "
+                                     "line, the tick on a section's own line is whether it shows at all");
+    } else {
+        text = tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · drag to reorder — or into another section to move it "
+                                     "there · del removes · “+ add” or ctrl+enter ranks an available model in its section "
+                                     "· typing filters this page; search every model on available · ctrl+z undoes")
+             + (boxClassTier(m_tier)
+                    ? QStringLiteral(" · “in box”: how far down a class alt+m shows, and the tick on a section's "
+                                     "own line is whether it shows at all")
+                    : QString());
+    }
     if (onEscape) text += QStringLiteral(" · esc back to the pane");
+    m_footer->setToolTip(text);
+    if (m_compact)
+        text = m_tier == kAll
+            ? QStringLiteral("search · tick available · enter use · tab / shift+tab switch page")
+            : effortPage() ? QStringLiteral("choose a ranked model, then its reasoning level · ctrl+z undo")
+            : QStringLiteral("ctrl+enter add · del remove · alt+↑/↓ move · ctrl+z undo · enter use");
     m_footer->setText(text);
     // Only available searches the whole catalog (#AVR8); a list page filters what it draws.
-    m_filter->setPlaceholderText(m_tier == kAll
+    m_filter->setPlaceholderText(effortPage() ? QStringLiteral("filter ranked models") : m_tier == kAll
         ? QStringLiteral("search every model · ↑↓ select · enter uses it")
         : QStringLiteral("filter this page · ↑↓ select · enter uses it · ctrl+enter adds it here"));
 }
@@ -1579,6 +1669,10 @@ bool ModelPicker::handleShortcut(QKeyEvent *event) {
         return true;
     }
     if (ctrl && key == Qt::Key_Z) { undo(); return true; }
+    // Effort edits a ranked row's level. Ranking keys here would silently change Priorities.
+    if (effortPage() && ((ctrl && (key == Qt::Key_Return || key == Qt::Key_Enter))
+                         || (alt && (key == Qt::Key_Up || key == Qt::Key_Down))
+                         || key == Qt::Key_Delete || key == Qt::Key_Backspace)) return true;
     if (ctrl && (key == Qt::Key_Return || key == Qt::Key_Enter)) { addSelected(); return true; }
     if (alt && (key == Qt::Key_Up || key == Qt::Key_Down)) { moveSelected(key == Qt::Key_Up ? -1 : 1); return true; }
     // Delete takes the row out of the list wherever the focus is (owner, design 5.2) — including
@@ -1607,7 +1701,10 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
                 QCoreApplication::sendEvent(m_list, event);
                 return true;
             }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+                if (effortPage()) m_list->setFocus(); else use();
+                return true;
+            }
             // ←/→ walk the tabs from the filter, which is where the focus starts — unless there is
             // text and the caret is somewhere inside it, when they are a caret's arrows again.
             // Hosted on the flat tab this widget's class row is hidden, so ←/→ have no tab of
@@ -1619,28 +1716,36 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
         }
         if (watched == m_list) {
             // The view swallows Enter (it emits activated), so the default button never sees it.
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+                if (effortPage()) { if (m_levels->isVisible()) m_levels->setFocus(); }
+                else use();
+                return true;
+            }
             if (!key->modifiers() && (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down)) {
                 stepRow(key->key() == Qt::Key_Down ? 1 : -1);
                 return true;
             }
             if (key->key() == Qt::Key_Right) {                                   // → the providers, then the levels
                 if (m_vias->isVisible() && m_vias->count()) { m_vias->setFocus(); return true; }
-                if (m_levels->count()) { m_levels->setFocus(); return true; }
+                if (m_levels->isVisible() && m_levels->count()) { m_levels->setFocus(); return true; }
             }
             if (key->key() == Qt::Key_Left) { m_filter->setFocus(); return true; }
         }
         if (watched == m_vias) {
             if (key->key() == Qt::Key_Left) { m_list->setFocus(); return true; }
-            if (key->key() == Qt::Key_Right && m_levels->count()) { m_levels->setFocus(); return true; }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
+            if (key->key() == Qt::Key_Right && m_levels->isVisible() && m_levels->count()) { m_levels->setFocus(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+                if (effortPage()) { if (m_levels->isVisible()) m_levels->setFocus(); }
+                else use();
+                return true;
+            }
         }
         if (watched == m_levels) {
             if (key->key() == Qt::Key_Left) {
                 if (m_vias->isVisible() && m_vias->count()) m_vias->setFocus(); else m_list->setFocus();
                 return true;
             }
-            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { use(); return true; }
+            if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) { if (!effortPage()) use(); return true; }
         }
     }
     return QWidget::eventFilter(watched, event);

@@ -172,8 +172,9 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     }
     m_tabs->setTabToolTip(0, QStringLiteral("Step 1 — the providers this machine can reach, and their keys"));
     m_tabs->setTabToolTip(1, QStringLiteral("Step 2 — which models exist for the lists, the box and its filter"));
-    m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — one section per class: its order, levels and box cutoffs"));
-    m_tabs->setTabToolTip(3, QStringLiteral("What each job relay does runs on right now, and a model of its own for one"));
+    m_tabs->setTabToolTip(2, QStringLiteral("Steps 3 and 4 — one section per class: its order and box cutoffs"));
+    m_tabs->setTabToolTip(3, QStringLiteral("Reasoning levels for models ranked in each class"));
+    m_tabs->setTabToolTip(4, QStringLiteral("What each job relay does runs on right now, and a model of its own for one"));
     layout->addWidget(m_tabs);
     relay::paneTabs::registerTabs(this, m_tabs);
 
@@ -185,7 +186,14 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     auto *providersBox = new QVBoxLayout(m_providersPage);
     providersBox->setContentsMargins(0, 0, 0, 0);
     m_providers = new SettingsPane(SettingsPane::Mode::Options,
-                                   [this] { return m_sections ? m_sections() : QList<SettingsSection>(); },
+                                   [this] {
+                                       QList<SettingsSection> sections = m_sections ? m_sections() : QList<SettingsSection>();
+                                       // The introductory paragraph is useful in Options, but
+                                       // occupies most of a narrow Models pane before the first
+                                       // provider row. The tab and its controls explain the page.
+                                       for (SettingsSection &section : sections) section.blurb.clear();
+                                       return sections;
+                                   },
                                    [] { return QList<ActionItem>(); });
     m_providers->setEmbedded(true);
     m_providers->onClose = [this] { if (m_target.focusBack) m_target.focusBack(); };
@@ -285,8 +293,8 @@ void ModelsPane::setTarget(const Target &target) {
     } else {
         buildPicker();
     }
-    if (!samePane && currentTab() == prioritiesTab()) {
-        m_picker->setTier(ModelPicker::classesTier());
+    if (!samePane && (currentTab() == prioritiesTab() || currentTab() == effortTab())) {
+        m_picker->setTier(currentTab() == effortTab() ? ModelPicker::effortTier() : ModelPicker::classesTier());
         m_picker->focusClass(m_classTab);
     }
     updateHeader();
@@ -343,10 +351,11 @@ void ModelsPane::showTab(const QString &id) {
         if (m_picker->tier() != kAll) m_classTab = m_picker->currentClass();
         m_picker->setTier(kAll);
     } else {
+        if (m_picker->tier() != kAll) m_classTab = m_picker->currentClass();
         // One page, four sections — no class tabs (owner, 2026-09-21: "in a pane, i dont want
         // separate tabs for the modes. they should just be in divided sections"). The class the
         // served pane is in is where the highlight lands, which is what opening on its tab was.
-        m_picker->setTier(ModelPicker::classesTier());
+        m_picker->setTier(id == effortTab() ? ModelPicker::effortTier() : ModelPicker::classesTier());
         m_picker->focusClass(m_classTab.isEmpty() ? QStringLiteral("main") : m_classTab);
     }
 }
@@ -433,6 +442,7 @@ void ModelsPane::showEvent(QShowEvent *event) {
 
 void ModelsPane::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
+    m_tabs->setTabText(0, width() < 500 ? QStringLiteral("keys") : QStringLiteral("providers"));
     updateConsoleHeight();
 }
 

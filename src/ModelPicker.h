@@ -78,12 +78,14 @@
 class QCheckBox;
 class QComboBox;
 class QKeyEvent;
+class QResizeEvent;
 class QLabel;
 class QLineEdit;
 class QPushButton;
 class QTabBar;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QGridLayout;
 class QListWidget;
 class QEvent;
 
@@ -177,7 +179,9 @@ public:
     // answers `classes` on the page; `currentClass()` is the class of the row under the highlight,
     // which is the sectioned page's answer to "which list am I in".
     static QString classesTier() { return QStringLiteral("classes"); }
+    static QString effortTier() { return QStringLiteral("effort"); }
     bool sectionsPage() const;
+    bool effortPage() const;
     // high · main · flash, and local where this machine serves one: the sections, in order. Never
     // lite (design 5.3: it is not a pane mode and the box has never had a row for it).
     QStringList sectionTiers() const;
@@ -223,6 +227,7 @@ public:
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     struct UndoStep {
@@ -262,6 +267,7 @@ private:
     void onViaChanged();
     void onLevelChanged();
     void updateFooter();
+    void updateCompactLayout();
     void selectFirstRow();
     void syncTabBar();
     void stepTab(int delta);
@@ -282,6 +288,8 @@ private:
     QLabel *m_sortLabel = nullptr;
     QComboBox *m_sort = nullptr;
     QTreeWidget *m_list = nullptr;
+    QGridLayout *m_listsLayout = nullptr;
+    QWidget *m_sidePanel = nullptr;
     QLabel *m_viaLabel = nullptr;
     QListWidget *m_vias = nullptr;     // the providers of a folded row, when it has more than one
     QListWidget *m_levels = nullptr;   // the reasoning level, a separate pick beside the model
@@ -299,6 +307,7 @@ private:
     bool m_filling = false;   // the right-hand lists are being populated: their signals are not picks
     bool m_building = false;  // the rows are being built: an itemChanged is ours, not a click
     bool m_hosted = false;    // embedded in the models pane, which owns the flat tab
+    bool m_compact = false;
     // The class the sectioned page was last pointed at (`focusClass`). It is what `currentClass()`
     // answers while the highlight is on no row of a class — an empty section, or a page with no
     // list at all — so "which class is this page on" has an answer before anything is ranked.
