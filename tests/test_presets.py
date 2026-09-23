@@ -556,10 +556,11 @@ class ModelCatalogTests(unittest.TestCase):
                     # None means the preset's style; a list only ever narrows what it offers.
                     self.assertEqual(row["efforts"], offered if raw["efforts"] is None else raw["efforts"])
                     self.assertTrue(set(row["efforts"]) <= set(offered), (preset_id, row["id"]))
-                    # INTELLIGENCE is keyed by the *name* since card #MDL1: one model, one score.
+                    # Hosted role names are public aliases; ranking still uses its internal model name.
                     self.assertEqual(row["name"], P.model_name(preset_id, row["id"]))
-                    self.assertIn(row["name"], P.INTELLIGENCE)
-                    self.assertEqual(row["intelligence"], P.INTELLIGENCE[row["name"]])
+                    ranking_name = P._ranking_name(preset_id, row["id"])
+                    self.assertIn(ranking_name, P.INTELLIGENCE)
+                    self.assertEqual(row["intelligence"], P.INTELLIGENCE[ranking_name])
                     self.assertEqual(row["label"], row["name"])
                     self.assertIn(row["intelligence"], (None, *range(0, 101)))
                     # The same model on OpenRouter, or None: where the per-model toggle shows.
@@ -586,7 +587,10 @@ class ModelCatalogTests(unittest.TestCase):
         for preset_id in P.MODEL_CATALOG:
             for row in P.catalog_rows(preset_id):
                 with self.subTest(preset=preset_id, model=row["id"]):
-                    self.assertRegex(row["name"], self.NAME_RE)
+                    if preset_id in ("relay-free", "relay-pro"):
+                        self.assertRegex(row["name"], r"^relay (free|pro) · (high|main|flash|lite)$")
+                    else:
+                        self.assertRegex(row["name"], self.NAME_RE)
                     self.assertEqual(row["label"], row["name"])
         listing = openrouter_catalog.parse_rows({"data": [
             {"id": "openai/gpt-6-sol", "name": "OpenAI: GPT-6 Sol", "context_length": 400000},
@@ -616,9 +620,18 @@ class ModelCatalogTests(unittest.TestCase):
             self.assertEqual(P.model_name("guest:claude", alias), P.model_name("anthropic", model), alias)
         self.assertEqual(P.model_name("guest:claude", "opus"), "claude-opus-5.5")
         self.assertEqual(P.model_name("guest:claude", "fable"), "claude-fable-5.1")
-        # Relay Free's three are role names and keep them, hyphenated (design 3.5).
+        # Hosted roles are service names; their gateway ids and backing models stay internal.
         self.assertEqual([r["name"] for r in P.catalog_rows("relay-free")],
-                         ["relay-main", "relay-flash", "relay-lite"])
+                         ["relay free · main", "relay free · flash", "relay free · lite"])
+        self.assertEqual([r["name"] for r in P.catalog_rows("relay-pro")],
+                         ["relay pro · high", "relay pro · main", "relay pro · flash"])
+        self.assertEqual(P.model_name("relay-pro", "an-unexpected-upstream-id"), "relay pro")
+        self.assertEqual(P.model_name("relay-free", "an-unexpected-upstream-id"), "relay free")
+        self.assertNotIn("glm", P.PRESETS["relay-pro"].to_dict()["note"].lower())
+        for preset_id in ("relay-free", "relay-pro"):
+            for row in P.catalog_rows(preset_id):
+                self.assertNotIn("glm", row["name"])
+                self.assertEqual(row["label"], row["name"])
         # Serving variants are their own models to the person picking one (design 3.3).
         self.assertEqual(P.model_name("kimi-code", "k3-256k"), "k3-256k")
         self.assertEqual(P.model_name("kimi", "kimi-k2.7-code-highspeed"), "kimi-k2.7-code-highspeed")

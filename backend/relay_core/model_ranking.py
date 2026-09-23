@@ -286,7 +286,7 @@ class Ranking:
 
         for preset_id, rows in P.MODEL_CATALOG.items():
             for row in rows:
-                name = P.model_name(preset_id, row["id"])
+                name = P._ranking_name(preset_id, row["id"])
                 if name not in self.models:
                     problems.append(f"model {name!r} ({preset_id} {row['id']!r}) has no row in the "
                                     f"Models table")

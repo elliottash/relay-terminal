@@ -275,7 +275,7 @@ PRESETS: dict[str, Preset] = {p.id: p for p in [
            max_output=16_000),
     Preset("relay-pro", "relay pro", "https://api.relay-terminal.ai/v1", "relay-pro-main",
            {"reasoning_effort": "medium"}, 1_000_000, "relay-pro", "subscription",
-           "https://relay-terminal.ai", "Per-person access to GLM 5.3 and GLM 5.3 Flash through Relay.",
+           "https://relay-terminal.ai", "Per-person access through Relay's hosted service.",
            provider="relay", plan="pro", hosted=True, max_output=16_000),
     Preset("kimi", "kimi · k3", "https://api.moonshot.ai/v1", "kimi-k3", {"reasoning_effort": "high"},
            1_048_576, "kimi", "payg", "https://platform.kimi.ai/console/api-keys",
@@ -607,6 +607,14 @@ def model_name(preset_id, model_id) -> str:
     text = (model_id or "").strip() if isinstance(model_id, str) else ""
     if not text:
         return ""
+    # Hosted ids are gateway roles. The upstream model behind a role may change without changing
+    # that role, so the app names the service and role instead of its current backing model.
+    if preset_id in ("relay-free", "relay-pro"):
+        for row in MODEL_CATALOG[preset_id]:
+            if row["id"] == text:
+                service = "relay free" if preset_id == "relay-free" else "relay pro"
+                return f"{service} · {row['tier']}"
+        return "relay free" if preset_id == "relay-free" else "relay pro"
     for row in MODEL_CATALOG.get(preset_id, ()) if isinstance(preset_id, str) else ():
         if row["id"] == text and row.get("name"):
             return row["name"]
@@ -614,6 +622,15 @@ def model_name(preset_id, model_id) -> str:
     if aliased is not None:
         return _NAME_OVERRIDES.get(aliased) or derived_name(aliased)
     return _NAME_OVERRIDES.get(text) or derived_name(text)
+
+
+def _ranking_name(preset_id: str, model_id: str) -> str:
+    """The stable ranking-table name; hosted public role names never change defaults."""
+    if preset_id in ("relay-free", "relay-pro"):
+        for row in MODEL_CATALOG[preset_id]:
+            if row["id"] == model_id:
+                return row.get("name") or model_id
+    return model_name(preset_id, model_id)
 
 
 # The owner's intelligence ruling, seeded 2026-09-20 from the Artificial Analysis Intelligence
@@ -744,10 +761,10 @@ def catalog_rows(preset_id) -> list[dict]:
         out.append({"id": row["id"], "name": name, "label": name, "tier": row["tier"],
                     "efforts": efforts,
                     "effort_fixed": effort_fixed(efforts, preset_id == "relay-free"),
-                    "intelligence": INTELLIGENCE.get(name),
+                    "intelligence": INTELLIGENCE.get(_ranking_name(preset_id, row["id"])),
                     "openrouter": openrouter_twin(row["id"]),
                     "default_effort": provider_default,
-                    "tier_effort": tier_start_efforts(efforts, provider_default, "", name)})
+                    "tier_effort": tier_start_efforts(efforts, provider_default, "", _ranking_name(preset_id, row["id"]))})
     if preset_id == "openrouter":
         from . import openrouter_catalog          # here, not at the top: it imports this module
         known = {row["id"] for row in out}
@@ -1026,7 +1043,7 @@ def provider_model_id(preset_id: str, name: str) -> str | None:
     if not isinstance(preset_id, str) or not isinstance(name, str) or not name:
         return None
     for row in MODEL_CATALOG.get(preset_id) or []:
-        if model_name(preset_id, row["id"]) == name:
+        if _ranking_name(preset_id, row["id"]) == name:
             return row["id"]
     if preset_id == "openrouter":
         for model_id, slug in OPENROUTER_TWINS.items():
@@ -1047,7 +1064,7 @@ def levels_for_name(name: str) -> tuple[str, ...]:
     out: list[str] = []
     for preset_id in PRESETS:
         for row in MODEL_CATALOG.get(preset_id) or []:
-            if model_name(preset_id, row["id"]) != name:
+            if _ranking_name(preset_id, row["id"]) != name:
                 continue
             for level in model_efforts(preset_id, row["id"]) or ():
                 if level not in out:
@@ -1077,13 +1094,13 @@ def _builtin_candidates(preset_id: str, rank) -> list[_Candidate]:
             # The same GLM model has distinct server routes for high and main. Keep each
             # route in its own class while ranking both by their shared model name.
             return (model_id.removeprefix("relay-pro-"),)
-        name = model_name(preset_id, model_id)
+        name = _ranking_name(preset_id, model_id)
         shared = tuple(cls for cls in _ranked_classes(rank, name) if cls not in picked)
         return tuple(cls for cls in model_ranking.CLASSES
                      if cls in shared or picked.get(cls) == model_id)
 
-    out = [_Candidate(preset_id, row["id"], model_name(preset_id, row["id"]), identity, order,
-                      rank.score(model_name(preset_id, row["id"])), classes_of(row["id"]))
+    out = [_Candidate(preset_id, row["id"], _ranking_name(preset_id, row["id"]), identity, order,
+                      rank.score(_ranking_name(preset_id, row["id"])), classes_of(row["id"]))
            for row in MODEL_CATALOG.get(preset_id) or []]
     known = {candidate.model for candidate in out}
     for model_id in dict.fromkeys(picked.values()):

@@ -1774,6 +1774,8 @@ public:
         if (!preset.isEmpty())
             if (const relay::models::Entry *entry = catalog.find(catalog.resolveKey(preset, model)))
                 return entry->name;
+        if (preset == QStringLiteral("relay-free")) return QStringLiteral("relay free");
+        if (preset == QStringLiteral("relay-pro")) return QStringLiteral("relay pro");
         // No preset, or one that lists nothing like this id: any provider's row for it still
         // carries the name that row was given — "k3" is "kimi-k3" only because its row says so.
         for (const relay::models::Entry &entry : catalog.entries)

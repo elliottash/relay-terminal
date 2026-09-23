@@ -115,8 +115,7 @@ QJsonArray groupPresets() {
                      {QStringLiteral("provider"), QStringLiteral("relay")}, {QStringLiteral("plan"), QStringLiteral("included")},
                      {QStringLiteral("hosted"), true}, {QStringLiteral("available"), true},
                      {QStringLiteral("model"), QStringLiteral("relay-main")},
-                     {QStringLiteral("models"), QJsonArray{model(QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-sol"), QString(), {}),
-                                                           model(QStringLiteral("relay-main"), QStringLiteral("relay-main"), QStringLiteral("main"), {})}}};
+                     {QStringLiteral("models"), QJsonArray{model(QStringLiteral("relay-main"), QStringLiteral("relay-main"), QStringLiteral("main"), {})}}};
     out << free;
     return out;
 }
@@ -183,6 +182,8 @@ private Q_SLOTS:
         catalog = catalogFrom(QJsonArray{pro});
         QVERIFY(catalog.find(key)->usable);
         QVERIFY(!catalog.find(key)->effortFixed);
+        QCOMPARE(catalog.find(key)->displayName(), QStringLiteral("relay pro · main"));
+        QCOMPARE(catalog.find(key)->name, QStringLiteral("relay pro · main"));
         pro.insert(QStringLiteral("available"), false); // revoked; the keyring still has the code
         catalog = catalogFrom(QJsonArray{pro});
         QVERIFY(!catalog.find(key)->usable);
@@ -1211,15 +1212,16 @@ private Q_SLOTS:
         // One group per name, in the order each name first appeared in the list handed in.
         QCOMPARE(namesOf(groups), (QStringList{QStringLiteral("gpt-6-sol"), QStringLiteral("gpt-6-astra"),
                                                QStringLiteral("glm-5.3"), QStringLiteral("bonsai-2-27b"),
-                                               QStringLiteral("bonsai-2-27b"), QStringLiteral("relay-main")}));
+                                               QStringLiteral("bonsai-2-27b"), QStringLiteral("relay free · main")}));
         const Group sol = groupNamed(groups, QStringLiteral("gpt-6-sol"));
         QVERIFY(!sol.name.isEmpty());
         // Nothing is ranked yet, so it is the kind of access that decides: the guest harness, then
-        // the first-party API, then OpenRouter, then Relay Free.
+        // the first-party API, then OpenRouter. Hosted roles have their own names.
         QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-6-sol"),
                                                     QStringLiteral("openai|gpt-6-sol"),
-                                                    QStringLiteral("openrouter|openai/gpt-6-sol"),
-                                                    QStringLiteral("relay-free|gpt-6-sol")}));
+                                                    QStringLiteral("openrouter|openai/gpt-6-sol")}));
+        QCOMPARE(keysOf(groupNamed(groups, QStringLiteral("relay free · main")).entries),
+                 QStringList{QStringLiteral("relay-free|relay-main")});
     }
 
     void aRankedEntryComesFirstWhateverItIsServedBy() {
@@ -1233,8 +1235,7 @@ private Q_SLOTS:
         // Main rank 1 first, then the flash list, then the unranked ones in access order.
         QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openrouter|openai/gpt-6-sol"),
                                                     QStringLiteral("openai|gpt-6-sol"),
-                                                    QStringLiteral("guest:codex|gpt-6-sol"),
-                                                    QStringLiteral("relay-free|gpt-6-sol")}));
+                                                    QStringLiteral("guest:codex|gpt-6-sol")}));
     }
 
     // ----- the ranking file decides the fold (card #MDL1, protocol 13.2) ------------------------
@@ -1270,7 +1271,6 @@ private Q_SLOTS:
         QVERIFY(!sol.name.isEmpty());
         QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("openai|gpt-6-sol"),
                                                     QStringLiteral("openrouter|openai/gpt-6-sol"),
-                                                    QStringLiteral("relay-free|gpt-6-sol"),
                                                     QStringLiteral("guest:codex|gpt-6-sol")}));
     }
 
@@ -1282,12 +1282,11 @@ private Q_SLOTS:
                                                            {QStringLiteral("openrouter"), 30},
                                                            {QStringLiteral("relay-free"), 40}}));
         curation::setTierList(QStringLiteral("main"),
-                              {{QStringLiteral("relay-free|gpt-6-sol"), QString()}});
+                              {{QStringLiteral("openrouter|openai/gpt-6-sol"), QString()}});
         const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
-        QCOMPARE(sol.entries.first().key, QStringLiteral("relay-free|gpt-6-sol"));
+        QCOMPARE(sol.entries.first().key, QStringLiteral("openrouter|openai/gpt-6-sol"));
         QCOMPARE(keysOf(sol.entries).mid(1), (QStringList{QStringLiteral("guest:codex|gpt-6-sol"),
-                                                           QStringLiteral("openai|gpt-6-sol"),
-                                                           QStringLiteral("openrouter|openai/gpt-6-sol")}));
+                                                           QStringLiteral("openai|gpt-6-sol")}));
     }
 
     void oneRowWithoutAnOrderSendsThePairBackToTheOldRank() {
@@ -1299,8 +1298,7 @@ private Q_SLOTS:
         const Group sol = groupNamed(grouped(catalog, allEntries(catalog)), QStringLiteral("gpt-6-sol"));
         QCOMPARE(keysOf(sol.entries), (QStringList{QStringLiteral("guest:codex|gpt-6-sol"),
                                                     QStringLiteral("openai|gpt-6-sol"),
-                                                    QStringLiteral("openrouter|openai/gpt-6-sol"),
-                                                    QStringLiteral("relay-free|gpt-6-sol")}));
+                                                    QStringLiteral("openrouter|openai/gpt-6-sol")}));
     }
 
     void thePlanIsSpentBeforeTheMeteredApi() {

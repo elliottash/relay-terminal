@@ -357,7 +357,7 @@ class ShippedFileTests(unittest.TestCase):
         for preset_id, rows in P.MODEL_CATALOG.items():
             for row in rows:
                 with self.subTest(preset=preset_id, model=row['id']):
-                    self.assertIn(P.model_name(preset_id, row['id']), self.rank.models)
+                    self.assertIn(P._ranking_name(preset_id, row['id']), self.rank.models)
         for guest, models in MR._GUEST_MODEL_IDS.items():
             for model in models:
                 with self.subTest(guest=guest, model=model):

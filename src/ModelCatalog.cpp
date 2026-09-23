@@ -117,6 +117,7 @@ QString nameOf(const QString &modelId) {
 }
 
 QString Entry::displayName() const {
+    if (hosted) return name; // the service role already says Relay Free or Relay Pro
     if (provider.isEmpty()) return name;
     return name + QStringLiteral(" · ") + provider;
 }
@@ -266,6 +267,14 @@ Catalog catalogFrom(const QJsonArray &presets) {
             // One name per model (card #MDL1): the worker's `name`, else the same derivation here,
             // so a row from an older worker and a row from this one fold into the same group.
             entry.name = str(row, "name").isEmpty() ? nameOf(entry.model) : str(row, "name").toLower();
+            // A stale worker may still report its hosted provider's backing model as the name.
+            // The model id is a gateway role; only the service and role belong in app surfaces.
+            if (id == QStringLiteral("relay-free") || id == QStringLiteral("relay-pro")) {
+                const QString role = str(row, "tier");
+                const QString service = id == QStringLiteral("relay-free")
+                    ? QStringLiteral("relay free") : QStringLiteral("relay pro");
+                entry.name = role.isEmpty() ? service : service + QStringLiteral(" · ") + role;
+            }
             entry.label = entry.name;
             entry.provider = provider;
             entry.plan = str(preset, "plan").toLower();
