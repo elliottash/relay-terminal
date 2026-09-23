@@ -114,3 +114,9 @@ Implement first Ctrl+Enter submission and empty idle guest activation; verify ag
 
 <!-- relay:entry 20260923T234704Z-qf author=agent kind=event model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-ctrl-ente… → {"plans": [], "commits": ["39af7325be6f369b622a07076b0d99117df81ebc"], "evidence…
+
+<!-- relay:entry 20260923T234741Z-r4 author=agent kind=progress model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+- ✦ agent is preparing Try it for this card
+
+<!-- relay:entry 20260923T234758Z-0m author=agent kind=note model=gpt-6-sol pane=bf8aa1b7 turn=b770a55cbbdc46ed93b756b551a44372/d9f3f40fb40444c39cbe70494d0cab9b -->
+Try it could not be staged: a reproducible fresh guest-harness pane needs a configured Codex or Claude guest process, while Try it requires an offline, no-model staging script. The intercepted-worker regression is recorded in docs/qa_evidence/2026-09-23-ctrl-enter-guest/; separate live verification remains on this card.
