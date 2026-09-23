@@ -6279,7 +6279,9 @@ private:
         }
         if (type == QStringLiteral("turn_summary")) {
             const QString turn = event.value(QStringLiteral("turn_id")).toString();
-            m_turnSummaries.insert(turn, event);
+            QJsonObject history = event;
+            history.insert(QStringLiteral("request"), m_currentRequest);
+            m_turnSummaries.insert(turn, history);
             {
                 // The picker's speed sort (owner, 2026-09-20): tokens per second as this pane
                 // saw them — answer and thinking characters over four, across the whole turn,
@@ -6588,6 +6590,29 @@ public:
         endCallRun();   // a held run of reads in the grid ends where it is; the pane draws the rest
         if (thinkingDisplay() == QLatin1String("never"))
             view->note(QStringLiteral("Reasoning display is off (Options › General) · this pane shows the tool calls only"));
+        // These turns were printed in the terminal before Activity opened. Reuse the worker's
+        // recent summaries here, outside m_internalsLedger: closing Activity must not print them
+        // into the terminal a second time.
+        if (!m_turnOrder.isEmpty())
+            view->note(QStringLiteral("Recent activity · up to 50 completed turns kept in this pane"));
+        for (const QString &turn : std::as_const(m_turnOrder)) {
+            const QJsonObject summary = m_turnSummaries.value(turn);
+            view->beginTurn(turn, summary.value(QStringLiteral("request")).toString());
+            if (thinkingDisplay() != QLatin1String("never")) {
+                const QString thinking = m_turnThinking.value(turn);
+                if (!thinking.isEmpty())
+                    view->setThinking(turn, QStringLiteral("history-thinking-") + turn,
+                                      thinking, true, -1);
+            }
+            for (const QJsonValue &value : summary.value(QStringLiteral("tools")).toArray()) {
+                const QJsonObject tool = value.toObject();
+                view->toolResult({{QStringLiteral("turn_id"), turn},
+                                  {QStringLiteral("call_id"), tool.value(QStringLiteral("call_id"))},
+                                  {QStringLiteral("tool"), tool.value(QStringLiteral("name"))},
+                                  {QStringLiteral("ok"), tool.value(QStringLiteral("ok"))},
+                                  {QStringLiteral("label"), tool.value(QStringLiteral("label"))}});
+            }
+        }
         if (!m_thinkingAnchor.isEmpty()) {
             const relay::calllines::Ref ref = relay::calllines::parseUri(m_thinkingAnchor);
             finishThinkingFold(0, QStringLiteral("✦ thinking moved to the Activity pane"));

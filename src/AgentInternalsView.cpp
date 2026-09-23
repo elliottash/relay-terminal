@@ -137,7 +137,7 @@ void AgentInternalsView::setHeader() {
     for (const ToolCall &call : m_calls) calls += std::max(1, int(call.callIds.size()));
     parts << QStringLiteral("%1 turn%2").arg(m_turns).arg(m_turns == 1 ? QString() : QStringLiteral("s"));
     parts << QStringLiteral("%1 tool call%2").arg(calls).arg(calls == 1 ? QString() : QStringLiteral("s"));
-    parts << QStringLiteral("the terminal prints these again when you close this pane");
+    parts << QStringLiteral("new activity returns to the terminal on close");
     m_status->setText(parts.join(QStringLiteral(" · ")));
     updateAskRow();
 }

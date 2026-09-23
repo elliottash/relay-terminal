@@ -1420,6 +1420,43 @@ void aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript()
     const QString after = qEnvironmentVariable("RELAY_MEMORY_OUTCOME_CAPTURE");
     if (!after.isEmpty()) CHECK(console.grab().save(after));
 }
+void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent({{"event", "agent_started"}, {"id", "t1"}});
+    console.deliverWorkerEvent({{"event", "thinking_delta"}, {"turn_id", "t1"}, {"text", "earlier reasoning"}});
+    console.deliverWorkerEvent({{"event", "thinking_done"}, {"turn_id", "t1"}, {"chars", 17}, {"elapsed_ms", 1000}});
+    const QJsonObject label{{"kind", "run"}, {"running", "running pytest"}, {"title", "ran pytest"}};
+    console.deliverWorkerEvent({{"event", "turn_summary"}, {"turn_id", "t1"}, {"elapsed_ms", 1000},
+                                {"tools", QJsonArray{QJsonObject{{"call_id", "c1"}, {"name", "run_command"},
+                                                                  {"ok", true}, {"label", label}}}}});
+    const QString before = console.paneTextLines(2000).join('\n');
+    {
+        relay::AgentInternalsView activity;
+        console.attachInternals(&activity);
+        CHECK_EQ(activity.turnCount(), 1);
+        CHECK_EQ(activity.toolRowCount(), 1);
+        CHECK(activity.plainText().contains(QStringLiteral("earlier reasoning")));
+        CHECK(activity.plainText().contains(QStringLiteral("ran pytest")));
+        const QString capture = qEnvironmentVariable("RELAY_ACTIVITY_HISTORY_CAPTURE");
+        if (!capture.isEmpty()) {
+            activity.resize(900, 600);
+            activity.show();
+            QCoreApplication::processEvents();
+            CHECK(activity.grab().save(capture));
+        }
+        console.detachInternals(&activity);
+    }
+    CHECK_EQ(console.paneTextLines(2000).join('\n'), before);
+    relay::AgentInternalsView reopened;
+    console.attachInternals(&reopened);
+    CHECK_EQ(reopened.turnCount(), 1);
+    CHECK_EQ(reopened.toolRowCount(), 1);
+    console.detachInternals(&reopened);
+}
 }  // namespace cases
 
 int main(int argc, char **argv)
@@ -1448,6 +1485,10 @@ int main(int argc, char **argv)
         cases::enteringPlanSelectsHigh();
         cases::clickingPlanLeavesModeAndPreservesDraft();
         cases::planWhileConfiguringSelectsHighBeforeMode();
+        return failures ? 1 : 0;
+    }
+    if (app.arguments().contains(QStringLiteral("--activity-history-only"))) {
+        cases::openingActivityReplaysCompletedTurnsWithoutReprintingThem();
         return failures ? 1 : 0;
     }
 
