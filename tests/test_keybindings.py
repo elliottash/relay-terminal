@@ -359,7 +359,8 @@ class GuiDefaultsTests(unittest.TestCase):
             'board.open': ['Ctrl+Shift+A'],
             'sessions.open': ['Ctrl+Shift+S'],
             'files.explorer': ['Ctrl+Shift+D'],
-            'palette.open': ['Ctrl+Shift+P'],
+            'palette.open': [],
+            'projects.open': ['Ctrl+Shift+P'],
             'help.shortcuts': ['Ctrl+?', 'Ctrl+Shift+/', 'Ctrl+/'],
             'prompt.clear': ['Ctrl+Shift+Q', 'Ctrl+Q'],
             'closed.restore': ['Ctrl+Shift+Z'],
@@ -371,15 +372,17 @@ class GuiDefaultsTests(unittest.TestCase):
             self.assertEqual(self.defaults(action), keys, action)
         # Registered, so slash commands and keybindings.json can name them, but with no keys.
         for action in ('pane.restartShell', 'agent.stopAllSubagents', 'agent.resume', 'conversations.open',
-                       'projects.open', 'globals.open', 'control.prompt', 'agent.screenshotPane'):
+                       'control.prompt', 'agent.screenshotPane'):
             self.assertEqual(self.defaults(action), [], f'{action} keeps no default key')
+        self.assertEqual(self.defaults('globals.open'), ['Ctrl+Shift+G'])
+        self.assertEqual(self.owners('relay').get('Ctrl+Shift+G'), ['globals.open'])
         source = (ROOT / 'src/Keymap.h').read_text(encoding='utf-8')
-        self.assertRegex(source, r'add\("sessions\.open", "pane", "Sessions & Projects: ')
+        self.assertRegex(source, r'add\("sessions\.open", "pane", "Sessions: ')
         self.assertIn('add("prompt.clear", "agent", "Clear the prompt box (Ctrl+Z brings it back)"', source)
         self.assertRegex(source, r'add\("control\.human", "terminal", "[^"]*give it back to the Relay prompt[^"]*toggle')
         # Freed by the move, and left free in the Relay preset.
         owners = self.owners('relay')
-        for key in ('Ctrl+Shift+Y', 'Ctrl+Shift+G', 'Ctrl+Shift+B', 'Ctrl+Shift+R', 'Ctrl+Shift+X', 'Ctrl+B'):
+        for key in ('Ctrl+Shift+Y', 'Ctrl+Shift+B', 'Ctrl+Shift+R', 'Ctrl+Shift+X', 'Ctrl+B'):
             self.assertNotIn(key, owners, f'{key} was freed by #QWAS')
 
     def test_plain_ctrl_is_left_to_the_editor_for_asdzxcp(self):
@@ -428,12 +431,14 @@ class GuiDefaultsTests(unittest.TestCase):
         self.assertLess(guard, body.find('m_programKeys == QStringLiteral("all")'))
 
     def test_workspace_views_have_dedicated_keys_without_preset_collisions(self):
-        # The Board, the Sessions & Projects pane and the palette hold their chords in every preset.
-        expected = {'Ctrl+Shift+A': 'board.open', 'Ctrl+Shift+S': 'sessions.open', 'Ctrl+Shift+P': 'palette.open'}
+        # Board, Sessions, Projects and Actions/help hold their chords in every preset.
+        expected = {'Ctrl+Shift+A': 'board.open', 'Ctrl+Shift+S': 'sessions.open',
+                    'Ctrl+Shift+P': 'projects.open', 'Ctrl+?': 'help.shortcuts'}
         for preset in self.presets():
             owners = self.owners(preset)
             for key, owner in expected.items():
                 self.assertEqual(owners.get(key), [owner], f'{preset} must reserve {key} for {owner}')
+            self.assertEqual(self.effective(preset)['palette.open'], [])
 
     def test_the_shortcuts_overlay_binds_every_spelling_of_ctrl_question(self):
         # #T9ZS: "Ctrl+?" is one gesture with several spellings. Qt reports the main-row key as
