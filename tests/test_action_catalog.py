@@ -112,7 +112,7 @@ class ActionCatalogTest(unittest.TestCase):
         self.assertIn('m_search->setProperty("relayLocalKeys", QStringList{QStringLiteral("Ctrl+N"), QStringLiteral("Ctrl+P")})',
                       settings)
         files = (ROOT / 'src' / 'FilePanes.cpp').read_text(encoding='utf-8')
-        self.assertIn('m_view->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up")})', files)
+        self.assertIn('m_view->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up"), QStringLiteral("Left"), QStringLiteral("Right")})', files)
         self.assertIn('m_filter->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up")})', files)
 
     def test_board_slash_label_is_board(self):
