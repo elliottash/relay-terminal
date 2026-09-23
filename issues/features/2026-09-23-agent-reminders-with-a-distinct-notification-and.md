@@ -1,13 +1,13 @@
 ---
 id: WJ0H
 type: work
-status: executing
+status: needs-verification
 labels: [feature, agent, notifications]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
 rank: zzzzzzzzzzzzzzzzzw
 created: '2026-09-23'
-links: {plans: [], commits: [], evidence: [], related: [0C0V], github: null}
+links: {plans: [], commits: [8074c44f], evidence: [docs/qa_evidence/2026-09-23-WJ0H/], related: [0C0V], github: null}
 ---
 # Agent reminders with a distinct notification and audible bell
 
