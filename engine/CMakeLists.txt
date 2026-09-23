@@ -98,6 +98,18 @@ find_package(Threads REQUIRED)
 # shared word-aware break rule (#R2WQ), which is QtCore-only with PUBLIC src
 # includes, so this is no cycle.
 target_link_libraries(relay-terminal-engine PUBLIC ${RELAY_QT}::Widgets relay-outputlinks relay-markdown PRIVATE relay-vterm-c Threads::Threads)
+# Qt 6 Multimedia supplies real pause, seek and position on platforms that ship it. The Linux
+# Qt 5 build and minimal Qt 6 installs keep the CLI playback fallback (#MDA7).
+if(RELAY_QT_MAJOR STREQUAL "6")
+    find_package(Qt6 QUIET COMPONENTS Multimedia)
+    if(TARGET Qt6::Multimedia)
+        target_link_libraries(relay-terminal-engine PRIVATE Qt6::Multimedia)
+        target_compile_definitions(relay-terminal-engine PRIVATE RELAY_HAVE_QTMULTIMEDIA)
+        message(STATUS "Relay: inline audio uses Qt Multimedia")
+    else()
+        message(STATUS "Relay: inline audio uses a command-line player (Qt Multimedia not found)")
+    endif()
+endif()
 if(UNIX AND NOT APPLE)
     target_link_libraries(relay-terminal-engine PRIVATE util) # forkpty
 endif()

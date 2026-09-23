@@ -29,6 +29,8 @@
 class QLabel;
 class QLineEdit;
 class QProcess;
+class QMediaPlayer;
+class QAudioOutput;
 
 namespace relay {
 
@@ -583,6 +585,9 @@ private:
     QHash<QString, MediaInfo> m_mediaInfo;
     std::vector<MediaPlacement> m_mediaPlacements;
     QProcess *m_audioProcess = nullptr;
+    QMediaPlayer *m_qtPlayer = nullptr;  // Qt 6 Multimedia, when built
+    QAudioOutput *m_qtOutput = nullptr;
+    bool m_qtAudioFailed = false;
     QTimer m_audioTimer;
     QString m_audioPath;
     qint64 m_audioPositionMs = 0;

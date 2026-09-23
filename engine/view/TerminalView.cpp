@@ -43,6 +43,10 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 #include <QtMath>
+#ifdef RELAY_HAVE_QTMULTIMEDIA
+#include <QAudioOutput>
+#include <QMediaPlayer>
+#endif
 
 #include <algorithm>
 
@@ -2634,6 +2638,10 @@ QRect TerminalView::mediaRect(const MediaPlacement &media) const
 
 qint64 TerminalView::audioPositionMs() const
 {
+#ifdef RELAY_HAVE_QTMULTIMEDIA
+    if (m_qtPlayer && !m_qtAudioFailed && !m_audioPath.isEmpty())
+        return m_qtPlayer->position();
+#endif
     const qint64 running = m_audioProcess && m_audioProcess->state() != QProcess::NotRunning &&
                            m_audioClock.isValid() ? m_audioClock.elapsed() : 0;
     return m_audioDurationMs > 0 ? std::min(m_audioDurationMs, m_audioPositionMs + running)
@@ -2656,8 +2664,12 @@ void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
             p.drawText(box.adjusted(6, 0, -4, 0), Qt::AlignVCenter,
                        tr("[media unavailable]"));
         } else if (info.kind == QStringLiteral("audio")) {
-            const bool playing = m_audioPath == info.path && m_audioProcess &&
-                                 m_audioProcess->state() != QProcess::NotRunning;
+            bool playing = m_audioPath == info.path && m_audioProcess &&
+                           m_audioProcess->state() != QProcess::NotRunning;
+#ifdef RELAY_HAVE_QTMULTIMEDIA
+            playing = playing || (m_audioPath == info.path && m_qtPlayer &&
+                                  m_qtPlayer->playbackState() == QMediaPlayer::PlayingState);
+#endif
             p.setPen(m_scheme.foreground);
             p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignLeft | Qt::AlignVCenter,
                        playing ? QStringLiteral("❚❚") : QStringLiteral("▶"));
@@ -2738,6 +2750,14 @@ void TerminalView::stopAudio(bool preservePosition)
         m_audioPath.clear();
     }
     m_audioTimer.stop();
+#ifdef RELAY_HAVE_QTMULTIMEDIA
+    if (m_qtPlayer) {
+        if (preservePosition)
+            m_qtPlayer->pause();
+        else
+            m_qtPlayer->stop();
+    }
+#endif
     if (m_audioProcess) {
         QProcess *process = m_audioProcess;
         m_audioProcess = nullptr;
@@ -2760,6 +2780,44 @@ void TerminalView::playAudio(const MediaInfo &info, qint64 fromMs)
     if (activeAudioView && activeAudioView != this)
         activeAudioView->stopAudio();
     stopAudio();
+#ifdef RELAY_HAVE_QTMULTIMEDIA
+    if (!m_qtAudioFailed) {
+        if (!m_qtPlayer) {
+            m_qtPlayer = new QMediaPlayer(this);
+            m_qtOutput = new QAudioOutput(this);
+            m_qtPlayer->setAudioOutput(m_qtOutput);
+            connect(m_qtPlayer, &QMediaPlayer::mediaStatusChanged, this,
+                    [this](QMediaPlayer::MediaStatus status) {
+                        if (status == QMediaPlayer::EndOfMedia)
+                            stopAudio();
+                        else if (status == QMediaPlayer::LoadedMedia && m_audioPositionMs > 0)
+                            m_qtPlayer->setPosition(m_audioPositionMs);
+                    });
+            connect(m_qtPlayer, &QMediaPlayer::errorOccurred, this,
+                    [this](QMediaPlayer::Error, const QString &) {
+                        if (m_audioPath.isEmpty())
+                            return;
+                        const qint64 at = audioPositionMs();
+                        MediaInfo fallback;
+                        fallback.path = m_audioPath;
+                        fallback.durationMs = m_audioDurationMs;
+                        m_qtAudioFailed = true;
+                        stopAudio();
+                        playAudio(fallback, at); // fall back to the CLI player on this machine
+                    });
+        }
+        m_audioPath = info.path;
+        m_audioDurationMs = info.durationMs;
+        m_audioPositionMs = fromMs;
+        m_qtPlayer->setSource(QUrl::fromLocalFile(info.path));
+        m_qtPlayer->setPosition(fromMs);
+        m_qtPlayer->play();
+        m_audioTimer.start();
+        activeAudioView = this;
+        update();
+        return;
+    }
+#endif
     const QString ffplay = QStandardPaths::findExecutable(QStringLiteral("ffplay"));
     QString tool = ffplay;
     QStringList args;
@@ -2868,6 +2926,24 @@ void TerminalView::activateMedia(const MediaPlacement &media, const QPoint &pos)
         const QRect box = mediaRect(media);
         const int left = box.left() + std::max(60, 7 * m_cw);
         const int right = box.right() - std::max(80, 9 * m_cw);
+#ifdef RELAY_HAVE_QTMULTIMEDIA
+        if (m_qtPlayer && !m_qtAudioFailed && m_audioPath == info.path) {
+            if (right > left && pos.x() >= left && pos.x() <= right && info.durationMs > 0) {
+                m_qtPlayer->setPosition(info.durationMs * (pos.x() - left) / (right - left));
+                update();
+                return;
+            }
+            if (m_qtPlayer->playbackState() == QMediaPlayer::PlayingState)
+                stopAudio(true);
+            else {
+                m_qtPlayer->play();
+                m_audioTimer.start();
+                activeAudioView = this;
+                update();
+            }
+            return;
+        }
+#endif
         if (right > left && pos.x() >= left && pos.x() <= right && info.durationMs > 0) {
             playAudio(info, info.durationMs * (pos.x() - left) / (right - left));
         } else if (m_audioPath == info.path && m_audioProcess &&
