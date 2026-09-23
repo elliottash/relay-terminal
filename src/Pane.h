@@ -8278,6 +8278,7 @@ private:
                     // Delivered here, not queued: no "at the next tool call" suffix, which only
                     // belongs on a row still waiting in the strip.
                     printInline(QStringLiteral("✦ ") + steer.text + QLatin1Char('\n'), Ink::UserAgent);
+                    printAttachmentThumbnails(steer.text);   // #1MGS
                     forgetSteer(i);
                     if (steer.withdraw) {
                         // The withdraw lost the race: the turn took it first, so the transcript line
@@ -12066,6 +12067,7 @@ private:
             } else if (!prompt.fix && !prompt.text.isEmpty()) {
                 ensureLineStart();
                 printInline(QStringLiteral("✦ ") + prompt.text + '\n', Ink::UserAgent);
+                printAttachmentThumbnails(prompt.text);   // #1MGS
                 if (!prompt.why.isEmpty()) printInline(prompt.why + '\n', Ink::Note);
             }
         } else if (type == QStringLiteral("agent_finished")) {
@@ -14945,6 +14947,52 @@ private:
         return out;
     }
 
+    // Rendered agent prose into terminal bytes: proseStart() and the wrapper, except that an
+    // inline image's kitty escape (#1MGS, MarkdownAnsi) never lands in a prose run — the run's
+    // text is what the view re-wraps after a resize, and the collector would read the escape's
+    // body as words. So the run closes before the escape, the escape goes out on its own at the
+    // start of a row, and the text after it opens a run of its own, with its label links (#MDKN)
+    // re-pointed at that run: the renderer hung them from the one that just closed.
+    QByteArray agentProse(const QString &rendered) {
+        QByteArray out;
+        QString rest = rendered;
+        for (int at; (at = rest.indexOf(relay::MarkdownAnsi::kImageEscapeStart)) >= 0;) {
+            const int end = rest.indexOf(QStringLiteral("\x1b\\"), at);
+            if (end < 0) break;
+            const QString before = rest.left(at);
+            if (!before.isEmpty()) out += proseStart(Ink::Agent, before) + wrapped(before);
+            const QString closed = m_proseUri;
+            out += takeWrapped() + closeProseRun() + rest.mid(at, end + 2 - at).toUtf8();
+            rest = rest.mid(end + 2);
+            if (!closed.isEmpty()) {
+                const QString next = proseUriFor(Ink::Agent);
+                rest.replace(closed + QLatin1Char('#'), next + QLatin1Char('#'));
+                rest.replace(closed + QStringLiteral("\x1b\\"), next + QStringLiteral("\x1b\\"));
+            }
+        }
+        if (!rest.isEmpty()) out += proseStart(Ink::Agent, rest) + wrapped(rest);
+        return out;
+    }
+
+    // A prompt's attached images as thumbnails under its echo (#1MGS): pasted, dropped, `@`-named
+    // and "Screenshot this pane" alike, since all four are an `@` token by the time it is sent.
+    // Outside any prose run, like a reply's picture, and two columns in, under the prompt's text.
+    // A login's attachments are the host's files, which this machine cannot draw.
+    void printAttachmentThumbnails(const QString &prompt) {
+        if (m_login.active || !m_inlineOpen || !m_backend) return;
+        const int columns = std::min(m_backend->columns() - 2, int(relay::MarkdownAnsi::kImageMaxColumns));
+        QByteArray out;
+        for (const QJsonValue &value : attachmentsFor(prompt)) {
+            const QString escape = relay::MarkdownAnsi::imageEscape(value.toObject().value(QStringLiteral("path")).toString(),
+                                                                    columns, relay::MarkdownAnsi::kThumbnailRows);
+            if (!escape.isEmpty()) out += "\x1b[2C" + escape.toUtf8() + "\r\n";
+        }
+        if (out.isEmpty()) return;
+        ensureLineStart();
+        writeTerminal(takeWrapped() + closeProseRun() + out);
+        m_atLineStart = true;
+    }
+
     void printInline(const QString &text, Ink ink) {
         if (text.isEmpty()) return;
         if (!inlineReady()) { m_inlinePending.append({text, ink}); appendTranscript(text, ink); return; }
@@ -14988,16 +15036,19 @@ private:
             // target as a fragment (#MDKN); the renderer writes that run, so it is told the
             // anchor before it renders the chunk.
             m_markdown.setLinkAnchor(proseUriFor(ink));
+            // `![alt](file)` is drawn (#1MGS) — not in a login, where a path names the host's file.
+            m_markdown.setInlineImages(!m_login.active);
+            m_markdown.setImageBaseDir(m_cwd);
+            m_markdown.setImageColumns(m_backend ? m_backend->columns() : 0);
             const QString rendered = m_markdown.feed(clean);
-            out += proseStart(ink, rendered);
-            out += wrapped(rendered);
+            out += agentProse(rendered);
             m_atLineStart = clean.endsWith('\n');
             writeTerminal(out);
             return;
         }
         m_markdown.setLinkAnchor(proseUriFor(Ink::Agent));   // the tail lands in an Agent block (#MDKN)
         const QString mdTail = m_markdown.finish();   // always runs: it resets the renderer
-        if (!mdTail.isEmpty()) out += proseStart(Ink::Agent, mdTail) + wrapped(mdTail);
+        if (!mdTail.isEmpty()) out += agentProse(mdTail);
         // A line the user typed carries a *role*, not a colour: every row of it is marked with the
         // private OSC 7772 ("shell" / "agent"), and the engine view paints that row's band and ink
         // from the theme in force when it paints (EngineBackend::applyThemeColors, ColorScheme.h).
@@ -15110,7 +15161,7 @@ private:
         if (m_markdown.holding()) {
             m_markdown.setLinkAnchor(proseUriFor(Ink::Agent));   // #MDKN, as in printInline
             const QString tail = m_markdown.finish();
-            if (!tail.isEmpty()) writeTerminal(proseStart(Ink::Agent, tail) + wrapped(tail));
+            if (!tail.isEmpty()) writeTerminal(agentProse(tail));
         }
         writeTerminal(takeWrapped());
         // The run closes before the last newline: a blank row that ends the inline region is not
