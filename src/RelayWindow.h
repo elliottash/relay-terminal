@@ -6663,9 +6663,26 @@ public:
         auto resume = view->onResume;
         auto close = view->onClose;
         // Close first: a resume may focus another pane (the one that already has the session),
-        // and closing afterwards would take the focus back. Shift+Enter (`keepOpen`) skips this,
-        // so several conversations can be reattached from the same list in a row (#R6J0 follow-up).
-        view->onResume = [resume, close, ownerGuard](const QJsonObject &item, bool, bool keepOpen) {
+        // and closing afterwards would take the focus back. Shift+Enter keeps this list open and
+        // returns focus to the control the user was using, so they can open another row (#E7FP).
+        view->onResume = [resume, close, ownerGuard, guard](const QJsonObject &item, bool, bool keepOpen) {
+            QPointer<QWidget> focused = keepOpen ? QApplication::focusWidget() : nullptr;
+            auto restoreListFocus = [guard, focused, keepOpen] {
+                if (!keepOpen || !guard) return;
+                // openFork queues focusInput() for the new pane. Queue this after resume so that
+                // its focus change runs first; the same path also handles an existing pane.
+                QTimer::singleShot(0, guard, [guard, focused] {
+                    auto *w = windowOf(guard);
+                    if (!w) return;
+                    if (QWidget *page = w->pageOf(guard)) w->m_tabs->setCurrentWidget(page);
+                    w->setActiveLeaf(guard);
+                    w->raise();
+                    w->activateWindow();
+                    if (focused && (focused == guard || guard->isAncestorOf(focused)))
+                        focused->setFocus(Qt::OtherFocusReason);
+                    else focusLeaf(guard);
+                });
+            };
             if (!keepOpen && close) close();
             const QString id = item.value(QStringLiteral("session_id")).toString();
             if (id.isEmpty()) return;
@@ -6684,9 +6701,11 @@ public:
             }
             if (existing) {
                 if (auto *w = windowOf(existing)) w->revealPane(existing);
+                restoreListFocus();
                 return;
             }
             if (resume) resume(item, true, keepOpen);
+            restoreListFocus();
         };
         view->onOpenInfo = [ownerGuard, guard](const QJsonObject &item) {
             auto *w = windowOf(guard);
