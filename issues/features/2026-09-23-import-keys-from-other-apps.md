@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 rank: m
 created: '2026-09-23'
 source: Codex in Relay, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-import-keys/], related: [P3KD], github: null}
+links: {plans: [], commits: [4de23c464996f2ab39577772930cf9e90231de82], evidence: [docs/qa_evidence/2026-09-23-import-keys/], related: [P3KD], github: null}
 ---
 # Import provider keys from other apps
 
