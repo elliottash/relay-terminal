@@ -17,6 +17,9 @@ from pathlib import Path
 
 import unittest.mock
 
+# Board Test suites imports this file as tests.test_board_protocol with only backend on
+# PYTHONPATH. The fixture modules live beside it and must be importable in that mode too.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fake_cards
 import fake_github as FG
 from relay_core import agent_context as AC
@@ -406,6 +409,26 @@ class OpenTests(ProtocolTest):
 # ------------------------------------------------------------------------- writes
 
 class WriteTests(ProtocolTest):
+    def test_triage_is_read_only_and_create_writes_only_selected_related_ids(self):
+        existing = self.make_card(title="Clickable file paths", text="Make file paths clickable")
+        before = len(self.board.cards())
+        events = self.send(type="board_triage", id="triage1", text="Clickable file paths")
+        answer = [event for event in events if event["event"] == "board_triage"]
+        self.assertEqual(len(answer), 1)
+        self.assertEqual(answer[0]["phase"], "local")
+        self.assertEqual(answer[0]["duplicates"][0]["id"], existing)
+        self.assertEqual(len(self.board.cards()), before)
+        created = self.make_card(title="Open paths from output", text="Open file paths",
+                                 related=[existing], labels=["feature"])
+        card = self.board.card_by_id(created)
+        self.assertEqual(card.front["links"]["related"], [existing])
+        self.assertEqual(card.front["labels"], ["feature"])
+
+    def test_triage_with_no_provider_falls_back_without_blocking(self):
+        events = self.send(type="board_triage", id="triage2", text="A new request", semantic=True)
+        self.assertEqual([event["phase"] for event in events if event["event"] == "board_triage"],
+                         ["local", "semantic"])
+
     def test_quick_add_keeps_the_text_verbatim_and_titles_it_from_the_first_line(self):
         self.send(type="board_create", tab="features", status="inbox",
                   text="parse all folders and filenames and highlight them")

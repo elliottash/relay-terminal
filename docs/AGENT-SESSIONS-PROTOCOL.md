@@ -2965,7 +2965,8 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 
 | Message | Reply |
 |---|---|
-| `board_create {id?, tab, status, section?, text, title?, card_type?, labels?, source?, author?}` | `board_written` + `board_changed` |
+| `board_triage {id?, text, title?, semantic?}` | `board_triage` local, then optional semantic |
+| `board_create {id?, tab, status, section?, text, title?, card_type?, labels?, related?, source?, author?}` | `board_written` + `board_changed` |
 | `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
 | `board_move {id?, card, status?, tab?, section?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
 | `board_priority {id?, card, priority, author?}` | `board_written` + `board_changed` |
@@ -2988,9 +2989,18 @@ disk — both privacy variants of the thread — with the bytes on the write rec
 turn runs on that card, a cleanup, the page agent or a sync runs, and it is never an agent tool:
 agents close a card with `board_move_card` (`done`/`dropped`) exactly as before.
 
+`board_triage` is read-only draft assistance (#5KMQ). It replies immediately with `phase: "local"`
+and arrays of likely duplicate and related `{id, title, status, score}` rows, using the Board's
+fuzzy matching over open cards. With `semantic: true`, a background chores-role call later sends
+`phase: "semantic"` with duplicate and related ID arrays plus an optional tab and labels. A
+missing provider or timeout yields empty suggestions. The GUI matches request IDs so an older
+answer cannot change a newer draft. No suggestion writes a card or link by itself.
+
 `board_create` is quick add: `text` is stored **verbatim** as the card's `## Issue`, and the title
 is its first line (shortened) unless one is given. `section` (2026-09-20, #3XZV) parks the new
 card in a manual section — the quick-add field over one — and its status stays what `status` said.
+The pre-save draft supplies an explicit `title`, and only the related IDs selected by the owner
+ride `related` into the new card's `links.related` field. Tab and labels are editable in the draft.
 On `board_move`, `section` is the id of a manual section the card is parked in, leaving `status`
 alone; the empty string takes the card out (a drop on a status column sends exactly that), and the
 board's own stage moves never touch a parking place. On a project with no Board yet it answers

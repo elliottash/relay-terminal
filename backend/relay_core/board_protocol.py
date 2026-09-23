@@ -70,7 +70,7 @@ TRYIT_TYPES = ("try_run", "try_stop", "try_answer")
 TP_GATE_FROM = "needs-verification"
 TP_GATE_TO = ("needs-qa", "needs-qa-llm", "needs-qa-human", "needs-review", "done", "verified")
 
-TYPES = {"board_open", "board_refresh", "board_card_get", "board_create", "board_update",
+TYPES = {"board_open", "board_refresh", "board_card_get", "board_triage", "board_create", "board_update",
          "board_move", "board_priority", "board_delete", "board_comment", "board_undo", "board_ask",
          # Stop and go, per card: `board_cancel` pauses that card's queue, `board_resume` runs it
          # again — `cancel` and `resume_queue` (12.5) by the road a device can reach (#7JD1).
@@ -1528,6 +1528,57 @@ class BoardCommands:
                if all(any(term in part for part in parts) for term in terms)]
         self._send({"event": "board_search", "id": rid, "query": query or "", "ids": sorted(ids)})
 
+    def _triage(self, request: dict, rid) -> None:
+        """Local suggestions now; an optional chores-role answer later, never a write."""
+        text = request.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > 3000:
+            raise ValueError("board_triage needs 1–3000 characters of draft text.")
+        title = request.get("title", text)
+        if not isinstance(title, str) or not title.strip() or len(title) > 200:
+            raise ValueError("board_triage title must be 1–200 characters.")
+        semantic = request.get("semantic", False)
+        if type(semantic) is not bool:
+            raise ValueError("board_triage semantic must be true or false.")
+        tools = self._need_ready()
+        cards = [card for card in tools.board.cards()
+                 if card.id and card.type == "work" and card.status not in ("done", "dropped")]
+        local = tools.duplicates(title, text, cards, threshold=0.40)
+        self._send({"event": "board_triage", "id": rid, "phase": "local",
+                    "duplicates": [item for item in local if item["score"] >= 0.66],
+                    "related": [item for item in local if item["score"] < 0.66]})
+        if not semantic:
+            return
+        from . import board_triage
+        agent = getattr(self.turns, "agent", None)
+        if agent is None:
+            self._send({"event": "board_triage", "id": rid, "phase": "semantic",
+                        "duplicates": [], "related": [], "tab": "", "labels": []})
+            return
+        try:
+            provider = agent.side_provider(cheap=True, role="chores",
+                                           max_tokens=board_triage.MAX_TOKENS)
+        except Exception:
+            self._send({"event": "board_triage", "id": rid, "phase": "semantic",
+                        "duplicates": [], "related": [], "tab": "", "labels": []})
+            return
+        # The model sees a bounded set: nearest local matches first, then the remaining open
+        # titles. It can only cite those IDs, and the GUI still asks the owner to select links.
+        by_id = {card.id: card for card in cards}
+        ordered = [by_id[item["id"]] for item in local if item["id"] in by_id]
+        local_ids = {card.id for card in ordered}
+        ordered.extend(card for card in sorted(cards, key=lambda item: str(item.front.get("created") or ""),
+                                                reverse=True) if card.id not in local_ids)
+        summaries = [{"id": card.id, "title": card.title[:120]}
+                     for card in ordered[:board_triage.MAX_CARDS]]
+        tabs = [str(tab["id"]) for tab in tools.board.tabs() if tab.get("folder")]
+        labels = sorted({"feature", "bug"}
+                        | {label for card in cards for label in (card.front.get("labels") or [])})
+        root = str(tools.board.root)
+        threading.Thread(target=board_triage.run,
+                         args=(provider, rid, f"Title: {title}\nIssue: {text}", summaries, tabs, labels,
+                               lambda event: self.emit({"root": root, **event})),
+                         name="relay-board-triage", daemon=True).start()
+
     # ---- the tests (protocol section 31) --------------------------------------
     def _tests(self):
         """The `tests_*` handlers for the board this worker is pointed at (#7BM4).
@@ -1718,6 +1769,8 @@ class BoardCommands:
             self._emit_changed(rid=rid)
         elif kind == "board_search":
             self._search(request, rid)
+        elif kind == "board_triage":
+            self._triage(request, rid)
         elif kind == "board_check":
             section = request.get("section")
             if section is not None and not isinstance(section, str):
@@ -1862,6 +1915,9 @@ class BoardCommands:
                     "title": title, "request": text if isinstance(text, str) and text.strip() else title,
                     "type": request.get("card_type") or "work",
                     **({"labels": request["labels"]} if request.get("labels") else {}),
+                    **({"related": request["related"]} if request.get("related") else {}),
+                    **({"not_duplicate_of": request["not_duplicate_of"]}
+                       if request.get("not_duplicate_of") else {}),
                     **({"source": request["source"]} if request.get("source") else {}),
                     **({"section": request["section"]} if request.get("section") else {})})
             elif kind == "board_update":

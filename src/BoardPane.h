@@ -25,10 +25,13 @@
 #include "AgentContext.h"    // what the agent on this surface is about (#AGNT steps 2, 6)
 
 class QComboBox;
+class QCheckBox;
 class QFrame;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
+class QPlainTextEdit;
+class QPushButton;
 class QListWidget;
 class QSplitter;
 class QFileSystemWatcher;
@@ -285,6 +288,10 @@ public:
     // ---- actions, also reachable from the palette and the keymap
     void quickAdd();
     void quickAddIn(const QString &columnId);
+    void requestQuickAddTriage(bool semantic = false);
+    void showQuickAddReview();
+    void renderQuickAddSuggestions();
+    void saveQuickAdd();
     void openSelected();
     void editSelected();             // `e`: edit the open card's title and issue text
     // `p` / `x` / `v` on the open or the selected card: Plan it, Execute it (#XS6Q) or hand it to
@@ -665,6 +672,22 @@ private:
     QWidget *m_quickAddRow = nullptr;
     QPointer<QLineEdit> m_quickAdd;
     QString m_quickAddColumn;
+    QWidget *m_quickAddReview = nullptr;
+    QPlainTextEdit *m_quickAddIssue = nullptr;
+    QComboBox *m_quickAddTab = nullptr;
+    QLineEdit *m_quickAddLabels = nullptr;
+    QLabel *m_quickAddTriageStatus = nullptr;
+    QWidget *m_quickAddSuggestions = nullptr;
+    QVBoxLayout *m_quickAddSuggestionsLayout = nullptr;
+    QPushButton *m_quickAddSave = nullptr;
+    QPushButton *m_quickAddCancel = nullptr;
+    QTimer *m_quickAddTriageTimer = nullptr;
+    QString m_quickAddTriageRequest;
+    QString m_quickAddCreateRequest;
+    bool m_quickAddTriageSupported = true;
+    QJsonArray m_quickAddDuplicates, m_quickAddRelated;
+    QSet<QString> m_quickAddChosenRelated;
+    bool m_quickAddTabTouched = false, m_quickAddLabelsTouched = false;
 
     // ---- the Switchboard agent, under the list on the list page (card #AGNT step 6).
     //

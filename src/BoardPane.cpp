@@ -6158,32 +6158,215 @@ void BoardView::buildQuickAdd(QVBoxLayout *layout)
     row->setContentsMargins(8, 5, 8, 3);
     auto *field = new QLineEdit(m_quickAddRow);
     field->setObjectName(QStringLiteral("boardQuickAdd"));
-    field->setToolTip(QStringLiteral("The card's title, kept verbatim. Enter creates the card and "
-                                     "opens it with its issue ready to type"));
+    field->setMaxLength(200);
+    field->setToolTip(QStringLiteral("The card's title. Enter reviews likely duplicates and the issue before saving"));
     row->addWidget(field);
     m_quickAdd = field;
     m_quickAddRow->hide();
     layout->addWidget(m_quickAddRow);
     field->installEventFilter(this);
-    connect(field, &QLineEdit::returnPressed, this, [this, field] {
-        const QString text = field->text().trimmed();
-        if (text.isEmpty()) {
+    m_quickAddTriageTimer = new QTimer(this);
+    m_quickAddTriageTimer->setSingleShot(true);
+    m_quickAddTriageTimer->setInterval(180);
+    connect(m_quickAddTriageTimer, &QTimer::timeout, this,
+            [this] { requestQuickAddTriage(); });
+    connect(field, &QLineEdit::textChanged, this, [this] {
+        m_quickAddTriageRequest.clear();
+        m_quickAddDuplicates = {};
+        m_quickAddRelated = {};
+        m_quickAddChosenRelated.clear();
+        renderQuickAddSuggestions();
+        if (!m_quickAdd->text().trimmed().isEmpty())
+            m_quickAddTriageTimer->start();
+    });
+    connect(field, &QLineEdit::returnPressed, this, [this] {
+        if (m_quickAdd->text().trimmed().isEmpty()) {
             closeQuickAdd();
             focusInput();
             return;
         }
-        const QString status = m_model.dropStatus(m_quickAddColumn);
-        QJsonObject create{{QStringLiteral("type"), QStringLiteral("board_create")},
-                           {QStringLiteral("tab"), defaultCategory()},
-                           {QStringLiteral("status"),
-                            status.isEmpty() ? QStringLiteral("inbox") : status},
-                           {QStringLiteral("card_type"), QStringLiteral("work")},
-                           {QStringLiteral("text"), text}};
-        if (status.isEmpty())
-            create.insert(QStringLiteral("section"), m_quickAddColumn);   // a manual section
-        send(create);
-        field->clear();
+        showQuickAddReview();
     });
+
+    m_quickAddReview = new QWidget(m_listPane);
+    m_quickAddReview->setObjectName(QStringLiteral("boardQuickAddReview"));
+    auto *review = new QVBoxLayout(m_quickAddReview);
+    review->setContentsMargins(8, 2, 8, 6);
+    review->addWidget(new QLabel(QStringLiteral("Issue"), m_quickAddReview));
+    m_quickAddIssue = new QPlainTextEdit(m_quickAddReview);
+    m_quickAddIssue->setObjectName(QStringLiteral("boardQuickAddIssue"));
+    m_quickAddIssue->setMaximumHeight(90);
+    m_quickAddIssue->setPlaceholderText(QStringLiteral("Describe the request"));
+    m_quickAddIssue->installEventFilter(this);
+    review->addWidget(m_quickAddIssue);
+    connect(m_quickAddIssue, &QPlainTextEdit::textChanged, this, [this] {
+        m_quickAddTriageRequest.clear();
+        m_quickAddTriageStatus->clear();
+        m_quickAddTriageStatus->hide();
+        m_quickAddDuplicates = {};
+        m_quickAddRelated = {};
+        m_quickAddChosenRelated.clear();
+        renderQuickAddSuggestions();
+        if (!m_quickAddReview->isHidden())
+            m_quickAddTriageTimer->start();
+    });
+    auto *choices = new QHBoxLayout;
+    m_quickAddTab = new QComboBox(m_quickAddReview);
+    m_quickAddTab->setObjectName(QStringLiteral("boardQuickAddTab"));
+    choices->addWidget(m_quickAddTab);
+    m_quickAddLabels = new QLineEdit(m_quickAddReview);
+    m_quickAddLabels->setObjectName(QStringLiteral("boardQuickAddLabels"));
+    m_quickAddLabels->setPlaceholderText(QStringLiteral("Labels, separated by commas"));
+    choices->addWidget(m_quickAddLabels, 1);
+    review->addLayout(choices);
+    connect(m_quickAddTab, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this] { m_quickAddTabTouched = true; });
+    connect(m_quickAddLabels, &QLineEdit::textEdited, this,
+            [this] { m_quickAddLabelsTouched = true; });
+    m_quickAddTriageStatus = new QLabel(m_quickAddReview);
+    m_quickAddTriageStatus->setObjectName(QStringLiteral("boardQuickAddTriageStatus"));
+    m_quickAddTriageStatus->hide();
+    review->addWidget(m_quickAddTriageStatus);
+    m_quickAddSuggestions = new QWidget(m_listPane);
+    m_quickAddSuggestions->setObjectName(QStringLiteral("boardQuickAddSuggestions"));
+    m_quickAddSuggestionsLayout = new QVBoxLayout(m_quickAddSuggestions);
+    m_quickAddSuggestionsLayout->setContentsMargins(0, 0, 0, 0);
+    auto *buttons = new QHBoxLayout;
+    m_quickAddSave = new QPushButton(QStringLiteral("Create card"), m_quickAddReview);
+    m_quickAddSave->setObjectName(QStringLiteral("boardQuickAddSave"));
+    connect(m_quickAddSave, &QPushButton::clicked, this, [this] { saveQuickAdd(); });
+    m_quickAddCancel = new QPushButton(QStringLiteral("Cancel"), m_quickAddReview);
+    connect(m_quickAddCancel, &QPushButton::clicked, this, [this] { closeQuickAdd(); });
+    buttons->addWidget(m_quickAddSave);
+    buttons->addWidget(m_quickAddCancel);
+    buttons->addStretch();
+    review->addLayout(buttons);
+    m_quickAddReview->hide();
+    m_quickAddSuggestions->hide();
+    layout->addWidget(m_quickAddSuggestions);
+    layout->addWidget(m_quickAddReview);
+}
+
+void BoardView::requestQuickAddTriage(bool semantic)
+{
+    if (m_quickAddRow->isHidden() || !m_quickAddTriageSupported)
+        return;
+    const QString text = m_quickAddReview->isHidden()
+                             ? m_quickAdd->text().trimmed()
+                             : m_quickAddIssue->toPlainText().trimmed();
+    if (text.isEmpty())
+        return;
+    m_quickAddTriageTimer->stop();
+    m_quickAddTriageRequest = nextRequestId();
+    if (semantic) {
+        m_quickAddTriageStatus->setText(QStringLiteral("Checking related cards…"));
+        m_quickAddTriageStatus->show();
+    }
+    send({{QStringLiteral("type"), QStringLiteral("board_triage")},
+          {QStringLiteral("id"), m_quickAddTriageRequest},
+          {QStringLiteral("title"), m_quickAdd->text().trimmed().left(200)},
+          {QStringLiteral("text"), text.left(3000)},
+          {QStringLiteral("semantic"), semantic}});
+}
+
+void BoardView::showQuickAddReview()
+{
+    if (m_quickAddReview->isHidden()) {
+        m_quickAddIssue->setPlainText(m_quickAdd->text().trimmed());
+        m_quickAddReview->show();
+        m_quickAddIssue->setFocus();
+        m_quickAddIssue->selectAll();
+        renderQuickAddSuggestions();
+    }
+    requestQuickAddTriage(true);
+}
+
+void BoardView::renderQuickAddSuggestions()
+{
+    if (!m_quickAddSuggestionsLayout)
+        return;
+    while (QLayoutItem *item = m_quickAddSuggestionsLayout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    const auto addGroup = [this](const QString &name, const QJsonArray &items, bool linkable) {
+        if (items.isEmpty())
+            return;
+        m_quickAddSuggestionsLayout->addWidget(new QLabel(name, m_quickAddSuggestions));
+        for (const QJsonValue &value : items) {
+            const QJsonObject suggestion = value.toObject();
+            const QString id = suggestion.value(QStringLiteral("id")).toString();
+            if (id.isEmpty())
+                continue;
+            const QString title = suggestion.value(QStringLiteral("title")).toString();
+            auto *row = new QWidget(m_quickAddSuggestions);
+            auto *line = new QHBoxLayout(row);
+            line->setContentsMargins(0, 0, 0, 0);
+            if (linkable) {
+                auto *check = new QCheckBox(QStringLiteral("Link"), row);
+                check->setChecked(m_quickAddChosenRelated.contains(id));
+                connect(check, &QCheckBox::toggled, this, [this, id](bool checked) {
+                    if (checked) m_quickAddChosenRelated.insert(id);
+                    else m_quickAddChosenRelated.remove(id);
+                });
+                line->addWidget(check);
+            }
+            auto *label = new QLabel(row);
+            label->setText(QStringLiteral("<a href=\"card:%1\">#%1 %2</a>")
+                               .arg(id.toHtmlEscaped(), title.toHtmlEscaped()));
+            label->setTextInteractionFlags(Qt::TextBrowserInteraction);
+            label->setOpenExternalLinks(false);
+            connect(label, &QLabel::linkActivated, this, [this, id] { selectCard(id); });
+            line->addWidget(label, 1);
+            m_quickAddSuggestionsLayout->addWidget(row);
+        }
+    };
+    addGroup(QStringLiteral("Possible duplicates — open and compare before creating"),
+             m_quickAddDuplicates, false);
+    addGroup(QStringLiteral("Related cards — check Link to include on the new card"),
+             m_quickAddRelated, true);
+    if (m_quickAddDuplicates.isEmpty() && m_quickAddRelated.isEmpty()
+        && !m_quickAddReview->isHidden())
+        m_quickAddSuggestionsLayout->addWidget(
+            new QLabel(QStringLiteral("No likely matches found."), m_quickAddSuggestions));
+    m_quickAddSuggestions->setVisible(!m_quickAddRow->isHidden()
+        && (!m_quickAddDuplicates.isEmpty() || !m_quickAddRelated.isEmpty()
+            || !m_quickAddReview->isHidden()));
+}
+
+void BoardView::saveQuickAdd()
+{
+    if (!m_quickAddCreateRequest.isEmpty())
+        return;
+    const QString title = m_quickAdd->text().trimmed();
+    if (title.isEmpty())
+        return;
+    const QString issue = m_quickAddIssue->toPlainText().trimmed();
+    const QString status = m_model.dropStatus(m_quickAddColumn);
+    QJsonObject create{{QStringLiteral("type"), QStringLiteral("board_create")},
+                       {QStringLiteral("tab"), m_quickAddTab->currentData().toString()},
+                       {QStringLiteral("status"), status.isEmpty() ? QStringLiteral("inbox") : status},
+                       {QStringLiteral("card_type"), QStringLiteral("work")},
+                       {QStringLiteral("title"), title},
+                       {QStringLiteral("text"), issue.isEmpty() ? title : issue}};
+    if (status.isEmpty())
+        create.insert(QStringLiteral("section"), m_quickAddColumn);
+    QJsonArray labels;
+    for (const QString &part : m_quickAddLabels->text().split(QLatin1Char(','))) {
+        const QString label = part.trimmed();
+        if (!label.isEmpty() && !labels.contains(label)) labels.append(label);
+    }
+    if (!labels.isEmpty())
+        create.insert(QStringLiteral("labels"), labels);
+    QJsonArray related;
+    for (const QString &id : m_quickAddChosenRelated) related.append(id);
+    if (!related.isEmpty())
+        create.insert(QStringLiteral("related"), related);
+    m_quickAddCreateRequest = nextRequestId();
+    create.insert(QStringLiteral("id"), m_quickAddCreateRequest);
+    m_quickAddSave->setEnabled(false);
+    m_quickAddCancel->setEnabled(false);
+    send(create);
 }
 
 namespace {
@@ -6638,6 +6821,61 @@ void BoardView::handleEvent(const QJsonObject &event)
         }
         return;
     }
+    if (type == QStringLiteral("board_triage") && mine) {
+        if (requestId != m_quickAddTriageRequest || m_quickAddRow->isHidden())
+            return;
+        const QString phase = event.value(QStringLiteral("phase")).toString();
+        if (phase == QStringLiteral("local")) {
+            m_quickAddDuplicates = event.value(QStringLiteral("duplicates")).toArray();
+            m_quickAddRelated = event.value(QStringLiteral("related")).toArray();
+        } else if (phase == QStringLiteral("semantic")) {
+            m_quickAddTriageStatus->clear();
+            m_quickAddTriageStatus->hide();
+            const auto addIds = [this](const QJsonArray &ids, QJsonArray &target) {
+                for (const QJsonValue &value : ids) {
+                    const QString id = value.toString();
+                    const board::Card *card = m_model.card(id);
+                    if (!card || card->closed()) continue;
+                    bool known = false;
+                    for (const QJsonValue &existing : target)
+                        known |= existing.toObject().value(QStringLiteral("id")).toString() == id;
+                    if (!known)
+                        target.append(QJsonObject{{QStringLiteral("id"), id},
+                                                  {QStringLiteral("title"), card->title}});
+                }
+            };
+            addIds(event.value(QStringLiteral("duplicates")).toArray(), m_quickAddDuplicates);
+            QSet<QString> duplicateIds;
+            for (const QJsonValue &value : m_quickAddDuplicates)
+                duplicateIds.insert(value.toObject().value(QStringLiteral("id")).toString());
+            QJsonArray keptRelated;
+            for (const QJsonValue &value : m_quickAddRelated) {
+                const QString id = value.toObject().value(QStringLiteral("id")).toString();
+                if (!duplicateIds.contains(id)) keptRelated.append(value);
+                else m_quickAddChosenRelated.remove(id);
+            }
+            m_quickAddRelated = keptRelated;
+            for (const QJsonValue &value : event.value(QStringLiteral("related")).toArray())
+                if (!duplicateIds.contains(value.toString()))
+                    addIds(QJsonArray{value}, m_quickAddRelated);
+            const QString tab = event.value(QStringLiteral("tab")).toString();
+            if (!m_quickAddTabTouched && !tab.isEmpty()) {
+                const int index = m_quickAddTab->findData(tab);
+                if (index >= 0) {
+                    QSignalBlocker block(m_quickAddTab);
+                    m_quickAddTab->setCurrentIndex(index);
+                }
+            }
+            if (!m_quickAddLabelsTouched) {
+                QStringList labels;
+                for (const QJsonValue &value : event.value(QStringLiteral("labels")).toArray())
+                    if (!value.toString().isEmpty()) labels << value.toString();
+                if (!labels.isEmpty()) m_quickAddLabels->setText(labels.join(QStringLiteral(", ")));
+            }
+        }
+        renderQuickAddSuggestions();
+        return;
+    }
     // The worker's answer about the filter's plain words (#7M6E). Only the newest question is
     // believed: anything else is a search the box has already moved past.
     if (type == QStringLiteral("board_search") && mine) {
@@ -6908,20 +7146,15 @@ void BoardView::handleEvent(const QJsonObject &event)
         // card's removal events, until the card itself comes back or the pane reloads.
         m_pendingDeletes.remove(requestId);
         if (kind == QStringLiteral("board_create")) {
+            m_quickAddCreateRequest.clear();
             // The id is a `card:` link, so the notice itself zooms to the new card.
             note = QStringLiteral("Created <a href=\"card:%1\" style=\"color:%2;"
                                   "text-decoration:none\">#%1</a>")
                        .arg(card.toHtmlEscaped(), theme::Link.name());
-            // The quick-add field took the title; the card itself takes the issue (owner, #VZ69:
-            // "when you first press enter to add a new card, it should open the edit box, the
-            // editable issue part … the first thing you enter in the top row thing makes the
-            // title, not the issue content"). So the new card is the selection, it opens, and it
-            // opens *editing*, with the cursor in the issue box — which is the same path `e`
-            // takes, and it waits for the card to arrive the same way.
+            // The draft already collected the issue and links before the write (#5KMQ).
             m_selected = card;
             closeQuickAdd();
-            m_editOnOpenFresh = true;
-            editSelected();
+            openSelected();
         }
         if (kind == QStringLiteral("board_comment"))
             return;              // the thread itself shows it
@@ -7026,6 +7259,18 @@ void BoardView::handleEvent(const QJsonObject &event)
     // A write this pane asked for and the worker refused (a move into Needs QA without evidence,
     // a stale hash): say so where the card was dropped instead of in a status bar.
     if (type == QStringLiteral("error") && mine) {
+        if (!m_quickAddTriageRequest.isEmpty() && requestId == m_quickAddTriageRequest) {
+            m_quickAddTriageRequest.clear();
+            m_quickAddTriageSupported = false;
+            m_quickAddTriageStatus->clear();
+            m_quickAddTriageStatus->hide();
+            return;
+        }
+        if (requestId == m_quickAddCreateRequest) {
+            m_quickAddCreateRequest.clear();
+            m_quickAddSave->setEnabled(true);
+            m_quickAddCancel->setEnabled(true);
+        }
         m_pendingNotes.remove(requestId);
         m_pendingDeletes.remove(requestId);
         const QString text = event.value(QStringLiteral("text")).toString();
@@ -8124,9 +8369,8 @@ void BoardView::quickAdd()
 
 // The field sits over the list rather than inside a section: with one long list, a field at a
 // section's head would be scrolled out of sight as often as not. It names the section it adds to,
-// and it takes the card's *title*: Enter creates the card and opens it with the cursor in its
-// issue box (#VZ69), so the one line here is never mistaken for the whole card. Esc, or leaving it
-// empty, closes it.
+// and it takes the card's *title*. Enter opens the pre-save review, where the owner can write
+// the issue and compare suggestions before the card is created (#5KMQ).
 void BoardView::quickAddIn(const QString &columnId)
 {
     if (!m_open)
@@ -8143,16 +8387,42 @@ void BoardView::quickAddIn(const QString &columnId)
     if (id.isEmpty())
         return;
     m_quickAddColumn = id;
-    m_quickAdd->setPlaceholderText(QStringLiteral("Title of a new card in %1 — Enter opens it, Esc closes")
+    m_quickAdd->setPlaceholderText(QStringLiteral("Title of a new card in %1 — Enter reviews it, Esc closes")
                                        .arg(sectionTitle(id)));
+    if (m_quickAddRow->isHidden()) {
+        QSignalBlocker block(m_quickAddTab);
+        m_quickAddTab->clear();
+        for (const board::Tab &tab : m_model.tabs())
+            if (!tab.folder.isEmpty()) m_quickAddTab->addItem(tab.title, tab.id);
+        const int defaultIndex = m_quickAddTab->findData(defaultCategory());
+        m_quickAddTab->setCurrentIndex(defaultIndex >= 0 ? defaultIndex : 0);
+        m_quickAddTabTouched = false;
+        m_quickAddLabelsTouched = false;
+    }
     m_quickAddRow->show();
     m_quickAdd->setFocus();
 }
 
 void BoardView::closeQuickAdd()
 {
+    if (!m_quickAddCreateRequest.isEmpty())
+        return;
+    m_quickAddCreateRequest.clear();
+    m_quickAddSave->setEnabled(true);
+    m_quickAddCancel->setEnabled(true);
+    m_quickAddTriageTimer->stop();
+    m_quickAddTriageRequest.clear();
+    m_quickAddTriageStatus->clear();
+    m_quickAddTriageStatus->hide();
+    m_quickAddChosenRelated.clear();
+    m_quickAddDuplicates = {};
+    m_quickAddRelated = {};
     m_quickAdd->clear();
+    m_quickAddIssue->clear();
+    m_quickAddLabels->clear();
+    m_quickAddReview->hide();
     m_quickAddRow->hide();
+    m_quickAddSuggestions->hide();
 }
 
 void BoardView::openSelected()
@@ -8815,7 +9085,7 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
     // An empty quick-add field that loses the focus has been abandoned; one with text in it is
     // waiting for the person to come back to it. Enter leaves it open and focused either way.
     if (object == m_quickAdd && event->type() == QEvent::FocusOut) {
-        if (m_quickAdd->text().trimmed().isEmpty())
+        if (m_quickAdd->text().trimmed().isEmpty() && m_quickAddReview->isHidden())
             closeQuickAdd();
         return false;
     }
@@ -8850,6 +9120,19 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
         if (key->key() == Qt::Key_Escape) {
             closeQuickAdd();
             focusInput();
+            return true;
+        }
+        return QWidget::eventFilter(object, event);
+    }
+    if (object == m_quickAddIssue) {
+        if (key->key() == Qt::Key_Escape) {
+            closeQuickAdd();
+            focusInput();
+            return true;
+        }
+        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+            && key->modifiers() == Qt::ControlModifier) {
+            saveQuickAdd();
             return true;
         }
         return QWidget::eventFilter(object, event);

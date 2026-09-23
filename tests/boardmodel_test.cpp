@@ -402,6 +402,7 @@ private slots:
     void labelClicksCopyFiltersAndCardRefsZoom();
     void theRefCopyButtonCopiesTheIdInTheRowsAndTheHeader();
     void quickAddNamesTheSectionItAddsTo();
+    void quickAddLinksOnlyCheckedRelatedCards();
     void aCleanupPreviewsFirstAndItsEventsNeverReachACardThread();
     void applyingAPreviewRunsTheCleanupForReal();
     void aCleanupAndACardsAskRefuseEachOther();
@@ -2467,19 +2468,54 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     view.quickAdd();
     QVERIFY(!strip->isHidden());
     QCOMPARE(field->placeholderText(),
-             QStringLiteral("Title of a new card in Inbox — Enter opens it, Esc closes"));
+             QStringLiteral("Title of a new card in Inbox — Enter reviews it, Esc closes"));
     field->setText(QStringLiteral("clickable paths in the output"));
+    QTest::qWait(220);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_triage"));
+    QCOMPARE(sent.last().value("semantic").toBool(), false);
+    view.handleEvent(QJsonObject{{"event", "board_triage"},
+                                 {"id", sent.last().value("id").toString()}, {"phase", "local"},
+                                 {"duplicates", QJsonArray{QJsonObject{{"id", "K7Q2"},
+                                                                       {"title", "Existing card"}}}}});
+    auto *suggestions = view.findChild<QWidget *>(QStringLiteral("boardQuickAddSuggestions"));
+    QVERIFY(suggestions && !suggestions->isHidden());
     QTest::keyClick(field, Qt::Key_Return);
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_triage"));
+    QCOMPARE(sent.last().value("semantic").toBool(), true);
+    auto *review = view.findChild<QWidget *>(QStringLiteral("boardQuickAddReview"));
+    auto *issue = view.findChild<QPlainTextEdit *>(QStringLiteral("boardQuickAddIssue"));
+    QVERIFY(review && !review->isHidden());
+    QVERIFY(issue);
+    QCOMPARE(issue->toPlainText(), QStringLiteral("clickable paths in the output"));
+    const QString triageId = sent.last().value("id").toString();
+    view.handleEvent(QJsonObject{{"event", "board_triage"}, {"id", triageId},
+                                 {"phase", "local"},
+                                 {"duplicates", QJsonArray{QJsonObject{{"id", "K7Q2"},
+                                                                       {"title", "Existing card"}}}},
+                                 {"related", QJsonArray{QJsonObject{{"id", "M3XJ"},
+                                                                    {"title", "A related card"}}}}});
+    QVERIFY(review->findChild<QLabel *>()->text().contains(QStringLiteral("Issue")));
+    auto *link = suggestions->findChild<QCheckBox *>();
+    QVERIFY(link);
+    link->setChecked(true);
+    // The first Enter has not written anything. The owner supplies the issue, then explicitly saves.
+    issue->setPlainText(QStringLiteral("A full issue description"));
+    // Editing the draft invalidates old suggestions and selections; even a late answer cannot
+    // attach a link to a different draft.
+    view.handleEvent(QJsonObject{{"event", "board_triage"}, {"id", triageId},
+                                 {"phase", "semantic"}, {"related", QJsonArray{"M3XJ"}}});
+    auto *save = view.findChild<QPushButton *>(QStringLiteral("boardQuickAddSave"));
+    QVERIFY(save);
+    save->click();
     QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_create"));
     QCOMPARE(sent.last().value("status").toString(), QStringLiteral("inbox"));
-    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("clickable paths in the output"));
+    QCOMPARE(sent.last().value("text").toString(), QStringLiteral("A full issue description"));
+    QCOMPARE(sent.last().value("title").toString(), QStringLiteral("clickable paths in the output"));
+    QVERIFY(!sent.last().contains("related"));
     // With no tabs a new card is filed in the board's first category folder; `m` re-files it.
     QCOMPARE(sent.last().value("tab").toString(), QStringLiteral("features"));
 
-    // Owner, #VZ69: "when you first press enter to add a new card, it should open the edit box,
-    // the editable issue part. the first thing you enter in teh top row thing makes the title,
-    // not the issue content." So the write comes back, the field closes, and the card is asked
-    // for; when it arrives it is already being edited, with the cursor in the issue box.
+    // The write opens the card after the draft has supplied both title and issue.
     const QString createId = sent.last().value("id").toString();
     view.handleEvent(QJsonObject{{"event", "board_written"}, {"id", createId},
                                  {"kind", "board_create"}, {"card_id", "N3W1"},
@@ -2495,39 +2531,63 @@ void BoardModelTests::quickAddNamesTheSectionItAddsTo()
     view.selectCard(QStringLiteral("K7Q2"));
     emit noticeText->linkActivated(QStringLiteral("card:N3W1"));
     QCOMPARE(view.selectedCard(), QStringLiteral("N3W1"));
-    // The worker seeds the new card's `## Issue` with the line that was typed, because that line
-    // is the owner's own words and the card format keeps them verbatim.
     openCard(view, sent, card("N3W1", "clickable paths in the output",
-                          "clickable paths in the output", "h1"));
-    auto *issue = view.findChild<QPlainTextEdit *>(QStringLiteral("boardIssueEditor"));
-    auto *titleField = view.findChild<QLineEdit *>(QStringLiteral("boardCardTitleEdit"));
-    QVERIFY(issue);
-    QVERIFY(!issue->isHidden());
-    // The cursor is in the issue box, not the title: the title is already typed. (`hasFocus()`
-    // asks the window system, which an offscreen test has none of; `focusWidget()` is the same
-    // question asked of the widget tree.)
-    QCOMPARE(view.focusWidget(), static_cast<QWidget *>(issue));
-    QCOMPARE(titleField->text(), QStringLiteral("clickable paths in the output"));
-    // And that line is offered *selected*: it is the title, not the issue (owner, #VZ69), so the
-    // first thing typed replaces it — while Esc or an empty save leaves the card as the field
-    // made it, rather than blanking the only words the card has.
-    QCOMPARE(issue->toPlainText(), QStringLiteral("clickable paths in the output"));
-    QCOMPARE(issue->textCursor().selectedText(), QStringLiteral("clickable paths in the output"));
-    // The reply box stands down while the card is being written.
-    QVERIFY(view.findChild<QFrame *>(QStringLiteral("boardReply"))->isHidden());
+                          "A full issue description", "h1"));
 
     // A section's own + is the one path that names a section: it adds straight into that one.
     view.closeDetail();
     view.quickAddIn(QStringLiteral("ready"));
     QCOMPARE(field->placeholderText(),
-             QStringLiteral("Title of a new card in Ready to start — Enter opens it, Esc closes"));
+             QStringLiteral("Title of a new card in Ready to start — Enter reviews it, Esc closes"));
     // Nothing is created straight into Done: `n` there falls back to the first section.
     QTest::keyClick(field, Qt::Key_Escape);
     view.quickAddIn(relay::board::doneSection());
     QCOMPARE(field->placeholderText(),
-             QStringLiteral("Title of a new card in Inbox — Enter opens it, Esc closes"));
+             QStringLiteral("Title of a new card in Inbox — Enter reviews it, Esc closes"));
     QTest::keyClick(field, Qt::Key_Escape);
     QVERIFY(strip->isHidden());
+}
+
+void BoardModelTests::quickAddLinksOnlyCheckedRelatedCards()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row("K7Q2", "inbox", "features"),
+                             row("M3XJ", "ready", "features")}));
+    view.quickAdd();
+    auto *field = view.findChild<QLineEdit *>(QStringLiteral("boardQuickAdd"));
+    field->setText(QStringLiteral("New card"));
+    QTest::keyClick(field, Qt::Key_Return);
+    const QString requestId = sent.last().value("id").toString();
+    view.handleEvent(QJsonObject{{"event", "board_triage"}, {"id", requestId},
+                                 {"phase", "local"},
+                                 {"related", QJsonArray{QJsonObject{{"id", "K7Q2"},
+                                                                    {"title", "First"}},
+                                                        QJsonObject{{"id", "M3XJ"},
+                                                                    {"title", "Second"}}}}});
+    view.handleEvent(QJsonObject{{"event", "board_triage"}, {"id", requestId},
+                                 {"phase", "semantic"}, {"tab", "bugs"},
+                                 {"labels", QJsonArray{"bug"}}});
+    QCOMPARE(view.findChild<QComboBox *>(QStringLiteral("boardQuickAddTab"))->currentData().toString(),
+             QStringLiteral("bugs"));
+    QCOMPARE(view.findChild<QLineEdit *>(QStringLiteral("boardQuickAddLabels"))->text(),
+             QStringLiteral("bug"));
+    const auto checks = view.findChild<QWidget *>(QStringLiteral("boardQuickAddSuggestions"))
+                            ->findChildren<QCheckBox *>();
+    QCOMPARE(checks.size(), 2);
+    checks[1]->setChecked(true);
+    if (qEnvironmentVariableIsSet("RELAY_QA_SCREENSHOT")) {
+        view.resize(1050, 760);
+        view.show();
+        QTest::qWait(100);
+        QVERIFY(view.grab().save(qEnvironmentVariable("RELAY_QA_SCREENSHOT")));
+    }
+    view.findChild<QPushButton *>(QStringLiteral("boardQuickAddSave"))->click();
+    QCOMPARE(sent.last().value("type").toString(), QStringLiteral("board_create"));
+    QCOMPARE(sent.last().value("related").toArray(), QJsonArray{QStringLiteral("M3XJ")});
+    QCOMPARE(sent.last().value("tab").toString(), QStringLiteral("bugs"));
+    QCOMPARE(sent.last().value("labels").toArray(), QJsonArray{QStringLiteral("bug")});
 }
 
 // Owner, 2026-09-18: "after adding a card, i couldn't edit the title or the task." Both are
