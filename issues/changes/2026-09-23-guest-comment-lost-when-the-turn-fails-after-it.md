@@ -1,5 +1,5 @@
 ---
-id: GBNI
+id: GBN4
 type: work
 status: inbox
 labels: [bug, guests, switchboard]
