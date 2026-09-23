@@ -34,3 +34,6 @@ Isolated combined Keep-link → accepted reply → visible Globals refresh probe
 
 <!-- relay:entry 20260923T233155Z-at author=agent kind=event model=gpt-6-sol pane=8f478c92 turn=4f8b0198068442a7bce4a462b35dcbc6/80cb48d68f5643ea9feb8afb8071a7ee -->
 - ✦ agent moved this card · Executing → Planned · Combined isolated Keep/Globals probe passes; live crash remains unreproduced and needs a symbolized Keep-link run before a code fix. · evidence docs/qa_evidence/2026-09-23-c8sv/report.md
+
+<!-- relay:entry 20260923T233213Z-3p author=agent kind=event model=gpt-6-sol pane=8f478c92 turn=4f8b0198068442a7bce4a462b35dcbc6/80cb48d68f5643ea9feb8afb8071a7ee -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-c8sv/repo… → {"plans": [], "commits": ["5fd243681de4ca76129971c53aeda26587203209"], "evidence…
