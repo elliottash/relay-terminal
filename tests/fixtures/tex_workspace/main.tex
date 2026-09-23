@@ -1,0 +1,15 @@
+% Fixture for tests/test_tex_build.py (#WYGY): a small paper split over
+% \input, \include and a BibTeX bibliography. Keep it fast to compile.
+\documentclass{article}
+\begin{document}
+\title{Relay TeX Workspace Fixture}
+\author{Relay}
+\maketitle
+
+\input{sections/intro}
+
+\include{sections/method}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}
