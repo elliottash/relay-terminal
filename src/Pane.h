@@ -7745,7 +7745,7 @@ public:
             // pane.sharing has no key of its own on purpose; the palette is the fast path, so
             // the hint teaches that rather than inventing one (WARP.md, "Shortcut hints").
             hint(QStringLiteral("pane.sharing"),
-                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("palette.open")),
+                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("help.shortcuts")),
                                                 QStringLiteral("then “Sharing”")));
             return;
         }
@@ -10858,7 +10858,7 @@ public:
             row(keys.shortcutText(QStringLiteral("agent.requests")).isEmpty() ? QStringLiteral("/tasks")
                                                                              : keys.shortcutText(QStringLiteral("agent.requests")),
                 QStringLiteral("tasks in this session"));
-            row(keys.shortcutText(QStringLiteral("palette.open")), QStringLiteral("Actions: search every action"));
+            row(keys.shortcutText(QStringLiteral("help.shortcuts")), QStringLiteral("Actions: search every action"));
             row(keys.shortcutText(QStringLiteral("app.settings")), QStringLiteral("options"));
             row(keys.shortcutText(QStringLiteral("agent.modelBox")).isEmpty() ? QStringLiteral("/model")
                                                                              : keys.shortcutText(QStringLiteral("agent.modelBox")),
@@ -12989,7 +12989,7 @@ private:
             {QStringLiteral("idle.plan"), QStringLiteral("Tip: %1 switches to plan mode").arg(key("agent.planToggle"))},
             {QStringLiteral("idle.rewind"), QStringLiteral("Tip: Esc Esc in an empty prompt box rewinds the chat; /rewind-code restores files")},
             {QStringLiteral("idle.agents"), QStringLiteral("Tip: ↓ from the prompt box selects running subagents")},
-            {QStringLiteral("idle.palette"), QStringLiteral("Tip: %1 opens every action").arg(key("palette.open"))},
+            {QStringLiteral("idle.palette"), QStringLiteral("Tip: %1 opens every action").arg(key("help.shortcuts"))},
             {QStringLiteral("idle.prefix"), QStringLiteral("Tip: start with ! for the terminal or * for the agent")},
         };
         // Only a pane whose tab is attached to a project has a Switchboard to tip about (#JN7X):
