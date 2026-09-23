@@ -293,6 +293,7 @@ private:
     QWidget *m_sidePanel = nullptr;
     QLabel *m_viaLabel = nullptr;
     QListWidget *m_vias = nullptr;     // the providers of a folded row, when it has more than one
+    QLabel *m_levelsLabel = nullptr;
     QListWidget *m_levels = nullptr;   // the reasoning level, a separate pick beside the model
     QLabel *m_limits = nullptr;
     QLabel *m_footer = nullptr;

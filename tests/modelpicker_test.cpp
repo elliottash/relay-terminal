@@ -6,6 +6,7 @@
 // `accept()` was, and the modal's own behaviour (exec, reject, "cancel", "customize…" closing the
 // dialog) is gone with it. The pane that hosts it is tests/modelspane_test.cpp.
 #include "ModelPicker.h"
+#include "Hints.h"
 
 #include <QCheckBox>
 #include <QApplication>
@@ -631,7 +632,9 @@ private Q_SLOTS:
     }
 
     // Card #RKP3: hosted, the footer's keys are the pane's — Tab / Shift+Tab, not the alt+digits
-    // the window took back (#PNAV) — and the priorities line names what a rank change is now.
+    // the window took back (#PNAV). The rank-change keys themselves moved off the permanent
+    // footer and into a one-shot hint on the limits line (below) — the footer now says only the
+    // one thing no row control spells out on its own: what the cutoff means.
     void theFooterNamesTheRealKeys() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
         ModelPicker::Context ctx = context();
@@ -641,8 +644,24 @@ private Q_SLOTS:
         const QString text = picker.footer()->text();
         QVERIFY(!text.contains(QStringLiteral("alt+1")));
         QVERIFY(text.contains(QStringLiteral("tab / shift+tab")));
-        QVERIFY(text.contains(QStringLiteral("▲▼")));
-        QVERIFY(text.contains(QStringLiteral("into another section")));
+        QVERIFY(text.contains(QStringLiteral("“in box”")));
+        QVERIFY(!text.contains(QStringLiteral("▲▼")));   // moved into the hint, not the permanent line
+    }
+
+    // The rest of what the page can do — reorder, add, remove, undo — is taught once through the
+    // limits line's shortcut-hint mechanism instead of a permanent paragraph (card #RKP3 was
+    // already trying to shorten that paragraph; this retires it).
+    void thePrioritiesPageTeachesItsControlsAsAHintNotAPermanentParagraph() {
+        ShortcutHints::instance().resetAll();
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.setHosted(true);
+        // Deferred a turn (like the move buttons' hint, card #RKP3), so it survives the
+        // constructor's own `selectKey()` running after the rebuild that raised it.
+        QTest::qWait(20);
+        QVERIFY(picker.findChild<QLabel *>(QStringLiteral("modelLimits"))->text().contains(QStringLiteral("reorders")));
     }
 
 
@@ -863,6 +882,76 @@ private Q_SLOTS:
         QVERIFY(picker.selectedKey().isEmpty());   // a header is not a model
         picker.focusClass(QStringLiteral("main"));
         QCOMPARE(picker.selectedKey(), QStringLiteral("glm-coding|glm-5.3"));
+    }
+
+    // ColLeft has no room on the sectioned page (rule 1 protects the model column first): a row
+    // with something wrong says so in "via" instead, right beside the provider it's wrong about.
+    // A healthy row's plain percentage is not worth repeating down a page of rows that are fine.
+    void onTheSectionedPageAWrongRowSaysWhyInViaAndColLeftHides() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.now = QDateTime(QDate(2026, 9, 20), QTime(9, 0)).toSecsSinceEpoch();
+        ctx.catalog.limits[QStringLiteral("anthropic")] =
+            {LimitWindow{QStringLiteral("5h"), 100, QDateTime(QDate(2026, 9, 20), QTime(14, 30)).toSecsSinceEpoch()}};
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        QVERIFY(picker.list()->isColumnHidden(ColLeft));
+        QTreeWidgetItem *healthy = rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(healthy->text(ColVia), QStringLiteral("z.ai (glm) · coding plan"));   // nothing appended
+        QTreeWidgetItem *spent = rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5-5"));
+        QVERIFY(spent->text(ColVia).contains(QStringLiteral("anthropic (claude)")));
+        QVERIFY(spent->text(ColVia).contains(QStringLiteral("resets 14:30")));
+        QCOMPARE(spent->text(ColLeft), QStringLiteral("0% · resets 14:30"));   // still there, just not drawn
+        // The same row via `addGroupRow` on the `all` tab: its own column is back, so nothing
+        // needs folding into "via" there.
+        picker.setTier(QStringLiteral("all"));
+        QVERIFY(!picker.list()->isColumnHidden(ColLeft));
+        QTreeWidgetItem *spentOnAll = rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5-5"));
+        QVERIFY(spentOnAll != nullptr);
+        QVERIFY(!spentOnAll->text(ColVia).contains(QStringLiteral("resets")));
+    }
+
+    // A row ranked past its class's "in box" cutoff is muted the same way an unusable one is, in
+    // addition to its checkbox: a checkbox column alone read as independent ticks rather than one
+    // cutoff line (owner's own review evidence never called this out directly, but the checkbox-
+    // only signal is why card #RKP3 and #MDL1 both had to spell the cutoff out in the footer).
+    void aRowPastTheBoxCutoffIsMutedTooOnTheSectionedPage() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});   // cutoff defaults to 2
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        const QColor muted = picker.palette().color(QPalette::Disabled, QPalette::Text);
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->foreground(ColModel).style(), Qt::NoBrush);
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5-5"))->foreground(ColModel).style(), Qt::NoBrush);
+        QTreeWidgetItem *third = rowFor(picker.list(), QStringLiteral("guest:claude|opus"));
+        QCOMPARE(third->foreground(ColModel).color(), muted);
+        QVERIFY(third->toolTip(ColModel).contains(QStringLiteral("not shown in the box")));
+        // Not gated to the sectioned page: a single-class tab draws the same checkbox and the same
+        // cutoff, so it is muted there too.
+        picker.setTier(QStringLiteral("main"));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->foreground(ColModel).color(), muted);
+    }
+
+    // "for no knob models, the effort box should be grayed out" used to mean a disabled one-line
+    // placeholder in the rail (the truncated "has no rea…" a review run caught); on the sectioned
+    // page, which has no width to spare for a rail that says nothing, the rail hides instead and
+    // the row's own tooltip carries the reason. The `all` tab keeps the placeholder (#RelayFree
+    // and no-knob rows both still need a visible answer to "why is this greyed" there).
+    void theReasoningRailHidesRatherThanShowingAnEmptyPlaceholderOnTheSectionedPage() {
+        setList(QStringLiteral("main"), {{QStringLiteral("anthropic|claude-opus-5-5"), QString()}});   // no efforts
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
+        QVERIFY(picker.levelList()->isHidden());
+        // Off the sectioned page the placeholder line is still drawn.
+        picker.setTier(QStringLiteral("all"));
+        picker.selectKey(QStringLiteral("anthropic|claude-opus-5-5"));
+        QVERIFY(!picker.levelList()->isHidden());
+        QCOMPARE(picker.levelList()->count(), 1);
     }
 
     // ----- the flat tab -----------------------------------------------------------------------------

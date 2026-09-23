@@ -265,7 +265,8 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     m_vias->setTextElideMode(Qt::ElideRight);
     m_vias->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     sideColumn->addWidget(m_vias);
-    sideColumn->addWidget(new QLabel(QStringLiteral("reasoning")));
+    m_levelsLabel = new QLabel(QStringLiteral("reasoning"));
+    sideColumn->addWidget(m_levelsLabel);
     m_levels = new QListWidget;
     m_levels->setObjectName(QStringLiteral("modelLevels"));
     m_levels->setAccessibleName(QStringLiteral("reasoning level"));
@@ -699,8 +700,21 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     if (entry && !entry->efforts.isEmpty())
         level = item.effort.isEmpty() ? QStringLiteral("default") : nearestEffort(entry->efforts, item.effort);
     const double speed = curation::speed(item.key);
+    // The sectioned page has no column to spare for "left" (rule 1 protects the model column
+    // first): a row with something actually wrong says so in "via" instead, right beside the
+    // provider it's wrong about. A healthy row's plain percentage stays out of sight here — it is
+    // still in ColLeft (hidden on this page) and in the tooltip — since nobody needs "87% left"
+    // repeated down a page of rows that are all fine.
+    QString via = entry ? providerText(*entry) : QString();
+    if (sectionsPage() && dead && !left.isEmpty())
+        via = via.isEmpty() ? left : via + QStringLiteral(" · ") + left;
+    // Ranked but past this class's "in box" cutoff (`setBoxCutoffFromRow`): the checkbox says so,
+    // but a checkbox column alone read as nine independent ticks rather than one cutoff line, so
+    // the row is muted the same way an unusable one is — a second, glance-able signal for the
+    // same fact.
+    const bool outOfBox = boxClassTier(tier) && curation::boxShown(tier) && rank > curation::boxCutoff(tier);
     auto *row = new QTreeWidgetItem(m_list, QStringList{
-        QString::number(rank), QString(), QString(), QString(), name, entry ? providerText(*entry) : QString(), level,
+        QString::number(rank), QString(), QString(), QString(), name, via, level,
         entry && entry->intelligence >= 0 ? QString::number(entry->intelligence) : QString(),
         speed > 0 ? QString::number(qRound(speed)) : QString(), left});
     row->setData(0, KeyRole, item.key);
@@ -746,18 +760,22 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     if (boxClassTier(tier))
         row->setCheckState(ColBox, curation::boxShown(tier) && rank <= curation::boxCutoff(tier)
                                        ? Qt::Checked : Qt::Unchecked);
-    row->setToolTip(0, !entry ? QStringLiteral("%1 is not in the catalog right now: its provider has no key, or it left the listing")
-                                    .arg(item.key)
-                   : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(entry->provider)
-                   : until >= 0 ? QStringLiteral("Exhausted · skipped until it resets")
-                   : rank == 1 && tier == kMain
-                       ? QStringLiteral("%1 · rank 1 of main: what a new pane and /swap run on").arg(entry->model)
-                       : rank == 1 ? QStringLiteral("%1 · rank 1 of the %2 list").arg(entry->model, tier)
-                       : QStringLiteral("%1 · fallback %2 of the %3 list").arg(entry->model).arg(rank - 1).arg(tier));
-    for (int c = 0; c < ColCount; ++c) row->setToolTip(c, row->toolTip(0));
+    QString tip = !entry ? QStringLiteral("%1 is not in the catalog right now: its provider has no key, or it left the listing")
+                               .arg(item.key)
+                : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(entry->provider)
+                : until >= 0 ? QStringLiteral("Exhausted · skipped until it resets")
+                : rank == 1 && tier == kMain
+                    ? QStringLiteral("%1 · rank 1 of main: what a new pane and /swap run on").arg(entry->model)
+                    : rank == 1 ? QStringLiteral("%1 · rank 1 of the %2 list").arg(entry->model, tier)
+                    : QStringLiteral("%1 · fallback %2 of the %3 list").arg(entry->model).arg(rank - 1).arg(tier);
+    if (outOfBox)
+        tip += QStringLiteral(" · not shown in the box (alt+m) — rank %1 and below are cut off there")
+                   .arg(curation::boxCutoff(tier) + 1);
+    row->setToolTip(0, tip);
+    for (int c = 0; c < ColCount; ++c) row->setToolTip(c, tip);
     row->setTextAlignment(ColRank, Qt::AlignRight | Qt::AlignVCenter);
     for (int c = ColReasoning; c < ColCount; ++c) row->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
-    if (dead)
+    if (dead || outOfBox)
         for (int c = 0; c < ColCount; ++c) row->setForeground(c, palette().color(QPalette::Disabled, QPalette::Text));
     if (item.key == m_context.currentKey) {
         QFont font = row->font(ColModel);
@@ -788,6 +806,9 @@ QTreeWidgetItem *ModelPicker::addGroupRow(const Group &group, bool addable, cons
     const qint64 until = exhaustedUntil(m_context.catalog, entry.preset, now);
     QString leftText = percent(percentLeft(m_context.catalog, entry.preset));
     if (until >= 0) leftText = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
+    // Same fold as a listed row's (addListRow): the sectioned page has no ColLeft to spare, so an
+    // offer that would be spent if added says so right in "via" instead of a column of its own.
+    if (sectionsPage() && until >= 0) via += QStringLiteral(" · ") + leftText;
     auto *row = new QTreeWidgetItem(m_list, QStringList{
         addable ? QStringLiteral("+ add") : QString(), QString(), QString(), QString(), name, via,
         level,
@@ -1245,9 +1266,16 @@ void ModelPicker::rebuild() {
     // "claude-o…". Intelligence and tok/s are what the sort menu sorts by, not what is read while
     // picking, and every cell of the row already carries them in its tooltip, so they are the two
     // that go (card #MDL1 t:a11; docs/qa_evidence/2026-09-21-models-pane/e-available.png is the
-    // run that showed it). "left" stays: it is where an exhausted row says why it is greyed.
+    // run that showed it). "left" stays on `all`: it is where an exhausted row says why it is
+    // greyed there; the sectioned page folds the same reason into "via" instead (below).
     m_list->setColumnHidden(ColIntelligence, m_hosted);
     m_list->setColumnHidden(ColSpeed, m_hosted);
+    // "left" is folded into "via" on the sectioned page (addListRow, addGroupRow) rather than
+    // drawn in its own column: the reason a row is greyed sits right beside the provider it's
+    // wrong about, and a healthy row's plain percentage is not worth a column nobody compares
+    // across a page of already-ranked rows. ColLeft keeps its text for tooltips and callers that
+    // read it directly; only the header hides.
+    m_list->setColumnHidden(ColLeft, sectionsPage());
     // Dragging is how a list is reordered — and, across a header, how a model moves to another
     // section (card #RKP3); on the flat tab there is no order to write down.
     m_list->setDragDropMode(all || effortPage() ? QAbstractItemView::NoDragDrop : QAbstractItemView::InternalMove);
@@ -1264,6 +1292,9 @@ void ModelPicker::rebuild() {
     if (sectionsPage() && !currentRow() && !m_focusClass.isEmpty()) focusClass(m_focusClass);
     if (!currentRow() && !m_list->currentItem()) selectKey(m_context.currentKey);
     if (!currentRow() && !m_list->currentItem()) selectFirstRow();
+    // onRowChanged() first: it ends by setting m_limits to the highlighted row's own status (or
+    // clearing it), and a hint updateFooter() sets there — due only once in a while — must be the
+    // last write, or it is overwritten in the same breath it was shown.
     onRowChanged();
     updateFooter();
     updateCompactLayout();
@@ -1382,26 +1413,33 @@ void ModelPicker::onRowChanged() {
             if (each == key) m_vias->setCurrentItem(item);
         }
     m_levels->clear();
-    QLabel *reasoningLabel = nullptr;
-    for (QLabel *label : m_sidePanel->findChildren<QLabel *>())
-        if (label->text() == QStringLiteral("reasoning")) reasoningLabel = label;
     if (m_hosted && !effortPage()) {
-        if (reasoningLabel) reasoningLabel->hide();
+        m_levelsLabel->hide();
         m_levels->hide();
         m_filling = false;
         m_limits->clear();
         return;
     }
     if (!entry) {
-        if (reasoningLabel) reasoningLabel->hide();
-        m_levels->hide();
         m_filling = false;
         m_limits->clear();
+        // Nothing is highlighted (a section header, an empty page): the sectioned page has no room
+        // for a rail that would say nothing either way.
+        if (sectionsPage()) { m_levelsLabel->hide(); m_levels->hide(); }
+        else { m_levelsLabel->show(); m_levels->show(); }
         return;
     }
-    if (reasoningLabel) reasoningLabel->show();
-    m_levels->show();
-    if (entry->effortFixed || entry->efforts.isEmpty()) {
+    const bool noKnob = entry->effortFixed || entry->efforts.isEmpty();
+    if (noKnob && sectionsPage()) {
+        // On the sectioned page there is no width to spare for a rail that holds one disabled
+        // line (the truncated "has no rea…" a review run caught, docs/qa_evidence/2026-09-22-VPR7):
+        // the row's own tooltip already says why, so the rail is hidden instead of filled with a
+        // sentence nobody can read past the third word.
+        m_levelsLabel->hide();
+        m_levels->hide();
+    } else if (noKnob) {
+        m_levelsLabel->show();
+        m_levels->show();
         // A model with no knob, or Relay Free, where the gateway picks the level for the role
         // whatever anyone asks for (owner, 2026-09-21). The list is empty and says which it is,
         // in the same sentence the pane's greyed box puts in its tooltip.
@@ -1412,6 +1450,8 @@ void ModelPicker::onRowChanged() {
         none->setFlags(Qt::NoItemFlags);
         none->setToolTip(why);
     } else {
+        m_levelsLabel->show();
+        m_levels->show();
         // On a row that is in this tab's list, the level list is the level the *entry carries in
         // the list* (TierEntry::effort), "default" included — picking one writes it there. On the
         // flat tab it is the level this pick would run at and nothing more.
@@ -1514,8 +1554,17 @@ void ModelPicker::updateFooter() {
         // line's own hint mechanism (`ShortcutHints`, the same one "models.move.buttons" already
         // uses) — the one fact worth saying every time is the one no control on the row spells
         // out on its own: what the cutoff means.
-        text = tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · “in box”: ranks above the line show in alt+m — the tick on a row moves the "
+        text = tabs + QStringLiteral("“in box”: ranks above the line show in alt+m — the tick on a row moves the "
                                      "line, the tick on a section's own line is whether it shows at all");
+        // Deferred a turn, the same way the move buttons' hint is (card #RKP3): `rebuild()` calls
+        // this and then often `selectKey()` right after (the constructor, moveKey, addSelected…),
+        // whose `currentItemChanged` runs `onRowChanged()` and overwrites `m_limits` with the row's
+        // own status. Set here and now, the hint would be erased before anyone saw it.
+        if (ShortcutHints::instance().shouldShow(QStringLiteral("models.priorities.controls")))
+            QTimer::singleShot(0, this, [this] {
+                m_limits->setText(QStringLiteral("Tip: drag, ▲▼ or alt+↑/↓ reorders (drag across a section to move "
+                                                 "it there) · type a name + ctrl+enter adds it here · del removes, ctrl+z undoes"));
+            });
     } else {
         text = tabs + QStringLiteral("▲▼ or alt+↑↓ moves a row · drag to reorder — or into another section to move it "
                                      "there · del removes · “+ add” or ctrl+enter ranks an available model in its section "
