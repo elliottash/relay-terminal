@@ -105,13 +105,13 @@ SYSTEM_SHORT = platform_prompt(SYSTEM_SHORT)
 #: rule rather than tighten one.
 SHORT_BOARD_TOOLS = ("board_list", "board_read", "board_create_card", "board_claim", "board_comment")
 
-#: The eight tools, in the order `Agent.tools` already produces, then the board five, then the two
-#: terminal tools when the turn offers them — the last two are where decision 2's moved rules live,
-#: so they keep their own descriptions. Everything else in the list is dropped. The order is
-#: `Agent.tools`'s own, so what a pane sends is a subsequence of the full list and never a reorder.
+#: The eight tools, then the board five, terminal tools when offered, and the compact reminder
+#: tool: a small-model pane can still honour a person's reminder request. Everything else is
+#: dropped. The order is fixed for the life of a pane so cached tool prefixes stay stable.
 SHORT_TOOLS = ("run_command", "read_file", "list_directory", "write_file", "edit_file",
                "command_output", "stop_command", "load_skill") + SHORT_BOARD_TOOLS + (
-               "terminal_history", "terminal_read", "run_in_terminal", "type_into_program")
+               "terminal_history", "terminal_read", "run_in_terminal", "type_into_program",
+               "app_reminder")
 
 #: A one- or two-sentence description each, and no parameter prose except `run_command`'s: the
 #: full descriptions are 3.6 KB of rules a 27B model reads as prose rather than as constraints.
@@ -129,6 +129,7 @@ SHORT_DESCRIPTIONS = {
     "command_output": "Read what a run_command job has printed since you last read it; wait_seconds waits for it to finish.",
     "stop_command": "Stop a run_command job.",
     "load_skill": "Load the full SKILL.md of one of the user's skills by name.",
+    "app_reminder": "Set, list or cancel a persistent reminder. Set only when the person asks; it alerts and rings a bell when due.",
 }
 #: Kept as parameters, said once in the description instead.
 _KEEP_PARAM_PROSE = {"run_command": ("timeout_seconds", "background")}
@@ -213,7 +214,7 @@ def sections(*, workspace: str, skills=None, instructions: str = "", board: str 
 
 
 def tool_specs(specs: list[dict]) -> list[dict]:
-    """The eight tools (plus the terminal pair when offered), each with its short description.
+    """Core tools, terminal evidence and reminders, with short descriptions where needed.
 
     Filtering the assembled list rather than building a second one keeps one source of truth for
     what a tool *is*: a tool added to `tools.py` is either in `SHORT_TOOLS` or it is not offered

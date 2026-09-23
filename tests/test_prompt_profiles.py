@@ -146,9 +146,10 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(agent.profile(), 'short')
         self.assertEqual(self.agent(context_window=200000).profile(), 'full')
 
-    def test_the_short_profile_sends_eight_tools_when_there_is_no_board(self):
+    def test_the_short_profile_sends_core_tools_and_reminder_when_there_is_no_board(self):
         agent = self.agent(prompt_profile='short', board=False)
-        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:8]) + ["terminal_history", "terminal_read"])
+        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:8]) +
+                         ["terminal_history", "terminal_read", "app_reminder"])
         prompt = agent.system_prompt()
         # A pane with no board pays nothing for one, and the todo, app and own-session text
         # is out of the short profile whatever else is in it.
@@ -161,7 +162,8 @@ class AgentTests(unittest.TestCase):
         size = len(prompt.encode('utf-8'))
         tools = len(json.dumps(agent.tools(), ensure_ascii=False).encode('utf-8'))
         self.assertLess(size, 4 * 1024, f'the short prompt grew to {size} bytes')
-        self.assertLess(tools, 4 * 1024, f'the short tool list grew to {tools} bytes')
+        # The reminder's compact schema adds ~500 bytes to the prior 4 KiB ceiling.
+        self.assertLess(tools, 4608, f'the short tool list grew to {tools} bytes')
 
     def test_a_board_adds_five_tools_and_the_policy_and_nothing_else(self):
         # The owner's decision of 2026-09-20 (#GMCF, the second open question): the Local and Lite
@@ -169,7 +171,7 @@ class AgentTests(unittest.TestCase):
         # find it again, claim it, say what happened — and none of the three that rewrite, move or
         # bulk-import a card, which is where a small model does quiet damage.
         agent = self.agent(prompt_profile='short')
-        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:15]))
+        self.assertEqual(self.names(agent), list(prompt_profiles.SHORT_TOOLS[:15]) + ["app_reminder"])
         self.assertEqual(list(prompt_profiles.SHORT_BOARD_TOOLS),
                          ['board_list', 'board_read', 'board_create_card', 'board_claim',
                           'board_comment'])
@@ -273,6 +275,8 @@ class AgentTests(unittest.TestCase):
     def test_the_short_tools_keep_their_schemas_and_lose_their_prose(self):
         agent = self.agent(prompt_profile='short')
         full = {t['function']['name']: t for t in self.agent().tools()}
+        from relay_core.app_tools import TOOL_SPECS
+        full.update({t['function']['name']: t for t in TOOL_SPECS})
         for spec in agent.tools():
             name = spec['function']['name']
             self.assertEqual(spec['function']['parameters']['properties'].keys(),
@@ -281,6 +285,13 @@ class AgentTests(unittest.TestCase):
                             len(full[name]['function']['description']) + 1, name)
         edit = next(s for s in agent.tools() if s['function']['name'] == 'edit_file')
         self.assertIn('byte for byte', edit['function']['description'])
+
+    def test_reminder_is_available_to_the_short_profile_when_the_app_offers_it(self):
+        from relay_core.app_tools import TOOL_SPECS
+        reminder = next(spec for spec in TOOL_SPECS if spec['function']['name'] == 'app_reminder')
+        offered = prompt_profiles.tool_specs([reminder])
+        self.assertEqual([s['function']['name'] for s in offered], ['app_reminder'])
+        self.assertLess(len(offered[0]['function']['description']), 130)
 
 
 if __name__ == '__main__':
