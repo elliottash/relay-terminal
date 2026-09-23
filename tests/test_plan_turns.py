@@ -26,7 +26,7 @@ from test_images import RecordingProvider                                      #
 
 KIMI = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "high"}, 8192)
 KIMI_MAX = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "max"}, 8192)
-ANTHROPIC = ProviderConfig("https://api.anthropic.com/v1", "claude-opus-5", "key", {}, 8192)
+ANTHROPIC = ProviderConfig("https://api.anthropic.com/v1", "claude-opus-5-5", "key", {}, 8192)
 
 
 class TrackedProvider(RecordingProvider):
@@ -212,8 +212,8 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(RecordingProvider.windows[-1], PRESETS["kimi"].context_window)
         # ... and the pane is measured against its own window again once the turn is over.
         self.assertEqual(agent.context.window, PRESETS["anthropic"].context_window)
-        self.assertEqual(agent.config.model, "claude-opus-5")
-        self.assertEqual(agent.provider.config.model, "claude-opus-5")
+        self.assertEqual(agent.config.model, "claude-opus-5-5")
+        self.assertEqual(agent.provider.config.model, "claude-opus-5-5")
 
     def test_a_save_while_a_plan_turn_is_routed_records_the_panes_own_model(self):
         # `_autosave_soon` fires inside the turn, and a title or summary thread saves from its own:
@@ -230,8 +230,8 @@ class PlanTurnTests(unittest.TestCase):
         with mock.patch.object(TrackedProvider, "complete", complete):
             agent.ask("plan this change")
         self.assertEqual(RecordingProvider.served[-1][0], "kimi-k3")
-        self.assertEqual(seen, [("claude-opus-5", "anthropic")])
-        self.assertEqual(agent.session_data()["model"], "claude-opus-5")
+        self.assertEqual(seen, [("claude-opus-5-5", "anthropic")])
+        self.assertEqual(agent.session_data()["model"], "claude-opus-5-5")
 
     def test_a_model_switch_during_a_plan_turn_lands_after_the_restore(self):
         # The switch waits for the turn's end, as it does under a failover (#G9VE): landing it at a
@@ -256,7 +256,7 @@ class PlanTurnTests(unittest.TestCase):
         self.assertEqual(seen["deferred"]["in_flight_model"], "kimi-k3")
         self.assertIsNone(seen["at_step"])                      # not while the swap is in force
         self.assertEqual(seen["model_at_step"], "kimi-k3")
-        self.assertEqual(agent.config.model, "claude-opus-5")   # the restore ran, and kept nothing
+        self.assertEqual(agent.config.model, "claude-opus-5-5")   # the restore ran, and kept nothing
         self.assertEqual(agent.apply_pending_model(at="turn_end")["model"], target.model)
         self.assertEqual((agent.config.model, agent.context.window),
                          (target.model, target.context_window))
@@ -270,14 +270,14 @@ class PlanTurnTests(unittest.TestCase):
         kimi, anthropic = PRESETS["kimi"].label, PRESETS["anthropic"].label
         route = self.event("plan_route")
         self.assertEqual(route["text"], f"Plan mode · this turn runs on kimi-k3 ({kimi}), "
-                                        f"then back to claude-opus-5 ({anthropic}).")
+                                        f"then back to claude-opus-5-5 ({anthropic}).")
         self.assertEqual((route["preset"], route["from_preset"]), ("kimi", "anthropic"))
         ended = self.event("plan_route_ended")
-        self.assertEqual(ended["text"], f"Back to claude-opus-5 ({anthropic}).")
+        self.assertEqual(ended["text"], f"Back to claude-opus-5-5 ({anthropic}).")
         self.assertEqual((ended["preset"], ended["was_preset"]), ("anthropic", "kimi"))
         statuses = [e["text"] for e in self.events if e["event"] == "status"]
         self.assertIn(f"Plan turn · kimi-k3 ({kimi})", statuses)
-        self.assertIn(f"Back to claude-opus-5 ({anthropic})", statuses)
+        self.assertIn(f"Back to claude-opus-5-5 ({anthropic})", statuses)
 
     # ----- nothing to swap: no event, no provider change ------------------------------
     # ----- a planning model whose provider is down (owner, 2026-09-19) -----------------
