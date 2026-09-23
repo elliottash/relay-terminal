@@ -13,3 +13,6 @@ Confirmed the count is RequestLedger.open_count(): user requests still open or i
 
 <!-- relay:entry 20260923T162227Z-ms author=agent kind=event model=gpt-6-sol pane=7d5859de turn=d07fe423cc0541e0ac86ecc83c13996d/37e9dd35b60049fe9a91a78f85ddcd68 -->
 - ✦ agent moved this card · Executing → Needs verification · Requests column, request-count sorting and real header clicks pass targeted backend and Qt tests; screenshot captured. · evidence docs/qa_evidence/2026-09-23-open-requests-R4WX/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T162359Z-9w author=agent kind=event model=gpt-6-sol pane=7d5859de turn=d07fe423cc0541e0ac86ecc83c13996d/37e9dd35b60049fe9a91a78f85ddcd68 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-23-open-requ… → {"plans": [], "commits": ["00eb857104284e1e83e909918079b87be982ee74"], "evidence…
