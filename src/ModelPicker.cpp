@@ -21,6 +21,7 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -67,6 +68,15 @@ constexpr int AvailRole = Qt::UserRole + 7;    // a model row of the `all` tab: 
 constexpr int TierRole = Qt::UserRole + 8;     // the class list this row belongs to
 constexpr int ClassHeadRole = Qt::UserRole + 9;  // a section's own header: its tick is the class switch
 constexpr int AddByIdPresetRole = Qt::UserRole + 10;  // the provider a section's "+ add model" row adds to
+
+int listPosition(const QString &tier, const QString &key) {
+    int position = 0;
+    for (const curation::TierEntry &entry : curation::tierList(tier)) {
+        ++position;
+        if (entry.key == key) return position;
+    }
+    return 0;
+}
 
 const QString kAll = QStringLiteral("all");
 const QString kClasses = QStringLiteral("classes");
@@ -358,6 +368,22 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     connect(m_list, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item, int column) {
         if (!item || item->data(0, SectionRole).toBool()) return;
         if (column == ColRank && item->data(0, AddRole).toBool()) { addSelected(); return; }
+        if (column == ColRank && item->data(0, ListedRole).toBool()) {
+            const QString tier = rowTier(item);
+            const QString key = item->data(0, KeyRole).toString();
+            bool ok = false;
+            const int chosen = QInputDialog::getInt(this, QStringLiteral("Model rank"),
+                QStringLiteral("Give models the same rank to draw randomly between them."),
+                item->text(ColRank).toInt(), 1, 1000, 1, &ok);
+            if (ok) {
+                pushUndo(tier);
+                curation::setTierRank(tier, key, chosen);
+                rebuild();
+                selectKey(key);
+                changed();
+            }
+            return;
+        }
         // "+ add model" is a button in a row's clothes: one click asks, as a button would.
         if (item->data(0, AddByIdRole).toBool()) {
             const QString preset = item->data(0, AddByIdPresetRole).toString();
@@ -833,7 +859,9 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
         ++rank;
         const Entry *entry = m_context.catalog.find(item.key);
         if (!query.isEmpty() && !(entry ? matches(*entry, query) : item.key.contains(query, Qt::CaseInsensitive))) continue;
-        addListRow(tier, rank, item, entry);
+        QTreeWidgetItem *row = addListRow(tier, rank, item, entry);
+        row->setText(ColRank, QString::number(item.rank > 0 ? item.rank : rank));
+        row->setToolTip(ColRank, QStringLiteral("Click to set rank. Equal ranks draw at random; lower ranks run first."));
         ++drawn;
     }
     if (effortPage()) {
@@ -1099,7 +1127,7 @@ void ModelPicker::refreshBoxChecks() {
             continue;
         }
         if (!row->data(0, ListedRole).toBool()) continue;
-        const int rank = row->text(ColRank).toInt();
+        const int rank = listPosition(tier, row->data(0, KeyRole).toString());
         row->setCheckState(ColBox, boxClassTier(tier) && curation::boxShown(tier)
                                            && rank >= 1 && rank <= curation::boxCutoff(tier)
                                        ? Qt::Checked : Qt::Unchecked);
@@ -1122,7 +1150,8 @@ void ModelPicker::onCheckChanged(QTreeWidgetItem *item, int column) {
         return;
     }
     if (!item->data(0, ListedRole).toBool()) return;
-    setBoxCutoffFromRow(tier, item->text(ColRank).toInt(), item->checkState(ColBox) == Qt::Checked);
+    setBoxCutoffFromRow(tier, listPosition(tier, item->data(0, KeyRole).toString()),
+                        item->checkState(ColBox) == Qt::Checked);
 }
 
 // ----- step 2: available (owner, 2026-09-21; design 5.7) --------------------------------------
@@ -1536,6 +1565,9 @@ void ModelPicker::moveKey(const QString &tier, const QString &key, int delta) {
     // drag's job — there the target and the rank are both pointed at.)
     if (at < 0 || to < 0 || to >= list.size()) return;
     pushUndo(tier);
+    // Moving between distinct priorities exchanges their rank slots. A move inside a tied
+    // group only changes its display order; both models still take the same random draw.
+    std::swap(list[at].rank, list[to].rank);
     list.move(at, to);
     curation::setTierList(tier, list);
     rebuild();
@@ -1618,10 +1650,12 @@ void ModelPicker::commitDragOrder() {
     const QStringList tiers = sectionsPage() ? sectionTiers() : QStringList{m_tier};
     QHash<QString, QStringList> before;
     QHash<QString, QString> efforts;   // a key keeps the level it carried, whichever list it moves to
+    QHash<QString, QList<int>> ranks;
     for (const QString &tier : tiers)
         for (const curation::TierEntry &item : curation::tierList(tier)) {
             before[tier] << item.key;
             efforts.insert(item.key, item.effort);
+            ranks[tier] << item.rank;
         }
     // The drop is an order only when the drawn rows are exactly the listed rows: only listed rows
     // can drag, so a difference is a view, not an order — a filter hiding part of a list, or a row
@@ -1643,7 +1677,13 @@ void ModelPicker::commitDragOrder() {
         const QStringList drawn = rows.value(tier);
         if (drawn == before.value(tier)) continue;
         QList<curation::TierEntry> after;
-        for (const QString &key : drawn) after << curation::TierEntry{key, efforts.value(key)};
+        for (int i = 0; i < drawn.size(); ++i) {
+            const QString &key = drawn.at(i);
+            // Existing slots retain their ranks, including ties; a cross-section move
+            // creates a new sequential order in the changed-size lists.
+            const int rank = drawn.size() == ranks.value(tier).size() ? ranks.value(tier).at(i) : i + 1;
+            after << curation::TierEntry{key, efforts.value(key), rank};
+        }
         pushUndo(tier);
         curation::setTierList(tier, after);
         anyMoved = true;
