@@ -7,7 +7,7 @@ assignee: codex
 rank: m
 created: '2026-09-23'
 source: 'Codex in a Relay pane, 2026-09-23'
-links: {plans: [], commits: [], evidence: [tests/test_guest_delegation.py], related: [GPF7], github: null}
+links: {plans: [], commits: [09ae54d3577aa85b9ef62719d5d183e3e81aee3f], evidence: [tests/test_guest_delegation.py], related: [GPF7], github: null}
 ---
 # Remove repeated guest prompt preamble and audit prompt overhead
 
