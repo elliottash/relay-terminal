@@ -4,6 +4,7 @@
 #include "core/AnsiSerializer.h"
 #include "core/CellTypes.h"
 #include "core/InlineImage.h"
+#include "core/InlineMedia.h"
 #include "session/TerminalSession.h"
 #include "view/TerminalView.h"
 
@@ -264,15 +265,15 @@ QString VTermBackend::screenText() const { return m_session->screenText(); }
 
 namespace {
 
-// `lines`, whose first is absolute row `first`, in the saved form (lineToSavedAnsi): the image
-// rows' links come from the core's own walk for them, in absolute rows, so no viewport has to
-// be scrolled to ask for a URI and every other link is never looked up (#1MGS).
+// `lines`, whose first is absolute row `first`, in the saved form (lineToSavedAnsi). Image and
+// media row links come from the core's walk in absolute rows, including scrollback (#1MGS, #MDA7).
 QStringList savedLines(VtCore &core, const std::vector<Line> &lines, int first)
 {
     QMultiHash<int, VtCore::HyperlinkRun> byRow;
-    for (const VtCore::HyperlinkRun &run : core.hyperlinkRuns(QLatin1String(inlineimage::kImagePrefix)))
-        for (int row = run.startRow; row <= run.endRow; ++row)
-            byRow.insert(row, run);
+    for (const QString &prefix : {QLatin1String(inlineimage::kImagePrefix), QLatin1String(inlinemedia::kPrefix)})
+        for (const VtCore::HyperlinkRun &run : core.hyperlinkRuns(prefix))
+            for (int row = run.startRow; row <= run.endRow; ++row)
+                byRow.insert(row, run);
     QStringList out;
     out.reserve(int(lines.size()));
     for (int i = 0; i < int(lines.size()); ++i) {

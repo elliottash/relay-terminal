@@ -2601,6 +2601,38 @@ private slots:
         QCOMPARE(table->item(1, 1)->text(), QStringLiteral("10"));
     }
 
+    void mediaRowSurvivesSavedTextAndReplay()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term source(core, QStringLiteral("/bin/cat"));
+        QTemporaryDir dir;
+        const QString dataPath = dir.filePath(QStringLiteral("data.csv"));
+        QFile data(dataPath);
+        QVERIFY(data.open(QIODevice::WriteOnly));
+        data.write("name,value\na,1\n");
+        data.close();
+        const QString manifestPath = dir.filePath(QStringLiteral("table.json"));
+        QFile manifest(manifestPath);
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+            {QStringLiteral("kind"), QStringLiteral("table")}, {QStringLiteral("path"), dataPath},
+            {QStringLiteral("rows"), 2}, {QStringLiteral("columns"), 2}}).toJson(QJsonDocument::Compact));
+        manifest.close();
+        const QString uri = inlinemedia::mediaUri({manifestPath, 0, 1, 40});
+        source.backend->writeToDisplay("before\r\n");
+        source.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") +
+                                       QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\\r\nafter\r\n")).toUtf8());
+        QVERIFY(source.waitScreen(QStringLiteral("after")));
+        const QStringList saved = source.backend->formattedScreenText().split(QLatin1Char('\n'));
+        QVERIFY2(saved.join(QLatin1Char('\n')).contains(uri), "media URI must be saved, not only its blank cell");
+        Term restored(core, QStringLiteral("/bin/cat"));
+        for (const QString &line : saved)
+            if (!line.isEmpty()) restored.backend->writeToDisplay(restorableAnsi(line).toUtf8() + "\r\n");
+        QVERIFY(restored.waitScreen(QStringLiteral("after")));
+        QVERIFY2(restored.backend->formattedScreenText().contains(uri),
+                 qPrintable(restored.backend->formattedScreenText()));
+    }
+
     void audioRowPlaysPausesAndSeeksWithCliPlayer()
     {
         QFETCH_GLOBAL(QString, core);

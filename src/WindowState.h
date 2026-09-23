@@ -141,11 +141,10 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
 // order, with their attributes and colours as ANSI SGR (card #VJDD). Engines that cannot
 // reconstruct escape sequences fall back to the plain `scrollbackText()` / `screenText()` and the
 // block is still readable. Only SGR is serialized — no cursor movement, and no OSC but the OSC 8
-// links of inline image rows (`relay-image:` URIs, engine/core/InlineImage.h, card #1MGS), so a
-// restored pane draws its pictures again. Replay (relay::restorableAnsi) filters the file down to
-// CSI SGR and those links, kept only when inlineimage::parseImageUri accepts the URI, so a
-// hand-edited or truncated file cannot drive the terminal: the most an edited image link can do is
-// make the view paint some local image file over its rows, which is acceptable.
+// links of inline image and media rows (`relay-image:` and `relay-media:` URIs), so a restored pane
+// draws them again. Replay (relay::restorableAnsi) filters the file down to CSI SGR and links
+// accepted by inlineimage::parseImageUri or inlinemedia::parseMediaUri; a hand-edited or truncated
+// file cannot drive the terminal.
 //
 // The tradeoff is colour and theme: an indexed colour (0-255) is resolved by the palette in force
 // when it is painted, so it follows a palette-based theme change, but an RGB colour
