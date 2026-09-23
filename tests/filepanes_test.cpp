@@ -5,6 +5,7 @@
 #include <QBuffer>
 #include <QDir>
 #include <QFile>
+#include <QFileSystemModel>
 #include <QImage>
 #include <QKeySequence>
 #include <QLabel>
@@ -89,6 +90,60 @@ private slots:
         explorer.goUp();
         QCOMPARE(QDir(explorer.root()), QDir(temp.path()));
         QCOMPARE(changes.size(), 2);
+    }
+
+    // Left navigates up; Right enters a selected folder only. Both keys are local to the tree so
+    // they take precedence over pane navigation. Files, no selection, and filesystem root are safe.
+    void leftAndRightNavigateDirectoriesInTheList() {
+        QTemporaryDir temp;
+        QVERIFY(QDir(temp.path()).mkpath(QStringLiteral("inner/deeper")));
+        writeFile(temp.filePath(QStringLiteral("top.txt")), "x");
+        const QString inner = QDir(temp.path()).filePath(QStringLiteral("inner"));
+        const QString deeper = QDir(inner).filePath(QStringLiteral("deeper"));
+        FileExplorer explorer(deeper);
+        explorer.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&explorer));
+        QTreeView *view = explorer.findChild<QTreeView *>(QStringLiteral("fileExplorerView"));
+        QLineEdit *filter = explorer.findChild<QLineEdit *>(QStringLiteral("fileExplorerFilter"));
+        QVERIFY(view && filter);
+        const QStringList local = view->property("relayLocalKeys").toStringList();
+        QVERIFY(local.contains(QStringLiteral("Left")));
+        QVERIFY(local.contains(QStringLiteral("Right")));
+        QVERIFY(!filter->property("relayLocalKeys").toStringList().contains(QStringLiteral("Left")));
+        QVERIFY(!filter->property("relayLocalKeys").toStringList().contains(QStringLiteral("Right")));
+
+        // Right on the selected directory enters it.
+        explorer.setRoot(inner);
+        QTRY_COMPARE(names(explorer.visiblePaths()), QStringList{QStringLiteral("deeper")});
+        auto *localModel = qobject_cast<QFileSystemModel *>(view->model());
+        QVERIFY(localModel);
+        QModelIndex directory = localModel->index(deeper);
+        QVERIFY(directory.isValid());
+        view->setCurrentIndex(directory);
+        QTest::keyClick(view, Qt::Key_Right);
+        QCOMPARE(QDir(explorer.root()), QDir(deeper));
+
+        // Left goes back up and selects the directory we came from.
+        QTest::keyClick(view, Qt::Key_Left);
+        QCOMPARE(QDir(explorer.root()), QDir(inner));
+        QCOMPARE(QFileInfo(localModel->filePath(view->currentIndex())).fileName(), QStringLiteral("deeper"));
+
+        // Right on a file and with no selected row does nothing.
+        QModelIndex file = localModel->index(temp.filePath(QStringLiteral("top.txt")));
+        QVERIFY(file.isValid());
+        view->setCurrentIndex(file);
+        const QString beforeFile = explorer.root();
+        QTest::keyClick(view, Qt::Key_Right);
+        QCOMPARE(explorer.root(), beforeFile);
+        view->setCurrentIndex(QModelIndex());
+        QTest::keyClick(view, Qt::Key_Right);
+        QCOMPARE(explorer.root(), beforeFile);
+
+        // The filesystem root cannot go higher.
+        explorer.setRoot(QDir::rootPath());
+        const QString root = explorer.root();
+        QTest::keyClick(view, Qt::Key_Left);
+        QCOMPARE(explorer.root(), root);
     }
 
     // Alt+Up is the parent folder in the list and the filter (#KYPR). The window's dispatcher binds

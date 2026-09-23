@@ -271,9 +271,10 @@ FileExplorer::FileExplorer(const QString &root, QWidget *parent) : QWidget(paren
     m_view->installEventFilter(this);
     m_view->viewport()->installEventFilter(this);
     m_filter->installEventFilter(this);
-    // Alt+Up is the parent folder here (eventFilter), not the window's focus-the-pane-above: the
-    // window's dispatcher reads this property and gives the key way (#KYPR).
-    m_view->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up")});
+    // In the explorer list Left goes to the parent and Right enters the selected folder; these
+    // local keys take precedence over the window's pane-navigation shortcuts (#2K7Q, #KYPR).
+    // Alt+Up remains another way to go up. The filter is deliberately excluded: its arrows edit text.
+    m_view->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up"), QStringLiteral("Left"), QStringLiteral("Right")});
     m_filter->setProperty("relayLocalKeys", QStringList{QStringLiteral("Alt+Up")});
     setRoot(root.isEmpty() ? QDir::homePath() : root);
 }
@@ -737,8 +738,15 @@ bool FileExplorer::eventFilter(QObject *object, QEvent *event) {
                 return true;
             }
         }
-        if ((key->key() == Qt::Key_Backspace && mods == Qt::NoModifier) || (key->key() == Qt::Key_Up && mods == Qt::AltModifier)) {
+        if ((key->key() == Qt::Key_Backspace && mods == Qt::NoModifier)
+            || (key->key() == Qt::Key_Up && mods == Qt::AltModifier)
+            || (key->key() == Qt::Key_Left && mods == Qt::NoModifier)) {
             goUp();
+            return true;
+        }
+        if (key->key() == Qt::Key_Right && mods == Qt::NoModifier) {
+            const QModelIndex selected = m_view->currentIndex();
+            if (selected.isValid() && isDirAt(selected)) activate(pathAt(selected));
             return true;
         }
         // The keyboard route to the right-click menu.
