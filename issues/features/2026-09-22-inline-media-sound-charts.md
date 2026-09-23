@@ -1,13 +1,12 @@
 ---
 id: MDA7
 type: work
-status: discussing
-waiting_on: owner
+status: ready
 labels: [feature, terminal, agent-ui]
 assignee: claude-code
 rank: m
 created: '2026-09-22'
-source: 'Claude Code in a Relay pane, 2026-09-22'
+source: Claude Code in a Relay pane, 2026-09-22
 links: {plans: [], commits: [], evidence: [], related: [1MGS, NY7Z], github: null}
 ---
 # Inline media after images: playable sound, interactive charts, and the rest
@@ -43,3 +42,20 @@ Proposed, in order:
 5. Later, if wanted: LaTeX math in agent replies (rendered to an image row), rich tables for
    CSV/dataframes (sortable, drawn natively), video as a poster frame that opens in the system
    player, and reading a reply aloud with TTS (the reverse of voice input).
+
+## Decisions
+- 2026-09-22, the owner: "yes to all of these ideas -- tables, video, read-aloud, and latex math -- definitely, add that now. for charts, (b) for now. for sound, if qt is better let me know".
+  - Scope: the sound player, `relay-show`, SVG/GIF/PDF/matplotlib, tables, video, read-aloud and LaTeX math.
+  - Charts: (b). A static snapshot inline; a click opens the live HTML or localhost URL in the browser.
+  - Sound: QtMultimedia as an optional component, because it is better where it is built (FFmpeg backend in Qt 6.8, the installers' Qt: real pause, seek and position on all three platforms). The CLI tools are the fallback for builds without it (Qt5 Linux, like this machine). Read-aloud does the same with QtTextToSpeech, falling back to spd-say/espeak-ng/say.
+
+## Tasks
+
+- [ ] Sound player row (QtMultimedia optional, CLI fallback): play/pause, waveform, position, seek <!-- t:9s -->
+- [ ] relay-show CLI: any file or stdin, type-sniffed, emits Relay's escape <!-- t:8a -->
+- [ ] SVG, animated GIF/WebP, PDF pages, matplotlib inline backend <!-- t:vj -->
+- [ ] Charts (b): HTML/plotly/bokeh/altair/localhost as an inline snapshot, click opens live in the browser <!-- t:q1 -->
+- [ ] Tables: CSV/TSV/dataframe output and Markdown tables as a native sortable table <!-- t:ym -->
+- [ ] Video: poster frame inline, click plays in the system player <!-- t:ms -->
+- [ ] Read-aloud: speak a reply (QtTextToSpeech optional, CLI fallback) <!-- t:cy -->
+- [ ] LaTeX math in agent replies ($...$, $$...$$) rendered as image rows <!-- t:sq -->
