@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-astra via codex
 rank: msbgn
 created: '2026-09-22'
 source: Codex in a Relay pane, 2026-09-22
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-22-simplify-subagents/], related: [R0PE, GD8K], github: null}
+links: {plans: [], commits: [7c4b9ec34a76a0b4302e14db1afadda3046cebcd], evidence: [docs/qa_evidence/2026-09-22-simplify-subagents/], related: [R0PE, GD8K], github: null}
 ---
 # General subagents without role tags, with explicit blocked outcomes
 

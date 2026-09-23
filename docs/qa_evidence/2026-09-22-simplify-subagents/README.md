@@ -41,3 +41,7 @@ The main application also built successfully with `scripts/relay-build --target 
 (build 2026-09-22.20H.08). The board's tests_check equivalent resolved all three evidence paths.
 The repository-wide board check reported 12 errors and 754 warnings in other cards/threads,
 with no findings for SBGN.
+
+Landed in `7c4b9ec34a76a0b4302e14db1afadda3046cebcd`. The land.py build gate compiled the
+exact committed tree successfully. The same 105 targeted backend tests also passed against
+that exact tree (3.626 s), including the intervening guest-resume change on main.
