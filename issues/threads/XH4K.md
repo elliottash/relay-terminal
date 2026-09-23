@@ -42,3 +42,94 @@ I have the full picture. Writing the plan now.
 **Done:** the plan on #XH4K is now an execution-ready plan for wiring z.ai and Kimi quota endpoints into the worker's `usage_limits` path — a new `backend/relay_core/provider_limits.py` on the `openrouter_catalog` background-fetch pattern, `worker.py` wiring into `emit_presets`, comment/doc corrections (ARCHITECTURE.md:1883, protocol 29.3), and a new `tests/test_provider_limits.py`; the GUI needs no functional change.
 
 One thing the executor must do first: read `/home/elliott/data/usage_tracker/check_usage.py` from the terminal (it's outside this workspace) to confirm the Kimi host — the thread note says `api.kimi.com` but the preset's base URL is `api.kimi.ai` — and the timestamp units. That check, and whether z.ai's endpoint serves the payg `glm` key at all, are flagged in the plan's Risks.
+
+<!-- relay:entry 20260923T181718Z-cd author=codex kind=progress -->
+### Codex · 2026-09-23 18:17
+Owner asked me to claim #XH4K and deliver the Z.AI/Kimi quota integration. Taking over from needs-verification and implementing its existing plan.
+
+<!-- relay:entry 20260923T181803Z-v3 author=owner kind=comment mode=discuss -->
+refresh this and update the plan
+
+<!-- relay:entry 20260923T182237Z-9g author=agent kind=event model=gpt-6-sol pane=b46708c9 turn=bf07ea53fe1e47b383aeb5e7025ce0da/dc8fae0bc52242ec9bd87d8687cb21ba -->
+- ✦ agent updated this card · appended to `## Done means`
+
+<!-- relay:entry 20260923T182449Z-sz author=agent kind=event model=kimi-k3 pane=switchboard turn=e5bdaeb6520bedac957e60f0d4a328d8/c85dc1c43be74c7bb90bd11b057c2676 -->
+- ✦ agent updated this card · replaced `## Plan`
+
+<!-- relay:entry 20260923T182504Z-t1 author=agent kind=comment mode=discuss model=kimi-k3 turn=e5bdaeb6520bedac957e60f0d4a328d8/c85dc1c43be74c7bb90bd11b057c2676 -->
+I'll check the current state of the code against the plan, then refresh it.
+
+
+
+No `provider_limits.py` yet — Codex's claim hasn't produced code. Let me verify the plan's other references are still accurate.
+
+Line numbers have drifted and the "no quota endpoint" wording is gone. Checking the current GUI and docs wording:
+
+
+
+The GUI code seems to have moved out of `Pane.h`. Searching more broadly:
+
+
+
+
+
+`provider_limits.py` now exists — the backend work has been started. Let me read it and check the worker wiring and tests:
+
+
+
+
+
+
+
+
+
+
+
+There's a `PaneUsage.cpp` — likely where the limits handling moved:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+One more check on whether the 429 heuristic survived the GUI refactor anywhere:
+
+
+
+
+
+
+
+The card changed under me — re-reading before reapplying:
+
+Codex added a `## Done means` section in the meantime. Reapplying my Plan refresh on the new hash:
+
+**Done:** refreshed the `## Plan` on #XH4K against the current tree. What it now says:
+
+- **Already landed:** `backend/relay_core/provider_limits.py` (z.ai + Kimi polling, 15-min cadence), the `worker.py` wiring (`start`, listener → re-push `presets`, `limits` on built-in rows), and both doc updates (ARCHITECTURE.md:2416, protocol 29.3). Deviations from the old plan are recorded: payg `glm` dropped, Kimi host is `api.kimi.com`, unchanged figures re-emit on purpose.
+- **Still to do:** (1) the planned `tests/test_provider_limits.py` was never written; (2) reconcile the GUI — the exhausted/grey logic survives in `ModelCatalog`/`ModelPicker`/`ModelRows`, but `noteLimits` and the 429 `markExhausted` heuristic are no longer findable in `src/` while ARCHITECTURE.md still describes them, so QA item 4 may be broken or the docs stale; (3) live verification on a restarted Relay — the QA checklist is still fully unchecked.
+
+Writing the tests and code is **Run** — hand the card to a terminal pane when you're ready.
+
+<!-- relay:entry 20260923T182532Z-c5 author=agent kind=event model=gpt-6-sol pane=b46708c9 turn=bf07ea53fe1e47b383aeb5e7025ce0da/dc8fae0bc52242ec9bd87d8687cb21ba -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["e8220208"], "evidence": ["docs/qa_evidence/2026-09-20… → {"plans": [], "commits": ["e8220208", "38f5e4ceb5c6244333aba61c015b3bcf30686005"…; appended to `## Execution Summary`
+
+<!-- relay:entry 20260923T182538Z-7s author=agent kind=event model=gpt-6-sol pane=b46708c9 turn=bf07ea53fe1e47b383aeb5e7025ce0da/dc8fae0bc52242ec9bd87d8687cb21ba -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260923T182542Z-cv author=agent kind=event model=gpt-6-sol pane=b46708c9 turn=bf07ea53fe1e47b383aeb5e7025ce0da/dc8fae0bc52242ec9bd87d8687cb21ba -->
+- ✦ agent moved this card · Executing → Needs verification · Z.AI and Kimi quota polling landed; offline tests, exact-tree build, and live read-only probes passed. Restarted UI and exhaustion behavior await independent verification. · evidence docs/qa_evidence/2026-09-23-xh4k/ · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260923T182628Z-rd author=agent kind=event model=gpt-6-sol pane=b46708c9 turn=bf07ea53fe1e47b383aeb5e7025ce0da/dc8fae0bc52242ec9bd87d8687cb21ba -->
+- ✦ agent updated this card · replaced `## Plan`
