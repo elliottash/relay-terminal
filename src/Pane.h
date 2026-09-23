@@ -528,6 +528,7 @@ class Pane final : public QWidget, public relay::agent::Host {
 public:
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
+        bool boardTask = false;   // keep its header chip until this queued task starts
         // A slash line entered before `configured.skill_commands` arrives. It cannot be classified
         // as Relay skill vs guest command yet, so it waits and is resolved by pumpQueue().
         bool awaitingSkillCatalog = false;
@@ -15833,6 +15834,10 @@ private:
         request.insert(QStringLiteral("context"), context);
         const QString requestId = sendPrompt(request, prompt);
         setTurnCards(entry.cards, requestId);   // the header names the card this turn works (#C7PF)
+        if (entry.boardTask) {
+            m_boardTaskCard.clear();   // the running turn now owns the same header chip
+            refreshCardChip();
+        }
         if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
     }
 
@@ -19795,12 +19800,11 @@ private:
     void runBoardTask() {
         if (m_boardTask.isEmpty()) return;
         QueueEntry entry;
-        entry.agent = true; entry.text = m_boardTask;
+        entry.agent = true; entry.boardTask = true; entry.text = m_boardTask;
         entry.why = QStringLiteral("Board · Execute #%1").arg(m_boardTaskCard);
         entry.cards = QJsonArray{QJsonObject{{QStringLiteral("id"), m_boardTaskCard}}};
         noteWorkCard(m_boardTaskCard);
-        m_boardTask.clear(); m_boardTaskCard.clear();
-        refreshCardChip();   // still parked in the queue: the chip waits for the turn (#C7PF)
+        m_boardTask.clear();   // the card ID stays in the header until this entry starts
         if (relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) startAgentEntry(entry, false);
         else enqueue(entry);
     }
