@@ -123,6 +123,7 @@ private:
     QPushButton *m_reject;
     QToolButton *m_rejectedToggle;
     QListWidget *m_rejectedList;
+    QWidget *m_detail;
     QJsonArray m_records, m_pending, m_rejected;
     QJsonObject m_record;
     QString m_workspace, m_original, m_selected, m_listRequest, m_getRequest, m_writeRequest, m_suggestRequest;

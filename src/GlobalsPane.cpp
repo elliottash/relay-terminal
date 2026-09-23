@@ -84,7 +84,7 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     m_rejectedList->setVisible(false);
     listsLayout->addWidget(m_rejectedList, 1);
     split->addWidget(lists);
-    auto *detail = new QWidget;
+    auto *detail = m_detail = new QWidget;
     auto *detailLayout = new QVBoxLayout(detail);
     detailLayout->setContentsMargins(0, 0, 0, 0);
     m_source = new QLabel(tr("Select a record to inspect or edit its source."));
@@ -372,6 +372,9 @@ void GlobalsPane::updateButtons() {
              "Review or edit a memory below, or let the helper interview you. "
              "Applicable memories are sent to the model you choose. Retire stops future loading; it keeps the file and history."));
     m_rejectedToggle->setVisible(suggestions);
+    // A suggestion is one sentence and the list is what is being reviewed, so the list gets the room.
+    m_detail->setMaximumHeight(suggestions ? m_detail->minimumSizeHint().height() + 4 * fontMetrics().lineSpacing()
+                                           : QWIDGETSIZE_MAX);
     m_rejectedList->setVisible(suggestions && m_rejectedToggle->isChecked());
     const bool deciding = suggestions && suggesting();
     m_keep->setVisible(suggestions); m_edit->setVisible(suggestions); m_reject->setVisible(suggestions);

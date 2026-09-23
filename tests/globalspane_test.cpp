@@ -7,6 +7,7 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSplitter>
 #include <QTest>
 #include <QToolButton>
 using relay::globals::GlobalsPane;
@@ -250,6 +251,18 @@ private slots:
         GlobalsPane pane;
         QList<QJsonObject> requests;
         pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
+        pane.resize(600, 800);
+        pane.show();
+        QTest::qWait(20);
+        auto *split = pane.findChild<QSplitter *>();
+        const int listBefore = split->sizes().at(0);
+        pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(4);
+        QTest::qWait(20);   // the splitter settles on the next layout pass
+        QVERIFY(split->sizes().at(0) > split->sizes().at(1));   // the review list gets the room
+        QVERIFY(split->sizes().at(0) > listBefore);
+        pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(0);
+        QTest::qWait(20);
+        QVERIFY(split->sizes().at(0) <= listBefore + 1);
         pane.findChild<QComboBox *>("globalsSection")->setCurrentIndex(4);
         QCOMPARE(pane.findChild<QLabel *>("globalsNotice")->text(), QString("No suggestions waiting."));
         QVERIFY(pane.findChild<QLabel *>("globalsSource")->text().startsWith("Select a suggestion"));
