@@ -1,7 +1,7 @@
 ---
 id: 2GV0
 type: work
-status: planning
+status: planned
 labels: [feature, agent-tools, media]
 assignee: codex
 rank: m
@@ -33,3 +33,26 @@ is gemini the best for that? check what openrouter has at low cost
 
 ## Decisions
 - Owner, 2026-09-23: “i want seedance 2 and veo 3.1 lite”. Offer both OpenRouter video models: standard Seedance 2.0 (`bytedance/seedance-2.0`) and Veo 3.1 Lite (`google/veo-3.1-lite`). The earlier Wan 3.0 fallback recommendation is superseded; do not silently choose Seedance 2.0 Mini or Fast. Source for model identity: https://openrouter.ai/bytedance/seedance-2.0-20260414/api and https://openrouter.ai/google/veo-3.1-lite .
+
+## Done means
+- An agent can request an image, a music clip, an ElevenLabs sound effect, or a video from the selected providers and receives a real, reusable file path in the workspace. Image, music and SFX generation use the available OpenRouter, fal.ai or ElevenLabs key as decided; missing keys produce a precise setup message.
+- Video offers exactly standard Seedance 2.0 and Veo 3.1 Lite through OpenRouter. A request can be quoted before submission; an asynchronous job can be checked and its finished video downloaded after a worker restart.
+- The result records provider, model, settings, estimated and reported cost when available. Invalid settings, stale prices, failed jobs, unsafe URLs and oversized files fail without leaving a misleading success artifact.
+
+## Plan
+**Goal.** Give Relay agents four media capabilities—image, music, sound effects and video—using the owner's provider choices, with durable local results and a visible cost estimate before a paid generation. Speech synthesis is a separate capability and is outside this card's agreed scope.
+
+**Findings.** Native agent tools are assembled in `backend/relay_core/agent.py:tools` from `backend/relay_core/tools.py`; guest access is exposed separately by `backend/relay_core/guest_board_bridge.py`. `backend/relay_core/keystore.py` and `src/ModelSettings.cpp` own provider keys; fal.ai and ElevenLabs are service keys, not chat-model presets. `backend/relay_core/attachments.py` and `src/MarkdownAnsi.h` already support local image paths and inline images; `src/FilePanes.cpp` previews images but does not play audio or video. `docs/AGENT-SESSIONS-PROTOCOL.md` specifies worker events and must describe any new media result/status shape.
+
+OpenRouter uses `POST /api/v1/images` (base64 image data) and an asynchronous `POST /api/v1/videos` → poll → content-download flow. The chosen video IDs are `bytedance/seedance-2.0` and `google/veo-3.1-lite`, with different duration, resolution, reference and audio capabilities. Lyria's music response format needs an adapter test against its current OpenRouter endpoint. fal's current ElevenLabs SFX v2 schema supports loop but specifies 0.5–22 seconds; the direct ElevenLabs endpoint allows 0.5–30 seconds. Use `elevenlabs/music/v2.5` on fal or the direct ElevenLabs Music endpoint: fal marks its older `fal-ai/elevenlabs/music` endpoint for deprecation.
+
+**Steps.**
+1. Add a media service module under `backend/relay_core/` with small OpenRouter, fal and ElevenLabs adapters. Add service-key lookup/storage for fal and ElevenLabs through `keystore.py`, the worker key messages and the Keys UI, without treating either as a chat provider. Keep credentials in the worker/keyring and redact provider error bodies.
+2. Add `media_catalog` and `media_quote` tools. Discover OpenRouter image/video capabilities and pricing with a bounded cache; expose only supported model-specific settings. Quote the selected model, duration/resolution/audio and an estimated cost or an explicit “estimate unavailable,” with the source and timestamp. Do not silently substitute a different provider or model. The quote is shown as a normal tool result before generation.
+3. Add `media_generate` plus `media_job` tools with a quote token. Support image via OpenRouter, Lyria through OpenRouter, ElevenLabs Music through fal or direct ElevenLabs, ElevenLabs SFX through fal or direct ElevenLabs, and the two selected video models through OpenRouter. Choose Lyria when neither ElevenLabs key is available; SFX returns the decided key-setup message. Validate each provider's parameter limits, including the different SFX duration caps. Start video asynchronously; persist the job ID and settings so status/download survives worker restart. Report actual usage/cost where the provider supplies it.
+4. Save results under a user-chosen workspace path through the existing workspace path guard. Decode or download with MIME and byte-size checks, HTTPS/redirect safeguards and atomic writes; never put binary data or signed provider URLs into chat history. Return path, type, dimensions/duration when available, model and cost metadata. Make the returned path clickable in the existing tool-result/file-opening flow; reuse inline Markdown images for PNGs and open audio/MP4 files with the system viewer until Relay has a native player.
+5. Offer the same safe media schemas to guest agents through `guest_board_bridge.py`, routed to the active Relay worker and its stored keys. Document the new tool/result contract in `docs/AGENT-SESSIONS-PROTOCOL.md` and update the agent tool guidance. Keep the paid call explicit and cancelable; a canceled poll does not imply an already submitted job was refunded.
+
+**Risks.** Provider catalog prices and model parameters change; a quote is an estimate, never a guarantee. fal's older music endpoint is being retired. Video and music outputs can be large and delayed; download timeouts, restart recovery and output-size limits matter. Fal SFX duration differs from direct ElevenLabs. Guest tools must not expose keys or permit writes outside the workspace.
+
+**Verify.** Add focused adapter tests with mocked provider responses for image decoding, Lyria audio, fal/direct ElevenLabs, and video submit/poll/download; test model-specific validation, missing-key fallback, stale/unknown quotes, cost reporting, bad URLs, size limits, atomic file failure and restart recovery. Run the relevant `tests/test_tools.py`, `tests/test_keystore.py`, `tests/test_images.py` and new media tests, plus protocol and guest-bridge tests. In an isolated profile, generate one small artifact for each capability with test keys or sandboxed provider responses; confirm image display, audio/video file opening and the pre-generation quote in Relay.
