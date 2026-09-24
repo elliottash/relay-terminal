@@ -107,6 +107,7 @@ private slots:
 
     // ----- the wiring that cannot be linked ------------------------------------------------------
     void thePaneRaisesEveryTriggerAndBlocksNone();
+    void theStandingQuestionAnswersTheWorkersParkedRequest();
     void theWindowOffersItPassivelyAndRemembersTheAnswer();
     void aGuestsPaneNeverDrawsTheQuestion();
     void theseEventsStayOnTheDesktop();
@@ -418,6 +419,30 @@ void ProjectInitTests::thePaneRaisesEveryTriggerAndBlocksNone()
     const QString proposals = bodyOf(pane, QStringLiteral("void projectInitProposals("), QStringLiteral("\n    }"));
     QVERIFY(proposals.contains(QStringLiteral("source_key")));
     QVERIFY(proposals.contains(QStringLiteral("board_import_apply")));
+}
+
+// #NSYT: an agent's parked `board_create_card` must be answered by the user's click on the
+// question this pane already has on screen, never by the pane in the user's name. The wiring is
+// read as text, exactly as the test above reads it.
+void ProjectInitTests::theStandingQuestionAnswersTheWorkersParkedRequest()
+{
+    const QString pane = fileText(QStringLiteral("src/Pane.h"));
+    QVERIFY(!pane.isEmpty());
+    const QString body = bodyOf(pane, QStringLiteral("void handleBoardInitRequest("), QStringLiteral("\n    }"));
+    QVERIFY(!body.isEmpty());
+
+    // While this pane's own question about this very project is up — probing for it or showing it —
+    // the worker's request is linked to it, so the click is the answer.
+    const int link = body.indexOf(QStringLiteral("m_initRequestId = id"));
+    QVERIFY(link > 0);
+    QVERIFY(body.contains(QStringLiteral("m_initStage == InitStage::Probing || m_initStage == InitStage::Asking")));
+    QVERIFY(body.contains(QStringLiteral("m_initProject == project")));
+
+    // The link returns before any refusal is sent: an instant accept:false remains only for the
+    // reasons that are the user's own no (a remembered no, a guest's pane), never for a question
+    // that is merely waiting for its answer.
+    const int refusal = body.indexOf(QStringLiteral("board_init_answer"));
+    QVERIFY(refusal > link);
 }
 
 void ProjectInitTests::theWindowOffersItPassivelyAndRemembersTheAnswer()
