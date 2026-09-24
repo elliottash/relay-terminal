@@ -19,9 +19,12 @@
 // gate honest: a failed check names its line and the run exits non-zero.
 
 #include "Pane.h"
+#include "Images.h"
 
 #include <QApplication>
 #include <QComboBox>
+#include <QFile>
+#include <QImage>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QJsonObject>
@@ -1199,6 +1202,51 @@ void repeatedEnterKeepsTheFirstQueuedPrompt()
     CHECK_EQ(console.queuedPrompts(), 1);
 }
 
+// A picture named with `@` is an attachment on its way to the agent — one of the four ways in
+// (src/Images.h: paste, drop, `@path`, screenshot) — so a draft holding one `@` image token and
+// nothing else submits like any other prompt. The `@path`-on-its-own quick-open rule used to eat
+// exactly that draft, which is what an image pasted into an empty box leaves behind, and open a
+// preview pane instead of sending it: the attachment line under the box promises the agent.
+void anImageDraftSubmitsToTheAgentRatherThanOpening()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QStringList opened;
+    console.onOpenPath = [&opened](const QString &path, int) { opened << path; };
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
+    auto *editor = console.findChild<RichEditor *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (!editor) return;
+
+    // A real PNG on disk, and the draft a paste of it into the empty box leaves behind.
+    const QString image = relay::images::savePng(QImage(4, 4, QImage::Format_RGB32),
+                                                 home->filePath(QStringLiteral("relay-shot.png")));
+    CHECK(relay::images::isImageFile(image));
+    if (image.isEmpty()) return;
+    console.draftInComposer(QStringLiteral("@") + image);
+    editor->onSubmit(QStringLiteral("auto"));
+    CHECK(opened.isEmpty());                 // never opened in a pane
+    CHECK_EQ(console.queuedPrompts(), 1);    // it queued for the agent instead
+    QStringList queued;
+    for (const Pane::QueueRow &row : console.queueRows())
+        if (row.id.startsWith(QStringLiteral("entry:"))) queued.append(row.preview);
+    CHECK_EQ(queued.size(), 1);
+    if (queued.size() == 1)
+        CHECK(queued.first().contains(image));   // the image rides the queued prompt as its token
+
+    // The quick-open itself still works for anything that is not a picture.
+    const QString notes = home->filePath(QStringLiteral("notes.txt"));
+    QFile file(notes);
+    CHECK(file.open(QIODevice::WriteOnly));
+    file.write("hello");
+    file.close();
+    console.draftInComposer(QStringLiteral("@") + notes);
+    editor->onSubmit(QStringLiteral("auto"));
+    CHECK(opened == QStringList{notes});
+}
+
 void pendingQueueSurvivesPaneRestorePaused()
 {
     StubContext context;
@@ -1672,6 +1720,7 @@ int main(int argc, char **argv)
     cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
+    cases::anImageDraftSubmitsToTheAgentRatherThanOpening();
     cases::pendingQueueSurvivesPaneRestorePaused();
     cases::enteringPlanSelectsHigh();
     cases::effortMenuFollowsTheActiveRoleModel();

@@ -844,13 +844,17 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
                 answerQuestion(typed);
                 return;
             }
-            // `@path` on its own opens the file (or folder) in a Relay pane.
+            // `@path` on its own opens the file (or folder) in a Relay pane — but never a
+            // picture: naming an image with `@` is one of the four ways it reaches the agent
+            // (src/Images.h), and one pasted or dropped into an empty box leaves exactly one
+            // `@` token as the whole draft. Enter sends that to the agent, as the attachment
+            // line under it promises, instead of swallowing it into a preview pane.
             static const QRegularExpression only(QStringLiteral("^@(?:\"([^\"]+)\"|(\\S+))$"));
             const auto match = only.match(m_editor->toPlainText().trimmed());
             if (m_guest.isEmpty() && match.hasMatch()) {
                 const QString path = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
                 const QString absolute = m_login.active ? QString() : resolveComposerPath(path);
-                if (!absolute.isEmpty() && onOpenPath) {
+                if (!absolute.isEmpty() && !relay::images::isImageFile(absolute) && onOpenPath) {
                     m_editor->remember(m_editor->toPlainText().trimmed());
                     m_editor->clear();
                     hideAtPopup();
