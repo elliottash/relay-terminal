@@ -1208,6 +1208,13 @@ QWidget *RelayWindow::buildNode(const QJsonObject &node) {
             QTimer::singleShot(0, tool, [guard] { if (auto *w = windowOf(guard)) w->linkRestoredTestSuitesPane(guard); });
             return tool;
         }
+        if (node.contains(QStringLiteral("review"))) {
+            const QJsonObject saved = node.value(QStringLiteral("review")).toObject();
+            ToolPane *tool = createReviewPane(saved.value(QStringLiteral("cwd")).toString());
+            QPointer<ToolPane> guard(tool);
+            QTimer::singleShot(0, tool, [guard] { if (auto *w = windowOf(guard)) w->linkRestoredReviewPane(guard); });
+            return tool;
+        }
         if (node.contains(QStringLiteral("subagents"))) {   // card #WD83: the tabs' text, then its owner
             const QJsonObject saved = node.value(QStringLiteral("subagents")).toObject();
             ToolPane *tool = createSubagentPane(saved.value(QStringLiteral("cwd")).toString(), saved);

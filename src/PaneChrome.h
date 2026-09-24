@@ -17,6 +17,7 @@
 #include "OutputLinks.h"
 #include "PaneView.h"
 #include "ModelsPane.h"   // the models pane is a hosted PaneView, and node() saves which tab it is on
+#include "ReviewPane.h"
 #include "PaneDimming.h"
 #include "SessionInfo.h"
 
@@ -389,7 +390,7 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models };
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models, Review };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -525,6 +526,8 @@ public:
         // inventory again (RelayWindow::linkTestSuitesPane), exactly as the Activity pane does.
         if (m_kind == Kind::TestSuites)
             return {{"testsuites", QJsonObject{{"cwd", m_subagentCwd}}}};
+        if (m_kind == Kind::Review)
+            return {{"review", QJsonObject{{"cwd", m_subagentCwd}}}};
         // The Actions pane or the Options pane (card #XAME): enough to put the reader back where
         // it was — the mode, the section tab, the search and the highlighted row. visibleRowIds()
         // is m_rows in order, so currentRow() indexes it.
@@ -594,6 +597,7 @@ public:
         case Kind::Turn: return QStringLiteral("turn");
         case Kind::Internals: return QStringLiteral("internals");
         case Kind::TestSuites: return QStringLiteral("testsuites");   // card #7BM4
+        case Kind::Review: return QStringLiteral("review");
         case Kind::Explorer: return QStringLiteral("explorer");
         case Kind::Preview: return QStringLiteral("preview");
         case Kind::Plan: return QStringLiteral("plan");

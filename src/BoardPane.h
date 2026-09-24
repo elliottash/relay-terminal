@@ -131,6 +131,7 @@ public:
     // buttons live in that row). The pane it opens is the window's — a splitter pane beside this
     // one, on the same tab's board worker — so the view only says that it was pressed.
     std::function<void()> onOpenTestSuites;
+    std::function<void()> onOpenReview;
     // The Profile button beside it (#7BM4 phase 5). The window owns the target menu — it has to
     // be anchored under the button, so the button is what is handed over — and the result pane it
     // opens. Unset, the button does nothing.

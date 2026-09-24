@@ -2587,7 +2587,7 @@ public:
         if (!has)
             return;
         const TrySummary summary = readTryIt(m_body);
-        QString text = QStringLiteral("<span style=\"color:%1\">Try it</span>")
+        QString text = QStringLiteral("<span style=\"color:%1\">Review</span>")
                            .arg(theme::TextMuted.name());
         if (summary.revealed) {
             text += QStringLiteral(" <span style=\"color:%1\">· answered — the expected result is "
@@ -2605,7 +2605,7 @@ public:
         m_tryOpen->setVisible(!summary.open.isEmpty());
         m_tryOpen->setToolTip(summary.open.isEmpty()
                                   ? QString()
-                                  : QStringLiteral("Open what Try it staged: %1").arg(summary.open));
+                                  : QStringLiteral("Open the staged review: %1").arg(summary.open));
         m_tryAnswer->setEnabled(!m_id.isEmpty());
         m_tryAnswer->setVisible(!summary.revealed || !summary.question.isEmpty());
     }
@@ -3389,10 +3389,10 @@ public:
             relay::agent::Action tryIt;
             tryIt.key = QStringLiteral("boardTryIt");
             tryIt.letter = QStringLiteral("y");
-            tryIt.label = m_tryRunning ? QStringLiteral("Trying…") : QStringLiteral("Try it");
+            tryIt.label = m_tryRunning ? QStringLiteral("Preparing review…") : QStringLiteral("Stage review");
             tryIt.enabled = !m_busy && !m_tryRunning;
             tryIt.tooltip = m_tryRunning
-                ? QStringLiteral("Try it is already running on this card — the board's notice "
+                ? QStringLiteral("Review staging is already running on this card — the board's notice "
                                  "line has its progress, and Stop is there")
                 : (hasTryIt()
                        ? QStringLiteral("Stage this card's situation again and rewrite `## Try "
@@ -4470,6 +4470,16 @@ class BoardContext final : public relay::agent::Context {
                 view->onOpenTestSuites();
         };
         actions << tests;
+
+        relay::agent::Action review;
+        review.key = QStringLiteral("boardReview");
+        review.label = QStringLiteral("Review");
+        review.tooltip = QStringLiteral("The cards that need your judgement, in a pane beside the Board");
+        review.run = [view] {
+            const ActionGuard guard;
+            if (view->onOpenReview) view->onOpenReview();
+        };
+        actions << review;
 
         relay::agent::Action profile;
         profile.key = QStringLiteral("boardProfile");
@@ -9576,8 +9586,8 @@ void BoardView::hideCleanupPanel()
 void BoardView::showTryItProgress(const QString &step)
 {
     const qint64 seconds = m_tryClock.isValid() ? m_tryClock.elapsed() / 1000 : 0;
-    QString text = m_tryCard.isEmpty() ? QStringLiteral("Try it")
-                                       : QStringLiteral("Try it · #%1").arg(m_tryCard);
+    QString text = m_tryCard.isEmpty() ? QStringLiteral("Preparing review")
+                                       : QStringLiteral("Preparing review · #%1").arg(m_tryCard);
     text += QStringLiteral(" · %1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
     if (m_tryReusing)
         text += QStringLiteral(" · reusing the staged environment");
@@ -9626,8 +9636,8 @@ bool BoardView::handleTryItEvent(const QString &type, const QJsonObject &event)
     if (state == QStringLiteral("answered")) {
         // The verdict, the reveal and `## Human QA` are all written by now; the card re-reads
         // itself from `board_changed`, so this only says so.
-        showNotice(QStringLiteral("Answer recorded on #%1. The expected result is under "
-                                  "`## Try it`, and `## Human QA` is written from it.").arg(card),
+        showNotice(QStringLiteral("Answer recorded on #%1. The expected result is in the "
+                                  "review section, with your answer recorded.").arg(card),
                    false);
         return true;
     }
@@ -9641,9 +9651,9 @@ bool BoardView::handleTryItEvent(const QString &type, const QJsonObject &event)
     const QString message = event.value(QStringLiteral("message")).toString();
     const QString out = event.value(QStringLiteral("out")).toString();
     if (state == QStringLiteral("error")) {
-        showNotice(message.isEmpty() ? QStringLiteral("Try it could not start.") : message, true);
+        showNotice(message.isEmpty() ? QStringLiteral("Review staging could not start.") : message, true);
     } else if (state == QStringLiteral("stopped")) {
-        showNotice(QStringLiteral("Try it stopped. Whatever it captured is in %1.").arg(out),
+        showNotice(QStringLiteral("Review staging stopped. Whatever it captured is in %1.").arg(out),
                    false);
     } else if (event.value(QStringLiteral("section_written")).toBool()) {
         // The card page re-renders from `board_changed`; the notice says where to look, and
@@ -9651,13 +9661,13 @@ bool BoardView::handleTryItEvent(const QString &type, const QJsonObject &event)
         if (!card.isEmpty())
             send({{QStringLiteral("type"), QStringLiteral("board_card_get")},
                   {QStringLiteral("card"), card}});
-        showNotice(QStringLiteral("#%1 has a `## Try it`: one task and one question. The expected "
+        showNotice(QStringLiteral("#%1 has a staged review: one task and one question. The expected "
                                   "result stays sealed until you answer.").arg(card), false);
     } else {
         // The turn could not stage it, and said so on the thread (brief step 7). Amber, because
         // this is the case the whole feature exists to keep off a review request.
         showNotice(message.isEmpty()
-                       ? QStringLiteral("Try it could not stage #%1, and wrote no section.").arg(card)
+                       ? QStringLiteral("Review could not stage #%1, and wrote no section.").arg(card)
                        : message, true);
     }
     return true;

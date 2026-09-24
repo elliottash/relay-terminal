@@ -3123,6 +3123,72 @@ public:
         return tool ? dynamic_cast<relay::tests::TestSuitesPane *>(tool->hosted()) : nullptr;
     }
 
+    static ToolPane *reviewPaneIn(QWidget *page) {
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Review)
+                return tool;
+        return nullptr;
+    }
+    static relay::ReviewPane *reviewViewOf(ToolPane *tool) {
+        return tool ? dynamic_cast<relay::ReviewPane *>(tool->hosted()) : nullptr;
+    }
+    void openReviewPane() {
+        QWidget *page = m_tabs->currentWidget();
+        if (!page) return;
+        if (ToolPane *open = reviewPaneIn(page)) {
+            if (auto *view = reviewViewOf(open)) view->requestList();
+            setActiveLeaf(open);
+            focusLeaf(open);
+            updateTitles();
+            return;
+        }
+        QWidget *anchor = nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) { anchor = tool; break; }
+        if (!anchor) anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+        ToolPane *tool = createReviewPane(boardWorkspaceOfTab(page));
+        if (anchor) insertBeside(anchor, tool, anchor->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        else if (page->layout()) page->layout()->addWidget(tool);
+        linkReviewPane(tool);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+    }
+    ToolPane *createReviewPane(const QString &cwd) {
+        auto *view = new relay::ReviewPane;
+        auto *tool = new ToolPane(ToolPane::Kind::Review, view, view, cwd);
+        tool->setProperty("paneType", QStringLiteral("review"));
+        relay::theme::polishWindow(tool);
+        tool->setObjectName(QStringLiteral("pane"));
+        return tool;
+    }
+    void linkReviewPane(ToolPane *tool) {
+        relay::ReviewPane *view = reviewViewOf(tool);
+        QWidget *page = view ? pageOf(tool) : nullptr;
+        if (!page) return;
+        QPointer<ToolPane> guard(tool);
+        view->onSend = [guard](const QJsonObject &request) {
+            if (auto *w = windowOf(guard))
+                if (QWidget *page = w->pageOf(guard)) w->sendToHelper(page, request);
+        };
+        QPointer<relay::ReviewPane> viewGuard(view);
+        listenToHelper(page, view, [viewGuard](const QJsonObject &event) {
+            if (!viewGuard) return;
+            if (event.value(QStringLiteral("event")).toString() == QStringLiteral("ready"))
+                viewGuard->requestList();
+            else viewGuard->handleEvent(event);
+        });
+        view->onOpenCard = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) w->openBoardCard(id);
+        };
+        view->requestList();
+    }
+    void linkRestoredReviewPane(ToolPane *tool) {
+        if (!tool) return;
+        if (!pageOf(tool)) { closePane(tool, false); return; }
+        linkReviewPane(tool);
+    }
+
     // `tests.open`, and the Tests button on the Switchboard's tool row. The tab's own pane comes
     // forward and re-asks for the inventory; there is never a second one.
     void openTestSuitesPane() {
@@ -5144,6 +5210,9 @@ public:
         // a splitter pane beside this one on the same tab's worker.
         view->onOpenTestSuites = [guard] {
             if (auto *w = windowOf(guard)) w->openTestSuitesPane();
+        };
+        view->onOpenReview = [guard] {
+            if (auto *w = windowOf(guard)) w->openReviewPane();
         };
         // The Profile button beside it (#7BM4 phase 5): the menu is the window's, anchored under
         // the button, and what it starts opens a result pane of the window's too.

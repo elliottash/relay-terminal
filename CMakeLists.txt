@@ -1185,6 +1185,10 @@ if(BUILD_TESTING)
     add_executable(relay-boardpane-tests tests/boardpane_test.cpp)
     target_link_libraries(relay-boardpane-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardpane COMMAND relay-boardpane-tests)
+    add_executable(relay-reviewpane-tests tests/reviewpane_test.cpp)
+    target_link_libraries(relay-reviewpane-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME reviewpane COMMAND relay-reviewpane-tests)
+    set_tests_properties(reviewpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     set_tests_properties(boardpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     # The card's `## Tests` strip and its Check (#7BM4): the strip appears only for a card that
