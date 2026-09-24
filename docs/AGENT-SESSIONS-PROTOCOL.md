@@ -233,6 +233,7 @@ Free's ceiling — and is `""` everywhere else, because nothing is silently sent
   the `reset` event, so the context chip never goes on showing the previous conversation's reading
   until the next turn (issue 5PY9).
 - Auto-compaction when `percent >= threshold` at a step boundary (never between a tool call and its results): emits `compaction_started {reason: "auto"|"manual"}` then `compacted {before_tokens, after_tokens, summary_chars}`. Order: drop/trim old tool outputs first, then summarize older turns with a no-tools model call, keeping the system prompt, instructions, the last N turns and the current task.
+- While the summary streams, throttled to one every 0.2 s: `compaction_progress {chars, estimate, phase: "summary"|"thinking"}` — `chars` of summary text so far against `estimate`, the previous compaction's `summary_chars` when there was one, else clamped `transcript chars / 12`. A percentage from these is a live estimate (the UI clamps below 100% until `compacted`); reasoning deltas carry `phase: "thinking"` and count for nothing but liveness, since no denominator exists for them.
 - `compact {focus?: string}` → manual compaction.
 - **Stale tool results** (#0C0V step 4, `clear_tool_results`, on by default): after each tool group,
   when the tool results older than the last 3 assistant tool-call groups add up to 40,000

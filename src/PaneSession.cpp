@@ -402,12 +402,27 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             return true;
         }
         if (type == QStringLiteral("compaction_started")) {
-            m_compacting = true; updateContextLabel();
+            m_compacting = true; m_compactPercent = -1; m_compactThinking = false;
+            updateContextLabel();
             status(QStringLiteral("Compacting the conversation…"));
             return true;
         }
+        if (type == QStringLiteral("compaction_progress")) {
+            // Streaming the summary (compaction is one completion): chars against an estimated
+            // total, clamped below 100% until the compacted event lands — it is a live guess, not
+            // a promise. Reasoning deltas count only as "still working" (no denominator exists).
+            if (m_compacting) {
+                const bool thinking = event.value(QStringLiteral("phase")).toString() == QStringLiteral("thinking");
+                const double estimate = event.value(QStringLiteral("estimate")).toDouble();
+                const double chars = event.value(QStringLiteral("chars")).toDouble();
+                m_compactPercent = (!thinking && estimate > 0) ? qBound(0, int(100.0 * chars / estimate), 95) : -1;
+                m_compactThinking = thinking;
+                updateContextLabel();
+            }
+            return true;
+        }
         if (type == QStringLiteral("compacted")) {
-            m_compacting = false;
+            m_compacting = false; m_compactPercent = -1; m_compactThinking = false;
             status(QStringLiteral("Conversation compacted"));
             ensureLineStart();
             const QString forModel = event.value(QStringLiteral("for_model")).toString();   // issue 3ES1
@@ -762,6 +777,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             // must not survive into the new one's chip.
             clearNextContext();
             m_compacting = false;
+            m_compactPercent = -1; m_compactThinking = false;
             updateContextLabel();
             if (m_reconfigureOnNewChat) {
                 m_reconfigureOnNewChat = false;

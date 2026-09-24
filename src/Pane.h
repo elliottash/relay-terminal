@@ -5736,7 +5736,10 @@ private:
         const double percent = next ? m_ctxNextPercent : m_ctxPercent;
         relay::context::Reading reading{used, window, limit, percent, m_ctxEstimated || next, m_ctxGuest};
         if (m_compacting) {
-            m_ctxLabel->setText(QStringLiteral("compacting…"));
+            m_ctxLabel->setText(m_compactThinking ? QStringLiteral("compacting… thinking")
+                                                  : (m_compactPercent >= 0
+                                                         ? QStringLiteral("compacting… %1%").arg(m_compactPercent)
+                                                         : QStringLiteral("compacting…")));
         } else {
             m_ctxLabel->setText(reading.label() + (next ? QStringLiteral(" ↻") : QString()));
         }
@@ -16591,6 +16594,10 @@ private:
     double m_ctxNextPercent = 0;
     QString m_ctxNextModel, m_ctxInFlightModel;
     bool m_ctxEstimated = false, m_compacting = false, m_contextNotePending = false;
+    // Compaction stream state: -1 percent = nothing streamed yet (prefill), so the chip stays at
+    // plain "compacting…"; m_compactThinking = reasoning deltas flowing (no denominator exists).
+    int m_compactPercent = -1;
+    bool m_compactThinking = false;
     QString m_rewindKind = QStringLiteral("chat");
     bool m_rewindPending = false, m_forkPending = false, m_recapManual = false;
     bool m_instructionsDialogPending = false, m_onboarding = false, m_agentsListPending = false, m_reconfigureOnNewChat = false;

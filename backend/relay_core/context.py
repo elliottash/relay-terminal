@@ -314,7 +314,8 @@ def last_group_start(messages: list[dict]) -> int:
 
 
 def summarize(provider, messages: list[dict], focus: str | None, cancel: threading.Event | None,
-              max_chars: int) -> str:
+              max_chars: int, expected_chars: int | None = None,
+              on_progress: "callable | None" = None) -> str:
     messages = [m for m in messages if m.get("relay_kind") != "carried"
                 and not str(m.get("content") or "").startswith(CARRIED_MARKER)]
     transcript = sidecall.render_transcript(messages, max_chars=max_chars, keep_user=True)
@@ -323,7 +324,20 @@ def summarize(provider, messages: list[dict], focus: str | None, cancel: threadi
         user = MERGE_NOTE + "\n\n" + user
     if focus:
         user += "\n\nThe user asked the summary to focus on: " + focus[:2000]
-    text, _ = sidecall.call(provider, SUMMARY_SYSTEM, user, cancel)
+    # Progress denominator for the summary stream: the last compaction's summary when we have one,
+    # else a guess from the transcript (the prompt asks for "at most ~1,500 words" ≈ 9k chars, and
+    # small transcripts get proportionally smaller summaries). A percentage from this is an estimate,
+    # not a promise — the caller clamps it below 100% until the call returns.
+    estimate = expected_chars if expected_chars and expected_chars > 0 else max(2_000, min(12_000, len(transcript) // 12))
+    counted = [0]
+
+    def forward(text: str, thinking: bool) -> None:
+        if not thinking:
+            counted[0] += len(text)
+        on_progress(counted[0], estimate, thinking)
+
+    text, _ = sidecall.call(provider, SUMMARY_SYSTEM, user, cancel,
+                            on_delta=forward if on_progress else None)
     if not text:
         raise ValueError("The model returned an empty summary; nothing was compacted.")
     return text
@@ -414,7 +428,8 @@ def carried_block(requests: list[dict], todos: list[dict], *, open_budget_chars:
 
 def compact(messages: list[dict], provider, *, over, manual: bool, focus: str | None = None,
             cancel: threading.Event | None = None, keep_turns: int = KEEP_TURNS,
-            window_chars: int = 400_000, carry=None) -> dict:
+            window_chars: int = 400_000, carry=None, expected_chars: int | None = None,
+            on_progress: "callable | None" = None) -> dict:
     """Return {"messages", "boundary", "prefix", "summary_chars", "trimmed", "carried"}.
 
     `over(messages)` says whether the list is still above the limit. Manual compaction always
@@ -435,7 +450,8 @@ def compact(messages: list[dict], provider, *, over, manual: bool, focus: str | 
         return {"messages": result, "boundary": None, "prefix": None, "summary_chars": 0, "trimmed": trimmed,
                 "carried": None}
     region = messages[1:boundary]
-    summary = summarize(provider, region, focus, cancel, window_chars)
+    summary = summarize(provider, region, focus, cancel, window_chars,
+                        expected_chars=expected_chars, on_progress=on_progress)
     new = [messages[0], {"role": "user", "content": f"{SUMMARY_MARKER}\n\n{summary}", "relay_kind": "summary"},
            {"role": "assistant", "content": SUMMARY_ACK}]
     carried = None

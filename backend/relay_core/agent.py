@@ -781,6 +781,9 @@ class Agent:
         # thread's older state after the other's newer state.
         self._save_lock = threading.Lock()
         self._last_usage = None
+        # Chars of the summary the last compaction produced: the denominator for the next one's
+        # progress events (a learned estimate beats guessing from the transcript again).
+        self._last_summary_chars = 0
         # When the session file was last written; _autosave_soon throttles the mid-turn ones.
         self._last_save = 0.0
         # A title or summary whose save was left to the other cheap call of its cadence point
@@ -2201,13 +2204,27 @@ class Agent:
                 if carry is not None:
                     carry = lambda region, tail_ids=frozenset(), lean=False: self._carry(  # noqa: E731
                         region, tail_ids, lean, window=target_window)
+            emitted = [0.0]  # monotonic time of the last compaction_progress (throttled below)
+
+            def on_progress(chars: int, estimate: int, thinking: bool) -> None:
+                # The chip needs a tick, not a firehose: one event per 0.2 s of stream.
+                now = time.monotonic()
+                if now - emitted[0] < 0.2:
+                    return
+                emitted[0] = now
+                self.emit({"event": "compaction_progress", "chars": chars, "estimate": estimate,
+                           "phase": "thinking" if thinking else "summary"})
+
             result = compaction.compact(
                 self.messages, self.side_provider(role="summaries"), manual=reason == "manual", focus=focus,
                 cancel=self.cancel_event,
                 over=lambda m: compaction.estimate_tokens(m) * ratio + compaction.estimate_tokens(tools) * ratio >= limit,
                 window_chars=max(20_000, min(400_000, self.context.window * compaction.CHARS_PER_TOKEN // 2)),
-                carry=carry, keep_turns=keep_turns)
+                carry=carry, keep_turns=keep_turns,
+                expected_chars=self._last_summary_chars or None, on_progress=on_progress)
             boundary = result["boundary"]
+            if result["summary_chars"]:
+                self._last_summary_chars = result["summary_chars"]
             if boundary is not None:
                 self._move_epoch(boundary, result["prefix"])
             self.messages = result["messages"]

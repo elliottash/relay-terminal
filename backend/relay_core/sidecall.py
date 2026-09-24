@@ -21,17 +21,23 @@ RETRY_BUDGET_S = 20.0
 
 
 def call(provider, system: str, user: str, cancel: threading.Event | None = None,
-         retry_budget_s: float | None = RETRY_BUDGET_S) -> tuple[str, dict | None]:
+         retry_budget_s: float | None = RETRY_BUDGET_S,
+         on_delta: "callable | None" = None) -> tuple[str, dict | None]:
     """Run one no-tools completion. Returns (text, usage).
 
     ``retry_budget_s`` caps the wall clock the transport's HTTP retries may spend; None leaves the
-    provider's own budget alone.
+    provider's own budget alone. ``on_delta(text, thinking)``, when given, receives the streamed
+    pieces as they arrive (compaction turns them into its progress events); the completion itself
+    is unchanged — these calls still never stream text to the GUI.
     """
     usage: dict = {}
 
     def quiet(event: dict) -> None:
-        if event.get("event") == "usage" and isinstance(event.get("usage"), dict):
+        kind = event.get("event")
+        if kind == "usage" and isinstance(event.get("usage"), dict):
             usage.update(event["usage"])
+        elif on_delta is not None and kind in ("delta", "thinking_delta"):
+            on_delta(event.get("text") or "", kind == "thinking_delta")
 
     with _retry_budget(provider, retry_budget_s):
         message = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
