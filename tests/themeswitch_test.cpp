@@ -106,6 +106,9 @@ private Q_SLOTS:
             // A metal or plastic theme gives the tile the face it gives every other raised chip,
             // rather than leaving it the one flat rectangle in the window.
             QVERIFY2(!css.contains(QStringLiteral("QToolButton#workChip, QMenu,")), id);
+            // Nothing sets the `hot` property since the row became permanent, so a rule keyed on
+            // it never fires: no stylesheet may carry it (the bevel sheet was the last one).
+            QVERIFY2(!css.contains(QStringLiteral("hot=\"true\"")), id);
         }
     }
 

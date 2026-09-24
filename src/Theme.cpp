@@ -96,7 +96,7 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
 QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
-QFrame#paneChrome[hot="true"], QFrame#helpPopup, QFrame#paneInfoPopover, QMenu, QFrame#notificationsPopup {
+QFrame#paneChrome, QFrame#helpPopup, QFrame#paneInfoPopover, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
 QPushButton:pressed, QToolButton#stripChip:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
