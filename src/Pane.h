@@ -14148,6 +14148,8 @@ private:
         if (m_cardIndexAsked || !m_configured) return;
         if (reason ? !attachForBoard(reason) : !hasBoard()) return;
         m_cardIndexAsked = true;
+        if (!m_cardIndexClock.isValid()) m_cardIndexClock.start();
+        m_unknownCardRefresh.requested(m_cardIndexClock.elapsed());
         send({{QStringLiteral("type"), QStringLiteral("board_open")}});
     }
 
@@ -14167,7 +14169,14 @@ private:
     bool lookupOutputCard(const QString &id, QString *title) {
         if (m_cardIndex.total() == 0) requestCardIndex();
         const relay::board::Card *card = m_cardIndex.card(id);
-        if (!card) return false;
+        if (!card) {
+            if (m_configured && hasBoard()) {
+                if (!m_cardIndexClock.isValid()) m_cardIndexClock.start();
+                if (m_unknownCardRefresh.due(m_cardIndexClock.elapsed()))
+                    send({{QStringLiteral("type"), QStringLiteral("board_refresh")}});
+            }
+            return false;
+        }
         if (title) *title = card->title;
         return true;
     }
@@ -16296,6 +16305,8 @@ private:
     QListWidget *m_cardList = nullptr;
     relay::board::IndexFeed m_cardIndex;
     bool m_cardIndexAsked = false;
+    QElapsedTimer m_cardIndexClock;
+    relay::links::UnknownCardRefresh m_unknownCardRefresh;
     int m_cardDismissedAt = -1;
     int m_atDismissedAt = -1;
     relay::FileIndex m_fileIndex;   // the `@` picker's listing; keeps its own cwd and freshness

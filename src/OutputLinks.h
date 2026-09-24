@@ -78,6 +78,24 @@ Probe systemProbe();
 // `#K7Q2` in its output stays plain text, exactly as an unknown id does.
 using CardLookup = std::function<bool(const QString &id, QString *title)>;
 
+// A miss can mean a card was written directly to disk after this pane loaded its board.
+// Limit refreshes from repeated hovers (and from ids that really are typos). `nowMs` is
+// monotonic time supplied by the pane, which also records its initial board_open here.
+class UnknownCardRefresh {
+public:
+    static constexpr qint64 intervalMs = 5000;
+
+    void requested(qint64 nowMs) { m_lastRequestMs = nowMs; }
+    bool due(qint64 nowMs) {
+        if (m_lastRequestMs >= 0 && nowMs - m_lastRequestMs < intervalMs) return false;
+        requested(nowMs);
+        return true;
+    }
+
+private:
+    qint64 m_lastRequestMs = -1;
+};
+
 // The target a card reference resolves to: `relay://card/K7Q2`. src/main.cpp's
 // openOutputTarget() already routes relay:// targets, so a clicked, keyboard-walked or
 // right-clicked card link travels the same one path as every other link.

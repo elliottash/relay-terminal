@@ -289,6 +289,43 @@ private slots:
         QVERIFY(scan(QStringLiteral("◆ #K7Q2 · done"), kCwd, kHome, probe()).isEmpty());
     }
 
+    void aCardWrittenAfterTheFirstScanLinksAfterRefresh()
+    {
+        QSet<QString> board{QStringLiteral("K7Q2")};
+        UnknownCardRefresh refresh;
+        int refreshes = 0;
+        const auto lookup = [&board, &refresh, &refreshes](const QString &id, QString *title) {
+            if (board.contains(id)) {
+                *title = QStringLiteral("New card");
+                return true;
+            }
+            if (refresh.due(5000)) ++refreshes; // the pane requests a board reread on a miss
+            return false;
+        };
+        refresh.requested(0); // initial board_open
+        const auto scanLine = [&lookup](const QString &line) {
+            return scan(line, kCwd, kHome, probe(), lookup);
+        };
+        QVERIFY(scanLine(QStringLiteral("#ABCD")).isEmpty());
+        QCOMPARE(refreshes, 1);
+        board.insert(QStringLiteral("ABCD")); // board_changed after the refresh
+        QCOMPARE(scanLine(QStringLiteral("#ABCD")).size(), 1);
+        QCOMPARE(scanLine(QStringLiteral("#ABCD"))[0].target.target,
+                 QStringLiteral("relay://card/ABCD"));
+        QVERIFY(scanLine(QStringLiteral("#ZZZZ")).isEmpty());
+        QCOMPARE(refreshes, 1); // another miss in the same interval sends nothing
+    }
+
+    void unknownCardRefreshIsThrottled()
+    {
+        UnknownCardRefresh refresh;
+        refresh.requested(100); // initial board_open
+        QVERIFY(!refresh.due(5099));
+        QVERIFY(refresh.due(5100));
+        QVERIFY(!refresh.due(5101)); // another unknown id or another hover
+        QVERIFY(refresh.due(10100));
+    }
+
     void cardIdsAtTheEdgesOfALineAndInsidePunctuation()
     {
         QCOMPARE(targets(QStringLiteral("#K7Q2 is the card")), {QStringLiteral("relay://card/K7Q2")});
