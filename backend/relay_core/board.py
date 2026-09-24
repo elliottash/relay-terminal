@@ -400,6 +400,106 @@ def deferred_text(verify: Mapping | None) -> str:
     return text
 
 
+# ---- verified (#1AA6): one definition for the move rules, `check` and the card-page strip
+#: A numbered question in `## Human QA`, and the indented `Answer:` line that settles it
+#: (docs/BOARD-FORMAT.md 2.7).  `board_tools.unanswered_human_qa` reads through here.
+HUMAN_QA_HEADING = "Human QA"
+_HUMAN_QA_QUESTION_RE = re.compile(r"^(?P<number>\d+)[.)]\s+(?P<text>\S.*)$")
+_HUMAN_QA_ANSWER_RE = re.compile(r"^\s+(?:[-*]\s*)?answer\s*:", re.I)
+TESTS_HEADING = "Tests"
+VERDICT_HEADINGS = ("verdict", "qa verdict", "qa result")
+RECEIPT_HEADINGS = ("Verdict", "Execution Summary")
+#: A `### Check` block under `## Tests` (tests_protocol): one `- <status> · <test> — …` line per
+#: listed test.  It passes when every status line is `passed` or `not-applicable` and at least
+#: one passed; `failed` and `missing-evidence` are the two the landing gate refuses on too.
+_CHECK_HEADING_RE = re.compile(r"^###[ \t]+Check\b.*$", re.M)
+_CHECK_STATUS_RE = re.compile(r"^-[ \t]+(?P<status>[a-z][a-z-]*)[ \t]+·")
+CHECK_PASSING = ("passed", "not-applicable")
+CHECK_BLOCKING = ("failed", "missing-evidence")
+_RECEIPT_RE = re.compile(r"^[ \t]*(?:[-*][ \t]+)?Receipt:", re.M)
+
+
+def human_qa_questions(body: str) -> list[tuple[str, bool]]:
+    """The numbered `## Human QA` questions, each with whether an indented `Answer:` line sits
+    under it.  Prose with no numbered question is a brief, and gates nothing."""
+    text = section_text(body or "", HUMAN_QA_HEADING)
+    if not text.strip():
+        return []
+    out: list[tuple[str, bool]] = []
+    current: str | None = None
+    for line in text.splitlines():
+        match = _HUMAN_QA_QUESTION_RE.match(line.strip()) if line[:1].isdigit() else None
+        if match:
+            if current is not None:
+                out.append((current, False))
+            current = f"{match.group('number')}. {match.group('text').strip()}"[:120]
+            continue
+        if current is not None and _HUMAN_QA_ANSWER_RE.match(line):
+            out.append((current, True))
+            current = None
+    if current is not None:
+        out.append((current, False))
+    return out
+
+
+def has_verdict(body: str) -> bool:
+    return any(m.group("heading").strip().lower() in VERDICT_HEADINGS
+               for m in _SECTION_HEADING_RE.finditer(body or ""))
+
+
+def check_passing(body: str) -> bool:
+    """True when the current `### Check` block under `## Tests` says every listed test passed."""
+    section = section_text(body or "", TESTS_HEADING)
+    blocks = list(_CHECK_HEADING_RE.finditer(section))
+    if not blocks:
+        return False
+    text = section[blocks[-1].end():]
+    statuses = [m.group("status") for m in (_CHECK_STATUS_RE.match(ln) for ln in text.splitlines()) if m]
+    return ("passed" in statuses and not any(s in CHECK_BLOCKING for s in statuses)
+            and all(s in CHECK_PASSING for s in statuses))
+
+
+def has_receipt(body: str) -> bool:
+    """A line beginning `Receipt:` in `## Verdict` or `## Execution Summary`: the sign-off."""
+    return any(_RECEIPT_RE.search(section_text(body or "", h)) for h in RECEIPT_HEADINGS)
+
+
+def unverified_reasons(card: "Card") -> list[str]:
+    """Why the card is not verified, in ladder order; empty when it is (#1AA6).
+
+    Verified means: not deferred; the primary evidence on the card (a `## Verdict`, or a passing
+    `### Check` under `## Tests`); the person's answer under a `## Human QA` question when
+    `verify.human` is `required`; a `Receipt:` line when `verify.sign_off` is not `none`.  A
+    card with no `verify` block is judged on its evidence alone.  An invalid block is itself a
+    reason, so a card cannot be verified through a block nobody can read.
+    """
+    try:
+        verify = verify_block(card)
+    except BoardError as exc:
+        return [f"the verify block is invalid: {exc}"]
+    reasons: list[str] = []
+    if verify and verify.get("deferred"):
+        reasons.append(f"unverified until {deferred_text(verify)} (verify.deferred)")
+    if not has_verdict(card.body) and not check_passing(card.body):
+        reasons.append("no primary evidence: no `## Verdict` and no passing `### Check` under `## Tests`")
+    if verify and verify.get("human") == "required":
+        questions = human_qa_questions(card.body)
+        if not any(answered for _, answered in questions):
+            open_q = [q for q, answered in questions if not answered]
+            reasons.append("the person's answer is missing: verify.human is required and `## Human QA` "
+                           + (f"has no `Answer:` under {open_q[0]!r}" if open_q
+                              else f"holds no question ({verify.get('criteria', '')})"))
+    if verify and verify.get("sign_off", "none") != "none" and not has_receipt(card.body):
+        reasons.append(f"no `Receipt:` line in `## Verdict` or `## Execution Summary` "
+                       f"(verify.sign_off: {verify['sign_off']})")
+    return reasons
+
+
+def verified(card: "Card") -> bool:
+    """The one definition of *verified* (#1AA6): `unverified_reasons` is empty."""
+    return not unverified_reasons(card)
+
+
 def verify_summary(verify: Mapping | None) -> str:
     """One short cell: the primary mode and the person flag (`probe · person`, `script`,
     `ai-text · person?` when optional), or `unverified until …` while deferred."""
@@ -1553,6 +1653,12 @@ class Board:
             validate_verify(card.front.get("verify"))
         except BoardError as exc:
             return [Problem("bad_verify", rel, str(exc))]
+        if card.status == "done":
+            # `verified()` is the same rule `board_move_card` refuses on (#1AA6); a card that
+            # reached `done` past it (the owner's own move, a hand edit) is named, not hidden.
+            reasons = unverified_reasons(card)
+            if reasons:
+                return [Problem("not_verified", rel, f"done but not verified: {reasons[0]}", "warning")]
         return []
 
     def _check_tasks(self, card: Card, rel: str, fix: bool) -> list[Problem]:

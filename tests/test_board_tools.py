@@ -3309,5 +3309,143 @@ class VerifyFieldTests(BoardToolsTest):
             self.assertIn(word, deliver)
 
 
+class VerifyGateTests(BoardToolsTest):
+    """The `verify` block's refusals and passes on board_move_card (#1AA6)."""
+
+    def prepare(self, verify=None, sections=(), title="Voice transcription mode"):
+        card_id = self.create(title=title, request=f"add {title.lower()}")
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        fields = {"verify": {"artifact": "code", "primary": "script", "effort": "low", **verify}} if verify else {}
+        args = {"id": card_id, "base_hash": card_hash, **({"fields": fields} if fields else {})}
+        result = self.tools.run("board_update_card", args)
+        self.assertNotIn("error", result, result)
+        for heading, text in sections:
+            card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+            result = self.tools.run("board_update_card", {"id": card_id, "base_hash": card_hash,
+                                                          "append_section": {"heading": heading, "text": text}})
+            self.assertNotIn("error", result, result)
+        return card_id
+
+    def move(self, card_id, status, **kw):
+        return self.tools.run("board_move_card", {"id": card_id, "status": status, "reason": "landing", **kw})
+
+    # ---- human: required
+    def test_human_required_refuses_done_without_an_answered_question_and_offers_the_lane(self):
+        card_id = self.prepare({"human": "required", "criteria": "the strip reads in one line"})
+        refused = self.move(card_id, "done")
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertEqual(refused["requires"], "human_qa_answer")
+        self.assertEqual(refused["offer"], "needs-qa-human")
+        self.assertIn(f"#{card_id} needs the person's answer", refused["error"])
+        self.assertIn("the strip reads in one line", refused["error"])
+        self.assertEqual(self.board.card_by_id(card_id).status, "inbox")
+        # The lane it offers is open.
+        result = self.move(card_id, "needs-qa-human", evidence="docs/qa_evidence/2026-09-23-x/")
+        self.assertNotIn("error", result, result)
+
+    def test_human_required_passes_once_a_question_carries_an_answer(self):
+        card_id = self.prepare({"human": "required", "criteria": "reads right"},
+                               [("Human QA", "1. Reads right?\n    Answer: yes (owner, 2026-09-23)")])
+        result = self.move(card_id, "done")
+        self.assertNotIn("error", result, result)
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+    def test_an_open_question_still_blocks_and_the_refusal_names_the_block(self):
+        card_id = self.prepare({"human": "required", "criteria": "reads right"},
+                               [("Human QA", "1. Reads right?")])
+        refused = self.move(card_id, "done")
+        self.assertEqual(refused["requires"], "human_qa_answer")
+        self.assertIn("(verify.human: required)", refused["error"])
+        self.assertEqual(refused["offer"], "needs-qa-human")
+
+    def test_optional_and_none_do_not_gate(self):
+        for human in ("optional", "none"):
+            card_id = self.prepare({"human": human, "criteria": "reads right"}, title=f"Human {human}")
+            result = self.move(card_id, "done")
+            self.assertNotIn("error", result, (human, result))
+
+    def test_the_owner_is_the_person_and_may_close_it(self):
+        card_id = self.prepare({"human": "required", "criteria": "reads right"})
+        self.tools.context.actor = T.OWNER_ACTOR
+        result = self.move(card_id, "done")
+        self.assertNotIn("error", result, result)
+
+    # ---- sign_off
+    def test_a_sign_off_needs_a_receipt_line(self):
+        card_id = self.prepare({"sign_off": "publish"})
+        refused = self.move(card_id, "done")
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertEqual(refused["requires"], "receipt")
+        self.assertEqual(refused["sign_off"], "publish")
+        self.assertIn(f"#{card_id} needs a publish sign-off", refused["error"])
+        self.assertIn("`Receipt:`", refused["error"])
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {"id": card_id, "base_hash": card_hash,
+                                             "append_section": {"heading": "Execution Summary",
+                                                                "text": "Published.\nReceipt: owner clicked Publish at 10:12, site live"}})
+        result = self.move(card_id, "done")
+        self.assertNotIn("error", result, result)
+
+    def test_a_receipt_in_the_verdict_counts_and_the_issue_does_not(self):
+        card_id = self.prepare({"sign_off": "money"}, [("Issue", "Receipt: not the place")])
+        self.assertEqual(self.move(card_id, "done")["requires"], "receipt")
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        self.tools.run("board_update_card", {"id": card_id, "base_hash": card_hash,
+                                             "append_section": {"heading": "Verdict", "text": "pass\nReceipt: transfer 4411"}})
+        self.assertNotIn("error", self.move(card_id, "done"))
+
+    # ---- deferred
+    def test_deferred_refuses_done_and_the_qa_lanes_and_says_until_when(self):
+        card_id = self.prepare({"deferred": "until the pilot runs (owner: Sam)"})
+        for status in ("done", "needs-qa-llm", "needs-qa-human"):
+            refused = self.move(card_id, status, evidence="docs/qa_evidence/2026-09-23-x/")
+            self.assertEqual(refused.get("code"), "board_refused", (status, refused))
+            self.assertEqual(refused["requires"], "verify_deferred")
+            self.assertIn(f"#{card_id} is unverified until the pilot runs (owner: Sam)", refused["error"])
+            self.assertEqual(refused["until"], "the pilot runs (owner: Sam)")
+        self.assertEqual(self.board.card_by_id(card_id).status, "inbox")
+        # Landing for a verifier is still open: deferring is about the verdict, not the work.
+        self.assertNotIn("error", self.move(card_id, "needs-verification"))
+        row = next(r for r in self.tools.run("board_list", {})["cards"] if r["id"] == card_id)
+        self.assertEqual(row["verify"], "unverified until the pilot runs (owner: Sam)")
+        # The owner too: a deferred card is a fact about the world, not a judgement.
+        self.tools.context.actor = T.OWNER_ACTOR
+        self.assertEqual(self.move(card_id, "done")["requires"], "verify_deferred")
+
+    def test_clearing_deferred_is_the_way_on_and_the_thread_says_who(self):
+        card_id = self.prepare({"deferred": "until the pilot runs"})
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        result = self.tools.run("board_update_card", {
+            "id": card_id, "base_hash": card_hash,
+            "fields": {"verify": {"artifact": "code", "primary": "script", "effort": "low"}}})
+        self.assertNotIn("error", result, result)
+        self.assertIn("verify.deferred cleared by agent (was until the pilot runs)", result["changes"])
+        text = self.thread_text(card_id)
+        self.assertIn("verify.deferred cleared by agent", text)
+        self.assertIn("author=agent", text.split("verify.deferred cleared")[0].rsplit("<!-- relay:entry", 1)[1])
+        self.assertNotIn("error", self.move(card_id, "done"))
+        self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+    def test_an_unreadable_block_cannot_verify_anything(self):
+        card_id = self.create()
+        card = self.board.card_by_id(card_id)
+        card.set("verify", {"artifact": "code", "primary": "vibes", "effort": "low"})
+        self.board.save(card)
+        refused = self.move(card_id, "done")
+        self.assertEqual(refused["requires"], "verify")
+        self.assertIn("verify.primary 'vibes'", refused["error"])
+
+    def test_the_move_tool_and_the_skill_say_what_verified_means(self):
+        move = next(item["function"] for item in T.TOOL_SPECS
+                    if item["function"]["name"] == "board_move_card")["description"]
+        for phrase in ("`human: required`", "needs-qa-human", "`Receipt:`", "`deferred`"):
+            self.assertIn(phrase, move)
+        from relay_core import skills as skills_mod
+        deliver = (Path(skills_mod.bundled_dir()) / "deliver" / "SKILL.md").read_text("utf-8")
+        self.assertIn("`relay_core.board.verified`", deliver)
+        self.assertIn("unverified until", deliver)
+        self.assertIn("needs it met: evidence, the person's answer, a receipt, not deferred", T.policy_text())
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

@@ -594,6 +594,88 @@ class VerifyBlockTests(TempBoardTest):
         self.assertEqual(B.deferred_text({"deferred": "Until Monday"}), "Monday")
 
 
+class VerifiedTests(TempBoardTest):
+    """`verified(card)` and its parts (#1AA6): evidence, the person's answer, the receipt, deferred."""
+
+    PASSING = ("## Tests\n- `ctest -R x`\n\n### Check 2026-09-23 10:00\n"
+               "- passed · ctest:x — passed for this revision\n"
+               "- not-applicable · manual — not this card's\nhistory: thread\n")
+    FAILING = ("## Tests\n- `ctest -R x`\n\n### Check 2026-09-23 10:00\n"
+               "- passed · ctest:x — passed\n- missing-evidence · unittest:y — no run\nhistory: thread\n")
+
+    def card(self, body="", **verify):
+        card = B.new_card("work", "Thing", "needs-verification", card_id="K7Q2", rank="0m",
+                          **({"verify": {"artifact": "code", "primary": "script", "effort": "low", **verify}}
+                             if verify else {}))
+        card.body += "\n" + body
+        return card
+
+    def test_human_qa_questions_and_their_answers(self):
+        body = ("## Human QA\n1. Is the threshold right?\n    Answer: yes, leave it.\n"
+                "2. Does the wording read right?\n")
+        self.assertEqual(B.human_qa_questions(body),
+                         [("1. Is the threshold right?", True), ("2. Does the wording read right?", False)])
+        self.assertEqual(B.human_qa_questions("## Human QA\nprose only\n"), [])
+
+    def test_a_check_block_passes_only_when_every_listed_test_passed(self):
+        self.assertTrue(B.check_passing(self.PASSING))
+        self.assertFalse(B.check_passing(self.FAILING))
+        self.assertFalse(B.check_passing("## Tests\n- `ctest -R x`\n"))
+        self.assertFalse(B.check_passing("## Tests\n### Check 2026-09-23 10:00\n- no findings\nhistory: thread\n"))
+        # The current block is the last one; an older failing block above it is history.
+        self.assertTrue(B.check_passing(self.FAILING + "\n### Check 2026-09-23 11:00\n- passed · ctest:x — ok\n"))
+
+    def test_a_receipt_lives_in_the_verdict_or_the_execution_summary(self):
+        self.assertTrue(B.has_receipt("## Verdict\npass\nReceipt: owner clicked Publish, 2026-09-23 10:12\n"))
+        self.assertTrue(B.has_receipt("## Execution Summary\n- Receipt: transfer #4411 confirmed by Sam\n"))
+        self.assertFalse(B.has_receipt("## Issue\nReceipt: not here\n"))
+
+    def test_verified_needs_the_primary_evidence(self):
+        self.assertEqual(B.unverified_reasons(self.card()),
+                         ["no primary evidence: no `## Verdict` and no passing `### Check` under `## Tests`"])
+        self.assertTrue(B.verified(self.card("## Verdict\npass\n")))
+        self.assertTrue(B.verified(self.card(self.PASSING)))
+        self.assertFalse(B.verified(self.card(self.FAILING)))
+        self.assertTrue(B.verified(self.card("## Verdict\npass\n", human="none")))
+
+    def test_verified_needs_the_persons_answer_when_required(self):
+        base = "## Verdict\npass\n"
+        card = self.card(base, human="required", criteria="reads right")
+        reasons = B.unverified_reasons(card)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("the person's answer is missing", reasons[0])
+        self.assertIn("reads right", reasons[0])
+        card = self.card(base + "## Human QA\n1. Reads right?\n", human="required", criteria="reads right")
+        self.assertIn("has no `Answer:` under '1. Reads right?'", B.unverified_reasons(card)[0])
+        card = self.card(base + "## Human QA\n1. Reads right?\n    Answer: yes\n", human="required", criteria="reads right")
+        self.assertTrue(B.verified(card))
+        self.assertTrue(B.verified(self.card(base, human="optional", criteria="reads right")))
+
+    def test_verified_needs_the_receipt_when_a_sign_off_is_required(self):
+        card = self.card("## Verdict\npass\n", sign_off="publish")
+        self.assertEqual(B.unverified_reasons(card),
+                         ["no `Receipt:` line in `## Verdict` or `## Execution Summary` (verify.sign_off: publish)"])
+        self.assertTrue(B.verified(self.card("## Verdict\npass\nReceipt: published by Sam\n", sign_off="publish")))
+
+    def test_a_deferred_card_is_not_verified_and_says_until_when(self):
+        card = self.card("## Verdict\npass\n", deferred="until the pilot runs (owner: Sam)")
+        self.assertEqual(B.unverified_reasons(card),
+                         ["unverified until the pilot runs (owner: Sam) (verify.deferred)"])
+        card.set("verify", {"artifact": "code", "primary": "vibes", "effort": "low"})
+        self.assertIn("the verify block is invalid", B.unverified_reasons(card)[0])
+
+    def test_check_names_a_done_card_that_is_not_verified(self):
+        card = self.card("## Verdict\npass\n", human="required", criteria="reads right")
+        card.set("status", "done")
+        write(self.root / "features" / "done" / "2026-09-23-a.md", card.to_text())
+        problem = next(p for p in self.board.check() if p.code == "not_verified")
+        self.assertEqual(problem.severity, "warning")
+        self.assertIn("done but not verified: the person's answer is missing", problem.message)
+        card.body += "## Human QA\n1. Reads right?\n    Answer: yes\n"
+        write(self.root / "features" / "done" / "2026-09-23-a.md", card.to_text())
+        self.assertEqual([p.code for p in self.board.check() if p.code == "not_verified"], [])
+
+
 class PrivateTests(TempBoardTest):
     def test_private_card_under_the_private_root(self):
         card = B.new_card("work", "Private thing", "ready", card_id="Z9QT", private=True)

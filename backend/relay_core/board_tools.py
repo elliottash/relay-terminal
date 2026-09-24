@@ -281,7 +281,11 @@ TOOL_SPECS = [
          "failed / missing evidence / not applicable with its evidence path, what is unresolved, and "
          "one dated line saying the review happened — and the implementer writes none. A move to "
          "`done` is refused while the card's `## Human QA` holds a numbered question with no "
-         "indented `Answer:` line under it: that judgement is the user's, not an agent's.",
+         "indented `Answer:` line under it: that judgement is the user's, not an agent's. The "
+         "card's `verify` block gates the same way (#1AA6): `human: required` needs an answered "
+         "question (offer needs-qa-human), `sign_off` needs a line beginning `Receipt:` in "
+         "`## Verdict` or `## Execution Summary`, and `deferred` holds the card out of `done` "
+         "and the QA lanes until it is cleared through fields.verify.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
           "section": {"type": "string", "description": "Park the card in this manual section (a column "
@@ -610,23 +614,8 @@ def unanswered_human_qa(body: str) -> list[str]:
     closes cards has to be checkable by reading the file.  Everything else in the section -- the
     brief, the setup, the observations -- is prose, and prose gates nothing.
     """
-    text = section_text(body or "", HUMAN_QA_HEADING)
-    if not text.strip():
-        return []
-    open_questions: list[str] = []
-    current: str | None = None
-    for line in text.splitlines():
-        match = _HUMAN_QA_QUESTION_RE.match(line.strip()) if line[:1].isdigit() else None
-        if match:
-            if current is not None:
-                open_questions.append(current)
-            current = f"{match.group('number')}. {match.group('text').strip()}"[:120]
-            continue
-        if current is not None and _HUMAN_QA_ANSWER_RE.match(line):
-            current = None
-    if current is not None:
-        open_questions.append(current)
-    return open_questions
+    # One parser (#1AA6): `board.verified` reads the same questions and answers.
+    return [question for question, answered in B.human_qa_questions(body or "") if not answered]
 
 
 def _section_span(body: str, heading: str) -> tuple[int, int, int] | None:
@@ -2314,6 +2303,12 @@ class BoardTools:
                     card.set(key, value)
                 if old != card.front.get(key):
                     changes.append(f"{key}: {_short(old)} → {_short(card.front.get(key))}")
+                if key == "verify" and isinstance(old, dict) and old.get("deferred") \
+                        and not (card.front.get(key) or {}).get("deferred"):
+                    # The only way on from a deferred card (#1AA6), so the thread says who took
+                    # it: the event this update leaves carries the actor, model and pane.
+                    changes.append(f"verify.deferred cleared by {self.context.actor} "
+                                   f"(was {_short(old.get('deferred'))})")
 
         if args.get("title") is not None:
             new_title = _one_line(args.get("title"), "title", MAX_TITLE)
@@ -2394,6 +2389,10 @@ class BoardTools:
         # And a judgement the person has not made yet stops the card closing (#WC3E): an
         # unanswered `## Human QA` question is exactly the case where evidence is not the answer.
         self._human_qa_gate(card, status)
+        # And the card's own `verify` block (#1AA6): deferred verification holds it out of
+        # `done` and the QA lanes; `human: required` needs the person's answer; a sign-off
+        # needs its receipt.
+        self._verify_gate(card, status)
         # `section` parks the card in a manual section — a column that collects nothing — and an
         # empty string takes it out (#3XZV). Its status is left alone either way.
         section_arg = args.get("section")
@@ -3180,12 +3179,75 @@ class BoardTools:
         if not open_questions:
             return
         shown = "; ".join(open_questions[:2]) + ("…" if len(open_questions) > 2 else "")
+        # The reason is on the card when its `verify` block asks for a person (#1AA6).
+        try:
+            human = str((B.verify_block(card) or {}).get("human") or "")
+        except B.BoardError:
+            human = ""
+        because = f" (verify.human: {human})" if human in ("optional", "required") else ""
         raise BoardToolError(
             f"#{card.id} has {len(open_questions)} unanswered question(s) in `## Human QA` "
-            f"({shown}) — that judgement is the person's, so an agent does not move the card to "
-            "done: leave it in its QA lane and ask.",
+            f"({shown}){because} — that judgement is the person's, so an agent does not move the "
+            "card to done: leave it in its QA lane and ask.",
             code="board_refused", requires="human_qa_answer", id=card.id or "",
-            questions=open_questions)
+            offer="needs-qa-human", questions=open_questions)
+
+    def _verify_gate(self, card: B.Card, status: str) -> None:
+        """The `verify` block's three refusals (#1AA6), each with the move that is open instead.
+
+        - `deferred` set: neither `done` nor a `needs-qa-*` lane, for anyone -- verification
+          has not happened and the card says until when; clearing `deferred` through
+          `fields.verify` is the only way on, and the update's thread event records who did.
+        - `human: required` and no `## Human QA` question carries an `Answer:` line: `done` is
+          refused for an agent (the person at the keyboard is the answer, as in
+          `_human_qa_gate`) and the move offered is `needs-qa-human`.
+        - `sign_off` other than `none` and no line beginning `Receipt:` in `## Verdict` or
+          `## Execution Summary`: `done` is refused, naming the sign-off, for anyone -- a receipt
+          is a recorded fact, not the closer's say-so.
+        """
+        if status != "done" and status not in QA_STATUSES:
+            return
+        try:
+            verify = B.verify_block(card)
+        except B.BoardError as exc:
+            if status == "done":
+                raise BoardToolError(
+                    f"#{card.id} cannot be verified through a `verify` block nobody can read "
+                    f"({exc}): fix it with board_update_card fields.verify first.",
+                    code="board_refused", requires="verify", id=card.id or "") from exc
+            return
+        if not verify:
+            return
+        if verify.get("deferred"):
+            until = B.deferred_text(verify)
+            raise BoardToolError(
+                f"#{card.id} is unverified until {until}: its verification is deferred "
+                f"(verify.deferred), so it does not move to {status}. When it has been verified, "
+                "clear `deferred` with board_update_card fields.verify — the thread records who "
+                "did — and move it then.",
+                code="board_refused", requires="verify_deferred", id=card.id or "", until=until)
+        if status != "done":
+            return
+        if verify.get("human") == "required" and self.context.actor != OWNER_ACTOR:
+            questions = B.human_qa_questions(card.body)
+            if not any(answered for _, answered in questions):
+                open_q = [q for q, answered in questions if not answered]
+                missing = (f"the question {open_q[0]!r} has no `Answer:` line under it" if open_q
+                           else "`## Human QA` holds no question for them yet — write one from "
+                                f"the criteria: {verify.get('criteria', '')}")
+                raise BoardToolError(
+                    f"#{card.id} needs the person's answer before it is done: verify.human is "
+                    f"required and {missing}. Move it to needs-qa-human instead; the person "
+                    "answers on the card.",
+                    code="board_refused", requires="human_qa_answer", offer="needs-qa-human",
+                    id=card.id or "", questions=open_q)
+        sign_off = str(verify.get("sign_off") or "none")
+        if sign_off != "none" and not B.has_receipt(card.body):
+            raise BoardToolError(
+                f"#{card.id} needs a {sign_off} sign-off before it is done: add a line beginning "
+                "`Receipt:` to `## Verdict` or `## Execution Summary` saying who confirmed it, "
+                "when and where, then move it.",
+                code="board_refused", requires="receipt", sign_off=sign_off, id=card.id or "")
 
     def _signal_gate(self, card: B.Card, old_status: str, status: str) -> None:
         """Decision 6 and 8: refuse a move out of `needs-verification` under an open signal.
