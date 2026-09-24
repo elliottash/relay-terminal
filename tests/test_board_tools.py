@@ -3342,6 +3342,17 @@ class VerifyGateTests(BoardToolsTest):
     def move(self, card_id, status, **kw):
         return self.tools.run("board_move_card", {"id": card_id, "status": status, "reason": "landing", **kw})
 
+    def test_review_row_has_only_an_actionable_priority(self):
+        card_id = self.prepare({"human": "required", "criteria": "read the result", "stakes": "rework"})
+        card = self.board.card_by_id(card_id)
+        card.set("status", "needs-verification")
+        row = self.tools._row(card, {})
+        self.assertGreater(row["review_priority"], 0)
+        self.assertNotIn("criteria", row)
+        self.assertNotIn("verify", row)
+        card.body += "\n## Human QA\n1. Read it?\n    Answer: yes\n"
+        self.assertEqual(self.tools._row(card, {})["review_priority"], 0)
+
     # ---- human: required
     def test_human_required_refuses_done_without_an_answered_question_and_offers_the_lane(self):
         card_id = self.prepare({"human": "required", "criteria": "the strip reads in one line"})

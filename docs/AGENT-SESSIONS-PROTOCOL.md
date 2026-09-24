@@ -3030,7 +3030,7 @@ no table of its own.
 
 A **row** is `{id, title, type, status, section, tab, labels, assignee, waiting_on, rank, private,
 priority, path, thread_entries, tasks_done, tasks_total, created, updated, milestone, topic,
-implemented_by, verified_by, session}` — enough to draw a card without reading the file.
+implemented_by, verified_by, session, review_priority}` — enough to draw a card without reading the file.
 `session` (2026-09-20, #R9G7) is the pane session token holding the card (19.19): the pane draws
 its first eight characters as a chip that reveals that pane, and an agent's `board_list` sees from
 the row alone that a card is taken. `implemented_by` and `verified_by` are the signatures of 19.15,
@@ -3042,6 +3042,14 @@ nothing — or null for a card that sits in its status's own section. (Until 202
 `board_tools._row` sent only the first eleven, so the pane's age and `☑ done/total` badges had
 nothing to draw; it now sends them all. `component` is not in the row: the card detail reads it
 from `front`.)
+
+`review_priority` (#BX7B) is zero unless a built work card has an unanswered required human
+review or a missing sign-off receipt. A deferred card stays out of the queue. The positive number
+orders the Review pane by stakes and uncertainty; it carries no criteria or QA plan text. The pane
+uses `board_card_get` on the selected row to show the goal, deliverable and evidence and to record
+the person's answer with `board_update` against that card's `hash`. A changed card refuses a stale
+answer. The internal `## Try it` section can still stage a live artifact; its visible action is
+called **Stage review**.
 
 `priority` (2026-09-20, #VKFV) is the row's flag: an integer −1…+3, `0` unflagged. The pane draws
 it as a ring at 0 and coloured discs at the rest (yellow at −1, white at +1, pale green at +2,
