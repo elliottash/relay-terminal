@@ -402,6 +402,11 @@ private:
     QCheckBox *m_threads = nullptr;
     QToolButton *m_help = nullptr, *m_filters = nullptr;
     QMenu *m_filterMenu = nullptr;
+    QToolButton *m_sortButton = nullptr;   // Sort ▾: grouping and sort, the view choices (#1Q5V)
+    QMenu *m_sortMenu = nullptr;           // built from m_group's and m_sort's own items
+    QMenu *m_branchMenu = nullptr;         // Branch ▸ in More, refilled when the facets name one
+    QAction *m_branchAction = nullptr;     // its menu action, hidden while one branch exists
+    QJsonObject m_lastParsed;              // the parse the chips show, kept for requery-time re-chipping
     QAction *m_hasEdits = nullptr, *m_unfinished = nullptr, *m_pinnedOnly = nullptr,
             *m_hasSummary = nullptr, *m_openTasks = nullptr, *m_summariseAll = nullptr;
     QWidget *m_chipRow = nullptr;

@@ -5346,19 +5346,10 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_checksLayout = flow;
     toolsLayout->addWidget(m_checks);
 
-    // The label chips under them (#VKFV, owner: clean up annotates bug/feature/area labels and
-    // "those should become a second set of filter next to the section list"): one chip per
-    // label the board carries, wrapping the same way. Lower case, where the section boxes are
-    // engraved upper case, so the two rows never read as one.
-    m_labelChecks = new QWidget(tools);
-    m_labelChecks->setObjectName(QStringLiteral("boardLabelChecks"));
-    QSizePolicy labelPolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    labelPolicy.setHeightForWidth(true);
-    m_labelChecks->setSizePolicy(labelPolicy);
-    auto *labelFlow = new FlowLayout(m_labelChecks, 10, 3);
-    labelFlow->setContentsMargins(0, 0, 0, 0);
-    m_labelChecksLayout = labelFlow;
-    toolsLayout->addWidget(m_labelChecks);
+    // (#1Q5V) The label chips row (#VKFV) is gone from this pane: the filter field's
+    // `label:` and a click on any row's label badge carry the same choice, without a
+    // permanent row spent naming labels. m_labelPicked and setLabelFilter stay, so a
+    // restored session and typed `label:` filters still narrow the list.
 
     // The format problems belong to the list page too — they are about the cards it is showing —
     // and here they are under the tools rather than above them, where the pane's hover buttons
@@ -6284,35 +6275,8 @@ void BoardView::syncLabelChecks()
     // A label that went away while its chip was ticked simply stops filtering.
     m_labelPicked.intersect(QSet<QString>(labels.begin(), labels.end()));
     m_model.setLabelFilter(m_labelPicked);
-    while (QLayoutItem *item = m_labelChecksLayout->takeAt(0)) {
-        delete item->widget();
-        delete item;
-    }
-    for (const QString &label : labels) {
-        auto *box = new QCheckBox(label, m_labelChecks);
-        box->setObjectName(QStringLiteral("boardLabelCheck"));
-        box->setChecked(m_labelPicked.contains(label));
-        box->setCursor(Qt::PointingHandCursor);
-        box->setFocusPolicy(Qt::NoFocus);
-        box->setToolTip(QStringLiteral("Only cards labelled %1 — tick more to narrow, untick to "
-                                       "broaden. Composes with the filter box and the section "
-                                       "checkboxes.").arg(label));
-        connect(box, &QCheckBox::toggled, this, [this, label](bool on) {
-            if (on)
-                m_labelPicked.insert(label);
-            else
-                m_labelPicked.remove(label);
-            m_model.setLabelFilter(m_labelPicked);
-            rebuild();
-            // The selection may have been in what just went away: stand on the first card left.
-            if (board::rowOfCard(m_rows, m_selected) < 0) {
-                const int first = board::stepRow(m_rows, -1, 1);
-                m_selected = first >= 0 ? m_rows.at(first).cardId : QString();
-            }
-        });
-        m_labelChecksLayout->addWidget(box);
-    }
-    m_labelChecks->setVisible(!labels.isEmpty());
+    // (#1Q5V) no chips to sync any more; the labels still drive m_labelPicked, which a
+    // typed `label:` in the filter box reads and narrows the same rows.
 }
 
 // The pane's hover buttons take their room out of whichever row is on top for good, and in a
@@ -8421,16 +8385,7 @@ void BoardView::setLabelFilter(const QJsonArray &state)
         if (!value.toString().isEmpty())
             m_labelPicked.insert(value.toString());
     m_model.setLabelFilter(m_labelPicked);
-    // The chips exist only once the board's labels do; syncLabelChecks reads m_labelPicked when
-    // it builds them, and this keeps any that are already up in step.
-    if (m_labelChecksLayout) {
-        for (int i = 0; i < m_labelIds.size() && i < m_labelChecksLayout->count(); ++i) {
-            if (auto *box = qobject_cast<QCheckBox *>(m_labelChecksLayout->itemAt(i)->widget())) {
-                const QSignalBlocker block(box);
-                box->setChecked(m_labelPicked.contains(m_labelIds.at(i)));
-            }
-        }
-    }
+    // (#1Q5V) the chips are gone; the picked labels apply straight to the model.
     if (m_open)
         rebuild();
 }

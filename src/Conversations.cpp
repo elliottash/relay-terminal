@@ -5,6 +5,7 @@
 #include "CopyOnSelect.h"
 #include "OutputLinks.h"     // `session:` in an answer is this pane's own link (#AGNT step 8)
 #include "PaneStatus.h"      // listHue: this pane's rows select in its band's hue (#MXMG)
+#include <QToolTip>
 #include "Theme.h"           // the collapsed row's ink
 
 #include <QAbstractTextDocumentLayout>
@@ -552,8 +553,9 @@ public:
             if (!index.data(kTitleRole).toString().isEmpty()) {
                 const QFontMetrics metrics(option.font);
                 const bool two = !index.data(kSubRole).toString().isEmpty() || !index.data(kBadgeRole).toStringList().isEmpty();
-                const bool id = !index.data(kIdRole).toString().isEmpty();
-                return QSize(160, metrics.height() * (1 + int(two) + int(id)) + 8);
+                // (#1Q5V) The id rides the title line now, so the row is title + at most
+                // one more line of tags and summary.
+                return QSize(160, metrics.height() * (1 + int(two)) + 8);
             }
         }
         return QStyledItemDelegate::sizeHint(option, index);
@@ -610,8 +612,12 @@ public:
             painter->restore();
             return;
         }
-        // The title owns the first line: a narrow pane must not turn "Fix the FTS index" into
-        // "Fix the …" to make room for tags. The tags lead the second line, the summary follows.
+        // The title owns the first line — all of it, now that the row spans the width
+        // (#1Q5V): the title keeps going into the other columns instead of eliding at the
+        // first column's edge. After the title ride the session id, a ⧉ that copies it to
+        // the clipboard on click, and the relative time; the separate "ID:" line is gone.
+        // The tags lead the second line, the summary follows.
+        //
         // The title is set in bold (#MXMG): where the Board's rows are instruments — mono,
         // upper-case, letter-spaced — these are conversations, and a conversation starts
         // with its own name set the way prose names things. DemiBold at the same point size,
@@ -619,13 +625,37 @@ public:
         QFont titleFont(opt.font);
         titleFont.setWeight(QFont::DemiBold);
         const QFontMetrics metrics(titleFont);
+        const QFontMetrics tailMetrics(opt.font);
+        const QString sessionId = index.data(kIdRole).toString();
+        const QString when = index.siblingAtColumn(1).data(Qt::DisplayRole).toString();
+        const QString tail = (sessionId.isEmpty() ? QString() : sessionId)
+            + (sessionId.isEmpty() || when.isEmpty() ? QString() : QStringLiteral(" · ")) + when;
+        const int glyph = 16;
+        const int gap = 6;
+        const int tailRoom = tail.isEmpty() ? 0
+            : tailMetrics.horizontalAdvance(tail) + (sessionId.isEmpty() ? 0 : glyph + gap) + 2 * gap;
+        const int titleWidth = qMax(0, rect.width() - tailRoom);
+        const QString elided = metrics.elidedText(title, Qt::ElideRight, titleWidth);
         painter->setFont(titleFont);
         painter->setPen(ink);
-        painter->drawText(QRect(rect.left(), rect.top(), rect.width(), metrics.height()),
-                          Qt::AlignLeft | Qt::AlignVCenter, metrics.elidedText(title, Qt::ElideRight, rect.width()));
+        painter->drawText(QRect(rect.left(), rect.top(), titleWidth, metrics.height()),
+                          Qt::AlignLeft | Qt::AlignVCenter, elided);
+        if (!sessionId.isEmpty()) {
+            int tailX = rect.left() + metrics.horizontalAdvance(elided) + gap;
+            tailX = qMin(tailX, rect.right() - tailRoom + gap);
+            painter->setFont(opt.font);
+            painter->setPen(muted);
+            painter->drawText(QRect(tailX, rect.top(),
+                                    tailMetrics.horizontalAdvance(tail) + glyph + gap,
+                                    metrics.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter, tail);
+            const QRect copyGlyph(tailX + tailMetrics.horizontalAdvance(tail) + gap,
+                                 rect.top() + (metrics.height() - glyph) / 2, glyph, glyph);
+            painter->drawText(copyGlyph, Qt::AlignCenter, QStringLiteral("⧉"));
+            m_copyRects[sessionId] = copyGlyph.translated(rect.topLeft());
+        }
         const QStringList tags = index.data(kBadgeRole).toStringList();
         const QString sub = index.data(kSubRole).toString();
-        const QString sessionId = index.data(kIdRole).toString();
         if (tags.isEmpty() && sub.isEmpty() && sessionId.isEmpty()) { painter->restore(); return; }
         const int lineTop = rect.top() + metrics.height() + 2;
         int x = rect.left();
@@ -642,12 +672,8 @@ public:
             painter->drawText(QRect(x, lineTop, rect.right() - x, metrics.height()),
                               Qt::AlignLeft | Qt::AlignVCenter,
                               metrics.elidedText(sub, Qt::ElideRight, rect.right() - x));
-        if (!sessionId.isEmpty()) {
-            const int idTop = (tags.isEmpty() && sub.isEmpty()) ? lineTop : lineTop + metrics.height() + 2;
-            painter->drawText(QRect(rect.left(), idTop, rect.width(), metrics.height()),
-                              Qt::AlignLeft | Qt::AlignVCenter,
-                              metrics.elidedText(QStringLiteral("ID: ") + sessionId, Qt::ElideMiddle, rect.width()));
-        }
+        // (#1Q5V) The "ID: …" line is gone: the id, its ⧉ and the relative time ride the
+        // title line, drawn above.
         painter->restore();
     }
 
@@ -662,6 +688,24 @@ protected:
             case QEvent::ApplicationPaletteChange:
                 m_cache.clear();
                 break;
+            case QEvent::MouseButtonPress: {
+                // The title line's ⧉ (#1Q5V): one click puts the session id on the
+                // clipboard. paint records the glyph in row coordinates keyed by id;
+                // the press arrives in viewport coordinates, so translate by the row.
+                const auto *press = static_cast<QMouseEvent *>(event);
+                QTreeWidgetItem *item = m_tree->itemAt(press->pos());
+                const QString id = item ? item->data(0, kIdRole).toString() : QString();
+                const QRect stored = m_copyRects.value(id);
+                const QRect row = item ? m_tree->visualItemRect(item) : QRect();
+                if (!id.isEmpty() && stored.translated(row.topLeft()).adjusted(-4, -4, 4, 4)
+                        .contains(press->pos())) {
+                    QApplication::clipboard()->setText(id);
+                    QToolTip::showText(press->globalPos(), QStringLiteral("Copied session id"),
+                                       m_tree, stored.translated(row.topLeft()));
+                    return true;
+                }
+                break;
+            }
             default:
                 break;
             }
@@ -676,6 +720,7 @@ private:
         return std::max(80, m_tree->columnWidth(0) - depth * m_tree->indentation() - 10);
     }
     QTreeWidget *m_tree = nullptr;
+    mutable QHash<QString, QRect> m_copyRects;   // session id → its ⧉ rect, row coords
     // sizeHint() and paint() are const and both want the document; the cache is the delegate's
     // own scratch, not part of what it says about a row.
     mutable RichTextCache m_cache;
@@ -766,6 +811,24 @@ static QIcon askIcon(const QColor &ink) {
     painter.drawPoint(QPointF(7.0, 10.8));
     painter.end();
     return QIcon(pixmap);
+}
+
+// Mirror a QComboBox as a menu of checkable actions (#1Q5V): the combos left the row — one
+// row is the point — but they stay the state, and driving them through their
+// currentIndexChanged keeps requery and the tests that set them by hand working unchanged.
+void sweepComboIntoMenu(QMenu *menu, QComboBox *combo) {
+    for (int i = 0; i < combo->count(); ++i) {
+        QAction *action = menu->addAction(combo->itemText(i));
+        action->setData(combo->itemData(i));
+        action->setCheckable(true);
+        QObject::connect(action, &QAction::triggered, combo, [combo, action] {
+            combo->setCurrentIndex(combo->findData(action->data()));
+        });
+    }
+    QObject::connect(menu, &QMenu::aboutToShow, menu, [menu, combo] {
+        for (QAction *action : menu->actions())
+            action->setChecked(action->data() == combo->currentData());
+    });
 }
 
 SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
@@ -861,6 +924,40 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_filters->setPopupMode(QToolButton::InstantPopup);
     m_filterMenu = new QMenu(this);
     m_filters->setMenu(m_filterMenu);
+    // #1Q5V: what the six combos that left the row said is still one click away —
+    // grouping and sort in Sort ▾; scope, source and time in More. The combos stay the
+    // state: choosing a menu item sets the combo, whose currentIndexChanged fires the
+    // requery the wiring below relies on.
+    m_sortButton = new QToolButton;
+    m_sortButton->setObjectName(QStringLiteral("sessionsSort"));
+    m_sortButton->setText(QStringLiteral("Sort ▾"));
+    m_sortButton->setPopupMode(QToolButton::InstantPopup);
+    m_sortButton->setToolTip(QStringLiteral("Group the list and order it"));
+    m_sortMenu = new QMenu(this);
+    m_sortButton->setMenu(m_sortMenu);
+    m_sortMenu->addSection(QStringLiteral("Group by"));
+    sweepComboIntoMenu(m_sortMenu, m_group);
+    m_sortMenu->addSection(QStringLiteral("Sort"));
+    sweepComboIntoMenu(m_sortMenu, m_sort);
+    {
+        auto *scopeMenu = new QMenu(this);
+        scopeMenu->setObjectName(QStringLiteral("sessionsScopeMenu"));
+        sweepComboIntoMenu(scopeMenu, m_scope);
+        m_filterMenu->addMenu(scopeMenu)->setText(QStringLiteral("Scope"));
+        auto *sourceMenu = new QMenu(this);
+        sourceMenu->setObjectName(QStringLiteral("sessionsSourceMenu"));
+        sweepComboIntoMenu(sourceMenu, m_kind);
+        m_filterMenu->addMenu(sourceMenu)->setText(QStringLiteral("Source"));
+        auto *timeMenu = new QMenu(this);
+        timeMenu->setObjectName(QStringLiteral("sessionsTimeMenu"));
+        sweepComboIntoMenu(timeMenu, m_date);
+        m_filterMenu->addMenu(timeMenu)->setText(QStringLiteral("Time"));
+        m_branchMenu = new QMenu(this);
+        m_branchMenu->setObjectName(QStringLiteral("sessionsBranchMenu"));
+        m_branchAction = m_filterMenu->addMenu(m_branchMenu);
+        m_branchAction->setText(QStringLiteral("Branch"));
+        m_branchAction->setVisible(false);   // until the facets name more than one
+    }
     auto toggle = [this](const QString &label, const QString &name) {
         auto *action = m_filterMenu->addAction(label);
         action->setObjectName(name);
@@ -910,6 +1007,12 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     // display text ("14 min ago"). Sorting is asked of the worker —
     // a header click is the Sort combo in another form (the sectionClicked wiring below).
     m_tree->setSortingEnabled(false);
+    // The header is hidden (#1Q5V): session rows span the whole width now — the title
+    // keeps going into the other columns, as the owner asked — so the per-column cells
+    // are not painted and the header would name columns nothing lives in. Sorting and
+    // grouping moved to the Sort ▾ button; the sectionClicked wiring below stays, so a
+    // programmatic header poke still works.
+    m_tree->header()->setVisible(false);
     m_tree->header()->setSectionsClickable(true);
     // The unfolded rows wrap, so their height depends on how wide the first column is.
     connect(m_tree->header(), &QHeaderView::sectionResized, this,
@@ -1051,26 +1154,20 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_more->setVisible(false);
     auto *close = new QPushButton(QStringLiteral("Close"));
 
-    // Two rows, so no filter is cut short in a pane half the window wide: what the list holds,
-    // then how it is narrowed, grouped and ordered.
+    // One row (#1Q5V): the search field — which speaks model:, project:, branch: and the
+    // three-state toggles — with the two choosers that browse a list you may not know by
+    // heart (Project, Model), then Sort ▾, More ▾ and the subagent checkbox. The six
+    // combos that used to flank them are menus and typed tokens now, so no filter is cut
+    // short in a pane half the window wide and the row stays one line.
     for (QComboBox *combo : {m_scope, m_kind, m_projectFilter, m_model, m_date, m_sort, m_branch, m_group})
         combo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
-    auto *filters = new QHBoxLayout;
-    filters->setSpacing(8);
-    filters->addWidget(m_scope);
-    filters->addWidget(m_kind);
-    filters->addWidget(m_projectFilter);
-    filters->addWidget(m_threads);
-    filters->addStretch(1);
-    auto *narrow = new QHBoxLayout;
-    narrow->setSpacing(8);
-    narrow->addWidget(m_model);
-    narrow->addWidget(m_branch);
-    narrow->addWidget(m_date);
-    narrow->addWidget(m_group);
-    narrow->addWidget(m_sort);
-    narrow->addWidget(m_filters);
-    narrow->addStretch(1);
+    // The six that left the row are parented here and kept hidden: the menus drive them, the
+    // chips read them, findChild("sessionsSort") and friends in the tests still reach them,
+    // and without a parent they would have been found by nothing at all.
+    for (QComboBox *combo : {m_scope, m_kind, m_date, m_sort, m_branch, m_group}) {
+        combo->setParent(this);
+        combo->hide();
+    }
 
     auto *searchRow = new QHBoxLayout;
     searchRow->setSpacing(6);
@@ -1115,11 +1212,14 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     auto *box = new QVBoxLayout(list);
     box->setContentsMargins(8, 8, 8, 8);
     box->setSpacing(6);
+    searchRow->addWidget(m_projectFilter);
+    searchRow->addWidget(m_model);
+    searchRow->addWidget(m_sortButton);
+    searchRow->addWidget(m_filters);
+    searchRow->addWidget(m_threads);
     box->addLayout(searchRow);
     box->addWidget(m_chipRow);
     box->addWidget(m_ignored);
-    box->addLayout(filters);
-    box->addLayout(narrow);
     box->addLayout(statusRow);
     box->addWidget(m_confirm);
     box->addWidget(m_emptyRow);
@@ -1703,6 +1803,7 @@ QJsonObject SessionManager::queryRequest() const {
 
 void SessionManager::requery() {
     if (!onQuery) return;
+    rebuildChips(m_lastParsed);   // (#1Q5V) the combo chips read the combos live
     m_nextOffset = -1;
     m_previewFor.clear();          // a new list: the side preview is asked for afresh
     onQuery(queryRequest());
@@ -1739,7 +1840,8 @@ void SessionManager::setResults(const QJsonObject &event) {
         const QSignalBlocker quiet(m_scope);
         m_scope->setCurrentIndex(m_scope->findData(scope));
     }
-    rebuildChips(event.value(QStringLiteral("parsed")).toObject());
+    m_lastParsed = event.value(QStringLiteral("parsed")).toObject();
+    rebuildChips(m_lastParsed);
     fillFacets(event.value(QStringLiteral("facets")).toObject());
     rebuildTree(keep);
 }
@@ -1763,7 +1865,32 @@ void SessionManager::rebuildChips(const QJsonObject &parsed) {
                 [this, op] { m_search->setText(removeOperator(m_search->text(), op)); });
         row->insertWidget(row->count() - 1, chip);
     }
-    m_chipRow->setVisible(!operators.isEmpty());
+    // (#1Q5V) A menu choice that is not the default shows as one removable chip too, so
+    // what the row is hiding stays visible without the six combos it used to be named by.
+    const struct { QComboBox *combo; QString name; } sweepers[] = {
+        {m_scope, QStringLiteral("scope")}, {m_kind, QStringLiteral("source")},
+        {m_projectFilter, QStringLiteral("project")}, {m_model, QStringLiteral("model")},
+        {m_date, QStringLiteral("time")}, {m_branch, QStringLiteral("branch")},
+    };
+    int comboChips = 0;
+    for (const auto &sweeper : sweepers) {
+        const QString value = sweeper.combo->currentData().toString();
+        // Scope's "This project" and Time's "Any time" carry data of their own; the chip
+        // is for a choice, not for the resting state.
+        if (value.isEmpty() || value == sweeper.combo->itemData(0).toString()) continue;
+        auto *chip = new QToolButton;
+        chip->setObjectName(QStringLiteral("stripChip"));
+        chip->setProperty("chipKey", sweeper.name);
+        chip->setText(sweeper.name + QStringLiteral(": ") + value + QStringLiteral("  ×"));
+        chip->setToolTip(QStringLiteral("Take this out of the filters"));
+        connect(chip, &QToolButton::clicked, this, [this, sweeper] {
+            sweeper.combo->setCurrentIndex(0);   // index 0 is every combo's "any …" item
+            requery();
+        });
+        row->insertWidget(row->count() - 1, chip);
+        ++comboChips;
+    }
+    m_chipRow->setVisible(!operators.isEmpty() || comboChips > 0);
     const QJsonArray ignored = parsed.value(QStringLiteral("ignored")).toArray();
     QStringList words;
     for (const auto &value : ignored) words << value.toString();
@@ -1797,7 +1924,12 @@ void SessionManager::fillFacets(const QJsonObject &facets) {
         fill(m_model, facets.value(QStringLiteral("models")).toArray(), QStringLiteral("Any model"));
     if (facets.contains(QStringLiteral("branches"))) {
         const int branches = fill(m_branch, facets.value(QStringLiteral("branches")).toArray(), QStringLiteral("Any branch"));
-        m_branch->setVisible(branches > 1);          // one branch everywhere is not a filter
+        // (#1Q5V) Branch lives in More now: the submenu mirrors the refilled combo, and
+        // hides while one branch everywhere means it is not a filter. The `branch:` token
+        // types the same thing.
+        m_branchMenu->clear();
+        sweepComboIntoMenu(m_branchMenu, m_branch);
+        m_branchAction->setVisible(branches > 1);
     }
 }
 
@@ -1821,6 +1953,7 @@ QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJ
     row->setText(5, tokens > 0 ? compactTokens(tokens) : QStringLiteral("—"));
     row->setToolTip(5, tokens > 0 ? QStringLiteral("%1 recorded tokens").arg(tokens) : QStringLiteral("No usage reported"));
     decorate(row, item);
+    spanFirstColumn(row);   // #1Q5V: the title line spans the other columns, id after it
     // An arrow to unfold the quick look: the row needs a child before it has one.
     auto *placeholder = new QTreeWidgetItem(row);
     placeholder->setData(0, kKindRole, QStringLiteral("preview"));

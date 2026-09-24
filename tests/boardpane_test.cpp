@@ -251,6 +251,11 @@ void BoardPaneTests::navigationSurvivesReload()
     QCOMPARE(restored.navigationState(), saved);
     restored.closeDetail();
     QVERIFY(restored.navigationState().value(QStringLiteral("card")).toString().isEmpty());
+    // #1Q5V evidence: the list page top — section checkboxes, engraved header, and no label
+    // chips row (RELAY_SHOT_DIR set writes it, the conversations suite's own pattern).
+    const QString boardShotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+    if (!boardShotDir.isEmpty())
+        QVERIFY(restored.grab().save(boardShotDir + QStringLiteral("/board-top.png")));
     sent.clear();
     restored.handleEvent(board);
     for (const auto &message : sent)

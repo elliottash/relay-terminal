@@ -640,8 +640,6 @@ private:
     QStringList m_checkTitles;          // and what they were called when the boxes were built
     // The label chips under them (#VKFV): one per label the board carries, ticked to keep only
     // the cards that have it. Rebuilt when the board's set of labels changes, like the boxes.
-    QWidget *m_labelChecks = nullptr;
-    QLayout *m_labelChecksLayout = nullptr;
     QStringList m_labelIds;             // the labels the chips stand for, in order
     QSet<QString> m_labelPicked;        // the ticked ones: every one must be on a shown card
     // The gear at the end of that row, and the page it opens in this pane.

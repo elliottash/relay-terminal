@@ -74,6 +74,16 @@ static QTreeWidgetItem *rowTitled(QTreeWidget *tree, const QString &title) {
 
 // Select through the actual combo popup, not setCurrentIndex: this catches a control whose menu
 // appears to work but never delivers the user's click to SessionManager.
+// The menu-side twin for the choices the combos left behind (#1Q5V): trigger the action a
+// click would, and let its own wiring run.
+static bool chooseMenuAction(QMenu *menu, const QString &data) {
+    for (QAction *action : menu->actions()) {
+        if (action->isSeparator() || action->data().toString() != data) continue;
+        action->trigger();
+        return true;
+    }
+    return false;
+}
 static bool chooseComboItem(QComboBox *combo, const QString &data) {
     const int at = combo->findData(data);
     if (at < 0) return false;
@@ -1460,15 +1470,16 @@ private slots:
         QTest::qWait(200);
         QVERIFY(header->isSortIndicatorShown());
 
-        // Updated: oldest first, and a second click toggles back; the combo follows both ways.
-        const QPoint updatedCenter(header->sectionViewportPosition(1) + header->sectionSize(1) / 2,
-                                   header->height() / 2);
-        QTest::mouseClick(header->viewport(), Qt::LeftButton, Qt::NoModifier, updatedCenter);
+        // Updated: oldest first, and a second choice toggles back; the combo follows both ways.
+        // The header itself is hidden since #1Q5V — sorting is the Sort ▾ menu's job — so
+        // the test drives the signal a header click used to carry; the wiring under it is
+        // unchanged.
+        emit header->sectionClicked(1);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("oldest"));
         QCOMPARE(sort->currentData().toString(), QStringLiteral("oldest"));
         QCOMPARE(header->sortIndicatorSection(), 1);
         QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::AscendingOrder));
-        QTest::mouseClick(header->viewport(), Qt::LeftButton, Qt::NoModifier, updatedCenter);
+        emit header->sectionClicked(1);
         QVERIFY(!asked.last().contains(QStringLiteral("sort")));        // newest first is the default
         QCOMPARE(sort->currentData().toString(), QStringLiteral("recent"));
         QCOMPARE(int(header->sortIndicatorOrder()), int(Qt::DescendingOrder));
@@ -1541,8 +1552,14 @@ private slots:
         manager.setResults({{QStringLiteral("items"), QJsonArray{}},
                             {QStringLiteral("facets"), QJsonObject{
                                  {QStringLiteral("branches"), QJsonArray{QStringLiteral("main"), QStringLiteral("work")}}}}});
+        // Since #1Q5V the branch combo never shows: Branch ▸ in More carries it, and it
+        // appears only when the facets name more than one branch.
+        auto *branchMenu = manager.findChild<QMenu *>(QStringLiteral("sessionsBranchMenu"));
+        QVERIFY(branchMenu);
+        QVERIFY(branchMenu->menuAction()->isVisible());
+        QVERIFY(branchMenu->actions().size() >= 3);   // Any branch, main, work
         auto *branch = manager.findChild<QComboBox *>(QStringLiteral("sessionsBranch"));
-        QVERIFY(branch->isVisibleTo(&manager));
+        QVERIFY(!branch->isVisibleTo(&manager));
         branch->setCurrentIndex(branch->findData(QStringLiteral("work")));
         QCOMPARE(asked.last().value(QStringLiteral("branch")).toString(), QStringLiteral("work"));
     }
@@ -1607,9 +1624,12 @@ private slots:
                                 {QStringLiteral("branches"), QJsonArray{QStringLiteral("main"), QStringLiteral("work")}}}}});
         auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
         auto *group = manager.findChild<QComboBox *>(QStringLiteral("sessionsGroup"));
-        QVERIFY(tree && group);
+        auto *sortButton = manager.findChild<QToolButton *>(QStringLiteral("sessionsSort"));
+        QVERIFY(tree && group && sortButton && sortButton->menu());
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("alpha"));
-        QVERIFY(chooseComboItem(group, QStringLiteral("date")));
+        // Grouping and sort ride in Sort ▾ now (#1Q5V); the choices deliver the same
+        // fields they always did.
+        QVERIFY(chooseMenuAction(sortButton->menu(), QStringLiteral("date")));
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today"));
         QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Older"));
         manager.setResults({{QStringLiteral("items"), items}});
@@ -1618,9 +1638,9 @@ private slots:
         const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
         if (!shotDir.isEmpty())
             QVERIFY(manager.grab().save(shotDir + QStringLiteral("/by-date.png")));
-        QVERIFY(chooseComboItem(group, QStringLiteral("none")));
+        QVERIFY(chooseMenuAction(sortButton->menu(), QStringLiteral("none")));
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Alpha work"));
-        QVERIFY(chooseComboItem(group, QStringLiteral("project")));
+        QVERIFY(chooseMenuAction(sortButton->menu(), QStringLiteral("project")));
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("alpha"));
         if (!shotDir.isEmpty())
             QVERIFY(manager.grab().save(shotDir + QStringLiteral("/by-project.png")));
@@ -1633,23 +1653,30 @@ private slots:
         auto *model = manager.findChild<QComboBox *>(QStringLiteral("sessionsModel"));
         auto *date = manager.findChild<QComboBox *>(QStringLiteral("sessionsDate"));
         QVERIFY(kind && project && scope && sort && branch && model && date);
-        QVERIFY(chooseComboItem(kind, QStringLiteral("agent")));
+        // Source, Scope and Time ride in More, Branch in its own submenu; Project and
+        // Model are the two combos that stayed on the row, and they still take the mouse.
+        QVERIFY(chooseMenuAction(manager.findChild<QMenu *>(QStringLiteral("sessionsSourceMenu")),
+                                 QStringLiteral("agent")));
         QCOMPARE(asked.last().value(QStringLiteral("sources")).toArray(), QJsonArray{QStringLiteral("agent")});
         QVERIFY(chooseComboItem(project, QStringLiteral("/tmp/beta")));
         QCOMPARE(asked.last().value(QStringLiteral("project")).toString(), QStringLiteral("/tmp/beta"));
         manager.setResults({{QStringLiteral("items"), items}, {QStringLiteral("scope"), QStringLiteral("all")}});
-        QVERIFY(chooseComboItem(scope, QStringLiteral("project")));
+        QVERIFY(chooseMenuAction(manager.findChild<QMenu *>(QStringLiteral("sessionsScopeMenu")),
+                                 QStringLiteral("project")));
         QCOMPARE(project->currentData().toString(), QString());
         QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("project"));
-        QVERIFY(chooseComboItem(scope, QStringLiteral("all")));
+        QVERIFY(chooseMenuAction(manager.findChild<QMenu *>(QStringLiteral("sessionsScopeMenu")),
+                                 QStringLiteral("all")));
         QCOMPARE(asked.last().value(QStringLiteral("scope")).toString(), QStringLiteral("all"));
-        QVERIFY(chooseComboItem(sort, QStringLiteral("title")));
+        QVERIFY(chooseMenuAction(sortButton->menu(), QStringLiteral("title")));
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("title"));
         QVERIFY(chooseComboItem(model, QStringLiteral("glm-5")));
         QCOMPARE(asked.last().value(QStringLiteral("model")).toString(), QStringLiteral("glm-5"));
-        QVERIFY(chooseComboItem(date, QStringLiteral("week")));
+        QVERIFY(chooseMenuAction(manager.findChild<QMenu *>(QStringLiteral("sessionsTimeMenu")),
+                                 QStringLiteral("week")));
         QVERIFY(asked.last().value(QStringLiteral("since")).toDouble() > 0);
-        QVERIFY(chooseComboItem(branch, QStringLiteral("work")));
+        QVERIFY(chooseMenuAction(manager.findChild<QMenu *>(QStringLiteral("sessionsBranchMenu")),
+                                 QStringLiteral("work")));
         QCOMPARE(asked.last().value(QStringLiteral("branch")).toString(), QStringLiteral("work"));
         auto *filters = manager.findChild<QToolButton *>(QStringLiteral("sessionsFilters"));
         QVERIFY(filters && filters->menu());
