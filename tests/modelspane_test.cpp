@@ -18,6 +18,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -304,20 +305,28 @@ private Q_SLOTS:
             auto *list = pane.picker()->list();
             QVERIFY(!list->isColumnHidden(ColModel));
             QVERIFY(list->isColumnHidden(ColVia));
-            QVERIFY(list->isColumnHidden(ColReasoning));
+            if (tab == ModelsPane::effortTab()) {
+                QVERIFY(!list->isColumnHidden(ColReasoning));
+                QCOMPARE(list->headerItem()->text(ColReasoning), QStringLiteral("selected level"));
+                QVERIFY(list->findChild<QComboBox *>(QStringLiteral("modelEffortChoice")) != nullptr);
+            } else {
+                QVERIFY(list->isColumnHidden(ColReasoning));
+            }
             QVERIFY(list->viewport()->width() >= 250);
             QCOMPARE(list->horizontalScrollBar()->maximum(), 0);
-            QCOMPARE(pane.picker()->findChild<QListWidget *>(QStringLiteral("modelLevels"))->isVisible(),
-                     tab == ModelsPane::effortTab());
+            QVERIFY(!pane.picker()->findChild<QListWidget *>(QStringLiteral("modelLevels"))->isVisible());
             capture(tab == ModelsPane::availableTab() ? QStringLiteral("02-available")
                     : tab == ModelsPane::prioritiesTab() ? QStringLiteral("03-priorities")
                                                          : QStringLiteral("04-effort"));
         }
-        auto *levels = pane.picker()->findChild<QListWidget *>(QStringLiteral("modelLevels"));
-        QVERIFY(levels != nullptr);
-        for (int i = 0; i < levels->count(); ++i)
-            if (levels->item(i)->text() == QStringLiteral("max")) levels->setCurrentRow(i);
+        auto *choice = pane.picker()->list()->findChild<QComboBox *>(QStringLiteral("modelEffortChoice"));
+        QVERIFY(choice != nullptr);
+        const int maxIndex = choice->findData(QStringLiteral("max"));
+        QVERIFY(maxIndex >= 0);
+        choice->setCurrentIndex(maxIndex);
+        Q_EMIT choice->activated(maxIndex);
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QCOMPARE(choice->currentData().toString(), QStringLiteral("max"));
         QTest::keyClick(pane.picker()->list(), Qt::Key_Delete);
         QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 1);
 
@@ -389,7 +398,7 @@ private Q_SLOTS:
         QCOMPARE(pane.tier(), QStringLiteral("all"));
         QTreeWidget *list = pane.picker()->list();
         QVERIFY(!list->isColumnHidden(ColAvail));
-        QCOMPARE(list->headerItem()->text(ColAvail), QStringLiteral("available"));
+        QCOMPARE(list->headerItem()->text(ColAvail), QStringLiteral("enabled"));
         QTreeWidgetItem *row = nullptr;
         for (int i = 0; i < list->topLevelItemCount() && !row; ++i)
             if (list->topLevelItem(i)->data(0, Qt::UserRole).toString().startsWith(QStringLiteral("glm-coding|glm-5.3")))
@@ -481,10 +490,8 @@ private Q_SLOTS:
         QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("glm-coding|glm-5.3")));
     }
 
-    // A catalog that arrives late is searchable on **available**, where the whole catalog is
-    // searched; ticking a model there puts it in every class's "+ add" pool on priorities (owner,
-    // 2026-09-22: "i thought all available models would be in priority, so searching should
-    // happen in the available pane").
+    // A catalog that arrives late is searchable on Enabled, where the whole catalog is searched.
+    // Pick order then offers available matches under each eligible class when its search is used.
     void lateProviderCatalogBecomesSearchableInAvailableAndJoinsPriorities() {
         Served served;
         ModelsPane pane(providerSections());
@@ -502,11 +509,12 @@ private Q_SLOTS:
         QCOMPARE(pane.currentTab(), QStringLiteral("available"));
         QCOMPARE(pane.picker()->filter()->text(), QStringLiteral("openrouter"));
         QVERIFY(rowKeys(pane.picker()->list()).contains(QStringLiteral("openrouter|vendor/new-model")));
-        // A provider listing one model is not open-ended, so that model is available by default
-        // and priorities offers it in main's pool at once; ctrl+enter ranks it.
+        // A provider listing one model is available by default. Pick order's unranked pool stays
+        // collapsed until searched; the matching offer then appears under main and can be ranked.
         pane.showTab(ModelsPane::prioritiesTab());
-        QVERIFY(poolKeys(pane.picker()->list(), QStringLiteral("main")).contains(QStringLiteral("openrouter|vendor/new-model")));
+        QVERIFY(poolKeys(pane.picker()->list(), QStringLiteral("main")).isEmpty());
         pane.picker()->filter()->setText(QStringLiteral("new-model"));
+        QVERIFY(poolKeys(pane.picker()->list(), QStringLiteral("main")).contains(QStringLiteral("openrouter|vendor/new-model")));
         pane.picker()->focusClass(QStringLiteral("main"));
         pane.picker()->addSelected();
         QVERIFY(listKeys(QStringLiteral("main")).contains(QStringLiteral("openrouter|vendor/new-model")));
@@ -527,9 +535,9 @@ private Q_SLOTS:
         target.catalog = catalogFrom(fresh);
         pane.setTarget(target);
         pane.showTab(ModelsPane::prioritiesTab());
-        // Ranked nowhere; offered, untyped, where a harness can be a whole agent — main and high.
+        // Ranked nowhere. Search reveals offers where a harness can be a whole agent: main and high.
         QVERIFY(!rowKeys(pane.picker()->list()).contains(QStringLiteral("guest:codex|gpt-6-astra")));
-        QCOMPARE(poolKeys(pane.picker()->list()).count(QStringLiteral("guest:codex|gpt-6-astra")), 2);
+        QVERIFY(poolKeys(pane.picker()->list()).isEmpty());
         pane.picker()->filter()->setText(QStringLiteral("codex"));
         QCOMPARE(poolKeys(pane.picker()->list()).count(QStringLiteral("guest:codex|gpt-6-astra")), 2);
         for (const QString &tier : {QStringLiteral("main"), QStringLiteral("high")}) {

@@ -283,23 +283,29 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     m_orderSelection = new QLabel(QStringLiteral("Select a model to edit"), m_orderActions);
     m_orderSelection->setObjectName(QStringLiteral("modelOrderSelection"));
     m_orderSelection->setTextFormat(Qt::PlainText);
+    m_orderSelection->setWordWrap(true);
     orderLayout->addWidget(m_orderSelection);
-    auto *actionRow = new QHBoxLayout;
-    actionRow->setContentsMargins(0, 0, 0, 0);
-    actionRow->setSpacing(4);
-    const auto action = [this, actionRow](const QString &label, const QString &name) {
+    auto *moveRow = new QHBoxLayout;
+    auto *editRow = new QHBoxLayout;
+    for (QHBoxLayout *row : {moveRow, editRow}) {
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(4);
+    }
+    const auto action = [this](QHBoxLayout *row, const QString &label, const QString &name) {
         auto *button = new QPushButton(label, m_orderActions);
         button->setObjectName(name);
-        actionRow->addWidget(button);
+        row->addWidget(button);
         return button;
     };
-    m_orderUp = action(QStringLiteral("Move up"), QStringLiteral("modelOrderUp"));
-    m_orderDown = action(QStringLiteral("Move down"), QStringLiteral("modelOrderDown"));
-    m_orderTie = action(QStringLiteral("Tie with above"), QStringLiteral("modelOrderTie"));
-    m_orderRemove = action(QStringLiteral("Remove"), QStringLiteral("modelOrderRemove"));
-    m_orderAdd = action(QStringLiteral("Add to list"), QStringLiteral("modelOrderAdd"));
-    actionRow->addStretch(1);
-    orderLayout->addLayout(actionRow);
+    m_orderUp = action(moveRow, QStringLiteral("Move up"), QStringLiteral("modelOrderUp"));
+    m_orderDown = action(moveRow, QStringLiteral("Move down"), QStringLiteral("modelOrderDown"));
+    m_orderTie = action(editRow, QStringLiteral("Tie with above"), QStringLiteral("modelOrderTie"));
+    m_orderRemove = action(editRow, QStringLiteral("Remove"), QStringLiteral("modelOrderRemove"));
+    m_orderAdd = action(editRow, QStringLiteral("Add to list"), QStringLiteral("modelOrderAdd"));
+    moveRow->addStretch(1);
+    editRow->addStretch(1);
+    orderLayout->addLayout(moveRow);
+    orderLayout->addLayout(editRow);
     layout->addWidget(m_orderActions);
     connect(m_orderUp, &QPushButton::clicked, this, [this] { moveSelected(-1); });
     connect(m_orderDown, &QPushButton::clicked, this, [this] { moveSelected(1); });
@@ -308,7 +314,12 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
         if (row && row->data(0, ListedRole).toBool()) toggleTie(rowTier(row), row->data(0, KeyRole).toString());
     });
     connect(m_orderRemove, &QPushButton::clicked, this, [this] { removeSelected(); });
-    connect(m_orderAdd, &QPushButton::clicked, this, [this] { addSelected(); });
+    connect(m_orderAdd, &QPushButton::clicked, this, [this] {
+        QTreeWidgetItem *row = currentRow();
+        if (row && row->data(0, AddRole).toBool()) { addSelected(); return; }
+        m_filter->setFocus();
+        m_filter->selectAll();
+    });
     layout->addLayout(m_listsLayout, 1);
 
     m_limits = new QLabel;
@@ -746,73 +757,73 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     // always does something. Deferred a turn: the click rebuilds the rows, which deletes the
     // very button whose signal is running.
     if (!(m_hosted && sectionsPage())) {
-    auto *moveBox = new QWidget;
-    auto *moveLayout = new QHBoxLayout(moveBox);
-    moveLayout->setContentsMargins(0, 0, 0, 0);
-    moveLayout->setSpacing(0);
-    const QList<curation::TierEntry> ranked = curation::tierList(tier);
-    const int listSize = ranked.size();
-    const QString key = item.key;
-    for (const auto &[delta, arrow, tip] : {std::tuple{-1, Qt::UpArrow, QStringLiteral("move up (alt+↑)")},
-                                            std::tuple{1, Qt::DownArrow, QStringLiteral("move down (alt+↓)")}}) {
-        auto *button = new QToolButton(moveBox);
-        button->setArrowType(arrow);
-        button->setAutoRaise(true);
-        button->setFixedSize(18, 18);
-        button->setToolTip(tip);
-        button->setEnabled(delta < 0 ? rank > 1 : rank < listSize);
-        QObject::connect(button, &QToolButton::clicked, this, [this, tier, key, delta] {
-            QTimer::singleShot(0, this, [this, tier, key, delta] {
-                moveKey(tier, key, delta);
-                // The standing hint rule (WARP.md): the buttons are the slow path, alt+↑↓ the
-                // fast one. The limits line carries it — the picker has no toast queue — and
-                // alt+↑↓ is a picker key, not a Keymap action, so the text is a literal.
-                if (ShortcutHints::instance().shouldShow(QStringLiteral("models.move.buttons")))
-                    m_limits->setText(ShortcutHints::nextTime(QStringLiteral("Alt+↑ / Alt+↓"),
-                                                              QStringLiteral("move a row")));
+        auto *moveBox = new QWidget;
+        auto *moveLayout = new QHBoxLayout(moveBox);
+        moveLayout->setContentsMargins(0, 0, 0, 0);
+        moveLayout->setSpacing(0);
+        const QList<curation::TierEntry> ranked = curation::tierList(tier);
+        const int listSize = ranked.size();
+        const QString key = item.key;
+        for (const auto &[delta, arrow, tip] : {std::tuple{-1, Qt::UpArrow, QStringLiteral("move up (alt+↑)")},
+                                                std::tuple{1, Qt::DownArrow, QStringLiteral("move down (alt+↓)")}}) {
+            auto *button = new QToolButton(moveBox);
+            button->setArrowType(arrow);
+            button->setAutoRaise(true);
+            button->setFixedSize(18, 18);
+            button->setToolTip(tip);
+            button->setEnabled(delta < 0 ? rank > 1 : rank < listSize);
+            QObject::connect(button, &QToolButton::clicked, this, [this, tier, key, delta] {
+                QTimer::singleShot(0, this, [this, tier, key, delta] {
+                    moveKey(tier, key, delta);
+                    // The standing hint rule (WARP.md): the buttons are the slow path, alt+↑↓ the
+                    // fast one. The limits line carries it — the picker has no toast queue — and
+                    // alt+↑↓ is a picker key, not a Keymap action, so the text is a literal.
+                    if (ShortcutHints::instance().shouldShow(QStringLiteral("models.move.buttons")))
+                        m_limits->setText(ShortcutHints::nextTime(QStringLiteral("Alt+↑ / Alt+↓"),
+                                                                  QStringLiteral("move a row")));
+                });
+            });
+            moveLayout->addWidget(button);
+        }
+        const int ownRank = item.rank > 0 ? item.rank : rank;
+        const int previousRank = rank > 1 ? (ranked.at(rank - 2).rank > 0 ? ranked.at(rank - 2).rank : rank - 1) : -1;
+        const int nextRank = rank < listSize ? (ranked.at(rank).rank > 0 ? ranked.at(rank).rank : rank + 1) : -1;
+        const bool tied = ownRank == previousRank || ownRank == nextRank;
+        auto *tie = new QToolButton(moveBox);
+        tie->setObjectName(QStringLiteral("modelTie"));
+        tie->setText(tied ? QStringLiteral("≠") : QStringLiteral("="));
+        tie->setAccessibleName(tied ? QStringLiteral("untie model") : QStringLiteral("tie with previous model"));
+        tie->setToolTip(tied ? QStringLiteral("Untie this model: give it its own priority (equal ranks draw randomly)")
+                             : QStringLiteral("Tie with the model above: equal ranks draw randomly"));
+        tie->setAutoRaise(true);
+        tie->setFixedSize(20, 18);
+        tie->setEnabled(tied || rank > 1);
+        QObject::connect(tie, &QToolButton::clicked, this, [this, tier, key] {
+            QTimer::singleShot(0, this, [this, tier, key] { toggleTie(tier, key); });
+        });
+        moveLayout->addWidget(tie);
+        auto *remove = new QToolButton(moveBox);
+        remove->setObjectName(QStringLiteral("modelRemove"));
+        remove->setText(QStringLiteral("×"));
+        remove->setAccessibleName(QStringLiteral("remove model from this list"));
+        remove->setToolTip(QStringLiteral("Remove from this priority list (Delete); Ctrl+Z undoes"));
+        remove->setAutoRaise(true);
+        remove->setFixedSize(20, 18);
+        QObject::connect(remove, &QToolButton::clicked, this, [this, tier, key] {
+            QTimer::singleShot(0, this, [this, tier, key] {
+                for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
+                    QTreeWidgetItem *candidate = m_list->topLevelItem(i);
+                    if (candidate->data(0, ListedRole).toBool() && rowTier(candidate) == tier
+                        && candidate->data(0, KeyRole).toString() == key) {
+                        m_list->setCurrentItem(candidate);
+                        removeSelected();
+                        return;
+                    }
+                }
             });
         });
-        moveLayout->addWidget(button);
-    }
-    const int ownRank = item.rank > 0 ? item.rank : rank;
-    const int previousRank = rank > 1 ? (ranked.at(rank - 2).rank > 0 ? ranked.at(rank - 2).rank : rank - 1) : -1;
-    const int nextRank = rank < listSize ? (ranked.at(rank).rank > 0 ? ranked.at(rank).rank : rank + 1) : -1;
-    const bool tied = ownRank == previousRank || ownRank == nextRank;
-    auto *tie = new QToolButton(moveBox);
-    tie->setObjectName(QStringLiteral("modelTie"));
-    tie->setText(tied ? QStringLiteral("≠") : QStringLiteral("="));
-    tie->setAccessibleName(tied ? QStringLiteral("untie model") : QStringLiteral("tie with previous model"));
-    tie->setToolTip(tied ? QStringLiteral("Untie this model: give it its own priority (equal ranks draw randomly)")
-                         : QStringLiteral("Tie with the model above: equal ranks draw randomly"));
-    tie->setAutoRaise(true);
-    tie->setFixedSize(20, 18);
-    tie->setEnabled(tied || rank > 1);
-    QObject::connect(tie, &QToolButton::clicked, this, [this, tier, key] {
-        QTimer::singleShot(0, this, [this, tier, key] { toggleTie(tier, key); });
-    });
-    moveLayout->addWidget(tie);
-    auto *remove = new QToolButton(moveBox);
-    remove->setObjectName(QStringLiteral("modelRemove"));
-    remove->setText(QStringLiteral("×"));
-    remove->setAccessibleName(QStringLiteral("remove model from this list"));
-    remove->setToolTip(QStringLiteral("Remove from this priority list (Delete); Ctrl+Z undoes"));
-    remove->setAutoRaise(true);
-    remove->setFixedSize(20, 18);
-    QObject::connect(remove, &QToolButton::clicked, this, [this, tier, key] {
-        QTimer::singleShot(0, this, [this, tier, key] {
-            for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
-                QTreeWidgetItem *candidate = m_list->topLevelItem(i);
-                if (candidate->data(0, ListedRole).toBool() && rowTier(candidate) == tier
-                    && candidate->data(0, KeyRole).toString() == key) {
-                    m_list->setCurrentItem(candidate);
-                    removeSelected();
-                    return;
-                }
-            }
-        });
-    });
-    moveLayout->addWidget(remove);
-    m_list->setItemWidget(row, ColMove, moveBox);
+        moveLayout->addWidget(remove);
+        m_list->setItemWidget(row, ColMove, moveBox);
     }
     // The cutoff, as a column of checkboxes: rank 1..cutoff checked, the rest not, and clicking
     // one moves the cutoff to it (design 5.3, `setBoxCutoffFromRow`).
@@ -958,12 +969,13 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
                 tier, query.isEmpty() ? QString() : QStringLiteral(" match this filter")), tier);
         return;
     }
-    // Then every other *available* model this class may hold, always and not only while typing
-    // (owner, 2026-09-22: "i thought all available models would be in priority, so searching should
-    // happen in the available pane"). Step 2 is the pool and step 3 orders it, so the pool is on the
-    // page, under "+ add", one click from a rank. Typing here filters what is drawn and nothing
-    // more: the whole catalog — OpenRouter's long tail — is searched on Available only. Searching it
-    // here too, once per class section, froze the pane on every keystroke.
+    // Pick order's four classes no longer repeat the whole available catalog as a long + add
+    // pool. The labeled action above the list focuses search; matching offers appear below the
+    // appropriate class as soon as the user types.
+    if (m_hosted && sectionsPage() && query.isEmpty()) return;
+    // Offers come from the available pool, filtered within this class. The full catalog,
+    // including OpenRouter's long tail, is searched on Enabled; searching it once per class here
+    // froze the pane on every keystroke.
     QList<Entry> rest;
     for (const Entry &entry : shown(m_context.catalog)) {
         if (inList.contains(entry.key) || !addableToTier(entry, tier)) continue;
@@ -1576,7 +1588,9 @@ void ModelPicker::updateOrderActions() {
     const bool offered = row && row->data(0, AddRole).toBool();
     for (QPushButton *button : {m_orderUp, m_orderDown, m_orderTie, m_orderRemove})
         button->setVisible(listed);
-    m_orderAdd->setVisible(offered);
+    m_orderAdd->setVisible(m_hosted && sectionsPage());
+    m_orderAdd->setText(offered ? QStringLiteral("Add to %1").arg(rowTier(row))
+                                : QStringLiteral("Find model to add"));
     if (!row || (!listed && !offered)) {
         m_orderSelection->setText(QStringLiteral("Select a model to edit"));
         return;
@@ -1587,7 +1601,6 @@ void ModelPicker::updateOrderActions() {
     const QString name = entry ? entry->name : key;
     if (offered) {
         m_orderSelection->setText(QStringLiteral("%1 · %2 · not ranked").arg(tier, name));
-        m_orderAdd->setText(QStringLiteral("Add to %1").arg(tier));
         return;
     }
     const QList<curation::TierEntry> list = curation::tierList(tier);

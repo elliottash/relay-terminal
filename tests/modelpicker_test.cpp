@@ -538,7 +538,7 @@ private Q_SLOTS:
         picker.list()->setFocus();
         picker.list()->setCurrentItem(row);
         QTest::keyClick(picker.list(), Qt::Key_Return);
-        QVERIFY(choice->hasFocus());
+        QCOMPARE(picker.focusWidget(), static_cast<QWidget *>(choice));
         int told = 0;
         picker.onListsChanged = [&told] { ++told; };
         const int max = choice->findData(QStringLiteral("max"));
@@ -981,6 +981,60 @@ private Q_SLOTS:
         picker.setBoxCutoffFromRow(QStringLiteral("main"), 3, true);
         QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->text(ColBox), QStringLiteral("In"));
         QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->foreground(ColModel).style(), Qt::NoBrush);
+    }
+
+    void hostedPickOrderHasLabeledSelectedRowActionsAtNarrowWidth() {
+        const QString first = QStringLiteral("glm-coding|glm-5.3");
+        const QString second = QStringLiteral("anthropic|claude-opus-5-5");
+        setList(QStringLiteral("main"), {{first, QString()}, {second, QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        picker.setHosted(true);
+        picker.resize(420, 720);
+        picker.show();
+        QCoreApplication::processEvents();
+        QVERIFY(picker.list()->isColumnHidden(ColMove));
+        QVERIFY(poolKeys(picker.list()).isEmpty()); // long add pools wait for search
+        auto *panel = picker.findChild<QWidget *>(QStringLiteral("modelOrderActions"));
+        auto *up = picker.findChild<QPushButton *>(QStringLiteral("modelOrderUp"));
+        auto *down = picker.findChild<QPushButton *>(QStringLiteral("modelOrderDown"));
+        auto *tie = picker.findChild<QPushButton *>(QStringLiteral("modelOrderTie"));
+        auto *remove = picker.findChild<QPushButton *>(QStringLiteral("modelOrderRemove"));
+        auto *add = picker.findChild<QPushButton *>(QStringLiteral("modelOrderAdd"));
+        QVERIFY(panel && up && down && tie && remove && add);
+        QVERIFY(panel->isVisible());
+        QVERIFY(panel->width() <= picker.width());
+        picker.selectKey(first);
+        QVERIFY(!up->isEnabled());
+        QVERIFY(down->isEnabled());
+        QCOMPARE(tie->text(), QStringLiteral("Tie with above"));
+        picker.selectKey(second);
+        QVERIFY(up->isEnabled());
+        QVERIFY(tie->isEnabled());
+        QVERIFY(remove->isVisible());
+        QVERIFY(add->isVisible());
+        QCOMPARE(add->text(), QStringLiteral("Find model to add"));
+        tie->click();
+        QCOMPARE(curation::tierList(QStringLiteral("main")).at(0).rank,
+                 curation::tierList(QStringLiteral("main")).at(1).rank);
+        QCOMPARE(tie->text(), QStringLiteral("Untie"));
+        tie->click();
+        QVERIFY(curation::tierList(QStringLiteral("main")).at(1).rank
+                > curation::tierList(QStringLiteral("main")).at(0).rank);
+        remove->click();
+        QCOMPARE(listKeys(QStringLiteral("main")), QStringList{first});
+        QCOMPARE(add->text(), QStringLiteral("Find model to add"));
+        add->click();
+        QCOMPARE(picker.focusWidget(), static_cast<QWidget *>(picker.filter()));
+        picker.filter()->setText(QStringLiteral("claude-opus"));
+        QTreeWidgetItem *offer = poolRowFor(picker.list(), second, QStringLiteral("main"));
+        QVERIFY(offer);
+        picker.list()->setCurrentItem(offer);
+        QVERIFY(add->isVisible());
+        QCOMPARE(add->text(), QStringLiteral("Add to main"));
+        add->click();
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{first, second}));
     }
 
     // A drag inside one section rewrites that section; a drag past a header lands in the section
