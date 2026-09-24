@@ -1,0 +1,8 @@
+Internal ctest changing into directory: /tmp/claude-1000/land/codex-astra-effort/verify/build
+Test project /tmp/claude-1000/land/codex-astra-effort/verify/build
+    Start 50: consolemode
+1/1 Test #50: consolemode ......................   Passed    2.66 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   2.66 sec
