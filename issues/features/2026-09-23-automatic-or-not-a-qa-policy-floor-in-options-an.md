@@ -10,6 +10,7 @@ blocked_by: [WFRA, 1AA6]
 rank: zzzzzzzzzzzzzzzzzzzr
 created: '2026-09-23'
 source: owner, Relay conversation, 2026-09-23
+verify: {artifact: code, primary: script, also: [person], human: optional, criteria: "Options › Agent shows one Verification row under QA, and a fields.verify with stakes money and human none comes back human required with a qa_policy note", effort: medium, stakes: rework, blast: capability}
 links: {plans: [], commits: [71ed6ea3, ea29e766, dd00c838, 33a8f746, 71147e17], evidence: [], related: [BX7B, 1QKM, 3KB7], github: null}
 ---
 # Automatic or not: a QA policy floor in Options and per-project overrides in board.yaml
