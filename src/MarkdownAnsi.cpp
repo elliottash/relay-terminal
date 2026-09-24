@@ -795,62 +795,6 @@ QString MarkdownAnsi::renderTable() {
             out += sgr(m_palette.dim) + dashes.join(QStringLiteral("─┼─")) + kReset + QLatin1Char('\n');
         }
     }
-    // Keep the readable Markdown table in the transcript and add one linked row that opens a
-    // native sortable copy. The CSV is private, content-addressed, and survives a pane restart.
-    if (m_images && columns > 0 && columns <= 100 && cells.size() <= 5000) {
-        QByteArray csv;
-        for (int r = 0; r < rows.size(); ++r) {
-            if (r == 1) continue;
-            const QStringList plain = tableCells(rows.at(r));
-            for (int col = 0; col < columns; ++col) {
-                if (col) csv += ',';
-                QString cell = col < plain.size() ? plain.at(col) : QString();
-                cell.replace(QLatin1Char('"'), QStringLiteral("\"\""));
-                csv += (QLatin1Char('"') + cell + QLatin1Char('"')).toUtf8();
-            }
-            csv += '\n';
-        }
-        if (csv.size() <= 16 * 1024 * 1024) {
-            const QString base = qEnvironmentVariable("XDG_CACHE_HOME");
-            const QString cache = (base.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
-                                                  : base) + QStringLiteral("/relay/media");
-            if (QDir().mkpath(cache)) {
-                QFile::setPermissions(cache, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
-                const QString key = QString::fromLatin1(QCryptographicHash::hash(csv, QCryptographicHash::Sha256).toHex());
-                const QString dataPath = QDir(cache).filePath(key + QStringLiteral(".csv"));
-                if (!QFileInfo::exists(dataPath)) {
-                    QSaveFile data(dataPath);
-                    if (data.open(QIODevice::WriteOnly)) {
-                        data.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-                        if (data.write(csv) != csv.size()) data.cancelWriting();
-                        else data.commit();
-                    }
-                }
-                if (QFileInfo::exists(dataPath)) {
-                    const QJsonObject object{{QStringLiteral("version"), 1}, {QStringLiteral("kind"), QStringLiteral("table")},
-                        {QStringLiteral("name"), QStringLiteral("Markdown table")},
-                        {QStringLiteral("path"), dataPath}, {QStringLiteral("rows"), cells.size()},
-                        {QStringLiteral("columns"), columns}, {QStringLiteral("delimiter"), QStringLiteral(",")}};
-                    const QByteArray content = QJsonDocument(object).toJson(QJsonDocument::Compact);
-                    const QString manifest = QDir(cache).filePath(key + QStringLiteral(".json"));
-                    if (!QFileInfo::exists(manifest)) {
-                        QSaveFile file(manifest);
-                        if (file.open(QIODevice::WriteOnly)) {
-                            file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-                            if (file.write(content) != content.size()) file.cancelWriting();
-                            else file.commit();
-                        }
-                    }
-                    if (QFileInfo::exists(manifest)) {
-                        const int cols = std::clamp(m_imageColumns > 0 ? m_imageColumns : 60, 1, 120);
-                        const QString uri = QStringLiteral("relay-media:0/1/%1/%2")
-                            .arg(cols).arg(QString::fromLatin1(QUrl::toPercentEncoding(manifest)));
-                        out += osc8(uri) + QChar(0x2800) + osc8(QString()) + QLatin1Char('\n');
-                    }
-                }
-            }
-        }
-    }
     return out;
 }
 

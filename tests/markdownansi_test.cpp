@@ -150,13 +150,13 @@ private slots:
                                      "a    │    1\nlong │  200\nafter\n"));
     }
 
-    void inlineTableKeepsTextAndAddsSortableRow() {
+    // With inline media on, a table is still only the drawn table: no "open sortable table" row
+    // under it (#15G5). `relay show data.csv` is where a sortable table comes from.
+    void inlineTableIsOnlyTheDrawnTable() {
         const QString md = QStringLiteral("| name | value |\n|---|---:|\n| small | 2 |\n| large | 10 |\n");
         const QString out = renderImages(md);
-        QVERIFY(out.contains(QStringLiteral("small")));
-        QVERIFY(out.contains(QStringLiteral("large")));
-        QVERIFY(out.contains(MarkdownAnsi::kMediaEscapeStart));
-        QCOMPARE(out.count(MarkdownAnsi::kMediaEscapeStart), 1);
+        QCOMPARE(out, render(md));
+        QVERIFY(!out.contains(MarkdownAnsi::kMediaEscapeStart));
         QCOMPARE(renderImages(md, QString(), true), out);
     }
 
@@ -482,8 +482,8 @@ private slots:
         // A table cell is inline content: an image there stays text.
         const QString table = QStringLiteral("| a |\n|---|\n| ![a](a.png) |\n");
         const QString renderedTable = renderImages(table, dir.path());
-        QVERIFY(renderedTable.startsWith(render(table)));  // same readable cells, then the sortable row
-        QVERIFY(renderedTable.contains(MarkdownAnsi::kMediaEscapeStart));
+        QCOMPARE(renderedTable, render(table));  // the drawn table only: no media row under it
+        QVERIFY(!renderedTable.contains(MarkdownAnsi::kMediaEscapeStart));
     }
 
     void localAudioLinkBecomesOneMediaRow()
