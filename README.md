@@ -107,15 +107,15 @@ that conflict.
 | Shift+Enter | New line |
 | Ctrl+I | Toggle terminal / agent input (from the prompt box; at a password prompt it switches to the agent) |
 | Ctrl+H / Ctrl+Shift+H | Take control of the terminal (the only way keys reach it) / back to the prompt box |
-| Ctrl+Shift+A | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
+| Ctrl+? | Actions: everything you can do now, with its keys, in a list you can filter (again to close) |
 | Ctrl+Shift+O | Options: what persists, a tab per section (again to close; also Ctrl+, and the gear) |
-| Ctrl+Shift+S | Board: this repository's cards, threads and plans (again to close it) |
+| Ctrl+Shift+A | Board: this repository's cards, threads and plans (again to close it) |
 | Alt+M | Models: drop the pane's model box open (a header per class and its top models; Up/Down the rows, Right opens a class to its whole list, typing searches every model you have made available) |
 | Alt+F, Alt+H | This pane on the Flash model / the High model, and back to main (`/flash`, `/high`, `/main`) |
 | Alt+E | Reasoning: drop the pane's level box open (also Alt+. / Alt+, and `/effort`) |
 | Ctrl+Shift+M | Models: the models pane beside this one — **providers**, **available** models and **priorities** (again to close it, Esc to go back to the pane; `/model`, `/models`) |
-| Ctrl+Shift+Y | Sessions: resume a saved session (`/resume`) |
-| Alt+A, Ctrl+Shift+X | Subagents: this pane's subagent tabs / stop all running subagents |
+| Ctrl+Shift+S, Ctrl+Shift+P, Ctrl+Shift+G | Sessions (resume a saved session, `/resume`), Projects, Globals: one shared pane, a key per tab (again to close it) |
+| Alt+A | Subagents: this pane's subagent tabs (stop them all from there or the Actions list) |
 | Ctrl+T, Ctrl+N | New tab, new window |
 | Ctrl+E, Ctrl+Shift+E | New pane to the right (then ← ↑ ↓ places it) |
 | Ctrl+Shift+J | Delegate: the agent drives the program in this pane; ask from the prompt box |
@@ -124,7 +124,7 @@ that conflict.
 | Ctrl+W, Ctrl+Shift+W | Close pane (then tab, then window) |
 | Ctrl+Shift+Z | Redo immediately after Ctrl+Z in the same text field; otherwise reopen the last closed pane, tab or window |
 | F12 | Toggle native terminal input (same hand-over as Ctrl+H) |
-| Ctrl+Shift+R | Restart a pane's shell or agent after it was stopped |
+| Ctrl+Shift+R | Review: cards awaiting your judgement |
 | Ctrl+Tab, Ctrl+Shift+Tab | Next, previous tab |
 | Up (empty prompt box, items queued) | Open the queued items in the prompt box, one at a time: Up/Down move between them, Ctrl+Up/Down reorder, Enter saves, Esc cancels, Shift+Delete removes |
 | Up / Down (first / last line) | Prompt history |
@@ -138,7 +138,7 @@ Shortcut presets: **Relay** (Chrome-style, default), **Warp**, **VS Code**, **Ko
 which reloads live. Copy on select is off by default (Options › Terminal).
 
 **Actions and Options** are two panes that open beside the one you are in, one at a time.
-**Actions** (Ctrl+Shift+A) is everything you can do *now*, to this pane, conversation or window —
+**Actions** (Ctrl+?) is everything you can do *now*, to this pane, conversation or window —
 resume a session, open the Board, pick the model, a new pane, rewind, open Options — in one
 list you can filter, recent first, each with its keys. **Options** (Ctrl+Shift+O, the gear at the
 top right, or Ctrl+,) is what *persists*: a tab per section — General, Appearance, Models, Terminal,
@@ -234,7 +234,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   (switch provider), `/help` (the popup `?` shows). A `/command` Relay does not have is answered by
   Relay, not by the shell: it names the closest real commands and points at `/` and `/help`. Coming back to the window after 3 minutes, with a finished
   turn and an empty prompt, prints a short recap (Options › General turns it off).
-- **Sessions: list and full-text search.** Ctrl+Shift+Y (also `/resume`, `/sessions`, `/conversations`, Actions ›
+- **Sessions: list and full-text search.** Ctrl+Shift+S (also `/resume`, `/sessions`, `/conversations`, Actions ›
   Sessions… and the list button in the title bar) opens every saved conversation, grouped by project and newest first, with a
   search field that filters as you type. The search covers **both** agent threads (your prompts,
   the agent's replies, its tool calls and their output) and **Relay's terminal history** (the
@@ -423,7 +423,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 - **Voice.** Press the microphone beside the prompt box, or hold the voice key (Right Alt by
   default), and the transcript is inserted at the cursor; transcription goes through the
   provider you already use. The hold key is a setting under Options › Voice.
-- **Actions and shortcuts.** The Actions pane (Ctrl+Shift+A, Ctrl+?) lists every action with its
+- **Actions and shortcuts.** The Actions pane (Ctrl+?) lists every action with its
   keys, and its search finds actions and options together; it also matches related words
   ("undo" finds Rewind, "reasoning" finds effort, "detach" finds the move actions). Shortcuts
   live in `~/.config/RelayTerminal/relay/keybindings.json`, reload live, and the agent can change
@@ -444,7 +444,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
 
 Relay is not a Konsole fork and does not read or change your Konsole settings or dotfiles.
 
-### The Board (Ctrl+Shift+S)
+### The Board (Ctrl+Shift+A)
 
 The repository's `issues/` tracker as a board: one Markdown card per issue, plan or memory, in
 git, readable on GitHub and usable without Relay. Tabs are categories (Features, Bugs, Design,
@@ -452,7 +452,7 @@ Marketing, Plans, Memory, Deferred, Done), columns are status, and dragging a ca
 moves the file and records the move. Each card has a thread: the discussion and the audit trail,
 append-only, one entry per write.
 
-- **Ctrl+Shift+S** opens it beside the pane you were in (again to close it); `n` adds a card, `/` filters
+- **Ctrl+Shift+A** opens it beside the pane you were in (again to close it); `n` adds a card, `/` filters
   (`label:voice`, `status:ready`, `@agent`, `waiting:me`), Enter opens one, `m` moves it,
   `t` sends `#ID` to the composer, `Del` (or the card's Delete button) deletes one after a
   confirm — undoable for 30 seconds, and agents have no delete at all.
