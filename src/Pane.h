@@ -1852,7 +1852,12 @@ public:
         pauseAgentQueueForStop();
         send(queueOp(QStringLiteral("cancel"))); clearFix();
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
+        hint(QStringLiteral("agent.recall"), relay::ShortcutHints::nextTime(
+            QStringLiteral("↑ or Esc"), QStringLiteral("stops the agent and brings its prompt back to an empty composer")));
     }
+    bool agentPromptInFlight() const { return m_agentBusy || !m_recallPrompt.text.isEmpty(); }
+    bool restoreAgentPrompt();
+    void trackRecallEvent(const QString &type, const QJsonObject &event);
     void selectModel(const QString &id, const QString &model = QString()) {
         // "role:" is a Main/Flash row, "gear:" a door to the models pane, and "serving:" the model
         // this one turn is running on (an image, plan mode's own role, or a failover): none of them
@@ -12398,7 +12403,10 @@ private:
         if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
-        if (when == QStringLiteral("interrupt") && m_agentBusy) {
+        // The user finished editing before the cancel acknowledgement arrived (#7Z08).
+        // Use the existing replacement path so that acknowledgement cannot pause this submit.
+        if (fromEditor && m_recallPrompt.taken && agentPromptInFlight()) when = QStringLiteral("interrupt");
+        if (when == QStringLiteral("interrupt") && agentPromptInFlight()) {
             // Bypasses the queue: stop the running turn and run this now. Queued items keep their order.
             m_interruptPending = true;
             startAgentEntry(entry, false, QStringLiteral("interrupt"));
@@ -13298,7 +13306,7 @@ private:
         }
         // Esc stops a running program when the shell is the only resource running (the agent's
         // Esc is decided further down), so Ctrl+C is left to copying.
-        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !agentPromptInFlight()
             && !(m_atList && m_atList->isVisible()) && !(m_cardList && m_cardList->isVisible())
             && !readingAloudShown()
             && processBusy() && m_backend && !m_altScreen) {
@@ -13318,7 +13326,7 @@ private:
         // Esc Esc in an empty prompt box while the agent is idle opens Rewind. A single Esc no
         // longer takes control of the terminal (owner, 2026-09-17: Esc only interrupts); the
         // keyboard goes to a program through Ctrl+H or the "Take control" button.
-        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !agentPromptInFlight() && m_editor->toPlainText().isEmpty()
             && !inQueueSelection() && !(m_atList && m_atList->isVisible()) && m_configured) {
             if (m_escTimer.isActive()) { m_escTimer.stop(); openRewind(); return true; }
             m_escTimer.setSingleShot(true);
@@ -13472,6 +13480,18 @@ private:
                 }
             }
         }
+        // Queue recall and popup navigation took precedence above. A just-sent prompt is
+        // editable before agent_started arrives too; there is no timer to race (#7Z08).
+        if (mods == Qt::NoModifier && k == Qt::Key_Up && agentPromptInFlight()
+            && m_editor->toPlainText().isEmpty() && !m_recallPrompt.text.isEmpty()
+            && !m_recallPrompt.taken) {
+            if (key->isAutoRepeat()) return true;
+            if (restoreAgentPrompt()) {
+                stopAgent();
+                toast(QStringLiteral("Stopping · prompt restored for editing"));
+                return true;
+            }
+        }
         // --- subagents UI: Down on the last line (history at the draft) enters the strip under the
         // prompt — the running agents and, since 2026-09-19, the open tasks beside them. The
         // isVisible() test already covers the tasks-only case, where the strip shows with no
@@ -13489,14 +13509,15 @@ private:
             return true;
         }
         // --- end subagents UI ---
-        if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && agentPromptInFlight()) {
             // Card #XCXD: Esc no longer skips a question — a blank Enter does (further up), and an
             // approval is never skipped by a key. When both resources run, Esc stops the agent;
             // the shell's stop has Alt+Esc all to itself. An autorepeat is swallowed so a held
             // key cannot spill the stop onto the shell once the agent has stopped.
             if (key->isAutoRepeat()) return true;
+            const bool restored = restoreAgentPrompt();
             stopAgent();
-            toast(QStringLiteral("Agent interrupted"));
+            toast(restored ? QStringLiteral("Stopping · prompt restored for editing") : QStringLiteral("Agent interrupted"));
             return true;
         }
         if (!m_editor->ghost().isEmpty() && m_editor->textCursor().atEnd() && !m_editor->textCursor().hasSelection()) {
@@ -15563,6 +15584,9 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
         const QString requestId = QStringLiteral("ask-%1").arg(++m_askSerial);
         request.insert(QStringLiteral("id"), requestId);
         m_pendingPrompts.insert(requestId, prompt);
+        if (!prompt.fix && !prompt.handoff)
+            m_recallPrompt = {prompt.text, requestId, QString(), false};
+        else m_recallPrompt = {};
         send(request);
         return requestId;
     }
@@ -16317,6 +16341,8 @@ private:
     QPlainTextEdit *m_transcriptView = nullptr;
     QString m_transcriptProgram;
     QHash<QString, PendingPrompt> m_pendingPrompts, m_itemPrompts;   // request id / queue item id -> prompt
+    struct RecallPrompt { QString text, request, item; bool taken = false; };
+    RecallPrompt m_recallPrompt;  // local full text, never a worker's truncated preview (#7Z08)
     // The worker's own queue, exactly as its last `queue_changed` reported it — every surface's
     // rows, in the worker's order, because `queue_move`'s `to` is a position in *that* list.
     // `workerQueued()` and `workerSteers()` are what the strip draws, filtered to this console's

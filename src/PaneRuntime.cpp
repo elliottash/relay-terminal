@@ -1,6 +1,49 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Pane.h"
 
+bool Pane::restoreAgentPrompt() {
+    if (!m_editor->toPlainText().isEmpty() || inQueueSelection()
+        || m_recallPrompt.text.isEmpty() || m_recallPrompt.taken) return false;
+    m_recallPrompt.taken = true;
+    // The correction is a new prompt, never an answer to the cancelled turn's ask.
+    // Withdraw it locally now; the worker's cancellation closes its matching waiter.
+    closeQuestion(QStringLiteral("editing the interrupted prompt"));
+    clearPrefixMode(true);
+    setPrefixMode(QStringLiteral("agent"));
+    m_editor->setPlainText(m_recallPrompt.text);
+    m_editor->moveCursor(QTextCursor::End);
+    m_escTimer.stop();
+    changed();
+    return true;
+}
+
+void Pane::trackRecallEvent(const QString &type, const QJsonObject &event) {
+    const QString item = event.value(QStringLiteral("id")).toString();
+    if (type == QStringLiteral("queued")) {
+        if (!m_recallPrompt.request.isEmpty()
+            && event.value(QStringLiteral("request_id")).toString() == m_recallPrompt.request)
+            m_recallPrompt.item = item;
+    } else if (type == QStringLiteral("agent_started")) {
+        if (m_recallPrompt.item != item) {
+            // A correction can already be on the wire when the old turn's start arrives.
+            // Keep that newer submission; the old lifecycle must not replace its draft.
+            if (!m_recallPrompt.request.isEmpty()
+                && (m_pendingPrompts.contains(m_recallPrompt.request)
+                    || m_itemPrompts.contains(m_recallPrompt.item))) return;
+            const PendingPrompt prompt = m_itemPrompts.value(item);
+            const QString text = prompt.fix || prompt.handoff ? QString()
+                : prompt.text.isEmpty() ? m_workerPrompts.value(item).text : prompt.text;
+            m_recallPrompt = {text, QString(), item, false};
+        }
+    } else if ((type == QStringLiteral("agent_finished") && item == m_recallPrompt.item)
+               || (type == QStringLiteral("error") && !m_recallPrompt.request.isEmpty()
+                   && item == m_recallPrompt.request)
+               || type == QStringLiteral("ready") || type == QStringLiteral("reset")
+               || type == QStringLiteral("configured")) {
+        m_recallPrompt = {};
+    }
+}
+
 bool Pane::eventFilter(QObject *object, QEvent *event) {
         // Card #XCXD: the two queue lanes sit side by side on a wide strip and stack on a narrow
         // one. The layout is chosen when the strip is rebuilt, so a resize that crosses the
@@ -538,6 +581,7 @@ void Pane::connectWorker() {
             // submit in this pane is dropped in silence — the worst version of the bug the local
             // dispatch above exists to prevent.
             m_pendingSubmit.clear(); m_previewId.clear(); m_heldDecision = QJsonObject();
+            m_recallPrompt = {};
             m_enterSteerBuffered = 0;   // a route that will never be answered takes its presses with it
             // Nobody is left to answer to (#MQ9C): take the ask down rather than leave the pane
             // asking on behalf of a worker that is gone.

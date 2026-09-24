@@ -1673,6 +1673,7 @@ void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
 #include "xcxd_review_cases.h"
 #include "xcxd_context_cases.h"
 #include "h2kq_cases.h"
+#include "recall_prompt_cases.h"
 
 int main(int argc, char **argv)
 {
@@ -1691,6 +1692,13 @@ int main(int argc, char **argv)
     CHECK(scratch.isValid());
     qputenv("HOME", scratch.path().toUtf8());
     home = &scratch;
+
+    if (app.arguments().contains(QStringLiteral("--recall-only"))) {
+        relay::theme::applyTheme(app);
+        cases::recallPromptCases();
+        if (!failures) std::fprintf(stdout, "recall: all cases passed\n");
+        return failures ? 1 : 0;
+    }
 
     if (app.arguments().contains(QStringLiteral("--xcxd-only"))) {
         relay::theme::applyTheme(app);
@@ -1723,6 +1731,7 @@ int main(int argc, char **argv)
     }
 
     cases::aContextWithoutAShellStartsNoProgram();
+    cases::recallPromptCases();
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
     cases::aTerminalPaneIsUnchanged();
