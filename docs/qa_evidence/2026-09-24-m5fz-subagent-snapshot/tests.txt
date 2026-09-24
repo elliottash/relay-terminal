@@ -1,0 +1,20 @@
+== PYTHON tests/test_subagents.py (41, includes TranscriptItemsTests) ==
+Ran 41 tests in 2.059s
+
+OK
+
+== PYTHON tests/test_routing_thinking_skills.py (29, paired transcript shape) ==
+Ran 29 tests in 0.846s
+
+OK
+
+== C++ ./build/relay-subagents-tests (33, includes transcriptSnapshotOpensOnToolRows) ==
+PASS   : SubagentsTests::cleanupTestCase()
+Totals: 32 passed, 1 failed, 0 skipped, 0 blacklisted, 821ms
+********* Finished testing of SubagentsTests *********
+
+== Note: trackerOmitsRoleTagsIncludingHistoricalRows (a strip screenshot test this change does not touch) failed in one full-suite run and passed alone and in the next two runs — pre-existing flake, filed separately.
+
+== commits ==
+bdc20cfe Routing test asserts the paired transcript shape (#M5FZ follow-up)
+eab7300a Subagents: the snapshot opens on folded tool rows, not raw JSON (protocol 23)
