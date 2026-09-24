@@ -48,6 +48,7 @@ from typing import Callable, Sequence
 
 from . import board as B
 from . import qa_verifiers as QA
+from .skills import PROFILE_VERIFY_KEYS
 from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
@@ -1175,10 +1176,21 @@ class ToolContext:
     pane: str | None = None
     turn_id: str | None = None
     session_id: str | None = None
+    #: The skills this turn has loaded (#MSJ0): skill id → its `profile` (`{}` for a skill with
+    #: none).  `Agent` records a `load_skill` call and a `/name` invocation here and
+    #: `BoardTools.begin_turn` clears it, so it is exactly the skills in the turn's context; when
+    #: one of them carries verify keys, `board_claim` and `board_update_card` fill a card's
+    #: missing `verify` from it (`BoardTools._verify_from_skills`).
+    skills: dict[str, dict] = field(default_factory=dict)
 
     def signature(self) -> str:
         """This worker's own `provider/model`, or "" when it cannot know it."""
         return QA.signature(self.preset, self.model)
+
+    def skill_loaded(self, skill_id, profile) -> None:
+        """Record that this turn loaded `skill_id`, with its `profile` block (may be empty)."""
+        if isinstance(skill_id, str) and skill_id.strip():
+            self.skills[skill_id.strip()] = dict(profile) if isinstance(profile, dict) else {}
 
     def attrs(self) -> dict:
         out = {}
@@ -1531,6 +1543,7 @@ class BoardTools:
         self.creates_this_turn = 0
         self.writes_this_turn = 0
         self.context.turn_id = turn_id
+        self.context.skills.clear()
 
     def begin_cleanup(self, run_id: str, *, dry_run: bool = False, scope: str | None = None,
                       note: str | None = None, limits: dict | None = None) -> CleanupLog:
@@ -2238,6 +2251,34 @@ class BoardTools:
                             "path": str(card.path.relative_to(self.board.repo)) if card.path else None})
         return sorted(out, key=lambda d: -d["score"])[:5]
 
+    def _verify_from_skills(self, card: B.Card) -> tuple[dict | None, str | None, str | None]:
+        """The `verify` block a work card with none inherits from the skill this turn loaded (#MSJ0).
+
+        Returns `(block, skill_id, note)`.  Exactly one loaded skill with a profile carrying
+        verify keys gives the block — `PROFILE_VERIFY_KEYS` only, validated like an explicit
+        `fields.verify` — and a note saying so.  Two or more profiled skills are not guessed
+        between: no block, and the note names them so the agent sets `fields.verify` itself.
+        A profile that does not validate as a block (say `human: required` with no `criteria`)
+        is reported the same way rather than written.  Agent-facing only (owner steer
+        2026-09-23): the note rides in the tool result and the thread event, nowhere a user reads.
+        """
+        if card.type != "work" or card.front.get("verify") is not None:
+            return None, None, None
+        profiled = {sid: {k: prof[k] for k in PROFILE_VERIFY_KEYS if k in prof}
+                    for sid, prof in self.context.skills.items()
+                    if isinstance(prof, dict) and any(k in prof for k in PROFILE_VERIFY_KEYS)}
+        if not profiled:
+            return None, None, None
+        if len(profiled) > 1:
+            names = ", ".join(sorted(profiled))
+            return None, None, (f"verify not defaulted: skills {names} each carry a profile; "
+                                "set fields.verify yourself")
+        (sid, block), = profiled.items()
+        try:
+            return B.validate_verify(block), sid, f"verify defaulted from skill {sid}"
+        except B.BoardError as exc:
+            return None, None, f"verify not defaulted from skill {sid}: {exc}"
+
     def _update(self, args: dict) -> dict:
         allowed = {"id", "base_hash", "fields", "title", "append_section", "replace_section",
                    "replace_agent_section", "tasks"}
@@ -2347,6 +2388,15 @@ class BoardTools:
             raise BoardToolError("nothing to change: pass fields, title, append_section, "
                                  "replace_section or tasks.")
 
+        # A card still without a `verify` block inherits the loaded skill's (#MSJ0).  An
+        # explicit `fields.verify` — even one that cleared it — always wins and says nothing.
+        defaulted_from = verify_note = None
+        if "verify" not in (fields or {}):
+            block, defaulted_from, verify_note = self._verify_from_skills(card)
+            if block is not None:
+                card.set("verify", block)
+                changes.append(verify_note)
+
         size = self._thread_size(card)
         self.board.save(card, base_hash=base_hash)
         self.writes_this_turn += 1
@@ -2358,7 +2408,9 @@ class BoardTools:
             self._append(card, _rewrite_entry(what, old, new), kind="rewrite")
         write_id = self._record("update", card, summary, before, size)
         return {"id": card.id, "hash": B.file_hash(card.path), "changes": changes,
-                "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites]}
+                "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites],
+                **({"verify_defaulted_from": defaulted_from} if defaulted_from else {}),
+                **({"note": verify_note} if verify_note else {})}
 
     def _move(self, args: dict) -> dict:
         allowed = {"id", "status", "section", "tab", "before", "after", "reason", "evidence",
@@ -2802,6 +2854,11 @@ class BoardTools:
         if mine and str(card.front.get("implemented_by") or "") != mine:
             card.set("implemented_by", mine)
             parts.append(f"implemented_by {mine}")
+        # A card claimed with no `verify` block inherits the loaded skill's (#MSJ0).
+        block, defaulted_from, verify_note = self._verify_from_skills(card)
+        if block is not None:
+            card.set("verify", block)
+            parts.append(verify_note)
         if token:
             if held != token:
                 card.set("session", token)
@@ -2842,6 +2899,8 @@ class BoardTools:
                 "session": token or None, "entry_id": entry.entry_id,
                 "hash": B.file_hash(card.path), "write_id": write_id, "summary": summary,
                 **({"reminder": reminder} if reminder else {}),
+                **({"verify_defaulted_from": defaulted_from} if defaulted_from else {}),
+                **({"note": verify_note} if verify_note else {}),
                 **({} if token else {"warning": NO_TOKEN_NOTE}),
                 "card": card_block(self.board, card)}
 

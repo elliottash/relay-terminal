@@ -2422,6 +2422,14 @@ class Agent:
             self.sign_board()
             self.board.context.session_id = self.session_id
             self.board.begin_turn(turn_id)
+            # A skill the user ran as `/name` is in this turn's context as much as one the
+            # model loads (#MSJ0): record it, with its profile, so a card claimed under it
+            # inherits the profile's `verify` defaults.
+            index = self.executor.skills
+            for item in attachments or []:
+                if isinstance(item, dict) and item.get("kind") == "skill" and item.get("skill"):
+                    skill = index.skills.get(item["skill"]) if index is not None else None
+                    self.board.context.skill_loaded(item["skill"], skill.profile if skill else {})
         # Identifiers, sizes and settings only: the prompt itself is logged solely at "verbose".
         logs.event(_log, "turn_start", session=self.session_id, turn=turn_id, model=self.config.model,
                    host=_host(self.config.base_url), mode=self.mode, effort=self.effort,
@@ -4097,6 +4105,13 @@ class Agent:
             self.checkpoints.record_before(turn, prepared.path, old)
             result = self.executor.execute(prepared)
             self.checkpoints.record_after(turn, prepared.path, result["sha256"])
+            return result
+        if prepared.name == "load_skill":
+            # What this turn has in context (#MSJ0): the board's claim and update tools
+            # default a card's `verify` from a loaded skill's profile.
+            result = self.executor.execute(prepared)
+            if self.board is not None and isinstance(result, dict) and result.get("skill"):
+                self.board.context.skill_loaded(result["skill"], result.get("profile"))
             return result
         return self.executor.execute(prepared)
 

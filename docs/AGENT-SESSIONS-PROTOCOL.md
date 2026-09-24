@@ -4173,6 +4173,12 @@ is the one definition; `board_update_card {fields: {verify}}` refuses a bad key 
 (`board_refused`, `field: "verify"`), `relay-board.py check` errors on an invalid block
 (`bad_verify`) and warns on a card in `executing` or later with none (`missing_verify`), and
 `board_claim`'s result carries a one-line `reminder` when the card has none.
+When the turn has loaded exactly one skill whose `profile:` carries verify keys (#MSJ0, via
+`load_skill` or a `/name` invocation), `board_claim` and `board_update_card` fill a work card's
+missing `verify` from those keys (`relay_core.skills.PROFILE_VERIFY_KEYS`, validated the same
+way) and say so in the result — `verify_defaulted_from: "<skill id>"` and a `note` reading
+`verify defaulted from skill <id>`; two profiled skills default nothing and the `note` names
+them, and an explicit `fields.verify` always wins with no note.
 
 **Shape on the wire.** `board_read` — and so the `board_card` event — carry it under `front.verify`,
 normalized: every value a string, `also` a list of strings, `human` and `sign_off` present

@@ -3464,5 +3464,126 @@ class VerifyGateTests(BoardToolsTest):
         self.assertIn("needs it met: evidence, the person's answer, a receipt, not deferred", T.policy_text())
 
 
+class VerifyDefaultTests(BoardToolsTest):
+    """#MSJ0: a card claimed or updated while the turn has loaded a profiled skill inherits the
+    profile's verify keys as its `verify` block; an explicit `fields.verify` always wins."""
+
+    REFEREE = ("artifact: text\nprimary: ai-text\nalso: person\nhuman: required\n"
+               "criteria: every major point is addressed\nsign_off: none\neffort: high\n"
+               "regularity: routine\nrot: low\nconfidential: yes")
+    HEALTH = "artifact: system\nprimary: probe\nhuman: none\neffort: low\nexecutable: yes"
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+
+    def load(self, skill_id, profile_text):
+        from relay_core.skills import parse_profile
+        self.tools.context.skill_loaded(skill_id, parse_profile(profile_text))
+
+    def update(self, **args):
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        return self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current, **args})
+
+    def test_a_claim_defaults_verify_from_the_one_loaded_profiled_skill(self):
+        self.load("referee-report", self.REFEREE)
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["verify_defaulted_from"], "referee-report")
+        self.assertEqual(result["note"], "verify defaulted from skill referee-report")
+        self.assertNotIn("reminder", result)
+        self.assertIn("verify defaulted from skill referee-report", result["summary"])
+        # Only the verify keys cross over, normalized by validate_verify; the server-only
+        # factors (regularity, rot, confidential) stay on the skill.
+        self.assertEqual(self.board.card_by_id(self.card_id).front["verify"],
+                         {"artifact": "text", "primary": "ai-text", "also": ["person"],
+                          "human": "required", "criteria": "every major point is addressed",
+                          "sign_off": "none", "effort": "high"})
+        read = self.tools.run("board_read", {"id": self.card_id})
+        self.assertEqual(read["front"]["verify"]["primary"], "ai-text")
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_an_update_defaults_verify_when_the_card_has_none(self):
+        self.load("server-health-check", self.HEALTH)
+        result = self.update(append_section={"heading": "Findings", "text": "- disk at 91%"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["verify_defaulted_from"], "server-health-check")
+        self.assertEqual(result["note"], "verify defaulted from skill server-health-check")
+        self.assertIn("verify defaulted from skill server-health-check", result["changes"])
+        card = self.board.card_by_id(self.card_id)
+        self.assertEqual(card.front["verify"], {"artifact": "system", "primary": "probe", "also": [],
+                                                "human": "none", "sign_off": "none", "effort": "low"})
+        self.assertIn("verify defaulted from skill server-health-check", self.thread_text(self.card_id))
+        # A second update finds the block in place and says nothing more.
+        again = self.update(append_section={"heading": "Findings", "text": "- rotated the log"})
+        self.assertNotIn("verify_defaulted_from", again)
+        self.assertNotIn("note", again)
+
+    def test_an_explicit_fields_verify_wins_and_gets_no_note(self):
+        self.load("server-health-check", self.HEALTH)
+        mine = {"artifact": "code", "primary": "script", "effort": "medium"}
+        result = self.update(fields={"verify": mine})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("verify_defaulted_from", result)
+        self.assertNotIn("note", result)
+        self.assertEqual(self.board.card_by_id(self.card_id).front["verify"]["primary"], "script")
+        # And a claim afterwards leaves the explicit block alone.
+        claim = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("verify_defaulted_from", claim)
+        self.assertEqual(self.board.card_by_id(self.card_id).front["verify"]["primary"], "script")
+
+    def test_two_profiled_skills_are_not_guessed_between(self):
+        self.load("referee-report", self.REFEREE)
+        self.load("server-health-check", self.HEALTH)
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("verify_defaulted_from", result)
+        self.assertEqual(result["note"], "verify not defaulted: skills referee-report, "
+                                         "server-health-check each carry a profile; set fields.verify yourself")
+        self.assertIn("reminder", result)
+        self.assertNotIn("verify", self.board.card_by_id(self.card_id).front)
+        update = self.update(append_section={"heading": "Findings", "text": "- x"})
+        self.assertNotIn("verify_defaulted_from", update)
+        self.assertNotIn("verify", self.board.card_by_id(self.card_id).front)
+
+    def test_a_profile_without_verify_keys_or_no_profile_defaults_nothing(self):
+        self.load("plain", "")
+        self.load("server-only", "regularity: novel\nexecutable: no\nrot: high")
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("verify_defaulted_from", result)
+        self.assertNotIn("note", result)
+        self.assertIn("reminder", result)
+        self.assertNotIn("verify", self.board.card_by_id(self.card_id).front)
+
+    def test_a_profile_that_is_not_a_valid_block_is_reported_not_written(self):
+        # `human: required` needs `criteria`; the profile is the skill author's to fix.
+        self.load("half", "artifact: text\nprimary: ai-text\nhuman: required\neffort: low")
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("verify_defaulted_from", result)
+        self.assertIn("verify not defaulted from skill half: verify.criteria is required", result["note"])
+        self.assertNotIn("verify", self.board.card_by_id(self.card_id).front)
+
+    def test_begin_turn_forgets_the_skills_of_the_last_turn(self):
+        self.load("server-health-check", self.HEALTH)
+        self.tools.begin_turn("t-2")
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertNotIn("verify_defaulted_from", result)
+        self.assertIn("reminder", result)
+
+    def test_the_bundled_deliver_profile_defaults_a_claim(self):
+        from relay_core import skills as skills_mod
+        index = skills_mod.SkillIndex.load([Path(skills_mod.bundled_dir())])
+        loaded = index.load_skill("deliver")
+        self.tools.context.skill_loaded(loaded["skill"], loaded["profile"])
+        result = self.tools.run("board_claim", {"id": self.card_id})
+        self.assertEqual(result["verify_defaulted_from"], "deliver")
+        verify = self.board.card_by_id(self.card_id).front["verify"]
+        self.assertEqual((verify["primary"], verify["human"], verify["effort"], verify["stakes"], verify["blast"]),
+                         ("script", "none", "medium", "rework", "capability"))
+        self.assertNotIn("regularity", verify)
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()
