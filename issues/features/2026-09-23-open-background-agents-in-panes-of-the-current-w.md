@@ -9,7 +9,7 @@ session: 42f336c3-adea-4056-8db6-6c8f23927aa5
 rank: zzzzzzzzzzzzzzzzzzzi
 created: '2026-09-23'
 source: Owner in a Relay pane, 2026-09-23
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-w92v/], related: [BGRN], github: null}
+links: {plans: [], commits: [dadcc3be1a8b41fc797e5aba244bb48b659b0544], evidence: [docs/qa_evidence/2026-09-23-w92v/], related: [BGRN], github: null}
 ---
 # Open background agents in panes of the current window
 
