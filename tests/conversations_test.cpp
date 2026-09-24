@@ -86,6 +86,18 @@ static bool chooseComboItem(QComboBox *combo, const QString &data) {
     const QPoint point = view->visualRect(index).center();
     QTest::mouseMove(view->viewport(), point);
     QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+    if (combo->currentIndex() == at)
+        return true;
+    // The synthetic click can land dead when the popup has re-opened repositioned — the
+    // container shifts to keep the current item aligned, and the offscreen platform cannot
+    // grab the mouse the way a windowing system would, so the release never reaches the
+    // container's selection logic. The popup is still open and focused, so finish the choice
+    // the way a keyboard user would: arrows to the item, Return. That still drives the combo's
+    // real popup — which is what this helper exists to check — and not setCurrentIndex.
+    const int steps = (at - combo->currentIndex() + combo->count()) % combo->count();
+    for (int i = 0; i < steps; ++i)
+        QTest::keyClick(view, Qt::Key_Down);
+    QTest::keyClick(view, Qt::Key_Return);
     return combo->currentIndex() == at;
 }
 
