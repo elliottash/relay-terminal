@@ -261,12 +261,15 @@ QList<PlugItem> plugMenu(const State &state)
 {
     QList<PlugItem> items;
     // The line the plug has carried since #PH0N: where this desktop is published and how many of
-    // the owner's phones are on it. Not clickable — it is the answer to "is it on?", and the two
-    // rows under it are what to do about it.
+    // the owner's phones are on it. Not clickable — it is the answer to "is it on?"; the actions
+    // under it open Sharing, start pairing and control the service.
     items.append({PlugItem::Status, QStringLiteral("remote.status"), statusLine(state), false});
     items.append({PlugItem::Separator, QString(), QString(), false});
-    // First, because it is the thing a person with a phone in their hand came here to do, and
-    // because it turns remote control on by itself when it is off.
+    // The same Sharing pane reached from a pane's share chip. This window-level entry works
+    // even when a tool pane has focus; pairing and joining keep their own direct routes below.
+    items.append({PlugItem::Action, QStringLiteral("remote.sharing"),
+                  QStringLiteral("Sharing…"), false});
+    // Pairing turns remote control on by itself when it is off.
     items.append({PlugItem::Action, QStringLiteral("remote.pair"),
                   QStringLiteral("Pair a phone…"), false});
     // The switch itself, one click from the window rather than three from Options. Turning it off

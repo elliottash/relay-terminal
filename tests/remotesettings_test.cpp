@@ -288,28 +288,28 @@ private Q_SLOTS:
 
     // ----- one entry point: the plug menu (#FR1C) ----------------------------------------------
 
-    // The plug at the top right of the window. "Pair a phone…" is the first row a person can
-    // choose — the status line above it is not clickable — and the switch itself is the row under
-    // it, so turning remote control on is one click from the window rather than three from
-    // Options ("even step 1 of enabling remote, that was not obvious to me").
-    void thePlugMenuLeadsWithPairingAndCarriesTheSwitch() {
+    // The top-right plug opens the same Sharing pane as a pane's share chip while keeping direct
+    // pairing, remote-control and joining actions.
+    void thePlugMenuOpensSharingAndCarriesTheSwitch() {
         rs::State off;
         const QList<rs::PlugItem> items = rs::plugMenu(off);
-        QCOMPARE(items.size(), 7);
+        QCOMPARE(items.size(), 8);
         QCOMPARE(items[0].kind, rs::PlugItem::Status);
         QCOMPARE(items[0].id, QStringLiteral("remote.status"));
         QCOMPARE(items[0].label, QStringLiteral("Remote control off"));
         QCOMPARE(items[1].kind, rs::PlugItem::Separator);
         QCOMPARE(items[2].kind, rs::PlugItem::Action);
-        QCOMPARE(items[2].id, QStringLiteral("remote.pair"));
-        QCOMPARE(items[2].label, QStringLiteral("Pair a phone…"));
-        QCOMPARE(items[3].kind, rs::PlugItem::Toggle);
-        QCOMPARE(items[3].id, QStringLiteral("remote.control"));
-        QCOMPARE(items[3].label, QStringLiteral("Remote control: off"));
-        QVERIFY(!items[3].checked);
-        QCOMPARE(items[4].kind, rs::PlugItem::Separator);
-        QCOMPARE(items[5].id, QStringLiteral("remote.join"));
-        QCOMPARE(items[6].id, QStringLiteral("remote.openShared"));
+        QCOMPARE(items[2].id, QStringLiteral("remote.sharing"));
+        QCOMPARE(items[2].label, QStringLiteral("Sharing…"));
+        QCOMPARE(items[3].id, QStringLiteral("remote.pair"));
+        QCOMPARE(items[3].label, QStringLiteral("Pair a phone…"));
+        QCOMPARE(items[4].kind, rs::PlugItem::Toggle);
+        QCOMPARE(items[4].id, QStringLiteral("remote.control"));
+        QCOMPARE(items[4].label, QStringLiteral("Remote control: off"));
+        QVERIFY(!items[4].checked);
+        QCOMPARE(items[5].kind, rs::PlugItem::Separator);
+        QCOMPARE(items[6].id, QStringLiteral("remote.join"));
+        QCOMPARE(items[7].id, QStringLiteral("remote.openShared"));
 
         rs::State on;
         on.on = true;
@@ -318,8 +318,8 @@ private Q_SLOTS:
         on.devices = 2;
         const QList<rs::PlugItem> lit = rs::plugMenu(on);
         QCOMPARE(lit[0].label, QStringLiteral("Remote control on · relay-terminal.ai · 2 devices"));
-        QCOMPARE(lit[3].label, QStringLiteral("Remote control: on"));
-        QVERIFY(lit[3].checked);
+        QCOMPARE(lit[4].label, QStringLiteral("Remote control: on"));
+        QVERIFY(lit[4].checked);
         // Joining somebody else's session is still there, under the separator: the plug keeps
         // what it had and gains the two rows above.
         QStringList ids;

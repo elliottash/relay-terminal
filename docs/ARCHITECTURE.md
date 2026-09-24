@@ -3691,11 +3691,12 @@ fit beside the model picker and the microphone in the composer strip; `PaneChrom
 owns it and repaints it through `Pane::onShareChipChanged`). Since #SMDX (owner, 2026-09-24) it
 opens a two-action menu rather than a window: "Share this pane…" opens the Sharing pane on its
 People page with the invite form already on this pane, and "Sharing…" opens the Sharing pane to
-choose another scope or see current activity. The pane's context menu keeps "Share this pane…"
-and "Sharing". Pairing one of your own devices is a different entry point: "Pair a phone…" in the
-plug menu, the palette (`remote.pair`) and Options › Remote all open the Sharing pane on its
-Devices page with a pairing offer already started. "Join a shared session…" and "Open a shared pane…" — being the guest, not
-the host — stay in the plug menu and the palette.
+choose another scope or see current activity. The top-right plug menu also has "Sharing…" for
+that pane, alongside device pairing, remote control and joining. The pane's context menu keeps
+"Share this pane…" and "Sharing". Pairing one of your own devices is a different entry point:
+"Pair a phone…" in the plug menu, the palette (`remote.pair`) and Options › Remote all open the
+Sharing pane on its Devices page with a pairing offer already started. "Join a shared session…"
+and "Open a shared pane…" — being the guest, not the host — stay in the plug menu and the palette.
 
 The protocol, the cryptography and the phone's web client live in a Python sidecar,
 `remote/gui_host.py`, started on demand and spoken to in line JSON exactly as the agent worker is

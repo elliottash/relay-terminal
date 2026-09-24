@@ -1349,15 +1349,14 @@ void RelayWindow::buildWindowChrome() {
         rightRow->addSpacing(4);
         rightRow->addWidget(new ChromeSeparator);
         rightRow->addSpacing(4);
-        // The plug: into somebody else's session. Joining with a code is the common case, so it
-        // is the first entry; your own desktop's panes are the second (owner, 2026-09-18).
+        // The plug: Sharing, pairing your own devices, and joining somebody else's session.
         m_connect = new ChromeButton(ChromeButton::Glyph::Connect);
-        m_connect->setToolTip(QStringLiteral("Join a shared session"));
+        m_connect->setToolTip(QStringLiteral("Sharing and remote connections"));
         connect(m_connect, &QToolButton::clicked, this, [this] {
             QMenu menu(this);
             // The rows and their order are relay::remotesettings::plugMenu (#FR1C), so a test
             // reads them without a window: the status line the plug has carried since #PH0N,
-            // "Pair a phone…" first, and the switch itself under it. Turning the switch off here
+            // "Sharing…", "Pair a phone…", then the switch. Turning the switch off here
             // is what "Disconnect all" was — the phones go and the service goes with them — under
             // the name of the thing it actually moves.
             for (const relay::remotesettings::PlugItem &item :

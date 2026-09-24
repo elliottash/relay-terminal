@@ -6165,11 +6165,22 @@ private:
         const relay::remotesettings::State state = shownRemoteState();
         m_connect->setBadge(state.online ? state.devices : 0);
         m_connect->setToolTip(state.on ? relay::remotesettings::statusLine(state)
-                                       : QStringLiteral("Join a shared session"));
+                                       : QStringLiteral("Sharing and remote connections"));
     }
 
     // One plug-menu row chosen. The ids are relay::remotesettings::plugMenu's.
     void runPlugItem(const QString &id) {
+        if (id == QStringLiteral("remote.sharing")) {
+            Pane *owner = dynamic_cast<Pane *>(m_activeLeaf.data());
+            if (!owner) owner = m_active;
+            if (!owner) {
+                const QList<Pane *> panes = allPanes();
+                owner = panes.isEmpty() ? nullptr : panes.first();
+            }
+            if (owner) openSharingPane(owner, true);
+            else notice(QStringLiteral("Open a terminal pane first to show Sharing."), 6000);
+            return;
+        }
         if (id == QStringLiteral("remote.pair")) { pairPhone(); return; }
         if (id == QStringLiteral("remote.control")) {
             if (relay::RemoteShare::instance().alwaysOn()) disconnectRemoteDevices();
