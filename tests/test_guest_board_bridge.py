@@ -289,6 +289,10 @@ class BridgeTests(unittest.TestCase):
         self.assertIn('native identity', text)
         self.assertIn('model=claude-live-model', text)
         self.assertEqual(self.call(key='after')['code'], 'unavailable')
+        # The inner failure reaches the pane with its own words, not just its type (#GBN4).
+        errors = [e for e in self.events if e.get('event') == 'error']
+        self.assertTrue(any('guest failed after write' in str(e.get('text')) for e in errors),
+                        errors)
 
     def test_real_stdio_proxy_initialize_list_call_and_malformed(self):
         self.active()

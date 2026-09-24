@@ -1282,8 +1282,10 @@ class HarnessProvider:
                                 self.usage_limits) from None
         except Exception as exc:
             turn.close_thinking()
+            # Keep the exception's own text: the type alone told the owner nothing when a guest
+            # died right after its board write went through (#GBN4).
             raise ProviderError(f"{guest.spec(self.guest_id).name}'s harness failed "
-                                f"({type(exc).__name__}).") from None
+                                f"({type(exc).__name__}: {exc}).") from None
         finally:
             turn.release_steer()
             if self.board_bridge is not None:
