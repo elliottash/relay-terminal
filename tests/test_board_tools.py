@@ -279,7 +279,8 @@ class CreateTests(BoardToolsTest):
 
     def test_a_created_card_passes_the_format_check(self):
         self.create()
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
 
 # ------------------------------------------------------------------------- update
@@ -611,7 +612,8 @@ class MoveTests(BoardToolsTest):
                                            "reason": "not now"})
         self.assertEqual(self.board.card_by_id(self.card_id).path.parent,
                          self.root / "features" / "deferred")
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_move_to_another_tab_moves_the_category(self):
         self.tools.run("board_move_card", {"id": self.card_id, "tab": "bugs", "reason": "it is a bug"})
@@ -1108,7 +1110,8 @@ class CommentTests(BoardToolsTest):
         self.assertNotIn("error", plain)
         note = next(e for e in self.board.thread(self.card_id) if e.text == "no pane")
         self.assertNotIn("pane_token", note.attrs)
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_pane_token_the_entry_marker_cannot_hold_is_refused(self):
         # The attrs live inside an HTML comment: whitespace would split one, '>' would close
@@ -1141,7 +1144,8 @@ class CommentTests(BoardToolsTest):
         ids = [e.entry_id for e in self.board.thread(self.card_id)]
         self.assertEqual(ids, sorted(ids))
         self.assertEqual(len(set(ids)), len(ids))
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
 
 # ------------------------------------------------------------------------- claim
@@ -1176,7 +1180,8 @@ class ClaimTests(BoardToolsTest):
                          f"Claimed ({self.pane_token[:8]}) · working on it from a terminal pane")
         self.assertIn("starting on the parser", entry.text)
         self.assertIn(f"pane_token={self.pane_token}", self.thread_text(self.card_id))
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_claim_is_one_undoable_write_and_one_activity_event(self):
         before = len(self.events)
@@ -1202,7 +1207,8 @@ class ClaimTests(BoardToolsTest):
         # Two claims, two progress entries; the card is claimed once.
         self.assertEqual(len(self.progress_entries()), 2)
         self.assertEqual(self.tools.claimed, [self.card_id])
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_card_held_by_another_session_is_refused_and_force_takes_it(self):
         other = T.BoardTools(self.board, autonomy="auto",
@@ -1226,7 +1232,8 @@ class ClaimTests(BoardToolsTest):
         self.assertNotIn("error", taken, taken)
         self.assertEqual(taken["session"], self.pane_token)
         self.assertEqual(self.board.card_by_id(self.card_id).front["session"], self.pane_token)
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_session_that_is_not_executing_does_not_hold_the_card(self):
         # Only executing/in-progress means held: a card whose work was landed carries the
@@ -1259,7 +1266,8 @@ class ClaimTests(BoardToolsTest):
         entry = self.progress_entries()[-1]
         self.assertNotIn("pane_token", entry.attrs)
         self.assertEqual(entry.text, "Claimed · working on it from a terminal pane")
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_the_result_carries_the_whole_card_block(self):
         self.tools.run("board_update_card", {
@@ -1477,7 +1485,8 @@ class ReleaseOnCloseTests(BoardToolsTest):
         entries = [e for e in self.board.thread(self.card_id) if e.kind == "event"]
         self.assertIn(f"session {self.pane_token[:8]} released", entries[-1].text)
         self.assertEqual(self.tools.claimed, [])
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_moving_a_claimed_card_to_dropped_drops_the_session(self):
         self.move("dropped")
@@ -1585,7 +1594,8 @@ class ReleaseClaimsTests(BoardToolsTest):
         self.assertEqual(entry.text.splitlines()[0],
                          f"Released ({self.pane_token[:8]}) · the pane closed")
         self.assertEqual(self.tools.claimed, [])
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_an_in_progress_card_is_released_as_well(self):
         # `in-progress` is the same thing on a board configured before the stage statuses.
@@ -2941,7 +2951,8 @@ class SignalToolTests(BoardToolsTest):
         section = B.section_text(card.body, self.S.SIGNAL_HEADING)
         self.assertIn("`ctest:panelayout`", section)
         self.assertIn("closing this card does not close the signal", section)
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
         # …and the signal now names the card, so a second promotion is a no-op.
         again = self.tools.run("board_signals", {"action": "promote", "key": "ctest:panelayout"})
         self.assertFalse(again["promoted"])
@@ -2971,7 +2982,8 @@ class SignalToolTests(BoardToolsTest):
         # Idempotent: nothing to write a second time.
         signals = self.S.state(self.repo, self.root)
         self.assertFalse(self.S.rewrite_section(self.board, signals["ctest:panelayout"]))
-        self.assertEqual([str(p) for p in self.board.check()], [])
+        # (a claimed card without a `verify` block is a `missing_verify` warning, #WFRA)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
 
     # ---- the gate ------------------------------------------------------------
     def gated_card(self, status="needs-verification", session=None):
@@ -3206,6 +3218,95 @@ class DoneMeansSectionTests(BoardToolsTest):
                                                     "reason": "I looked at it"})
         self.assertNotIn("error", result, result)
         self.assertEqual(self.board.card_by_id(card_id).status, "done")
+
+
+class VerifyFieldTests(BoardToolsTest):
+    """`fields.verify` on board_update_card, the claim reminder and where the block is read (#WFRA)."""
+
+    BLOCK = {"artifact": "code", "primary": "script", "also": ["ai-text"], "human": "optional",
+             "criteria": "the refusal reads as one sentence", "effort": "low"}
+
+    def update(self, card_id, **kw):
+        card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
+        return self.tools.run("board_update_card", {"id": card_id, "base_hash": card_hash, **kw})
+
+    def test_fields_verify_is_validated_and_read_back_normalized(self):
+        card_id = self.create()
+        result = self.update(card_id, fields={"verify": dict(self.BLOCK, also="ai-text")})
+        self.assertNotIn("error", result, result)
+        self.assertTrue(any(c.startswith("verify: (unset) → ") for c in result["changes"]), result["changes"])
+        read = self.tools.run("board_read", {"id": card_id})
+        self.assertEqual(read["front"]["verify"], dict(self.BLOCK, sign_off="none"))
+        self.assertNotIn("verify_error", read)
+        self.assertIsInstance(read["front"]["verify"]["also"], list)
+        # The file holds the normalized block, on one line of front matter.
+        self.assertIn("verify: {artifact: code, primary: script, also: [ai-text], human: optional, "
+                      "criteria: the refusal reads as one sentence, sign_off: none, effort: low}",
+                      self.board.card_by_id(card_id).path.read_text())
+        # null removes it, like any other field.
+        self.assertNotIn("error", self.update(card_id, fields={"verify": None}))
+        self.assertNotIn("verify", self.tools.run("board_read", {"id": card_id})["front"])
+
+    def test_a_bad_key_or_value_is_refused_by_name(self):
+        card_id = self.create()
+        for value, phrase in (({**self.BLOCK, "primary": "vibes"}, "verify.primary 'vibes' is not one of"),
+                              ({**self.BLOCK, "sample": "1/10", "grade": "A"}, "verify has no key 'grade'"),
+                              ({"artifact": "code", "primary": "script"}, "verify is missing 'effort'"),
+                              ({**self.BLOCK, "human": "required", "criteria": None},
+                               "verify.criteria is required when verify.human is 'required'"),
+                              ("script", "verify must be a mapping")):
+            refused = self.update(card_id, fields={"verify": value})
+            self.assertEqual(refused.get("code"), "board_refused", refused)
+            self.assertEqual(refused.get("field"), "verify")
+            self.assertIn(phrase, refused["error"])
+        self.assertNotIn("verify", self.board.card_by_id(card_id).front)
+
+    def test_a_stored_block_that_does_not_validate_is_named_on_read(self):
+        card_id = self.create()
+        card = self.board.card_by_id(card_id)
+        card.set("verify", {"artifact": "code", "primary": "vibes", "effort": "low"})
+        self.board.save(card)
+        read = self.tools.run("board_read", {"id": card_id})
+        self.assertIn("verify.primary 'vibes'", read["verify_error"])
+        self.assertEqual(read["front"]["verify"]["primary"], "vibes")   # as written, not dropped
+        row = next(r for r in self.tools.run("board_list", {})["cards"] if r["id"] == card_id)
+        self.assertEqual(row["verify"], "invalid")
+
+    def test_a_claim_without_a_block_carries_a_one_line_reminder(self):
+        card_id = self.create()
+        result = self.tools.run("board_claim", {"id": card_id})
+        self.assertNotIn("error", result, result)
+        self.assertIn(f"#{card_id} has no `verify` block", result["reminder"])
+        self.assertIn("## Done means", result["reminder"])
+        self.assertNotIn("\n", result["reminder"])
+        self.assertNotIn("error", self.update(card_id, fields={"verify": self.BLOCK}))
+        again = self.tools.run("board_claim", {"id": card_id})
+        self.assertNotIn("error", again, again)
+        self.assertNotIn("reminder", again)
+
+    def test_list_rows_carry_the_verify_cell(self):
+        with_block = self.create(title="Has block")
+        self.update(with_block, fields={"verify": dict(self.BLOCK, primary="probe", human="required")})
+        without = self.create(title="No block", request="a different request with no block")
+        rows = {r["id"]: r for r in self.tools.run("board_list", {})["cards"]}
+        self.assertEqual(rows[with_block]["verify"], "probe · person")
+        self.assertNotIn("verify", rows[without])
+
+    def test_the_policy_the_skill_and_the_tool_say_to_propose_it(self):
+        policy = T.policy_text()
+        self.assertIn("propose `verify` beside `## Done means`", policy)
+        self.assertIn("ladder order, with effort", policy)
+        update = next(item["function"] for item in T.TOOL_SPECS
+                      if item["function"]["name"] == "board_update_card")["description"]
+        self.assertIn("`verify`", update)
+        self.assertIn("refused naming a bad key or value", update)
+        from relay_core import skills as skills_mod
+        deliver = (Path(skills_mod.bundled_dir()) / "deliver" / "SKILL.md").read_text("utf-8")
+        self.assertIn("propose the `verify` block", deliver)
+        self.assertLess(deliver.index("propose the `verify` block"), deliver.index("## 5. Run"))
+        for word in ("`script`", "`probe`", "`metric`", "`ai-text`", "`ai-visual`", "`level`",
+                     "`pairwise`", "`person`", "`world`", "effort: low|medium|high"):
+            self.assertIn(word, deliver)
 
 
 if __name__ == "__main__":       # pragma: no cover

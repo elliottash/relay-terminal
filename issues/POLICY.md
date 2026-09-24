@@ -22,34 +22,35 @@ when the bridge or the needed tool is unavailable.
 Board rules (`board_*` writes the repository's `issues/` tracker in git):
 
 1. **Capture work at its size.** Check code, history and `board_list` first; do not redo done work.
-   Each unfinished user request gets a card, or updates its existing card. One card per request,
+   Each unfinished user request gets a card or updates its existing one; one card per request,
    never for your steps (`update_todos`). *Small*: finished and verified this turn, no design choice
    or question; no card, the commit is the record. *Medium*: more than one turn or two files,
    no decision needed, proved by a test. *Large*: needs a plan, a user decision or changes UI.
    Before medium/large work, find or create the card and `board_claim` it. Load **`deliver`** for
    the procedure. `/deliver` makes work large; "just do it" or "no card" makes it small.
 2. **Verbatim requests.** `request` is the user's words verbatim; do not paraphrase or tidy. Write the title.
-3. **Questions** for the user go on the card as a `question` comment, and the card goes to
-   `discussing` with `waiting_on: owner`. Name the card in your reply rather than burying the
+3. **Questions** for the user go on the card as a `question` comment; the card goes to
+   `discussing` with `waiting_on: owner`. Name the card in your reply rather than burying
    questions in the terminal or the board page's chat: the card is where the question waits.
-4. **Decisions:** quote the user in a `decision` comment and the card's `## Decisions` section.
+4. **Decisions:** quote the user in a `decision` comment and in `## Decisions`.
 5. **Work.** `board_claim` records the `session` that is this pane, so a card in Executing with
-   another `session` is that session's work — comment on it, and claim it only when the user says
-   to take it over. It lands in the same commit as the change: a *medium* card you move to `done`
-   yourself, a *large* one to `needs-verification` with its evidence path, and no
+   another `session` is that session's work — comment, and claim it only when the user says to
+   take it over. It lands in the change's commit: a *medium* card you move to `done` yourself, a
+   *large* one to `needs-verification` with its evidence path, and no
    `## QA checklist`: a separate session verifies and writes it.
-6. **Unrelated faults** you notice on the way become a new card in the bugs tab with the measured
-   evidence — never a silent fix and never a detour.
-7. **Other people's cards:** comment, never reassign and never rewrite what they wrote. **Nothing
-   is deleted** and there is no delete tool: a card is closed by moving it to `done` or `dropped`
-   with a reason. Threads are append-only. Only the owner deletes cards.
+6. **Unrelated faults** you notice become a new card in the bugs tab with the measured
+   evidence — never a silent fix, never a detour.
+7. **Other people's cards:** comment; never reassign or rewrite what they wrote. **Nothing is
+   deleted** (no delete tool): a card closes by moving to `done` or `dropped` with a reason;
+   threads are append-only; only the owner deletes.
 8. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
-   writing and summarize the rest of the requests in your reply.
+   writing and summarize the rest in your reply.
 9. **Report:** after a card write, name `#ID` and the change in your reply.
-10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means
-    (the outcome and how failure shows, before the work), Plan, Tasks, Execution Summary, Tests,
-    Profile, Try it, QA checklist, Human QA, Verdict, Resolution; no others. Write only your
-    stage's section and move cards within your authority.
+10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means,
+    Plan, Tasks, Execution Summary, Tests, Profile, Try it, QA checklist, Human QA, Verdict,
+    Resolution; no others. Write only your stage's section and move cards within your authority.
+11. **Verify:** propose `verify` beside `## Done means` (ladder order, with effort); `done`
+    needs it met: evidence, the person's answer, a receipt, not deferred.
 
 
 Memory: `board_create_card {type: memory}` saves one reusable fact with a stable `name` and
@@ -141,6 +142,22 @@ lines: the outcome someone could check, and how failure would be recognised. It 
 verifying session checks the work against, so it has to be chosen before the implementation can
 shape it. Run on a card without it says so on the board and goes on.
 
+**Beside it, propose the `verify` block** — `board_update_card {fields: {verify: {…}}}` — by
+walking the QA ladder in order and stopping at the first oracle that can gate: `script` (a test,
+a diff, a hash), `probe` (the live artifact answers), `metric` (a calibrated threshold),
+`ai-text` (a model reads the output), `ai-visual` (a model reads a picture), `level` (a rubric),
+`pairwise` (old against new), `person` (someone looks, listens or plays), `world` (an experiment
+or a client). That rung is `primary`; the others that still help go in `also`. Say what the
+`artifact` is (code, text, number, visual, audio, system, physical, decision); whether a person
+must look — `human: none|optional|required`, with `criteria` (one line: what they check and what
+passing looks like) whenever it is not `none`; `sign_off` when a rule demands one (money,
+publish, send, delete, legal, clinical); and `effort: low|medium|high` from stakes × novelty
+(`stakes`, `blast` when they matter). If nobody here can run the check at all, say so honestly:
+`deferred: "until <what has to happen, and who owns it>"`. Example, a worker change proved by a
+unit test and read once by a person: `{artifact: code, primary: script, also: [ai-text], human:
+optional, criteria: "the refusal reads as one sentence", effort: low}`. The claim result reminds
+you when the card has none; the user corrects the proposal, and their correction stands.
+
 ### 5. Run
 
 - **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage
@@ -181,6 +198,14 @@ shape it. Run on a card without it says so on the board and goes on.
     judgement is the user's.
   Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
   card, so never type either — and never type `session`.
+- **Verified means the whole `verify` block is met** (`relay_core.board.verified`): the primary
+  evidence is on the card — a `## Verdict`, or a passing `### Check` under `## Tests` — *and* the
+  person's `Answer:` sits under a `## Human QA` question when `human: required` (offer
+  `needs-qa-human`, never `done`), *and* a line beginning `Receipt:` in `## Verdict` or
+  `## Execution Summary` records the sign-off when one is required, *and* `deferred` is not set.
+  `board_move_card` refuses `done` (and, while deferred, the QA lanes) until all of that holds;
+  a deferred card shows "unverified until …" on its row, and clearing `deferred` through
+  `fields.verify` — recorded in the thread under your name — is the only way on.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
 - **Show it working, in a picture.** Relay draws images inline (#1MGS), so a change a person can

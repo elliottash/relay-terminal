@@ -249,7 +249,9 @@ def main(argv=None) -> int:
                              'issues/ (default: the board of the git checkout it is run in)')
     sub = parser.add_subparsers(dest='command', required=True)
 
-    check = sub.add_parser('check', help='verify the card, task and thread format')
+    check = sub.add_parser('check', help='verify the card, task and thread format; an invalid '
+                                         '`verify` block is an error, a card in executing or '
+                                         'later without one a warning (#WFRA)')
     check.add_argument('--fix', action='store_true', help='apply the fixable repairs')
     check.add_argument('--json', action='store_true')
     check.add_argument('--strict', action='store_true', help='warnings fail too')

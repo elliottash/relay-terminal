@@ -235,7 +235,10 @@ TOOL_SPECS = [
          "the write is refused if the file changed meanwhile. id, type, status, rank, created, "
          "source and private are never writable here (status and rank move; the rest are the record). "
          "`fields` carries the rest of the front matter — labels, assignee, waiting_on, milestone, "
-         "component, and `priority`, an integer −1…+3 with 0 clearing the flag (#VKFV/#DPJB). "
+         "component, and `priority`, an integer −1…+3 with 0 clearing the flag (#VKFV/#DPJB), and "
+         "`verify`, the QA ladder's block for the card (an object: artifact, primary, also, "
+         "deferred, human, criteria, sample, sign_off, effort, stakes, blast; refused naming a "
+         "bad key or value). "
          # Policy rule 9 until v5 (#GMCF): a rewrite of the user's own text happens through this
          # tool and nowhere else, so the permission and the "say you did it" are stated here.
          "Rewriting text the user wrote (a request, a title, an intake note) is allowed when they "
@@ -1954,6 +1957,9 @@ class BoardTools:
                 "updated": self._updated_at(card),
                 "milestone": card.front.get("milestone"),
                 "topic": card.front.get("topic"),
+                # The Verify cell of the row (#WFRA, #1AA6): primary mode and person flag, or
+                # "unverified until …"; absent when the card has no block.
+                **({"verify": self._verify_cell(card)} if card.front.get("verify") is not None else {}),
                 "implemented_by": card.front.get("implemented_by"),
                 # Who closed it: out of a QA lane (#T71W), or — when this equals `implemented_by` —
                 # the pane that both wrote and closed the card, which is what makes it **self-
@@ -2029,6 +2035,13 @@ class BoardTools:
         return {"cards": out, "total": len(rows), "truncated": len(rows) > limit,
                 "tabs": [t for t in self._tab_map()], "autonomy": self.autonomy}
 
+    @staticmethod
+    def _verify_cell(card: B.Card) -> str:
+        try:
+            return B.verify_summary(B.verify_block(card))
+        except B.BoardError:
+            return "invalid"
+
     def _card(self, card_id: str) -> B.Card:
         card = self.board.card_by_id(card_id)
         if card is None:
@@ -2047,11 +2060,22 @@ class BoardTools:
         entries.sort(key=lambda e: e.entry_id)
         tail = entries[len(entries) - count:] if count else []
         qa = self._qa_block(card)
+        # The `verify` block (#WFRA) reaches the GUI under `front`, normalized (`also` a list,
+        # `human` and `sign_off` filled) so the card page's strip reads one shape; a block that
+        # does not validate is left as written and named in `verify_error`.
+        front = dict(card.front)
+        verify_error = ""
+        if front.get("verify") is not None:
+            try:
+                front["verify"] = B.validate_verify(front["verify"])
+            except B.BoardError as exc:
+                verify_error = str(exc)
         return {**({"qa": qa} if qa else {}),
+                **({"verify_error": verify_error} if verify_error else {}),
                 "id": card.id, "hash": B.file_hash(card.path), "type": card.type,
                 "tab": self._tab_of(card), "status": card.status,
                 "path": str(card.path.relative_to(self.board.repo)),
-                "front": dict(card.front), "title": card.title, "body": card.body[:MAX_TEXT],
+                "front": front, "title": card.title, "body": card.body[:MAX_TEXT],
                 "body_truncated": len(card.body) > MAX_TEXT,
                 "sections": section_headings(card.body),
                 # The user's own words, so the pane can offer them for editing without parsing
@@ -2276,6 +2300,13 @@ class BoardTools:
                         raise BoardToolError(str(exc), code="board_refused", field=key) from exc
                     if value == 0:
                         value = None
+                if key == "verify" and value is not None:
+                    # The QA ladder's block (#WFRA): validated against the vocabulary, refused
+                    # naming the bad key or value, stored normalized.
+                    try:
+                        value = B.validate_verify(value)
+                    except B.BoardError as exc:
+                        raise BoardToolError(f"{exc}.", code="board_refused", field=key) from exc
                 old = card.front.get(key)
                 if value is None:
                     card.drop(key)
@@ -2807,9 +2838,16 @@ class BoardTools:
         if card_id not in self.claimed:
             self.claimed.append(card_id)
         card = self.board.card_by_id(card_id) or card
+        # One line, once, at the moment the work starts (#WFRA): a card claimed without a
+        # `verify` block is asked for one beside `## Done means`, before any code.
+        reminder = ("" if card.front.get("verify") is not None else
+                    f"#{card_id} has no `verify` block: propose one with board_update_card "
+                    "fields.verify (artifact, primary, also, human, criteria, sign_off, effort, …) "
+                    "beside `## Done means` before you write code.")
         return {"claimed": True, "id": card_id, "status": status,
                 "session": token or None, "entry_id": entry.entry_id,
                 "hash": B.file_hash(card.path), "write_id": write_id, "summary": summary,
+                **({"reminder": reminder} if reminder else {}),
                 **({} if token else {"warning": NO_TOKEN_NOTE}),
                 "card": card_block(self.board, card)}
 

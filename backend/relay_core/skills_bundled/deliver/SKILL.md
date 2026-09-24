@@ -89,6 +89,22 @@ lines: the outcome someone could check, and how failure would be recognised. It 
 verifying session checks the work against, so it has to be chosen before the implementation can
 shape it. Run on a card without it says so on the board and goes on.
 
+**Beside it, propose the `verify` block** — `board_update_card {fields: {verify: {…}}}` — by
+walking the QA ladder in order and stopping at the first oracle that can gate: `script` (a test,
+a diff, a hash), `probe` (the live artifact answers), `metric` (a calibrated threshold),
+`ai-text` (a model reads the output), `ai-visual` (a model reads a picture), `level` (a rubric),
+`pairwise` (old against new), `person` (someone looks, listens or plays), `world` (an experiment
+or a client). That rung is `primary`; the others that still help go in `also`. Say what the
+`artifact` is (code, text, number, visual, audio, system, physical, decision); whether a person
+must look — `human: none|optional|required`, with `criteria` (one line: what they check and what
+passing looks like) whenever it is not `none`; `sign_off` when a rule demands one (money,
+publish, send, delete, legal, clinical); and `effort: low|medium|high` from stakes × novelty
+(`stakes`, `blast` when they matter). If nobody here can run the check at all, say so honestly:
+`deferred: "until <what has to happen, and who owns it>"`. Example, a worker change proved by a
+unit test and read once by a person: `{artifact: code, primary: script, also: [ai-text], human:
+optional, criteria: "the refusal reads as one sentence", effort: low}`. The claim result reminds
+you when the card has none; the user corrects the proposal, and their correction stands.
+
 ## 5. Run
 
 - **One section per stage** (`relay_core.board.CARD_SECTIONS`): the body records what each stage

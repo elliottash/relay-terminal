@@ -4165,6 +4165,59 @@ policy makes — nothing else is a stage.
   refused in `_prepare` with the same sentence, which names Execute. The tool list a Plan turn is
   offered is the console's (19.10, 33.3).
 
+### 19.21 The `verify` block: the QA ladder on a card (v4.9, 2026-09-23, cards #WFRA and #1AA6)
+
+A work card's front matter may carry `verify`, the agent's proposal (policy rule 11, the
+`deliver` skill step 4) for how the card will be known to be right. `relay_core.board.validate_verify`
+is the one definition; `board_update_card {fields: {verify}}` refuses a bad key or value by name
+(`board_refused`, `field: "verify"`), `relay-board.py check` errors on an invalid block
+(`bad_verify`) and warns on a card in `executing` or later with none (`missing_verify`), and
+`board_claim`'s result carries a one-line `reminder` when the card has none.
+
+**Shape on the wire.** `board_read` — and so the `board_card` event — carry it under `front.verify`,
+normalized: every value a string, `also` a list of strings, `human` and `sign_off` present
+(`none` when unset), the optional keys absent when unset. A card with no block has no `verify`
+key. A stored block that does not validate is passed through as written and named in a top-level
+`verify_error` string.
+
+| Key | Values | |
+|---|---|---|
+| `artifact` | `code` `text` `number` `visual` `audio` `system` `physical` `decision` | required |
+| `primary` | `script` `probe` `metric` `ai-text` `ai-visual` `level` `pairwise` `person` `world` | required: the gating rung |
+| `also` | list of the same | supplementary rungs; `[]` when none |
+| `deferred` | free text, "until …" | set only when nobody here can run the check |
+| `human` | `none` `optional` `required` | default `none` |
+| `criteria` | one line | required when `human` ≠ `none` |
+| `sample` | free text, e.g. `1/10 after 30` | optional |
+| `sign_off` | `none` `money` `publish` `send` `delete` `legal` `clinical` | default `none` |
+| `effort` | `low` `medium` `high` | required |
+| `stakes` | `nuisance` `rework` `money` `reputation` `harm` | optional |
+| `blast` | `case` `capability` | optional |
+
+```json
+"front": {"…": "…",
+  "verify": {"artifact": "visual", "primary": "probe", "also": ["ai-visual", "pairwise"],
+             "human": "required", "criteria": "the strip reads in one line at 80 columns",
+             "sign_off": "none", "effort": "medium"}}
+```
+
+The card page draws it as one strip under the action row — `Verify: probe · also ai-visual,
+pairwise · person required: <criteria> · effort medium` — and `No verify plan yet` without one;
+`board_list` rows and `BOARD.md` carry the same short cell (`probe · person`, `ai-text · person?`
+for optional, `unverified until <deferred>`).
+
+**Verified (#1AA6)** is `relay_core.board.verified(card)`, one definition shared by the move
+rules, `check` and the strip: primary evidence on the card (a `## Verdict`, or a `### Check`
+under `## Tests` whose lines are all `passed` / `not-applicable` with at least one `passed`),
+a `## Human QA` question with an `Answer:` line under it when `human: required`, a line
+beginning `Receipt:` in `## Verdict` or `## Execution Summary` when `sign_off` ≠ `none`, and no
+`deferred`. `relay_core.board.unverified_reasons(card)` lists what is missing, in that order.
+`board_move_card` refuses (`board_refused`) accordingly: `requires: "verify_deferred"` for
+`done` or a `needs-qa-*` lane while deferred; `requires: "human_qa_answer"` with
+`offer: "needs-qa-human"` for `done` under `human: required` and no answered question;
+`requires: "receipt"` with `sign_off` named for `done` without a receipt. Clearing `deferred`
+goes through `fields.verify` and the update's thread event records who cleared it.
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`

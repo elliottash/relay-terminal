@@ -227,7 +227,9 @@ WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemente
                # The manual section a card is parked in (#3XZV): the id of a configured column
                # that collects no status. It wins over the status for as long as that column
                # exists, and a move to a status column is what clears it.
-               "section")
+               "section",
+               # The QA ladder's proposal for this card (#WFRA): see `validate_verify`.
+               "verify")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author",
                  "origin", "suggested", "rejected", "reason")
@@ -249,7 +251,7 @@ FIELD_ORDER = ("id", "type", "status", "section", "name", "description", "kind",
                "aliases",
                "paths", "pinned", "reviewed", "author", "supersedes",
                "label_count", "label_output", "codebook", "shell", "priority", "rank", "created",
-               "acceptance", "source", "links")
+               "acceptance", "verify", "source", "links")
 
 TASK_HEADING = {"work": "Tasks", "memory": "Tasks", "alias": "Tasks"}
 
@@ -283,6 +285,131 @@ CARD_SECTIONS = (
 
 ITEM_STATUSES = ("open", "in-progress", "blocked", "deferred", "done", "dropped")
 CLOSED_ITEM_STATUSES = ("done", "dropped")
+
+# ------------------------------------------------------------- the verify block (#WFRA)
+#: The QA ladder (design card #BX7B), proposed once per work card by the agent beside
+#: `## Done means` and corrected by the user: what the artifact is, which rung of the ladder is
+#: the **primary** (gating) oracle, which others are supplementary, whether a person has to look
+#: and against what criteria, whether a rule demands a sign-off, and the effort, stakes and
+#: blast radius that set how much checking the card is worth.  A front-matter mapping, so it
+#: round-trips through `dump_front_matter` as a flow map and reaches `board_read` under `front`.
+#: `validate_verify` is the one definition of the vocabulary; `board_update_card fields.verify`
+#: and `check` both refuse through it, naming the bad key or value.
+VERIFY_ARTIFACTS = ("code", "text", "number", "visual", "audio", "system", "physical", "decision")
+#: The rungs, cheapest and strongest oracle first (the ladder's order): a script, a probe on the
+#: live artifact, a calibrated metric, an AI reading text, an AI reading a picture, a level on a
+#: rubric, a pairwise comparison, a person, or the world (an experiment, a client, a device).
+VERIFY_MODES = ("script", "probe", "metric", "ai-text", "ai-visual", "level", "pairwise", "person", "world")
+VERIFY_HUMAN = ("none", "optional", "required")
+VERIFY_SIGN_OFFS = ("none", "money", "publish", "send", "delete", "legal", "clinical")
+VERIFY_EFFORTS = ("low", "medium", "high")
+VERIFY_STAKES = ("nuisance", "rework", "money", "reputation", "harm")
+VERIFY_BLASTS = ("case", "capability")
+VERIFY_KEYS = ("artifact", "primary", "also", "deferred", "human", "criteria", "sample",
+               "sign_off", "effort", "stakes", "blast")
+#: What a block must say: what is checked, how, and how much it is worth.  `human` and
+#: `sign_off` default to `none`; the rest are optional and absent when unset.
+VERIFY_REQUIRED = ("artifact", "primary", "effort")
+VERIFY_DEFAULTS = {"human": "none", "sign_off": "none"}
+_VERIFY_VOCAB = {"artifact": VERIFY_ARTIFACTS, "primary": VERIFY_MODES, "human": VERIFY_HUMAN,
+                 "sign_off": VERIFY_SIGN_OFFS, "effort": VERIFY_EFFORTS, "stakes": VERIFY_STAKES,
+                 "blast": VERIFY_BLASTS}
+_VERIFY_TEXT = ("deferred", "criteria", "sample")
+#: The statuses from which a card without a `verify` block is a gap `check` names: the work is
+#: under way or landed and nobody has said how it will be known to be right.  A closed card's
+#: missing block is history, and the board predates the block by hundreds of closed cards.
+VERIFY_EXPECTED_STATUSES = ("executing", "in-progress", "needs-verification", "needs-review",
+                            "needs-labels", "needs-ab", "needs-qa-llm", "needs-qa-human")
+
+
+def _verify_word(key: str, value) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise BoardError(f"verify.{key} must be one word, not {value!r}")
+    word = str(value).strip().lower()
+    if not word:
+        raise BoardError(f"verify.{key} is empty")
+    return word
+
+
+def validate_verify(value) -> dict:
+    """The `verify` block checked against the ladder's vocabulary and normalized: keys in
+    `VERIFY_KEYS` order, words lower-cased, `also` always a list, `human` and `sign_off` filled
+    with `none` when unset.  Raises `BoardError` naming the bad key or value."""
+    if not isinstance(value, dict):
+        raise BoardError(f"verify must be a mapping of {', '.join(VERIFY_KEYS)}, not {value!r}")
+    unknown = [str(k) for k in value if k not in VERIFY_KEYS]
+    if unknown:
+        raise BoardError(f"verify has no key {unknown[0]!r}; the keys are {', '.join(VERIFY_KEYS)}")
+    out: dict = {}
+    for key in VERIFY_KEYS:
+        raw = value.get(key)
+        if raw is None:
+            if key in VERIFY_DEFAULTS:
+                out[key] = VERIFY_DEFAULTS[key]
+            elif key == "also":
+                out[key] = []
+            continue
+        if key == "also":
+            items = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+            also: list[str] = []
+            for item in items:
+                word = _verify_word(key, item)
+                if word not in VERIFY_MODES:
+                    raise BoardError(f"verify.also {word!r} is not one of {'|'.join(VERIFY_MODES)}")
+                if word not in also:
+                    also.append(word)
+            out[key] = also
+        elif key in _VERIFY_VOCAB:
+            word = _verify_word(key, raw)
+            if word not in _VERIFY_VOCAB[key]:
+                raise BoardError(f"verify.{key} {word!r} is not one of {'|'.join(_VERIFY_VOCAB[key])}")
+            out[key] = word
+        else:                                   # free text: deferred, criteria, sample
+            if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):
+                raise BoardError(f"verify.{key} must be one line of text, not {raw!r}")
+            text = " ".join(str(raw).split())
+            if not text:
+                raise BoardError(f"verify.{key} is empty; leave it out instead")
+            out[key] = text
+    missing = [key for key in VERIFY_REQUIRED if key not in out]
+    if missing:
+        raise BoardError(f"verify is missing {missing[0]!r}; a block says at least "
+                         f"{', '.join(VERIFY_REQUIRED)}")
+    if out["human"] != "none" and "criteria" not in out:
+        raise BoardError(f"verify.criteria is required when verify.human is {out['human']!r}: "
+                         "one line saying what the person checks and what passing looks like")
+    if out["primary"] in out["also"]:
+        out["also"] = [m for m in out["also"] if m != out["primary"]]
+    return out
+
+
+def verify_block(card: "Card") -> dict | None:
+    """The card's normalized `verify` block, or None when it has none.  Raises `BoardError`
+    on an invalid one, exactly as `validate_verify` does."""
+    if card.type != "work" or card.front.get("verify") is None:
+        return None
+    return validate_verify(card.front.get("verify"))
+
+
+def deferred_text(verify: Mapping | None) -> str:
+    """`verify.deferred` as the words after "unverified until": the leading "until" the agent
+    was told to write is not repeated ("" when verification is not deferred)."""
+    text = str((verify or {}).get("deferred") or "").strip()
+    if text.lower().startswith("until "):
+        text = text[6:].strip()
+    return text
+
+
+def verify_summary(verify: Mapping | None) -> str:
+    """One short cell: the primary mode and the person flag (`probe · person`, `script`,
+    `ai-text · person?` when optional), or `unverified until …` while deferred."""
+    if not verify:
+        return ""
+    if verify.get("deferred"):
+        return f"unverified until {deferred_text(verify)}"
+    human = str(verify.get("human") or "none")
+    flag = " · person" if human == "required" else " · person?" if human == "optional" else ""
+    return f"{verify.get('primary', '')}{flag}"
 
 
 class BoardError(Exception):
@@ -1389,6 +1516,7 @@ class Board:
             problems.append(Problem("missing_title", rel, "no '# ' heading in the body"))
         if card.type == "work":
             problems.extend(self._check_sections(card, rel))
+            problems.extend(self._check_verify(card, rel))
         problems.extend(self._check_tasks(card, rel, fix))
         return problems
 
@@ -1410,6 +1538,22 @@ class Board:
                                     f"`## {heading}` is not one of the card body sections "
                                     "(docs/BOARD-FORMAT.md, card file)", "warning"))
         return problems
+
+    def _check_verify(self, card: Card, rel: str) -> list[Problem]:
+        """The `verify` block (#WFRA): an invalid one is an error, naming the key or value, and
+        a card in `executing` or later with none is a warning -- the work is under way and
+        nobody has said how it will be known to be right (`VERIFY_EXPECTED_STATUSES`)."""
+        if card.front.get("verify") is None:
+            if card.status in VERIFY_EXPECTED_STATUSES:
+                return [Problem("missing_verify", rel,
+                                f"a card in {card.status} has no `verify` block: propose one "
+                                "(artifact, primary, effort, …) beside `## Done means`", "warning")]
+            return []
+        try:
+            validate_verify(card.front.get("verify"))
+        except BoardError as exc:
+            return [Problem("bad_verify", rel, str(exc))]
+        return []
 
     def _check_tasks(self, card: Card, rel: str, fix: bool) -> list[Problem]:
         problems: list[Problem] = []
@@ -1510,8 +1654,8 @@ class Board:
             title = str(tab.get("title") or tab["id"]).replace("-", " ").title()
             lines.append(f"## {title} ({len(group)})")
             lines.append("")
-            lines.append("| Card | Title | Status | Assignee | Tasks | Thread |")
-            lines.append("|---|---|---|---|---|---|")
+            lines.append("| Card | Title | Status | Verify | Assignee | Tasks | Thread |")
+            lines.append("|---|---|---|---|---|---|---|")
             for card in sorted(group, key=lambda c: (_status_order(c), c.rank, str(c.path))):
                 rel = str(card.path.relative_to(self.root))
                 items = card.tasks()
@@ -1520,8 +1664,15 @@ class Board:
                 thread = self.thread_path(card.id or "", card.private) if card.id else None
                 link = (f"[{len(self.thread(card.id, card.private))}]"
                         f"({THREADS_FOLDER}/{card.id}.md)") if thread and thread.exists() else ""
+                # The Verify cell (#WFRA): the primary mode and the person flag, or
+                # "unverified until …" while deferred (#1AA6); an invalid block says so.
+                try:
+                    verify = verify_summary(verify_block(card))
+                except BoardError:
+                    verify = "invalid"
                 lines.append(f"| `#{card.id or '????'}` | [{_escape_cell(card.title)}]({rel}) "
-                             f"| {card.status} | {_escape_cell(str(card.front.get('assignee') or ''))} "
+                             f"| {card.status} | {_escape_cell(verify)} "
+                             f"| {_escape_cell(str(card.front.get('assignee') or ''))} "
                              f"| {tasks} | {link} |")
             lines.append("")
         return "\n".join(lines).rstrip("\n") + "\n"

@@ -495,6 +495,105 @@ class CardTypeTests(TempBoardTest):
         self.assertIn("unknown_type", {p.code for p in self.board.check()})
 
 
+class VerifyBlockTests(TempBoardTest):
+    """The QA ladder's `verify` block (#WFRA): vocabulary, refusals, round trip, check, index."""
+
+    GOOD = {"artifact": "code", "primary": "script", "also": ["ai-text", "script"],
+            "human": "required", "criteria": "the refusal reads as one sentence", "effort": "medium"}
+
+    def test_a_valid_block_is_normalized(self):
+        block = B.validate_verify(dict(self.GOOD, primary=" Script ", stakes="rework"))
+        self.assertEqual(block, {"artifact": "code", "primary": "script", "also": ["ai-text"],
+                                 "human": "required", "criteria": "the refusal reads as one sentence",
+                                 "sign_off": "none", "effort": "medium", "stakes": "rework"})
+        self.assertEqual(list(block), [k for k in B.VERIFY_KEYS if k in block])
+        # `also` may be written as one word; `human` and `sign_off` default to none.
+        one = B.validate_verify({"artifact": "text", "primary": "ai-text", "also": "pairwise", "effort": "low"})
+        self.assertEqual(one["also"], ["pairwise"])
+        self.assertEqual((one["human"], one["sign_off"]), ("none", "none"))
+        self.assertNotIn("deferred", one)
+
+    def test_refusals_name_the_bad_key_or_value(self):
+        cases = [
+            (dict(self.GOOD, primary="vibes"), "verify.primary 'vibes' is not one of script|probe"),
+            (dict(self.GOOD, also=["ai-text", "guess"]), "verify.also 'guess' is not one of"),
+            (dict(self.GOOD, colour="red"), "verify has no key 'colour'; the keys are artifact, primary"),
+            ({"artifact": "code", "primary": "script"}, "verify is missing 'effort'"),
+            ({"primary": "script", "effort": "low"}, "verify is missing 'artifact'"),
+            (dict(self.GOOD, human="required", criteria=None), "verify.criteria is required when verify.human is 'required'"),
+            (dict(self.GOOD, effort=["low"]), "verify.effort must be one word, not ['low']"),
+            (dict(self.GOOD, criteria=["a", "b"]), "verify.criteria must be one line of text"),
+            (dict(self.GOOD, sign_off="boss"), "verify.sign_off 'boss' is not one of none|money|publish"),
+            (dict(self.GOOD, stakes="high"), "verify.stakes 'high' is not one of nuisance|rework"),
+            (dict(self.GOOD, blast="everything"), "verify.blast 'everything' is not one of case|capability"),
+            ("script", "verify must be a mapping of artifact, primary"),
+        ]
+        for value, message in cases:
+            with self.assertRaises(B.BoardError, msg=str(value)) as caught:
+                B.validate_verify(value)
+            self.assertIn(message, str(caught.exception))
+
+    def test_the_block_round_trips_through_the_front_matter(self):
+        card = B.Card.parse("---\nid: K7Q2\ntype: work\nstatus: executing\nrank: 0i\n"
+                            "verify:\n  artifact: visual\n  primary: probe\n  also: [ai-visual, pairwise]\n"
+                            "  human: required\n  criteria: the strip reads in one line\n  effort: medium\n"
+                            "---\n# Strip\n")
+        block = B.verify_block(card)
+        self.assertEqual(block["also"], ["ai-visual", "pairwise"])
+        card.set("verify", block)
+        again = B.Card.parse(card.to_text())
+        self.assertEqual(B.verify_block(again), block)
+        self.assertIn("verify: {artifact: visual, primary: probe, also: [ai-visual, pairwise], "
+                      "human: required, criteria: the strip reads in one line, sign_off: none, "
+                      "effort: medium}", card.to_text())
+        self.assertIn("verify", B.ALLOWED_FIELDS["work"])
+        self.assertNotIn("verify", B.ALLOWED_FIELDS["memory"])
+        self.assertIsNone(B.verify_block(B.new_card("work", "None yet", "ready", card_id="M3XJ")))
+
+    def test_check_errors_on_an_invalid_block_and_warns_when_a_working_card_has_none(self):
+        bad = B.new_card("work", "Bad block", "executing", card_id="K7Q2", rank="0m",
+                         verify={"artifact": "code", "primary": "vibes", "effort": "low"})
+        write(self.root / "features" / "2026-09-23-a.md", bad.to_text())
+        problems = {p.code: p for p in self.board.check()}
+        self.assertEqual(problems["bad_verify"].severity, "error")
+        self.assertIn("verify.primary 'vibes'", problems["bad_verify"].message)
+        (self.root / "features" / "2026-09-23-a.md").unlink()
+        for status, expected in (("executing", True), ("needs-verification", True),
+                                 ("needs-qa-human", True), ("planned", False), ("done", False)):
+            card = B.new_card("work", "No block", status, card_id="M3XJ", rank="0n")
+            folder = self.root / "features" / B.WORK_STATUS_FOLDER[status]
+            path = write(folder / "2026-09-23-b.md", card.to_text())
+            codes = {p.code for p in self.board.check()}
+            self.assertEqual("missing_verify" in codes, expected, status)
+            path.unlink()
+        good = B.new_card("work", "Has block", "executing", card_id="P4QT", rank="0o",
+                          verify=self.GOOD)
+        write(self.root / "features" / "2026-09-23-c.md", good.to_text())
+        self.assertEqual([p.code for p in self.board.check() if p.code.endswith("verify")], [])
+
+    def test_the_index_shows_the_primary_mode_and_the_person_flag(self):
+        write(self.root / "features" / "2026-09-23-a.md",
+              B.new_card("work", "Person looks", "executing", card_id="K7Q2", rank="0m",
+                         verify=dict(self.GOOD, primary="probe")).to_text())
+        write(self.root / "features" / "2026-09-23-b.md",
+              B.new_card("work", "Optional look", "executing", card_id="M3XJ", rank="0n",
+                         verify=dict(self.GOOD, primary="ai-text", human="optional")).to_text())
+        write(self.root / "features" / "2026-09-23-c.md",
+              B.new_card("work", "Deferred", "executing", card_id="P4QT", rank="0o",
+                         verify={"artifact": "system", "primary": "world", "effort": "high",
+                                 "deferred": "until the pilot runs (owner: Sam)"}).to_text())
+        write(self.root / "features" / "2026-09-23-d.md",
+              B.new_card("work", "No block", "ready", card_id="Z9QT", rank="0p").to_text())
+        text = self.board.index_markdown()
+        self.assertIn("| Card | Title | Status | Verify | Assignee | Tasks | Thread |", text)
+        self.assertIn("| executing | probe · person |", text)
+        self.assertIn("| executing | ai-text · person? |", text)
+        self.assertIn("| executing | unverified until the pilot runs (owner: Sam) |", text)
+        self.assertIn("| ready |  |", text)
+        self.assertEqual(B.verify_summary(None), "")
+        self.assertEqual(B.deferred_text({"deferred": "Until Monday"}), "Monday")
+
+
 class PrivateTests(TempBoardTest):
     def test_private_card_under_the_private_root(self):
         card = B.new_card("work", "Private thing", "ready", card_id="Z9QT", private=True)
@@ -540,7 +639,7 @@ class CheckTests(TempBoardTest):
     def test_clean_board_has_no_problems(self):
         self.good("K7Q2")
         self.good("M3XJ", "needs-qa-llm")
-        self.assertEqual(self.board.check(), [])
+        self.assertEqual([p for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_folder_and_status_must_agree(self):
         self.good("K7Q2", "needs-qa-llm", rel="features/2026-09-17-k7q2.md")
@@ -807,7 +906,7 @@ class MigrationTests(TempBoardTest):
         # Migration keeps legacy bodies byte-for-byte, so their invented headings now draw the
         # section-schema warning (#Z4HR: warn, never error, and no rewriting on migration).
         # What the test asserts is that there are no *errors*.
-        self.assertTrue(all(p.code == "unknown_section" and p.severity == "warning"
+        self.assertTrue(all(p.code in ("unknown_section", "missing_verify") and p.severity == "warning"
                             for p in problems), problems)
 
     def test_unparsable_files_are_reported_not_written(self):
@@ -908,7 +1007,7 @@ class MergeTests(TempBoardTest):
         self.assertEqual(entries[0].attrs["from"], "M3XJ")
         self.assertIn("orig", entries[0].attrs)
         self.assertEqual([e.entry_id for e in entries], sorted(e.entry_id for e in entries))
-        self.assertEqual(self.board.check(), [])
+        self.assertEqual([p for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_quoted_body_cannot_end_the_section_it_was_quoted_into(self):
         self.merge()
@@ -948,7 +1047,7 @@ class SplitTests(TempBoardTest):
         self.assertEqual(child.front["parent"], "K7Q2")
         self.assertEqual(child.front["links"]["split_from"], "K7Q2")
         self.assertIn("and put a clock in the tab bar", child.body)
-        self.assertEqual(self.board.check(), [])
+        self.assertEqual([p for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_close_moves_the_original_to_done_with_a_resolution(self):
         result = B.split_card(self.board, self.card_file, self.parts, reason="split",
@@ -959,7 +1058,7 @@ class SplitTests(TempBoardTest):
         self.assertIn("features/done/", result["path"])
         self.assertIn("## Resolution", original.body)
         self.assertIn("add voice transcribe mode", original.body)  # its own text is still there
-        self.assertEqual(self.board.check(), [])
+        self.assertEqual([p for p in self.board.check() if p.code != "missing_verify"], [])
 
     def test_a_split_needs_at_least_two_parts_and_a_request_each(self):
         with self.assertRaises(B.BoardError):
