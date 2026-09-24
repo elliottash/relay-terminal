@@ -48,6 +48,13 @@ class FakeGateway:
         self.tokens: dict[str, float] = {}
         self.registrations = 0
         self.chat_calls = 0
+        self.image_calls = 0
+        self.image_limit = 2                        # per day; the gateway counts per picture
+        self.images_used = 0
+        self.images_exhausted = False               # answer every image call 429 quota_exhausted
+        self.image_role = {"role": "relay-image", "model": "black-forest-labs/flux.2-klein-4b",
+                           "price_usd": 0.003, "resolutions": ["1024x1024", "1536x1024"],
+                           "aspect_ratios": ["1:1", "3:2"]}
         self.requests: list[dict] = []
         self.expires_in = 3600
         self.quota = {"limit": 250_000, "used": 1_200, "resets_at": int(time.time()) + 3600}
@@ -94,6 +101,10 @@ class FakeGateway:
                 return token if expires and expires > time.time() else None
 
             def do_GET(self):
+                if self.path == "/v1/health":       # public: no token, what an install reads to
+                    return self._json(200, {"ok": True,                  # learn the image roles
+                                            "roles": ["relay-image", "relay-lite", "relay-main"],
+                                            "open": True, "images": [outer.image_role]})
                 if self.path != "/v1/quota":
                     return self._refuse(404, "bad_request", "no such route")
                 if self._bearer() is None:
@@ -165,6 +176,27 @@ class FakeGateway:
                                          {"choices": [{"delta": {}, "finish_reason": "stop"}]},
                                          {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 3}}))
                     return
+                if self.path == "/v1/images":
+                    with outer.lock:
+                        outer.image_calls += 1
+                        exhausted = outer.images_exhausted
+                        if not exhausted and outer.images_used >= outer.image_limit:
+                            exhausted = True
+                    if self._bearer() is None:
+                        return self._refuse(401, "token_expired", "register again")
+                    if exhausted:
+                        return self._refuse(429, "quota_exhausted", "Relay Free images used for today.")
+                    if body.get("model") not in ("relay-image",):
+                        return self._refuse(400, "bad_request", "model must name an image role")
+                    with outer.lock:
+                        outer.images_used += 1
+                        used = outer.images_used
+                    headers = [("X-Relay-Image-Limit", str(outer.image_limit)),
+                               ("X-Relay-Image-Used", str(used)),
+                               ("X-Relay-Image-Resets-At", str(outer.quota["resets_at"]))]
+                    picture = base64.b64encode(b"FAKE_GATEWAY_IMAGE").decode()
+                    return self._json(200, {"created": 1, "data": [{"b64_json": picture}]},
+                                      headers + list(self._quota_headers()))
                 self._refuse(404, "bad_request", "no such route")
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -218,6 +250,8 @@ class HostedCase(unittest.TestCase):
             gateway.unavailable_retried = 0
             gateway.chat_script.clear()
             gateway.registrations = gateway.chat_calls = 0
+            gateway.image_calls = gateway.images_used = 0
+            gateway.images_exhausted = False
             gateway.tokens.clear()
             gateway.requests.clear()
         self.session = hosted.Session()
@@ -238,6 +272,38 @@ class HostedCase(unittest.TestCase):
 
 
 # ----- identity -----------------------------------------------------------------------------------
+class ImageTransportTests(HostedCase):
+    """The /v1/images exchange: a big body, its own quota headers, the same token retry."""
+
+    def test_image_generates_and_records_both_quotas(self):
+        reply = self.session.image({"model": "relay-image", "prompt": "a lighthouse"})
+        self.assertEqual(base64.b64decode(reply["data"][0]["b64_json"]), b"FAKE_GATEWAY_IMAGE")
+        # The picture was counted against the image allowance...
+        self.assertEqual(self.session.image_quota(),
+                         {"limit": 2, "used": 1, "resets_at": self.gateway.quota["resets_at"]})
+        # ...and the token quota the same reply carried is recorded too.
+        self.assertEqual(self.session.quota()["used"], self.gateway.quota["used"])
+        self.assertEqual(self.gateway.image_calls, 1)
+
+    def test_image_exhaustion_carries_the_code(self):
+        self.gateway.images_used = self.gateway.image_limit
+        with self.assertRaises(hosted.HostedUnavailable) as caught:
+            self.session.image({"model": "relay-image", "prompt": "another"})
+        self.assertEqual(caught.exception.code, "quota_exhausted")
+        self.assertEqual(self.gateway.image_calls, 1)     # refused, so not counted again
+
+    def test_image_refreshes_a_refused_token_once(self):
+        self.gateway.tokens.clear()                       # the cached token is suddenly invalid
+        reply = self.session.image({"model": "relay-image", "prompt": "a lighthouse"})
+        self.assertIn("data", reply)
+        self.assertEqual(self.gateway.registrations, 1)   # re-registered, then served
+
+    def test_image_roles_read_public_health(self):
+        roles = hosted.image_roles()
+        self.assertEqual(roles, [self.gateway.image_role])
+
+
+
 class IdentityTests(HostedCase):
     def test_the_installation_key_lives_in_its_own_file_and_is_made_once(self):
         first = hosted.load_identity()
@@ -504,7 +570,7 @@ class TransportTests(HostedCase):
         unavailable = hosted.HostedUnavailable("Relay Free needs python3-cryptography (the cryptography module).")
         with mock.patch.object(hosted, "_import_remote", side_effect=unavailable):
             self.assertFalse(hosted.available())
-            self.assertEqual(hosted.status(), {"available": False, "quota": None})
+            self.assertEqual(hosted.status(), {"available": False, "quota": None, "image_quota": None})
             with self.assertRaises(ProviderError) as caught:
                 self.complete(HostedChatProvider(self.config(), session=hosted.Session()))
         self.assertIn("python3-cryptography", str(caught.exception))
