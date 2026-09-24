@@ -1,0 +1,11 @@
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 2713381 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./usr/lib/python3.12/subprocess.py:1127: ResourceWarning: subprocess 2715283 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+----------------------------------------------------------------------
+Ran 2 tests in 30.428s
+
+OK

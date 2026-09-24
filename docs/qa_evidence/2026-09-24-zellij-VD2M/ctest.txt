@@ -1,0 +1,12 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 16: keymap
+1/3 Test #16: keymap ...........................   Passed    0.09 sec
+    Start 42: screen
+2/3 Test #42: screen ...........................   Passed    0.01 sec
+    Start 77: sshconfig
+3/3 Test #77: sshconfig ........................   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   0.11 sec

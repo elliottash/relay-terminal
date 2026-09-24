@@ -1,0 +1,5 @@
+elliott@spark-dcc9:~/repos/relay-terminal$ echo ZV=[$ZELLIJ] SN=[$ZELLIJ_SESSION_NAME] PID=[$ZELLIJ_PANE_ID]
+ZV=[0] SN=[probe6] PID=[0]
+elliott@spark-dcc9:~/repos/relay-terminal$ printf '\033]133;A\033\'; echo OSC133-SENT; printf '\033]7;file://relay/x\033\'
+OSC133-SENT
+elliott@spark-dcc9:~/repos/relay-terminal$
