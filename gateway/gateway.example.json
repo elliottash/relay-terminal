@@ -80,7 +80,7 @@
         ]
       },
       "price_per_image": {
-        "black-forest-labs/flux.2-klein-4b": 0.003
+        "black-forest-labs/flux.2-klein-4b": 0.006
       }
     },
     "deepseek": {
