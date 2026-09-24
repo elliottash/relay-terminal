@@ -178,29 +178,108 @@ bool safeWord(const QString &word) {
 // ssh options that take a value (ssh(1)); anything else starting with '-' is a flag.
 const QString kSshValued = QStringLiteral("BbcDEeFIiJLlmOoPpQRSWw");
 
-bool relayShareOption(const QString &option) {
+// `holder`: the line carried a holder remote command, so the wrapper ran it and each of these
+// three keys on it belongs to the wrapper's set, whatever directory its ControlPath names.
+bool relayShareOption(const QString &option, bool holder) {
     // What shell/integration.bash's ssh() adds: ControlMaster=auto, a ControlPath in relay-ssh,
     // ControlPersist. Only those three keys are ever taken out.
     const QString lower = option.toLower();
     return lower.startsWith(QLatin1String("controlmaster=")) || lower.startsWith(QLatin1String("controlpersist="))
-           || (lower.startsWith(QLatin1String("controlpath=")) && option.contains(QLatin1String("/relay-ssh/")));
+           || (lower.startsWith(QLatin1String("controlpath="))
+               && (holder || option.contains(QLatin1String("/relay-ssh/"))));
+}
+
+// The remote command the pane shell's wrapper appends to a plain login to hold it in a session on
+// the host (card #XQ8F), as ssh leaves it: one final argv word, `sh -c '<holder script>'
+// relay-holder <session> [<cwd>]`. Only a word of exactly that shape is ever taken for the
+// wrapper's own; any other command after the destination is the user's.
+bool holderCommandWord(const QString &word) {
+    return word.startsWith(QStringLiteral("sh -c ")) && word.contains(QStringLiteral(" relay-holder "));
+}
+
+// The same holder command as mosh leaves it: the words after the line's `--`, still one word or
+// already several. mosh-client's `-#` argument joins its arguments with spaces, so the same test
+// on those space-split words holds, with the script's quotes as literal characters.
+bool holderTail(const QStringList &words) {
+    if (words.isEmpty()) return false;
+    const QString &first = words.first();
+    const bool shCommand = first == QLatin1String("sh") || first.startsWith(QLatin1String("sh "));
+    return shCommand && words.join(QLatin1Char(' ')).contains(QStringLiteral(" relay-holder "));
+}
+
+// Where a mosh line's holder command starts: at the `--` that precedes it, at the `sh` word when
+// there is no `--`, or nowhere.
+int holderTailStart(const QStringList &words) {
+    for (int i = 0; i < words.size(); ++i)
+        if (words.at(i) == QLatin1String("--") && holderTail(words.mid(i + 1))) return i;
+    for (int i = 0; i < words.size(); ++i)
+        if (words.at(i) == QLatin1String("sh") && holderTail(words.mid(i))) return i;
+    return -1;
+}
+
+// The holder words of any of the three shapes above: session name and start directory, or empty
+// when the argv carries no holder command.
+struct HolderWords {
+    QString session;
+    QString cwd;
+};
+
+HolderWords holderWords(const QStringList &argv) {
+    // mosh-client keeps the original mosh line inside its -# argument; the IP and port that follow
+    // in argv are no part of it and must not read as the cwd.
+    QStringList tokens;
+    for (const QString &word : argv) {
+        if (!word.startsWith(QLatin1String("-#"))) { tokens << word; continue; }
+        QString joined = word.mid(2).trimmed();
+        if (joined.endsWith(QLatin1Char('|'))) joined.chop(1);
+        tokens = joined.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        break;
+    }
+    // ssh's holder command is one argv word; mosh's several words are apart already.
+    QStringList words;
+    for (const QString &token : std::as_const(tokens)) words << token.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    // A holder command always begins `sh -c`; an ordinary remote command that happens to mention
+    // the marker is not one.
+    bool shCommand = false;
+    for (int i = 0; i + 1 < words.size(); ++i)
+        if (words.at(i) == QLatin1String("sh") && words.at(i + 1) == QLatin1String("-c")) shCommand = true;
+    if (!shCommand) return {};
+    // The script precedes the marker, so the last marker with a session word after it is the real
+    // one; a session name is only ever relay's safe characters.
+    static const QRegularExpression sessionName(QStringLiteral("^[A-Za-z0-9_-]+$"));
+    HolderWords found;
+    for (int i = words.size() - 2; i >= 0; --i) {
+        if (words.at(i) != QLatin1String("relay-holder")) continue;
+        if (!sessionName.match(words.at(i + 1)).hasMatch()) continue;
+        found.session = words.at(i + 1);
+        found.cwd = words.mid(i + 2).join(QLatin1Char(' '));
+        if (found.cwd.size() > 1 && found.cwd.startsWith(QLatin1Char('\'')) && found.cwd.endsWith(QLatin1Char('\'')))
+            found.cwd = found.cwd.mid(1, found.cwd.size() - 2);
+        return found;
+    }
+    return found;
 }
 
 QString rerunSsh(const QStringList &args, QString *host) {
     // The wrapper's options come as a set; take them out only when its ControlPath is among them,
-    // so a ControlMaster the user wrote themselves stays.
-    bool wrapped = false;
+    // so a ControlMaster the user wrote themselves stays. A holder remote command proves the
+    // wrapper ran this line too, and carries the same set whatever its ControlPath names.
+    bool holder = false;
+    bool relayControlPath = false;
     for (int i = 0; i < args.size(); ++i) {
         const QString &arg = args.at(i);
+        if (holderCommandWord(arg)) holder = true;
         QString value;
         if (arg == QLatin1String("-o") && i + 1 < args.size()) value = args.at(i + 1);
         else if (arg.startsWith(QLatin1String("-o"))) value = arg.mid(2);
         if (value.startsWith(QLatin1String("ControlPath="), Qt::CaseInsensitive) && value.contains(QLatin1String("/relay-ssh/")))
-            wrapped = true;
+            relayControlPath = true;
     }
+    const bool wrapped = holder || relayControlPath;
     QStringList kept;
     QString destination;
     bool options = true;
+    int positionals = 0;  // the destination and any remote-command words after it
     for (int i = 0; i < args.size(); ++i) {
         const QString &arg = args.at(i);
         if (options && arg == QLatin1String("--")) { kept << arg; options = false; continue; }
@@ -216,18 +295,29 @@ QString rerunSsh(const QStringList &args, QString *host) {
             }
             if (wrapped && (arg == QLatin1String("-o") || arg.startsWith(QLatin1String("-o")))) {
                 const QString value = arg == QLatin1String("-o") ? args.value(i + 1) : arg.mid(2);
-                if (relayShareOption(value)) { if (arg == QLatin1String("-o")) ++i; continue; }
+                if (relayShareOption(value, holder)) { if (arg == QLatin1String("-o")) ++i; continue; }
             }
+            // The wrapper's own -t travels with the holder command, so it goes with it; a cluster
+            // such as the user's -tA is left alone.
+            if (holder && arg == QLatin1String("-t")) continue;
             kept << arg;
             if (takesNext && i + 1 < args.size()) kept << args.at(++i);
             continue;
         }
+        // The holder command comes off: the rebuilt line reaches the wrapper as the plain login
+        // the person typed, and the new pane's holder is the wrapper's to build.
+        if (holderCommandWord(arg)) continue;
         if (destination.isEmpty()) destination = arg;
         options = false;
+        ++positionals;
         kept << arg;
     }
     if (destination.isEmpty()) return {};
     if (host) *host = destination.section(QLatin1Char('@'), -1);
+    // One word after the destination is the user's remote command and stays; two or more are the
+    // words of a one-shot `ssh host cmd args…` line, which leaves nothing to open again and must
+    // never be wrapped into a session.
+    if (positionals > 2) return {};
     QStringList words{QStringLiteral("ssh")};
     for (const QString &word : std::as_const(kept)) words << shellQuote(word);
     return words.join(QLatin1Char(' '));
@@ -236,8 +326,9 @@ QString rerunSsh(const QStringList &args, QString *host) {
 // `joined`: the words came from mosh-client's `-#` argument, where mosh joined its arguments with
 // spaces, so a `--ssh="ssh -o …"` arrives as several words.
 QString rerunMosh(QStringList args, QString *host, bool joined = false) {
-    // The wrapper's --ssh (ssh with Relay's connection sharing) comes out; the new pane's wrapper
-    // adds it back.
+    // A holder command at the end says the wrapper ran this mosh, so the --ssh that comes with it
+    // is the wrapper's whatever its ControlPath names; the new pane's wrapper adds its own back.
+    const bool holder = holderTailStart(args) >= 0;
     bool wrapped = false;
     static const QRegularExpression shareWord(QStringLiteral("^(-o)?Control(Master|Path|Persist)=.*$"),
                                               QRegularExpression::CaseInsensitiveOption);
@@ -245,11 +336,11 @@ QString rerunMosh(QStringList args, QString *host, bool joined = false) {
         const QString &arg = args.at(i);
         if (!arg.startsWith(QLatin1String("--ssh="))) continue;
         if (!joined) {
-            if (arg.contains(QLatin1String("/relay-ssh/"))) { args.removeAt(i--); wrapped = true; }
+            if (holder || arg.contains(QLatin1String("/relay-ssh/"))) { args.removeAt(i--); wrapped = true; }
             continue;
         }
         int end = i + 1;
-        bool relay = false;
+        bool relay = holder;
         while (end < args.size() && (args.at(end) == QLatin1String("-o") || shareWord.match(args.at(end)).hasMatch())) {
             relay = relay || args.at(end).contains(QLatin1String("/relay-ssh/"));
             ++end;
@@ -261,16 +352,24 @@ QString rerunMosh(QStringList args, QString *host, bool joined = false) {
     if (wrapped) args.removeAll(QStringLiteral("--experimental-remote-ip=remote"));
     if (args.isEmpty()) return {};
     QString destination;
+    int at = -1;
     for (int i = 0; i < args.size(); ++i) {
         const QString &arg = args.at(i);
-        if (arg == QLatin1String("--")) { destination = args.value(i + 1); break; }
+        if (arg == QLatin1String("--")) { destination = args.value(i + 1); at = i + 1; break; }
         if (arg == QLatin1String("-p")) { ++i; continue; }
         if (arg.startsWith(QLatin1Char('-'))) continue;
         destination = arg;
+        at = i;
         break;
     }
-    if (destination.isEmpty()) return {};
+    if (destination.isEmpty() || at < 0) return {};
+    // The holder command comes off the end — from its `--`, or from its `sh` word when the line
+    // has no `--` — so the rebuilt line reaches the wrapper as the plain login it started as.
+    const int tail = holderTailStart(args);
+    if (tail > at) args.erase(args.begin() + tail, args.end());
     if (host) *host = destination.section(QLatin1Char('@'), -1);
+    // Words after the destination are a one-shot remote command, not a login to open again.
+    if (args.size() - at > 2) return {};
     QStringList words{QStringLiteral("mosh")};
     for (const QString &word : std::as_const(args)) words << shellQuote(word);
     return words.join(QLatin1Char(' '));
@@ -433,6 +532,56 @@ QString rerunCommand(const QStringList &argv, QString *host) {
         }
     }
     return {};
+}
+
+QString holderSession(const QStringList &argv) {
+    return holderWords(argv).session;
+}
+
+QString holderCwd(const QStringList &argv) {
+    return holderWords(argv).cwd;
+}
+
+QString killSessionCommand(const QString &session) {
+    // "Close and end the remote session" (card #XQ8F): the holder server on the host is Relay's
+    // own socket, so one line over the shared connection ends it and nothing on the host outlives
+    // the pane.
+    return QStringLiteral("tmux -L relay kill-session -t ") + shellQuote(session);
+}
+
+QString listSessionsCommand() {
+    // "Remote sessions on this host…": a real tab between the fields is what keeps a session name
+    // with a space from shifting the columns parseSessionList splits on, and an empty answer must
+    // not be an error the pane sees.
+    return QStringLiteral("tmux -L relay list-sessions -F '#{session_name}\t#{session_created}\t#{session_attached}'"
+                          " 2>/dev/null");
+}
+
+QList<RemoteSession> parseSessionList(const QByteArray &output) {
+    // The host answers over one shared connection and tmux writes one line per session; anything
+    // else in it (a "no server" line, a truncated tail) must not surface as a session Relay could
+    // offer to re-attach.
+    QList<RemoteSession> sessions;
+    for (QByteArray line : output.split('\n')) {
+        if (line.endsWith('\r')) line.chop(1);
+        const QList<QByteArray> parts = line.split('\t');
+        if (parts.isEmpty() || parts.first().isEmpty()) continue;
+        const QString name = QString::fromLocal8Bit(parts.first());
+        if (!name.startsWith(QStringLiteral("relay-"))) continue;  // not a Relay holder session
+        RemoteSession session;
+        session.name = name;
+        if (parts.size() > 1) session.created = parts.at(1).toLongLong();
+        if (parts.size() > 2) session.attached = parts.at(2).toInt();
+        sessions << session;
+    }
+    return sessions;
+}
+
+QString reattachCommand(const QString &target, const QString &session) {
+    // A saved or listed pane resumes as the plain login the person typed, plus the session it had:
+    // the wrapper reads the prefix as the holder to attach to instead of minting a new one, so a
+    // restored pane lands where it was, its programs still running.
+    return QStringLiteral("RELAY_SSH_SESSION=") + shellQuote(session) + QStringLiteral(" ssh ") + shellQuote(target);
 }
 
 }  // namespace relay::ssh

@@ -220,6 +220,95 @@ private Q_SLOTS:
         QCOMPARE(persistentSession(QStringLiteral("we! rd")), QStringLiteral("relay-werd"));
         QCOMPARE(persistentSession(QString()), QStringLiteral("relay-relay"));
     }
+
+    // A login the pane shell's wrapper wrapped into a holder (card #XQ8F) re-runs as the line the
+    // person typed; the new pane's wrapper builds its own holder around it.
+    void stripsTheHolderFromAnSshLogin() {
+        QString host;
+        const QStringList wrapped{QStringLiteral("ssh"),
+                                  QStringLiteral("-o"), QStringLiteral("ControlMaster=auto"),
+                                  QStringLiteral("-o"), QStringLiteral("ControlPath=/run/x/%C"),
+                                  QStringLiteral("-o"), QStringLiteral("ControlPersist=600"),
+                                  QStringLiteral("-t"), QStringLiteral("host"),
+                                  QStringLiteral("sh -c 'a; b' relay-holder relay-abcdef12 /srv")};
+        QCOMPARE(rerunCommand(wrapped, &host), QStringLiteral("ssh host"));
+        QCOMPARE(host, QStringLiteral("host"));
+        QCOMPARE(holderSession(wrapped), QStringLiteral("relay-abcdef12"));
+        QCOMPARE(holderCwd(wrapped), QStringLiteral("/srv"));
+        // The -t a holder travels with goes with it; a user's own -t without a holder stays.
+        QCOMPARE(rerunCommand({QStringLiteral("ssh"), QStringLiteral("-t"), QStringLiteral("host"),
+                               QStringLiteral("sh -c 'x' relay-holder relay-a")}),
+                 QStringLiteral("ssh host"));
+        QCOMPARE(rerunCommand({QStringLiteral("ssh"), QStringLiteral("-t"), QStringLiteral("host")}),
+                 QStringLiteral("ssh -t host"));
+        // A remote command is not a login: nothing to re-open, nothing to hold.
+        QVERIFY(rerunCommand({QStringLiteral("ssh"), QStringLiteral("host"), QStringLiteral("ls"),
+                              QStringLiteral("-la")}).isEmpty());
+        QVERIFY(holderSession({QStringLiteral("ssh"), QStringLiteral("host"),
+                               QStringLiteral("sh -c 'ls'")}).isEmpty());
+    }
+
+    void stripsTheHolderFromAMoshLogin() {
+        QString host;
+        // mosh's own argv: the holder command in several words after `--`, and as one word.
+        QCOMPARE(rerunCommand({QStringLiteral("mosh"),
+                               QStringLiteral("--ssh=ssh -o ControlMaster=auto -o ControlPath=/run/user/1/relay-ssh/%C "
+                                              "-o ControlPersist=600"),
+                               QStringLiteral("host"), QStringLiteral("--"), QStringLiteral("sh"), QStringLiteral("-c"),
+                               QStringLiteral("x; y"), QStringLiteral("relay-holder"), QStringLiteral("relay-abcdef12")},
+                              &host),
+                 QStringLiteral("mosh host"));
+        QCOMPARE(host, QStringLiteral("host"));
+        QCOMPARE(rerunCommand({QStringLiteral("mosh"),
+                               QStringLiteral("--ssh=ssh -o ControlMaster=auto -o ControlPath=/run/user/1/relay-ssh/%C "
+                                              "-o ControlPersist=600"),
+                               QStringLiteral("host"), QStringLiteral("--"),
+                               QStringLiteral("sh -c 'x; y' relay-holder relay-abcdef12 /srv")}),
+                 QStringLiteral("mosh host"));
+        QCOMPARE(holderCwd({QStringLiteral("mosh"), QStringLiteral("host"), QStringLiteral("--"),
+                            QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("x; y"),
+                            QStringLiteral("relay-holder"), QStringLiteral("relay-abcdef12"), QStringLiteral("/srv")}),
+                 QStringLiteral("/srv"));
+        // mosh-client: the line joined with spaces inside -# (quotes literal), IP and port after.
+        const QStringList client{QStringLiteral("mosh-client"),
+                                 QStringLiteral("-# --ssh=ssh -o ControlMaster=auto "
+                                                "-o ControlPath=/run/user/1/relay-ssh/%C -o ControlPersist=600 "
+                                                "--experimental-remote-ip=remote host -- sh -c 'x; y' "
+                                                "relay-holder relay-abcdef12 |"),
+                                 QStringLiteral("10.0.0.2"), QStringLiteral("60001")};
+        QCOMPARE(rerunCommand(client, &host), QStringLiteral("mosh host"));
+        QCOMPARE(holderSession(client), QStringLiteral("relay-abcdef12"));
+        QVERIFY(holderCwd(client).isEmpty());
+        // A remote command without the marker is not a login.
+        QVERIFY(rerunCommand({QStringLiteral("mosh"), QStringLiteral("host"), QStringLiteral("--"),
+                              QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("ls")}).isEmpty());
+    }
+
+    void buildsHolderSessionCommands() {
+        // "Close and end the remote session" and "Remote sessions on this host…" (card #XQ8F).
+        QCOMPARE(killSessionCommand(QStringLiteral("relay-a b")),
+                 QStringLiteral("tmux -L relay kill-session -t 'relay-a b'"));
+        QCOMPARE(listSessionsCommand(),
+                 QStringLiteral("tmux -L relay list-sessions -F "
+                                "'#{session_name}\t#{session_created}\t#{session_attached}' 2>/dev/null"));
+        const QList<RemoteSession> sessions = parseSessionList(
+            QByteArray("relay-abcdef12\t1727000000\t1\nrelay-x\t1727000001\t0\nother\t1\t0\njunk\n"));
+        QCOMPARE(sessions.size(), 2);
+        QCOMPARE(sessions.at(0).name, QStringLiteral("relay-abcdef12"));
+        QCOMPARE(sessions.at(0).created, qint64(1727000000));
+        QCOMPARE(sessions.at(0).attached, 1);
+        QCOMPARE(sessions.at(1).name, QStringLiteral("relay-x"));
+        QCOMPARE(sessions.at(1).created, qint64(1727000001));
+        QCOMPARE(sessions.at(1).attached, 0);
+        // A short line answers with what it has.
+        const QList<RemoteSession> shortList = parseSessionList(QByteArray("relay-only\t1727\n"));
+        QCOMPARE(shortList.size(), 1);
+        QCOMPARE(shortList.at(0).created, qint64(1727));
+        QCOMPARE(shortList.at(0).attached, 0);
+        // Re-attaching is the plain login plus the session the wrapper must attach to.
+        QCOMPARE(reattachCommand(QStringLiteral("quoted host"), QStringLiteral("relay-abcdef12")),
+                 QStringLiteral("RELAY_SSH_SESSION=relay-abcdef12 ssh 'quoted host'"));
+    }
 };
 
 QTEST_MAIN(SshConfigTests)
