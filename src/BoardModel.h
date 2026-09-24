@@ -280,6 +280,30 @@ QString verifyTask(const QString &id, const QString &title, const QString &verif
 // detail already shows the title in its header, so the heading would be said twice.
 QString bodyWithoutTitle(const QString &body, const QString &title);
 
+// The card's `verify:` block (#WFRA, the QA ladder): how the card says it will be checked, as
+// `board_card` sends it — a JSON object under `verify`, absent when the card has none. The
+// worker validates the vocabularies on read and on write; this side only carries the words to
+// the strip, so a value it has never heard of is drawn as it came rather than dropped. The
+// `also` list is the alternate modes in ladder order, `deferred` the "until …" that says the
+// card is knowingly unverified for now, and `human` says whether a person is in the plan.
+struct VerifyPlan {
+    bool present = false;   // the card carries a block at all
+    QString artifact, primary, deferred, human, criteria, sample, signOff, effort, stakes, blast;
+    QStringList also;
+
+    static VerifyPlan fromJson(const QJsonValue &value);
+};
+
+// The card page's Verify strip, one line: `Verify: probe · also ai-visual, pairwise · person
+// required: <criteria> · effort medium`. Empty parts are left out, a deferred plan is prefixed
+// `unverified until <deferred> · `, and a card with no block says "No verify plan yet" so the
+// strip is on every card page and the absence is what is read, not a blank.
+QString verifyStripText(const VerifyPlan &plan);
+// The rest of the block for the strip's tooltip, one `key: value` per line in the card's own
+// order, so the fields the strip leaves out (artifact, sample, sign-off, stakes, blast) are a
+// hover away without a second strip. Empty for a card with no block.
+QString verifyPlanDetail(const VerifyPlan &plan);
+
 // How long ago a thread entry was written, from its sortable id (`20260918T021603Z-tg`):
 // "just now", "12 min ago", "3 h ago", "yesterday", "Sep 16", or empty when the id has no time.
 QString entryAge(const QString &entryId, const QDateTime &now);

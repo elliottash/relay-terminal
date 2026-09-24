@@ -2070,6 +2070,18 @@ public:
         connect(m_tryOpen, &QPushButton::clicked, this, [this] { openTry(); });
         connect(m_tryAnswer, &QLineEdit::returnPressed, this, [this] { answerTry(); });
 
+        // The Verify strip (#WFRA, the QA ladder): the card's `verify:` block as one line, the
+        // same place and face as the Try it strip above it. Unlike that strip it is on every
+        // card page — a card with no block says so, because the absence of a plan is what the
+        // person is meant to notice. No button and no editing: the block is written by the
+        // agent at planning and by `board_update_card`, and this is only where it is read.
+        m_verifyPlanLine = new QLabel(this);
+        m_verifyPlanLine->setObjectName(QStringLiteral("boardVerifyStrip"));
+        m_verifyPlanLine->setWordWrap(true);
+        m_verifyPlanLine->setTextFormat(Qt::RichText);
+        m_verifyPlanLine->setTextInteractionFlags(Qt::NoTextInteraction);
+        layout->insertWidget(layout->indexOf(m_doc), m_verifyPlanLine);
+
         // Editing the card's own words (`## Issue`). It takes the document's place rather than
         // opening beside it, so the card is either being read or being written, never both.
         m_editFrame = new QFrame(this);
@@ -2596,6 +2608,22 @@ public:
         m_tryAnswer->setVisible(!summary.revealed || !summary.question.isEmpty());
     }
 
+    // The Verify strip's line (#WFRA): `board::verifyStripText` says the words, this only inks
+    // them. Muted throughout: the plan is a fact about the card, not a call for a person's eye —
+    // except that a plan which asks for a person is drawn in the amber that means one, and a
+    // card with no plan at all says so in the muted ink like any other empty field.
+    void showVerifyPlan(const QJsonValue &block)
+    {
+        const board::VerifyPlan plan = board::VerifyPlan::fromJson(block);
+        const QString text = board::verifyStripText(plan);
+        const bool asksAPerson = plan.present && !plan.human.isEmpty()
+                                 && plan.human != QStringLiteral("none");
+        m_verifyPlanLine->setText(QStringLiteral("<span style=\"color:%1\">%2</span>")
+                                      .arg(asksAPerson ? theme::Warning.name() : theme::TextMuted.name(),
+                                           text.toHtmlEscaped()));
+        m_verifyPlanLine->setToolTip(plan.present ? board::verifyPlanDetail(plan) : QString());
+    }
+
     // A `tests_check` answer (31.2): the findings as clickable rows and at most three action
     // buttons, in the shape the helper panel's own findings list uses. Empty findings are one
     // short sentence and nothing else — the card's Check is silent when nothing moved.
@@ -2884,6 +2912,7 @@ public:
             clearCheck();
         showTests();
         showTryIt();
+        showVerifyPlan(card.value(QStringLiteral("verify")));
 
         m_entries.clear();
         const QJsonArray thread = card.value(QStringLiteral("thread")).toArray();
@@ -4330,6 +4359,8 @@ private:
     QPushButton *m_tryOpen = nullptr;
     QLineEdit *m_tryAnswer = nullptr;
     bool m_tryRunning = false;        // a Try it turn is in flight on this card
+    // The Verify strip (#WFRA): the card's `verify:` block as one line under the Try it strip.
+    QLabel *m_verifyPlanLine = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
     QPushButton *m_saveEdit = nullptr, *m_cancelEdit = nullptr;

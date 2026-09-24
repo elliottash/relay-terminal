@@ -445,6 +445,7 @@ private slots:
     void theCardPageAsksForACardConsoleAndItsActionsFollowTheCard();
     void theOneConsoleIsToldWhichCardsTranscriptItIsDrawing();
     void theCardsRowCarriesVerifyOnlyInAQaLane();
+    void theVerifyBlockReadsIntoOneStripLine();
     void anAnswersCardOptionAndSessionLinksResolveThroughTheContext();
     void aBoardWithNoConsoleFactoryStillWorks();
 };
@@ -4520,6 +4521,72 @@ void BoardModelTests::aSelfClosedCardReachedByIdUnfoldsItsGroup()
     QVERIFY(other.openSelfClosed().isEmpty());
     QVERIFY(other.rows().at(relay::board::rowOfSection(other.rows(),
                                                        QStringLiteral("done"))).collapsed);
+}
+
+// The QA ladder's `verify:` block (#WFRA) as `board_card` sends it, read into the one line the
+// card page's Verify strip draws. Failure shows as a card with a block and a strip that says
+// "No verify plan yet", or a strip that reads a key it should have left out.
+void BoardModelTests::theVerifyBlockReadsIntoOneStripLine()
+{
+    using relay::board::VerifyPlan;
+    using relay::board::verifyStripText;
+    using relay::board::verifyPlanDetail;
+
+    // No block at all: absent, null or not an object all read as "no plan".
+    QVERIFY(!VerifyPlan::fromJson(QJsonValue()).present);
+    QVERIFY(!VerifyPlan::fromJson(QJsonValue(QJsonValue::Null)).present);
+    QVERIFY(!VerifyPlan::fromJson(QJsonValue(QStringLiteral("probe"))).present);
+    QCOMPARE(verifyStripText(VerifyPlan::fromJson(QJsonValue())), QStringLiteral("No verify plan yet"));
+    QVERIFY(verifyPlanDetail(VerifyPlan::fromJson(QJsonValue())).isEmpty());
+
+    // The whole vocabulary, in the card's own order.
+    const QJsonObject full{{"artifact", "visual"}, {"primary", "probe"},
+                           {"also", QJsonArray{"ai-visual", "pairwise"}},
+                           {"human", "required"}, {"criteria", "the strip reads as one line"},
+                           {"sample", "1/10 after 30"}, {"sign_off", "none"},
+                           {"effort", "medium"}, {"stakes", "rework"}, {"blast", "capability"}};
+    const VerifyPlan plan = VerifyPlan::fromJson(full);
+    QVERIFY(plan.present);
+    QCOMPARE(plan.artifact, QStringLiteral("visual"));
+    QCOMPARE(plan.primary, QStringLiteral("probe"));
+    QCOMPARE(plan.also, QStringList({QStringLiteral("ai-visual"), QStringLiteral("pairwise")}));
+    QVERIFY(plan.deferred.isEmpty());
+    QCOMPARE(plan.human, QStringLiteral("required"));
+    QCOMPARE(plan.criteria, QStringLiteral("the strip reads as one line"));
+    QCOMPARE(plan.sample, QStringLiteral("1/10 after 30"));
+    QCOMPARE(plan.signOff, QStringLiteral("none"));
+    QCOMPARE(plan.effort, QStringLiteral("medium"));
+    QCOMPARE(plan.stakes, QStringLiteral("rework"));
+    QCOMPARE(plan.blast, QStringLiteral("capability"));
+    QCOMPARE(verifyStripText(plan),
+             QStringLiteral("Verify: probe · also ai-visual, pairwise · person required: "
+                            "the strip reads as one line · effort medium"));
+    const QString detail = verifyPlanDetail(plan);
+    QVERIFY(detail.contains(QStringLiteral("artifact: visual\n")));
+    QVERIFY(detail.contains(QStringLiteral("also: ai-visual, pairwise\n")));
+    QVERIFY(detail.contains(QStringLiteral("sample: 1/10 after 30\n")));
+    QVERIFY(detail.endsWith(QStringLiteral("blast: capability")));
+    QVERIFY(!detail.contains(QStringLiteral("deferred")));
+
+    // Empty parts are left out: `human: none` says nothing, no alternates say nothing.
+    QCOMPARE(verifyStripText(VerifyPlan::fromJson(QJsonObject{{"primary", "script"}, {"human", "none"},
+                                                              {"effort", "low"}})),
+             QStringLiteral("Verify: script · effort low"));
+    // A person without criteria is still a person.
+    QCOMPARE(verifyStripText(VerifyPlan::fromJson(QJsonObject{{"primary", "person"}, {"human", "optional"}})),
+             QStringLiteral("Verify: person · person optional"));
+    // A deferred plan is prefixed with what it waits for.
+    QCOMPARE(verifyStripText(VerifyPlan::fromJson(QJsonObject{{"primary", "metric"},
+                                                              {"deferred", "the dataset lands"},
+                                                              {"effort", "high"}})),
+             QStringLiteral("Verify: unverified until the dataset lands · metric · effort high"));
+    // Only a deferral, nothing else, still reads as a sentence.
+    QCOMPARE(verifyStripText(VerifyPlan::fromJson(QJsonObject{{"deferred", "release"}})),
+             QStringLiteral("Verify: unverified until release"));
+    // An empty object is a block — the worker refuses it, but the page must not call it absent.
+    QCOMPARE(verifyStripText(VerifyPlan::fromJson(QJsonObject{})), QStringLiteral("Verify:"));
+    // A hand-written `also: pairwise` (one string where the list goes) is one alternate.
+    QCOMPARE(VerifyPlan::fromJson(QJsonObject{{"also", "pairwise"}}).also, QStringList{QStringLiteral("pairwise")});
 }
 
 QTEST_MAIN(BoardModelTests)

@@ -913,6 +913,92 @@ QString bodyWithoutTitle(const QString &body, const QString &title)
     return body.mid(end);
 }
 
+VerifyPlan VerifyPlan::fromJson(const QJsonValue &value)
+{
+    VerifyPlan plan;
+    if (!value.isObject())
+        return plan;
+    const QJsonObject object = value.toObject();
+    plan.present = true;
+    const auto text = [&object](const char *key) {
+        return object.value(QLatin1String(key)).toString().trimmed();
+    };
+    plan.artifact = text("artifact");
+    plan.primary = text("primary");
+    plan.deferred = text("deferred");
+    plan.human = text("human");
+    plan.criteria = text("criteria");
+    plan.sample = text("sample");
+    plan.signOff = text("sign_off");
+    plan.effort = text("effort");
+    plan.stakes = text("stakes");
+    plan.blast = text("blast");
+    // A single string where the list should be is still one alternate: the worker refuses that
+    // shape on write, but a card edited by hand reaches the page the way it was written.
+    const QJsonValue also = object.value(QStringLiteral("also"));
+    if (also.isString()) {
+        const QString one = also.toString().trimmed();
+        if (!one.isEmpty())
+            plan.also << one;
+    } else {
+        for (const QString &mode : stringList(also)) {
+            const QString one = mode.trimmed();
+            if (!one.isEmpty())
+                plan.also << one;
+        }
+    }
+    return plan;
+}
+
+QString verifyStripText(const VerifyPlan &plan)
+{
+    if (!plan.present)
+        return QStringLiteral("No verify plan yet");
+    QStringList parts;
+    if (!plan.deferred.isEmpty())
+        parts << QStringLiteral("unverified until %1").arg(plan.deferred);
+    if (!plan.primary.isEmpty())
+        parts << plan.primary;
+    if (!plan.also.isEmpty())
+        parts << QStringLiteral("also %1").arg(plan.also.join(QStringLiteral(", ")));
+    // `human: none` is the ordinary case and says nothing; the other two say whether the
+    // person's look is asked for or required, and on what the criteria say they should judge.
+    if (!plan.human.isEmpty() && plan.human != QStringLiteral("none")) {
+        QString person = QStringLiteral("person %1").arg(plan.human);
+        if (!plan.criteria.isEmpty())
+            person += QStringLiteral(": %1").arg(plan.criteria);
+        parts << person;
+    }
+    if (!plan.effort.isEmpty())
+        parts << QStringLiteral("effort %1").arg(plan.effort);
+    if (parts.isEmpty())
+        return QStringLiteral("Verify:");
+    return QStringLiteral("Verify: %1").arg(parts.join(QStringLiteral(" · ")));
+}
+
+QString verifyPlanDetail(const VerifyPlan &plan)
+{
+    if (!plan.present)
+        return QString();
+    QStringList lines;
+    const auto line = [&lines](const char *key, const QString &value) {
+        if (!value.isEmpty())
+            lines << QStringLiteral("%1: %2").arg(QLatin1String(key), value);
+    };
+    line("artifact", plan.artifact);
+    line("primary", plan.primary);
+    line("also", plan.also.join(QStringLiteral(", ")));
+    line("deferred", plan.deferred);
+    line("human", plan.human);
+    line("criteria", plan.criteria);
+    line("sample", plan.sample);
+    line("sign_off", plan.signOff);
+    line("effort", plan.effort);
+    line("stakes", plan.stakes);
+    line("blast", plan.blast);
+    return lines.join(QLatin1Char('\n'));
+}
+
 QString entryAge(const QString &entryId, const QDateTime &now)
 {
     const QDateTime parsed = QDateTime::fromString(entryId.left(16), QStringLiteral("yyyyMMdd'T'HHmmss'Z'"));
