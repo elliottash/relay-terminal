@@ -1820,6 +1820,8 @@ public:
             if (it.value().isEmpty()) catalog.status.remove(it.key());
             else catalog.status.insert(it.key(), it.value());
         }
+        for (auto it = m_resetsAvailable.constBegin(); it != m_resetsAvailable.constEnd(); ++it)
+            catalog.resetsAvailable.insert(it.key(), it.value());
         return catalog;
     }
     // ----- usage limits (owner, 2026-09-20) ---------------------------------------------------
@@ -1834,12 +1836,15 @@ public:
     // Fresh figures for one preset: the model box and the picker redraw, Options › Models' status
     // line follows, and the failover chain the worker holds is recomputed without the exhausted
     // ones. When the nearest reset lands, the same again, so the row comes back on its own.
-    void noteLimits(const QString &preset, const QList<relay::models::LimitWindow> &windows, const QString &status) {
+    void noteLimits(const QString &preset, const QList<relay::models::LimitWindow> &windows, const QString &status, int resetsAvailable = -1) {
         if (preset.isEmpty()) return;
         const QStringList before = exhaustedPresets();
         m_limits.insert(preset, windows);
         m_limitUpdatedAt.insert(preset, QDateTime::currentSecsSinceEpoch());
         m_limitStatus.insert(preset, status);
+        // Usage resets (protocol 29.3) fold in only when the event reported them, like the wire's
+        // own sparse rule: a figure-less event leaves the banked count as it was.
+        if (resetsAvailable >= 0) m_resetsAvailable.insert(preset, resetsAvailable);
         limitsChanged(before != exhaustedPresets());
     }
     QStringList exhaustedPresets() const {
@@ -15762,6 +15767,9 @@ private:
     QHash<QString, QList<relay::models::LimitWindow>> m_limits;
     QHash<QString, qint64> m_limitUpdatedAt;
     QHash<QString, QString> m_limitStatus;
+    // The banked usage resets per preset (usage_limits.resets_available): Codex's count today.
+    // Absent means the provider has not reported one, which is not the same as none left.
+    QHash<QString, int> m_resetsAvailable;
     bool m_turnSaw429 = false;
     QString m_failoverTarget;   // the preset the last failover of this turn moved to
     bool m_configuring = false;

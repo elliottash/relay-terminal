@@ -296,7 +296,12 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
                 w.resetsAt = window.value(QStringLiteral("resets_at")).toVariant().toLongLong();
                 if (!w.kind.isEmpty()) windows << w;
             }
-            noteLimits(event.value(QStringLiteral("preset")).toString(), windows, event.value(QStringLiteral("status")).toString());
+            // Usage resets are optional on the wire (protocol 29.3): only a real number counts,
+            // and a bool is not one.
+            const QJsonValue resets = event.value(QStringLiteral("resets_available"));
+            const int resetsAvailable = resets.isDouble() ? qMax(0, resets.toInt()) : -1;
+            noteLimits(event.value(QStringLiteral("preset")).toString(), windows,
+                       event.value(QStringLiteral("status")).toString(), resetsAvailable);
             return true;
         }
         if (type == QStringLiteral("usage")) {

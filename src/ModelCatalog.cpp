@@ -78,11 +78,22 @@ bool effortFixedOf(const QJsonObject &model, const QJsonObject &preset, const QS
     return efforts.isEmpty() || hosted;
 }
 
+QList<LimitWindow> windowsOf(const QJsonObject &preset, int *resetsAvailable);
 QList<LimitWindow> windowsOf(const QJsonObject &preset) {
+    return windowsOf(preset, nullptr);
+}
+
+QList<LimitWindow> windowsOf(const QJsonObject &preset, int *resetsAvailable) {
     QList<LimitWindow> windows;
-    // The worker's guest row carries `limits: {windows, status?, updated_at}` (protocol 29.3): the
-    // last usage_limits event as it held it. A bare array of windows is read too.
+    // The worker's guest row carries `limits: {windows, resets_available?, status?, updated_at}`
+    // (protocol 29.3): the last usage_limits event as it held it. A bare array of windows is read
+    // too, with no place for the resets count.
     const QJsonValue held = preset.value(QStringLiteral("limits"));
+    if (resetsAvailable) *resetsAvailable = -1;
+    if (held.isObject()) {
+        const QJsonValue resets = held.toObject().value(QStringLiteral("resets_available"));
+        if (resets.isDouble()) *resetsAvailable = qMax(0, resets.toInt());
+    }
     const QJsonArray limits = held.isObject() ? held.toObject().value(QStringLiteral("windows")).toArray() : held.toArray();
     for (const auto &value : limits) {
         const QJsonObject window = value.toObject();
@@ -244,8 +255,10 @@ Catalog catalogFrom(const QJsonArray &presets) {
         const int order = preset.value(QStringLiteral("order")).isDouble()
                               ? preset.value(QStringLiteral("order")).toInt() : -1;
         catalog.presetLabels.insert(id, str(preset, "label").toLower());
-        const QList<LimitWindow> windows = windowsOf(preset);
+        int resetsAvailable = -1;
+        const QList<LimitWindow> windows = windowsOf(preset, &resetsAvailable);
         if (!windows.isEmpty()) catalog.limits.insert(id, windows);
+        if (resetsAvailable >= 0) catalog.resetsAvailable.insert(id, resetsAvailable);
         const QJsonObject limits = preset.value(QStringLiteral("limits")).toObject();
         const qint64 updated = limits.value(QStringLiteral("updated_at")).toVariant().toLongLong();
         if (updated > 0) catalog.limitUpdatedAt.insert(id, updated);
@@ -1412,7 +1425,7 @@ QString resetText(qint64 resetsAt, qint64 now) {
                                           : resets.toString(QStringLiteral("d MMM")).toLower();
 }
 
-QString limitsText(const QList<LimitWindow> &windows, qint64 now) {
+QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable) {
     QStringList parts;
     for (const LimitWindow &window : windows) {
         if (window.usedPercent < 0) continue;
@@ -1420,6 +1433,11 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now) {
         if (window.resetsAt > 0) part += QStringLiteral(", resets %1").arg(resetText(window.resetsAt, now));
         parts << part;
     }
+    // The banked usage resets, the figure the CLI's /usage panel counts down (protocol 29.3):
+    // shown only when there is at least one, so a provider that never reports the figure and one
+    // that reports none left read the same.
+    if (resetsAvailable > 0)
+        parts << QStringLiteral("%1 usage reset%2").arg(resetsAvailable).arg(resetsAvailable == 1 ? QString() : QStringLiteral("s"));
     return parts.join(QStringLiteral(" · "));
 }
 

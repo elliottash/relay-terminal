@@ -1720,7 +1720,8 @@ void ModelPicker::onRowChanged() {
         if (!m_levels->currentItem() && m_levels->count()) m_levels->setCurrentRow(listed ? 0 : m_levels->count() - 1);
     }
     m_filling = false;
-    const QString limits = limitsText(m_context.catalog.limits.value(entry->preset), nowSeconds());
+    const QString limits = limitsText(m_context.catalog.limits.value(entry->preset), nowSeconds(),
+                                      m_context.catalog.resetsAvailable.value(entry->preset, -1));
     m_limits->setText(limits.isEmpty() ? QString() : entry->provider + QStringLiteral(": ") + limits);
 }
 

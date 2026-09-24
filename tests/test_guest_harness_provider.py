@@ -715,7 +715,8 @@ class LimitsTests(unittest.TestCase):
     def test_limits_become_usage_limits_and_are_remembered(self):
         windows = [{"kind": "5h", "used_percent": 62, "resets_at": 1789926600},
                    {"kind": "weekly", "used_percent": 40.04, "resets_at": 1790499600}]
-        script = [{"events": [ev("limits", windows=list(reversed(windows)), status="allowed"),
+        script = [{"events": [ev("limits", windows=list(reversed(windows)), status="allowed",
+                                resets_available=1),
                               ev("delta", text="ok")],
                    "result": ("ok", "end", {})}]
         events, agent, provider = run_turn(self, script)
@@ -724,11 +725,14 @@ class LimitsTests(unittest.TestCase):
         self.assertEqual(limits[0]["preset"], "guest:claude")
         self.assertEqual(limits[0]["guest"], "claude")
         self.assertEqual(limits[0]["status"], "allowed")
+        # The banked usage resets ride along (codex's usage resets today, 29.3).
+        self.assertEqual(limits[0]["resets_available"], 1)
         self.assertEqual(limits[0]["windows"],                     # normalised, 5h then weekly
                          [{"kind": "5h", "used_percent": 62.0, "resets_at": 1789926600},
                           {"kind": "weekly", "used_percent": 40.0, "resets_at": 1790499600}])
         self.assertEqual(provider.usage_limits["windows"], limits[0]["windows"])
         self.assertEqual(provider.usage_limits["status"], "allowed")
+        self.assertEqual(provider.usage_limits["resets_available"], 1)
         self.assertIsInstance(provider.usage_limits["updated_at"], int)
         with mock.patch.object(ghp, "installations", return_value={
                 "claude": {"installed": True, "binary": "/usr/bin/claude", "version": ""},
@@ -736,10 +740,27 @@ class LimitsTests(unittest.TestCase):
              mock.patch.object(ghp, "adapter_available", lambda guest_id, refresh=False: True):
             rows = {row["id"]: row for row in ghp.preset_rows()}
         self.assertEqual(rows["guest:claude"]["limits"]["windows"], limits[0]["windows"])
+        self.assertEqual(rows["guest:claude"]["limits"]["resets_available"], 1)
         self.assertNotIn("limits", rows["guest:codex"])           # codex has said nothing yet
         # The row is a copy: nobody's edit of it reaches the held figures.
         rows["guest:claude"]["limits"]["windows"].clear()
         self.assertEqual(len(ghp.last_limits("claude")["windows"]), 2)
+
+    def test_a_report_without_usage_resets_leaves_them_unsaid(self):
+        # Absent is "not reported", not "none left", so it never rides an event or a row.
+        windows = [{"kind": "5h", "used_percent": 62, "resets_at": 1789926600}]
+        script = [{"events": [ev("limits", windows=windows, status="allowed", resets_available=0),
+                              ev("delta", text="ok")],
+                   "result": ("ok", "end", {})}]
+        events, agent, provider = run_turn(self, script)
+        limits = [e for e in events if e["event"] == "usage_limits"]
+        self.assertEqual(limits[0]["resets_available"], 0)        # zero banked is said, not hidden
+        script[0]["events"][0] = ev("limits", windows=windows, status="allowed",
+                                    resets_available="one")
+        events, agent, provider = run_turn(self, script)
+        self.assertEqual([e for e in events if e["event"] == "usage_limits"][0].get(
+            "resets_available", "absent"), "absent")
+        self.assertNotIn("resets_available", provider.usage_limits)
 
     def test_a_report_with_no_usable_window_is_dropped(self):
         script = [{"events": [ev("limits", windows=[{"kind": "monthly", "used_percent": 1},

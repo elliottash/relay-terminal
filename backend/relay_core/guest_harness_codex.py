@@ -324,14 +324,18 @@ class CodexHarness:
         try:
             self._request_async("account/rateLimits/read", {},
                                 on_result=lambda result: self._merge_limits(
-                                    (result or {}).get("rateLimits")))
+                                    (result or {}).get("rateLimits"),
+                                    (result or {}).get("rateLimitResetCredits")))
         except HarnessError as exc:
             log.debug("codex harness: could not ask for rate limits: %s", exc)
 
-    def _merge_limits(self, snapshot) -> None:
+    def _merge_limits(self, snapshot, credits=None) -> None:
         """Fold a RateLimitSnapshot into the held one. The schema calls an update *sparse*
         ("merge available values… does not clear a previously observed value"), so a window that
-        is absent or null leaves what was known; a window that is present replaces it."""
+        is absent or null leaves what was known; a window that is present replaces it. The read
+        response also carries the account's banked usage-reset credits at its top level
+        (`rateLimitResetCredits`, the figure the CLI's own /usage panel counts down); the
+        `updated` notification does not, so credits fold in only when given — same sparse rule."""
         if not isinstance(snapshot, dict):
             return
         with self._lock:
@@ -343,6 +347,10 @@ class CodexHarness:
             for key in ("planType", "rateLimitReachedType", "limitId"):
                 if key in snapshot and snapshot[key] is not None:
                     self._limits[key] = snapshot[key]
+            if isinstance(credits, dict):
+                available = credits.get("availableCount")
+                if isinstance(available, (int, float)) and not isinstance(available, bool):
+                    self._limits["resetsAvailable"] = max(0, int(available))
             self._limits_fresh = bool(self._limits.get("primary") or self._limits.get("secondary"))
 
     def _limits_event(self) -> dict:
@@ -369,6 +377,10 @@ class CodexHarness:
         data = {"windows": windows}
         if held.get("rateLimitReachedType"):
             data["status"] = "rejected"
+        resets_available = held.get("resetsAvailable")
+        if isinstance(resets_available, int) and not isinstance(resets_available, bool) \
+                and resets_available >= 0:
+            data["resets_available"] = resets_available
         return data
 
     def _emit_limits_if_fresh(self, turn: _TurnState) -> None:

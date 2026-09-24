@@ -964,9 +964,11 @@ class LimitsTest(HarnessCase):
         harness.send("Reply with the single word ok.", emit=self.emit, cancel=threading.Event())
         self.assertEqual(self.kinds()[:2], ["started", "limits"])
         # A Pro plan with only a weekly allowance: primary is the 7-day window, no secondary.
+        # The read answer's top-level rateLimitResetCredits (none banked here) ride along.
         self.assertEqual(self.only("limits")[0],
                          {"windows": [{"kind": "weekly", "used_percent": 53.0,
-                                       "resets_at": 1790065926}]})
+                                       "resets_at": 1790065926}],
+                          "resets_available": 0})
         self.assertEqual(len(proc.sent("account/rateLimits/read")), 1)   # once, not per turn
 
     def test_a_read_the_server_does_not_have_is_shrugged_off(self):
@@ -1031,6 +1033,29 @@ class LimitsTest(HarnessCase):
         # Nothing known, nothing said.
         harness._limits = {}
         self.assertEqual(harness._limits_event(), {})
+
+    def test_banked_usage_resets_ride_the_limits_event(self):
+        # The read answer carries `rateLimitResetCredits` beside the snapshot (the figure the
+        # CLI's /usage panel counts down); an update notification does not, so what was read
+        # survives one (29.3's sparse rule) and an event without the figure keeps the last count.
+        harness = gh.CodexHarness(codex_path=self.fake_codex, spawn=lambda argv, cwd: None)
+        harness._merge_limits({"primary": _window(53, 10080, 1790065926), "secondary": None},
+                              credits={"availableCount": 1, "credits": []})
+        event = harness._limits_event()
+        self.assertEqual(event["resets_available"], 1)
+        harness._merge_limits({"primary": _window(9, 10080, 1790065926), "secondary": None})
+        self.assertEqual(harness._limits_event()["resets_available"], 1)
+        # A fresh read with none banked says so; a read that reports no count at all (an older
+        # server) leaves the last one, the same sparse rule the windows follow.
+        harness._merge_limits({"primary": _window(9, 10080, 1790065926), "secondary": None},
+                              credits={"availableCount": 0})
+        self.assertEqual(harness._limits_event()["resets_available"], 0)
+        harness._merge_limits({"primary": _window(9, 10080, 1790065926), "secondary": None},
+                              credits={"availableCount": None, "credits": None})
+        self.assertEqual(harness._limits_event()["resets_available"], 0)
+        harness._merge_limits({"primary": _window(9, 10080, 1790065926), "secondary": None},
+                              credits={"credits": []})
+        self.assertEqual(harness._limits_event()["resets_available"], 0)
 
 
 # ----- when things go wrong -----------------------------------------------------------------------

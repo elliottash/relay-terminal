@@ -1087,14 +1087,21 @@ private Q_SLOTS:
         QCOMPARE(limitsText(windows, now), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue"));
         QCOMPARE(limitsText({}, now), QString());
         QCOMPARE(limitsText({LimitWindow{QStringLiteral("5h"), -1, 0}}, now), QString());
+        // Banked usage resets (protocol 29.3) join the line only when there is at least one.
+        QCOMPARE(limitsText(windows, now, 1), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue · 1 usage reset"));
+        QCOMPARE(limitsText(windows, now, 3), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue · 3 usage resets"));
+        QCOMPARE(limitsText(windows, now, 0), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue"));
+        QCOMPARE(limitsText({}, now, 2), QStringLiteral("2 usage resets"));
     }
 
     void theWorkersLimitsObjectIsReadWindowsAndStatus() {
-        // The real row (protocol 29.3): `limits: {windows, status?, updated_at}`, not a bare array.
+        // The real row (protocol 29.3): `limits: {windows, resets_available?, status?, updated_at}`,
+        // not a bare array.
         QJsonArray rows = presets();
         QJsonObject guest = rows.at(3).toObject();
         guest.insert(QStringLiteral("limits"), QJsonObject{
             {QStringLiteral("windows"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("5h")}, {QStringLiteral("used_percent"), 100.0}, {QStringLiteral("resets_at"), 2000}}}},
+            {QStringLiteral("resets_available"), 1},
             {QStringLiteral("status"), QStringLiteral("rejected")}, {QStringLiteral("updated_at"), 1500}});
         rows.replace(3, guest);
         const Catalog catalog = catalogFrom(rows);
@@ -1102,6 +1109,12 @@ private Q_SLOTS:
         QCOMPARE(catalog.limits.value(QStringLiteral("guest:claude")).first().usedPercent, 100.0);
         QCOMPARE(catalog.status.value(QStringLiteral("guest:claude")), QStringLiteral("rejected"));
         QVERIFY(catalog.status.value(QStringLiteral("glm-coding")).isEmpty());
+        // The banked usage resets ride the same row; a preset that reports none keeps no entry,
+        // which reads as "not reported" rather than "none left".
+        QCOMPARE(catalog.resetsAvailable.value(QStringLiteral("guest:claude")), 1);
+        QVERIFY(!catalog.resetsAvailable.contains(QStringLiteral("glm-coding")));
+        QCOMPARE(catalog.resetsAvailable.value(QStringLiteral("guest:claude")),
+                 catalogFrom(rows).resetsAvailable.value(QStringLiteral("guest:claude")));
     }
 
     void exhaustedIsASpentWindowUntilItsReset() {

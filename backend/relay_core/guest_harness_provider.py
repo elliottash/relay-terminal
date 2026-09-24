@@ -715,7 +715,9 @@ def last_limits(guest_id: str) -> dict:
 def usage_limits_event(guest_id: str, data: dict, account: str = "") -> dict:
     """The worker's `usage_limits` event a harness `limits` event becomes (29.3), or {} when it
     names no window. Also the moment the figures are remembered for `preset_rows()`. `account`
-    files them under that account's key and preset (#M8S2)."""
+    files them under that account's key and preset (#M8S2). `resets_available`, the subscription's
+    banked usage resets (Codex's `rateLimitResetCredits` today), rides along when the harness
+    reports it; absent means "not reported", which is not the same as none left."""
     windows = limit_windows(data.get("windows") if isinstance(data, dict) else None)
     if not windows:
         return {}
@@ -727,9 +729,14 @@ def usage_limits_event(guest_id: str, data: dict, account: str = "") -> dict:
     status = data.get("status")
     if isinstance(status, str) and status.strip():
         event["status"] = status.strip()[:40]
+    resets = data.get("resets_available") if isinstance(data, dict) else None
+    if isinstance(resets, int) and not isinstance(resets, bool) and resets >= 0:
+        event["resets_available"] = resets
     held = {"windows": [dict(w) for w in windows], "updated_at": int(time.time())}
     if "status" in event:
         held["status"] = event["status"]
+    if "resets_available" in event:
+        held["resets_available"] = event["resets_available"]
     _LAST_LIMITS[key] = held
     return event
 

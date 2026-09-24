@@ -6615,19 +6615,23 @@ event whenever the guest reports fresh figures and the provider turns each one i
 {"event": "usage_limits", "preset": "guest:claude" | "guest:codex", "guest": "<id>",
  "windows": [{"kind": "5h" | "weekly", "used_percent": <0-100 float>,
               "resets_at": <unix seconds int> | null}, ...],
+ "resets_available"?: <int ≥ 0>,
  "status"?: "allowed" | "allowed_warning" | "rejected"}
 ```
 
 so the model picker can show "5h: 62% left, resets 14:30 · weekly: 40% left, resets Tue" per
 provider. `windows` is in that order, at most one row per kind, and only the kinds the guest
-named.
+named. `resets_available` is the subscription's banked usage resets — codex's app-server
+returns them as `rateLimitResetCredits.availableCount` beside the rate-limit snapshot, and the
+adapter folds them in; absent means "not reported", not "none left".
 
 The worker also emits `usage_limits` for Z.AI and Kimi Code subscription presets after each
 15-minute vendor quota poll. Those events use the same `windows` fields, with `preset` set to
 `glm-coding` or `kimi-code` and no `guest`; Kimi can include a `monthly` window.
 
 The last figures per guest are kept on the worker (`guest_harness_provider.last_limits`)
-and ride on the guest's `presets` row as `limits: {windows, status?, updated_at}`, so a picker
+and ride on the guest's `presets` row as `limits: {windows, resets_available?, status?,
+updated_at}`, so a picker
 opened in another pane has them without waiting for a turn; a limit belongs to the account, not
 to a pane. Where the numbers come from, verified against the installed binaries on 2026-09-20:
 Claude Code 2.1.278 writes one `rate_limit_event` per turn to a stream-json host, after the
