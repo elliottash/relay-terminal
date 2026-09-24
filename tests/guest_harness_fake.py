@@ -65,6 +65,9 @@ class FakeHarness:
         self.calls: list[tuple] = []
         self.answers: list[tuple[str, dict]] = []
         self.starts: list[dict] = []
+        # Session ids this harness must refuse to resume — the guest pruned them — for the
+        # relay-managed-resume fallback tests (#Q8TM): start(resume=<one of these>) fails.
+        self.missing_sessions: set[str] = set()
         self.sent: list[dict] = []
         self.interrupts = 0
         self.compactions = 0
@@ -95,6 +98,10 @@ class FakeHarness:
                             "permissions": permissions, "effort": effort})
         if self._start_error is not None:
             raise self._start_error
+        if resume and resume in self.missing_sessions:
+            # The guest no longer holds this session (rolled sessions away, pruned its store):
+            # resuming it is a HarnessError, as the adapters report an unknown thread id.
+            raise HarnessError(f"session {resume} is not on this guest anymore.")
         if self.started:
             # Both adapters refuse this ("this claude harness is already started"): a harness is
             # one process for one guest session, so resuming another one means a new harness.

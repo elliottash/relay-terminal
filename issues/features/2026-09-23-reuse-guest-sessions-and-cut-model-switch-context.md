@@ -1,13 +1,16 @@
 ---
 id: Q8TM
 type: work
-status: planned
+status: needs-verification
 labels: [feature, guests, context, models]
-assignee: codex
+assignee: agent
+implemented_by: glm/glm-5.3
+session: bd9e4ae0-caa0-4e43-ba0b-f26212835b63
 rank: m
 created: '2026-09-23'
-source: 'owner in Codex, 2026-09-23'
-links: {plans: [], commits: [], evidence: [], related: [1V4F, 0C0V, 3ES1], github: null}
+verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
+source: owner in Codex, 2026-09-23
+links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-24-guest-switch-resume-Q8TM/'], related: [1V4F, 0C0V, 3ES1], github: null}
 ---
 # Preserve context while reducing model-switch token use across guest and native models
 
@@ -64,3 +67,68 @@ Cut repeated model-switch context while keeping the owner's #1V4F requirement th
 - Resuming a guest without the intervening delta violates #1V4F. Replaying its own prior turns wastes context and may confuse it. Cursors, deduplication, failed sends, and resume fallback need focused regression tests.
 - Cache behavior can vary by model and provider; a shorter prompt may rebuild a cache and cost more. Require before/after usage and outcome evidence for Codex, Claude, GLM, and Kimi before choosing defaults.
 - Verify with fake guest harness tests, native provider payload tests, and a small number of explicit live A/B turns. Use #0C0V's usage records as the measurement source. No live subscription calls are required merely to plan this card.
+
+## Execution Summary
+
+Delivered 2026-09-24, pane bd9e4ae0 (GLM 5.3). The plan's five steps landed as:
+
+1. **Cursors** — `guest_harness_provider.cursor_key/guest_cursor/_note_cursor` keep, per pane
+   and per (guest, account), the session the guest ran and how far it read (`{session, messages,
+   head}` — `head` is an 80-char fingerprint of its last reply). Durable: `attach()`'s session-data
+   wrapper writes `guest_cursors` into the session file, and `resume_session()` restores it, so a
+   restart still resumes. Invalidated the four ways the plan names: an explicit `guest.resume` /
+   `guest.fork` wins over the cursor, another account's cursor is never read (#M8S2), a
+   rewind/fork on the pane is caught by the fingerprint (count-or-head mismatch → full brief), and
+   a session the guest no longer holds falls back inside `start_provider`.
+2. **Resume + delta** — `start_provider(resume_cursor=…)` restarts the harness on the pane's own
+   session (Codex `thread/resume`, Claude `--resume`) and `complete()` delivers only the
+   intervening Relay turns — user turns, assistant turns, tool calls and results, in order, via
+   `render_transcript` (so the #1V4F rendering is the same) inside a `CATCHUP_NOTE` block, capped
+   by the same 160 KB handover cap. Nothing already in the resumed session is re-sent; the
+   fingerprint check deduplicates exactly, not heuristically. The fallback is the existing
+   lossless full handover brief — never a silent trim. A failed send does not consume the
+   catch-up: it is retried with the block still in the prompt.
+3. **Native path** — untouched by construction: handovers and catch-ups are composed inside
+   `complete()` and never appended to `agent.messages`, so GLM/Kimi keep receiving the whole
+   conversation with #0C0V's pinned prefix. `test_model_switch`'s conversion tests and the
+   handover suite's endpoint round trips (unchanged) are the evidence; live per-provider cache
+   A/B is runtime evidence the owner's usage view will now show through the accounting below.
+4. **Accounting** — `model_changed` carries `guest_resumed` and `guest_resume_fallback`; the
+   first turn's `status` event carries `resumed_session`, `catchup_messages`, `catchup_chars`;
+   the turn record carries `guest_resumed`/`catchup_messages`/`catchup_chars` beside #0C0V's
+   `handover_*`; and `logs` records `guest_catchup`, `guest_catchup_fallback`,
+   `guest_resume_failed` and `cursor_resumed` on `guest_harness_started`. Session ids stay
+   redacted in the UI as before (status lines name them, payloads do not).
+5. **Replay** — the four patterns and every fallback on the scripted FakeHarness in
+   `tests/test_guest_handover.py` (see `## Tests`); protocol doc updated
+   (`docs/AGENT-SESSIONS-PROTOCOL.md`, the guest switch bullet).
+
+Evidence: `docs/qa_evidence/2026-09-24-guest-switch-resume-Q8TM/` (README + the 113-test
+would-land run: `git archive HEAD` plus exactly this card's files).
+
+Not done here, and why: live cross-provider A/B turns and per-provider billed-input comparison
+(run against real subscriptions — the owner's to run; the records to read them are what this
+card adds), and the stateful/incremental native APIs (plan step 3 keeps them behind capability
+checks; nothing to enable today).
+
+## Tests
+
+`tests/test_guest_handover.py` — the switch replay suite, all on FakeHarness, no real guest:
+
+- `test_switching_back_to_a_guest_resumes_its_session_and_gets_only_what_ran_since` — guest →
+  native → guest: the harness restarts on its own session, only the native turn is delivered,
+  never the guest's own earlier turns; a second round trip delivers only what ran since.
+- `test_a_return_with_nothing_to_deliver_sends_the_prompt_bare` — resume with an empty delta.
+- `test_a_cursor_that_no_longer_fits_falls_back_to_the_full_handover` — rewind/fork detection.
+- `test_a_guest_that_lost_the_session_starts_fresh_and_is_briefed_in_full` — pruned session:
+  `guest_resume_failed` logged, fresh harness, full brief, `switch_metrics` recorded.
+- `test_a_failed_send_is_retried_with_the_catch_up_still_in_the_prompt`.
+- `test_a_cursor_is_only_resumed_under_the_account_that_ran_it` — account keying.
+- `test_cursors_survive_a_restart_in_the_session_file` — session-file round trip + resume.
+- Unchanged #1V4F suite neighbours (guest→guest full brief, endpoint round trips) still green.
+
+Would-land run (HEAD + this card's five files): `tests.test_guest_handover` +
+`tests.test_guest_harness_provider` + `tests.test_model_switch` = **113/113 OK**
+(`docs/qa_evidence/2026-09-24-guest-switch-resume-Q8TM/tests.txt`). The shared working tree
+shows two other sessions' in-flight test failures in the same modules; they fail on files this
+card does not touch and pass on HEAD.

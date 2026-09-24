@@ -348,9 +348,15 @@ class SessionCommands:
             guest_provider = guest_harness_provider.switch_model(
                 agent, guest_id, request, guest_harness_provider.preset_account(preset_id))
             if guest_id is not None and guest_provider is None:
+                # A switch back to a guest this pane already ran resumes its own session and is
+                # briefed only on what has happened since (#Q8TM), instead of a cold start with the
+                # whole conversation. `start_provider` owns the fallbacks: a session the guest no
+                # longer has, and a cursor that no longer fits the transcript.
                 guest_provider = guest_harness_provider.start_provider(
                     preset_id, request, str(agent.executor.workspace.root), agent.stall_timeout_s,
-                    skill_index=agent.executor.skills)
+                    skill_index=agent.executor.skills,
+                    resume_cursor=guest_harness_provider.guest_cursor(
+                        agent, guest_id, guest_harness_provider.preset_account(preset_id)))
             if guest_provider is not None:
                 previous = guest_harness_provider.agent_provider(agent)
                 agent.set_model(guest_provider.config, preset_id, window, provider=guest_provider)
@@ -410,6 +416,12 @@ class SessionCommands:
                         if outcome["applies"] == "now" and provider is not None:
                             changed.update(model=provider.config.model, model_name=model_name(preset_id, provider.config.model),
                                            **guest_harness_provider.configured_fields(agent))
+                            # What the switch delivered (#Q8TM): a resumed own session with a
+                            # catch-up, or the fallback the pane should hear about.
+                            metrics = getattr(provider, "switch_metrics", None)
+                            if isinstance(metrics, dict) and metrics:
+                                changed.update({k: v for k, v in metrics.items()
+                                                if k not in ("guest", "account")})
                     self.emit(changed)
                 return outcome
         self.turns.now_or_later(lambda: decide(True), lambda: decide(False))

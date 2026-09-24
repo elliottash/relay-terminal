@@ -782,49 +782,81 @@ _SKILLS_UNSET = object()
 def start_provider(preset_id: str, request: dict, workspace: str,
                    stall_timeout: float = DEFAULT_STALL_TIMEOUT,
                    config: ProviderConfig | None = None, *, skill_index=_SKILLS_UNSET,
-                   instruction_suffix: str = "", delegation: bool = True) -> "HarnessProvider":
+                   instruction_suffix: str = "", delegation: bool = True,
+                   resume_cursor: dict | None = None) -> "HarnessProvider":
     """Build and start the harness a `configure`/`set_model` asked for, and wrap it as a provider.
 
     Every failure is a `ValueError`, which is what the worker's protocol loop already turns into an
     `error` event with the text in it — 29.3's "a guest that cannot start is `error` on the
     `configure`", with the pane left on the model it had.
+
+    `resume_cursor` is this pane's own earlier session on the same guest and account (#Q8TM): when
+    the request does not name a `resume` or `fork` of its own, the harness is restarted on that
+    session and briefed only on what has happened since, instead of on the whole conversation. A
+    session the guest no longer has falls back to a fresh harness and the full handover brief.
     """
     guest_id = preset_guest_id(preset_id)
     if guest_id is None:
         raise ValueError(f"Unknown guest preset {preset_id!r}.")
     account = preset_account(preset_id)
     options = guest_options(request.get("guest"))
-    try:
-        harness = (make_harness(guest_id, memory=options["memory"], account=account) if account
-                   else make_harness(guest_id, memory=options["memory"]))
-    except HarnessError as exc:
-        raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
     from .guest_board_bridge import Bridge
     from .guest_instructions import build_instructions
     from .board_tools import find_board_root
     bridge = Bridge(available=delegation and find_board_root(workspace) is not None,
                     delegation=delegation)
-    try:
-        instructions = (build_instructions(request.get("skills"), workspace,
-                                           memory=options["memory"])
-                        if skill_index is _SKILLS_UNSET else
-                        build_instructions(None, workspace, skill_index=skill_index,
-                                           memory=options["memory"]))
-        if instruction_suffix:
-            instructions += "\n\n" + instruction_suffix
-        started = harness.start(cwd=workspace, model=options["model"] or None,
-                                resume=options["resume"], fork=options["fork"],
-                                permissions=options["permissions"], effort=options["effort"],
-                                board_bridge=bridge.descriptor, instructions=instructions)
-    except HarnessError as exc:
-        bridge.close()
-        _close_quietly(harness)
-        raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
-    except Exception as exc:
-        bridge.close()
-        _close_quietly(harness)
-        raise ValueError(f"{guest.spec(guest_id).name} could not be started "
-                         f"({type(exc).__name__}).") from None
+
+    def attempt(resume: str):
+        """Make a harness and start it on `resume` ("" for a fresh session). Raises ValueError
+        with the harness and bridge closed behind it, so a failed resume attempt can be retried
+        as a fresh start."""
+        try:
+            harness = (make_harness(guest_id, memory=options["memory"], account=account) if account
+                       else make_harness(guest_id, memory=options["memory"]))
+        except HarnessError as exc:
+            raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
+        try:
+            instructions = (build_instructions(request.get("skills"), workspace,
+                                               memory=options["memory"])
+                            if skill_index is _SKILLS_UNSET else
+                            build_instructions(None, workspace, skill_index=skill_index,
+                                               memory=options["memory"]))
+            if instruction_suffix:
+                instructions += "\n\n" + instruction_suffix
+            started = harness.start(cwd=workspace, model=options["model"] or None,
+                                    resume=resume or None, fork=options["fork"],
+                                    permissions=options["permissions"], effort=options["effort"],
+                                    board_bridge=bridge.descriptor, instructions=instructions)
+        except HarnessError as exc:
+            _close_quietly(harness)
+            raise ValueError(str(exc) or f"{guest.spec(guest_id).name} could not be started.") from None
+        except Exception as exc:
+            _close_quietly(harness)
+            raise ValueError(f"{guest.spec(guest_id).name} could not be started "
+                             f"({type(exc).__name__}).") from None
+        return harness, instructions, started
+
+    # A relay-managed resume only when the request itself does not name a session: an explicit
+    # `resume` or `fork` is the user's own answer to "which session", and it wins (#Q8TM).
+    cursor_session = ""
+    if resume_cursor is not None and not options["resume"] and not options["fork"]:
+        cursor_session = str(resume_cursor.get("session") or "")
+    resumed, fallback = False, False
+    harness, instructions, started = None, None, None
+    if cursor_session:
+        try:
+            harness, instructions, started = attempt(cursor_session)
+            resumed = True
+        except ValueError as exc:
+            logs.event(_log, "guest_resume_failed", level_name="error", guest=guest_id,
+                       account=account, session=cursor_session, error=str(exc)[:300])
+            fallback = True
+    if harness is None:
+        try:
+            harness, instructions, started = attempt(options["resume"] or "")
+        except ValueError:
+            bridge.close()
+            raise
     # The caller's own config object when it has one, filled in rather than replaced: the worker
     # hands the same object to the role resolver before the guest is started, and the model is only
     # known once it has answered.
@@ -839,10 +871,16 @@ def start_provider(preset_id: str, request: dict, workspace: str,
     provider.permissions = options["permissions"]
     provider.effort = _harness_effort(harness) or options["effort"] or ""
     # A resumed or forked session carries its own history; a fresh one is briefed on its first turn.
-    provider.briefed = bool(options["resume"] or options["fork"])
+    provider.briefed = bool(options["resume"] or options["fork"] or resumed)
+    if resumed:
+        provider.catchup = {"from": int(resume_cursor.get("messages") or 0),
+                            "session": provider.session_id or cursor_session,
+                            "head": str(resume_cursor.get("head") or "")}
+    provider.switch_metrics = {"guest": guest_id, "account": account,
+                               "guest_resumed": resumed, "guest_resume_fallback": fallback}
     logs.event(_log, "guest_harness_started", guest=guest_id, account=account, model=config.model,
-               resumed=bool(options["resume"]), fork=options["fork"],
-               permissions=options["permissions"], effort=provider.effort)
+               resumed=bool(options["resume"]) or resumed, fork=options["fork"],
+               cursor_resumed=resumed, permissions=options["permissions"], effort=provider.effort)
     return provider
 
 
@@ -900,6 +938,59 @@ def handover_tokens(text: str) -> int:
     """A handover's size in tokens, estimated at 4 characters each: it is sent inside the guest's
     prompt, and the guest reports that prompt's tokens only summed with the rest of its turn."""
     return (len(text) + 3) // 4
+
+
+CATCHUP_NOTE = ("You ran this conversation earlier in Relay as {name} session {session}; that session has "
+                "been resumed, so everything up to your last turn is already yours. Below is only what "
+                "happened in Relay while you were switched away — continue from it.")
+# How much of a message the cursor keeps as a fingerprint: enough of its head to tell a rewound or
+# forked transcript from the one the guest read, cheap to store in the session file.
+CURSOR_HEAD_CHARS = 80
+
+
+def cursor_key(guest_id: str, account: str) -> str:
+    """The per-pane cursor slot: one per guest *and* account, because a session id is only valid
+    under the login that ran it (#M8S2)."""
+    return f"{guest_id}:{account or ''}"
+
+
+def _cursor_head(message: dict) -> str:
+    content = message.get("content")
+    if not isinstance(content, str):
+        content = "" if content is None else " ".join(str(content))
+    return content[:CURSOR_HEAD_CHARS]
+
+
+def guest_cursor(agent, guest_id: str, account: str = "") -> dict | None:
+    """The pane's cursor for (guest, account): which guest session it last ran and how far into
+    Relay's transcript that session read (#Q8TM). None when this pane never ran that guest under
+    that account."""
+    cursors = getattr(agent, "_guest_cursors", None)
+    if not isinstance(cursors, dict):
+        return None
+    cursor = cursors.get(cursor_key(guest_id, account or ""))
+    return cursor if isinstance(cursor, dict) and cursor.get("session") else None
+
+
+def _note_cursor(agent, provider: "HarnessProvider", messages: list[dict],
+                 reply_text: str = "") -> None:
+    """Record, at the end of a guest turn, where that guest session got to: the session id, how
+    many of the pane's messages it has seen (`seen` counts its own reply, which the agent appends
+    the moment this returns), and a fingerprint of that reply — so a rewind or a fork on the pane
+    is detected instead of resumed against a transcript that no longer matches."""
+    if agent is None or not provider.session_id:
+        return
+    seen = len(messages) + 1          # every message up to and including its own reply
+    cursors = getattr(agent, "_guest_cursors", None)
+    if not isinstance(cursors, dict):
+        try:
+            cursors = agent._guest_cursors = {}
+        except AttributeError:
+            return
+    cursors[cursor_key(provider.guest_id, provider.account)] = {
+        "session": provider.session_id, "messages": seen,
+        "head": _cursor_head({"content": reply_text}) if reply_text else "",
+    }
 
 
 def _recorded(result: dict) -> dict:
@@ -963,6 +1054,14 @@ class HarnessProvider:
         # for a fresh session, True once briefed, or from the start for a resumed/forked session
         # that holds its own history.
         self.briefed = False
+        # A relay-managed resume (#Q8TM): `start_provider` restarted this pane's own earlier guest
+        # session, and here is where it had got to in Relay's transcript. The first `complete()`
+        # delivers only the messages past this point instead of a full handover brief, then clears
+        # it. {"from": <message count the guest has seen>, "session": <guest session id>}.
+        self.catchup: dict | None = None
+        # What the switch that started this provider accounted about itself ({"guest", "account",
+        # "resumed", "fallback"}), for the `model_changed` event and the turn record.
+        self.switch_metrics: dict = {}
         self._agent = None
         self.board_bridge = None
         self.instructions: str | None = None
@@ -1071,8 +1170,65 @@ class HarnessProvider:
         # What this fresh harness is given besides the prompt, for the turn's usage record (#0C0V
         # step 8): the handover brief, or a plan turn's opening, which carries the transcript too.
         handover = ""
+        # This pane's own earlier guest session, resumed by `start_provider` (#Q8TM): read on the
+        # first turn after the switch back, and only given up once the send has actually gone
+        # through — a failed attempt is retried with the catch-up still in the prompt.
+        catchup = self.catchup
         if opening is not None:
             prompt = handover = opening(messages) if callable(opening) else str(opening)
+        elif catchup is not None and agent is not None:
+            # The resumed session holds everything up to its cursor, so only what ran in Relay
+            # while the pane was away is sent. A cursor that no longer fits the transcript — a
+            # rewind, a fork — falls back to the full handover brief rather than resume against
+            # a history the guest cannot reconcile.
+            name = guest.spec(self.guest_id).name
+            start = int(catchup.get("from") or 0)
+            head = str(catchup.get("head") or "")
+            fits = 0 <= start <= len(messages) and (
+                start == 0 or not head or _cursor_head(messages[start - 1]) == head)
+            if not fits:
+                handover = handover_brief(messages)
+                if handover:
+                    prompt = handover + "\n\n" + prompt
+                emit({"event": "status",
+                      "text": f"Resumed {name} session {self.session_id}, but the conversation has "
+                              f"changed since it ran: handed it the whole thing.",
+                      "catchup_fallback": True})
+                logs.event(_log, "guest_catchup_fallback", guest=self.guest_id,
+                           account=self.account, session=self.session_id, cursor_from=start,
+                           transcript_messages=len(messages))
+            else:
+                end = len(messages)
+                while end > 0 and messages[end - 1].get("role") == "user":
+                    end -= 1
+                delta = [m for m in messages[start:end] if m.get("role") != "system"]
+                if delta:
+                    from .agent import CONTEXT_CLOSE, CONTEXT_OPEN
+                    from .planning import render_transcript
+                    transcript = render_transcript(delta, (CONTEXT_OPEN, CONTEXT_CLOSE),
+                                                   max_chars=HANDOVER_MAX_CHARS,
+                                                   max_tool_chars=HANDOVER_TOOL_RESULT_CHARS,
+                                                   until_prompt=False)
+                    block = (f"{CONTEXT_OPEN}\n"
+                             + CATCHUP_NOTE.format(name=name, session=self.session_id)
+                             + f"\n\n{transcript}\n{CONTEXT_CLOSE}")
+                    prompt = block + "\n\n" + prompt
+                else:
+                    block = ""
+                emit({"event": "status",
+                      "text": (f"Resumed {name} session {self.session_id}"
+                               + (f"; sent the {len(delta)} messages that ran while it was away."
+                                  if delta else "; nothing has happened since it left.")),
+                      "resumed_session": self.session_id,
+                      "catchup_messages": len(delta), "catchup_chars": len(block or "")})
+                logs.event(_log, "guest_catchup", guest=self.guest_id, account=self.account,
+                           session=self.session_id, cursor_from=start,
+                           delivered_messages=len(delta), delivered_chars=len(block or ""),
+                           transcript_messages=len(messages))
+                if isinstance(record_holder := getattr(agent, "_turn_record", None), dict):
+                    record_holder["guest_resumed"] = True
+                    record_holder["catchup_messages"] = len(delta)
+                    record_holder["catchup_chars"] = len(block or "")
         elif not self.briefed and agent is not None:
             # A fresh harness in the middle of a conversation (#1V4F): the model box switched the
             # pane onto this guest, or back onto it after another model. It gets the transcript
@@ -1129,6 +1285,8 @@ class HarnessProvider:
             raise ProviderError(getattr(result, "text", "") or turn.error_text
                                 or f"{guest.spec(self.guest_id).name} ended the turn with an error.")
         turn.finish(getattr(result, "usage", None) or {})
+        self.catchup = None
+        _note_cursor(agent, self, messages, getattr(result, "text", "") or "")
         return {"role": "assistant", "content": getattr(result, "text", "") or ""}
 
     # ----- the question round trip ------------------------------------------------------------
@@ -1868,6 +2026,11 @@ def attach(agent, provider: HarnessProvider) -> None:
             data["guest_session"] = held.session_id
             if held.account:
                 data["guest_account"] = held.account
+        cursors = getattr(agent, "_guest_cursors", None)
+        if cursors:
+            # Where each guest this pane ran got to (#Q8TM), so a switch back after a Relay
+            # restart still resumes the guest's own session instead of a full handover.
+            data["guest_cursors"] = cursors
         return data
 
     def context_event():
@@ -1916,6 +2079,7 @@ def switch_model(agent, guest_id: str | None, request: dict,
     options = guest_options(request.get("guest"))
     if options["resume"] or options["fork"]:
         return None
+    provider.switch_metrics = {}   # the harness is reused, not resumed: nothing new to account
     model = options["model"]
     if model and model != provider.config.model:
         try:
@@ -2020,6 +2184,11 @@ def resume_session(agent, data, emit) -> None:
     starting a process behind the user's back is not this handler's to do.
     """
     guest_id, session = session_guest(data)
+    cursors = data.get("guest_cursors")
+    if isinstance(cursors, dict):
+        # Every guest this pane ran, and where each got to (#Q8TM): a later switch back to one of
+        # them resumes its own session rather than handing the whole conversation over again.
+        agent._guest_cursors = cursors
     provider = agent_provider(agent)
     # The session lives in its account's directory, so only a harness on that account can open it.
     if not guest_id or provider is None or provider.guest_id != guest_id \

@@ -4,12 +4,14 @@ loss on model changes"). Every direction a pane can switch — endpoint to endpo
 guest, a guest to an endpoint, one guest to another, and back — on the scripted FakeHarness, so no
 test starts a real claude or codex (protocol 29)."""
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
 from relay_core import agent as agent_module
 from relay_core import guest_harness_provider as P
 from relay_core.agent import Agent
+from relay_core.guest_harness import HarnessError
 from relay_core.provider import ProviderConfig
 from tests.guest_harness_fake import FakeHarness, ev
 
@@ -53,11 +55,15 @@ class HandoverTests(unittest.TestCase):
         self.agent = Agent(KIMI, self.temp.name, self.events.append, preset_id="kimi",
                            completion_check=False, track_requests=False, todo_tool=False)
 
-    def to_guest(self, guest_id, script, request=None):
-        """What `SessionCommands.switch_model` does for a guest preset it has no harness for."""
-        harness = FakeHarness(script, guest=guest_id, session_id=f"{guest_id}-1", model=f"{guest_id}-model")
+    def to_guest(self, guest_id, script, request=None, harness=None):
+        """What `SessionCommands.switch_model` does for a guest preset it has no harness for —
+        including the relay-managed resume of this pane's own earlier session on that guest
+        (#Q8TM): `apply_target` passes the pane's cursor for (guest, account)."""
+        harness = harness or FakeHarness(script, guest=guest_id, session_id=f"{guest_id}-1",
+                                         model=f"{guest_id}-model")
         with mock.patch.object(P, "make_harness", return_value=harness):
-            provider = P.start_provider(f"guest:{guest_id}", request or {}, self.temp.name)
+            provider = P.start_provider(f"guest:{guest_id}", request or {}, self.temp.name,
+                                        resume_cursor=P.guest_cursor(self.agent, guest_id))
         previous = P.agent_provider(self.agent)
         self.agent.set_model(provider.config, f"guest:{guest_id}", None, provider=provider)
         P.attach(self.agent, provider)
@@ -157,16 +163,133 @@ class HandoverTests(unittest.TestCase):
         self.assertIn("codeword: PELICAN-42", first)
         self.assertIn("Found it.", first)
 
-    def test_switching_back_to_a_guest_briefs_it_on_the_turns_another_model_ran(self):
+    def test_switching_back_to_a_guest_resumes_its_session_and_gets_only_what_ran_since(self):
         self.to_guest("codex", [reply("ok")])
         self.agent.ask("Start on codex.")
         self.to_endpoint(GLM, "glm")
         self.agent.ask("Remember the codeword PELICAN-42 for later.")
         back = self.to_guest("codex", [reply("PELICAN-42")])
         self.agent.ask("What was the codeword?")
+        self.assertEqual(back.starts[0]["resume"], "codex-1")      # its own session, restarted
         first = back.sent[0]["prompt"]
+        self.assertIn("Remember the codeword PELICAN-42", first)  # the turn that ran while away
+        self.assertNotIn("Start on codex.", first)                # the session already holds it
+        self.assertTrue(first.rstrip().endswith("What was the codeword?"))
+        self.assertTrue(any(s.startswith("Resumed") and "session codex-1" in s
+                            for s in self.statuses()))
+        # The cursor moved with the turn: a second round trip delivers only what ran since that.
+        self.to_endpoint(GLM, "glm")
+        self.agent.ask("Say it once more.")
+        again = self.to_guest("codex", [reply("PELICAN-42")])
+        self.agent.ask("And the codeword?")
+        second = again.sent[0]["prompt"]
+        self.assertIn("Say it once more.", second)
+        self.assertNotIn("Start on codex.", second)
+        self.assertNotIn("What was the codeword?", second)
+
+    def test_a_return_with_nothing_to_deliver_sends_the_prompt_bare(self):
+        self.to_guest("codex", [reply("ok"), reply("here")])
+        self.agent.ask("Start on codex.")
+        self.to_endpoint(GLM, "glm")            # switched away without a turn in between
+        back = self.to_guest("codex", [reply("here")])
+        self.agent.ask("And now?")
+        self.assertEqual(back.starts[0]["resume"], "codex-1")
+        self.assertEqual(back.sent[0]["prompt"], "And now?")
+        self.assertTrue(any("nothing has happened since it left" in s for s in self.statuses()))
+
+    def test_a_cursor_that_no_longer_fits_falls_back_to_the_full_handover(self):
+        self.to_guest("codex", [reply("ok")])
+        self.agent.ask("Start on codex.")
+        # A fork on the pane: same shape, different history where the cursor points.
+        self.agent.messages[-1]["content"] = "Rewound to a different turn."
+        back = self.to_guest("codex", [reply("PELICAN-42")])
+        self.agent.ask("What was the codeword?")
+        self.assertEqual(back.starts[0]["resume"], "codex-1")
+        first = back.sent[0]["prompt"]
+        self.assertIn(agent_module.CONTEXT_OPEN, first)          # the full brief, not a delta
         self.assertIn("Start on codex.", first)
+        self.assertIn("Rewound to a different turn.", first)
+        self.assertTrue(any("handed it the whole thing" in s for s in self.statuses()))
+
+    def test_a_guest_that_lost_the_session_starts_fresh_and_is_briefed_in_full(self):
+        self.to_guest("codex", [reply("ok")])
+        self.agent.ask("Start on codex.")
+        self.to_endpoint(GLM, "glm")
+        self.agent.ask("Remember the codeword PELICAN-42 for later.")
+        pruned = FakeHarness([], guest="codex", session_id="codex-1", model="codex-model")
+        pruned.missing_sessions = {"codex-1"}    # the guest rolled that session away
+        fresh = FakeHarness([reply("PELICAN-42")], guest="codex", session_id="codex-2",
+                            model="codex-model")
+        with mock.patch.object(P, "make_harness", side_effect=[pruned, fresh]), \
+                mock.patch.object(P.logs, "event") as log_event:
+            provider = P.start_provider("guest:codex", {}, self.temp.name,
+                                        resume_cursor=P.guest_cursor(self.agent, "codex"))
+        self.agent.set_model(provider.config, "guest:codex", None, provider=provider)
+        P.attach(self.agent, provider)
+        self.agent.ask("What was the codeword?")
+        self.assertEqual(pruned.starts[0]["resume"], "codex-1")  # tried, and refused
+        self.assertTrue(pruned.closed)
+        self.assertFalse(fresh.starts[0]["resume"])             # a fresh session, no resume
+        first = fresh.sent[0]["prompt"]
+        self.assertIn("Start on codex.", first)                  # the whole conversation again
         self.assertIn("Remember the codeword PELICAN-42", first)
+        self.assertTrue(any(s.startswith("Handed the conversation so far") for s in self.statuses()))
+        self.assertEqual(provider.switch_metrics,
+                         {"guest": "codex", "account": "", "guest_resumed": False,
+                          "guest_resume_fallback": True})
+        self.assertTrue(any(call.args[1:2] == ("guest_resume_failed",)
+                            for call in log_event.call_args_list))
+
+    def test_a_failed_send_is_retried_with_the_catch_up_still_in_the_prompt(self):
+        self.to_guest("codex", [reply("ok")])
+        self.agent.ask("Start on codex.")
+        self.to_endpoint(GLM, "glm")
+        self.agent.ask("Remember the codeword PELICAN-42 for later.")
+        harness = self.to_guest("codex", [
+            {"raise": HarnessError("the guest died mid-turn")},
+            reply("PELICAN-42")])
+        provider = P.agent_provider(self.agent)
+        self.agent.ask("What was the codeword?")
+        self.assertTrue(any(e.get("event") == "error" for e in self.events))
+        self.agent.ask("Once more: what was the codeword?")
+        first, second = harness.sent[0]["prompt"], harness.sent[1]["prompt"]
+        self.assertIn("Remember the codeword PELICAN-42", first)
+        self.assertIn("Remember the codeword PELICAN-42", second)  # not consumed by the failure
+
+    def test_a_cursor_is_only_resumed_under_the_account_that_ran_it(self):
+        self.to_guest("codex", [reply("ok")])
+        self.agent.ask("Start on codex.")
+        self.assertEqual(P.guest_cursor(self.agent, "codex")["session"], "codex-1")
+        self.assertIsNone(P.guest_cursor(self.agent, "codex", "other-login"))
+        self.assertIsNone(P.guest_cursor(self.agent, "claude"))
+
+    def test_cursors_survive_a_restart_in_the_session_file(self):
+        self.to_guest("codex", [reply("ok")])
+        self.agent.ask("Start on codex.")
+        self.to_endpoint(GLM, "glm")
+        self.agent.ask("Remember the codeword PELICAN-42 for later.")
+        data = self.agent.session_data()
+        self.assertEqual(data["guest_cursors"]["codex:"]["session"], "codex-1")
+
+        # The pane restarts, loads the session (the transcript with it) and runs a turn elsewhere.
+        restarted = Agent(GLM, self.temp.name, self.events.append, preset_id="glm",
+                          completion_check=False, track_requests=False, todo_tool=False)
+        restarted.messages = [dict(m) for m in self.agent.messages]
+        P.resume_session(restarted, data, self.events.append)
+        self.assertEqual(P.guest_cursor(restarted, "codex")["session"], "codex-1")
+        restarted.ask("After the restart.")
+        back = FakeHarness([reply("PELICAN-42")], guest="codex", session_id="codex-1",
+                           model="codex-model")
+        with mock.patch.object(P, "make_harness", return_value=back):
+            provider = P.start_provider("guest:codex", {}, self.temp.name,
+                                        resume_cursor=P.guest_cursor(restarted, "codex"))
+        restarted.set_model(provider.config, "guest:codex", None, provider=provider)
+        P.attach(restarted, provider)
+        restarted.ask("What was the codeword?")
+        self.assertEqual(back.starts[0]["resume"], "codex-1")
+        first = back.sent[0]["prompt"]
+        self.assertIn("After the restart.", first)      # only what ran since the codex turn
+        self.assertNotIn("Start on codex.", first)      # not the conversation it already holds
 
     # ----- endpoint -> endpoint --------------------------------------------------------------
     def test_an_endpoint_switch_keeps_the_whole_conversation(self):

@@ -173,6 +173,19 @@ Free's ceiling — and is `""` everywhere else, because nothing is silently sent
 - A fresh guest harness handed the conversation so far (#1V4F) says so in a `status` event that
   also carries **`handover_chars`** and **`handover_tokens`** (the brief's size; tokens estimated at
   4 characters each). The turn's record carries the same two fields.
+- **A switch back to a guest resumes its own session** (#Q8TM). The pane remembers, per guest and
+  account, which guest session it last ran and how far into Relay's transcript that session read
+  (a cursor, kept in the session file as `guest_cursors`, so it survives a restart). A switch back
+  to that guest restarts the harness on that session — `model_changed` carries
+  **`guest_resumed: true`** — and the first turn delivers only what ran in Relay while the pane was
+  away (a `status` event with **`resumed_session`**, **`catchup_messages`** and
+  **`catchup_chars`**; the turn's record the same). With nothing to deliver the prompt goes bare.
+  The full handover brief is the fallback in both directions: when the guest no longer holds the
+  session (`guest_resume_fallback: true` on `model_changed`, a fresh session and the whole
+  conversation again), and when the cursor no longer fits the transcript — a rewind, a fork. A
+  `guest` block that names its own `resume` or `fork` always wins over the cursor, and a cursor is
+  only resumed under the account that ran it. Model-to-model switching between guests is unchanged:
+  a guest that has never seen the conversation gets the #1V4F brief in full.
 - `context` message → same event on demand.
 - **The prefix does not move** (#0C0V step 6). Tools, then the system message, then the messages
   are what every provider's prompt cache keys on, so the system message and the tool list are
