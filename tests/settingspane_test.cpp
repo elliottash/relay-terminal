@@ -895,6 +895,39 @@ private slots:
         QVERIFY(next > row);
     }
 
+    // Options › Agent gains a QA heading with exactly one row, Verification (#C3Q2): "Ask me
+    // before closing any card" (the default) or "Automatic when the plan needs no person". The
+    // floor behind it has no rows — it is defaults in relay_core.qa_policy and a project's
+    // board.yaml `qa:` block. Read as text like the Board row above; what the worker does with
+    // the value (`configure.qa.verification`) is covered headless in tests/test_board_tools.py.
+    void verificationIsTheOneRowUnderQa() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowSettings.cpp"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int heading = text.indexOf(QStringLiteral("headingRow(QStringLiteral(\"QA\"))"));
+        QVERIFY2(heading > 0, "the QA heading is missing from Options › Agent");
+        const int board = text.indexOf(QStringLiteral("headingRow(QStringLiteral(\"Board\"))"), heading);
+        QVERIFY2(board > heading, "the QA heading belongs on the Agent page, before Board");
+        const QString section = text.mid(heading, board - heading);
+        QVERIFY(section.contains(QStringLiteral("choiceRow(QStringLiteral(\"qa/verification\"), QStringLiteral(\"Verification\")")));
+        QVERIFY(section.contains(QStringLiteral("\"Ask me before closing any card\"")));
+        QVERIFY(section.contains(QStringLiteral("\"Automatic when the plan needs no person\"")));
+        // The default is ask, persisted under qa/verification.
+        QVERIFY(section.contains(QStringLiteral("QSettings().value(QStringLiteral(\"qa/verification\"),")));
+        QVERIFY(section.contains(QStringLiteral("QSettings().setValue(QStringLiteral(\"qa/verification\"), value)")));
+        // One heading, one row, nothing else under it: no floor keys reach Options.
+        QCOMPARE(section.count(QStringLiteral("agent.rows <<")), 2);
+        QVERIFY(!section.contains(QStringLiteral("ask_at_stakes")));
+        // And the pane sends it in `configure`: requestOptions() carries `qa.verification`.
+        QFile pane(QStringLiteral(RELAY_SOURCE_DIR "/src/Pane.h"));
+        QVERIFY2(pane.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(pane.fileName()));
+        const QString paneText = QString::fromUtf8(pane.readAll());
+        const int options = paneText.indexOf(QStringLiteral("static QJsonObject requestOptions()"));
+        QVERIFY(options > 0);
+        const int qa = paneText.indexOf(QStringLiteral("{\"qa\", QJsonObject{{\"verification\", settings.value(QStringLiteral(\"qa/verification\"),"), options);
+        QVERIFY2(qa > options, "requestOptions() does not send qa.verification");
+    }
+
     // ----- Options › Models keeps providers, keys and profiles (card #MDL1 t:a10) ---------------
 
     // Design 5.5: "The tier lists and the 'models in the picker' checklist leave the page: one row,

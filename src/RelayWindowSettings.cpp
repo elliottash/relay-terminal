@@ -440,6 +440,32 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             profile.aliases = QStringLiteral("prompt profile short full local lite tier context window tokens prefill speed");
             agent.rows << profile;
         }
+        agent.rows << headingRow(QStringLiteral("QA"));
+        {
+            // The one switch a user sees of the QA policy floor (#C3Q2; owner, 2026-09-23: "most
+            // of this is just in the agent's work and the user doesn't see it directly"). The
+            // floor itself — which stakes always need a person, whether an AI rung may gate
+            // alone, whether a check may be sampled — is defaults in relay_core.qa_policy, tuned
+            // per project in board.yaml's `qa:` block, never a row here. The value reaches the
+            // worker as `configure.qa.verification` (Pane::requestOptions) and, like the rows
+            // above, applies from the next conversation.
+            relay::SettingRow verification =
+                choiceRow(QStringLiteral("qa/verification"), QStringLiteral("Verification"),
+                          QStringLiteral("Ask: a card whose plan needs no person still waits in "
+                                         "Needs verification for you to close. Automatic: a "
+                                         "verifier's pass closes it."),
+                          {QStringLiteral("ask"), QStringLiteral("automatic")},
+                          {QStringLiteral("Ask me before closing any card"),
+                           QStringLiteral("Automatic when the plan needs no person")},
+                          QSettings().value(QStringLiteral("qa/verification"),
+                                            QStringLiteral("ask")).toString(),
+                          QStringLiteral("ask"), [this](const QString &value) {
+                QSettings().setValue(QStringLiteral("qa/verification"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("qa/verification"));
+            });
+            verification.aliases = QStringLiteral("qa verification verify close done automatic ask needs verification policy floor");
+            agent.rows << verification;
+        }
         agent.rows << headingRow(QStringLiteral("Board"));
         // There is no "where does a new board go" row any more (owner, 2026-09-21, #1CXD): a new
         // board is `board/` whatever any setting says (`relay::projects::newBoardFolder()`), and a

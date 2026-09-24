@@ -5557,6 +5557,11 @@ private:
                 // the full 14,500-token prompt is eighteen seconds of prefill on every cold turn.
                 {"prompt_profile", settings.value(QStringLiteral("agent/prompt_profile"),
                                                   QStringLiteral("auto")).toString()},
+                // Options › Agent › QA (#C3Q2): the one switch of the QA policy floor. The worker
+                // reads it as `configure.qa.verification` (board_protocol.parse_board); the floor's
+                // other keys live in relay_core.qa_policy and a project's board.yaml `qa:` block.
+                {"qa", QJsonObject{{"verification", settings.value(QStringLiteral("qa/verification"),
+                                                                    QStringLiteral("ask")).toString()}}},
                 // Whether a turn whose provider keeps failing continues on another one (#G9VE),
                 // and whether Relay Free may be one of those providers (owner, 2026-09-19: opt-in,
                 // because a pane on the user's own key never chose Relay's hosted service).
