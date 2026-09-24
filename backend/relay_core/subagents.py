@@ -333,7 +333,7 @@ class SubagentFactory:
         if on_role and spec not in self.user_aliases and self.roles is not None:
             ranked = (getattr(self.roles, "roles", {}).get("subagent") or {}).get("candidates") or []
         agent = Agent(config, self.workspace, emit, provider=provider, max_steps=steps,
-                      max_tool_calls=max(24, 3 * steps), skills=skills, track_requests=False,
+                      max_tool_calls=max(24, 4 * steps), skills=skills, track_requests=False,
                       preset_id=preset_id, roles=self.roles, ranked_failover=ranked,
                       **self.failover_options())
         if isinstance(provider, GuestChildProvider):
@@ -381,8 +381,10 @@ class Subagent:
     model: str
     effort: str | None
     agent: object = None
-    status: str = "waiting"            # waiting | running | done | blocked | failed | stopped
+    status: str = "waiting"            # waiting | running | done | limit | blocked | failed | stopped
     outcome: str | None = None         # last terminal event of the current run
+    stop_reason: str | None = None     # the done event's stop_reason ("limit"), when it carried one
+    warnings: list = field(default_factory=list)   # model warnings from the factory, for the reply
     error_text: str | None = None
     result: str = ""
     tools: int = 0
@@ -673,6 +675,7 @@ class SubagentManager:
             if entry.background:
                 return {"id": entry.id, "type": entry.type, "status": "running", "background": True,
                         **({"todo_id": entry.todo_id} if entry.todo_id else {}),
+                        **({"warnings": entry.warnings} if entry.warnings else {}),
                         "note": "The result will be delivered to you automatically when it finishes."}
             self._wait([entry], cancel, None, stop_on_cancel=True)
             return self.result(entry)
@@ -687,8 +690,9 @@ class SubagentManager:
         if name == "agent_set_model":
             if set(args) != {"id", "model"}:
                 raise ValueError("agent_set_model needs id and model, with no unexpected arguments.")
-            ids = self.set_model(args["id"], args["model"])
-            return {"ids": ids, "model": args["model"], "changed": len(ids)}
+            ids = self.set_model(args["id"], args["model"], model_warnings := [])
+            return {"ids": ids, "model": args["model"], "changed": len(ids),
+                    **({"warnings": model_warnings} if model_warnings else {})}
         raise ValueError("Unknown tool or unexpected argument.")
 
     # ----- lifecycle --------------------------------------------------------------------
@@ -739,6 +743,7 @@ class SubagentManager:
                                                         lambda event, s=sub: self._on_event(s, event), agent_id)
             agent.inbox = _SubInbox(self, sub)
             sub.agent, sub.model = agent, model_label
+            sub.warnings = warnings   # they belong in the tool reply, not only the pane event (#VTJR)
             sub.todo_id = todo_id
             # A signal thread (#AQ6X): not reachable through the `agent` tool — the keyword is the
             # board worker's, and the fault's key is what makes the thread findable afterwards.
@@ -873,7 +878,7 @@ class SubagentManager:
             sub.run_start_index = len(sub.agent.messages)
             self._progress_locked(sub)
         while True:
-            sub.outcome, sub.error_text = None, None
+            sub.outcome, sub.error_text, sub.stop_reason = None, None, None
             try:
                 sub.agent.ask(text, reset_cancellation=False)
             except Exception as exc:  # ask() reports its own errors; defensive
@@ -888,7 +893,8 @@ class SubagentManager:
                 if sub.stop_requested or sub.outcome == "cancelled":
                     outcome = "stopped"
                 elif sub.outcome == "done":
-                    outcome = "done"
+                    # The turn limit is not finished work: report it as what it is (#VTJR).
+                    outcome = "limit" if sub.stop_reason == "limit" else "done"
                 else:
                     outcome = "failed"
                 sub.result = self._final_text(sub, outcome)
@@ -901,9 +907,15 @@ class SubagentManager:
     def _final_text(self, sub: Subagent, outcome: str) -> str:
         if outcome == "failed" and sub.error_text:
             return "Subagent failed: " + sub.error_text
+        # The limit note comes first: the trailing assistant remark is progress, not a report, and
+        # leading with it is exactly how a limit used to read as done (#VTJR).
+        prefix = ("Stopped at the turn limit before it finished; send agent_message to resume it."
+                  if outcome == "limit" else "")
         for message in reversed(sub.agent.messages[sub.run_start_index:]):
             if message.get("role") == "assistant" and (message.get("content") or "").strip():
-                return message["content"].strip()
+                return prefix + "\n\n" + message["content"].strip() if prefix else message["content"].strip()
+        if prefix:
+            return prefix
         return "Subagent was stopped before it produced a report." if outcome == "stopped" else "(no final report)"
 
     def _finish_locked(self, sub: Subagent, outcome: str) -> None:
@@ -1064,6 +1076,10 @@ class SubagentManager:
                    "tokens": sub.tokens, "elapsed_ms": self._elapsed(sub)}
             if sub.todo_id:
                 out["todo_id"] = sub.todo_id
+            if sub.stop_reason:
+                out["stop_reason"] = sub.stop_reason
+            if sub.warnings:
+                out["warnings"] = sub.warnings
             if not sub.live:
                 out["result"] = _labelled(sub)
             return out
@@ -1083,7 +1099,7 @@ class SubagentManager:
             self._lock.notify_all()
             return [sub.id for sub in subs]
 
-    def set_model(self, target, model) -> list[str]:
+    def set_model(self, target, model, warnings_out: list | None = None) -> list[str]:
         """agent_set_model: move one subagent, or every listed one ("all"), to another model.
 
         A running subagent switches before its next model call; a waiting or finished one at once
@@ -1116,6 +1132,8 @@ class SubagentManager:
                 event = {"event": "subagent_model", "id": sub.id, "model": config.model, "applies": applies}
                 if warnings:
                     event["warnings"] = warnings
+                    if warnings_out is not None:
+                        warnings_out.extend(warnings)   # the tool reply carries them too (#VTJR)
                 self._emit(event)
             return [sub.id for sub in subs]
 
@@ -1209,6 +1227,10 @@ class SubagentManager:
                 progress = self.clock() - sub.last_progress >= PROGRESS_INTERVAL
             elif kind in ("done", "error", "cancelled"):
                 sub.outcome = kind
+                if kind == "done":
+                    # A turn limit ends in `done` too; its stop_reason is what tells them apart (#VTJR).
+                    reason = event.get("stop_reason")
+                    sub.stop_reason = reason if isinstance(reason, str) else None
                 if kind == "error":
                     sub.error_text = str(event.get("text", ""))[:2000]
             if progress and sub.status == "running":

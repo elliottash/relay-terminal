@@ -130,6 +130,7 @@ QString SubagentModel::statusIcon(const QString &status) {
     if (status == QStringLiteral("done")) return QStringLiteral("✓");
     if (status == QStringLiteral("failed")) return QStringLiteral("✗");
     if (status == QStringLiteral("blocked")) return QStringLiteral("!");
+    if (status == QStringLiteral("limit")) return QStringLiteral("◔");   // ran out of turns, resumable (#VTJR)
     if (status == QStringLiteral("stopped")) return QStringLiteral("■");
     return QStringLiteral("○");   // waiting
 }

@@ -45,6 +45,8 @@ class ValidateTests(unittest.TestCase):
     def test_finish_outcomes(self):
         for outcome, status, note in (('done', 'completed', None), ('failed', 'blocked', 'Subagent a1 failed: boom'),
                                       ('blocked', 'blocked', 'Subagent a1 blocked: boom'),
+                                      # The limit is not finished work: the todo stays open (#VTJR).
+                                      ('limit', 'pending', 'Subagent a1 stopped at the turn limit; agent_message resumes it.'),
                                       ('stopped', 'pending', 'Subagent a1 was stopped before it finished.')):
             todo_list = todo_mod.TodoList()
             todo_list.replace({'items': [{'text': 'a', 'status': 'pending'}]}, set(), None)

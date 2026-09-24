@@ -35,7 +35,9 @@ MAX_PROMPT_BYTES = 16 * 1024
 MAX_DEFINITIONS = 200
 MAX_FILES_SCANNED = 1000
 MAX_DEPTH = 4
-MAX_STEPS = 50
+# The fuse, not the budget (#VTJR): a definition's max_steps is the policy, and this only caps a
+# file that asks for something absurd. The pane's backstop is the same 500 (#2CZP).
+MAX_STEPS = 500
 EFFORTS = ("low", "medium", "high", "max")
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 
@@ -77,7 +79,10 @@ class AgentDefinition:
     tools: tuple[str, ...] = SUBAGENT_TOOLS
     model: str = "inherit"
     effort: str | None = None
-    max_steps: int = 12
+    # The pane's backstop (#2CZP), not a small fuse: loop detection and the cadence recitation do
+    # the stopping, and a subagent that runs out of road reports the limit instead of pretending
+    # it finished (#VTJR). A definition that wants a small budget sets one on itself.
+    max_steps: int = 500
     background: bool | None = None
     read_only: bool = False
     source: str = "builtin"
@@ -104,7 +109,7 @@ BUILTINS = [
         "investigation or implementation. Put task-specific constraints (such as do not edit) in the prompt.",
         "You are a general-purpose agent. Complete the task, verify what you did, and finish with a "
         "concise report of what changed and what was verified.",
-        SUBAGENT_TOOLS, "inherit", None, 12),
+        SUBAGENT_TOOLS, "inherit", None, MAX_STEPS),
     # Signal threads (#AQ6X decision 9): the unasked pickup of a failing check nobody is on.  Its
     # own definition rather than `general` for two reasons a user can see.  The thread's row in the
     # Sessions manager is told apart by `agent_type`, so a pickup is listed and marked without a

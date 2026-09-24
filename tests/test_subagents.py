@@ -91,6 +91,9 @@ class SubProvider:
             hub.seen.append((task, json.loads(json.dumps(messages)), names))
             hub.started.set()
         try:
+            if 'loop' in task.split():
+                # Never finishes: keeps calling a tool so the run ends at the step limit (#VTJR).
+                return calls(call('list_directory', {'path': '.'}, f'lp{self.calls}'))
             if self.calls == 1:
                 for word in task.split():
                     if word.startswith('gate:'):
@@ -924,3 +927,37 @@ class BatchNoteTests(unittest.TestCase):
     def test_two_children_get_no_note(self):
         self.batch('high', 'high')
         self.assertEqual(self.notes(), [])
+
+
+class LimitReportingTests(Base):
+    """The turn limit is not finished work: it reports as limit, carries stop_reason, and the
+    result text begins with the note (#VTJR)."""
+
+    def setUp(self):
+        super().setUp()
+        self.manager.catalog.get('general').max_steps = 3
+
+    def test_limit_is_not_reported_as_done(self):
+        reply = self.manager.run_tool('agent', {'description': 'loop', 'prompt': 'loop'},
+                                      'c1', None, threading.Event())
+        self.assertEqual(reply['status'], 'limit')
+        self.assertEqual(reply['stop_reason'], 'limit')
+        self.assertIn('Stopped at the turn limit before it finished', reply['result'])
+        self.assertLess(reply['result'].index('Stopped at the turn limit'),
+                        reply['result'].index('[End of subagent result]'))
+        # agent_message resumes it (#VTJR's promise in the note).
+        resumed = self.manager.run_tool('agent_message', {'id': reply['id'], 'text': 'stop looping'}, 'c2', None,
+                                        threading.Event())
+        self.assertEqual(resumed['delivered'], 'resumed')
+
+    def test_general_definition_follows_the_pane_backstop(self):
+        self.assertEqual(AgentDefinition('general', 'General-purpose agent').max_steps, 500)
+
+    def test_spawn_warnings_reach_the_tool_reply(self):
+        reply = self.manager.run_tool('agent', {'description': 'w', 'prompt': 'hi', 'background': True,
+                                                'model': 'no-such-model'}, 'c3', None, threading.Event())
+        self.assertEqual(reply['status'], 'running')
+        self.assertTrue(any('no-such-model' in warning for warning in reply['warnings']), reply)
+        result = self.manager.wait(reply['id'], 10, threading.Event())
+        self.assertFalse(result['timed_out'])
+        self.assertTrue(any('no-such-model' in warning for warning in result['agents'][0]['warnings']), result)

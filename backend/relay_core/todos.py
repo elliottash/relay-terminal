@@ -195,6 +195,9 @@ class TodoList:
             del self.delegated[todo_id]
             if outcome == "done":
                 fields = {"status": "completed", "note": None}
+            elif outcome == "limit":   # #VTJR: the budget ran out, the work did not end
+                fields = {"status": "pending",
+                          "note": f"Subagent {agent_id} stopped at the turn limit; agent_message resumes it."[:MAX_NOTE]}
             elif outcome in ("failed", "blocked"):
                 reason = " ".join(str(error or "no reason given").split())
                 fields = {"status": "blocked", "note": f"Subagent {agent_id} {outcome}: {reason}"[:MAX_NOTE]}
