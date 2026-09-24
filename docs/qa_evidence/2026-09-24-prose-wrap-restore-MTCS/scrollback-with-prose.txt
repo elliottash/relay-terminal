@@ -1,0 +1,18 @@
+$ ./scripts/build.sh --target demo
+cc -O2 -g   demo/main.c   -o build/demo
+cc -O2 -g   demo/codec.c  -o build/codec
+demo: 2 targets built in 4.1s
+]8;;relay://prose/stage/2\A saved agent turn, restored: its heading]8;;\
+]8;;relay://prose/stage/2\sits in its own block.]8;;\
+[38;5;245m]8;;relay://prose/stage/1\This paragraph is Relay's own word-wrapped]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\output: it was saved with the lines it was]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\wrapped at plus the words before that]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\wrapping, so after this pane came back from a]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\restart it re-wraps whenever the pane is]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\resized - narrow the window and the lines]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\follow the edge, widen it and they flow back]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\out - instead of staying frozen at the width]8;;\[0m
+[38;5;245m]8;;relay://prose/stage/1\the pane happened to be when it was saved.]8;;\[0m
+_relay-prose\
+{"uri":"relay://prose/stage/2","columns":48,"lines":[{"role":32,"spans":[{"text":"A saved agent turn, restored: its heading sits in its own block.","sgr":""}]}]}
+{"uri":"relay://prose/stage/1","columns":48,"lines":[{"role":32,"spans":[{"text":"This paragraph is Relay's own word-wrapped output: it was saved with the lines it was wrapped at plus the words before that wrapping, so after this pane came back from a restart it re-wraps whenever the pane is resized - narrow the window and the lines follow the edge, widen it and they flow back out - instead of staying frozen at the width the pane happened to be when it was saved.","sgr":"38;5;245"}]}]}

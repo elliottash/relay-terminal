@@ -1,0 +1,5 @@
+Label Time Summary:
+engine    =  32.65 sec*proc (1 test)
+
+Total Test time (real) =  32.78 sec
+1d80a83b Save pane word wrap across restore (#MTCS)

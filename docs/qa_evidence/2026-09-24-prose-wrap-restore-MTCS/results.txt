@@ -1,0 +1,14 @@
+100% tests passed, 0 tests failed out of 2
+PASS   : WindowStateTest::initTestCase()
+PASS   : WindowStateTest::proseBlocksSurviveSaveReadAndRestore()
+PASS   : WindowStateTest::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 24ms
+PASS   : ViewTest::initTestCase()
+PASS   : ViewTest::proseWrapSurvivesSavedTextAndReplay(libvterm)
+PASS   : ViewTest::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 1244ms
+PASS   : CoreTest::initTestCase()
+PASS   : CoreTest::proseRunsKeepTheirLinksThroughRestore(libvterm)
+PASS   : CoreTest::cleanupTestCase()
+Totals: 3 passed, 0 failed, 0 skipped, 0 blacklisted, 0ms
+1d80a83b Save pane word wrap across restore (#MTCS)

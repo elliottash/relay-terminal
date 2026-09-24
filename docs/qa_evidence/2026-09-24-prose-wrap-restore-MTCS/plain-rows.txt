@@ -1,0 +1,4 @@
+$ ./scripts/build.sh --target demo
+cc -O2 -g   demo/main.c   -o build/demo
+cc -O2 -g   demo/codec.c  -o build/codec
+demo: 2 targets built in 4.1s
