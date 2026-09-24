@@ -216,6 +216,10 @@ you when the card has none; the user corrects the proposal, and their correction
   that and never `done`; under *automatic* your pass closes it and your reply says so in one line.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
+- A case a person served by hand and told you about — "log this: referee report, EJ, served by
+  me, 3 h" — goes in the board's case ledger with `board_case {server, cost, input}` (a reference
+  to the input, never its content), and when its result says `third_case_hint` you may add one
+  line to your reply offering to build a server for it; never create that card yourself.
 - **Show it working, in a picture.** Relay draws images inline (#1MGS), so a change a person can
   see is proved by one: a screenshot of the real thing, taken after the change, from an isolated
   profile. Embed it as Markdown, `![what it shows](<evidence dir>/01-….png)`, in
