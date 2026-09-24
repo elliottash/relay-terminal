@@ -545,6 +545,12 @@ LITERAL_TEXT = frozenset("echo printf print say logger wall write notify send ba
 # shell, and an explicit terminal destination still runs them.
 LOOP_ONLY = frozenset("continue break return".split())
 ASSIST_THRESHOLD = 2
+# Bar for a runnable first word that is NOT an English word (an agent CLI like `claude` or
+# `codex`, or `git`, `docker`): nobody opens a shell invocation with a clause like "claude has
+# usage rests now, so we should …", but people do address the agent that way, so the args still
+# score — only at this stricter bar, and only with a signal no invocation has (sentence
+# punctuation, or an article, pronoun or question word). Card #1ZNS, owner report 2026-09-23.
+NON_ENGLISH_THRESHOLD = 4
 # Operators and expansions that only appear in shell input. Globs (`*`, `[...]`) and `~` are left out
 # on purpose: "look at my letters in ~/admin/Advisees.*.docx for my style" is an English request that
 # happens to name a path, and `look` is also a command (2026-09-17 owner report).
@@ -562,10 +568,11 @@ def assist_signals(text: str, cwd: str | None = None, *,
                    local_files: bool = True) -> tuple[int, list[str], str | None]:
     """Score how much a runnable input reads like an English request.
 
-    Returns (score, reasons, first_word). Score 0 means no ambiguity: the first word is not an
-    English-word command, or the input uses flags, operators, expansions, globs or quotes.
-    `local_files=False` (the terminal is on an ssh host, card #S5SH) leaves out the one signal that
-    looks at this machine's files: whether a bare operand names a file in `cwd`.
+    Returns (score, reasons, first_word). Score 0 means no ambiguity: the input uses flags,
+    operators, expansions, globs or quotes, or — for a first word that is a command but not an
+    English word (`claude`, `git`) — the rest does not clear the stricter NON_ENGLISH_THRESHOLD
+    bar. `local_files=False` (the terminal is on an ssh host, card #S5SH) leaves out the one signal
+    that looks at this machine's files: whether a bare operand names a file in `cwd`.
     """
     trimmed = text.strip()
     if not trimmed or "\n" in trimmed or SHELLISH.search(trimmed) or '"' in trimmed:
@@ -577,8 +584,9 @@ def assist_signals(text: str, cwd: str | None = None, *,
     if not words:
         return 0, [], None
     first = words[0]
-    if first.lower() != first or first not in ENGLISH_COMMANDS:
+    if first.lower() != first:
         return 0, [], first
+    english = first in ENGLISH_COMMANDS
     args = words[1:]
     if "'" in trimmed or any(a.startswith(("-", "+")) for a in args):
         return 0, [], first  # quoting and flags are shell-typical
@@ -624,7 +632,33 @@ def assist_signals(text: str, cwd: str | None = None, *,
             elif first in BARE_WORD_ODD and len(args) <= 3 and local_files:
                 score += 2
                 reasons.append(f"{first} with a bare word")
+    if not english and not _clears_non_english_bar(score, reasons):
+        return 0, [], first
     return score, reasons, first
+
+
+def _clears_non_english_bar(score: int, reasons: list[str]) -> bool:
+    """True when the args after a non-English command name are unmistakably a sentence.
+
+    `git` or `claude` as the first word already points at the shell, so the evidence has to be
+    stronger than the English-command bar (NON_ENGLISH_THRESHOLD, not ASSIST_THRESHOLD) and
+    include one signal no invocation has: sentence punctuation, or an article, pronoun or
+    question word (the weight-2 entries of SIGNAL_WORDS). Below the bar the score is reported as
+    0, so nothing downstream can trip on ASSIST_THRESHOLD.
+    """
+    if score < NON_ENGLISH_THRESHOLD:
+        return False
+    if "punctuation" in reasons or "trailing ?" in reasons:
+        return True
+    return any(SIGNAL_WORDS.get(word, 0) >= 2 for word in reasons)
+
+
+def _assist_why(first: str, signals: list[str]) -> str:
+    """The one-line reason runnable input is being second-guessed as a sentence."""
+    detail = f" ({', '.join(signals[:4])})"
+    if first in ENGLISH_COMMANDS:
+        return f"“{first}” is a command and an English word; reads like a sentence{detail}"
+    return f"“{first}” is a command; the rest reads like a sentence{detail}"
 
 
 # Words no command takes as its first operand. A second word from this set means the line is a
@@ -1075,7 +1109,7 @@ def _classify_remote(text: str, trimmed: str, forced: str | None, host: str) -> 
     score, signals, first = assist_signals(trimmed, local_files=False)
     if score >= ASSIST_THRESHOLD:
         guess = "shell" if first in LITERAL_TEXT else "agent"
-        why = f"“{first}” is a command and an English word; reads like a sentence ({', '.join(signals[:4])})"
+        why = _assist_why(first, signals)
         return Decision(guess, text, why + (" · best guess: agent request" if guess == "agent"
                                               else f" · best guess: shell command, {typed}"),
                         needs_assist=True, assist_reason=why, remote_host=host)
@@ -1165,7 +1199,7 @@ def classify(text: str, mode: str = "auto", known_commands: Iterable[str] = (),
         score, signals, first = assist_signals(trimmed, cwd)
         if score >= ASSIST_THRESHOLD:
             guess = "shell" if first in LITERAL_TEXT else "agent"
-            why = f"“{first}” is a command and an English word; reads like a sentence ({', '.join(signals[:4])})"
+            why = _assist_why(first, signals)
             return Decision(guess, text, why + (" · best guess: agent request" if guess == "agent"
                                                   else " · best guess: shell command"),
                             ok, error, valid, reason, True, why)

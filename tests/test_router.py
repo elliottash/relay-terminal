@@ -705,5 +705,61 @@ class EnglishWordCommandTests(unittest.TestCase):
                 self.assertLess(score, ASSIST_THRESHOLD, f"{text}: {reasons}")
 
 
+class NonEnglishCommandNameTests(unittest.TestCase):
+    """A runnable first word that is not an English word: agent CLIs people address the agent
+    through (`claude`, `codex`) and ordinary program names (`git`, `docker`). A sentence after
+    one must clear NON_ENGLISH_THRESHOLD and carry a signal no invocation has; anything less is
+    reported as score 0 so nothing downstream can trip on ASSIST_THRESHOLD (card #1ZNS, owner
+    report 2026-09-23: "claude has usage rests now, so we should …" ran in the shell)."""
+
+    # claude/codex/gemini/kubectl are not on the hermetic INSTALLED list, so the cases state them.
+    KNOWN = ["claude", "codex", "gemini", "kubectl"]
+
+    SENTENCES = [
+        "claude has usage rests now, so we should start tracking those in my crontab "
+        "as well as add the functionality in relay",
+        "codex review the diff and tell me what broke",
+        "git is telling me the branch is behind, what does that mean?",
+    ]
+
+    INVOCATIONS = [
+        "claude --help",
+        "claude fix the tests",   # one strong word is not enough after a program name
+        "git status",
+        "git commit -m wip",
+        "docker ps",
+        "ssh filly tail the log",
+        "kubectl get pods",
+    ]
+
+    def check(self, text):
+        with tempfile.TemporaryDirectory() as cwd:
+            return classify(text, known_commands=self.KNOWN, cwd=cwd)
+
+    def test_sentences_after_program_names_route_to_agent_and_ask(self):
+        for text in self.SENTENCES:
+            result = self.check(text)
+            self.assertEqual(result.route, "agent", f"{text!r}: {result.reason}")
+            # It would also run (`claude has usage rests …`), so the model decides, not the table.
+            self.assertTrue(result.needs_assist, f"{text!r} guessed agent without asking")
+            self.assertTrue(result.assist_reason, text)
+
+    def test_real_invocations_stay_shell_and_never_ask(self):
+        for text in self.INVOCATIONS:
+            result = self.check(text)
+            self.assertEqual(result.route, "shell", f"{text!r}: {result.reason}")
+            self.assertFalse(result.needs_assist, f"{text!r} would ask the model")
+
+    def test_below_the_stricter_bar_scores_zero(self):
+        with tempfile.TemporaryDirectory() as cwd:
+            for text in self.INVOCATIONS:
+                score, reasons, _ = assist_signals(text, cwd)
+                self.assertEqual(score, 0, f"{text}: {reasons}")
+
+    def test_reason_says_command_not_english_word(self):
+        result = self.check(self.SENTENCES[0])
+        self.assertIn("“claude” is a command; the rest reads like a sentence", result.reason)
+
+
 if __name__ == '__main__':
     unittest.main()
