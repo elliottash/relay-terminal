@@ -3494,13 +3494,18 @@ class VerifyDefaultTests(BoardToolsTest):
         self.assertNotIn("reminder", result)
         self.assertIn("verify defaulted from skill referee-report", result["summary"])
         # Only the verify keys cross over, normalized by validate_verify; the server-only
-        # factors (regularity, rot, confidential) stay on the skill.
+        # factors (regularity, rot, confidential) stay on the skill.  The default then meets
+        # the QA policy floor like any proposal (#C3Q2): under the default policy an `ai-text`
+        # primary may not gate, so `person` (the next non-AI rung in `also`) becomes primary
+        # and `ai-text` stays as a supplementary rung; the result's `qa_policy` notes say so.
         self.assertEqual(self.board.card_by_id(self.card_id).front["verify"],
-                         {"artifact": "text", "primary": "ai-text", "also": ["person"],
+                         {"artifact": "text", "primary": "person", "also": ["ai-text"],
                           "human": "required", "criteria": "every major point is addressed",
                           "sign_off": "none", "effort": "high"})
+        self.assertEqual(result["qa_policy"], ["qa policy: primary ai-text → person, ai-text "
+                                               "kept in also (AI gating is off)"])
         read = self.tools.run("board_read", {"id": self.card_id})
-        self.assertEqual(read["front"]["verify"]["primary"], "ai-text")
+        self.assertEqual(read["front"]["verify"]["primary"], "person")
         self.assertEqual([str(p) for p in self.board.check()], [])
 
     def test_an_update_defaults_verify_when_the_card_has_none(self):
