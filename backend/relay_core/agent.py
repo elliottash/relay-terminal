@@ -2937,15 +2937,18 @@ class Agent:
             # turn through its own harness, started here for the turn. One that will not start
             # is said, and the turn goes where it would have gone without the guest entries.
             guest = self._start_plan_guest(turn_id, target)
-            if guest is None:
-                custom = (planner.roles.get("planning") or {}).get("candidates")
-                if custom:
-                    skipped_guests.add(target.preset_id)
-                    target = planner.choose_role("planning", skip_presets=skipped_guests)
-                    if target.is_main:
-                        target = None
-                else:
-                    target = planner.planning_target(guests=False)
+            if guest is not None:
+                # Started: without the break the loop re-enters and starts a second harness for
+                # the same target (#GPF7 — the `if` became a `while` in #RND7's failover change).
+                break
+            custom = (planner.roles.get("planning") or {}).get("candidates")
+            if custom:
+                skipped_guests.add(target.preset_id)
+                target = planner.choose_role("planning", skip_presets=skipped_guests)
+                if target.is_main:
+                    target = None
+            else:
+                target = planner.planning_target(guests=False)
         if skipped_guests:
             self._plan_choice = target
         if target is None:
