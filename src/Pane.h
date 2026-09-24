@@ -11878,10 +11878,8 @@ private:
         if (!m_transcript) return;
         const QString clean = sanitize(text);
         if (clean.isEmpty()) return;
-        const QString program = !m_transcriptProgram.isEmpty() ? m_transcriptProgram
-                                : (foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName());
-        m_transcriptHeader->setText(QStringLiteral("Agent · %1  —  output will also print in the terminal when %2 exits")
-                                        .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model, program));
+        m_transcriptHeader->setText(QStringLiteral("Agent - %1")
+                                        .arg(m_model.isEmpty() ? QStringLiteral("agent") : m_model));
         QTextCursor cursor(m_transcriptView->document());
         cursor.movePosition(QTextCursor::End);
         QTextCharFormat format;

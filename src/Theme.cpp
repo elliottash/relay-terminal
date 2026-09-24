@@ -446,8 +446,8 @@ QPushButton#projectInitButton:focus { color: @text; border-color: @accent; }
 QPushButton#projectInitYes { color: @text; border-color: @accentBorder; }
 QFrame#paneBanner { background: @raised; border: 1px solid @caution; border-radius: 8px; }
 QFrame#paneBanner QLabel { color: @text; }
-QFrame#transcript { background: @surface; border: 1px solid @accentBorder; border-radius: 8px; }
-QLabel#transcriptHeader { color: @muted; }
+QFrame#transcript { background: @surface; border: 1px solid @agent; border-radius: 8px; }
+QLabel#transcriptHeader { color: @agent; }
 QPlainTextEdit#transcriptView { background: transparent; border: none; font-family: "@mono"; font-size: 10pt; }
 QLabel#toast { background: @raised; color: @text; border: 1px solid @accentBorder; border-radius: 8px; padding: 6px 12px; }
 /* The share dialog's link and its note (src/RemoteShare.cpp). */
