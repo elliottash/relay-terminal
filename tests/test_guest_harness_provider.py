@@ -768,6 +768,8 @@ class LimitsTests(unittest.TestCase):
             agent.ask("do work")
             self.assertEqual(events[-1]["event"], "error")
             self.assertEqual(len(second.sent), 0)
+            self.assertTrue(any(e["event"] == "status" and "a guest tool already ran" in e["text"]
+                                for e in events))
             agent.ask("continue")
         self.assertEqual(events[-1]["event"], "done")
         self.assertEqual(len(second.sent), 1)

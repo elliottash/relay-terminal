@@ -228,6 +228,8 @@ class FailoverTests(unittest.TestCase):
         agent.ask('hello')
         self.assertEqual(self.events[-1]['event'], 'error')
         self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+        self.assertTrue(any(e['event'] == 'status' and 'cannot be replayed' in e['text']
+                            for e in self.events))
         agent.ask('continue')
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(self.stubs['kimi-k3'].calls, 1)

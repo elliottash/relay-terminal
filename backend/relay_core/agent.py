@@ -3241,6 +3241,7 @@ class Agent:
             limits = provider_limits.last(preset)
         if (limits.get("updated_at", 0) > hold["marked"]
                 and limits.get("status") != "rejected"
+                and limits.get("windows")
                 and all(w.get("used_percent", 0) < 100 for w in limits.get("windows") or ())):
             self._quota_blocked = None
             return False
@@ -3263,6 +3264,11 @@ class Agent:
         # A guest may have run a shell or edited a file without sending answer text. Its whole
         # request cannot be replayed after that; the hold routes its *next* turn instead.
         if self._produced_output or record.get("guest_tools_seen"):
+            reason = ("a guest tool already ran" if record.get("guest_tools_seen")
+                      else "part of the answer was already shown")
+            self.emit({"event": "status", "text":
+                       f"Usage exhausted; this turn cannot be replayed because {reason}. "
+                       "The next turn will use another allowed subscription."})
             return False
         swap = self._failover
         if swap is None:
