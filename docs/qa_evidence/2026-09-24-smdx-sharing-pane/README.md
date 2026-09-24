@@ -17,12 +17,14 @@ with every hook recorded into `driver.log`. No sidecar, no window chrome, no net
 | `07-devices-pairing-offer.png` | **Add a device…** pressed: `driver.log` shows `onPairRequest` and `onPairCodeRequest` exactly once; the QR, the typed code `RPFU 9647`, its clock, Copy link, the three captions and Done, above the device list | pairing offer minted on press, not on opening |
 | `08-devices-ask.png` | a phone's `ask`: the approval card at the top of the page with the five digits and Refuse / Allow viewing / Allow typing; the tab says "Devices · 1 asking" | the approval card with Refuse holding the focus |
 | `09-people-again-offer-withdrawn.png` | switching to People: `driver.log` shows `onPairCodeRevoke RPFU` — leaving Devices withdraws the code | leaving Devices revokes the code |
+| `10-chip-two-actions.png` | The whole Relay app in an isolated Xvfb profile: the share chip menu contains exactly **Share this pane…** and **Sharing…** | two menu actions in every state |
+| `11-sharing-opened.png` | Selecting **Sharing…** opens the Sharing pane on People | Sharing… opens the Sharing pane |
 
 `driver.log` records the hook calls in order. "focus after ask: (none)" is Xvfb reporting no active
 window for `QApplication::focusWidget()`; `tests/sharingpane_test.cpp` (offscreen) asserts that Refuse
 has the focus after `focusView()` with an ask showing.
 
-Not covered here (needs the whole app): the share chip's two-row menu, "Pair a phone…" from the plug
-menu landing on Devices, and `RemoteShare::attach()` against a live sidecar. Those are what the
-verifier should stage: `scripts/relay-drive` with remote control on, press the share chip, and pair a
-phone from the plug menu.
+Shots 10–11 run the built `relay` under Xvfb with separate config, data and workspace directories.
+The chip was clicked with Xdotool, then **Sharing…** was clicked. The shared-state menu, "Pair a
+phone…" from the plug menu, and `RemoteShare::attach()` against a live sidecar still need a
+verifier's live check.

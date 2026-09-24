@@ -2217,7 +2217,7 @@ RemotePaneDialog::RemotePaneDialog(Place place, QWidget *parent) : QDialog(paren
         auto *v = new QVBoxLayout(m_pairPage);
         auto *intro = plainLabel(QStringLiteral("remotePairIntro"));
         intro->setWordWrap(true);
-        intro->setText(QStringLiteral("On the desktop, open the Sharing pane (a pane's share button › Share more…, "
+        intro->setText(QStringLiteral("On the desktop, open the Sharing pane (a pane's share button › Sharing…, "
                                       "or the plug menu › Pair a phone…), press Add a device… and copy its link. "
                                       "Paste it here: this Relay becomes one of your own devices on that desktop."));
         v->addWidget(intro);

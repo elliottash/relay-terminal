@@ -1509,7 +1509,7 @@ listing per scope only the panes that have a participant or a live invite, with 
 and key fingerprints, who is driving, and the live invites with uses and expiry and a Revoke, and
 "Waiting for you": the knocks, control requests and guest prompts, each with the countdown of its
 own kind and Refuse first and holding the focus. The owner's own devices are the pane's other page,
-**Devices**. The pane opens from the share chip's menu ("Share this pane…", "Share more…"), from
+**Devices**. The pane opens from the share chip's menu ("Share this pane…", "Sharing…"), from
 the palette (`pane.sharing`) and by itself when somebody knocks, and opening it never takes the
 keyboard, because the next keystroke would land on Admit.
 The owner's keystroke in a pane a guest is driving sends `control_take` from the same place the

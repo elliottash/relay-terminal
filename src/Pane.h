@@ -7223,9 +7223,9 @@ public:
         const bool sharing = share.isSharing(m_token);
         const int guests = share.sharingModel().guestsOn(m_token);
         m_shareChip->setToolTip(!sharing
-            ? QStringLiteral("Share this pane with someone, or more")
+            ? QStringLiteral("Share this pane or open Sharing")
             : guests == 0
-                ? QStringLiteral("Shared — invite someone else, share more, or see what is waiting")
+                ? QStringLiteral("Shared — invite someone else or open Sharing")
                 : QStringLiteral("Shared with %1 · invite someone else, or see who is here and what is waiting")
                       .arg(guests == 1 ? QStringLiteral("one other person")
                                        : QStringLiteral("%1 other people").arg(guests)));
@@ -7233,49 +7233,28 @@ public:
         m_shareChip->style()->polish(m_shareChip);
     }
 
-    // The share button beside the folder opens a two-row menu (#SMDX): "Share this pane…" is the
-    // Sharing pane's People page with the invite form open on this pane, "Share more…" the same
-    // form with the scope picker open, for a whole tab or everything. Once the pane is shared, a
-    // third row opens the Sharing pane itself — the ongoing question is who is here and what is
-    // waiting — and when somebody is on it or waiting, a first row says so. Pairing a phone is
-    // deliberately not here: it is the plug menu's and Options › Remote's. Nothing is published
-    // by opening the menu; a pane is shared when a link or a code is made for it.
+    // The share button beside the folder always opens the same two actions (#SMDX): invite
+    // someone to this pane, or open Sharing for other scopes, devices and current activity.
+    // The chip itself shows the share state. Pairing a phone lives in the plug menu and Options
+    // › Remote. Opening this menu publishes nothing; a link or code starts a share.
     void shareChipPressed() {
         if (!m_shareChip) return;
-        relay::RemoteShare &share = relay::RemoteShare::instance();
-        const bool sharing = share.isSharing(m_token);
-        const relay::sharing::ChipState state = share.sharingModel().chip(m_token, sharing);
         auto *menu = new QMenu(m_shareChip);
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        if (!state.text.isEmpty()) {
-            // "alice is typing", "2 guests · 1 waiting": what the chip says, in full, not a row
-            // to choose.
-            QAction *now = menu->addAction(state.text);
-            now->setEnabled(false);
-            menu->addSeparator();
-        }
         QPointer<Pane> self(this);
         QAction *thisPane = menu->addAction(QStringLiteral("Share this pane…"));
         connect(thisPane, &QAction::triggered, this, [self] {
             if (self && self->onShareThisPane) self->onShareThisPane();
         });
-        QAction *more = menu->addAction(QStringLiteral("Share more…"));
-        connect(more, &QAction::triggered, this, [self] {
-            if (self && self->onShareMore) self->onShareMore();
+        QAction *open = menu->addAction(QStringLiteral("Sharing…"));
+        connect(open, &QAction::triggered, this, [self] {
+            if (!self || !self->onOpenSharing) return;
+            self->onOpenSharing();
+            // pane.sharing has no key of its own; the palette is its faster path.
+            self->hint(QStringLiteral("pane.sharing"),
+                       relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("help.shortcuts")),
+                                                      QStringLiteral("then “Sharing”")));
         });
-        if (sharing) {
-            menu->addSeparator();
-            QAction *open = menu->addAction(QStringLiteral("Sharing"));
-            connect(open, &QAction::triggered, this, [self] {
-                if (!self || !self->onOpenSharing) return;
-                self->onOpenSharing();
-                // pane.sharing has no key of its own on purpose; the palette is the fast path, so
-                // the hint teaches that rather than inventing one (WARP.md, "Shortcut hints").
-                self->hint(QStringLiteral("pane.sharing"),
-                           relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("help.shortcuts")),
-                                                          QStringLiteral("then “Sharing”")));
-            });
-        }
         menu->popup(m_shareChip->mapToGlobal(QPoint(0, m_shareChip->height())));
     }
 
