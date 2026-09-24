@@ -552,7 +552,10 @@ def main():
                 emit({"event": "opencode_imported", "id": request.get("id"),
                       "imported": [item.to_dict() for item in imported], "skipped": skipped})
             elif kind == "ask":
-                subagents.user_activity()
+                # A pane-message wake (#R5TC) is an ask nobody typed; it is not the person
+                # returning, so it must not reset the idle clocks.
+                if not isinstance(request.get("pane_note"), dict):
+                    subagents.user_activity()
                 loaded = session_protocol.load_attachments(request, turns)
                 if request.get("cards"):
                     # `#K7Q2` in the composer: the card, its open tasks and its thread tail travel
@@ -592,6 +595,15 @@ def main():
                     seed = board.console_seed(turns.agent)
                     if seed:
                         text = seed + "\n" + text
+                # Cross-pane messaging (#R5TC, protocol 37): an idle pane is woken by the note
+                # its GUI submits. The frame is built here, by the receiving worker, from the
+                # delivery hop — the sender writes none of the text. origin "pane:p2" rides the
+                # queue item and the ledger; author names the sender on the queue row.
+                origin, author = "user", None
+                pane_note = request.get("pane_note")
+                if isinstance(pane_note, dict) and turns.agent is not None:
+                    wake = turns.agent.executor.panes.wake_ask(pane_note)
+                    text, origin, author = wake["text"], wake["origin"], wake["author"]
                 turns.submit(text, request.get("when", "now"), request.get("id"),
                              request.get("context"), loaded or None,
                              requeue=request.get("requeue", True),
@@ -599,7 +611,34 @@ def main():
                              # whether this turn writes anything. A terminal pane sends none of
                              # the three and its turn is exactly what it was.
                              surface=request.get("surface"), screen=request.get("screen"),
-                             readonly=bool(request.get("readonly", False)))
+                             readonly=bool(request.get("readonly", False)),
+                             origin=origin, author=author)
+            # --- cross-pane messaging (#R5TC, protocol 37) ---
+            elif kind == "pane_roster":
+                # The pane's directory push: who else exists (handle, title, workspace, busy),
+                # this pane's own handle, and the agent/cross_pane kill switch. pane_list and
+                # pane_send appear on the next model call after the first roster arrives.
+                agent = turns.agent
+                if agent is not None and agent.executor is not None:
+                    agent.executor.panes.roster(request.get("panes"), request.get("self"),
+                                                request.get("enabled", True))
+            elif kind == "pane_note":
+                # The GUI placed a peer's message in this pane: its turn is busy (the note is
+                # read at the next step boundary), or a wake was withheld (the depth rule or
+                # the pane's wake budget) and the note waits for the next turn. Either way the
+                # existing notices path carries it — notify_main never starts a turn, and an
+                # unread notice survives to the next one (_MainInbox.drain reads _notices lazily).
+                agent = turns.agent
+                if agent is None or agent.executor is None:
+                    raise ValueError("No agent is configured in this pane.")
+                note, peer_line = agent.executor.panes.deliver_note(request)
+                subagents.notify_main(note)
+                emit(peer_line)
+            elif kind == "pane_message_result":
+                # The directory's acceptance verdict for one pane_send: {id, ok, outcome...}.
+                agent = turns.agent
+                if agent is not None and agent.executor is not None:
+                    agent.executor.panes.resolve(request)
             elif kind == "queue_steer":
                 queue_for(request).steer(request.get("item"))
             elif kind == "queue_unsteer":

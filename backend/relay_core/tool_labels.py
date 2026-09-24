@@ -438,6 +438,18 @@ def _base(name, args: dict, existed) -> dict:
         about = ", ".join(h for h in headers if h)[:60]
         subject = f" about {about}" if about else ""
         return _row("input", f"asking you{subject}", f"asked you{subject}", f"ask you{subject}")
+    if name == "pane_list":
+        return _row("agent", "listing the other panes", "listed the other panes",
+                    "list the other panes")
+    if name == "pane_send":
+        # "sent to pane 2 (Release notes) · woke it" (#R5TC): the outcome is the difference
+        # between "they will see this now" and "they will see this eventually".
+        to = _short(args.get("pane"), 12) or "a pane"
+        outcome = result.get("outcome") if isinstance(result, dict) else None
+        note = {"woke": " · woke it", "delivered": " · delivered · it is busy",
+                "no_wake": " · delivered · no wake"}.get(outcome, "") if result is not None else ""
+        return _row("agent", f"messaging pane {to}", f"sent to pane {to}{note}",
+                    f"message pane {to}")
     if name == "type_into_program":
         typed = _typed(args)
         return _row("input", f"typing {typed}", f"typed {typed}", "type into the program")
@@ -724,6 +736,19 @@ def detail(name, args, result, *, preview: str = "", diff=None) -> list[dict]:
             else result.get("result")
         if isinstance(report, str) and report.strip():
             sections.append(_section("report", "text", report, cap=DETAIL_TEXT_CAP))
+    elif name == "pane_send":
+        if isinstance(args.get("message"), str):
+            sections.append(_section("message", "text", args["message"], cap=DETAIL_TEXT_CAP))
+        if isinstance(result, dict):
+            for key in ("detail", "message"):
+                if isinstance(result.get(key), str) and result[key].strip():
+                    sections.append(_section(key, "text", result[key], cap=DETAIL_TEXT_CAP))
+            panes = result.get("panes") if isinstance(result.get("panes"), list) else []
+            if panes:
+                lines = [f"{p.get('handle', '?')} | {p.get('title', '')} | "
+                         f"{'busy' if p.get('busy') else 'idle'}"
+                         for p in panes if isinstance(p, dict)]
+                sections.append(_section("panes", "text", "\n".join(lines), cap=DETAIL_TEXT_CAP))
     elif name == "ask_user":
         items = args.get("questions") if isinstance(args.get("questions"), list) else []
         answers = result.get("answers") if isinstance(result.get("answers"), list) else []

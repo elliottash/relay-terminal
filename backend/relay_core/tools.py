@@ -34,6 +34,7 @@ from typing import Callable
 from .keybindings import KeybindingCatalog
 from .program_input import ProgramControl
 from .questions import Questions
+from .panes import PaneMessaging
 from .skills import TOOL_SPECS as SKILL_TOOLS, SkillIndex
 from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
@@ -505,6 +506,11 @@ class ToolExecutor:
         # well (like warp / claude)"); `can_ask` is off for a subagent's executor, which cannot see
         # the pane the ask would be drawn in.
         self.questions = Questions(emit, cancel)
+        # Messaging another pane of this Relay (relay_core/panes.py, card #R5TC). A tool family
+        # like the two above: emit to the pane, wait for its answer. Offered only to a main
+        # agent whose GUI has sent a pane roster — `RestrictedExecutor` (subagents.py) builds
+        # its tool list without it, and a subagent is never told which pane it runs in.
+        self.panes = PaneMessaging(emit, cancel)
         self.can_ask = True
         # Where run_command runs when the model gives no cwd: the directory the user's terminal is in.
         self.default_cwd = "."
@@ -601,6 +607,10 @@ class ToolExecutor:
             tools = tools + [self.terminal.tool_spec()]
         if self.can_ask:
             tools = tools + [self.questions.tool_spec()]
+        # Read per call like the two above: the roster arrives with the first pane_message push
+        # and the kill switch (agent/cross_pane) removes the tools from the next call.
+        if self.panes.available():
+            tools = tools + self.panes.tool_specs()
         return tools
 
     def prepare(self, name: str, arguments: dict) -> Prepared:
@@ -628,6 +638,9 @@ class ToolExecutor:
             if not self.can_ask:
                 raise ValueError("ask_user is not available here: you cannot reach the user.")
             payload, preview = self.questions.prepare(args)
+            return Prepared(name, payload, preview)
+        if name in ("pane_list", "pane_send"):
+            payload, preview = self.panes.prepare(name, args)
             return Prepared(name, payload, preview)
         if name == "set_keybinding":
             catalog = self.keybindings

@@ -197,7 +197,7 @@ class TurnSupervisor:
                 ledger.set_status(item["ledger_id"], "cancelled_by_user", reason)
 
     def submit(self, prompt, when: str = "now", request_id=None, context=None, attachments=None,
-               origin: str = "user", requeue: bool = True, ledger_id=None,
+               origin: str = "user", author: str | None = None, requeue: bool = True, ledger_id=None,
                surface: str = "", screen: str = "", readonly: bool = False,
                mode: str = "", card: str = "", preview: str = "") -> str:
         """origin "relay" marks prompts Relay queued itself (e.g. a background subagent finished).
@@ -253,7 +253,7 @@ class TurnSupervisor:
                     validate_context(context)
                     item = {"id": uuid.uuid4().hex, "prompt": prompt, "request_id": request_id,
                             "context": context, "attachments": attachments, "origin": origin,
-                            "requeue": requeue, "surface": surface, "screen": screen,
+                            "author": author, "requeue": requeue, "surface": surface, "screen": screen,
                             "readonly": readonly, "mode": mode, "card": card,
                             "preview": preview}
                     item["ledger_id"] = self._ledger_add(_preview_of(item), "steer", origin,
@@ -265,7 +265,8 @@ class TurnSupervisor:
                     self._steer.append(item)
                     self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
                                 "when": "steer", "position": len(self._steer) - 1, "origin": origin,
-                                "ledger_id": item["ledger_id"], **_surface_of(item), **_card_of(item)})
+                                "author": author, "ledger_id": item["ledger_id"],
+                                **_surface_of(item), **_card_of(item)})
                     self._changed_locked()
                     return item["id"]
                 when = "queue"
@@ -286,7 +287,7 @@ class TurnSupervisor:
             if when == "now" and busy:
                 raise ValueError("An agent turn is already active.")
             item = {"id": uuid.uuid4().hex, "prompt": prompt, "force": when != "queue", "context": context,
-                    "attachments": attachments, "origin": origin, "surface": surface,
+                    "attachments": attachments, "origin": origin, "author": author, "surface": surface,
                     "screen": screen, "readonly": readonly, "mode": mode, "card": card,
                     "preview": preview}
             item["ledger_id"] = self._ledger_add(_preview_of(item),
@@ -304,7 +305,7 @@ class TurnSupervisor:
                 self._queue.append(item)
                 position = len(self._queue) - 1
             self._emit({"event": "queued", "id": item["id"], "request_id": request_id,
-                        "when": when, "position": position, "origin": origin,
+                        "when": when, "position": position, "origin": origin, "author": author,
                         "ledger_id": item["ledger_id"], **_surface_of(item), **_card_of(item)})
             if when == "interrupt" and self._running is not None:
                 self._emit({"event": "interrupting", "id": self._running, "by": item["id"]})
@@ -656,10 +657,12 @@ class TurnSupervisor:
     def _changed_locked(self) -> None:
         self._emit({"event": "queue_changed", "running": self._running, "paused": self._paused,
                     "items": [{"id": i["id"], "preview": _preview_of(i)[:PREVIEW], "forced": i["force"],
-                               "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
+                               "origin": i.get("origin", "user"), "author": i.get("author"),
+                               **_surface_of(i), **_card_of(i)}
                               for i in self._queue],
                     "steering": [{"id": i["id"], "preview": _preview_of(i)[:PREVIEW],
-                                  "origin": i.get("origin", "user"), **_surface_of(i), **_card_of(i)}
+                                  "origin": i.get("origin", "user"), "author": i.get("author"),
+                                  **_surface_of(i), **_card_of(i)}
                                  for i in self._steer_inflight + self._steer]})
 
     def _next_locked(self):
