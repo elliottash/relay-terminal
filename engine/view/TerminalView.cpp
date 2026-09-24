@@ -2874,33 +2874,35 @@ void TerminalView::paintTablePreview(QPainter &p, const QRect &box, const MediaI
     const auto fitted = [](const QString &text, int width) {
         return text.size() <= width ? text : text.left(std::max(0, width - 1)) + QStringLiteral("…");
     };
-    // The terminal's own cell fonts: widths are counted in cells, so the bars and the rule's `┼`
-    // only line up in a font whose every character is one cell wide.
+    // The terminal's own cell fonts: widths are counted in cells, so a column's text only stays
+    // inside it in a font whose every character is one cell wide.
     const QFont &bold = m_fonts[1];
     const QFont &normal = m_fonts[0];
+    // Text goes at cell positions; the bars and the rule are lines, not box-drawing glyphs, which
+    // come from a fallback font a little narrower than a cell and drift as a string of them runs.
     const int left = box.left() + m_cw;
+    QVector<int> starts(columns);
+    for (int c = 0, x = left; c < columns; ++c) {
+        starts[c] = x;
+        x += (widths.at(c) + 3) * m_cw;
+    }
     const auto drawRow = [&](const QStringList &row, int line) {
-        int x = left;
-        for (int c = 0; c < columns; ++c) {
-            if (c > 0) {
-                p.setPen(faint);
-                p.drawText(QRect(x, box.top() + line * m_ch, 3 * m_cw, m_ch), Qt::AlignVCenter, QStringLiteral(" │ "));
-                x += 3 * m_cw;
-            }
-            p.setPen(m_scheme.foreground);
-            p.drawText(QRect(x, box.top() + line * m_ch, widths.at(c) * m_cw, m_ch), Qt::AlignVCenter,
-                       fitted(row.value(c), widths.at(c)));
-            x += widths.at(c) * m_cw;
-        }
+        p.setPen(m_scheme.foreground);
+        for (int c = 0; c < columns; ++c)
+            p.drawText(QRect(starts.at(c), box.top() + line * m_ch, widths.at(c) * m_cw, m_ch),
+                       Qt::AlignVCenter, fitted(row.value(c), widths.at(c)));
     };
     p.setFont(bold);
     drawRow(info.head.first(), 0);
     p.setFont(normal);
-    QStringList dashes;
-    for (int w : widths) dashes << QString(w, QChar(0x2500));
+    const int right = starts.last() + widths.last() * m_cw;
+    const int bottom = box.top() + (shown + 2) * m_ch;
     p.setPen(faint);
-    p.drawText(QRect(left, box.top() + m_ch, box.width(), m_ch), Qt::AlignVCenter,
-               dashes.join(QStringLiteral("─┼─")));
+    p.drawLine(left, box.top() + m_ch + m_ch / 2, right, box.top() + m_ch + m_ch / 2);
+    for (int c = 1; c < columns; ++c) {
+        const int x = starts.at(c) - m_cw - m_cw / 2;
+        p.drawLine(x, box.top() + 2, x, bottom - 2);
+    }
     for (int r = 1; r <= shown; ++r)
         drawRow(info.head.at(r), r + 1);
     if (shown < dataRows) {
