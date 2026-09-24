@@ -291,6 +291,127 @@ class RelayBuildTest(unittest.TestCase):
         self.assertIn("cmake configure failed", done.stdout)
         self.assertFalse(self.binary(root).exists())
 
+class JobCapTest(unittest.TestCase):
+    """relay-build picks --parallel from the memory limit it actually runs under.
+
+    The incident (2026-09-23, card #04EC): an agent pane built with the default 8
+    parallel jobs inside its systemd scope (MemoryMax=8G). Eight cc1plus of this
+    repo peak past 8 GiB, systemd killed the scope, and the pane's agent "ran out
+    of memory" while doing nothing but compiling. The job count is therefore
+    clamped to about one 2 GiB compile job per 2 GiB of limit.
+    """
+
+    def load(self):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader("relay_build_jobs_under_test", str(SCRIPT))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def limit_under(self, tmp, cgroup_line="0::/user.slice/relay-pane.scope",
+                    meminfo_mb=16000):
+        """memory_limit_bytes against a fake cgroup tree laid out in tmp."""
+        wrapper = self.load()
+        (Path(tmp) / "self.cgroup").write_text(cgroup_line + "\n")
+        (Path(tmp) / "meminfo").write_text("MemTotal:       %d kB\n" % (meminfo_mb * 1024))
+        return wrapper, wrapper.memory_limit_bytes(
+            cgroup_root=str(Path(tmp) / "cgroup"),
+            self_cgroup=str(Path(tmp) / "self.cgroup"),
+            meminfo=str(Path(tmp) / "meminfo"))
+
+    def write_cgroup(self, tmp, rel, memory_max):
+        """A fake cgroup v2 tree; memory_max=None leaves the level unlimited."""
+        node = Path(tmp) / "cgroup" / rel
+        node.mkdir(parents=True, exist_ok=True)
+        if memory_max is not None:
+            (node / "memory.max").write_text("%d\n" % memory_max)
+        return node
+
+    def test_the_pane_scopes_memory_max_is_the_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_cgroup(tmp, "user.slice/relay-pane.scope", 8 * 1024 ** 3)
+            wrapper, limit = self.limit_under(tmp)
+            self.assertEqual(8 * 1024 ** 3, limit)
+
+    def test_a_slice_ancestor_can_hold_the_limit(self):
+        # The scope itself is unlimited ("max" in v2); user.slice's 6 GiB still counts.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write_cgroup(tmp, "user.slice", 6 * 1024 ** 3)
+            self.write_cgroup(tmp, "user.slice/relay-pane.scope", None)
+            wrapper, limit = self.limit_under(tmp)
+            self.assertEqual(6 * 1024 ** 3, limit)
+
+    def test_without_a_cgroup_limit_the_hosts_ram_is_the_limit(self):
+        # cgroup v1's sentinel for "unlimited", and no v2 at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            cgroup = Path(tmp) / "cgroup"
+            (cgroup / "memory").mkdir(parents=True)
+            (cgroup / "memory" / "memory.limit_in_bytes").write_text("9223372036854771712\n")
+            wrapper, limit = self.limit_under(tmp, cgroup_line="12:memory:/",
+                                              meminfo_mb=4000)
+            self.assertEqual(4000 * 1024 * 1024, limit)
+
+    def test_jobs_are_clamped_to_the_memory_limit(self):
+        wrapper = self.load()
+        wrapper.memory_limit_bytes = lambda **_: 8 * 1024 ** 3      # an 8 GiB pane
+        notes = []
+        self.assertEqual("4", wrapper.jobs_for_environment({}, note=notes.append))
+        self.assertEqual("4", wrapper.jobs_for_environment({"RELAY_JOBS": "8"},
+                                                           note=notes.append))
+        self.assertIn("lowered to 4", notes[-1])
+        self.assertIn("8.0 GiB", notes[-1])
+        # A lower explicit value wins untouched...
+        self.assertEqual("2", wrapper.jobs_for_environment({"RELAY_JOBS": "2"}))
+        # ...and the count never goes below one job, even on a tiny limit.
+        wrapper.memory_limit_bytes = lambda **_: 1024 ** 3
+        self.assertEqual("1", wrapper.jobs_for_environment({}))
+
+    def test_without_any_limit_the_requested_count_stands(self):
+        wrapper = self.load()
+        wrapper.memory_limit_bytes = lambda **_: None
+        self.assertEqual("8", wrapper.jobs_for_environment({}))
+        self.assertEqual("16", wrapper.jobs_for_environment({"RELAY_JOBS": "16"}))
+        self.assertEqual("3", wrapper.jobs_for_environment({"RELAY_JOBS": "3"}))
+
+    def test_land_verify_build_applies_the_same_cap(self):
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        loader = SourceFileLoader("land_under_test", str(REPO / "scripts" / "land.py"))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        land = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(land)
+        notes = []
+        # limit_bytes pins the test: same cap math, whatever this host really has.
+        self.assertEqual("4", land.relay_build_jobs(notes.append, limit_bytes=8 * 1024 ** 3))
+        self.assertTrue(any("lowered to 4" in note for note in notes), notes)
+
+    def command(self, root, *args):
+        return [sys.executable, str(root / "scripts" / "relay-build"), *args]
+
+    def test_the_building_line_carries_the_capped_count(self):
+        root_root = Path(tempfile.mkdtemp(prefix="relay-build-cap-"))
+        self.addCleanup(shutil.rmtree, root_root, ignore_errors=True)
+        (root_root / "scripts").mkdir()
+        shutil.copy2(SCRIPT, root_root / "scripts" / "relay-build")
+        (root_root / "CMakeLists.txt").write_text(CMAKELISTS)
+        (root_root / "main.cpp").write_text(MAIN_CPP)
+        (root_root / "marker.h").write_text('#define RELAY_MARKER "MARKER-ONE"\n')
+        env = dict(os.environ)
+        env["RELAY_JOBS"] = "99"          # far past any limit, to force the clamp
+        env["RELAY_TEST_SLOW"] = "0"
+        done = subprocess.run(self.command(root_root), cwd=str(root_root), env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stdout)
+        wrapper = self.load()
+        expected = wrapper.jobs_for_environment({"RELAY_JOBS": "99"})
+        self.assertIn("--parallel %s" % expected, done.stdout)
+        if expected != "99":              # this host actually has a limit to clamp to
+            self.assertNotIn("--parallel 99", done.stdout)
+            self.assertIn("lowered to", done.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

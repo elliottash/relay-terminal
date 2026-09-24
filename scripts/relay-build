@@ -29,8 +29,12 @@ Usage:
     scripts/relay-build --check "Fold thinking"   # fail unless build/relay has it
     scripts/relay-build --wait-seconds 300   # give up if another build holds the lock
 
-Environment: RELAY_JOBS (default 8) is the parallelism, RELAY_SESSION names this
-session in the "waiting for ..." message other sessions see.
+Environment: RELAY_JOBS sets the parallelism (default 8) but is only an upper
+bound: the job count is clamped to what the memory limit this build runs under
+allows (about one 2 GiB compile job per 2 GiB of limit), so a default build
+inside an agent pane's 8 GiB systemd scope fits it instead of getting the pane
+OOM-killed (card #04EC). RELAY_SESSION names this session in the "waiting for
+..." message other sessions see.
 
 Manual escape hatch if you ever suspect a stale object anyway:
 `rm build/CMakeFiles/relay.dir/src/main.cpp.o` and build again.
@@ -200,6 +204,101 @@ def binary_contains(path: Path, needle: str) -> bool:
             tail = window[-overlap:] if overlap else b""
 
 
+# -------------------------------------------------------------------- memory cap
+
+
+# One compile job of the big translation units (src/main.cpp's) peaks at
+# 1.4-1.9 GiB in the RelWithDebInfo build. Budget 2 GiB per job: four jobs then
+# peak near 6 GiB and fit an agent pane's 8 GiB MemoryMax with room for the
+# agent itself; the old default of 8 does not, and systemd killed the pane
+# mid-build for exactly that on 2026-09-23 (card #04EC).
+BYTES_PER_JOB = 2 * 1024 ** 3
+DEFAULT_JOBS = 8
+
+
+def memory_limit_bytes(cgroup_root="/sys/fs/cgroup", self_cgroup="/proc/self/cgroup",
+                       meminfo="/proc/meminfo") -> "int | None":
+    """Bytes of memory this build is allowed, or None when nothing sets a limit.
+
+    Relay starts each agent pane in a systemd scope with MemoryMax
+    (src/Isolation.h), so a build inside a pane sees that cap here. A plain
+    terminal sees whatever its own cgroup says, if anything, else the host's RAM.
+    """
+    def read_limit(path) -> "int | None":
+        try:
+            text = Path(path).read_text().strip()
+        except OSError:
+            return None
+        # cgroup v2 writes "max" when there is no limit; v1 writes a huge sentinel.
+        return int(text) if text.isdigit() and int(text) > 0 else None
+
+    limit = None
+
+    # cgroup v2: the limit sits on this process's own cgroup (the pane scope) or
+    # on an ancestor (user.slice); the nearest one that sets it wins.
+    root = Path(cgroup_root)
+    try:
+        lines = Path(self_cgroup).read_text().splitlines()
+        rel = next((l.split(":", 2)[2].lstrip("/") for l in lines if l.startswith("0::")), "")
+    except (OSError, IndexError):
+        rel = ""
+    node = root / rel
+    while True:
+        value = read_limit(node / "memory.max")
+        if value:
+            limit = value
+            break
+        if node == root or node.parent == node:
+            break
+        node = node.parent
+
+    if limit is None:
+        # cgroup v1: one global memory controller, and "unlimited" is a sentinel.
+        value = read_limit(root / "memory" / "memory.limit_in_bytes")
+        if value and value < 1 << 44:
+            limit = value
+
+    # A cap above the machine's RAM is not a number to plan a build around.
+    try:
+        for line in Path(meminfo).read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                total = int(line.split()[1]) * 1024
+                limit = total if limit is None else min(limit, total)
+                break
+    except (OSError, ValueError, IndexError):
+        pass
+    return limit
+
+
+def jobs_for_environment(environ, note=None, limit=None) -> str:
+    """The `--parallel` job count: RELAY_JOBS (default 8), clamped to memory.
+
+    A build inside an agent pane runs in a systemd scope with MemoryMax; eight
+    parallel compiles of this repo peak past 8 GiB there and systemd stops the
+    pane, which from the outside looks like the agent "ran out of memory" while
+    doing nothing (card #04EC). An explicit RELAY_JOBS above the cap is lowered
+    with a note rather than obeyed into an OOM; below the cap it wins untouched.
+    """
+    try:
+        requested = int(str(environ.get("RELAY_JOBS") or DEFAULT_JOBS).strip())
+    except ValueError:
+        requested = DEFAULT_JOBS
+    requested = max(1, requested)
+
+    if limit is None:
+        limit = memory_limit_bytes()
+    if not limit:
+        return str(requested)
+    allowed = max(1, limit // BYTES_PER_JOB)
+    if requested <= allowed:
+        return str(requested)
+    if note:
+        note(f"RELAY_JOBS={requested} lowered to {allowed}: this build may use "
+             f"{limit / 2 ** 30:.1f} GiB and one compile job peaks near "
+             f"{BYTES_PER_JOB / 2 ** 30:.0f} GiB")
+    return str(allowed)
+
+
 # -------------------------------------------------------------------------- main
 
 
@@ -269,7 +368,7 @@ def main(argv: list[str]) -> int:
                 say(f"cmake configure failed ({code})")
                 return EXIT_CONFIGURE
 
-        jobs = os.environ.get("RELAY_JOBS", "8")
+        jobs = jobs_for_environment(os.environ, note=say)
         command = ["cmake", "--build", str(BUILD), "--parallel", jobs, *extra]
         say("building: " + " ".join(command))
         code = subprocess.call(command, cwd=str(ROOT))

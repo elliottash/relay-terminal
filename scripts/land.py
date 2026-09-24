@@ -1072,6 +1072,30 @@ def py_compile_landed(plans):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def relay_build_jobs(log, limit_bytes=None):
+    """Compile jobs for the verify build, capped by memory like scripts/relay-build.
+
+    The verify build runs wherever land.py runs, including inside an agent pane's
+    systemd scope, whose default 8 parallel jobs OOM-killed a pane mid-build
+    (card #04EC) -- so the wrapper's cap is loaded rather than copied, and the two
+    cannot drift apart. `limit_bytes` overrides the detected limit (tests).
+    """
+    try:
+        import types
+        script = Path(__file__).resolve().parent / "relay-build"
+        module = types.ModuleType("relay_build_jobs")
+        module.__file__ = str(script)
+        # exec rather than the import system: the file has no .py extension, so
+        # SourceFileLoader's spec path refuses the name (load_module() would work
+        # but is deprecated); the wrapper has no import-time side effects anyway.
+        exec(compile(script.read_text(), str(script), "exec"), module.__dict__)
+        return module.jobs_for_environment(
+            os.environ, note=lambda message: log("verify: %s" % message), limit=limit_bytes)
+    except Exception as exc:  # the cap is a guard, never a gate
+        log("verify: memory job cap unavailable (%s); using RELAY_JOBS or 8" % exc)
+        return os.environ.get("RELAY_JOBS") or "8"
+
+
 def run_verify(repo, root, session, tree, args, log):
     """Build the exact tree this commit would put on the branch.
 
@@ -1086,7 +1110,7 @@ def run_verify(repo, root, session, tree, args, log):
     log("verify: tree %s materialised in %s (%d file(s) refreshed)"
         % (tree[:12], src, refreshed))
 
-    jobs = os.environ.get("RELAY_JOBS") or "8"
+    jobs = relay_build_jobs(log)
     steps = []
     if args.verify_cmd:
         steps.append(("verify command", ["sh", "-c", args.verify_cmd]))

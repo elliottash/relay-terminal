@@ -212,7 +212,10 @@ It does three things:
   recompiles it — which is what make would have done if compiling were instantaneous. Everything
   gets the *same* timestamp, so no binary looks older than the objects it was linked from.
 
-`RELAY_JOBS` (default 8) is the parallelism and `scripts/build.sh` goes through the wrapper too.
+`RELAY_JOBS` (default 8) is the parallelism, clamped to what the memory limit the
+build runs under allows (about one 2 GiB compile job per 2 GiB, so a default build
+fits an agent pane's 8 GiB MemoryMax instead of being OOM-killed, card #04EC), and
+`scripts/build.sh` goes through the wrapper too.
 `tests/test_relay_build.py` reproduces the incident in throwaway CMake projects: plain
 `cmake --build` misses the mid-compile edit, the wrapper rebuilds it.
 
