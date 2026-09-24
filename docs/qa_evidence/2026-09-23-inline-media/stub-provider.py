@@ -4,7 +4,8 @@
 
     python3 stub-provider.py 8821
 
-Answers every request with streamed local audio, math and a Markdown table.
+Answers every request with streamed local audio, math and a Markdown table, one of whose
+cells is wider than the pane (#15G5).
 """
 import json
 import sys
@@ -13,7 +14,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 REPLY = ("Here is the sound: [tone](tone.wav)\n\n"
          "The equation is $$\\frac{x^2+y^2}{2}$$\n\n"
-         "| Item | Value |\n|---|---:|\n| Small | 2 |\n| Large | 10 |\n")
+         "| Item | Value | Note |\n|---|---:|---|\n| Small | 2 | fits |\n"
+         "| Large | 10 | " + " ".join(["This note is far wider than the pane, so the table wraps it"
+                                      " inside its own cell instead of breaking the row."] * 4) + " |\n")
 
 
 class Handler(BaseHTTPRequestHandler):

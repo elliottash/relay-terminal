@@ -116,6 +116,26 @@ if ! rg -a -q 'relay-media:' "$XDG_DATA_HOME/relay/state/scrollback"; then
     echo 'saved pane lost its media links' >&2
     exit 1
 fi
+# #15G5: the agent's Markdown table is drawn and wrapped inside its cells, with no
+# "open sortable table" row; only relay-show's CSV has a table manifest.
+python3 - "$XDG_DATA_HOME/relay/state/scrollback" "$XDG_CACHE_HOME/relay/media" <<'PY'
+import pathlib, re, sys
+scrollback, media = map(pathlib.Path, sys.argv[1:])
+names = [p.name for p in media.glob('*.json') if '"Markdown table"' in p.read_text(errors='replace')]
+if names:
+    raise SystemExit(f'Markdown table still wrote a sortable-table manifest: {names}')
+escape = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]')
+lines = [escape.sub('', line) for p in scrollback.glob('*.txt')
+         for line in p.read_text(errors='replace').splitlines()]
+note = [i for i, line in enumerate(lines) if line.startswith('Large') and '│' in line]
+if not note:
+    raise SystemExit('agent table row "Large" not found in saved scrollback')
+row = note[-1]
+bars = [m.start() for m in re.finditer('│', lines[row])]
+more = lines[row + 1] if row + 1 < len(lines) else ''
+if not re.match(r' +│ +│ \S', more) or [m.start() for m in re.finditer('│', more)] != bars:
+    raise SystemExit(f'wide cell did not wrap inside its column:\n{lines[row]}\n{more}')
+PY
 launch ''
 shot 04-restored
 command 'clear; relay-show demo.svg; relay-show demo.pdf; relay-show animate.gif'
