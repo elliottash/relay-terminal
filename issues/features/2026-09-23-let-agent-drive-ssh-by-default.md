@@ -6,9 +6,9 @@ labels: [feature, remote, terminal]
 assignee: agent
 rank: m
 created: '2026-09-23'
-source: 'owner in Relay conversation, 2026-09-23'
-verify: {artifact: system, primary: probe, also: [script], human: optional, criteria: 'An SSH login shows Agent driving by default and Take over returns control to the person', effort: medium}
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-23-A6SH/], related: [C1HH, S5SH], github: null}
+verify: {artifact: system, primary: probe, also: [script], human: optional, criteria: An SSH login shows Agent driving by default and Take over returns control to the person, effort: medium}
+source: owner in Relay conversation, 2026-09-23
+links: {plans: [], commits: [3fbf9aec5d90ab5eac364fa4d73c7183f8e3011a], evidence: [docs/qa_evidence/2026-09-23-A6SH/], related: [C1HH, S5SH], github: null}
 ---
 # Let the agent drive SSH sessions by default
 
@@ -39,6 +39,8 @@ on ssh, let the agent drive by default
 ![SSH login with the agent driving and Take over visible](../../docs/qa_evidence/2026-09-23-A6SH/01-agent-driving-ssh.png)
 
 ## Tests
-`RELAY_JOBS=2 scripts/relay-build --fast --target relay` (isolated worktree at the same committed baseline, with the Pane change applied) — passed.
+`RELAY_JOBS=2 scripts/relay-build --fast --target relay` (isolated worktree with the Pane change) — passed.
 
 `RELAY_SSH_TEST_BINARY=/tmp/relay-a6sh/build-fast/relay python3 docs/qa_evidence/2026-09-23-A6SH/drive.py` — passed.
+
+manual: docs/qa_evidence/2026-09-23-A6SH/README.md
