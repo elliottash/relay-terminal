@@ -332,8 +332,15 @@ class TurnRecordTests(unittest.TestCase):
         self.assertIn('cat hello.txt', output['preview'])
         transcript = agent.turn_transcript('T1')
         self.assertEqual([i['role'] for i in transcript['items']], ['user', 'assistant', 'tool', 'tool', 'assistant'])
-        self.assertEqual(transcript['items'][1]['tool_calls'], ['run_command', 'run_command'])
+        # Protocol 23: landed calls ride their own tool items (tool + § 23 label); the
+        # assistant's ⚙ line keeps only calls that have not landed yet, so none remain here.
+        self.assertNotIn('tool_calls', transcript['items'][1])
         self.assertEqual(transcript['items'][2]['tool_call_id'], 'c1')
+        self.assertEqual(transcript['items'][2]['tool'], 'run_command')
+        self.assertEqual(transcript['items'][3]['tool'], 'run_command')
+        self.assertEqual(transcript['items'][2]['label']['kind'], 'run')
+        self.assertTrue(transcript['items'][2]['label']['ok'])
+        self.assertFalse(transcript['items'][3]['label']['ok'])
         self.assertFalse(transcript['running'])
         with self.assertRaises(ValueError):
             agent.tool_output('T1', 'nope')
