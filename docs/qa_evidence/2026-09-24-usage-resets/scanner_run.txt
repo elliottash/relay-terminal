@@ -1,0 +1,25 @@
+$ cd /home/elliott/data/usage_tracker && timeout 300 python3 check_usage.py   # 2026-09-24, after the patch
+[OK]   claude (ashe@ethz.ch)                              available=   0% fable= 100% reset=2026-09-28 17:20 reset5h=2026-09-24 01:59 usage_resets=
+[OK]   claude (elliottash@gmail.com)                      available=   0% fable=      reset=2026-09-28 17:20 reset5h=2026-09-24 01:59 usage_resets=
+[OK]   claude (elliott@ash-labs.ai)                       available=  16% fable=      reset=2026-09-28 17:20 reset5h=2026-09-24 04:00 usage_resets=
+[OK]   claude (gess.library@gmail.com)                    available=  62% fable= 100% reset=2026-09-28 17:20 reset5h=2026-09-24 04:00 usage_resets=
+[OK]   codex (elliott@ash-labs.ai)                        available=  64% fable=      reset=2026-09-25 21:20 reset5h=- usage_resets=1
+[OK]   codex (elliottash@gmail.com)                       available= 100% fable=      reset=2026-09-25 21:20 reset5h=- usage_resets=1
+[OK]   kimi (elliott@ash-labs.ai)                         available=  12% fable=      reset=2026-09-24 08:00 reset5h=- usage_resets=
+[OK]   glm (elliott@ash-labs.ai)                          available=  43% fable=      reset=2026-09-24 19:00 reset5h=- usage_resets=
+Sheet updated at 2026-09-24T00:02:33-04:00. notifications=0 errors=0
+
+(new column H "5h reset" written on every row; Codex usage_resets=1 is the banked reset credit)
+
+Offline unit check of the metric parsers (real payload shapes, no network):
+
+$ python3 - <<'EOF'   # abridged
+>>> cu._claude_metrics(claude_payload)
+(83.0, 0.0, '2026-09-28 17:20', '2026-09-24 06:40', None)
+>>> cu._claude_metrics({**claude_payload, "rate_limit_reset_credits": {"available_count": 2}})[4]
+2
+>>> avail, reset, resets, reset5h = cu._codex_metrics(codex_payload)
+>>> (round(avail), resets, reset5h == cu.fmt_reset(1790236800))
+(64, 1, True)
+offline checks ok
+EOF
