@@ -190,6 +190,18 @@ QString MarkdownAnsi::mediaEscape(const QString &absolutePath, int maxColumns) {
     return osc8(uri) + QChar(0x2800) + osc8(QString());
 }
 
+// Card #N6Y3: a single-`$` run must look like math before it is rendered — Pandoc's rules, which
+// exist precisely because prose full of prices is not math. The opening `$` is not followed by
+// whitespace and the closing one is not preceded by it (so "costs about $1,500–2,300. A minimal
+// version costs about $500" stays prose), and the closing `$` is not followed by a digit (so
+// "$5 and $10" does). `open`/`end` index the run's markers; the content lies between them.
+// Display `$$…$$` is exempt — people habitually write it padded — and is not passed here.
+static bool delimitsInlineMath(const QString &text, int open, int end) {
+    if (text.at(open + 1).isSpace() || text.at(end - 1).isSpace())
+        return false;
+    return end + 1 >= text.size() || !text.at(end + 1).isDigit();
+}
+
 static QString mathMediaEscape(const QString &expression, int columns, int rows) {
     const QString base = qEnvironmentVariable("XDG_CACHE_HOME");
     const QString cache = (base.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
@@ -530,6 +542,13 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
         if (end < 0 || !withinLine) {
             if (!m_final && withinLine && text.size() - i < 4096) return false;
         } else if (end > i + markers && end - i < 4096) {
+            // The digit rule needs one character past the closing marker; while streaming, hold
+            // the run until it arrives (finish() decides when the text ends there instead).
+            if (markers == 1 && end + 1 >= text.size() && !m_final) return false;
+            if (markers == 1 && !delimitsInlineMath(text, i, end)) {
+                out += c; m_prev = c; ++i;
+                return true;
+            }
             const QString math = mathMediaEscape(text.mid(i + markers, end - i - markers),
                                                  m_imageColumns > 0 ? m_imageColumns : 60,
                                                  markers == 2 ? 5 : 3);

@@ -590,6 +590,41 @@ private slots:
                      .contains(MarkdownAnsi::kMediaEscapeStart));
     }
 
+    // Card #N6Y3: single-`$` runs render as math only when Pandoc's rules say they are math.
+    // The prose case is the false positive found in the wild: the sentence between two dollars
+    // of ordinary prices became a rendered math block (manifest db61b044…, 2026-09-24).
+    void inlineMathMustLookLikeMath()
+    {
+        QTemporaryDir dir;
+        const QByteArray oldCache = qgetenv("XDG_CACHE_HOME");
+        qputenv("XDG_CACHE_HOME", dir.path().toUtf8());
+        struct RestoreCache {
+            QByteArray old;
+            ~RestoreCache() { qputenv("XDG_CACHE_HOME", old); }
+        } restore{oldCache};
+
+        const QString prices = QStringLiteral(
+            "It costs about $1,500–2,300. A minimal version costs about $500 total.\n");
+        const QString whole = renderImages(prices);
+        QVERIFY(!whole.contains(MarkdownAnsi::kMediaEscapeStart));
+        QCOMPARE(renderImages(prices, QString(), true), whole);   // streamed decides the same
+        QCOMPARE(plain(whole).count(QLatin1Char('$')), 2);        // both dollars survive as text
+
+        // A digit directly after the closing dollar ("$5 and $10") is prose as well.
+        QVERIFY(!renderImages(QStringLiteral("$5 and $10\n"))
+                     .contains(MarkdownAnsi::kMediaEscapeStart));
+
+        // Real math still escapes — whole and streamed.
+        const QString math = QStringLiteral(
+            "so $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$ fits\n");
+        QVERIFY(renderImages(math).contains(MarkdownAnsi::kMediaEscapeStart));
+        QCOMPARE(renderImages(math, QString(), true), renderImages(math));
+
+        // Display math keeps its padding: $$ x = 1 $$ is exempt from the inline rules.
+        QVERIFY(renderImages(QStringLiteral("$$ x = 1 $$\n"))
+                     .contains(MarkdownAnsi::kMediaEscapeStart));
+    }
+
     void imageCellsFitAndKeepTheAspect() {
         const QSize cell(8, 16);
         QCOMPARE(MarkdownAnsi::imageCells(QSize(160, 64), cell, 80, 20), QSize(20, 4));
