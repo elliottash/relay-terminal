@@ -34,6 +34,14 @@ bool towardStart(Direction direction);
 // The orientation a move or a split in this direction happens along.
 Qt::Orientation orientationFor(Direction direction);
 
+// Where a pane Relay opens *for* another one goes (card #QVGQ): Sessions & Projects, Settings, a
+// file, Review, the Info pane, a fork — everything that docks beside the pane it was opened from,
+// as opposed to a split, move or drag the person aimed. One rule for all of them: to the right,
+// like the new-pane button (#803C), and beneath only when the anchor is narrower than two usable
+// panes side by side, where a split to the right would leave two slivers.
+inline constexpr int kDockBesideMinWidth = 600;
+Qt::Orientation dockOrientation(int anchorWidth);
+
 // The pane on `direction`'s side of `from` that Alt+arrow should focus and Ctrl+Alt+arrow should
 // move past: the nearest one, then the most aligned across the direction of travel. Returns an
 // index into `candidates` (all in the same coordinate system as `from`), or -1 when that side is

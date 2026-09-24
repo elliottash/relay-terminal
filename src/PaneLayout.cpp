@@ -17,6 +17,10 @@ Qt::Orientation orientationFor(Direction direction) {
     return direction == Direction::Left || direction == Direction::Right ? Qt::Horizontal : Qt::Vertical;
 }
 
+Qt::Orientation dockOrientation(int anchorWidth) {
+    return anchorWidth >= kDockBesideMinWidth ? Qt::Horizontal : Qt::Vertical;
+}
+
 int neighborIndex(const QRect &from, const QList<QRect> &candidates, Direction direction) {
     // A few pixels of slack, so a pane that starts level with this one still counts as beside it.
     constexpr int slack = 4;

@@ -689,7 +689,7 @@ public:
         if (!source->takeLeaf(pane)) return false;
         if (anchor) {
             if (QWidget *page = pageOf(anchor)) m_tabs->setCurrentWidget(page);
-            insertBeside(anchor, pane, Qt::Horizontal, false);
+            dockBeside(anchor, pane);
             setActiveLeaf(pane);
         } else adoptLeafAsTab(pane);
         m_manager->scheduleSave();
@@ -743,7 +743,7 @@ public:
                 for (QWidget *leaf : leavesIn(page))
                     if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->kind() == ToolPane::Kind::Explorer) anchor = tool;
             target = createToolPane(kind, what);
-            insertBeside(anchor, target, Qt::Horizontal, false);
+            dockBeside(anchor, target);
         }
         if (kind == ToolPane::Kind::Preview && line > 0) target->preview()->goToLine(line);
         if (edit && kind == ToolPane::Kind::Preview) target->preview()->startEditing();
@@ -883,7 +883,7 @@ public:
             if (!target->plan()->isDirty()) target->plan()->open(path);
         } else {
             target = createToolPane(ToolPane::Kind::Plan, QFileInfo(path).absoluteFilePath(), planActions);
-            insertBeside(owner, target, Qt::Horizontal, false);
+            dockBeside(owner, target);
         }
         QPointer<Pane> guard(owner);
         QPointer<ToolPane> tool(target);
@@ -911,7 +911,7 @@ public:
         Pane *pane = nullptr;
         try { pane = createPane({{"cwd", directory}, {"workspace", directory}}); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
-        insertBeside(source, pane, Qt::Horizontal, false);
+        dockBeside(source, pane);
         setActive(pane);
         // Tier A (protocol 29.4): when the worker can run this guest's harness, the new pane
         // resumes the session on its own agent instead — Relay's conversation, the guest's
@@ -934,7 +934,7 @@ public:
         try { pane = createPane({{"cwd", source->cwd()}, {"workspace", source->workspace()}}); }
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         pane->setInitialState(state, title, fork);
-        insertBeside(source, pane, Qt::Horizontal, false);
+        dockBeside(source, pane);
         setActive(pane);
         QTimer::singleShot(0, pane, [pane] { pane->focusInput(); });
     }
@@ -1332,7 +1332,7 @@ private:
             if (m_active) m_active->refreshAliases();
             QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
             tool = createSettingsPane(mode);
-            if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+            if (anchor) dockBeside(anchor, tool);
             else if (page && page->layout()) page->layout()->addWidget(tool);
         } else {
             tool->settings()->rebuild();
@@ -1499,7 +1499,7 @@ private:
             tool = createModelsPane(served ? served->cwd() : m_manager->workspace());
             QWidget *anchor = served ? static_cast<QWidget *>(served)
                                      : (m_activeLeaf ? m_activeLeaf.data() : nullptr);
-            if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+            if (anchor) dockBeside(anchor, tool);
             else if (page->layout()) page->layout()->addWidget(tool);
         }
         applyModelsTarget(tool, served, target, tab, filter);
@@ -3017,7 +3017,7 @@ public:
             tool = createSubagentPane(ownerPane->cwd());
             linkSubagentPane(tool, ownerPane);
             // Beside the owner; below it when the owner is too narrow to share its width.
-            insertBeside(ownerPane, tool, ownerPane->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            dockBeside(ownerPane, tool);
         }
         ownerPane->showSubagentTab(subagentId);
         RelayWindow *w = windowOf(tool);
@@ -3042,7 +3042,7 @@ public:
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
         owner->requestTurn(turnId, view);
-        insertBeside(owner, tool, Qt::Horizontal, false);
+        dockBeside(owner, tool);
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
@@ -3070,7 +3070,7 @@ public:
             tool = createInternalsPane(owner->cwd());
             linkInternalsPane(tool, owner);
             // Beside the owner; below it when the owner is too narrow to share its width.
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            dockBeside(owner, tool);
         }
         setActiveLeaf(tool);
         focusLeaf(tool);
@@ -3169,7 +3169,7 @@ public:
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) { anchor = tool; break; }
         if (!anchor) anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         ToolPane *tool = createReviewPane(boardWorkspaceOfTab(page));
-        if (anchor) insertBeside(anchor, tool, anchor->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        if (anchor) dockBeside(anchor, tool);
         else if (page->layout()) page->layout()->addWidget(tool);
         linkReviewPane(tool);
         setActiveLeaf(tool);
@@ -3231,7 +3231,7 @@ public:
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) { anchor = tool; break; }
         if (!anchor) anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         ToolPane *tool = createTestSuitesPane(boardWorkspaceOfTab(page));
-        if (anchor) insertBeside(anchor, tool, anchor->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        if (anchor) dockBeside(anchor, tool);
         else if (page->layout()) page->layout()->addWidget(tool);
         linkTestSuitesPane(tool);
         setActiveLeaf(tool);
@@ -3391,7 +3391,7 @@ public:
         tool->setProperty("paneType", QStringLiteral("profile"));
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
-        if (anchor) insertBeside(anchor, tool, anchor->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        if (anchor) dockBeside(anchor, tool);
         else if (page->layout()) page->layout()->addWidget(tool);
         linkProfilePane(tool);
         setActiveLeaf(tool);
@@ -3709,7 +3709,7 @@ public:
         tool->setProperty("paneType", QStringLiteral("diff"));
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
-        insertBeside(owner, tool, Qt::Horizontal, false);
+        dockBeside(owner, tool);
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
@@ -3935,7 +3935,7 @@ public:
         ToolPane *tool = sessionsPaneIn(page);
         if (!tool) {
             tool = createSessionsPane(owner->cwd());
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            dockBeside(owner, tool);
         }
         linkSessionsPane(tool, owner);
         finishSessionsTab(tool, tab, query);
@@ -4059,7 +4059,7 @@ public:
             };
             // Closing the owner takes its ⓘ pane with it: nothing else can answer its links.
             connect(owner, &QObject::destroyed, tool, [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            dockBeside(owner, tool);
         }
         owner->bindInfoView(view);
         if (!threadId.isEmpty()) view->showThread(threadId, sessionDir, threadOwner);
@@ -4137,7 +4137,7 @@ public:
             // The owner going takes the question with it; it reappears beside wherever the
             // conversation is resumed and configured again.
             connect(owner, &QObject::destroyed, tool, [guard] { if (auto *w = windowOf(guard)) w->closePane(guard, false); });
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            dockBeside(owner, tool);
         }
         if (QWidget *own = pageOf(tool)) m_tabs->setCurrentWidget(own);
         setActiveLeaf(tool);
@@ -4226,7 +4226,7 @@ public:
             };
             RelayWindow *w = (!first && *last) ? windowOf(last->data()) : nullptr;
             if (w) {
-                w->insertBeside(last->data(), tool, Qt::Horizontal, false);
+                w->dockBeside(last->data(), tool);
             } else {
                 w = self.data();
                 auto *page = new QWidget;
@@ -4371,7 +4371,7 @@ public:
                 guard->setProperty("paneLabel", label());
                 if (auto *w = windowOf(guard)) w->updateTitles();
             };
-            self->insertBeside(self->m_activeLeaf, tool, self->m_activeLeaf->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+            self->dockBeside(self->m_activeLeaf, tool);
             self->setActiveLeaf(tool);
             focusLeaf(tool);
             self->updateTitles();
@@ -4497,7 +4497,7 @@ public:
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         auto *tool = createBoardPane(workspace);
         if (!tool) return;
-        if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+        if (anchor) dockBeside(anchor, tool);
         else if (page && page->layout()) page->layout()->addWidget(tool);
         // Opening the Switchboard is the explicit project action: from here the tab is this
         // project's, its panes get the card tools, and it stays so until it is detached.
@@ -4575,7 +4575,7 @@ public:
         // toggleBoardPane places a first Switchboard.
         auto *tool = createBoardPane(workspace);
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
-        if (anchor) insertBeside(anchor, tool, Qt::Horizontal, false);
+        if (anchor) dockBeside(anchor, tool);
         else if (QWidget *page = m_tabs->currentWidget(); page && page->layout()) page->layout()->addWidget(tool);
         revealBoardCard(tool, id);
     }
@@ -5074,7 +5074,7 @@ public:
         QWidget *anchor = m_lastActive.value(page);
         const QList<QWidget *> leaves = leavesIn(page);
         if (!anchor || !leaves.contains(anchor)) anchor = leaves.isEmpty() ? nullptr : leaves.first();
-        if (anchor) insertBeside(anchor, pane, Qt::Horizontal, false);
+        if (anchor) dockBeside(anchor, pane);
         else if (page->layout()) page->layout()->addWidget(pane);
         if (background) pane->markBackgroundTask(true);
         else { setActive(pane); focusLeaf(pane); }
@@ -6375,6 +6375,13 @@ private:
         }
         pane->show();
         updateTitles();
+    }
+
+    // A pane opened for `anchor` — Sessions, Settings, a file, Review, Info, a fork — docks where
+    // every other one does (card #QVGQ): relay::panes::dockOrientation says right, or beneath a
+    // pane too narrow to share. Splits, moves and drags name their side and call insertBeside.
+    void dockBeside(QWidget *anchor, QWidget *pane) {
+        insertBeside(anchor, pane, relay::panes::dockOrientation(anchor->width()), false);
     }
 
     void split(Qt::Orientation orientation) {

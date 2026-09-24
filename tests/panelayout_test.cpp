@@ -229,6 +229,15 @@ private Q_SLOTS:
         QCOMPARE(orientationFor(Direction::Down), Qt::Vertical);
     }
 
+    // #QVGQ: every pane opened for another docks to its right, beneath only below two usable widths.
+    void openedPanesDockRightUnlessTooNarrow() {
+        QCOMPARE(dockOrientation(1920), Qt::Horizontal);
+        QCOMPARE(dockOrientation(700), Qt::Horizontal);   // the two-pane laptop layout that used to go below
+        QCOMPARE(dockOrientation(kDockBesideMinWidth), Qt::Horizontal);
+        QCOMPARE(dockOrientation(kDockBesideMinWidth - 1), Qt::Vertical);
+        QCOMPARE(dockOrientation(0), Qt::Vertical);
+    }
+
     // ----- the swap Ctrl+Alt+arrow performs ----------------------------------------------------
 
     void swapMovesAPaneTowardTheEnd() {

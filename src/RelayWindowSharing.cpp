@@ -63,7 +63,7 @@ ToolPane *RelayWindow::openSharingPane(Pane *owner, bool focus) {
         view->onCreateCode = [guard](const relay::sharing::Scope &scope, const QString &role) {
             if (auto *w = windowOf(guard)) w->codeForScope(scope, role);
         };
-        insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
+        dockBeside(owner, tool);
     }
     if (view) {
         // Which pane it was opened from, by token rather than pointer: the pane may close while
