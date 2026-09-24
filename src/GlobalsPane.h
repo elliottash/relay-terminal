@@ -84,6 +84,9 @@ public:
     std::function<void()> onInterview;
     void handleEvent(const QJsonObject &event);
     void refresh();
+    // A transcript's Keep or No (#MEMS): every Globals pane on screen, in every window, stops
+    // offering that suggestion. Found with dynamic_cast because this class has no Q_OBJECT (#C8SV).
+    static void refreshVisible();
     // Globals › Suggestions with this suggestion selected in the editor, from a transcript's Edit;
     // an empty id opens the list with nothing selected.
     void showSuggestion(const QString &id);

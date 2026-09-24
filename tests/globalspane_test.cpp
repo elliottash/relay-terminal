@@ -9,12 +9,36 @@
 #include <QPushButton>
 #include <QSplitter>
 #include <QTest>
+#include <QVBoxLayout>
 #include <QToolButton>
 using relay::globals::GlobalsPane;
 
 class GlobalsPaneTest : public QObject {
     Q_OBJECT
 private slots:
+    // #C8SV: a transcript's Keep refreshes the Globals panes on screen, and only those. GlobalsPane
+    // has no Q_OBJECT, so findChildren<GlobalsPane *> matched every visible QWidget and called a
+    // "refresh" whose onRequest was read out of an unrelated widget: SIGSEGV with the PC in the
+    // heap, 1 ms after `globals_suggestion_accepted` (relay.log, 2026-09-23 16:44:18).
+    void refreshVisibleCallsOnlyTheGlobalsPanesOnScreen() {
+        QWidget window;
+        auto *layout = new QVBoxLayout(&window);
+        layout->addWidget(new QLabel("a terminal pane's chrome"));
+        layout->addWidget(new QLineEdit);
+        auto *shown = new GlobalsPane;
+        auto *hidden = new GlobalsPane;
+        layout->addWidget(shown);
+        layout->addWidget(hidden);
+        int shownRequests = 0, hiddenRequests = 0;
+        shown->onRequest = [&](const QJsonObject &) { ++shownRequests; };
+        hidden->onRequest = [&](const QJsonObject &) { ++hiddenRequests; };
+        window.show();
+        hidden->hide();
+        QVERIFY(QTest::qWaitForWindowExposed(&window));
+        GlobalsPane::refreshVisible();
+        QCOMPARE(shownRequests, 2);   // globals_suggestions and globals_list
+        QCOMPARE(hiddenRequests, 0);
+    }
     void protocolEventsExposeProblems() {
         GlobalsPane pane;
         QJsonObject request;

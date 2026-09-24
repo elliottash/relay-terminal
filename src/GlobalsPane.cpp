@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GlobalsPane.h"
+#include <QApplication>
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -243,6 +244,16 @@ void GlobalsPane::refresh() {
     m_suggestRequest = request({{"type", "globals_suggestions"}});
     m_listRequest = request({{"type", "globals_list"}});
     if (m_dirty) m_notice->setText(tr("Refreshing the list; your unsaved draft is preserved."));
+}
+void GlobalsPane::refreshVisible() {
+    // Not findChildren<GlobalsPane *>: without Q_OBJECT it matches on QWidget's meta-object, so
+    // every visible widget was "refreshed" through an onRequest read out of the wrong object —
+    // the SIGSEGV 1 ms after a Keep (#C8SV). Qt 6 refuses to compile that form at all.
+    for (QWidget *top : QApplication::topLevelWidgets()) {
+        if (auto *globals = dynamic_cast<GlobalsPane *>(top); globals && globals->isVisible()) globals->refresh();
+        for (QWidget *child : top->findChildren<QWidget *>())
+            if (auto *globals = dynamic_cast<GlobalsPane *>(child); globals && globals->isVisible()) globals->refresh();
+    }
 }
 void GlobalsPane::rebuild() {
     const QSignalBlocker blocker(m_list);

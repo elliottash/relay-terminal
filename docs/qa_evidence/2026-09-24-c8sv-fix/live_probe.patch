@@ -1,0 +1,98 @@
+--- tests/consolemode_test.cpp	2026-09-23 23:05:31.515072395 -0400
++++ tests/consolemode_test.cpp (probe)	2026-09-24 00:38:09.724098495 -0400
+@@ -19,6 +19,9 @@
+ // gate honest: a failed check names its line and the run exits non-zero.
+ 
+ #include "Pane.h"
++#include "GlobalsPane.h"
++#include <QProcess>
++#include <QMouseEvent>
+ 
+ #include <QApplication>
+ #include <QPointer>
+@@ -1525,6 +1528,73 @@
+     const QString after = qEnvironmentVariable("RELAY_MEMORY_OUTCOME_CAPTURE");
+     if (!after.isEmpty()) CHECK(console.grab().save(after));
+ }
++
++// C8SV probe: a terminal pane (real shell, real worker) idle at its prompt; a real pending
++// suggestion; Keep through the link; the worker's own reply; a visible Globals pane refreshed.
++static QString seedSuggestion(const QString &fact) {
++    QProcess py;
++    py.setWorkingDirectory(QStringLiteral(RELAY_SOURCE_DIR "/backend"));
++    py.start(QStringLiteral("python3"), {QStringLiteral("-c"), QStringLiteral(
++        "import sys;from relay_core import memory_suggestions as m;print(m.suggest(sys.argv[1])['id'])"), fact});
++    py.waitForFinished(20000);
++    const QString id = QString::fromUtf8(py.readAllStandardOutput()).trimmed();
++    std::fprintf(stderr, "seeded %s err=%s\n", qPrintable(id), py.readAllStandardError().constData());
++    return id;
++}
++static void spin(int ms) { QEventLoop wait; QTimer::singleShot(ms, &wait, &QEventLoop::quit); wait.exec(); }
++void c8svProbe(int variant)
++{
++    const QString sid = seedSuggestion(QStringLiteral("Prefers terse answers %1").arg(variant));
++    CHECK(!sid.isEmpty());
++    auto *pane = new Pane(home->path(), home->path(), true);
++    QPointer<Pane> guard(pane);
++    pane->resize(1000, 650);
++    pane->show();
++    relay::globals::GlobalsPane globals;
++    globals.onRequest = [&pane, guard](const QJsonObject &request) {
++        std::fprintf(stderr, "globals request %s\n", qPrintable(request.value("type").toString()));
++    };
++    if (variant == 1 || variant == 3) globals.show();
++    int decided = 0;
++    pane->onMemorySuggestionDecided = [&decided] {
++        ++decided;
++        relay::globals::GlobalsPane::refreshVisible();   // RelayWindow::refreshVisibleGlobals
++    };
++    spin(4000);
++    spin(1500);   // the shell's first prompt
++    pane->deliverWorkerEvent({{"event", "memory_suggested"}, {"result", QJsonObject{
++        {"status", "pending"}, {"id", sid}, {"fact", QStringLiteral("Prefers terse answers %1").arg(variant)}, {"source", "agent"}}}});
++    spin(300);
++    std::fprintf(stderr, "---before---\n%s\n", qPrintable(pane->paneTextLines(40).join('\n')));
++    // Find the Keep link on screen and Ctrl+click it, as the owner did.
++    auto *backend = pane->findChild<relay::EngineBackend *>();
++    CHECK(backend != nullptr);
++    if (!backend) return;
++    auto *view = backend->view();
++    QPoint at(-1, -1);
++    const QString want = QStringLiteral("relay://memory/%1/%2/%3").arg(pane->sessionToken(), variant == 3 ? QStringLiteral("no") : QStringLiteral("keep"), sid);
++    for (int y = 2; y < view->height() && at.x() < 0; y += 3)
++        for (int x = 2; x < view->width() && at.x() < 0; x += 4)
++            if (view->linkAtPoint(QPoint(x, y)).target == want) at = QPoint(x, y);
++    CHECK(at.x() >= 0);
++    if (at.x() < 0) return;
++    if (variant == 2) QTimer::singleShot(0, pane, [pane] { pane->close(); pane->deleteLater(); });
++    {
++        QMouseEvent press(QEvent::MouseButtonPress, at, view->mapToGlobal(at), Qt::LeftButton, Qt::LeftButton, Qt::ControlModifier);
++        QApplication::sendEvent(view, &press);
++        if (guard) { QMouseEvent release(QEvent::MouseButtonRelease, at, view->mapToGlobal(at), Qt::LeftButton, Qt::NoButton, Qt::ControlModifier);
++        QApplication::sendEvent(view, &release); }
++    }
++    for (int i = 0; i < 40 && guard && decided == 0; ++i) spin(100);
++    spin(500);
++    if (guard) {
++        std::fprintf(stderr, "---after---\n%s\n", qPrintable(pane->paneTextLines(40).join('\n')));
++        CHECK_EQ(decided, 1);
++        CHECK(pane->paneTextLines(80).join('\n').contains(variant == 3 ? QStringLiteral("Rejected — won't be suggested again: Prefers terse answers") : QStringLiteral("Kept: Prefers terse answers")));
++        delete pane;
++    }
++    spin(300);
++}
+ void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
+ {
+     StubContext context;
+@@ -1582,6 +1652,11 @@
+     qputenv("HOME", scratch.path().toUtf8());
+     home = &scratch;
+ 
++    if (app.arguments().contains(QStringLiteral("--c8sv"))) {
++        const int v = qEnvironmentVariableIntValue("C8SV_VARIANT");
++        cases::c8svProbe(v);
++        return failures ? 1 : 0;
++    }
+     if (app.arguments().contains(QStringLiteral("--memory-only"))) {
+         cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
+         return failures ? 1 : 0;

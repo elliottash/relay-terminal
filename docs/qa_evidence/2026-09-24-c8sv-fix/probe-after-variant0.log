@@ -1,0 +1,56 @@
+seeded 30BV err=
+This plugin does not support propagateSizeHints()
+---before---
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+user@host:~$
+
+✦ Remember: Prefers terse answers 0   Keep · Edit · No  (Ctrl+click)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---after---
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+user@host:~$
+
+✦ Remember: Prefers terse answers 0   Keep · Edit · No  (Ctrl+click)
+✦ Kept: Prefers terse answers 0 · Globals › User memory
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

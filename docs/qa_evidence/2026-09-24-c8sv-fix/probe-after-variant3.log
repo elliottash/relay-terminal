@@ -1,0 +1,60 @@
+seeded CG3N err=
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+---before---
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+user@host:~$
+
+✦ Remember: Prefers terse answers 3   Keep · Edit · No  (Ctrl+click)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+globals request globals_suggestions
+globals request globals_list
+---after---
+To run a command as administrator (user "root"), use "sudo <command>".
+See "man sudo_root" for details.
+
+user@host:~$
+
+✦ Remember: Prefers terse answers 3   Keep · Edit · No  (Ctrl+click)
+✦ Rejected — won't be suggested again: Prefers terse answers 3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

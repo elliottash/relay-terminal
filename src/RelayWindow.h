@@ -3943,11 +3943,7 @@ public:
             globals->showSuggestion(id);
     }
     // A transcript's Keep or No: every Globals list on screen stops offering that suggestion.
-    static void refreshVisibleGlobals() {
-        for (QWidget *top : QApplication::topLevelWidgets())
-            for (auto *globals : top->findChildren<relay::globals::GlobalsPane *>())
-                if (globals->isVisible()) globals->refresh();
-    }
+    static void refreshVisibleGlobals() { relay::globals::GlobalsPane::refreshVisible(); }
 
     void closeSessionsPane(ToolPane *tool, Pane *back) {
         if (!tool) return;
