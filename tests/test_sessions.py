@@ -748,7 +748,7 @@ class PlanModeTests(Base):
         # #K3TY: an Orchestration block in a plan is the plan's own decision about how the work
         # runs, so every Execute prompt carries one standing line telling the executor to follow it.
         prompt = planning.execution_prompt('/tmp/plan.md', '## Steps\n1. do it')
-        self.assertTrue(prompt.startswith('Execute the plan in /tmp/plan.md:'))
+        self.assertTrue(prompt.startswith('Run the plan in /tmp/plan.md:'))  # wording since #BGRN (#JKG2)
         self.assertIn('## Steps', prompt)
         self.assertIn('Orchestration block, follow it', prompt)
         self.assertIn('name any deviation', prompt)
