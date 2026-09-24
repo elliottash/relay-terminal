@@ -488,6 +488,76 @@ private slots:
         }
     }
 
+    // Word wrap comes back with the text (#MTCS): a pane's prose blocks ride the file as a
+    // trailer, the rows keep the OSC 8 runs that anchor them, a file without a trailer (an older
+    // Relay) restores exactly as before, and a hand-edited record under a URI that is not prose's
+    // is dropped rather than trusted. The conversation store carries the same trailer.
+    void proseBlocksSurviveSaveReadAndRestore() {
+        DataHome data;
+        QVERIFY(data.valid());
+        const QString id = QStringLiteral("2f9a7d41-0000-4000-8000-abcdefabcdef");
+        const QString uri = QStringLiteral("relay://prose/p1/3");
+        const QString row = QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\wrapped words\x1b]8;;\x1b\\");
+        relay::ProseBlock block;
+        block.uri = uri;
+        block.printColumns = 80;
+        relay::FoldLine line;
+        line.role = relay::kFoldRoleAgent;
+        relay::FoldSpan span, linked;
+        span.text = QStringLiteral("wrapped words and more that only the block knows");
+        span.sgr = QStringLiteral("1;35");
+        linked.text = QStringLiteral("a label");
+        linked.sgr = QStringLiteral("1");
+        linked.link = QStringLiteral("relay-label://card/MTCS");
+        line.spans << span << linked;
+        block.lines << line;
+        QVERIFY(writeScrollback(id, QStringList{row}, {block}));
+        QCOMPARE(readScrollback(id), QStringList{row});   // the trailer never reads back as rows
+        const QVector<relay::ProseBlock> back = readScrollbackProse(id);
+        QCOMPARE(back.size(), 1);
+        QCOMPARE(back.at(0).uri, uri);
+        QCOMPARE(back.at(0).printColumns, 80);
+        QCOMPARE(back.at(0).lines.size(), 1);
+        QCOMPARE(back.at(0).lines.at(0).role, quint8(relay::kFoldRoleAgent));
+        QCOMPARE(back.at(0).lines.at(0).spans.at(0).text, span.text);
+        QCOMPARE(back.at(0).lines.at(0).spans.at(0).sgr, span.sgr);
+        QCOMPARE(back.at(0).lines.at(0).spans.at(1).text, linked.text);
+        QCOMPARE(back.at(0).lines.at(0).spans.at(1).link, linked.link);
+        // The run survives the replay filter, so the restored rows can anchor the block again.
+        QCOMPARE(relay::restorableAnsi(row), row);
+
+        // A file with no trailer — an older Relay, a hand-edit — restores as it always did.
+        const QString plain = QStringLiteral("11111111-2222-3333-4444-555555555555");
+        QVERIFY(writeScrollback(plain, QStringList{QStringLiteral("row")}));
+        QVERIFY(readScrollbackProse(plain).isEmpty());
+
+        // A record whose URI is not prose's is dropped, not registered; a malformed one too.
+        QFile handMade(scrollbackPath(QStringLiteral("22222222-3333-4444-5555-666666666666")));
+        QVERIFY(handMade.open(QIODevice::WriteOnly));
+        handMade.write("row\n");
+        handMade.write(proseTrailerSeparator().toUtf8() + '\n');
+        handMade.write("{\"uri\":\"relay://fold/not-prose\",\"columns\":80,\"lines\":[{\"spans\":[{\"text\":\"x\"}]}]}\n");
+        handMade.write("{not json\n");
+        handMade.write((QStringLiteral("{\"uri\":\"relay://prose/p2/9\",\"columns\":80,\"lines\":[{\"spans\":[{\"text\":\"y\"}]}]}")).toUtf8() + '\n');
+        handMade.close();
+        const QVector<relay::ProseBlock> handRead = readScrollbackProse(QStringLiteral("22222222-3333-4444-5555-666666666666"));
+        QCOMPARE(handRead.size(), 1);
+        QCOMPARE(handRead.at(0).uri, QStringLiteral("relay://prose/p2/9"));
+
+        // The conversation store round-trips the same trailer.
+        QTemporaryDir dir;
+        const QString session = dir.filePath(QStringLiteral("abc.scrollback.txt"));
+        QVERIFY(st::write(session, QStringList{row}, {block}));
+        QCOMPARE(st::readProse(session).at(0).uri, uri);
+        QCOMPARE(st::read(session), QStringList{row});
+        QVERIFY(st::write(session, QStringList{QStringLiteral("plain row")}));
+        QVERIFY(st::readProse(session).isEmpty());
+
+        // Rows gone, file gone: prose alone is not worth a file.
+        QVERIFY(writeScrollback(id, QStringList{}, {block}));
+        QVERIFY(!QFile::exists(scrollbackPath(id)));
+    }
+
     void scrollbackIsBoundedByLinesAndBytes() {
         QStringList many;
         for (int i = 0; i < kScrollbackMaxLines + 500; ++i) many << QStringLiteral("line %1").arg(i);
@@ -664,7 +734,7 @@ private slots:
         QVERIFY(st::read(path).isEmpty());
         QVERIFY(st::read(QString()).isEmpty());
         QString error;
-        QVERIFY(!st::write(QString(), QStringList{QStringLiteral("x")}, &error));
+        QVERIFY(!st::write(QString(), QStringList{QStringLiteral("x")}, {}, &error));
         QVERIFY(!error.isEmpty());
     }
 

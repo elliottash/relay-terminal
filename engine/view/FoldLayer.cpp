@@ -307,6 +307,21 @@ bool FoldLayer::isProseUri(const QString &uri)
     return uri.startsWith(QLatin1String(kProsePrefix));
 }
 
+QVector<ProseBlock> FoldLayer::proseBlocks() const
+{
+    QVector<ProseBlock> out;
+    for (const Fold &f : m_folds) {
+        if (!f.replacement || !f.hasContent)
+            continue;
+        ProseBlock b;
+        b.uri = f.uri;
+        b.lines = f.lines;
+        b.printColumns = f.printColumns;
+        out.push_back(b);
+    }
+    return out;
+}
+
 bool FoldLayer::proseActive() const
 {
     for (const Anchor &a : m_anchors) {

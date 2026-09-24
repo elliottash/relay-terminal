@@ -85,6 +85,7 @@ public:
     void setFoldPrefix(const QString &uriPrefix) override;
     void setFoldContent(const QString &uri, const QVector<FoldLine> &lines) override;
     void setProseBlock(const QString &uri, const QVector<FoldLine> &lines, int printColumns) override;
+    QVector<ProseBlock> proseBlocks() const override;
     void setFoldExpanded(const QString &uri, bool expanded) override;
     bool foldExpanded(const QString &uri) const override;
     void removeFold(const QString &uri) override;

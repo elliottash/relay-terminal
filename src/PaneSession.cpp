@@ -492,7 +492,10 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             // The fork takes this conversation's terminal text with it (#0TJ9). Stashed here
             // because the fork's own session id is not minted until the new pane loads the state;
             // that pane picks it up at its `state_loaded`. This pane's file is untouched.
-            pendingForkText() = ForkText{sessionTextLines(), QDateTime::currentDateTimeUtc()};
+            pendingForkText() = ForkText{sessionTextLines(),
+                                             m_backend ? m_backend->proseBlocks()
+                                                       : QVector<relay::ProseBlock>(),
+                                             QDateTime::currentDateTimeUtc()};
             const QJsonObject state = event.value(QStringLiteral("state")).toObject();
             const QString title = state.value(QStringLiteral("title")).toString();
             if (onForkState) QTimer::singleShot(0, this, [this, state, title] { if (onForkState) onForkState(state, title); });

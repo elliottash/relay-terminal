@@ -215,6 +215,9 @@ public:
     // OSC 8 run with `uri` (kProsePrefix), re-wrapped from `lines` whenever the
     // grid is not at printColumns, and never interactive. See TerminalBackend.h.
     void setProseBlock(const QString &uri, const QVector<FoldLine> &lines, int printColumns);
+    // Every prose block the view holds, as handed to setProseBlock(): what the
+    // host saves beside its scrollback rows (#MTCS).
+    QVector<ProseBlock> proseBlocks() const;
     void setFoldExpanded(const QString &uri, bool expanded);
     bool foldExpanded(const QString &uri) const;
     void removeFold(const QString &uri);

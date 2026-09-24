@@ -84,6 +84,15 @@ inline constexpr int kFoldIndent = 3;
 // the anchor walk finds them with the rest of the block's rows.
 inline constexpr const char kProsePrefix[] = "relay://prose/";
 
+// One prose block as it was handed to setProseBlock(): enough to save beside a
+// pane's scrollback rows and hand straight back on restore, so a restored pane
+// re-wraps the block when it is resized (card #MTCS).
+struct ProseBlock {
+    QString uri;              // the OSC 8 run covering the block's rows (kProsePrefix)
+    QVector<FoldLine> lines;  // the block's logical lines, as printed
+    int printColumns = 0;     // the width they were wrapped at
+};
+
 // Grid columns one grapheme cluster occupies (1 or 2). East Asian Wide /
 // Fullwidth and the pictographs are two cells: the emulator cores decide this
 // for real cells, and fold text is the host's own, so the layer -- and any host
@@ -446,6 +455,13 @@ public:
         Q_UNUSED(lines);
         Q_UNUSED(printColumns);
     }
+
+    // Every prose block handed to setProseBlock() whose anchor still holds
+    // rows, oldest first, in the same form it was given: what a host saves
+    // beside its scrollback rows and hands back after a restore, so a restored
+    // pane re-wraps the blocks when it is resized (#MTCS). Empty without the
+    // Folds capability.
+    virtual QVector<ProseBlock> proseBlocks() const { return {}; }
 
     // ---- host callbacks (GUI thread)
     // An anchor was clicked and the view has no detail for it: fetch it and

@@ -3782,6 +3782,11 @@ void TerminalView::setProseBlock(const QString &uri, const QVector<FoldLine> &li
     invalidateFoldAnchors();
 }
 
+QVector<ProseBlock> TerminalView::proseBlocks() const
+{
+    return m_folds.proseBlocks();
+}
+
 void TerminalView::setFoldContent(const QString &uri, const QVector<FoldLine> &lines)
 {
     if (uri.isEmpty())

@@ -261,8 +261,12 @@ target_compile_options(relay-backends PRIVATE ${RELAY_WARNINGS})
 # src/ClosedStack.* is the recently-closed list (state/closed.json): same directory, same node
 # shapes, same atomic write, so it lives in the same library.
 add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h src/ClosedStack.cpp src/ClosedStack.h)
-target_include_directories(relay-windowstate PUBLIC src)
-target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core)
+# engine/ is on the include path for relay::ProseBlock / FoldLine alone (a declaration -- the
+# engine is not linked in): the prose trailer the scrollback files carry is typed in those
+# terms (#MTCS). src/ is already PUBLIC below for WordWrap.h, which TerminalBackend.h includes.
+target_include_directories(relay-windowstate PUBLIC src ${CMAKE_CURRENT_SOURCE_DIR}/engine)
+# Gui for QColor: the FoldLine/FoldSpan types the trailer is built from carry explicit inks.
+target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Gui)
 target_compile_options(relay-windowstate PRIVATE ${RELAY_WARNINGS})
 
 # The "Recently closed" list widget (the session manager's second tab). Fed records and callbacks,

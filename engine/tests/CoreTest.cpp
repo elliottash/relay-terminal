@@ -159,6 +159,28 @@ private slots:
                  QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\"));
     }
 
+    void proseRunsKeepTheirLinksThroughRestore()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Harness h(core);
+        // A word-wrapped block's row, as the pane prints it (#R2WQ): the run's URI around the
+        // text, here with the fragment a label link rides on (#MDKN).
+        const QString uri = QStringLiteral("relay://prose/p9/17#l=card%3AMTCS");
+        h.feed((QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\wrapped words\x1b]8;;\x1b\\ tail")).toUtf8());
+        const Line line = h.frame().lines[0];
+        const QString saved = lineToSavedAnsi(line, [&](uint32_t id, int col) { return h.vt->hyperlinkUri(id, 0, col); });
+        QVERIFY(saved.contains(uri));
+        QCOMPARE(restorableAnsi(saved), saved);
+        Harness replay(core);
+        replay.feed(restorableAnsi(saved).toUtf8());
+        QCOMPARE(replay.vt->hyperlinkAt(0, 2), uri);
+        // A URI that only *looks* like prose's is inert but keeps its shape too: the replayed run
+        // paints nothing until the pane registers a block under it.
+        const QString stranger = QStringLiteral("relay://prose/zzz/999");
+        const QString strangerLine = QStringLiteral("\x1b]8;;") + stranger + QStringLiteral("\x1b\\x\x1b]8;;\x1b\\");
+        QCOMPARE(restorableAnsi(strangerLine), strangerLine);
+    }
+
     void mediaRowsKeepOnlyValidatedLinksThroughRestore()
     {
         QFETCH_GLOBAL(QString, core);

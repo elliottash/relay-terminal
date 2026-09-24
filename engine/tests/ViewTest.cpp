@@ -2677,6 +2677,58 @@ private slots:
                  qPrintable(restored.backend->formattedScreenText()));
     }
 
+    // #MTCS: word wrap survives a restore. A pane's own text is saved with the OSC 8 runs that
+    // anchor its prose blocks, and proseBlocks() carries the logical lines beside them; replaying
+    // the rows into a fresh backend and handing the blocks back re-registers the wrap, so resizing
+    // the restored pane re-wraps the block instead of showing the width it was saved at forever.
+    void proseWrapSurvivesSavedTextAndReplay()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term source(core, QStringLiteral("/bin/cat"));
+        source.backend->resizeTerminal(80, 12);
+        source.backend->writeToDisplay("before\r\n");
+        const QString uri = QStringLiteral("relay://prose/restore/1");
+        const QString text = QStringLiteral("alpha beta gamma delta epsilon zeta eta theta");
+        source.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\")).toUtf8());
+        for (const QString &row : proseRows(text, 12))
+            source.backend->writeToDisplay(row.toUtf8() + "\r\n");
+        source.backend->writeToDisplay("\x1b]8;;\x1b\\\r\nafter\r\n");
+        QVERIFY(source.waitScreen(QStringLiteral("after")));
+        source.backend->setProseBlock(uri, proseLines({text}), 12);
+        QTest::qWait(400);
+        const QStringList saved = source.backend->formattedScreenText().split(QLatin1Char('\n'));
+        QVERIFY2(saved.join(QLatin1Char('\n')).contains(uri), "the block's run must be saved, not stripped");
+        const QVector<ProseBlock> prose = source.backend->proseBlocks();
+        QCOMPARE(prose.size(), 1);
+        QCOMPARE(prose.first().uri, uri);
+        QCOMPARE(prose.first().printColumns, 12);
+        QCOMPARE(prose.first().lines.first().spans.first().text, text);
+
+        // The restore, as Pane::replayRestoredScrollback() performs it: rows through
+        // restorableAnsi into a fresh, *wider* backend, then the blocks handed straight back.
+        Term restored(core, QStringLiteral("/bin/cat"));
+        restored.backend->resizeTerminal(80, 40);
+        for (const QString &line : saved)
+            if (!line.isEmpty()) restored.backend->writeToDisplay(restorableAnsi(line).toUtf8() + "\r\n");
+        QVERIFY(restored.waitScreen(QStringLiteral("after")));
+        for (const ProseBlock &block : prose)
+            restored.backend->setProseBlock(block.uri, block.lines, block.printColumns);
+        QTest::qWait(400);
+        // 40 columns: the block is re-wrapped to the restored pane's width, not the saved one.
+        const QStringList wide = proseRows(text, 40);
+        QStringList rows = restored.view->visibleRowsText();
+        for (const QString &row : wide)
+            QVERIFY2(rows.contains(row), qPrintable(row + QStringLiteral(" | ") + rows.join(QLatin1Char('|'))));
+        QVERIFY2(!rows.contains(proseRows(text, 12).constFirst()),
+                 "the restored pane must not keep the width it was saved at");
+        // And it keeps re-wrapping: narrower again, the block follows the width again.
+        restored.backend->resizeTerminal(80, 16);
+        QTest::qWait(400);
+        rows = restored.view->visibleRowsText();
+        for (const QString &row : proseRows(text, 16))
+            QVERIFY2(rows.contains(row), qPrintable(row + QStringLiteral(" | ") + rows.join(QLatin1Char('|'))));
+    }
+
     void audioRowPlaysPausesAndSeeksWithCliPlayer()
     {
         QFETCH_GLOBAL(QString, core);

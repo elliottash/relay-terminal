@@ -176,6 +176,11 @@ void VTermBackend::setProseBlock(const QString &uri, const QVector<FoldLine> &li
         m_view->setProseBlock(uri, lines, printColumns);
 }
 
+QVector<ProseBlock> VTermBackend::proseBlocks() const
+{
+    return m_view ? m_view->proseBlocks() : QVector<ProseBlock>();
+}
+
 void VTermBackend::setFoldExpanded(const QString &uri, bool expanded)
 {
     if (m_view)
@@ -266,11 +271,13 @@ QString VTermBackend::screenText() const { return m_session->screenText(); }
 namespace {
 
 // `lines`, whose first is absolute row `first`, in the saved form (lineToSavedAnsi). Image and
-// media row links come from the core's walk in absolute rows, including scrollback (#1MGS, #MDA7).
+// media row links come from the core's walk in absolute rows, including scrollback (#1MGS, #MDA7);
+// prose runs too (#MTCS), so a save keeps the anchors a restore re-registers its blocks by.
 QStringList savedLines(VtCore &core, const std::vector<Line> &lines, int first)
 {
     QMultiHash<int, VtCore::HyperlinkRun> byRow;
-    for (const QString &prefix : {QLatin1String(inlineimage::kImagePrefix), QLatin1String(inlinemedia::kPrefix)})
+    for (const QString &prefix : {QLatin1String(inlineimage::kImagePrefix), QLatin1String(inlinemedia::kPrefix),
+                                  QLatin1String(kProsePrefix)})
         for (const VtCore::HyperlinkRun &run : core.hyperlinkRuns(prefix))
             for (int row = run.startRow; row <= run.endRow; ++row)
                 byRow.insert(row, run);

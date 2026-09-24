@@ -127,6 +127,12 @@ public:
     // paints its own wrap of the lines. The URI is never interactive.
     void setProse(const QString &uri, const QVector<FoldLine> &lines, int printColumns);
     static bool isProseUri(const QString &uri);
+    // Every replacement fold with content, in m_folds order (the order the pane
+    // printed them in): what a host saves beside its scrollback rows and hands
+    // back through setProse() after a restore (#MTCS). Unresolved anchors are
+    // included: the block is worth saving even when the view has not yet found
+    // its run, and a restored pane resolves it again from its replayed rows.
+    QVector<ProseBlock> proseBlocks() const;
     // True while any replacement fold has taken its rows over.
     bool proseActive() const;
     // A real row hidden by a taken-over replacement fold (its text is the

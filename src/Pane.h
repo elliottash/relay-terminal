@@ -1295,6 +1295,10 @@ public:
         if (relay::windowstate::isScrollbackId(scrollback)) {
             m_scrollbackId = scrollback;
             m_restoredScrollback = relay::windowstate::readScrollback(scrollback);
+            // The rows' word wrap travels with them: the prose trailer is handed back to the
+            // backend after the rows are replayed, so a restored pane re-wraps its own output
+            // when it is resized (#MTCS).
+            m_restoredProse = relay::windowstate::readScrollbackProse(scrollback);
             // The same id names this pane's prompt history: the composer was pointed at the fresh
             // token in buildUi(), before there was a saved spec to read. Nothing has been typed
             // yet, so re-pointing simply loads the pane's own history instead.
@@ -1405,7 +1409,12 @@ public:
     void saveScrollback() const {
         if (!terminalCan(relay::TerminalBackend::Scrollback)) return;
         QString error;
-        if (!relay::windowstate::writeScrollback(m_scrollbackId, paneFormattedTextLines(relay::windowstate::kScrollbackMaxLines), &error)
+        // The pane's word-wrapped blocks ride the same file as a trailer (#MTCS), so a restore
+        // can hand them back and the restored pane re-wraps them when it is resized.
+        const QVector<relay::ProseBlock> prose =
+                m_backend ? m_backend->proseBlocks() : QVector<relay::ProseBlock>();
+        if (!relay::windowstate::writeScrollback(
+                    m_scrollbackId, paneFormattedTextLines(relay::windowstate::kScrollbackMaxLines), prose, &error)
             && !error.isEmpty())
             fprintf(stderr, "relay: could not save this pane's scrollback: %s\n", qPrintable(error));
         saveSessionText();
@@ -1465,7 +1474,9 @@ public:
         // would replay nothing instead of falling back to the transcript.
         if (!relay::sessiontext::hasContent(lines, restoreMarks())) return;
         QString error;
-        if (!relay::sessiontext::write(path, lines, &error) && !error.isEmpty())
+        // The same trailer the per-pane store carries (#MTCS): a conversation replayed later
+        // re-wraps what it was printed as.
+        if (!relay::sessiontext::write(path, lines, m_backend->proseBlocks(), &error) && !error.isEmpty())
             fprintf(stderr, "relay: could not save this conversation's terminal text: %s\n", qPrintable(error));
     }
 
@@ -1514,11 +1525,14 @@ public:
     // Text with nothing of the conversation in it (sessiontext::hasContent) counts as none.
     bool queueSessionTextReplay(const QString &path) {
         const QStringList lines = relay::sessiontext::read(path);
-        return relay::sessiontext::hasContent(lines, restoreMarks()) && queueTextReplay(lines);
+        return relay::sessiontext::hasContent(lines, restoreMarks()) &&
+               queueTextReplay(lines, RestoredKind::Conversation, relay::sessiontext::readProse(path));
     }
-    bool queueTextReplay(const QStringList &lines, RestoredKind kind = RestoredKind::Conversation) {
+    bool queueTextReplay(const QStringList &lines, RestoredKind kind = RestoredKind::Conversation,
+                         const QVector<relay::ProseBlock> &prose = {}) {
         if (lines.isEmpty()) return false;
         m_restoredScrollback = lines;
+        m_restoredProse = prose;   // registered again once the rows are on screen (#MTCS)
         m_restoredKind = kind;
         m_scrollbackReplayed = false;
         QTimer::singleShot(0, this, [this] { replayRestoredScrollback(); });
@@ -1534,7 +1548,12 @@ public:
     // nobody claims is dropped rather than attaching itself to the next unrelated load.
     // `guest` is the source a guest fork is waiting for (`claude`, `codex`), empty for a Relay
     // one, so a guest arriving in another pane cannot walk off with a Relay fork's text.
-    struct ForkText { QStringList lines; QDateTime at; QString guest; };
+    struct ForkText {
+        QStringList lines;
+        QVector<relay::ProseBlock> prose;   // the wrap of those rows (#MTCS)
+        QDateTime at;
+        QString guest;
+    };
     static ForkText &pendingForkText() { static ForkText text; return text; }
     static constexpr int kForkTextSeconds = 60;
 
@@ -1548,8 +1567,8 @@ public:
         if (!stash.at.isValid() || stash.at.secsTo(QDateTime::currentDateTimeUtc()) > kForkTextSeconds) return;
         const QString path = sessionTextPath();
         if (stash.lines.isEmpty() || path.isEmpty()) return;
-        relay::sessiontext::write(path, stash.lines);
-        queueTextReplay(stash.lines);
+        relay::sessiontext::write(path, stash.lines, stash.prose);
+        queueTextReplay(stash.lines, RestoredKind::Conversation, stash.prose);
     }
 
     // Save before removing anything: a failed write or an unknown turn boundary must leave
@@ -4051,8 +4070,15 @@ public:
             const QStringList lines = paneFormattedTextLines(relay::windowstate::kScrollbackMaxLines);
             m_bankedText.remove(was);
             m_bankedOrder.removeAll(was);
-            if (!lines.isEmpty()) { m_bankedText.insert(was, lines); m_bankedOrder.append(was); }
-            while (m_bankedOrder.size() > kBankedSurfaces) m_bankedText.remove(m_bankedOrder.takeFirst());
+            if (!lines.isEmpty()) {
+                m_bankedText.insert(was, lines);
+                m_bankedProse.insert(was, m_backend ? m_backend->proseBlocks() : QVector<relay::ProseBlock>());
+                m_bankedOrder.append(was);
+            }
+            while (m_bankedOrder.size() > kBankedSurfaces) {
+                m_bankedText.remove(m_bankedOrder.first());
+                m_bankedProse.remove(m_bankedOrder.takeFirst());
+            }
         }
         m_transcriptSurface = now;
         closeInline();
@@ -4068,10 +4094,13 @@ public:
         resetTranscript();
         if (m_backend) { m_backend->clearScrollback(); m_backend->clear(); }
         m_restoredScrollback.clear();
+        m_restoredProse.clear();
         const QStringList replay = m_bankedText.value(now);
         m_transcriptUsed = !replay.isEmpty();
         applyTranscriptVisibility();
-        queueTextReplay(replay, RestoredKind::Surface);   // nothing banked: nothing is replayed
+        // The banked wrap comes back with the banked rows (#MTCS), so a surface switched back to
+        // still re-wraps when the pane is resized. Nothing banked: nothing is replayed.
+        queueTextReplay(replay, RestoredKind::Surface, m_bankedProse.value(now));
         rebuildQueueStrip();                        // the strip is the new surface's too
     }
 
@@ -8142,7 +8171,11 @@ public:
         if (newPane) {
             // A guest fork names itself only once it is running, so its text is stashed here and
             // claimed by the pane the fork comes up in, as a Relay fork's is (#0TJ9).
-            if (fork) pendingForkText() = ForkText{sessionTextLines(), QDateTime::currentDateTimeUtc(), source};
+            if (fork)
+                pendingForkText() = ForkText{sessionTextLines(),
+                                             m_backend ? m_backend->proseBlocks()
+                                                       : QVector<relay::ProseBlock>(),
+                                             QDateTime::currentDateTimeUtc(), source};
             if (onOpenGuestPane) { onOpenGuestPane(source, extra, cwd, accountPreset); return; }
             status(QStringLiteral("This window cannot open another pane; press Enter to resume here."));
             return;
@@ -12084,6 +12117,8 @@ private:
                                                                      : scrollbackCloseMark();
         const QStringList lines = m_restoredScrollback;
         m_restoredScrollback.clear();
+        const QVector<relay::ProseBlock> prose = m_restoredProse;
+        m_restoredProse.clear();
         QByteArray out = "\r\x1b[2K";
         out += inkCode(Ink::Note) + openMark.toUtf8() + "\x1b[0m\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
@@ -12095,6 +12130,12 @@ private:
         }
         out += inkCode(Ink::Note) + closeMark.toUtf8() + "\x1b[0m\r\n";
         writeTerminal(out);
+        // The rows carry each block's OSC 8 run (relay::restorableAnsi above keeps them), and the
+        // saved prose holds what the run covers: handing it back now re-registers the block, so
+        // the restored pane re-wraps its own output the moment it is resized (#MTCS). At the
+        // width the text was saved at this stands aside and shows the rows just replayed.
+        for (const relay::ProseBlock &block : prose)
+            m_backend->setProseBlock(block.uri, block.lines, block.printColumns);
         // Not redrawPrompt(): Readline still believes its prompt is where it drew it, and the
         // restored block has just scrolled the screen out from under it, so the repaint is a no-op
         // and the pane is left with no prompt at all (the same trap clearTerminal() documents).
@@ -15959,6 +16000,9 @@ private:
     QString m_scrollbackId;
     QString m_draftKey;
     QStringList m_restoredScrollback;
+    // The prose blocks m_restoredScrollback's rows anchor, in the form the backend handed them
+    // (#MTCS): registered again after the rows are replayed, so word wrap survives the restore.
+    QVector<relay::ProseBlock> m_restoredProse;
     bool m_scrollbackReplayed = false;
     // Which conversation the text in this pane belongs to, and the line it started at (#0TJ9).
     // Held apart from m_sessionId / m_guestSession because the text changes hands at a different
@@ -15980,6 +16024,7 @@ private:
     // every pane that is not a card page's console, which is every pane but one.
     QString m_transcriptSurface;
     QHash<QString, QStringList> m_bankedText;
+    QHash<QString, QVector<relay::ProseBlock>> m_bankedProse;   // the wrap of the banked rows (#MTCS)
     QStringList m_bankedOrder;   // least recently banked first, for the kBankedSurfaces cap
     // The `conversation_get` asked for to stand in for text that was never saved, and — for a
     // conversation opened in a new pane — the id to ask about once the worker is up.

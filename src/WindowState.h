@@ -32,12 +32,15 @@
 // This header holds the parts that do not need a window: reading and writing the file, clamping a
 // window onto a screen that still exists, falling back when a directory is gone, and dropping
 // records that could not be rebuilt. main.cpp keeps the widget side.
+#include "TerminalBackend.h"  // relay::ProseBlock, relay::FoldLine: the prose trailer (#MTCS)
+
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
 #include <QRect>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace relay {
 namespace windowstate {
@@ -144,9 +147,9 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
 // reconstruct escape sequences fall back to the plain `scrollbackText()` / `screenText()` and the
 // block is still readable. Only SGR is serialized — no cursor movement, and no OSC but the OSC 8
 // links of inline image and media rows (`relay-image:` and `relay-media:` URIs), so a restored pane
-// draws them again. Replay (relay::restorableAnsi) filters the file down to CSI SGR and links
-// accepted by inlineimage::parseImageUri or inlinemedia::parseMediaUri; a hand-edited or truncated
-// file cannot drive the terminal.
+// draws them again, and of prose blocks (`relay://prose/`, #MTCS), so a restored pane can anchor
+// its own word-wrapped output again. Replay (relay::restorableAnsi) filters the file down to CSI
+// SGR and those links; a hand-edited or truncated file cannot drive the terminal.
 //
 // The tradeoff is colour and theme: an indexed colour (0-255) is resolved by the palette in force
 // when it is painted, so it follows a palette-based theme change, but an RGB colour
@@ -160,6 +163,21 @@ QString resolveDirectory(const QString &cwd, const QString &workspace, const QSt
 // is gone are pruned whenever the layout is written.
 constexpr int kScrollbackMaxLines = 5000;
 constexpr qint64 kScrollbackMaxBytes = 512 * 1024;
+
+// The rows carry the OSC 8 runs of Relay's own word-wrapped output (kProsePrefix, #R2WQ), so a
+// restored pane can find each block's rows again; and after the rows the file carries a prose
+// trailer (#MTCS) — one separator line no serialized row can equal, then one JSON record per
+// block with the block's *logical* lines and the width they were wrapped at. A pane that
+// restores hands the records back through TerminalBackend::setProseBlock(), so resizing it
+// re-wraps the blocks instead of leaving rows hard-wrapped at the width they were saved at. The
+// trailer costs the same byte cap as the rows do; a file without one (an older Relay, a
+// hand-edit) restores exactly as before. A hand-edited trailer is inert paint: it can only
+// register blocks under prose URIs whose rows are themselves in the file, with text, SGR and
+// link targets no worse than the rows already carry.
+constexpr int kScrollbackMaxProseBlocks = 512;
+// The separator: an APC sequence (ESC _ ... ESC \). Saved rows contain printable text, CSI SGR
+// and OSC 8 only (engine/core/AnsiSerializer), so no serialized row can be this line.
+QString proseTrailerSeparator();
 
 // `$XDG_DATA_HOME/relay/state/scrollback`. Empty when no data location is available.
 QString scrollbackDirectory();
@@ -176,9 +194,15 @@ QStringList clampScrollback(QStringList lines, int maxLines = kScrollbackMaxLine
 
 // Atomic (temp file + rename) and 0600, like write(). Empty content removes the file rather than
 // leaving a stale one behind. False with *error set when the id or the directory is unusable.
-bool writeScrollback(const QString &id, const QStringList &lines, QString *error = nullptr);
+// `prose` (the pane's word-wrapped blocks, TerminalBackend::proseBlocks()) is written as the
+// file's trailer and bounded by the same byte cap as the rows.
+bool writeScrollback(const QString &id, const QStringList &lines,
+                     const QVector<ProseBlock> &prose = {}, QString *error = nullptr);
 // The saved lines, oldest first; empty when there is no file. Never reads more than the caps.
 QStringList readScrollback(const QString &id, int maxLines = kScrollbackMaxLines);
+// The prose trailer the file carries, as `prose` above writes it: empty for an old-format file,
+// and every record whose URI is not under kProsePrefix is dropped rather than trusted.
+QVector<ProseBlock> readScrollbackProse(const QString &id);
 
 // Every `scrollback` id in a saved layout's window records (pane nodes at any depth).
 QStringList scrollbackIds(const QJsonArray &windows);
@@ -237,9 +261,13 @@ QString guestPath(const QString &source, const QString &id);
 // Atomic, 0600, parent directory created 0700; the lines are clamped by `clampScrollback` first,
 // and empty content removes the file rather than leaving stale text behind. False with *error set
 // when the path is unusable — which is also what an unvalidated id gets, since it yields no path.
-bool write(const QString &path, const QStringList &lines, QString *error = nullptr);
+// `prose` rides the same trailer the per-pane store carries (see windowstate above, #MTCS).
+bool write(const QString &path, const QStringList &lines, const QVector<ProseBlock> &prose = {},
+           QString *error = nullptr);
 // The saved lines, oldest first; empty when there is no file. Reads only the file's tail.
 QStringList read(const QString &path, int maxLines = windowstate::kScrollbackMaxLines);
+// The file's prose trailer, if it carries one (the per-pane store's `readScrollbackProse`).
+QVector<ProseBlock> readProse(const QString &path);
 // Every sidecar of one session: its text file and its `rewound-<n>` files. What a delete has to
 // take with it, and what a test asserts over.
 QStringList sidecars(const QString &sessionDir, const QString &id);

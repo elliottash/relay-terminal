@@ -294,21 +294,133 @@ QStringList clampScrollback(QStringList lines, int maxLines, qint64 maxBytes) {
     return first == 0 ? lines : lines.mid(first);
 }
 
+// The line that ends a file's rows and starts its prose trailer (#MTCS). Serialized rows contain
+// printable text, CSI SGR and OSC 8 only (engine/core/AnsiSerializer.h), so no row can be this.
+QString proseTrailerSeparator() {
+    return QStringLiteral("\x1b_relay-prose\x1b\\");
+}
+
 namespace {
+
+// ---- the prose trailer's records (#MTCS) -------------------------------------------------------
+//
+// One compact JSON object per line, the shape of relay::ProseBlock:
+//   {"uri":"relay://prose/<pane>/<block>","columns":118,
+//    "lines":[{"role":16,"spans":[{"text":"...","sgr":"1;35","link":"..."}]}]}
+// `fg`/`bg` (#aarrggbb) and the style flags ride along when a span carries them, so a block
+// round-trips exactly as it was handed to TerminalBackend::setProseBlock().
+
+QJsonObject spanToJson(const FoldSpan &span) {
+    QJsonObject object;
+    object.insert(QStringLiteral("text"), span.text);
+    if (!span.sgr.isEmpty()) object.insert(QStringLiteral("sgr"), span.sgr);
+    if (!span.link.isEmpty()) object.insert(QStringLiteral("link"), span.link);
+    if (span.fg.isValid()) object.insert(QStringLiteral("fg"), span.fg.name(QColor::HexArgb));
+    if (span.bg.isValid()) object.insert(QStringLiteral("bg"), span.bg.name(QColor::HexArgb));
+    if (span.bold) object.insert(QStringLiteral("bold"), true);
+    if (span.italic) object.insert(QStringLiteral("italic"), true);
+    if (span.underline) object.insert(QStringLiteral("underline"), true);
+    if (span.strike) object.insert(QStringLiteral("strike"), true);
+    if (span.dim) object.insert(QStringLiteral("dim"), true);
+    if (span.reverse) object.insert(QStringLiteral("reverse"), true);
+    return object;
+}
+
+QString proseToRecord(const ProseBlock &block) {
+    QJsonObject object;
+    object.insert(QStringLiteral("uri"), block.uri);
+    object.insert(QStringLiteral("columns"), block.printColumns);
+    QJsonArray lines;
+    for (const FoldLine &line : block.lines) {
+        QJsonObject lineObject;
+        if (line.role) lineObject.insert(QStringLiteral("role"), int(line.role));
+        QJsonArray spans;
+        for (const FoldSpan &span : line.spans) spans.append(spanToJson(span));
+        lineObject.insert(QStringLiteral("spans"), spans);
+        lines.append(lineObject);
+    }
+    object.insert(QStringLiteral("lines"), lines);
+    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+// The reverse of proseToRecord(), minus what a hand-edited file must not be trusted with: the uri
+// has to sit under kProsePrefix (a record can never register an arbitrary fold URI), the columns
+// have to be a sane width, and a record that does not parse is dropped, not fatal. Reading stops
+// at the caps so a pathological file costs nothing to refuse.
+ProseBlock proseFromRecord(const QString &record) {
+    QJsonParseError error{};
+    const QJsonDocument parsed = QJsonDocument::fromJson(record.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !parsed.isObject()) return {};
+    const QJsonObject object = parsed.object();
+    ProseBlock block;
+    block.uri = object.value(QStringLiteral("uri")).toString();
+    if (!block.uri.startsWith(QLatin1String(kProsePrefix))) return {};
+    const int columns = object.value(QStringLiteral("columns")).toInt();
+    if (columns < 1 || columns > 65535) return {};
+    block.printColumns = columns;
+    const QJsonArray lines = object.value(QStringLiteral("lines")).toArray();
+    if (lines.size() > kScrollbackMaxLines) return {};
+    for (const auto &value : lines) {
+        const QJsonObject lineObject = value.toObject();
+        FoldLine line;
+        line.role = quint8(lineObject.value(QStringLiteral("role")).toInt());
+        const QJsonArray spans = lineObject.value(QStringLiteral("spans")).toArray();
+        if (spans.size() > kScrollbackMaxLines) return {};
+        for (const auto &spanValue : spans) {
+            const QJsonObject spanObject = spanValue.toObject();
+            FoldSpan span;
+            span.text = spanObject.value(QStringLiteral("text")).toString();
+            span.sgr = spanObject.value(QStringLiteral("sgr")).toString();
+            span.link = spanObject.value(QStringLiteral("link")).toString();
+            if (spanObject.contains(QStringLiteral("fg")))
+                span.fg = QColor(spanObject.value(QStringLiteral("fg")).toString());
+            if (spanObject.contains(QStringLiteral("bg")))
+                span.bg = QColor(spanObject.value(QStringLiteral("bg")).toString());
+            span.bold = spanObject.value(QStringLiteral("bold")).toBool();
+            span.italic = spanObject.value(QStringLiteral("italic")).toBool();
+            span.underline = spanObject.value(QStringLiteral("underline")).toBool();
+            span.strike = spanObject.value(QStringLiteral("strike")).toBool();
+            span.dim = spanObject.value(QStringLiteral("dim")).toBool();
+            span.reverse = spanObject.value(QStringLiteral("reverse")).toBool();
+            line.spans.append(span);
+        }
+        block.lines.append(line);
+    }
+    return block;
+}
 
 // The file side of both stores: the per-pane one below and the per-session one in
 // `relay::sessiontext`, which saves the same text under a different name (card #0TJ9). One copy,
-// so the two can never drift apart on permissions, clamping or the empty-file rule.
-bool writeScrollbackFile(const QString &path, const QStringList &lines, QString *error) {
+// so the two can never drift apart on permissions, clamping or the empty-file rule. `prose` rides
+// the trailer above; its records count against the byte cap alongside the rows.
+bool writeScrollbackFile(const QString &path, const QStringList &lines,
+                         const QVector<ProseBlock> &prose, QString *error) {
     auto fail = [error](const QString &text) {
         if (error) *error = text;
         return false;
     };
     if (error) error->clear();
     if (path.isEmpty()) return fail(QStringLiteral("No writable place for this scrollback."));
-    const QStringList kept = clampScrollback(lines);
+    QStringList records;
+    qint64 reserved = 0;
+    for (const ProseBlock &block : prose) {
+        if (records.size() >= kScrollbackMaxProseBlocks) break;
+        if (!block.uri.startsWith(QLatin1String(kProsePrefix))) continue;
+        const QString record = proseToRecord(block);
+        reserved += qint64(record.toUtf8().size()) + 1;
+        records.append(record);
+    }
+    // A pathological trailer must not crowd the rows out of the file: bound it to half the byte
+    // cap, dropping the oldest records (m_folds order is print order) to get there.
+    while (records.size() > 1 && reserved > kScrollbackMaxBytes / 2) {
+        reserved -= qint64(records.constFirst().toUtf8().size()) + 1;
+        records.removeFirst();
+    }
+    const QStringList kept = clampScrollback(lines, kScrollbackMaxLines,
+                                             kScrollbackMaxBytes - proseTrailerSeparator().size() - 1 - reserved);
     if (kept.isEmpty()) {
-        // Nothing to bring back: leaving the previous file would restore stale output.
+        // Nothing to bring back: leaving the previous file would restore stale output. Prose
+        // without rows is inert paint — the blocks' anchor rows are what makes them show.
         QFile::remove(path);
         return true;
     }
@@ -318,7 +430,10 @@ bool writeScrollbackFile(const QString &path, const QStringList &lines, QString 
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return fail(file.errorString());
     file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
-    if (file.write(kept.join(QLatin1Char('\n')).toUtf8() + '\n') < 0) {
+    QByteArray out = kept.join(QLatin1Char('\n')).toUtf8() + '\n';
+    if (!records.isEmpty())
+        out += (proseTrailerSeparator() + QLatin1Char('\n') + records.join(QLatin1Char('\n')) + QLatin1Char('\n')).toUtf8();
+    if (file.write(out) < 0) {
         file.cancelWriting();
         return fail(file.errorString());
     }
@@ -327,30 +442,66 @@ bool writeScrollbackFile(const QString &path, const QStringList &lines, QString 
     return true;
 }
 
-QStringList readScrollbackFile(const QString &path, int maxLines) {
+struct ScrollbackFileText {
+    QStringList rows;
+    QStringList records;   // the trailer's raw record lines, separator not included
+};
+
+ScrollbackFileText readScrollbackParts(const QString &path) {
     if (path.isEmpty()) return {};
     QFile file(path);
     if (!file.exists() || !file.open(QIODevice::ReadOnly)) return {};
-    // A file that grew past the cap (an older Relay, or an edit) is read from its tail only.
+    // A file that grew past the cap (an older Relay, or an edit) is read from its tail only. The
+    // trailer sits at the tail, so its records survive the cut; the rows above them may not.
     if (file.size() > kScrollbackMaxBytes) file.seek(file.size() - kScrollbackMaxBytes);
     QStringList lines = QString::fromUtf8(file.read(kScrollbackMaxBytes + 1)).split(QLatin1Char('\n'));
     if (!lines.isEmpty() && lines.constLast().isEmpty()) lines.removeLast();   // the trailing newline
-    return clampScrollback(lines, std::min(maxLines, kScrollbackMaxLines), kScrollbackMaxBytes);
+    ScrollbackFileText text;
+    const int separator = lines.indexOf(proseTrailerSeparator());
+    if (separator < 0) {
+        text.rows = lines;
+    } else {
+        text.rows = lines.mid(0, separator);
+        text.records = lines.mid(separator + 1);
+    }
+    return text;
+}
+
+QStringList readScrollbackFile(const QString &path, int maxLines) {
+    return clampScrollback(readScrollbackParts(path).rows, std::min(maxLines, kScrollbackMaxLines),
+                           kScrollbackMaxBytes);
+}
+
+QVector<ProseBlock> readProseFile(const QString &path) {
+    QVector<ProseBlock> prose;
+    const QStringList records = readScrollbackParts(path).records;
+    for (const QString &record : records) {
+        if (prose.size() >= kScrollbackMaxProseBlocks) break;
+        ProseBlock block = proseFromRecord(record);
+        if (block.uri.isEmpty() || block.lines.isEmpty()) continue;
+        prose.append(block);
+    }
+    return prose;
 }
 
 }  // namespace
 
-bool writeScrollback(const QString &id, const QStringList &lines, QString *error) {
+bool writeScrollback(const QString &id, const QStringList &lines, const QVector<ProseBlock> &prose,
+                     QString *error) {
     const QString path = scrollbackPath(id);
     if (path.isEmpty()) {
         if (error) *error = QStringLiteral("No writable place for this pane's scrollback.");
         return false;
     }
-    return writeScrollbackFile(path, lines, error);
+    return writeScrollbackFile(path, lines, prose, error);
 }
 
 QStringList readScrollback(const QString &id, int maxLines) {
     return readScrollbackFile(scrollbackPath(id), maxLines);
+}
+
+QVector<ProseBlock> readScrollbackProse(const QString &id) {
+    return readProseFile(scrollbackPath(id));
 }
 
 namespace {
@@ -467,16 +618,21 @@ QString guestPath(const QString &source, const QString &id) {
     return dir + QLatin1Char('/') + source + QLatin1Char('/') + id + QStringLiteral(".scrollback.txt");
 }
 
-bool write(const QString &path, const QStringList &lines, QString *error) {
+bool write(const QString &path, const QStringList &lines, const QVector<ProseBlock> &prose,
+          QString *error) {
     if (path.isEmpty()) {
         if (error) *error = QStringLiteral("No writable place for this conversation's terminal text.");
         return false;
     }
-    return windowstate::writeScrollbackFile(path, lines, error);
+    return windowstate::writeScrollbackFile(path, lines, prose, error);
 }
 
 QStringList read(const QString &path, int maxLines) {
     return windowstate::readScrollbackFile(path, maxLines);
+}
+
+QVector<ProseBlock> readProse(const QString &path) {
+    return windowstate::readProseFile(path);
 }
 
 QStringList sidecars(const QString &sessionDir, const QString &id) {

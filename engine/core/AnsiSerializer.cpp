@@ -2,6 +2,7 @@
 #include "AnsiSerializer.h"
 #include "InlineImage.h"
 #include "InlineMedia.h"
+#include "TerminalBackend.h"  // kProsePrefix
 
 #include <QStringList>
 
@@ -162,7 +163,8 @@ QString lineToSavedAnsi(const Line &line, const std::function<QString(uint32_t, 
     return lineToAnsi(line, [&](uint32_t id, int col) {
         const QString uri = linkUri ? linkUri(id, col) : QString();
         return uri.startsWith(QLatin1String(inlineimage::kImagePrefix)) ||
-                       uri.startsWith(QLatin1String(inlinemedia::kPrefix)) ? uri : QString();
+                       uri.startsWith(QLatin1String(inlinemedia::kPrefix)) ||
+                       uri.startsWith(QLatin1String(kProsePrefix)) ? uri : QString();
     });
 }
 
@@ -209,7 +211,8 @@ QString restorableAnsi(const QString &text)
                 i = end;
                 continue;
             }
-            if (inlineimage::parseImageUri(uri, nullptr) || inlinemedia::parseMediaUri(uri)) {
+            if (inlineimage::parseImageUri(uri, nullptr) || inlinemedia::parseMediaUri(uri) ||
+                uri.startsWith(QLatin1String(kProsePrefix))) {
                 clean += text.mid(i, end - i + 1);
                 inImage = true;
                 i = end;
