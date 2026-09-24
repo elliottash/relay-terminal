@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Switchboard on the owner's phone, desktop half (src/BoardRemote.h, card #SWPH): what a device
 // may ask, what each request becomes on the worker's wire, which events go back and under which
-// `rid`, that the board pane still gets every event, that Execute and Verify go through the
+// `rid`, that the board pane still gets every event, that Run and Verify go through the
 // window's hooks, and that all of it is refused while remote control is off.
 //
 // The window and RemoteShare are functions to the bridge, so this drives it with neither.
@@ -387,7 +387,7 @@ void BoardRemoteTests::executeGoesThroughTheWindowsHookAndClaimsTheCard()
     rig.event({{"event", "board_card"}, {"id", rig.lastWorkerId()}, {"card_id", "K7Q2"}, {"title", "The title"},
                {"status", "planned"}, {"hash", "h1"}, {"sections", QJsonArray{"Issue", "Plan"}},
                {"front", QJsonObject{{"acceptance", "it works"}}}});
-    // … then the window's Execute hook opens the pane, with the desktop's own task text …
+    // … then the window's Run hook opens the pane, with the desktop's own task text …
     QCOMPARE(rig.executed.size(), 1);
     QVERIFY(rig.executed.first().startsWith(QStringLiteral("K7Q2|")));
     QVERIFY(rig.executed.first().contains(QStringLiteral("K7Q2")));
@@ -405,7 +405,7 @@ void BoardRemoteTests::executeGoesThroughTheWindowsHookAndClaimsTheCard()
     QCOMPARE(rig.toHub.first().event, (QJsonObject{{"event", "board_action_result"}, {"id", "K7Q2"}, {"action", "execute"},
                                                    {"ok", true}, {"pane", rig.paneToken},
                                                    {"message", "#K7Q2 is executing in a new pane."}}));
-    QCOMPARE(rig.status, (QStringList{"Execute on #K7Q2 from iPhone"}));
+    QCOMPARE(rig.status, (QStringList{"Run on #K7Q2 from iPhone"}));
     // The claim's `board_written` is a broadcast like any other write.
     rig.event({{"event", "board_written"}, {"id", rig.lastWorkerId()}, {"kind", "board_claim"}, {"card_id", "K7Q2"}});
     QCOMPARE(rig.toHub.size(), 2);

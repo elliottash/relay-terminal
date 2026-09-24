@@ -21,7 +21,7 @@
 //
 // Three writes may wait for the link (comment, move, create): they go through app/outbox.js with
 // a `msg_id`, so a comment typed on a bus lands once when the phone is back. A Discuss, a Plan,
-// Execute and Verify start work on the desktop *now*, so offline they are refused in a line and
+// Run and Verify start work on the desktop *now*, so offline they are refused in a line and
 // the words stay in the box.
 
 import { renderMarkdown, renderLines, bodySections, numberedOptions, OPENABLE } from './boardmd.js';
@@ -862,7 +862,7 @@ export function mountBoard(options) {
     move.addEventListener('click', openMoveSheet);
     actions.append(move);
     if (!isClosed && !verifyLane) {
-      const execute = button('rb-action rb-action-execute', 'Execute');
+      const execute = button('rb-action rb-action-execute', 'Run');
       execute.disabled = running || !card;
       execute.addEventListener('click', () => runAction('execute'));
       actions.append(execute);
@@ -1094,7 +1094,7 @@ export function mountBoard(options) {
     } else if (!str(drafts.get(id)).trim()) drafts.set(id, text);
   }
 
-  // The desktop's own rule for Execute (src/BoardPane.cpp `execute()`): a card with neither a
+  // The desktop's own rule for Run (src/BoardPane.cpp `execute()`): a card with neither a
   // `## Plan` nor an acceptance line asks once, on the card and not in a dialog, because the
   // pane's agent would be working from the issue alone. The second tap goes ahead.
   let executeArmed = '';
@@ -1111,12 +1111,12 @@ export function mountBoard(options) {
     if (action === 'execute' && needsArming() && executeArmed !== id) {
       executeArmed = id;
       say(cardLine, `#${id} has no plan and no acceptance yet, so the pane’s agent would work from the issue alone. `
-        + 'Tap Execute again to hand it over as it is, or Plan first.', { error: true });
+        + 'Tap Run again to hand it over as it is, or Plan first.', { error: true });
       return;
     }
     executeArmed = '';
-    if (!online()) { say(cardLine, `Offline — ${action === 'verify' ? 'Verify' : 'Execute'} needs your desktop.`, { error: true }); return; }
-    say(cardLine, action === 'verify' ? 'Asking your desktop to verify…' : 'Asking your desktop to execute…', { keep: true });
+    if (!online()) { say(cardLine, `Offline — ${action === 'verify' ? 'Verify' : 'Run'} needs your desktop.`, { error: true }); return; }
+    say(cardLine, action === 'verify' ? 'Asking your desktop to verify…' : 'Asking your desktop to run…', { keep: true });
     request({ type: 'board_action', id, action })
       .catch((error) => sayAbout(id, error.message || 'That did not send.', { error: true }));
   }

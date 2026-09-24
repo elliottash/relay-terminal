@@ -561,7 +561,7 @@ void BoardRemote::workerEvent(QObject *owner, const QString &tab, const QJsonObj
         return;
     const QString type = event.value(QStringLiteral("event")).toString();
     const QString card = event.value(QStringLiteral("card_id")).toString();
-    // Which cards have a Discuss or Plan running (19.16), so that Execute and Verify from a device
+    // Which cards have a Discuss or Plan running (19.16), so that Run and Verify from a device
     // are refused mid-turn exactly as the desktop's buttons refuse them. Followed whether or not
     // remote control is on: the turn is running either way.
     if (!card.isEmpty()) {
@@ -654,7 +654,7 @@ void BoardRemote::actionResult(const Pending &pending, bool ok, const QString &p
                                        {QStringLiteral("message"), message}});
 }
 
-// Execute (`x`) and Verify (`v`) for a device. The rules are CardDetail::execute() / verify() and
+// Run (`r`) and Verify (`v`) for a device. The rules are CardDetail::execute() / verify() and
 // the writes are BoardView::executeCard() / verifyCard() (src/BoardPane.cpp): the same task text,
 // the same hook, the same hand-off message. What differs is only what a phone cannot do — there is
 // no reply box whose text rides along as a note, and no second press to arm a card that has

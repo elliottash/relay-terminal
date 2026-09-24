@@ -5038,10 +5038,10 @@ public:
             return true;
         };
         host.executeCard = [guard](const QString &tab, const QString &card, const QString &task) {
-            return guard ? guard->remoteCardPane(tab, card, QString(), task) : QString();
+            return guard ? guard->remoteCardPane(tab, card, QString(), task, true) : QString();
         };
         host.verifyCard = [guard](const QString &tab, const QString &card, const QString &runner, const QString &task) {
-            return guard && !runner.isEmpty() ? guard->remoteCardPane(tab, card, runner, task) : QString();
+            return guard && !runner.isEmpty() ? guard->remoteCardPane(tab, card, runner, task, false) : QString();
         };
         host.paneExists = [guard](const QString &token) {
             return guard && !token.isEmpty() && guard->findPaneByToken(token) != nullptr;
@@ -5093,18 +5093,21 @@ public:
         return tabHasBoard(current) ? tabIdOf(current) : QString();
     }
 
-    // Execute (`runner` empty) or Verify from a device. With a Switchboard pane in the tab this
+    // Run (`runner` empty) or Verify from a device. With a Switchboard pane in the tab this
     // *is* the desktop's code path: the pane's own onExecuteCard / onVerifyCard, as createBoardPane()
     // installed them. With none, the same pane is opened beside whatever the tab was last using —
-    // there is no board to keep a split for — and handed the same task the same way.
-    QString remoteCardPane(const QString &tab, const QString &card, const QString &runner, const QString &task) {
+    // there is no board to keep a split for — and handed the same task the same way. A Run works
+    // in the background (#E728): the desktop's tab and focus stay put, and the pane moves to the
+    // background window once its agent accepts the task. A Verify still takes the focus.
+    QString remoteCardPane(const QString &tab, const QString &card, const QString &runner, const QString &task,
+                           bool background) {
         QWidget *page = pageOfTabId(tab);
         if (!page) return {};
-        m_tabs->setCurrentWidget(page);     // the new pane takes the focus, as it does on the desktop
+        if (!background) m_tabs->setCurrentWidget(page);    // a Verify takes the focus, as on the desktop
         for (QWidget *leaf : leavesIn(page))
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
                 relay::BoardView *view = tool->board();
-                if (runner.isEmpty()) return view->onExecuteCard ? view->onExecuteCard(card, task, true) : QString();
+                if (runner.isEmpty()) return view->onExecuteCard ? view->onExecuteCard(card, task, background) : QString();
                 return view->onVerifyCard ? view->onVerifyCard(card, runner, task) : QString();
             }
         const QString workspace = boardWorkspaceOfTab(page);
@@ -5121,11 +5124,12 @@ public:
         if (!anchor || !leaves.contains(anchor)) anchor = leaves.isEmpty() ? nullptr : leaves.first();
         if (anchor) insertBeside(anchor, pane, Qt::Horizontal, false);
         else if (page->layout()) page->layout()->addWidget(pane);
-        setActive(pane);
-        focusLeaf(pane);
+        if (background) pane->markBackgroundTask(true);
+        else { setActive(pane); focusLeaf(pane); }
         if (guest) pane->startGuestBoardTask(runnerId, task, card);
         else pane->startBoardTask(task, card);
         updateTitles();
+        if (background) backgroundPaneWhenWorking(pane);
         return pane->sessionToken();
     }
 
@@ -5263,26 +5267,7 @@ public:
             if (runInBackground) pane->markBackgroundTask(true);
             pane->startBoardTask(task, card);
             w->updateTitles();
-            if (runInBackground) {
-                // A new pane configures asynchronously. Keep it visible until its agent accepts
-                // the task; a failed start leaves the reason and the pane on screen.
-                auto attempts = std::make_shared<int>(0);
-                QPointer<Pane> pending(pane);
-                QPointer<RelayWindow> owner(w);
-                auto *timer = new QTimer(pane);
-                timer->setInterval(250);
-                QObject::connect(timer, &QTimer::timeout, pane, [timer, attempts, pending, owner] {
-                    if (!pending || !owner || ++*attempts > 80) {
-                        timer->stop(); timer->deleteLater(); return;
-                    }
-                    if (*attempts >= 4 && pending->agentBusy()
-                        && pending->backgroundTaskState() == QStringLiteral("working")) {
-                        timer->stop(); timer->deleteLater();
-                        owner->backgroundPane(pending);
-                    }
-                });
-                timer->start();
-            }
+            if (runInBackground) w->backgroundPaneWhenWorking(pane);
             return pane->sessionToken();
         };
         // And the card wears that token (#R9G7): the chip on the row and on the card page says
@@ -7933,6 +7918,29 @@ private:
         // never what closes the window. Its × is the chrome's, so that button comes here too.
         if (auto *tool = dynamic_cast<ToolPane *>(pane); tool && tool->settings()) { closeSettingsPane(tool); return; }
         closePane(pane, true);
+    }
+
+    // A new pane configures asynchronously. A background run keeps the pane visible until its
+    // agent accepts the task, then moves it to the background window; a failed start leaves the
+    // reason and the pane on screen.
+    void backgroundPaneWhenWorking(Pane *pane) {
+        if (!pane) return;
+        auto attempts = std::make_shared<int>(0);
+        QPointer<Pane> pending(pane);
+        QPointer<RelayWindow> owner(this);
+        auto *timer = new QTimer(pane);
+        timer->setInterval(250);
+        connect(timer, &QTimer::timeout, pane, [timer, attempts, pending, owner] {
+            if (!pending || !owner || ++*attempts > 80) {
+                timer->stop(); timer->deleteLater(); return;
+            }
+            if (*attempts >= 4 && pending->agentBusy()
+                && pending->backgroundTaskState() == QStringLiteral("working")) {
+                timer->stop(); timer->deleteLater();
+                owner->backgroundPane(pending);
+            }
+        });
+        timer->start();
     }
 
     bool backgroundPane(Pane *pane) {

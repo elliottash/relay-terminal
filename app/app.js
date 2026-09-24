@@ -1744,7 +1744,7 @@ function transcribe(event) {
       const plan = el('div', 'plan');
       plan.append(el('div', 'plan-title', event.title || 'Plan'));
       plan.append(el('pre', 'plan-body', event.preview || ''));
-      const run = el('button', 'plan-run', 'Execute');
+      const run = el('button', 'plan-run', 'Run');
       run.type = 'button';
       run.addEventListener('click', () => {
         run.disabled = true;

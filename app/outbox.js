@@ -36,7 +36,7 @@ export const QUEUEABLE = new Set(['compose', 'agent_stop']);
 // …and, of the Board's requests (app/board.js, card #SWPH), the three that are a thing the
 // person *said* rather than a thing to start now: a comment, a move and a new card. They ride in
 // a `board_request` envelope, so the type that decides is the request's own. A Discuss, a Plan,
-// Execute and Verify start work on the desktop and are never kept: finding one running twenty
+// Run and Verify start work on the desktop and are never kept: finding one running twenty
 // minutes after the thought is the `keys` problem again.
 export const QUEUEABLE_BOARD = new Set(['board_comment', 'board_move', 'board_create']);
 
