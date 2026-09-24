@@ -65,13 +65,61 @@ function parseLinkFragment(fragment, secretField, incomplete, damagedText) {
 // The private key is generated non-extractable and kept as a CryptoKey, so it is never in reach of
 // script that can read it — including a later, hostile version of this app.
 
-function openDb() {
+// Opening the database is bounded and retried once (#SAW4). WebKit can leave an `open` request
+// that never fires either callback after iOS cold-starts a Home Screen app it had suspended; the
+// app then waited for ever on the pairing form, and a phone whose record was fine was paired
+// again. A stalled open now rejects with `StorageUnavailable`, which the app answers with "this
+// phone is paired, its storage is not answering" instead of a form.
+export class StorageUnavailable extends Error {}
+
+const OPEN_TIMEOUT_MS = 4000;
+let dbPromise = null;
+
+function openDbOnce() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new StorageUnavailable('this app\'s storage did not answer.'));
+    }, OPEN_TIMEOUT_MS);
+    let request;
+    try {
+      request = indexedDB.open(DB_NAME, 1);
+    } catch (error) {
+      clearTimeout(timer);
+      settled = true;
+      reject(new StorageUnavailable(error?.message || 'this app\'s storage is not available.'));
+      return;
+    }
     request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (settled) { db.close(); return; }      // answered after we gave up on it
+      settled = true;
+      clearTimeout(timer);
+      // Another tab upgrading or deleting the database must not be blocked by this handle, and
+      // the next call opens a fresh one.
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      db.onclose = () => { dbPromise = null; };
+      resolve(db);
+    };
+    request.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new StorageUnavailable(request.error?.message || 'this app\'s storage refused.'));
+    };
   });
+}
+
+function openDb() {
+  if (!dbPromise) {
+    dbPromise = openDbOnce()
+      .catch(() => openDbOnce())
+      .catch((error) => { dbPromise = null; throw error; });
+  }
+  return dbPromise;
 }
 
 async function dbGet(key) {
@@ -135,13 +183,44 @@ export async function dropValue(key) {
   await dbDelete(key);
 }
 
+// A note beside the record, in localStorage, that this app holds a pairing and with which
+// desktop (#SAW4). No key and no token: only enough to say "this phone is paired with <name>" when
+// IndexedDB does not answer, or "its pairing key is gone" when the record vanished, instead of
+// silently offering to pair as if it never had been.
+const HINT_KEY = 'relay.paired';
+
+export function pairedHint() {
+  try {
+    const hint = JSON.parse(localStorage.getItem(HINT_KEY) || 'null');
+    return hint && typeof hint.desktopName === 'string' ? hint : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHint(record) {
+  try {
+    if (record) {
+      localStorage.setItem(HINT_KEY, JSON.stringify({
+        desktopName: record.desktopName || 'your desktop', deviceId: record.deviceId || '',
+        pairedAt: record.pairedAt || Date.now() }));
+    } else {
+      localStorage.removeItem(HINT_KEY);
+    }
+  } catch {
+    // Private mode or a full quota: the hint is a courtesy, never a requirement.
+  }
+}
+
 export async function saveDevice(record) {
   if (!isDeviceRecord(record)) throw new Error('that is not a device record.');
   await dbPut('paired', record);
+  writeHint(record);
 }
 
 export async function forgetDevice() {
   await dbDelete('paired');
+  writeHint(null);
 }
 
 export async function saveGuest(record) {
@@ -228,6 +307,14 @@ export class Rrp extends EventTarget {
       pairedAt: Date.now(),
     };
     await saveDevice(record);
+    // Read it straight back (#SAW4). The private key is a non-extractable CryptoKey kept by
+    // structured clone, and a browser that stores it but hands back something unusable would
+    // otherwise surface only later, as a phone that "forgot" its pairing on the next start.
+    const kept = await loadDevice();
+    if (!kept || !(kept.devicePrivate instanceof CryptoKey) || kept.deviceId !== record.deviceId) {
+      throw new Error('This browser could not keep the pairing key, so the pairing would not '
+        + 'survive a restart. Update iOS or use another browser, then pair again.');
+    }
     this.record = record;
     // A pairing channel is for pairing. Drop it and come back as a paired device, so there is one
     // path into a working session and it is the one every later connection uses.

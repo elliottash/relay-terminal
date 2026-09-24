@@ -6,7 +6,7 @@
 // textContent. There is no innerHTML in this file, and the CSP forbids inline script anyway.
 
 import { Rrp, loadDevice, forgetDevice, fingerprint, b64, un64, storedValue, storeValue,
-  dropValue } from './rrp.js';
+  dropValue, pairedHint } from './rrp.js';
 import { ScreenView, KEYS, controlByte, keyEventBytes } from './screen.js';
 // A guest invited to one pane of somebody else's desktop is a different session, not this one
 // with buttons hidden (docs/REMOTE-PROTOCOL.md section 10). Their client takes the page over and
@@ -456,13 +456,47 @@ function appRoot() {
   return location.pathname.replace(/\/(pair|join)\/?$/, '/');
 }
 
+// Storage did not answer (#SAW4). The pairing is very likely still there — iOS cold-starting a
+// suspended Home Screen app is the usual cause — so this says so, retries on its own, and never
+// shows the pairing form: pairing again would only add another device record on the desktop.
+let storageRetries = 0;
+
+function storageTrouble() {
+  const hint = pairedHint();
+  show('start');
+  $('start-note').textContent = (hint
+    ? `This phone is paired with ${hint.desktopName}, but the app's storage is not answering yet. `
+    : 'The app\'s storage is not answering yet. ')
+    + 'Nothing is lost — trying again. If this stays, close Relay from the app switcher and open it again.';
+  $('start-retry').hidden = false;
+  if (storageRetries < 5) {
+    storageRetries += 1;
+    setTimeout(() => connectStored(), 2000 * storageRetries);
+  }
+}
+
 async function connectStored() {
-  const record = await loadDevice();
+  let record;
+  try {
+    record = await loadDevice();
+  } catch {
+    storageTrouble();
+    return;
+  }
+  storageRetries = 0;
   if (!record) {
     // No desktop of your own here. A guest record from an invitation is still somebody's live
     // session, and the app's start_url is '/', so it is checked before offering to pair.
     if (await startGuestIfInvited()) return;
     showWelcome();
+    // Storage answered, and the pairing is gone although this app once held one (#SAW4): say
+    // so, rather than let the form read as if this phone had never been paired.
+    const hint = pairedHint();
+    if (hint) {
+      $('welcome-note').textContent = `This phone was paired with ${hint.desktopName}, but its `
+        + 'pairing key is no longer in this app\'s storage — iOS may have cleared it. Pair again '
+        + 'below, and remove the old entry from the desktop\'s device list.';
+    }
     return;
   }
   setStatus('connecting…');
@@ -488,7 +522,18 @@ function scheduleReconnect(delay = 3000) {
   }
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
-    const record = await loadDevice();
+    // The record this page already connected with, when there is one: a reconnect needs no trip
+    // to storage, and a storage read that failed here used to throw out of the timer and end
+    // reconnecting for good (#SAW4).
+    let record = rrp.record && rrp.record.deviceId ? rrp.record : null;
+    if (!record) {
+      try {
+        record = await loadDevice();
+      } catch {
+        scheduleReconnect();
+        return;
+      }
+    }
     // `connecting` as well as `session`: a handshake that has begun has no session yet, and a
     // second `connect` on top of it opens a second channel to the desktop whose frames the first
     // one's cipherstate cannot read. That is one socket per wake-up event, which is what a phone
@@ -2044,7 +2089,8 @@ rrp.addEventListener('error', (event) => {
 });
 
 rrp.addEventListener('revoked', async () => {
-  await forgetDevice();
+  rrp.record = null;         // a reconnect dials from this record now; a revoked one must not
+  await forgetDevice().catch(() => {});
   outbox.clear();            // nothing staged for a desktop that will not take it
   board.reset();
   setStatus('revoked', 'warn');
@@ -2188,7 +2234,9 @@ window.addEventListener('DOMContentLoaded', () => {
   $('term-new-output').addEventListener('click', () => toLive());
   $('notify').addEventListener('click', toggleNotifications);
   $('pair-retry').addEventListener('click', () => location.reload());
+  $('start-retry').addEventListener('click', () => location.reload());
   $('forget').addEventListener('click', async () => {
+    rrp.record = null;
     await forgetDevice();
     outbox.clear();
     rrp.close();
@@ -2201,8 +2249,9 @@ window.addEventListener('DOMContentLoaded', () => {
   // this device is already paired, in which case the page is a paired phone's tab coming back
   // (a refresh, the app switcher) and belongs in the inbox, not at a note about scanning.
   if (!location.hash.includes('v=1') && /\/pair\/?$/.test(location.pathname)) {
-    loadDevice().then((record) => {
-      if (record) {
+    loadDevice().catch(() => undefined).then((record) => {
+      // `undefined`: storage did not answer, which connectStored explains (#SAW4).
+      if (record !== null) {
         history.replaceState(null, '', appRoot());
         connectStored();
         return;

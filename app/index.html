@@ -44,7 +44,19 @@
        the desktop, which is the one path that needs no camera, no clipboard and no second device
        to carry a link. The QR and the pasted link stay underneath, smaller, for the devices where
        scanning is the quicker act. -->
-  <section class="screen" id="screen-welcome">
+  <!-- What the app shows while it reads its own pairing (#SAW4). The pairing form used to be the
+       default screen, so a phone whose storage was slow to answer after iOS cold-started it looked
+       unpaired, and was paired again. app.js leaves this screen for the inbox, the welcome screen
+       only once storage has *said* there is no pairing, or a sentence and a retry here. -->
+  <section class="screen" id="screen-start">
+    <div class="pad">
+      <h1 id="start-title">Relay</h1>
+      <p id="start-note">Opening…</p>
+      <button type="button" id="start-retry" hidden>Try again</button>
+    </div>
+  </section>
+
+  <section class="screen" id="screen-welcome" hidden>
     <div class="pad">
       <!-- iPhone and iPad, not installed: this app has to be on the Home Screen before it is
            worth pairing, because iOS delivers Web Push only to an installed app and gives it

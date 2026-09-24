@@ -856,7 +856,8 @@ class Sidecar:
         self.host = host_mod.Host(self.identity, self.devices, self.source, app_base=self.base,
                                   approver=self.ask, name=message.get("name", "this desktop"),
                                   knock_approver=self.knock, prompt_approver=self.prompt,
-                                  control_approver=self.control)
+                                  control_approver=self.control,
+                                  hub_lock=host_mod.hub_lock_path(self.identity.desktop_id))
         # `device` is the id of the owner's own paired device holding the pane, empty when the
         # desktop, the agent or a guest holds it. The desktop needs it to know that its keystroke
         # has somebody to take the pane back *from* (section 10.3).

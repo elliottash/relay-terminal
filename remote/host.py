@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import fcntl
 import hmac
+import os
 import json
 import logging
 import random
@@ -29,6 +31,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from . import audit as audit_mod, control as control_mod, envelope, guests as guests_mod, \
@@ -58,6 +61,66 @@ HOUSEKEEPING = 1.0                 # how often lapsed prompts and control reques
 # every desktop's retry in the same tick.
 RECONNECT_MIN = 1.0
 RECONNECT_MAX = 60.0
+# A link that dies sooner than this after coming up did not really come up: the back-off keeps
+# growing instead of starting again from RECONNECT_MIN (#Q5QJ).
+LINK_SETTLED = 10.0
+# How often a hub that found another hub holding this identity checks whether it has gone.
+HUB_LOCK_RETRY = 5.0
+# The rendezvous's close code for "a newer connection for this desktop took the link".
+CLOSE_REPLACED = 4409
+REPLACED_REASON = ("another Relay on this machine, or another machine with this desktop's "
+                   "identity, holds the link; waiting for it to let go.")
+HUB_LOCKED_REASON = ("another Relay on this machine is already the remote hub for this "
+                     "identity; this one will take over when it quits.")
+
+
+def hub_lock_path(desktop_id: str) -> Path:
+    """Where the one-hub lock for this identity lives (#Q5QJ).
+
+    Named by the identity rather than put in the data directory: a Relay started with a scratch
+    ``XDG_DATA_HOME`` still loads the profile's identity from the keyring, and it is the identity
+    two hubs fight over. ``/tmp`` rather than ``XDG_RUNTIME_DIR`` or ``TMPDIR`` for the same
+    reason: test drives override those too.
+    """
+    return Path("/tmp") / f"relay-{os.getuid()}-hub-{desktop_id[:16]}.lock"
+
+
+class HubLock:
+    """One hub per desktop identity on this machine (#Q5QJ).
+
+    Two Relay processes in the same profile load the same identity, register as the same
+    desktop, and replace each other at the rendezvous every second or so, and every replacement
+    closes every phone channel. An exclusive, non-blocking ``flock`` beside the device store says
+    which process is the hub. The kernel drops it when the holder exits, crash included, so there
+    is no stale lock to clear.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self._fd: int | None = None
+
+    def acquire(self) -> bool:
+        if self._fd is not None:
+            return True
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return False
+        with contextlib.suppress(OSError):
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{os.getpid()}\n".encode())
+        self._fd = fd
+        return True
+
+    def release(self) -> None:
+        if self._fd is None:
+            return
+        with contextlib.suppress(OSError):
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+        os.close(self._fd)
+        self._fd = None
 
 
 def jittered(delay: float) -> float:
@@ -510,8 +573,14 @@ class Host:
                  knock_approver: KnockApprover = admit_nobody,
                  prompt_approver: PromptApprover = approve_no_prompts,
                  control_approver: ControlApprover = grant_control_to_nobody,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 hub_lock: Path | None = None):
         self.identity = identity
+        # The profile's hub lock (#Q5QJ). None in tests and for a CLI `--state` directory, whose
+        # identity is its own and cannot collide with the profile's.
+        self.hub_lock = HubLock(hub_lock) if hub_lock is not None else None
+        self.hub_lock_retry = HUB_LOCK_RETRY
+        self.link_settled = LINK_SETTLED
         self.devices = devices
         self.source = source
         self.app_base = app_base
@@ -758,9 +827,13 @@ class Host:
             # has to notice; the queues' clocks are injected, so a test calls `expire_pending`
             # instead of waiting ten minutes.
             self._housekeeping = asyncio.create_task(self._housekeep())
+        if self.hub_lock is not None and not await self._take_hub_lock():
+            return
         delay = self.reconnect_min
         while self._running:
             reason = "the rendezvous link is down."
+            up_since: float | None = None
+            replaced = False
             try:
                 url = self.socket_url()
                 self.socket = await ws.connect(url)
@@ -770,7 +843,7 @@ class Host:
                     continue
                 self._rehomed = False
                 log.info("connected to the rendezvous as %s", self.identity.desktop_id[:8])
-                delay = self.reconnect_min
+                up_since = time.monotonic()
                 self._link_changed(True, "")
                 pinging = asyncio.create_task(self.socket.keepalive(self.keepalive_seconds))
                 try:
@@ -779,6 +852,12 @@ class Host:
                     pinging.cancel()
             except (ws.WebSocketError, OSError) as error:
                 reason = self._link_reason(error)
+                if isinstance(error, ws.ConnectionClosed) and error.code == CLOSE_REPLACED:
+                    # Somebody else holds this desktop's link. Dialling straight back takes it
+                    # from them, they take it back, and every phone channel dies each time
+                    # (#Q5QJ). Wait the longest interval, and say why.
+                    replaced = True
+                    delay = self.reconnect_max
                 log.info("rendezvous link down (%s); retrying in %.0fs", error, delay)
             finally:
                 self.socket = None
@@ -792,14 +871,33 @@ class Host:
                 self._rehomed = False
                 continue
             self._link_changed(False, reason)
+            # Only a link that stayed up resets the back-off: one that dies at once is the same
+            # failure again, and must not be redialled every second for ever.
+            if not replaced and up_since is not None \
+                    and time.monotonic() - up_since >= self.link_settled:
+                delay = self.reconnect_min
             await asyncio.sleep(jittered(delay))
             delay = min(delay * 2, self.reconnect_max)
             await self._register_again()
+        if self.hub_lock is not None:
+            self.hub_lock.release()
         self._link_changed(False, "remote control is off.")
+
+    async def _take_hub_lock(self) -> bool:
+        """Wait until this process is the only hub for the identity, or ``stop`` is called."""
+        while self._running:
+            if self.hub_lock.acquire():
+                return True
+            log.info("another hub holds %s; waiting", self.hub_lock.path)
+            self._link_changed(False, HUB_LOCKED_REASON)
+            await asyncio.sleep(self.hub_lock_retry)
+        return False
 
     @staticmethod
     def _link_reason(error: Exception) -> str:
         """One sentence for the GUI: why the link is down, with no host or path in it."""
+        if isinstance(error, ws.ConnectionClosed) and error.code == CLOSE_REPLACED:
+            return REPLACED_REASON
         text = str(error)
         if "4401" in text:
             return "the rendezvous no longer knows this desktop; registering again."
