@@ -12,3 +12,6 @@
 
 <!-- relay:entry 20260924T012306Z-jv author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a546aaa38e9246e0857c476c7dfe6416 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["reports/Knowledge work across project… → {"plans": [], "commits": [], "evidence": ["reports/Knowledge work across project…
+
+<!-- relay:entry 20260924T014108Z-f7 author=agent kind=event model=claude-fable-5-1 pane=9b541d35 -->
+- ✦ agent updated this card · inserted `### 7. The task profile` before Open questions, added open question 6, pointer in §3
