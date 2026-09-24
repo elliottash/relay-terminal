@@ -683,7 +683,7 @@ private Q_SLOTS:
     // pane-scoped half waited for group 2, because a picker that cannot say *which* pane it means
     // lands on whichever one the person is looking at.
     void theWindowScopedGroupThreeKeysAreSafe() {
-        for (const QString &key : {QStringLiteral("tests.open"), QStringLiteral("app.about"),
+        for (const QString &key : {QStringLiteral("review.open"), QStringLiteral("tests.open"), QStringLiteral("app.about"),
                                    QStringLiteral("logs.open"), QStringLiteral("theme.folder"),
                                    QStringLiteral("agent.screenshotPane"), QStringLiteral("pane.equalize"),
                                    QStringLiteral("menu:closed")})

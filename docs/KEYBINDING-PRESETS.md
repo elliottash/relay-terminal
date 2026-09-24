@@ -29,6 +29,7 @@ The Relay preset after the move (action → keys; everything not listed is uncha
 | action id | keys | was |
 |---|---|---|
 | board.open | Ctrl+Shift+A | Ctrl+Shift+S |
+| review.open | Ctrl+Shift+R | — (Review queue; the key was freed from pane.restartShell) |
 | sessions.open (new) | Ctrl+Shift+S | — : "Sessions & Projects: sessions, projects, recently closed and globals" |
 | files.explorer | Ctrl+Shift+D | Ctrl+B, Ctrl+Shift+B (Ctrl+D is never bound: end-of-input) |
 | palette.open | — | Ctrl+Shift+A, then Ctrl+Shift+P; Ctrl+? opens Actions/help |
@@ -43,7 +44,7 @@ The Relay preset after the move (action → keys; everything not listed is uncha
 | globals.open | Ctrl+Shift+G | Restored as the direct Globals shortcut; plain Ctrl+G remains unbound |
 | closed.restore, pane.close, pane.splitRight | Ctrl+Shift+Z; Ctrl+W, Ctrl+Shift+W; Ctrl+E, Ctrl+Shift+E | unchanged |
 
-Freed in the Relay preset: Ctrl+Shift+Y, B, R, X and Ctrl+B. Ctrl+Shift+G opens Globals; Ctrl+G remains available to the editor or terminal program.
+Freed in the Relay preset: Ctrl+Shift+Y, B, X and Ctrl+B. Ctrl+Shift+G opens Globals; Ctrl+G remains available to the editor or terminal program.
 
 **What the move did to the other presets** (each change keeps the two rules above):
 

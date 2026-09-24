@@ -313,6 +313,7 @@ private:
         // A for the Board, S for Sessions, D for files: the left hand's home row (#QWAS). The Board
         // was Ctrl+Shift+S until 2026-09-22.
         add("board.open", "pane", "Board: cards, threads and plans (again to close it)", {QStringLiteral("Ctrl+Shift+A")});
+        add("review.open", "pane", "Review: cards awaiting your judgement", {QStringLiteral("Ctrl+Shift+R")});
         // Sessions and Projects have direct keys into the shared pane (#SPSG); recently closed
         // and background are nested under Sessions. agent.resume and conversations.open remain
         // registered for slash commands and user keybindings.json overrides.
@@ -479,8 +480,8 @@ private:
         // shortcut for showing / hiding the reasoning traces, maybe an F# key -- ... or alt+R").
         // Alt+R is his suggestion and no preset binds it: the only Alt+letter Relay has is Alt+F
         // (fast agent), and the four preset tables override no Alt+letter at all, so all of them
-        // inherit this default. No Ctrl+Shift twin (Ctrl+Shift+R was pane.restartShell's until
-        // #QWAS and is left free) and no F-key twin yet: which F-keys Relay should claim is
+        // inherit this default. No Ctrl+Shift twin (Ctrl+Shift+R opens Review since #JEWY)
+        // and no F-key twin yet: which F-keys Relay should claim is
         // docs/F-KEYS.md's question, not a thing to settle one action at a time.
         add("agent.thinkingPanel", "agent", "Reasoning: fold or unfold this pane's latest reasoning",
             {QStringLiteral("Alt+R")});

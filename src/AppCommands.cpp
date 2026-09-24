@@ -45,6 +45,7 @@ const QSet<QString> &readActions() {
         QStringLiteral("app.settings"),        // Options
         QStringLiteral("palette.open"),        // Actions
         QStringLiteral("board.open"),          // the Board
+        QStringLiteral("review.open"),         // human Review queue
         QStringLiteral("conversations.open"),  // the session manager
         QStringLiteral("projects.open"), QStringLiteral("globals.open"),
         QStringLiteral("closed.list"),

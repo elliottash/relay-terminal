@@ -5166,7 +5166,11 @@ public:
             if (auto *w = windowOf(guard)) w->openTestSuitesPane();
         };
         view->onOpenReview = [guard] {
-            if (auto *w = windowOf(guard)) w->openReviewPane();
+            if (auto *w = windowOf(guard)) {
+                w->openReviewPane();
+                w->hint(QStringLiteral("review.open.board"), relay::ShortcutHints::nextTime(
+                    Keymap::instance().shortcutText(QStringLiteral("review.open"))));
+            }
         };
         // The Profile button beside it (#7BM4 phase 5): the menu is the window's, anchored under
         // the button, and what it starts opens a result pane of the window's too.

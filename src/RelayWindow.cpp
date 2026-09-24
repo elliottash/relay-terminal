@@ -359,6 +359,13 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             tests.aliases = QStringLiteral("tests test suites ctest unittest flaky slow failing suite coverage runs");
             items << tests;
         }
+        {
+            PaletteItem review = actionItem(panes, QStringLiteral("Review"),
+                                            QStringLiteral("Cards awaiting your judgement"),
+                                            QStringLiteral("review.open"));
+            review.aliases = QStringLiteral("review verification human qa sign-off approvals");
+            items << review;
+        }
         // Offered only while this tab is attached to a project (#JN7X): with no project there is
         // nothing to detach from, and the quiet state must not advertise itself. No shortcut —
         // detaching is rare, so there is no fast path to teach and no hint entry.

@@ -27,6 +27,8 @@ private slots:
         keymap.setPreset(QStringLiteral("relay"));
         keymap.clearOverrides();
         QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+A")), QStringLiteral("board.open"));
+        QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+R")), QStringLiteral("review.open"));
+        QVERIFY(keymap.keysFor(QStringLiteral("pane.restartShell")).isEmpty());
         QVERIFY(keymap.actionForKey(QStringLiteral("Ctrl+Alt+F9")).isEmpty());
         keymap.setBinding(QStringLiteral("app.update"), {QStringLiteral("Ctrl+Alt+F9")});
         QCOMPARE(keymap.keysFor(QStringLiteral("app.update")), QStringList{QStringLiteral("Ctrl+Alt+F9")});
@@ -47,6 +49,7 @@ private slots:
         keymap.clearOverrides();
         for (const auto &preset : Keymap::presets()) {
             keymap.setPreset(preset.first);
+            QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+R")), QStringLiteral("review.open"));
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+S")), QStringLiteral("sessions.open"));
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+P")), QStringLiteral("projects.open"));
             QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+?")), QStringLiteral("help.shortcuts"));
