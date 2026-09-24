@@ -81,7 +81,9 @@ class SpecTests(unittest.TestCase):
                                         # protocol 32 (#AQ6X): the faults the machine tracks
                                         "board_signals",
                                         # protocol 31.10 (#JNYN): stage the card for its verifier
-                                        "board_try"))
+                                        "board_try",
+                                        # #95VZ: a person-served case into the ledger
+                                        "board_case"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)
@@ -3782,3 +3784,235 @@ class QaPolicyFloorTests(BoardToolsTest):
 
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()
+
+
+# --------------------------------------------------------------------------- the case ledger (#95VZ)
+
+class CaseLedgerTests(BoardToolsTest):
+    """Every writer leaves one row in `cases.jsonl`; `board_case` logs a person's case; the
+    readers filter it and keep confidential rows to the board's own workspace."""
+
+    REFEREE = ("artifact: text\nprimary: ai-text\nalso: person\nhuman: required\n"
+               "criteria: every major point is addressed\neffort: high\nrot: high\nconfidential: yes")
+    HEALTH = "artifact: system\nprimary: probe\neffort: low\nrot: medium"
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create(title="Referee the EJ paper", request="referee EJ-1234")
+
+    def load(self, skill_id, profile_text, version="sha256:abc"):
+        from relay_core.skills import parse_profile
+        self.tools.context.skill_loaded(skill_id, parse_profile(profile_text), version)
+
+    def rows(self, **filters):
+        from relay_core import cases
+        return cases.read(self.root, **filters)
+
+    def update(self, **args):
+        current = self.tools.run("board_read", {"id": self.card_id})["hash"]
+        return self.tools.run("board_update_card", {"id": self.card_id, "base_hash": current, **args})
+
+    def move(self, status, **args):
+        return self.tools.run("board_move_card", {"id": self.card_id, "status": status,
+                                                  "reason": f"to {status}", **args})
+
+    def test_board_case_logs_a_person_served_case_and_says_how_many(self):
+        result = self.tools.run("board_case", {"server": "referee-report", "cost": "3 h",
+                                               "input": "Referee-Work/EJ-1234.pdf"})
+        self.assertNotIn("error", result, result)
+        self.assertEqual((result["server"], result["served_by"], result["cases"]), ("referee-report", "person", 1))
+        self.assertFalse(result["third_case_hint"])
+        self.assertNotIn("hint", result)
+        (row,) = self.rows()
+        self.assertEqual(row["id"], result["case"])
+        self.assertEqual(row["cost"], {"seconds": 10800.0})
+        self.assertEqual(row["input"], "Referee-Work/EJ-1234.pdf")
+        self.assertEqual(row["verdict"], {"result": "pending", "who": "person", "revision": 1})
+        self.assertEqual(row["server_version"], "")
+        self.assertFalse(row["confidential"])
+        # No thread entry, no board event: the row is agent-facing (owner steer 2026-09-23).
+        self.assertEqual(self.thread_text(self.card_id).count("case"), 0)
+        self.assertFalse([e for e in self.events if e.get("event") == "board_activity"
+                          and "case" in str(e.get("summary", ""))])
+
+    def test_the_third_person_served_case_in_90_days_carries_the_hint_once(self):
+        from relay_core import cases
+        for _ in range(2):
+            self.tools.run("board_case", {"server": "person", "cost": "1 h", "input": "matter A"})
+        third = self.tools.run("board_case", {"server": "person", "cost": "1 h", "input": "matter B"})
+        self.assertTrue(third["third_case_hint"])
+        self.assertEqual(third["hint"], cases.hint_line("person"))
+        self.assertIn("build a server? (/deliver)", third["hint"])
+        fourth = self.tools.run("board_case", {"server": "person", "cost": "1 h"})
+        self.assertFalse(fourth["third_case_hint"])
+        # And a case served by a model does not count towards it.
+        self.assertEqual(self.tools.run("board_case", {"server": "other", "served_by": "openai/gpt-5-6"})["third_case_hint"], False)
+        self.assertEqual(len(self.rows()), 5)
+        self.assertEqual(self.board.check(), [])          # the ledger is not a card
+
+    def test_board_case_under_a_confidential_profile_drops_the_input(self):
+        self.load("referee-report", self.REFEREE, "sha256:deadbeef")
+        result = self.tools.run("board_case", {"server": "referee-report", "card": self.card_id,
+                                               "input": "the patient's file", "verdict": "pass"})
+        self.assertNotIn("error", result, result)
+        self.assertTrue(result["confidential"])
+        (row,) = self.rows()
+        self.assertNotIn("input", row)
+        self.assertEqual(row["server_version"], "sha256:deadbeef")
+        self.assertEqual(row["card"], self.card_id)
+        self.assertEqual(row["verdict"]["result"], "pass")
+        text = (self.root / "cases.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn("patient", text)
+
+    def test_board_case_refuses_what_it_cannot_record(self):
+        self.assertIn("server", self.tools.run("board_case", {})["error"])
+        self.assertIn("cost", self.tools.run("board_case", {"server": "x", "cost": "a while"})["error"])
+        self.assertEqual(self.tools.run("board_case", {"server": "x", "card": "ZZZZ"})["code"], "board_not_found")
+        self.assertIn("board_case takes", self.tools.run("board_case", {"server": "x", "who": "me"})["error"])
+        self.assertIn("never content", self.tools.run("board_case", {"server": "x", "input": "x" * 300})["error"])
+        self.assertEqual(self.rows(), [])
+        # A read-only turn writes no row either.
+        self.tools.readonly = True
+        self.assertEqual(self.tools.run("board_case", {"server": "x"})["code"], "board_readonly_turn")
+
+    def test_a_verdict_section_writes_a_decided_row_naming_the_cards_server(self):
+        self.load("referee-report", self.REFEREE, "sha256:v1")
+        self.tools.run("board_claim", {"id": self.card_id})
+        self.tools.begin_turn("t-2")                       # the verifier's turn loads nothing
+        result = self.update(replace_section={"heading": "Verdict", "text": "Pass. Every point is addressed."})
+        self.assertNotIn("error", result, result)
+        (row,) = self.rows(card=self.card_id)
+        self.assertEqual(result["case"], row["id"])
+        # Without a loaded skill the server is what the ledger already knows about the card —
+        # here nothing — so the card itself is the server, and the verdict is the first word.
+        self.assertEqual(row["server"], f"card:{self.card_id}")
+        self.assertEqual(row["verdict"], {"result": "pass", "who": "anthropic/claude-opus-5-5", "revision": 1})
+        self.assertEqual(row["signal"], {"mode": "person", "result": "pass"})
+        fail = self.update(append_section={"heading": "Verdict", "text": "**FAIL**: the gate let it through"})
+        self.assertEqual(self.rows(card=self.card_id)[-1]["verdict"]["result"], "fail")
+        self.assertIn("case", fail)
+        # An ordinary section is not a verdict and writes nothing.
+        self.update(append_section={"heading": "Findings", "text": "- x"})
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_a_verdict_row_reuses_the_server_of_the_turn_that_served_the_card(self):
+        self.tools.begin_turn("t-1b")                      # setUp's create was the last turn's
+        self.load("server-health-check", self.HEALTH, "sha256:h1")
+        self.tools.record_turn_cases(outcome="done", cost={"seconds": 12.5, "tokens": 900})
+        self.tools.begin_turn("t-2")
+        self.update(replace_section={"heading": "Verdict", "text": "passed"})
+        rows = self.rows(card=self.card_id)
+        self.assertEqual(len(rows), 1)                     # the turn row named no card…
+        turn_row = self.rows(server="server-health-check")[0]
+        self.assertIsNone(turn_row.get("card"))
+        # …so the verdict row falls back to the card as its own server.
+        self.assertEqual(rows[0]["server"], f"card:{self.card_id}")
+        # But a turn that wrote to the card names it, and the later verdict reuses that server.
+        self.tools.begin_turn("t-3")
+        self.load("server-health-check", self.HEALTH, "sha256:h1")
+        self.update(append_section={"heading": "Findings", "text": "- disk ok"})
+        self.tools.record_turn_cases(outcome="done", cost={"seconds": 3})
+        self.tools.begin_turn("t-4")
+        self.update(replace_section={"heading": "Verdict", "text": "pass"})
+        newest = self.rows(card=self.card_id)[-1]
+        self.assertEqual((newest["server"], newest["server_version"]), ("server-health-check", "sha256:h1"))
+
+    def test_a_turn_that_loaded_a_profiled_skill_leaves_a_pending_row(self):
+        self.load("referee-report", self.REFEREE, "sha256:r1")
+        self.load("plain", "")                              # no profile: no row
+        self.update(append_section={"heading": "Findings", "text": "- read it"})
+        self.tools.context.session_id = "s-9"
+        rows = self.tools.record_turn_cases(outcome="done",
+                                            cost={"seconds": 40.0, "tokens": 12000, "money": 0.04})
+        self.assertEqual(len(rows), 1)
+        (row,) = self.rows()
+        self.assertEqual(row["server"], "referee-report")
+        self.assertEqual(row["server_version"], "sha256:r1")
+        self.assertEqual(row["served_by"], "anthropic/claude-opus-5-5")
+        self.assertEqual(row["card"], self.card_id)
+        self.assertEqual(row["cost"], {"seconds": 40.0, "tokens": 12000, "money": 0.04})
+        self.assertEqual(row["signal"], {"mode": "ai-text", "result": "done"})
+        self.assertEqual(row["verdict"]["result"], "pending")
+        self.assertTrue(row["confidential"])                # the profile says so: no input
+        self.assertNotIn("input", row)
+        # A turn with no profiled skill writes nothing.
+        self.tools.begin_turn("t-2")
+        self.assertEqual(self.tools.record_turn_cases(), [])
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_a_move_to_done_is_a_pass_and_back_a_stage_is_a_fail(self):
+        self.tools.run("board_claim", {"id": self.card_id})
+        self.update(append_section={"heading": "Execution Summary", "text": "built"})
+        self.move("needs-verification", evidence="docs/qa_evidence/x/")
+        self.assertEqual(self.rows(), [])                   # not a verdict
+        back = self.move("executing")
+        self.assertNotIn("error", back, back)
+        self.assertEqual(self.rows()[-1]["verdict"]["result"], "fail")
+        self.assertEqual(self.rows()[-1]["card"], self.card_id)
+        self.move("needs-verification", evidence="docs/qa_evidence/x/")
+        self.update(append_section={"heading": "Verdict", "text": "pass"})
+        self.tools.context.actor = "owner"
+        self.tools.context.model = self.tools.context.preset = None
+        done = self.move("done")
+        self.assertNotIn("error", done, done)
+        self.assertIn("case", done)
+        results = [r["verdict"]["result"] for r in self.rows(card=self.card_id)]
+        self.assertEqual(results, ["fail", "pass", "pass"])
+        self.assertEqual(self.rows()[-1]["served_by"], "owner")
+
+    def test_board_list_cases_filters_by_server_and_card_and_hides_confidential_rows_elsewhere(self):
+        self.tools.run("board_case", {"server": "referee-report", "input": "EJ-1", "card": self.card_id})
+        self.tools.run("board_case", {"server": "rent", "input": "September"})
+        self.load("referee-report", self.REFEREE)
+        self.tools.run("board_case", {"server": "referee-report", "input": "secret"})
+        listed = self.tools.run("board_list", {"cases": True})
+        self.assertEqual(listed["total"], 3)
+        self.assertEqual([r["server"] for r in listed["cases"]], ["referee-report", "rent", "referee-report"])
+        self.assertEqual(listed["path"], "issues/cases.jsonl")
+        self.assertFalse(listed["confidential_hidden"])
+        by_server = self.tools.run("board_list", {"cases": True, "server": "rent"})
+        self.assertEqual([r["input"] for r in by_server["cases"]], ["September"])
+        by_card = self.tools.run("board_list", {"cases": True, "card": self.card_id.lower()})
+        self.assertEqual(by_card["total"], 1)
+        limited = self.tools.run("board_list", {"cases": True, "limit": 1})
+        self.assertTrue(limited["truncated"])
+        self.assertEqual(len(limited["cases"]), 1)
+        self.assertIn("pass cases: true", self.tools.run("board_list", {"server": "rent"})["error"])
+        self.assertIn("filters cards", self.tools.run("board_list", {"cases": True, "tab": "features"})["error"])
+        # A pane whose workspace is another project sees the same ledger minus the confidential row.
+        with tempfile.TemporaryDirectory() as other:
+            elsewhere = T.BoardTools(self.board, emit=self.events.append, workspace=other,
+                                     context=T.ToolContext(actor="agent"),
+                                     state_path=self.repo / ".relay" / "rate2.json")
+            self.assertFalse(elsewhere.own_workspace())
+            seen = elsewhere.run("board_list", {"cases": True})
+            self.assertEqual(seen["total"], 2)
+            self.assertTrue(seen["confidential_hidden"])
+            self.assertTrue(all(not r["confidential"] for r in seen["cases"]))
+        inside = T.BoardTools(self.board, emit=self.events.append, workspace=self.repo / "src",
+                              context=T.ToolContext(actor="agent"),
+                              state_path=self.repo / ".relay" / "rate3.json")
+        self.assertTrue(inside.own_workspace())
+        self.assertEqual(inside.run("board_list", {"cases": True})["total"], 3)
+
+    def test_the_qa_floor_counts_passing_cases_from_the_ledger(self):
+        from relay_core import cases
+        (self.root / B.BOARD_CONFIG).write_text(self.config + "qa: {ai_may_gate_after: 2}\n", encoding="utf-8")
+        self.tools = T.BoardTools(self.board, emit=self.events.append,
+                                  context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5-5"),
+                                  state_path=self.repo / ".relay" / "rate4.json")
+        self.tools.begin_turn("t-1")
+        self.load("referee-report", self.REFEREE)
+        block = {"artifact": "text", "primary": "ai-text", "also": ["person"], "effort": "low"}
+        # Not yet: the ledger has no passing case of this server, so AI may not gate.
+        first = self.update(fields={"verify": block})
+        self.assertIn("qa policy: primary ai-text → person, ai-text kept in also (AI gating is off)", first["qa_policy"])
+        for _ in range(2):
+            cases.append(self.root, cases.new_record("referee-report", served_by="openai/gpt-5-6", verdict="pass"))
+        # Two passing cases: the count is reached; what still stops it is the lineage rule,
+        # which this card cannot meet without an independent verifier on record.
+        second = self.update(fields={"verify": {**block, "effort": "medium"}})
+        self.assertNotIn("error", second, second)
+        self.assertIn("names no verifier outside the author's lineage", " ".join(second["qa_policy"]))
+        self.assertNotIn("AI gating is off", " ".join(second["qa_policy"]))
+

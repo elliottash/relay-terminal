@@ -50,6 +50,7 @@ from . import board as B
 from . import qa_verifiers as QA
 from .skills import PROFILE_VERIFY_KEYS
 from . import qa_policy as QP
+from . import cases as CASES
 from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
@@ -196,7 +197,15 @@ TOOL_SPECS = [
           "labels": {"type": "array", "items": {"type": "string"},
                      "description": "Every label must be present, e.g. ['bug'] for the fault list."},
           "query": {"type": "string", "description": "Case-insensitive text matched against id, title and body."},
-          "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_LIMIT}},
+          "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_LIMIT},
+          # The case ledger (#95VZ): not cards but served cases, the last N rows.
+          "cases": {"type": "boolean",
+                    "description": "true lists the board's case ledger (cases.jsonl) instead of "
+                                   "cards: the last `limit` rows, newest last, each with server, "
+                                   "served_by, cost, signal and verdict. Filter with server / card."},
+          "server": {"type": "string", "description": "With cases: only rows served by this skill id, "
+                                                      "program path or 'person'."},
+          "card": {"type": "string", "description": "With cases: only rows about this card."}},
          []),
     spec("board_read",
          "Read one card: its front matter, the Markdown body (request, decisions, tasks, QA checklist) "
@@ -412,6 +421,35 @@ TOOL_SPECS = [
          "card. Do that work in this turn and write `## Try it` with board_update_card. It is "
          "refused during a Board cleanup, which has no machine of its own to stage on.",
          {"card": _ID_ARG}, ["card"]),
+    spec("board_case",
+         "Log one served case to the board's case ledger (cases.jsonl) when a person did the work "
+         "by hand — a referee report, a client matter, a payment — naming what served it, who, "
+         "what it cost and a one-line reference to the input, never its content. The result "
+         "carries third_case_hint when this is the third person-served case of that server in "
+         "90 days; then you may add one line to your reply offering to build a server, and "
+         "never create a card for it yourself.",
+         {"server": {"type": "string",
+                     "description": "What served the case: a skill id, a program path, or "
+                                    "'person' for work with no server yet."},
+          "served_by": {"type": "string",
+                        "description": "'person' (default), or a model signature such as "
+                                       "anthropic/claude-opus-5-5."},
+          "cost": {"description": "What it cost: {tokens, seconds, money}, or a phrase like "
+                                  "'3 h', '45 min', '$12'.",
+                   "anyOf": [{"type": "string"}, {"type": "object"}]},
+          "input": {"type": "string",
+                    "description": "A path or a one-line reference to the input (a file, an "
+                                   "id, a subject line). Never the content. Dropped when the "
+                                   "loaded skill's profile says confidential: yes."},
+          "card": {"type": "string", "description": "The card this case belongs to, if any."},
+          "verdict": {"type": "string", "enum": list(CASES.VERDICTS),
+                      "description": "pass, fail or pending (default pending)."},
+          "signal": {"type": "string",
+                     "description": "The verify mode that judged it (script, probe, metric, "
+                                    "ai-text, ai-visual, level, pairwise, person, world)."},
+          "escalated": {"type": "string",
+                        "description": "Who it was escalated to, when it was."}},
+         ["server"]),
 ]
 
 #: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
@@ -490,7 +528,7 @@ CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
 OWNER_TOOLS = ("board_sections",)
 ALL_TOOL_NAMES = TOOL_NAMES + CLEANUP_TOOL_NAMES
 WRITE_TOOLS = ("board_create_card", "board_update_card", "board_move_card", "board_comment",
-               "board_claim",
+               "board_claim", "board_case",
                "board_merge_cards", "board_split_card", "board_sections", "board_import_items")
 
 #: The statuses that mean "somebody is on this" (#R9G7).  A card in one of them with a `session`
@@ -1183,15 +1221,21 @@ class ToolContext:
     #: one of them carries verify keys, `board_claim` and `board_update_card` fill a card's
     #: missing `verify` from it (`BoardTools._verify_from_skills`).
     skills: dict[str, dict] = field(default_factory=dict)
+    #: skill id → `cases.skill_version` of its SKILL.md (#95VZ), for the ledger row the turn's
+    #: end writes; "" when the agent could not read the file.
+    skill_versions: dict[str, str] = field(default_factory=dict)
 
     def signature(self) -> str:
         """This worker's own `provider/model`, or "" when it cannot know it."""
         return QA.signature(self.preset, self.model)
 
-    def skill_loaded(self, skill_id, profile) -> None:
-        """Record that this turn loaded `skill_id`, with its `profile` block (may be empty)."""
+    def skill_loaded(self, skill_id, profile, version: str = "") -> None:
+        """Record that this turn loaded `skill_id`, with its `profile` block (may be empty)
+        and, when the caller knows it, the `version` of its SKILL.md (#95VZ)."""
         if isinstance(skill_id, str) and skill_id.strip():
             self.skills[skill_id.strip()] = dict(profile) if isinstance(profile, dict) else {}
+            if isinstance(version, str) and version:
+                self.skill_versions[skill_id.strip()] = version
 
     def attrs(self) -> dict:
         out = {}
@@ -1398,8 +1442,14 @@ class BoardTools:
                  context: ToolContext | None = None, state_path: Path | str | None = None,
                  clock: Callable[[], float] = time.time, enforce_limits: bool = True,
                  duplicate_check: bool = True, state: str = "ready", project: str | None = None,
-                 init=None, pane_token: str | None = None, qa: dict | None = None):
+                 init=None, pane_token: str | None = None, qa: dict | None = None,
+                 workspace: str | os.PathLike | None = None):
         self.board = board
+        #: The workspace of the pane these tools serve, or None for the Board worker and for
+        #: tests.  The case ledger's confidential rows (#95VZ) are returned only when it is
+        #: this board's own project — `own_workspace()` — so a pane pointed at another
+        #: project's board reads that board's ledger minus the rows that name nothing.
+        self.workspace = Path(workspace).expanduser() if workspace else None
         #: This pane's session token, from `configure {pane_token}` (protocol 19.19), or None for
         #: the Board worker and for tests.  `board_claim` writes it onto the card as
         #: `session` and onto its progress entry as `pane_token`, so the Board can draw the
@@ -1457,6 +1507,9 @@ class BoardTools:
         self._order: list[str] = []
         self.creates_this_turn = 0
         self.writes_this_turn = 0
+        #: The cards this turn wrote to, in order (#95VZ): the row the turn's end writes for a
+        #: loaded profiled skill names the last of them.
+        self.cards_this_turn: list[str] = []
         #: Set while a `board_cleanup` turn runs (protocol 19.9): it raises the per-turn
         #: ceilings, offers the merge/split/sections tools, and records every write.
         self.cleanup: CleanupLog | None = None
@@ -1550,6 +1603,8 @@ class BoardTools:
         self.writes_this_turn = 0
         self.context.turn_id = turn_id
         self.context.skills.clear()
+        self.context.skill_versions.clear()
+        self.cards_this_turn = []
 
     def begin_cleanup(self, run_id: str, *, dry_run: bool = False, scope: str | None = None,
                       note: str | None = None, limits: dict | None = None) -> CleanupLog:
@@ -1815,6 +1870,7 @@ class BoardTools:
                        "board_sections": self._sections,
                        "tests_check": self._tests_check, "tests_run": self._tests_run,
                        "board_try": self._board_try,
+                       "board_case": self._case,
                        "board_signals": self._signals,
                        "board_import_items": self._import_items}[name]
             return handler(dict(args))
@@ -2005,12 +2061,16 @@ class BoardTools:
         return {card_id: len(entries) for card_id, entries in self._threads().items()}
 
     def _list(self, args: dict) -> dict:
-        allowed = {"tab", "status", "type", "labels", "query", "limit"}
+        allowed = {"tab", "status", "type", "labels", "query", "limit", "cases", "server", "card"}
         if set(args) - allowed:
             raise BoardToolError(f"board_list takes {', '.join(sorted(allowed))}.")
         limit = args.get("limit", 25)
         if not isinstance(limit, int) or not 1 <= limit <= MAX_LIST_LIMIT:
             raise BoardToolError(f"limit must be an integer from 1 to {MAX_LIST_LIMIT}.")
+        if args.get("cases"):
+            return self._list_cases(args, limit)
+        if args.get("server") is not None or args.get("card") is not None:
+            raise BoardToolError("server and card filter the case ledger: pass cases: true.")
         want_type = args.get("type")
         if want_type is not None and want_type not in B.CARD_TYPES:
             raise BoardToolError(f"type must be one of {', '.join(B.CARD_TYPES)}.")
@@ -2125,7 +2185,7 @@ class BoardTools:
         reads the card's `qa` recommendation (protocol 19.15) without its commit list."""
         implementer = str(card.front.get("implemented_by") or "").strip()
         qa = QA.recommend_here(implementer) if implementer else None
-        return QP.apply(self.qa_policy, verify, qa)
+        return QP.apply(self.qa_policy, verify, qa, cases=self._verified_cases(card))
 
     def _apply_qa_floor(self, card: B.Card) -> list[str]:
         """Run the floor over the `verify` block already on the card, in place, and return the
@@ -2201,6 +2261,8 @@ class BoardTools:
                              moved_from=moved_from, others=list(others))
         self.writes[write_id] = record
         self._order.append(write_id)
+        if card_id and card_id not in self.cards_this_turn:
+            self.cards_this_turn.append(card_id)
         while len(self._order) > 50:
             self.writes.pop(self._order.pop(0), None)
         rel = str(path.relative_to(self.board.repo))
@@ -2366,6 +2428,7 @@ class BoardTools:
 
         changes: list[str] = []
         rewrites: list[tuple[str, str, str]] = []   # (what, old, new)
+        verdict_text: str | None = None              # a `## Verdict` this write put on the card
 
         fields = args.get("fields")
         if fields is not None:
@@ -2445,6 +2508,8 @@ class BoardTools:
             changes.append(f"{verb} `## {heading}`")
             if replace and old_text.strip() and is_owner_section(heading):
                 rewrites.append((f"## {heading}", old_text, text))
+            if heading.strip().lower() in ("verdict", "qa verdict", "qa result"):
+                verdict_text = text
 
         if args.get("tasks") is not None:
             items = _task_items(args["tasks"], card)
@@ -2480,8 +2545,17 @@ class BoardTools:
         for what, old, new in rewrites:
             self._append(card, _rewrite_entry(what, old, new), kind="rewrite")
         write_id = self._record("update", card, summary, before, size)
+        # A verifier's `## Verdict` is a case decided (#95VZ): one ledger row naming the server
+        # that served the card, with the verdict's first decisive word as its result.
+        case = None
+        if verdict_text is not None:
+            case = self.record_case(card=card.id, verdict=CASES.verdict_from_text(verdict_text),
+                                    signal={"mode": _primary_mode(card),
+                                            "result": CASES.verdict_from_text(verdict_text)},
+                                    input=f"card #{card.id}")
         return {"id": card.id, "hash": B.file_hash(card.path), "changes": changes,
                 "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites],
+                **({"case": case["id"]} if case else {}),
                 **({"qa_policy": qa_notes} if qa_notes else {}),
                 **({"verify_defaulted_from": defaulted_from} if defaulted_from else {}),
                 **({"note": verify_note} if verify_note else {})}
@@ -2671,11 +2745,24 @@ class BoardTools:
             line += f" · verified_by {verified}"
         self._append(card, line, kind="event")
         write_id = self._record("move", card, summary, before_bytes, size, moved_from)
+        # The ledger (#95VZ): `done` is the case passed; a card sent back a stage from
+        # verification, a QA lane or `done` is the case failed.  Other moves are not verdicts.
+        case = None
+        if card.type == "work" and status != old_status:
+            back = (old_status in (*QA_STATUSES, "needs-verification", "needs-review", "done")
+                    and _status_rank(status) < _status_rank(old_status)
+                    and status not in ("done", "dropped"))
+            if status == "done" or back:
+                case = self.record_case(card=card.id, verdict="pass" if status == "done" else "fail",
+                                        input=f"card #{card.id}",
+                                        signal={"mode": _primary_mode(card),
+                                                "result": "pass" if status == "done" else "fail"})
         return {"id": card.id, "status": status, "section": new_section or None, "tab": tab,
                 "rank": card.rank,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
                 "write_id": write_id, "summary": summary,
+                **({"case": case["id"]} if case else {}),
                 **({"qa_policy": qa_note} if qa_note else {})}
 
     def set_priority(self, card_id: str, priority) -> dict:
@@ -3076,6 +3163,164 @@ class BoardTools:
                 str(TI.evidence_dir_for(self.board.repo, card_id).relative_to(self.board.repo)),
                 "reusing": bool(staged and staged.get("stage")),
                 "staged": (staged or {}).get("stage") or ""}
+
+    # ---- the case ledger (#95VZ) ------------------------------------------------
+    def own_workspace(self) -> bool:
+        """Whether the pane these tools serve works *in* this board's project.  The Board
+        worker and a test pass no workspace and count as the board's own; a pane pointed at
+        another project's board (`set_board`) does not, and then the ledger's confidential
+        rows are not its to read."""
+        if self.workspace is None:
+            return True
+        try:
+            here, repo = self.workspace.resolve(), Path(self.board.repo).resolve()
+        except OSError:                                     # pragma: no cover - unreadable path
+            return False
+        return here == repo or here.is_relative_to(repo)
+
+    def ledger(self, *, server: str | None = None, card: str | None = None,
+               limit: int | None = None) -> list[dict]:
+        """The ledger's rows, confidential ones included only for the board's own workspace."""
+        return CASES.read(self.board.root, server=server, card=card, limit=limit,
+                          include_confidential=self.own_workspace())
+
+    def _profiled_skill(self) -> tuple[str | None, dict]:
+        """The one skill this turn loaded that carries a profile, or (None, {}) when there is
+        none or more than one — the same rule `_verify_from_skills` applies."""
+        profiled = {sid: prof for sid, prof in self.context.skills.items()
+                    if isinstance(prof, dict) and prof}
+        if len(profiled) != 1:
+            return None, {}
+        (sid, prof), = profiled.items()
+        return sid, prof
+
+    def _server_for_card(self, card_id: str | None) -> tuple[str, str, dict]:
+        """`(server, server_version, profile)` for a row about `card_id`: the loaded profiled
+        skill this turn, else what the ledger's newest row about the card says, else the
+        card itself (`card:<ID>`, a card that served as its own server)."""
+        sid, profile = self._profiled_skill()
+        if sid:
+            return sid, self.context.skill_versions.get(sid, ""), profile
+        if card_id:
+            prior = CASES.read(self.board.root, card=card_id, limit=1)
+            if prior:
+                return (str(prior[-1].get("server") or f"card:{card_id}"),
+                        str(prior[-1].get("server_version") or ""),
+                        {"confidential": "yes"} if prior[-1].get("confidential") else {})
+        return f"card:{card_id}" if card_id else CASES.PERSON, "", {}
+
+    def _verified_cases(self, card: B.Card) -> int:
+        """What `qa_policy`'s `ai_may_gate_after` / `sample_after` count against: passing
+        rows for the server that serves this card, or across the board when no row and no
+        loaded skill says which server that is."""
+        try:
+            rows = CASES.read(self.board.root)
+        except OSError:                                     # pragma: no cover - unreadable ledger
+            return 0
+        if not rows:
+            return 0
+        server, _, _ = self._server_for_card(card.id)
+        mine = CASES.verified_count(rows, server) if not server.startswith("card:") else 0
+        return mine if mine else CASES.verified_count(rows)
+
+    def record_case(self, *, card: str | None = None, verdict=None, served_by: str | None = None,
+                    server: str | None = None, server_version: str | None = None, cost=None,
+                    signal=None, escalated=None, input: str | None = None,
+                    confidential: bool | None = None) -> dict | None:
+        """Append one row for a case this pane served or judged; None when the board has no
+        directory to write in or the row cannot be written.  Never raises on the write —
+        a ledger that cannot be appended must not fail the card write it rides on — and never
+        emits an event: the row is agent-facing (owner, 2026-09-23)."""
+        who = served_by or self.context.signature() or self.context.actor
+        srv, ver, profile = self._server_for_card(card)
+        if server:
+            srv = server
+            ver = server_version or (CASES.PERSON if server == CASES.PERSON else "")
+            profile = self.context.skills.get(server) or {}
+        elif server_version:
+            ver = server_version
+        if confidential is None:
+            confidential = str(profile.get("confidential") or "").lower() == "yes"
+        try:
+            row = CASES.new_record(srv, served_by=who, server_version=ver, card=card, input=input,
+                                   cost=cost, signal=signal, escalated=escalated, verdict=verdict,
+                                   confidential=confidential)
+        except CASES.CaseError as exc:
+            raise BoardToolError(str(exc), code="board_refused") from exc
+        try:
+            return CASES.append(self.board.root, row)
+        except OSError:
+            return None
+
+    def record_turn_cases(self, *, outcome: str = "done", cost=None) -> list[dict]:
+        """The end of a turn that loaded a profiled skill (#95VZ): one row per such skill,
+        pending, costed with the turn's usage, about the last card the turn wrote to.  Called
+        by `Agent._end_turn`; a turn that loaded no profiled skill writes nothing."""
+        rows = []
+        card = self.cards_this_turn[-1] if self.cards_this_turn else None
+        turn = self.context.attrs().get("turn")
+        for sid, profile in list(self.context.skills.items()):
+            if not isinstance(profile, dict) or not profile:
+                continue
+            row = self.record_case(server=sid, server_version=self.context.skill_versions.get(sid, ""),
+                                   card=card, cost=cost, verdict="pending",
+                                   signal={"mode": profile.get("primary", ""), "result": outcome},
+                                   input=f"turn {turn}" if turn else None)
+            if row is not None:
+                rows.append(row)
+        return rows
+
+    def _case(self, args: dict) -> dict:
+        """`board_case`: the agent logs a case a person served (or one it served outside a
+        card).  The result says how many rows the server now has and, at the third
+        person-served case of one server inside 90 days, `third_case_hint: true` with the
+        one line the agent may put in its reply (owner, 2026-09-23: a line, never a card)."""
+        allowed = {"server", "served_by", "cost", "input", "card", "verdict", "signal", "escalated"}
+        if set(args) - allowed:
+            raise BoardToolError(f"board_case takes {', '.join(sorted(allowed))}.")
+        server = args.get("server")
+        if not isinstance(server, str) or not server.strip():
+            raise BoardToolError("board_case needs server: a skill id, a program path, or 'person'.")
+        server = server.strip()
+        served_by = args.get("served_by")
+        if served_by is not None and (not isinstance(served_by, str) or not served_by.strip()):
+            raise BoardToolError("served_by must be 'person' or a model signature.")
+        served_by = (served_by or CASES.PERSON).strip()
+        card_id = normalize_id(args["card"], "card") if args.get("card") else None
+        if card_id:
+            self._card(card_id)
+        skill = self.context.skills.get(server)
+        version = self.context.skill_versions.get(server) if skill is not None else None
+        if version is None:
+            version = CASES.PERSON if server == CASES.PERSON else ""
+        row = self.record_case(server=server, server_version=version, served_by=served_by,
+                               card=card_id, cost=args.get("cost"), input=args.get("input"),
+                               verdict=args.get("verdict"), signal=args.get("signal"),
+                               escalated=args.get("escalated"))
+        if row is None:
+            raise BoardToolError("the case ledger could not be written.", code="board_error")
+        rows = CASES.read(self.board.root, server=server)
+        hint = CASES.third_case_hint(rows, server)
+        return {"case": row["id"], "when": row["when"], "server": server,
+                "served_by": row["served_by"], "cases": len(rows),
+                "confidential": row["confidential"], "third_case_hint": hint,
+                **({"hint": CASES.hint_line(server)} if hint else {})}
+
+    def _list_cases(self, args: dict, limit: int) -> dict:
+        """`board_list {cases: true}`: the last `limit` rows, oldest first, filtered by
+        `server` / `card`; confidential rows only for the board's own workspace."""
+        for key in ("tab", "status", "type", "labels", "query"):
+            if args.get(key) is not None:
+                raise BoardToolError(f"{key} filters cards, not cases; with cases: true pass "
+                                     "server or card.")
+        server = args.get("server")
+        if server is not None and (not isinstance(server, str) or not server.strip()):
+            raise BoardToolError("server must be a skill id, a program path, or 'person'.")
+        card = normalize_id(args["card"], "card") if args.get("card") else None
+        rows = self.ledger(server=server.strip() if server else None, card=card)
+        return {"cases": rows[-limit:], "total": len(rows), "truncated": len(rows) > limit,
+                "path": str(CASES.ledger_path(self.board.root).relative_to(self.board.repo)),
+                "confidential_hidden": not self.own_workspace()}
 
     # ---- the faults the machine tracks (protocol 32, #AQ6X) --------------------
     def _signal_state(self):
@@ -3833,6 +4078,24 @@ class BoardTools:
 
 
 # ------------------------------------------------------------------ text plumbing
+
+def _primary_mode(card: B.Card) -> str:
+    """The card's `verify.primary`, or "" when it has no readable block — the `signal.mode`
+    of a ledger row about it (#95VZ)."""
+    try:
+        verify = B.verify_block(card)
+    except B.BoardError:
+        return ""
+    return str((verify or {}).get("primary") or "")
+
+
+def _status_rank(status: str) -> int:
+    """Where a status sits on the board's stage order (`board._STATUS_ORDER`); unknown last."""
+    try:
+        return B._STATUS_ORDER.index(status)
+    except ValueError:
+        return len(B._STATUS_ORDER)
+
 
 def preview_line(name: str, args: dict) -> str:
     """One line describing a write a tool call would make (the dry-run changelog)."""

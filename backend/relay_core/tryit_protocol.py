@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import board as B
+from . import cases
 from .board_tools import BoardToolError, card_brief, normalize_id, section_text
 
 #: The requests this class answers.  `board_protocol.TYPES` includes them and delegates here.
@@ -404,6 +405,14 @@ class TryItCommands:
         entry.append(f'A: "{text}"')
         _checked(tools.run("board_comment", {"id": card_id, "kind": "decision",
                                              "text": "\n".join(entry)}))
+        # The case ledger (#95VZ): a Try it answer is the person's signal on this case.  The
+        # row says a person judged it; the verdict is what their words decide, `pending` when
+        # they decide nothing in so many words.
+        if hasattr(tools, "record_case"):
+            tools.record_case(card=card_id, served_by=cases.PERSON,
+                              verdict=cases.verdict_from_text(text),
+                              signal={"mode": "person", "result": cases.verdict_from_text(text)},
+                              input=f"card #{card_id} Try it answer")
 
         # 2. The seal. `expected.md` is read from the evidence directory the section names, and
         #    appended under the section — once: a second answer must not paste it in again.

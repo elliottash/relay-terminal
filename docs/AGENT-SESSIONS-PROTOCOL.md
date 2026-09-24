@@ -4262,6 +4262,68 @@ user's to close; under `automatic` the move proceeds and the result's `qa_policy
 `closed automatically: …` for the reply's one line. The owner's own close, a self-close out
 of `executing`, a card with no block and a card whose person has answered are not gated.
 
+### 19.22 The case ledger: `cases.jsonl`, `board_case`, `board_list {cases}` (v4.11, 2026-09-24, card #95VZ)
+
+A card is built; a case is served (design #1QKM §1). `backend/relay_core/cases.py` keeps one JSON
+line per served case in `<board>/cases.jsonl` — git-tracked, append-only, written under the board
+directory's lock exactly as a thread entry is — and nothing draws it: the rows are agent-facing
+(owner steer 2026-09-23, "most of this is just in the agent's work and the user doesn't see it
+directly"). The keys, in this order:
+
+| Key | Value |
+|---|---|
+| `id` | `c-` + 8 hex |
+| `when` | UTC, `YYYY-MM-DDTHH:MM:SSZ` |
+| `server` | a skill id, a program path, `card:<ID>` for a card that served as its own server, or `person` |
+| `server_version` | `sha256:…` of the skill's SKILL.md; `<path>@<HEAD>` for a program; `person` |
+| `served_by` | `person`, or the model signature of 19.15 (`anthropic/claude-opus-5-5`) |
+| `card` | the card id, when there is one (absent otherwise) |
+| `input` | a path or a one-line reference, at most 200 characters, never content; **absent** on a confidential row |
+| `cost` | `{tokens, seconds, money}`, each optional |
+| `signal` | `{mode, result}`: the verify primary mode that judged it and what it said |
+| `escalated` | `{yes: bool, to?: string}` |
+| `verdict` | `{result: pass \| fail \| pending, who, revision}` |
+| `confidential` | bool: the row carries only ids and numbers |
+
+```json
+{"id":"c-8f3a2b1c","when":"2026-09-23T14:02:11Z","server":"referee-report",
+ "server_version":"sha256:9d1c…","served_by":"person","card":"K7Q2",
+ "input":"Referee-Work/2026/EJ-1234.pdf","cost":{"seconds":10800.0},
+ "signal":{"mode":"person","result":"pass"},"escalated":{"yes":false},
+ "verdict":{"result":"pass","who":"person","revision":1},"confidential":false}
+```
+
+**Writers**, each the smallest hook: the end of an agent turn that loaded a skill with a
+`profile:` (`Agent._end_turn` → `BoardTools.record_turn_cases`: one `pending` row per such
+skill, `served_by` the worker's signature, `cost` from the turn's usage, `card` the last card
+the turn wrote to, `input` the session/turn reference); `try_answer` (a `person` row about the
+card, verdict read from the answer's first decisive word, `pending` when it has none); a
+`## Verdict` written through `board_update_card` (verdict from its first `pass`/`fail` word);
+`board_move_card` to `done` (`pass`) or from `needs-verification`, a QA lane or `done` back a
+stage (`fail`); and **`board_case`**, the agent's tool for a case a person served —
+`{server, served_by?, cost?, input?, card?, verdict?, signal?, escalated?}`, `cost` an object or
+a phrase (`3 h`, `45 min`, `$12`). A row about a card names the server the turn loaded, else the
+server the ledger already names for that card, else `card:<ID>`; a row written while a
+`confidential: yes` profile is loaded drops `input`. `board_case`'s result is `{case, when,
+server, served_by, cases, confidential, third_case_hint}` plus `hint` — one line, `three cases
+of <server> served by a person in 90 days; build a server? (/deliver)` — exactly at the third
+person-served case of one server inside 90 days (`cases.third_case_hint`). Whether that line
+reaches the reply is the agent's choice; no card is ever created for it (owner, 2026-09-23).
+`board_update_card` and `board_move_card` results carry `case: "<id>"` when they wrote a row.
+No writer emits a board event or a thread entry for a row.
+
+**Readers.** `board_list {cases: true, server?, card?, limit?}` answers
+`{cases: [rows, oldest first, the last limit], total, truncated, path, confidential_hidden}`;
+confidential rows are included only when the caller's workspace is this board's project
+(`BoardTools.own_workspace`: the `configure` workspace is the board's repository or inside it;
+the Board worker and a pane with no workspace count as its own), and `confidential_hidden` says
+when they were left out. `skills_list` items with a `profile` carry `cases`, `last_served`,
+`pass_rate_30` (the share of passes among the last 30 decided rows, `null` when none) and
+`stale` (no passing row within the profile's `rot`: `low` 90 days, `medium` 30, `high` 7; a
+skill with no row is not stale) from the workspace's board ledger — `cases.stats`. The QA policy
+floor's `ai_may_gate_after` / `sample_after` numbers (19.21) count passing rows the same way
+(`cases.verified_count`, docs/BOARD-FORMAT.md §4).
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`

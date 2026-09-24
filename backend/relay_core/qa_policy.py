@@ -20,7 +20,9 @@ Three layers, project over global over the defaults in code::
 (agent-facing notes for the tool result, never text a user reads), and `effective_line` is the
 one-line statement `board_read` carries so an agent can see the floor it works under.  Pure
 functions: no file, no board, no clock.  The counters `<N>` compare against are the case ledger
-of #95VZ; until that lands `apply` is given ``cases=0``, so an integer reads as "not yet".
+of #95VZ (`relay_core.cases`): `BoardTools._qa_floor` passes ``cases=`` the number of passing
+rows for the server that serves the card (`cases.verified_count`), so an integer is a real
+threshold, and a caller with no ledger passes 0, which reads as "not yet".
 """
 from __future__ import annotations
 

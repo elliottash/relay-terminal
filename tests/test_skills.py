@@ -498,6 +498,39 @@ class ProfileTests(unittest.TestCase):
                           by['server-health-check'].profile['location']), ('probe', 'yes', 'remote'))
 
 
+class CaseStatisticsTests(unittest.TestCase):
+    """#95VZ: a `skills_list` item with a profile carries its case statistics from the
+    workspace's board ledger — cases, last_served, pass_rate_30, stale — and nothing else does."""
+
+    def test_profiled_items_carry_the_four_statistics_from_the_boards_ledger(self):
+        from relay_core import cases, skill_manage
+        with tempfile.TemporaryDirectory() as temp:
+            ws = Path(temp) / 'ws'
+            (ws / 'issues').mkdir(parents=True)
+            (ws / 'issues' / 'board.yaml').write_text('version: 1\ntabs: [{id: features, folder: features}]\n')
+            base = ws / '.relay' / 'skills'
+            write(base / 'referee' / 'SKILL.md', '---\nname: referee\ndescription: Referee\nprofile: |\n'
+                  '  artifact: text\n  primary: ai-text\n  effort: high\n  rot: high\n---\nBody\n')
+            write(base / 'plain' / 'SKILL.md', '---\nname: plain\ndescription: Plain\n---\nBody\n')
+            cases.append(ws / 'issues', cases.new_record('referee', served_by='person', verdict='pass',
+                                                         when='2026-01-01T10:00:00Z'))
+            cases.append(ws / 'issues', cases.new_record('referee', served_by='openai/gpt-5-6', verdict='fail',
+                                                         when='2026-01-02T10:00:00Z'))
+            cases.append(ws / 'issues', cases.new_record('referee', served_by='openai/gpt-5-6',
+                                                         when='2026-01-03T10:00:00Z'))
+            rows = {item['name']: item for item in skill_manage.list_skills([base], workspace=str(ws))}
+            referee = rows['referee']
+            self.assertEqual((referee['cases'], referee['last_served']), (3, '2026-01-03T10:00:00Z'))
+            self.assertEqual(referee['pass_rate_30'], 0.5)          # pending rows are not decided
+            self.assertTrue(referee['stale'])                       # rot high: 7 days since the last pass
+            for key in ('cases', 'last_served', 'pass_rate_30', 'stale'):
+                self.assertNotIn(key, rows['plain'])
+            # No board: a profiled skill still lists, uncounted and not stale.
+            nowhere = {item['name']: item for item in skill_manage.list_skills([base], workspace=temp)}
+            self.assertEqual((nowhere['referee']['cases'], nowhere['referee']['stale']), (0, False))
+            self.assertIsNone(nowhere['referee']['pass_rate_30'])
+
+
 class RealSkillsTest(unittest.TestCase):
     def test_home_skills_index_without_errors(self):
         home = Path.home() / '.warp' / 'skills'

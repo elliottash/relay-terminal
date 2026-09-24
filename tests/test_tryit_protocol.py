@@ -388,6 +388,18 @@ class AnswerTests(TryItTest):
         self.assertIn("docs/qa_evidence", human)
         self.assertIn("Generated from", human)
 
+    def test_the_answer_leaves_a_person_served_row_in_the_case_ledger(self):
+        # #95VZ: the person's Try it answer is their signal on the case.
+        from relay_core import cases
+        self.staged_section()
+        self.assertEqual(cases.read(self.root), [])
+        self.answer()
+        (row,) = cases.read(self.root, card=self.card)
+        self.assertEqual((row["served_by"], row["signal"]["mode"]), ("person", "person"))
+        self.assertEqual(row["input"], f"card #{self.card} Try it answer")
+        self.assertEqual(row["verdict"]["result"], "pending")    # "It stopped me…" decides nothing in a word
+        self.assertEqual(row["server"], f"card:{self.card}")
+
     def test_a_second_answer_refreshes_human_qa_and_does_not_reveal_twice(self):
         self.staged_section()
         self.answer()

@@ -23,7 +23,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import sidecall
+from . import cases, sidecall
 from .skills import (MAX_SKILL_BYTES, NAME, SkillError, SkillIndex, bundled_dir, default_directories,
                      imports_root, parse_frontmatter, parse_profile, refined_dir)
 
@@ -89,10 +89,26 @@ def index_settings(index: SkillIndex | None, workspace=None) -> tuple[list[Path]
     return default_directories(workspace), DEFAULT_EXCLUDE, workspace
 
 
+def _ledger_rows(workspace) -> list[dict]:
+    """The case ledger of the board that governs `workspace` (#95VZ), or [] when there is none.
+    Confidential rows are included: the statistics count them, they never quote them."""
+    if not workspace:
+        return []
+    from .board_tools import find_board_root      # local: board_tools imports skills
+    root = find_board_root(workspace)
+    return cases.read(root) if root is not None else []
+
+
 def list_skills(directories, exclude=(), workspace=None) -> list[dict]:
-    """Every <dir>/<name>/SKILL.md, with excluded and shadowed flags. The first directory wins a name."""
+    """Every <dir>/<name>/SKILL.md, with excluded and shadowed flags. The first directory wins a name.
+
+    A skill with a profile also carries its case statistics (#95VZ) from the workspace's board
+    ledger — `cases`, `last_served`, `pass_rate_30`, `stale` (`cases.stats`) — agent-facing
+    numbers the Switchboard's Skills list may read and nothing prints.
+    """
     items, seen = [], {}
     excluded = set(exclude)
+    rows = None                                     # read once, only if a profiled skill turns up
     for directory in directories:
         base = Path(os.path.expanduser(str(directory)))
         if not base.is_dir():
@@ -117,6 +133,9 @@ def list_skills(directories, exclude=(), workspace=None) -> list[dict]:
             profile = parse_profile(fields.get("profile", ""), warnings)
             if profile:
                 item["profile"] = profile      # the task profile (#MSJ0); the dialog's verify line
+                if rows is None:
+                    rows = _ledger_rows(workspace)
+                item.update(cases.stats(rows, entry.name, profile))
             if warnings:
                 item["profile_warnings"] = warnings
             if entry.name in seen:

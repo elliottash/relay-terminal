@@ -2776,6 +2776,10 @@ catalogue line, so the prompt costs nothing for it; an unknown key or an out-of-
 is a warning in `skills_skipped` ("<name>: profile … (skill still loads)") and on the item's
 `profile_warnings`, never a reason to drop the skill. The bundled `deliver` skill and the five
 templates in `docs/skills-examples/` are the worked profiles.
+Every case a profiled skill serves is one row in the board's `cases.jsonl` (#95VZ,
+`backend/relay_core/cases.py`, protocol 19.22), and each `skills_list` item with a profile carries
+its `cases`, `last_served`, `pass_rate_30` and `stale` computed from those rows — agent-facing
+numbers the Skills list may read; the GUI draws nothing for them yet.
 
 GUI: `src/SkillsDialog.*` (non-modal, from `/skills`, the palette or Agent options) lists
 `skills_list` items with a checkbox per skill (unchecked names go to QSettings `skills/exclude`,

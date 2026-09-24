@@ -477,7 +477,7 @@ class BoardCommands:
         if board is None:
             self.tools = None
         else:
-            self.tools = self._build(board, state, settings, actor="owner")
+            self.tools = self._build(board, state, settings, actor="owner", workspace=workspace)
         if agent:
             self._attach_agent_tools(workspace, settings)
         return self.state_block()
@@ -504,9 +504,10 @@ class BoardCommands:
             return board, "uninitialized"
         return None, None
 
-    def _build(self, board: B.Board, state: str, settings: dict, *, actor: str) -> BoardTools:
+    def _build(self, board: B.Board, state: str, settings: dict, *, actor: str,
+               workspace: str | None = None) -> BoardTools:
         tools = BoardTools(board, emit=self.emit, autonomy=settings.get("autonomy"),
-                           limits=settings.get("limits"), qa=settings.get("qa"),
+                           limits=settings.get("limits"), qa=settings.get("qa"), workspace=workspace,
                            context=ToolContext(actor=actor,
                                                pane=os.environ.get("RELAY_PANE_ID") or None),
                            enforce_limits=actor != "owner", duplicate_check=actor != "owner",
@@ -588,7 +589,7 @@ class BoardCommands:
         board, state = self._resolve(workspace, settings)
         if board is None:
             return None
-        tools = self._build(board, state, settings, actor="agent")
+        tools = self._build(board, state, settings, actor="agent", workspace=workspace)
         if tools.autonomy == "off":
             return None
         if self.console:

@@ -2429,7 +2429,8 @@ class Agent:
             for item in attachments or []:
                 if isinstance(item, dict) and item.get("kind") == "skill" and item.get("skill"):
                     skill = index.skills.get(item["skill"]) if index is not None else None
-                    self.board.context.skill_loaded(item["skill"], skill.profile if skill else {})
+                    self.board.context.skill_loaded(item["skill"], skill.profile if skill else {},
+                                                    self._skill_version(item["skill"]))
         # Identifiers, sizes and settings only: the prompt itself is logged solely at "verbose".
         logs.event(_log, "turn_start", session=self.session_id, turn=turn_id, model=self.config.model,
                    host=_host(self.config.base_url), mode=self.mode, effort=self.effort,
@@ -3958,6 +3959,20 @@ class Agent:
         self._end_failover()
         self._dropped_routes = []
         self._forget_images()
+        # The case ledger (#95VZ): a turn that loaded a profiled skill served a case of it.
+        # One pending row per such skill, costed with what this turn spent; nothing for a
+        # turn that loaded none, and never a failure of the turn over the ledger.
+        if self.board is not None and getattr(self.board.context, "skills", None):
+            try:
+                usage = record.get("usage") or {}
+                tokens = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+                cost = {"seconds": record["elapsed_ms"] / 1000.0,
+                        **({"tokens": tokens} if tokens else {}),
+                        **({"money": float(usage["cost"])} if isinstance(usage.get("cost"), (int, float)) else {})}
+                self.board.record_turn_cases(outcome=record["outcome"], cost=cost)
+            except Exception as exc:                        # pragma: no cover - never fails the turn
+                logs.event(_log, "cases_skipped", level_name="warning", session=self.session_id,
+                           turn=record["turn_id"], error=str(exc)[:200])
         self.emit(self.turn_summary(record))
         self.emit(event)
 
@@ -4111,9 +4126,19 @@ class Agent:
             # default a card's `verify` from a loaded skill's profile.
             result = self.executor.execute(prepared)
             if self.board is not None and isinstance(result, dict) and result.get("skill"):
-                self.board.context.skill_loaded(result["skill"], result.get("profile"))
+                self.board.context.skill_loaded(result["skill"], result.get("profile"),
+                                                self._skill_version(result["skill"]))
             return result
         return self.executor.execute(prepared)
+
+    def _skill_version(self, skill_id: str) -> str:
+        """`cases.skill_version` of a loaded skill's SKILL.md (#95VZ), "" when unknown."""
+        index = self.executor.skills
+        skill = index.skills.get(skill_id) if index is not None else None
+        if skill is None:
+            return ""
+        from .cases import skill_version
+        return skill_version(skill.root / "SKILL.md")
 
     # ----- session title (issue JRWQ) ---------------------------------------------------
     def title_event(self) -> dict:
