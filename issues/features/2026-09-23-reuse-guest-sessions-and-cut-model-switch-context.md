@@ -132,3 +132,21 @@ Would-land run (HEAD + this card's five files): `tests.test_guest_handover` +
 (`docs/qa_evidence/2026-09-24-guest-switch-resume-Q8TM/tests.txt`). The shared working tree
 shows two other sessions' in-flight test failures in the same modules; they fail on files this
 card does not touch and pass on HEAD.
+
+## Try it
+
+Open it with one command:
+
+```
+docs/qa_evidence/2026-09-24-tryit-Q8TM/stage.sh
+```
+
+It prints, side by side, what Relay sent to the Codex guest on a switch back **before** this
+card (a fresh session and the whole conversation again) and **after** it (its own session
+resumed, only the GLM turn that ran while it was away) — the real switch code path, with
+scripted model answers so it needs no network. Read the two prompts and the two status lines.
+
+Would you trust the "after" hand-over on a real working session — is anything missing from the
+catch-up that you would want re-sent? (~2 min)
+
+Expected: docs/qa_evidence/2026-09-24-tryit-Q8TM/expected.md (sealed until you answer)

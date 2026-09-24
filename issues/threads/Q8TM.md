@@ -31,3 +31,20 @@ Taking #Q8TM from Codex planning: implement guest-session resume cursors and swi
     land.py's contested-hunk selection. One follow-up observed on the landed tree: the
     catalogue-test race #JXFT now also fires under tests.test_guest_harness_provider +
     tests.test_model_switch (~2/7 runs); evidence appended to that card's thread.
+
+<!-- relay:entry 20260924T041838Z-kn author=agent kind=progress model=glm-5.3 pane=3ecfd0fe turn=9a5b6e44b68e41eaaa1af58945daaa6b/dfbb85ebc93b47538847e1e92dc83175 -->
+- ✦ agent is preparing Try it for this card
+- id: 20260924T051000Z-q8tm-tryit
+  ts: '2026-09-24T05:10:00Z'
+  kind: evidence
+  by: bd9e4ae0
+  body: |
+    Try it staged (own staging; no verifying-session stage existed): 
+    docs/qa_evidence/2026-09-24-tryit-Q8TM/stage.sh prints the before/after prompt payloads and
+    status lines for a guest→native→guest switch on the real code path (FakeHarness + scripted
+    native; no model, no network; run twice). Path: 1. agent — run stage.sh, capture
+    (capture.txt, exit 0, rerun ok); 2. person — read the two prompts and answer the one
+    question (the only judgement: is the catch-up complete and trustworthy; ~2 min). Everything
+    else — the suite, the fallbacks, the restart case — is covered by the automated tests and
+    was not asked of the person. Saw what was expected: AFTER resumes codex-1 and sends only
+    the GLM turn; BEFORE re-sends everything including the guest's own turn.

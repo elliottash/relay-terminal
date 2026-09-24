@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-646 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
+647 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
 
-## Features (369)
+## Features (370)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -14,7 +14,6 @@
 | `#FDBK` | [/bug (and /feedback): save the session and send it to a clearinghouse](features/2026-09-21-a-bug-command-alias-feedback-that-saves-the-sess.md) | inbox | unassigned |  | [2](threads/FDBK.md) |
 | `#CF3A` | [bug: on restore, command histories arent working (up / down to see previous comm…](features/2026-09-23-bug-on-restore-command-histories-arent-working-u.md) | inbox |  |  | [1](threads/CF3A.md) |
 | `#FJ9S` | [bug: ctrl + shift + s would not open sessions from an aux pane (text editor)](features/2026-09-23-bug-ctrl-shift-s-would-not-open-sessions-from-an.md) | inbox |  |  | [1](threads/FJ9S.md) |
-| `#PH0N` | [Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone](features/2026-09-20-phone-remote-control-all-day.md) | discussing | claude-code | 8/10 | [28](threads/PH0N.md) |
 | `#8E4Q` | [How far the switchboard aesthetic goes inside the app](features/2026-09-17-switchboard-aesthetic.md) | discussing |  | 3/7 |  |
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#3F8V` | [switchboard tests support agent](features/2026-09-19-switchboard-tests-support-agent.md) | discussing |  |  | [5](threads/3F8V.md) |
@@ -44,6 +43,7 @@
 | `#4DS8` | [in options, make "microphone" a dropdown from available microphones, rather than…](features/2026-09-20-in-options-make-microphone-a-dropdown-from-avail.md) | planned |  |  | [7](threads/4DS8.md) |
 | `#XHH4` | [potential bug: switchboard agent didnt recognize a session id.](features/2026-09-20-potential-bug-switchboard-agent-didnt-recognize.md) | planned |  |  | [7](threads/XHH4.md) |
 | `#9EZJ` | [include reasoning summaries for codex / claude to fill the reasoning bubbles](features/2026-09-21-include-reasoning-summaries-for-codex-claude-to.md) | planned |  |  | [7](threads/9EZJ.md) |
+| `#495G` | [Pace subscription-aware routing by remaining quota and reset time](features/2026-09-24-pace-subscription-aware-routing-by-remaining-quo.md) | planned |  |  | [3](threads/495G.md) |
 | `#BGRN` | [Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done](features/2026-09-23-run-in-background.md) | executing | agent |  | [34](threads/BGRN.md) |
 | `#R5TC` | [One pane's agent sends a message to another, inside one Relay](features/2026-09-19-relay-terminals-talk-to-each-other-and-to-claude.md) | executing | agent | 0/15 | [8](threads/R5TC.md) |
 | `#3KB7` | [A Security section in Options, gathering what the agent may reach](features/2026-09-19-a-security-section-in-options.md) | executing | agent | 8/10 | [10](threads/3KB7.md) |
@@ -113,7 +113,7 @@
 | `#Z8P4` | [Let the prompt box expand for long prompts](features/2026-09-23-prompt-box-grows-with-long-text.md) | needs-verification | codex |  | [6](threads/Z8P4.md) |
 | `#C7NQ` | [Remove the Continue section from Sessions](features/2026-09-23-remove-continue-section-from-sessions.md) | needs-verification | agent |  | [10](threads/C7NQ.md) |
 | `#R7ST` | [Restart Relay only after the old instance exits](features/2026-09-23-restart-relay-after-old-instance-exits.md) | needs-verification | codex |  | [3](threads/R7ST.md) |
-| `#Q8TM` | [Preserve context while reducing model-switch token use across guest and native models](features/2026-09-23-reuse-guest-sessions-and-cut-model-switch-context.md) | needs-verification | agent |  | [3](threads/Q8TM.md) |
+| `#Q8TM` | [Preserve context while reducing model-switch token use across guest and native models](features/2026-09-23-reuse-guest-sessions-and-cut-model-switch-context.md) | needs-verification | agent |  | [4](threads/Q8TM.md) |
 | `#Z8DR` | [Save unfinished prompt drafts on exit and crash](features/2026-09-23-save-unfinished-prompt-drafts.md) | needs-verification | codex |  | [6](threads/Z8DR.md) |
 | `#Y4MT` | [Preview Sessions rows on mouse click before resuming](features/2026-09-23-session-click-previews-before-resume.md) | needs-verification | codex |  | [5](threads/Y4MT.md) |
 | `#N8F4` | [Keep the session manager newest first by default](features/2026-09-23-session-manager-newest-first-default.md) | needs-verification | codex |  | [3](threads/N8F4.md) |
@@ -361,6 +361,7 @@
 | `#5V1E` | [tab detach button is not intuitive](features/deferred/2026-09-19-tab-detach-button-is-not-intuitive.md) | deferred |  |  | [4](threads/5V1E.md) |
 | `#KJ44` | [Agent sessions, planning, instructions, subagents, suggestions and unified queue](features/done/2026-09-17-agent-sessions-planning-subagents.md) | done | agent |  |  |
 | `#FR1C` | [Pairing a phone without friction: one entry point on the desktop, a typed code on the phone](features/done/2026-09-20-phone-pairing-without-friction.md) | done | claude-code | 4/4 | [13](threads/FR1C.md) |
+| `#PH0N` | [Phone remote control, all day: always on, reachable from anywhere, and the last mile on the iPhone](features/done/2026-09-20-phone-remote-control-all-day.md) | done | claude-code | 8/10 | [29](threads/PH0N.md) |
 | `#16QX` | [Review opencode for agent features and logic](features/done/2026-09-17-review-opencode-agent-design.md) | done | agent |  |  |
 | `#KX82` | [Run unrecognized input in the terminal first, then fall back to the agent](features/done/2026-09-17-terminal-first-agent-fallback.md) | done | agent |  |  |
 | `#B1AD` | [Document cross-platform build instructions for every repository agent](features/done/2026-09-21-document-cross-platform-build-instructions.md) | done | codex | 3/3 | [3](threads/B1AD.md) |
@@ -652,7 +653,7 @@
 |---|---|---|---|---|---|
 | `#MEPR` | [Task plugins: a workspace kind adds a language router, a runner, tools and a layout (first two: TeX-to-PDF, and a Python/Stata kernel IDE)](design/2026-09-23-task-plugins-a-workspace-kind-adds-a-language-ro.md) | discussing |  |  | [5](threads/MEPR.md) |
 | `#1QKM` | [Cards build servers, servers serve cases: skills as the Switchboard's second object, across knowledge work](design/2026-09-23-cards-build-servers-servers-serve-cases-skills-a.md) | discussing |  |  | [7](threads/1QKM.md) |
-| `#BX7B` | [Broaden verification into a QA pane with card-specific human review](design/2026-09-23-broaden-verification-into-a-qa-pane-with-card-sp.md) | executing | agent |  | [10](threads/BX7B.md) |
+| `#BX7B` | [Broaden verification into a QA pane with card-specific human review](design/2026-09-23-broaden-verification-into-a-qa-pane-with-card-sp.md) | executing | agent |  | [12](threads/BX7B.md) |
 | `#RCP9` | [Generate a final recap when a session closes](design/2026-09-23-final-recap-on-session-close.md) | needs-verification | codex |  | [16](threads/RCP9.md) |
 | `#SEJ2` | [Ctrl+Enter or Shift+Enter for open-external vs edit-here in file panes](design/2026-09-20-ctrl-enter-or-shift-enter-for-open-external-vs-e.md) | needs-verification | agent | 7/7 | [20](threads/SEJ2.md) |
 | `#XHXX` | [Survey Warp, Claude, and Codex plugin ecosystems for Relay](design/2026-09-23-survey-warp-claude-and-codex-plugin-ecosystems-f.md) | needs-verification | agent |  | [12](threads/XHXX.md) |
