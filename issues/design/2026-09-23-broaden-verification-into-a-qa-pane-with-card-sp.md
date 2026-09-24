@@ -1,12 +1,16 @@
 ---
 id: BX7B
 type: work
-status: discussing
+status: needs-verification
 labels: [feature, board, qa]
+assignee: agent
+implemented_by: openai/gpt-6-sol via codex
+session: c74ef5a7-e3b2-4741-b4d4-251871e1398e
 rank: zzzzzzzzzzzzzzzzzi
 created: '2026-09-23'
+verify: {artifact: visual, primary: script, also: [probe, ai-visual, person], human: required, criteria: Review view shows the right cards and a clear one-step judgement on a live card, sign_off: none, effort: high, stakes: rework, blast: capability}
 source: owner, Relay conversation, 2026-09-23
-links: {plans: [], commits: [], evidence: [reports/Knowledge work across projects.md], related: [JNYN, YZ8G, WC3E, 74Y5, SJTR, 1QKM, WFRA, 1AA6, MSJ0, C3Q2, 95VZ], github: null}
+links: {plans: [], commits: [25deb67f, 35bfbcb2, 31e11b6c, fbf43d9c, 9b7ac698, 1bb32fe8, ec074443], evidence: [reports/Knowledge work across projects.md, docs/qa_evidence/2026-09-24-BX7B-review/], related: [JNYN, YZ8G, WC3E, 74Y5, SJTR, 1QKM, WFRA, 1AA6, MSJ0, C3Q2, 95VZ], github: null}
 ---
 # Broaden verification into a QA pane with card-specific human review
 
@@ -56,19 +60,28 @@ Owner's stated direction, 2026-09-23: “i dont like the terminology "Try It". t
 - 2026-09-23, owner: "ideally, most of this is just in the agent's work and the user doesn't see it directly." Applied across the build: the `verify` block, the skill profile and the policy floor are agent-facing data and rules; the user meets them only as a one-line review request when a person is needed, an "unverified until …" state, a refusal sentence, and a single Options switch (ask | automatic). No BOARD.md column, no Skills-dialog line, no placeholder strip on cards that need no person.
 
 ## Plan
-**Goal.** Build the whole QA ladder, phased so each step adds one visible thing and nothing asks the user a question they did not ask for.
+**Goal.** Give human review a focused pane; keep the QA ladder and machine checks in the agent workflow.
 
-**Findings.** The board already has `needs-qa-llm` / `needs-qa-human` statuses (`relay_core/board.py` `_STATUS_ORDER`, `COLUMN_STATUSES`), a `## Human QA` question that blocks close, a `qa` block naming the verifier (protocol 19), Try it (#JNYN, `board_tryit_brief.md`, `BoardPane.cpp` "Try it" strip) and a flat `SKILL.md` frontmatter parser (`relay_core/skills.py`). The ladder is therefore data on cards and skills plus rules in the worker, not a new subsystem.
+**Findings.** #WFRA, #1AA6, #MSJ0, #C3Q2 and #95VZ are landed. `board_open` sends small card rows, while `board_card_get` provides the card's full verify block and sections. `BoardView` already handles staged Try it answers. The separate Test suites pane provides the host/worker wiring pattern.
 
-**Steps (one card each).**
-1. **#WFRA** — the `verify` block: schema, validation, `board_update_card fields.verify`, policy and `deliver` text, `relay-board.py check`, the card-page strip. *Visible:* one strip on the card page; one reminder line at claim.
-2. **#1AA6** — `verified()` in one place; `human: required`, `sign_off` and `deferred` gate `done`. *Visible:* one refusal message; "unverified until …" on a row.
-3. **#MSJ0** — `profile:` on skills; a card claimed under a skill inherits its verify defaults and effort; six example profiles. *Visible:* a second line in the Skills dialog.
-4. **#C3Q2** — the policy floor in Options › Agent › QA and `board.yaml qa:`; conservative defaults so nothing changes until the user opens it. *Visible:* one Options heading.
-5. **#95VZ** — the case ledger and the Skills list's cases / pass rate / stale column; the third-case suggestion line. *Visible:* numbers beside skills; one sentence in a reply.
-6. **This card** — the QA pane: "Review" replaces the Try it label and incorporates it as one action; the pane shows goal, deliverable, checks and evidence, then the human step the `verify` block names; a cross-card human queue ranked by stakes × doubt, not FIFO. Planned after 1–5 land and the strip has been used for a week.
-7. Later: a Skills registry surface (versions, evals, rot) — needs 5.
+**Steps.** (1) Verify the five landed pieces and repair regressions found. (2) Add a small review queue derived from cards with a pending human step, ordered by stakes then uncertainty. (3) Add a separate Review pane that opens the selected card's goal, deliverable and evidence and focuses the one human question or sign-off. Keep Try it staging as an action for cards that need it. (4) Wire the pane to the board worker, restore it with the layout, and rename the user action Review. (5) Capture a real screenshot and run targeted backend and GUI tests.
 
-**Risks / owner decisions.** Vocabulary of `primary` and `stakes` is fixed on #WFRA and shared by all five; changing it later touches all. Whether "Review" is the final label (open on this card). Who may set a server's profile (#1QKM question 6).
+**Risks.** An answer must be tied to the revision read, and stale answers must be refused. Existing board rows omit verify details by design; the queue gets only the minimum human-review flags, while the full plan stays in board_card. The UI must not turn routine machine QA into a user task.
 
-**Verify.** Each card's own tests; then one end-to-end: claim a card under a profiled skill, see the strip, try to close it with `human: required` unanswered and be refused, answer, close; screenshot the strip and the refusal into `docs/qa_evidence/`.
+**Verify.** Targeted board and GUI tests on the exact landed tree, plus a live Review pane showing a required judgement and a machine-only card absent from the queue.
+
+## Done means
+The Board has one Review view that lists cards needing a person's judgement, ordered by stakes and uncertainty. Opening a row shows the goal, deliverable and evidence, with only the person's question or sign-off as an action. Existing staged Try it cases remain usable through Review. A recorded answer is tied to the card revision; cards without a human step stay out of the queue.
+
+## Execution Summary
+Built a separate Review pane beside the Board. Its queue contains only built cards with an unanswered required human question or missing sign-off; stakes and uncertainty order the rows. Selecting a card shows its goal, pass criterion, result and evidence, then one answer field or explicit sign-off confirmation. The answer writes `## Human QA` against the card hash and names the revision reviewed; a stale write keeps the person's draft and reloads the card. Internal QA plans stay off this view. The existing Try it protocol remains available through the card, with its visible action renamed Stage review. Repaired the two malformed QA thread IDs and landed the generated policy that #95VZ had left pending. Fixed the multi-question gate so every numbered human question must be answered.
+
+Evidence: `docs/qa_evidence/2026-09-24-BX7B-review/01-review-queue.png` and its README. The exact landed C++ tree built through `land.py`; focused Python and GUI tests pass.
+
+## Tests
+- `PYTHONPATH=backend python3 -m unittest tests.test_board.VerifiedTests tests.test_board_tools.VerifyGateTests tests.test_cases tests.test_qa_policy`
+- `ctest --test-dir build -R '^(boardpane|reviewpane)$' --output-on-failure`
+- manual: `docs/qa_evidence/2026-09-24-BX7B-review/01-review-queue.png`
+
+## Human QA
+1. Does the Review pane show the right cards and leave you one clear judgement, with internal QA details out of sight?
