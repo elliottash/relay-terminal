@@ -35,10 +35,9 @@
 // 13), by model name and level, refreshed every time the served pane's worker reports. Nothing in
 // Relay showed a person where a summary went before this column.
 //
-// **An override is one pick: a model.** Not a tier — which tier a job follows is a property of the
-// job, and moving the *tier* is what the priorities lists are for — so the tier box is gone. Enter
-// on a row drops the same filter list the model box uses, over the available models by name; a
-// model with levels then drops its level list. Delete clears the row back to "follows its tier".
+// **An override is a model or ranked model list.** The three ranked jobs show their list and
+// controls inline when selected; other jobs use the filter list on Enter. Delete clears a row
+// back to "follows its tier". A model with levels offers its own level list.
 // The storage is `roles/<role>/{preset,model,effort}` (`relay::rolestore`). A legacy
 // `roles/<role>/tier` is read and shown as "follows <tier>", and the × clears it too. The one
 // exception is the pre-#HR5E planning override: it is retired once because it silently defeats
@@ -175,7 +174,7 @@ public:
     // ----- the keyboard ------------------------------------------------------------------------
     QString currentRole() const;
     bool selectRole(const QString &role);
-    bool openOverride();          // Enter on a row: the model list. False when the row cannot be set.
+    bool openOverride();          // Enter: inline ranked list, or model picker for other jobs.
     bool clearOverride();         // Delete on a row
     void focusList();
 
@@ -188,9 +187,15 @@ private:
     void rebuild();
     void updateColumns();
     void updateCompactDetails();
+    void updateRankedPanel();
+    void saveRanked(const QString &role, QList<models::curation::TierEntry> entries);
+    void addRankedModel();
+    void moveRanked(int direction);
+    void tieRanked(bool tie);
+    void removeRanked();
+    void chooseRankedEffort();
     void applyOverride(const QString &role, const QString &key, const QString &effort);
     void openLevels(const QString &role, const QString &key);
-    void editRankedOverride(const QString &role);
     QString nameFor(const QString &preset, const QString &model) const;
     QString resolvedText(const QJsonObject &entry) const;
     // The entry a group row stands for, honouring the guest rule: the provider this job would
@@ -206,6 +211,17 @@ private:
     QLabel *m_compactDetails = nullptr;
     QPushButton *m_compactChoose = nullptr;
     QPushButton *m_compactClear = nullptr;
+    QWidget *m_rankedPanel = nullptr;
+    QLabel *m_rankedStatus = nullptr;
+    QTreeWidget *m_rankedList = nullptr;
+    QPushButton *m_rankedAdd = nullptr;
+    QPushButton *m_rankedUp = nullptr;
+    QPushButton *m_rankedDown = nullptr;
+    QPushButton *m_rankedTie = nullptr;
+    QPushButton *m_rankedUntie = nullptr;
+    QPushButton *m_rankedEffort = nullptr;
+    QPushButton *m_rankedRemove = nullptr;
+    QPushButton *m_rankedFollow = nullptr;
     FilterPopup *m_popup = nullptr;
     // A one-cell-sized invisible child of the list's viewport, moved over the row being picked
     // for: `FilterPopup::openFor` drops under its anchor, and anchoring on the whole list put the

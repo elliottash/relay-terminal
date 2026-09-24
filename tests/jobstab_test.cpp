@@ -17,6 +17,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QPushButton>
 #include <QSet>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -382,6 +383,68 @@ private Q_SLOTS:
         QVERIFY(tab.clearOverride());
         QVERIFY(!rolestore::rankedOverrideSet(QStringLiteral("planning")));
         QCOMPARE(tab.overrideText(QStringLiteral("planning")), QStringLiteral("follows high"));
+    }
+
+    void rankedRouteIsEditedInlineAndEachActionPersists() {
+        Served served;
+        JobsTab tab;
+        tab.setData(dataFor(&served));
+        QVERIFY(tab.selectRole(QStringLiteral("subagent")));
+        auto *panel = tab.findChild<QWidget *>(QStringLiteral("jobsRankedPanel"));
+        auto *list = tab.findChild<QTreeWidget *>(QStringLiteral("jobsRankedList"));
+        auto button = [&tab](const char *name) {
+            return tab.findChild<QPushButton *>(QLatin1String(name));
+        };
+        QVERIFY(panel && !panel->isHidden());
+        QVERIFY(list);
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY(rowFor(tab.list(), QStringLiteral("subagent"))->text(3).contains(QStringLiteral("inherited")));
+
+        auto add = [&](const QString &key) {
+            button("jobsRankedAdd")->click();
+            QVERIFY(tab.popup());
+            int at = -1;
+            const auto choices = tab.popup()->rows();
+            for (int i = 0; i < choices.size(); ++i)
+                if (choices.at(i).data == key) at = i;
+            QVERIFY(at >= 0);
+            tab.popup()->onPicked(at);
+        };
+        add(QStringLiteral("kimi|kimi-k3"));
+        add(QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(served.resends, 2);
+        QVERIFY(rolestore::rankedOverrideSet(QStringLiteral("subagent")));
+        QCOMPARE(list->topLevelItemCount(), 2);
+        QVERIFY(!QApplication::activeModalWidget());
+
+        list->setCurrentItem(list->topLevelItem(1));
+        button("jobsRankedTie")->click();
+        auto entries = rolestore::rankedOverride(QStringLiteral("subagent"));
+        QCOMPARE(entries.at(0).rank, entries.at(1).rank);
+        QVERIFY(tab.overrideText(QStringLiteral("subagent")).contains(QStringLiteral("random")));
+        button("jobsRankedUntie")->click();
+        entries = rolestore::rankedOverride(QStringLiteral("subagent"));
+        QVERIFY(entries.at(0).rank != entries.at(1).rank);
+
+        list->setCurrentItem(list->topLevelItem(1));
+        const QString last = list->topLevelItem(1)->data(1, Qt::UserRole).toString();
+        button("jobsRankedUp")->click();
+        QCOMPARE(list->topLevelItem(0)->data(1, Qt::UserRole).toString(), last);
+        button("jobsRankedEffort")->click();
+        const auto levels = tab.popup()->rows();
+        int high = -1;
+        for (int i = 0; i < levels.size(); ++i)
+            if (levels.at(i).data == QStringLiteral("high")) high = i;
+        QVERIFY(high >= 0);
+        tab.popup()->onPicked(high);
+        entries = rolestore::rankedOverride(QStringLiteral("subagent"));
+        QCOMPARE(entries.at(0).effort, QStringLiteral("high"));
+        button("jobsRankedRemove")->click();
+        QCOMPARE(rolestore::rankedOverride(QStringLiteral("subagent")).size(), 1);
+        button("jobsRankedFollow")->click();
+        QVERIFY(!rolestore::rankedOverrideSet(QStringLiteral("subagent")));
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY(rowFor(tab.list(), QStringLiteral("subagent"))->text(3).contains(QStringLiteral("inherited")));
     }
 
     // ----- one row per model, and the guest rule --------------------------------------------------

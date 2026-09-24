@@ -5,13 +5,10 @@
 
 #include <QAbstractItemView>
 #include <QEvent>
-#include <QDialog>
-#include <QDialogButtonBox>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QKeyEvent>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -19,6 +16,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -344,17 +342,73 @@ JobsTab::JobsTab(QWidget *parent) : QWidget(parent) {
     m_compactPanel->hide();
     layout->addWidget(m_compactPanel);
 
+    m_rankedPanel = new QWidget;
+    m_rankedPanel->setObjectName(QStringLiteral("jobsRankedPanel"));
+    auto *rankedBox = new QVBoxLayout(m_rankedPanel);
+    rankedBox->setContentsMargins(0, 4, 0, 0);
+    rankedBox->setSpacing(4);
+    m_rankedStatus = new QLabel;
+    m_rankedStatus->setWordWrap(true);
+    rankedBox->addWidget(m_rankedStatus);
+    m_rankedList = new QTreeWidget;
+    m_rankedList->setObjectName(QStringLiteral("jobsRankedList"));
+    m_rankedList->setHeaderLabels({QStringLiteral("order"), QStringLiteral("model"), QStringLiteral("effort")});
+    m_rankedList->setRootIsDecorated(false);
+    m_rankedList->setMaximumHeight(150);
+    m_rankedList->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_rankedList->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_rankedList->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    rankedBox->addWidget(m_rankedList);
+    auto *rankedActions = new QHBoxLayout;
+    rankedActions->setSpacing(3);
+    auto action = [](QHBoxLayout *row, const QString &name, const QString &label) {
+        auto *button = new QPushButton(label);
+        button->setObjectName(name);
+        row->addWidget(button);
+        return button;
+    };
+    m_rankedAdd = action(rankedActions, QStringLiteral("jobsRankedAdd"), QStringLiteral("Add model…"));
+    m_rankedUp = action(rankedActions, QStringLiteral("jobsRankedUp"), QStringLiteral("↑"));
+    m_rankedDown = action(rankedActions, QStringLiteral("jobsRankedDown"), QStringLiteral("↓"));
+    m_rankedTie = action(rankedActions, QStringLiteral("jobsRankedTie"), QStringLiteral("Tie ↑"));
+    rankedBox->addLayout(rankedActions);
+    auto *moreActions = new QHBoxLayout;
+    moreActions->setSpacing(3);
+    m_rankedUntie = action(moreActions, QStringLiteral("jobsRankedUntie"), QStringLiteral("Untie"));
+    m_rankedEffort = action(moreActions, QStringLiteral("jobsRankedEffort"), QStringLiteral("Effort…"));
+    m_rankedRemove = action(moreActions, QStringLiteral("jobsRankedRemove"), QStringLiteral("Remove"));
+    m_rankedFollow = action(moreActions, QStringLiteral("jobsRankedFollow"), QStringLiteral("Follow tier"));
+    rankedBox->addLayout(moreActions);
+    m_rankedUp->setToolTip(QStringLiteral("Move this rank group earlier."));
+    m_rankedDown->setToolTip(QStringLiteral("Move this rank group later."));
+    m_rankedTie->setToolTip(QStringLiteral("Give this model the preceding rank; tied models are chosen at random."));
+    m_rankedUntie->setToolTip(QStringLiteral("Give this model its own rank."));
+    m_rankedPanel->hide();
+    layout->addWidget(m_rankedPanel);
+
     m_footer = new QLabel(QStringLiteral(
-        "↑↓ a job · enter edits its models · delete puts it back on its tier · esc back to the pane"));
+        "↑↓ select a job · Enter edits its route · Delete follows its tier · Esc back to the pane"));
     m_footer->setObjectName(QStringLiteral("transcriptHeader"));
     m_footer->setWordWrap(true);
     layout->addWidget(m_footer);
 
     connect(m_list, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *, int) { openOverride(); });
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *, int) { openOverride(); });
-    connect(m_list, &QTreeWidget::currentItemChanged, this, [this] { updateCompactDetails(); });
+    connect(m_list, &QTreeWidget::currentItemChanged, this, [this] {
+        updateCompactDetails();
+        updateRankedPanel();
+    });
     connect(m_compactChoose, &QPushButton::clicked, this, [this] { openOverride(); });
     connect(m_compactClear, &QPushButton::clicked, this, [this] { clearOverride(); });
+    connect(m_rankedList, &QTreeWidget::currentItemChanged, this, [this] { updateRankedPanel(); });
+    connect(m_rankedAdd, &QPushButton::clicked, this, [this] { addRankedModel(); });
+    connect(m_rankedUp, &QPushButton::clicked, this, [this] { moveRanked(-1); });
+    connect(m_rankedDown, &QPushButton::clicked, this, [this] { moveRanked(1); });
+    connect(m_rankedTie, &QPushButton::clicked, this, [this] { tieRanked(true); });
+    connect(m_rankedUntie, &QPushButton::clicked, this, [this] { tieRanked(false); });
+    connect(m_rankedEffort, &QPushButton::clicked, this, [this] { chooseRankedEffort(); });
+    connect(m_rankedRemove, &QPushButton::clicked, this, [this] { removeRanked(); });
+    connect(m_rankedFollow, &QPushButton::clicked, this, [this] { clearOverride(); });
     rebuild();
 }
 
@@ -397,8 +451,16 @@ void JobsTab::updateCompactDetails() {
         m_compactClear->setVisible(false);
         return;
     }
-    m_compactDetails->setText(QStringLiteral("%1 — %2\noverride: %3")
-        .arg(job->name, job->what, overrideText(job->role)));
+    const bool custom = !rolestore::overrideKey(job->role).isEmpty()
+        || !rolestore::overrideTier(job->role).isEmpty()
+        || rolestore::rankedOverrideSet(job->role);
+    m_compactDetails->setText(QStringLiteral("%1 — %2\n%3: %4")
+        .arg(job->name, job->what,
+             !job->settable ? QStringLiteral("pane route")
+             : custom ? QStringLiteral("custom route") : QStringLiteral("inherited route"),
+             overrideText(job->role)));
+    m_compactChoose->setText(rolestore::supportsRanked(job->role)
+        ? QStringLiteral("Edit ranked list") : QStringLiteral("Choose model…"));
     m_compactChoose->setEnabled(job->settable);
     m_compactClear->setVisible(job->settable &&
         (!rolestore::overrideKey(job->role).isEmpty() || !rolestore::overrideTier(job->role).isEmpty()
@@ -452,7 +514,8 @@ QString JobsTab::overrideText(const QString &role) const {
                 [](const auto &a, const auto &b) { return a.rank < b.rank; })->rank;
             const int peers = std::count_if(entries.begin(), entries.end(),
                 [firstRank](const auto &entry) { return entry.rank == firstRank; });
-            return QStringLiteral("%1 models%2").arg(entries.size())
+            return QStringLiteral("%1 model%2%3").arg(entries.size())
+                .arg(entries.size() == 1 ? QString() : QStringLiteral("s"))
                 .arg(peers > 1 ? QStringLiteral(" · random at rank 1") : QString());
         }
     }
@@ -554,7 +617,13 @@ void JobsTab::rebuild() {
             item->setText(ColWhat, job->what);
             const QString runs = runsOn(job->role);
             item->setText(ColRuns, runs.isEmpty() ? QStringLiteral("—") : runs);
-            item->setText(ColOverride, overrideText(job->role));
+            const bool custom = !rolestore::overrideKey(job->role).isEmpty()
+                || !rolestore::overrideTier(job->role).isEmpty()
+                || rolestore::rankedOverrideSet(job->role);
+            item->setText(ColOverride, QStringLiteral("%1 · %2")
+                .arg(!job->settable ? QStringLiteral("pane")
+                     : custom ? QStringLiteral("custom") : QStringLiteral("inherited"),
+                     overrideText(job->role)));
 
             const QJsonObject resolved = m_data.roles.value(job->role).toObject();
             QStringList tip{job->what,
@@ -586,7 +655,7 @@ void JobsTab::rebuild() {
             auto *box = new QHBoxLayout(cell);
             box->setContentsMargins(0, 0, 0, 0);
             box->setSpacing(4);
-            box->addWidget(new QLabel(overrideText(job->role)), 1);
+            box->addWidget(new QLabel(QStringLiteral("custom · %1").arg(overrideText(job->role))), 1);
             auto *clear = new QToolButton;
             clear->setObjectName(QStringLiteral("jobsClearOverride"));
             clear->setText(QStringLiteral("×"));
@@ -649,120 +718,184 @@ QWidget *JobsTab::anchorForCurrentRow() {
     return m_anchor;
 }
 
-void JobsTab::editRankedOverride(const QString &role) {
+void JobsTab::updateRankedPanel() {
+    const QString role = currentRole();
     const Job *job = jobFor(role);
-    if (!job) return;
-    QList<models::curation::TierEntry> entries = rolestore::rankedOverride(role);
-    QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("%1 models").arg(job->name));
-    dialog.resize(540, 390);
-    auto *layout = new QVBoxLayout(&dialog);
-    auto *hint = new QLabel(QStringLiteral(
-        "Lower ranks run first. Models at the same rank are drawn at random; recent unused "
-        "subscription allowance nearing reset makes a model more likely. Leave the list empty "
-        "to follow the shared tier."));
-    hint->setWordWrap(true);
-    layout->addWidget(hint);
-    auto *list = new QTreeWidget;
-    list->setHeaderLabels({QStringLiteral("rank"), QStringLiteral("model"), QStringLiteral("effort")});
-    list->setRootIsDecorated(false);
-    list->setSelectionMode(QAbstractItemView::SingleSelection);
-    list->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    list->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    list->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    layout->addWidget(list, 1);
-    auto refresh = [&] {
-        const int selected = list->indexOfTopLevelItem(list->currentItem());
-        list->clear();
+    const bool ranked = job && rolestore::supportsRanked(role);
+    m_rankedPanel->setVisible(ranked);
+    if (!ranked) return;
+
+    const int selected = m_rankedList->indexOfTopLevelItem(m_rankedList->currentItem());
+    auto entries = rolestore::rankedOverride(role);
+    std::stable_sort(entries.begin(), entries.end(),
+                     [](const auto &a, const auto &b) { return a.rank < b.rank; });
+    {
+        QSignalBlocker blocked(m_rankedList);
+        m_rankedList->clear();
         for (const auto &entry : entries) {
             QString preset, model;
             models::Catalog::splitKey(entry.key, &preset, &model);
-            auto *row = new QTreeWidgetItem(list);
-            row->setText(0, QString::number(entry.rank));
+            auto *row = new QTreeWidgetItem(m_rankedList);
+            const int peers = std::count_if(entries.begin(), entries.end(),
+                [&](const auto &other) { return other.rank == entry.rank; });
+            row->setText(0, peers > 1 ? QStringLiteral("%1 · random").arg(entry.rank)
+                                      : QString::number(entry.rank));
             row->setText(1, nameFor(preset, model));
             row->setText(2, entry.effort.isEmpty() ? QStringLiteral("default") : entry.effort);
-            row->setToolTip(1, preset);
+            row->setData(1, Qt::UserRole, entry.key);
         }
-        if (selected >= 0 && selected < entries.size()) list->setCurrentItem(list->topLevelItem(selected));
-    };
-    refresh();
-    auto *actions = new QHBoxLayout;
-    auto button = [&](const QString &label) {
-        auto *control = new QPushButton(label);
-        actions->addWidget(control);
-        return control;
-    };
-    auto *add = button(QStringLiteral("add…"));
-    auto *remove = button(QStringLiteral("remove"));
-    auto *rank = button(QStringLiteral("rank…"));
-    auto *level = button(QStringLiteral("effort…"));
-    actions->addStretch(1);
-    layout->addLayout(actions);
-    auto selected = [&]() { return list->indexOfTopLevelItem(list->currentItem()); };
-    connect(add, &QPushButton::clicked, &dialog, [&] {
-        QStringList labels, keys;
-        for (const FilterRow &row : overrideRows(role)) {
-            if (row.data.isEmpty()) continue;
-            if (std::any_of(entries.begin(), entries.end(),
-                            [&](const auto &entry) { return entry.key == row.data; })) continue;
-            labels << row.text + QStringLiteral(" · ") + row.trailing;
-            keys << row.data;
-        }
-        if (labels.isEmpty()) return;
-        bool ok = false;
-        const QString picked = QInputDialog::getItem(&dialog, QStringLiteral("Add model"),
-            QStringLiteral("Model"), labels, 0, false, &ok);
-        const int at = labels.indexOf(picked);
-        if (!ok || at < 0) return;
-        int nextRank = 1;
-        for (const auto &entry : entries) nextRank = qMax(nextRank, entry.rank + 1);
-        entries << models::curation::TierEntry{keys.at(at), models::curation::listEffortFor(keys.at(at)), nextRank};
-        refresh();
-        list->setCurrentItem(list->topLevelItem(entries.size() - 1));
-    });
-    connect(remove, &QPushButton::clicked, &dialog, [&] {
-        const int at = selected();
-        if (at < 0) return;
-        entries.removeAt(at);
-        refresh();
-    });
-    connect(rank, &QPushButton::clicked, &dialog, [&] {
-        const int at = selected();
-        if (at < 0) return;
-        bool ok = false;
-        const int chosen = QInputDialog::getInt(&dialog, QStringLiteral("Set rank"),
-            QStringLiteral("Give two models the same rank to randomize between them."),
-            entries.at(at).rank, 1, 1000, 1, &ok);
-        if (ok) { entries[at].rank = chosen; refresh(); }
-    });
-    connect(level, &QPushButton::clicked, &dialog, [&] {
-        const int at = selected();
-        if (at < 0) return;
-        const auto *entry = m_data.catalog.find(entries.at(at).key);
-        if (!entry || entry->efforts.isEmpty() || entry->effortFixed) return;
-        QStringList choices{QStringLiteral("default")};
-        choices << entry->efforts;
-        bool ok = false;
-        const QString picked = QInputDialog::getItem(&dialog, QStringLiteral("Reasoning effort"),
-            QStringLiteral("Effort"), choices,
-            qMax(0, choices.indexOf(entries.at(at).effort)), false, &ok);
-        if (ok) { entries[at].effort = picked == QStringLiteral("default") ? QString() : picked; refresh(); }
-    });
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    auto *follow = new QPushButton(QStringLiteral("follow shared tier"));
-    buttons->addButton(follow, QDialogButtonBox::ResetRole);
-    connect(follow, &QPushButton::clicked, &dialog, [&] { entries.clear(); refresh(); });
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    layout->addWidget(buttons);
-    if (dialog.exec() != QDialog::Accepted) return;
+        if (!entries.isEmpty())
+            m_rankedList->setCurrentItem(m_rankedList->topLevelItem(qBound(0, selected, entries.size() - 1)));
+    }
+    const bool custom = !entries.isEmpty();
+    m_rankedStatus->setText(custom
+        ? QStringLiteral("%1 — custom route. Top models run first; tied models are chosen at random."
+                         " The worker's current choice stays in ‘runs on’ above.").arg(job->name)
+        : QStringLiteral("%1 — inherits %2. Add a model to make a custom ranked route.")
+              .arg(job->name, rolestore::overrideTier(role).isEmpty()
+                   ? job->tier : rolestore::overrideTier(role)));
+    const int at = m_rankedList->indexOfTopLevelItem(m_rankedList->currentItem());
+    const bool chosen = at >= 0 && at < entries.size();
+    const int rank = chosen ? entries.at(at).rank : -1;
+    const bool hasPreviousGroup = chosen && entries.first().rank < rank;
+    const bool hasNextGroup = chosen && entries.last().rank > rank;
+    const int peers = chosen ? std::count_if(entries.begin(), entries.end(),
+        [rank](const auto &entry) { return entry.rank == rank; }) : 0;
+    m_rankedUp->setEnabled(hasPreviousGroup);
+    m_rankedDown->setEnabled(hasNextGroup);
+    m_rankedTie->setEnabled(hasPreviousGroup);
+    m_rankedUntie->setEnabled(peers > 1);
+    m_rankedRemove->setEnabled(chosen);
+    const auto *model = chosen ? m_data.catalog.find(entries.at(at).key) : nullptr;
+    m_rankedEffort->setEnabled(model && !model->effortFixed && !model->efforts.isEmpty());
+    m_rankedFollow->setVisible(rolestore::rankedOverrideSet(role) || custom
+                               || !rolestore::overrideTier(role).isEmpty());
+}
+
+void JobsTab::saveRanked(const QString &role, QList<models::curation::TierEntry> entries) {
     std::stable_sort(entries.begin(), entries.end(),
                      [](const auto &a, const auto &b) { return a.rank < b.rank; });
+    // Keep stored ranks dense while preserving equal ranks as one randomized group.
+    int rank = 0, oldRank = -1;
+    for (auto &entry : entries) {
+        if (entry.rank != oldRank) { oldRank = entry.rank; ++rank; }
+        entry.rank = rank;
+    }
     rolestore::setRankedOverride(role, entries);
     if (m_data.rolesChanged) m_data.rolesChanged();
     rebuild();
     selectRole(role);
-    m_list->setFocus(Qt::OtherFocusReason);
+    updateRankedPanel();
+}
+
+void JobsTab::addRankedModel() {
+    const QString role = currentRole();
+    if (!rolestore::supportsRanked(role)) return;
+    const auto entries = rolestore::rankedOverride(role);
+    QList<FilterRow> choices;
+    for (const auto &row : overrideRows(role)) {
+        if (row.data.isEmpty()) continue;
+        if (std::any_of(entries.begin(), entries.end(),
+                        [&](const auto &entry) { return entry.key == row.data; })) continue;
+        choices << row;
+    }
+    if (choices.isEmpty()) { m_rankedStatus->setText(QStringLiteral("Every available model is already listed.")); return; }
+    if (!m_popup) m_popup = new FilterPopup(this);
+    m_picking = role;
+    m_popup->onPicked = [this, role](int index) {
+        if (index < 0 || index >= m_popup->rows().size()) return;
+        const QString key = m_popup->rows().at(index).data;
+        auto rows = rolestore::rankedOverride(role);
+        int nextRank = 1;
+        for (const auto &entry : rows) nextRank = qMax(nextRank, entry.rank + 1);
+        rows << models::curation::TierEntry{key, models::curation::listEffortFor(key), nextRank};
+        saveRanked(role, rows);
+        m_rankedList->setCurrentItem(m_rankedList->topLevelItem(rows.size() - 1));
+        m_rankedList->setFocus(Qt::OtherFocusReason);
+    };
+    m_popup->onCancelled = [this] { m_picking.clear(); m_rankedList->setFocus(Qt::OtherFocusReason); };
+    m_popup->setRows(choices, 0);
+    m_popup->openFor(m_rankedAdd);
+}
+
+void JobsTab::moveRanked(int direction) {
+    const QString role = currentRole();
+    auto rows = rolestore::rankedOverride(role);
+    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.rank < b.rank; });
+    const int at = m_rankedList->indexOfTopLevelItem(m_rankedList->currentItem());
+    if (at < 0 || at >= rows.size()) return;
+    const int rank = rows.at(at).rank;
+    int otherRank = direction < 0 ? -1 : 1001;
+    for (const auto &entry : rows)
+        if (direction < 0 && entry.rank < rank) otherRank = qMax(otherRank, entry.rank);
+        else if (direction > 0 && entry.rank > rank) otherRank = qMin(otherRank, entry.rank);
+    if (otherRank < 0 || otherRank > 1000) return;
+    const QString key = rows.at(at).key;
+    for (auto &entry : rows) {
+        if (entry.rank == rank) entry.rank = otherRank;
+        else if (entry.rank == otherRank) entry.rank = rank;
+    }
+    saveRanked(role, rows);
+    for (int i = 0; i < m_rankedList->topLevelItemCount(); ++i)
+        if (m_rankedList->topLevelItem(i)->data(1, Qt::UserRole).toString() == key)
+            m_rankedList->setCurrentItem(m_rankedList->topLevelItem(i));
+}
+
+void JobsTab::tieRanked(bool tie) {
+    const QString role = currentRole();
+    auto rows = rolestore::rankedOverride(role);
+    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.rank < b.rank; });
+    const int at = m_rankedList->indexOfTopLevelItem(m_rankedList->currentItem());
+    if (at < 0 || at >= rows.size()) return;
+    const QString key = rows.at(at).key;
+    const int rank = rows.at(at).rank;
+    if (tie) {
+        if (at == 0 || rows.at(at - 1).rank == rank) return;
+        rows[at].rank = rows.at(at - 1).rank;
+    } else {
+        if (std::count_if(rows.begin(), rows.end(),
+                [rank](const auto &entry) { return entry.rank == rank; }) < 2) return;
+        for (auto &entry : rows) if (entry.rank > rank) ++entry.rank;
+        rows[at].rank = rank + 1;
+    }
+    saveRanked(role, rows);
+    for (int i = 0; i < m_rankedList->topLevelItemCount(); ++i)
+        if (m_rankedList->topLevelItem(i)->data(1, Qt::UserRole).toString() == key)
+            m_rankedList->setCurrentItem(m_rankedList->topLevelItem(i));
+}
+
+void JobsTab::removeRanked() {
+    const QString role = currentRole();
+    auto rows = rolestore::rankedOverride(role);
+    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.rank < b.rank; });
+    const int at = m_rankedList->indexOfTopLevelItem(m_rankedList->currentItem());
+    if (at < 0 || at >= rows.size()) return;
+    rows.removeAt(at);
+    saveRanked(role, rows);
+}
+
+void JobsTab::chooseRankedEffort() {
+    const QString role = currentRole();
+    const int at = m_rankedList->indexOfTopLevelItem(m_rankedList->currentItem());
+    auto rows = rolestore::rankedOverride(role);
+    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.rank < b.rank; });
+    if (at < 0 || at >= rows.size()) return;
+    const QString key = rows.at(at).key;
+    const auto choices = levelRows(role, key);
+    if (choices.isEmpty()) return;
+    if (!m_popup) m_popup = new FilterPopup(this);
+    int current = 0;
+    for (int i = 0; i < choices.size(); ++i)
+        if (choices.at(i).data == rows.at(at).effort) { current = i; break; }
+    m_popup->onPicked = [this, role, key](int index) {
+        if (index < 0 || index >= m_popup->rows().size()) return;
+        auto entries = rolestore::rankedOverride(role);
+        for (auto &entry : entries) if (entry.key == key) entry.effort = m_popup->rows().at(index).data;
+        saveRanked(role, entries);
+    };
+    m_popup->onCancelled = [this] { m_rankedList->setFocus(Qt::OtherFocusReason); };
+    m_popup->setRows(choices, current);
+    m_popup->openFor(m_rankedEffort);
 }
 
 bool JobsTab::openOverride() {
@@ -770,7 +903,9 @@ bool JobsTab::openOverride() {
     const Job *job = jobFor(role);
     if (!job || !job->settable) return false;
     if (rolestore::supportsRanked(role)) {
-        editRankedOverride(role);
+        updateRankedPanel();
+        if (m_rankedList->topLevelItemCount()) m_rankedList->setFocus(Qt::OtherFocusReason);
+        else m_rankedAdd->setFocus(Qt::OtherFocusReason);
         return true;
     }
     m_picking = role;
