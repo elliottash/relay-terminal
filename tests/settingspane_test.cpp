@@ -854,11 +854,13 @@ private slots:
     // The defaults themselves and the wiring live in RelayWindow::settingsSections(), which needs a
     // whole window to run; read it as text, the way localModelsComeRightAfterModels() does.
     void everyRowHelperDeclaresADefault() {
+        QFile settings(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowSettings.cpp"));
+        QVERIFY2(settings.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(settings.fileName()));
+        QVERIFY2(QString::fromUtf8(settings.readAll()).contains(QStringLiteral("relay::resetRow(section")),
+                 "settingsSections() no longer gives its pages a reset row");
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        QVERIFY2(text.contains(QStringLiteral("relay::resetRow(section")),
-                 "settingsSections() no longer gives its pages a reset row");
         for (const QString &helper : {QStringLiteral("toggleRow"), QStringLiteral("numberRow"),
                                       QStringLiteral("textRow"), QStringLiteral("hostListRow"),
                                       QStringLiteral("choiceRow"), QStringLiteral("buttonRow")}) {
@@ -877,7 +879,7 @@ private slots:
     // `signals_config` into the board's own `board.yaml` — is covered headless in
     // tests/test_signal_threads.py.
     void workSignalsUnaskedSitsUnderBoardAndSaysWhatItDoes() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowSettings.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
         const int heading = text.indexOf(QStringLiteral("headingRow(QStringLiteral(\"Board\"))"));
@@ -900,12 +902,12 @@ private slots:
     // by RelayWindow::modelsSection(), which needs a whole window; read it as text like the tests
     // above, and read only that function so a row of some other page cannot answer for it.
     void theModelsPageHasNoTierListsAndNoChecklist() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowModels.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {"));
         QVERIFY2(start > 0, "modelsSection() is gone");
-        const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
+        const int end = text.indexOf(QStringLiteral("return models;"), start);
         QVERIFY(end > start);
         const QString page = text.mid(start, end - start);
         // The five lists: no numbered rows or "+ add a model..." button. Options now owns
@@ -936,7 +938,7 @@ private slots:
     // dialog until 2026-09-21), and on main -- not on the mode the pane happens to be in, which is
     // what runAction("agent.modelOptions") would do.
     void theModelsPageButtonOpensTheModelsPaneOnMain() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowModels.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
         const int row = text.indexOf(QStringLiteral("QStringLiteral(\"models.prioritize\")"));
@@ -950,7 +952,7 @@ private slots:
                      || text.mid(row - 400, 400).contains(QStringLiteral("if (!inModelsPane)")),
                  qPrintable(text.mid(row - 400, 500)));
         // It is the first row the page appends: the complaint was that the chooser sat too far down.
-        const int section = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
+        const int section = text.indexOf(QStringLiteral("relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {"));
         const int firstRow = text.indexOf(QStringLiteral("models.rows << "), section);
         QVERIFY(firstRow > row);
         QVERIFY2(firstRow - row < 1600, "another row is appended before the dialog button");
@@ -970,16 +972,16 @@ private slots:
     // link under it says how many of that provider's models are available and opens the models
     // pane's available tab on that provider, which is where step 2 is edited.
     void everyProviderRowHasAModelsLinkIntoTheAvailableTab() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowModels.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {"));
         QVERIFY2(start > 0, "modelsSection() is gone");
-        const int end = text.indexOf(QStringLiteral("void modelsCurated() {"), start);
+        const int end = text.indexOf(QStringLiteral("return models;"), start);
         const QString page = text.mid(start, end - start);
         const int row = page.indexOf(QStringLiteral("QStringLiteral(\"models.available:\")"));
         QVERIFY2(row > 0, "the per-provider models link is gone from the Models page");
-        const QString block = page.mid(row, 1400);
+        const QString block = page.mid(row, 1800);
         // Its own count, and the models pane's available tab filtered to this provider.
         QVERIFY2(block.contains(QStringLiteral("of %2 available")), qPrintable(block.left(600)));
         QVERIFY2(block.contains(QStringLiteral("openModelPicker(QStringLiteral(\"all\")")), qPrintable(block.left(900)));
@@ -998,17 +1000,55 @@ private slots:
 
     // ----- the owner's review of the providers tab (card #MDL1, 2026-09-21) --------------------
 
+    // Sources is assembled in RelayWindow, which this small SettingsPane target cannot link.
+    // Check the two production assembly sites: source groups precede local servers, profiles
+    // follow them, and a group with no provider rows does not leave an empty heading.
+    void modelsSourcesScansAccountsThenLocalServersThenProfiles() {
+        const auto read = [](const char *path) {
+            QFile source(QStringLiteral(RELAY_SOURCE_DIR) + QLatin1Char('/') + QLatin1String(path));
+            if (!source.open(QIODevice::ReadOnly | QIODevice::Text)) return QString();
+            return QString::fromUtf8(source.readAll());
+        };
+        const QString models = read("src/RelayWindowModels.cpp");
+        const QString window = read("src/RelayWindow.h");
+        QVERIFY(!models.isEmpty() && !window.isEmpty());
+
+        const int arrange = models.indexOf(QStringLiteral("QList<relay::SettingRow> arranged;"));
+        const int finish = models.indexOf(QStringLiteral("models.rows = arranged;"), arrange);
+        QVERIFY(arrange >= 0 && finish > arrange);
+        const QString groups = models.mid(arrange, finish - arrange);
+        QVERIFY(groups.contains(QStringLiteral("if (inModelsPane && groups[i].isEmpty()) continue;")));
+        QVERIFY(groups.contains(QStringLiteral("head.id = QStringLiteral(\"heading:\") + savedNames.at(i);")));
+        const int providerRows = groups.indexOf(QStringLiteral("arranged << beforeGroups;"));
+        const int accountGroups = groups.indexOf(QStringLiteral("for (int i = 0; i < 3; ++i)"));
+        const int importKeys = groups.indexOf(QStringLiteral("arranged << afterGroups;"));
+        const int profiles = groups.indexOf(QStringLiteral("if (inModelsPane) arranged << original.mid(profilesAt"));
+        QVERIFY(providerRows >= 0 && accountGroups > providerRows && importKeys > accountGroups
+                && profiles > importKeys);
+
+        const int pane = window.indexOf(QStringLiteral("ToolPane *createModelsPane("));
+        const int paneEnd = window.indexOf(QStringLiteral("view->onSourcesShown"), pane);
+        QVERIFY(pane >= 0 && paneEnd > pane);
+        const QString sources = window.mid(pane, paneEnd - pane);
+        const int splitProfiles = sources.indexOf(QStringLiteral("sources.rows = sources.rows.mid(0, profilesAt);"));
+        const int localServers = sources.indexOf(QStringLiteral("sources.rows += localModels().compactSection().rows;"));
+        const int localMore = sources.indexOf(QStringLiteral("sources.rows << more;"));
+        const int appendProfiles = sources.indexOf(QStringLiteral("sources.rows += profiles;"));
+        QVERIFY(splitProfiles >= 0 && localServers > splitProfiles && localMore > localServers
+                && appendProfiles > localMore);
+    }
+
     // "tab 1: add horizontal line dividers between providers." One provider is up to three rows —
     // its key, its "models… (N of M)" link and, for a guest, what it may do with a tool — and they
     // ran into the next provider's as one wall of text. The rule is `SettingRow::ruleAbove`, drawn
     // by the pane in the theme's `@border`.
     void everyProviderButTheFirstDrawsARuleAboveIt() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowModels.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
-        const int start = text.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
+        const int start = text.indexOf(QStringLiteral("relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {"));
         QVERIFY2(start > 0, "modelsSection() is gone");
-        const QString page = text.mid(start, text.indexOf(QStringLiteral("void modelsCurated() {"), start) - start);
+        const QString page = text.mid(start, text.indexOf(QStringLiteral("return models;"), start) - start);
         QVERIFY2(page.contains(QStringLiteral("row.ruleAbove = !firstProvider;")), "no divider between providers");
         QVERIFY(page.contains(QStringLiteral("firstProvider = false;")));
 
@@ -1045,11 +1085,12 @@ private slots:
             return QString::fromUtf8(source.readAll());
         };
         const QString window = read("src/RelayWindow.h");
+        const QString models = read("src/RelayWindowModels.cpp");
         const QString pane = read("src/Pane.h");
         const QString keymap = read("src/Keymap.h");
-        QVERIFY(!window.isEmpty() && !pane.isEmpty() && !keymap.isEmpty());
+        QVERIFY(!window.isEmpty() && !models.isEmpty() && !pane.isEmpty() && !keymap.isEmpty());
         // The row, the dialog and the action, each gone rather than merely unbound.
-        QVERIFY2(!window.contains(QStringLiteral("QStringLiteral(\"Advanced provider settings\")")),
+        QVERIFY2(!models.contains(QStringLiteral("QStringLiteral(\"Advanced provider settings\")")),
                  "the advanced row is still on the Models page");
         QVERIFY2(!window.contains(QStringLiteral("openProviderDialog()")), "the window still opens it");
         QVERIFY2(!pane.contains(QStringLiteral("void openProviderDialog()")), "Pane still has the door");
@@ -1057,8 +1098,11 @@ private slots:
         QVERIFY2(!keymap.contains(QStringLiteral("add(\"agent.provider\"")), "the action is still registered");
         QVERIFY2(!keymap.contains(QStringLiteral("\"agent.provider\":[")), "a keybinding preset still binds it");
         // One import row offers all supported sources after the provider groups.
-        const int start = window.indexOf(QStringLiteral("relay::SettingsSection modelsSection(bool inModelsPane = false) {"));
-        const QString page = window.mid(start, window.indexOf(QStringLiteral("void modelsCurated() {"), start) - start);
+        const int start = models.indexOf(QStringLiteral("relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {"));
+        QVERIFY(start > 0);
+        const int end = models.indexOf(QStringLiteral("return models;"), start);
+        QVERIFY(end > start);
+        const QString page = models.mid(start, end - start);
         const int imports = page.indexOf(QStringLiteral("QStringLiteral(\"models.importKeys\")"));
         QVERIFY2(imports > 0, "there is nowhere to import API keys from");
         QVERIFY(page.mid(imports, 1700).contains(QStringLiteral("import_warp")));
@@ -1084,7 +1128,7 @@ private slots:
     // The placement is one line of RelayWindow::settingsSections(), which needs a whole window to
     // run; read it as text, the way tests/test_presets.py reads the preset mirror.
     void localModelsComeRightAfterModels() {
-        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowSettings.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
         // `modelsSection()` since the page grew its own builder (2026-09-20); the placement

@@ -460,10 +460,13 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                 if (usable > 0) {
                     const QString provider = str(preset, "provider").toLower();
                     relay::SettingRow link = buttonRow(QStringLiteral("models.available:") + id,
-                        QStringLiteral("models"),
-                        QStringLiteral("Which of this provider's models your lists, the alt+m box and its filter may "
-                                       "offer. Opens the models pane's available tab on this provider"),
-                        QStringLiteral("models… (%1 of %2 available)").arg(available).arg(usable),
+                        inModelsPane ? QStringLiteral("Enabled models") : QStringLiteral("models"),
+                        inModelsPane
+                            ? QStringLiteral("Choose which of this source's models appear in lists and the Alt+M picker.")
+                            : QStringLiteral("Which of this provider's models your lists, the alt+m box and its filter may "
+                                             "offer. Opens the models pane's available tab on this provider"),
+                        inModelsPane ? QStringLiteral("%1 of %2 enabled…").arg(available).arg(usable)
+                                     : QStringLiteral("models… (%1 of %2 available)").arg(available).arg(usable),
                         [this, provider, label, target = QPointer<Pane>(pane)] {
                             // Follow the provider page's target even if focus moved meanwhile.
                             Pane *on = target ? target.data() : focusedConsole();
@@ -818,7 +821,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
         Q_ASSERT(providerAt >= 0 && profilesAt > providerAt && defaultsAt > profilesAt);
         QList<relay::SettingRow> arranged;
         if (!inModelsPane) arranged << original.mid(0, providerAt); // Options' link to the pane
-        arranged << original.mid(profilesAt, defaultsAt - profilesAt);
+        if (!inModelsPane) arranged << original.mid(profilesAt, defaultsAt - profilesAt);
         QList<relay::SettingRow> groups[3];
         QList<relay::SettingRow> beforeGroups;
         QList<relay::SettingRow> afterGroups;
@@ -855,10 +858,22 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
         }
         flushProvider();
         arranged << beforeGroups;
-        const QStringList labels{QStringLiteral("Guest Agents"), QStringLiteral("Subscription Keys"),
-                                 QStringLiteral("Pay-as-you-go Keys")};
+        const QStringList labels = inModelsPane
+            ? QStringList{QStringLiteral("Coding accounts"), QStringLiteral("Subscription keys"),
+                          QStringLiteral("API keys and endpoints")}
+            : QStringList{QStringLiteral("Guest Agents"), QStringLiteral("Subscription Keys"),
+                          QStringLiteral("Pay-as-you-go Keys")};
         for (int i = 0; i < 3; ++i) {
+            // Sources is a short inventory. An empty category need not take up space there;
+            // + Add provider remains visible above the groups for first-time setup.
+            if (inModelsPane && groups[i].isEmpty()) continue;
             relay::SettingRow head = headingRow(labels.at(i));
+            // The heading ID is also the saved collapse key. Keep it when changing the wording.
+            if (inModelsPane) {
+                const QStringList savedNames{QStringLiteral("Guest Agents"), QStringLiteral("Subscription Keys"),
+                                             QStringLiteral("Pay-as-you-go Keys")};
+                head.id = QStringLiteral("heading:") + savedNames.at(i);
+            }
             head.collapsible = true;
             arranged << head;
             bool first = true;
@@ -872,6 +887,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             }
         }
         arranged << afterGroups;
+        if (inModelsPane) arranged << original.mid(profilesAt, defaultsAt - profilesAt);
         if (!inModelsPane) {
             arranged << original.mid(defaultsAt);
             relay::SettingRow fill;
