@@ -14824,13 +14824,12 @@ private:
             // the block closes or the user sends the login a line (typeIntoLogin).
         } else {
             // The cursor's own row, not the last row of the screen: inside a remote tmux the last
-            // row is its status bar. The cursor must sit at the end of what that row holds, and
-            // that text must read like a shell's prompt.
+            // row is its status bar. The row is read only up to the cursor, and what follows must
+            // be blank or a pane separator, because a zellij or tmux split puts the neighbour
+            // pane's text there (card #VD2M).
             const QPoint cursor = m_backend->cursorPosition();
             const QString row = cursor.y() >= 0 ? m_backend->screenText().split('\n').value(cursor.y()) : QString();
-            const QString typed = row.left(std::max(0, cursor.x()));
-            bool prompt = !typed.trimmed().isEmpty() && cursor.x() >= row.trimmed().size()
-                          && relay::screen::isShellPrompt(typed) && !m_screenPrompt.actionable();
+            bool prompt = relay::screen::rowHoldsPrompt(row, cursor.x()) && !m_screenPrompt.actionable();
             m_login.promptTicks = prompt ? m_login.promptTicks + 1 : 0;
             m_login.atPrompt = m_login.promptTicks >= 2;
         }

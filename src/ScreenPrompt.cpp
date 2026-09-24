@@ -143,6 +143,20 @@ double score(double base, const Signals &sig, bool password) {
 
 bool isShellPrompt(const QString &line) { return shellPrompt(line.trimmed()); }
 
+bool rowHoldsPrompt(const QString &row, int cursorX)
+{
+    const int x = std::clamp(cursorX, 0, row.size());
+    const QString typed = row.left(x);
+    if (!isShellPrompt(typed)) return false;
+    const QString rest = row.mid(x).trimmed();
+    if (rest.isEmpty()) return true;
+    // The first thing after the cursor can be a split pane's border: the box-drawing verticals
+    // (`│ ┃ ┆ ┇ ┊ ┋`, and `║ ╎ ╏`), or the ASCII `|` of a borderless tmux layout. Anything else
+    // means the cursor sits in the middle of the row's own text, which a prompt's cursor does not.
+    const ushort c = rest.at(0).unicode();
+    return c == '|' || (c >= 0x2502 && c <= 0x250D) || c == 0x2551 || c == 0x254E || c == 0x254F;
+}
+
 const char *kindName(Kind kind) {
     switch (kind) {
     case Kind::None: return "none";

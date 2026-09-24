@@ -196,6 +196,30 @@ private Q_SLOTS:
         QVERIFY(argv.first().endsWith(QStringLiteral("sshconfig-tests")));
         QVERIFY(processArgv(0).isEmpty());
     }
+
+    // "Connect to host (persistent)…" (card #VD2M): mosh when this machine has it, ssh -t
+    // otherwise, and on the host zellij attach --create, or tmux attach-or-create, or a login
+    // shell. The host script travels as one single-quoted word.
+    void persistentCommandBuildsTheFallingChain() {
+        const QString mosh = persistentCommand(QStringLiteral("filly"), true);
+        QVERIFY(mosh.startsWith(QStringLiteral("mosh filly -- sh -c '")));
+        QVERIFY(mosh.contains(QStringLiteral("zellij attach --create relay-filly")));
+        QVERIFY(mosh.contains(QStringLiteral("tmux new -A -s relay-filly")));
+        QVERIFY(mosh.contains(QStringLiteral("exec \"$SHELL\" -l'")));
+        QCOMPARE(mosh.count(QLatin1Char('\'')), 2);   // only the host script's own quotes
+        const QString ssh = persistentCommand(QStringLiteral("quoted name"), false);
+        QVERIFY(ssh.startsWith(QStringLiteral("ssh -t 'quoted name' sh -c '")));
+        QVERIFY(ssh.contains(QStringLiteral("relay-quotedname")));
+        QCOMPARE(ssh.count(QLatin1Char('\'')), 4);   // host name and host script
+    }
+
+    void persistentSessionKeepsOneNamePerUserAndHost() {
+        QCOMPARE(persistentSession(QStringLiteral("filly")), QStringLiteral("relay-filly"));
+        QCOMPARE(persistentSession(QStringLiteral("elliott@box.example.com:2222")),
+                 QStringLiteral("relay-elliott-box.example.com2222"));
+        QCOMPARE(persistentSession(QStringLiteral("we! rd")), QStringLiteral("relay-werd"));
+        QCOMPARE(persistentSession(QString()), QStringLiteral("relay-relay"));
+    }
 };
 
 QTEST_MAIN(SshConfigTests)

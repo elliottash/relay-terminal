@@ -123,16 +123,18 @@ public:
         if (action == QStringLiteral("prompt.clear") && !(mods & Qt::ShiftModifier)) return false;
         if (m_programKeys == QStringLiteral("all")) return true;
         const bool fkey = event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F35;
-        // Alt+arrows move between panes. A terminal cannot send Ctrl+Shift+letter to a program, and
-        // few TUIs use Alt+arrows, so these stay Relay's while a program owns the keyboard —
-        // otherwise a full-screen program (Claude Code, vim) traps the keyboard in its pane
-        // (owner report 2026-09-17).
+        // Shift+Alt+arrows move between panes. Plain Alt+arrows go to the program: a multiplexer
+        // inside a Relay pane — zellij, tmux — uses them to move between its own panes, and it
+        // must keep its keys (owner decision 2026-09-24, card #VD2M). Shift+Alt+arrows are the
+        // fallback that still escapes a full-screen program (Claude Code, vim), which otherwise
+        // traps the keyboard in its pane (owner report 2026-09-17).
         const bool arrow = event->key() == Qt::Key_Left || event->key() == Qt::Key_Right
                            || event->key() == Qt::Key_Up || event->key() == Qt::Key_Down;
-        const bool altArrow = arrow && (mods & Qt::AltModifier) && !(mods & Qt::ControlModifier);
+        const bool shiftAltArrow = arrow && (mods & Qt::AltModifier) && (mods & Qt::ShiftModifier)
+                                   && !(mods & Qt::ControlModifier);
         const bool dimmer = action == QStringLiteral("pane.brighten") || action == QStringLiteral("pane.darken")
                             || action == QStringLiteral("pane.dimToggle") || action == QStringLiteral("pane.autoDim");
-        return dimmer || fkey || altArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
+        return dimmer || fkey || shiftAltArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
     }
 
     void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }
@@ -235,6 +237,7 @@ private:
         // says anything about hosts. Bind one in keybindings.json and the shortcut hints start
         // teaching it.
         add("ssh.connect", "tab", "Connect to host…: a new tab running ssh to a host from ~/.ssh/config or a recent one", {});
+        add("ssh.connectPersistent", "tab", "Connect to host (persistent)…: a new tab whose remote work outlives the connection — mosh (or ssh) running a zellij or tmux session on the host", {});
         // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
         // One key is now the whole of "new pane": it makes one on the right, and Left, Up or Down
@@ -247,10 +250,10 @@ private:
         add("pane.splitLeft", "pane", "New pane to the left", {});
         add("pane.splitUp", "pane", "New pane above", {});
         add("ssh.splitSameHost", "pane", "Split on the same host: a new pane running this pane's ssh or mosh command again", {});
-        add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left")});
-        add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right")});
-        add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up")});
-        add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down")});
+        add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left"), QStringLiteral("Shift+Alt+Left")});
+        add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right"), QStringLiteral("Shift+Alt+Right")});
+        add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up"), QStringLiteral("Shift+Alt+Up")});
+        add("pane.focusDown", "pane", "Focus pane below", {QStringLiteral("Alt+Down"), QStringLiteral("Shift+Alt+Down")});
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
         add("pane.moveToBackground", "pane", "Move the running agent to background", {QStringLiteral("Ctrl+Alt+B")});
         add("pane.runInBackground", "pane", "Run in background: send the prompt, or move a live agent there", {QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});

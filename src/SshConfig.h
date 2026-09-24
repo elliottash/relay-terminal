@@ -46,6 +46,19 @@ QString shellQuote(const QString &word);
 // `ssh <target>` for an alias or a `user@host`, quoted as needed.
 QString connectCommand(const QString &target);
 
+// True when this machine has a mosh client, for persistentCommand()'s transport choice.
+bool hasLocalMosh();
+
+// The zellij/tmux session name a persistent connection to `target` attaches to: `relay-` plus the
+// target's safe characters, so the same host (and user) always lands on the same session.
+QString persistentSession(const QString &target);
+
+// A shell line that opens `target` on a session that outlives the connection (card #VD2M): mosh
+// when this machine has it, `ssh -t` otherwise, and on the host `zellij attach --create <session>`
+// or, without zellij, `tmux new -A -s <session>`, or a login shell when it has neither. Closing
+// Relay or losing the network leaves the session running; running the line again re-attaches.
+QString persistentCommand(const QString &target, bool haveMosh);
+
 // What the Actions search box holds, read as a host to connect to: "user@host", or "ssh <host>"
 // (with an optional user@). Empty when it does not look like one, so ordinary searches never
 // grow a "connect to" row.

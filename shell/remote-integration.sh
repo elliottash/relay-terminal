@@ -9,13 +9,18 @@ __relay_r_h=${HOSTNAME:-${HOST:-$(hostname 2>/dev/null)}}
 case $__relay_r_h in *[!A-Za-z0-9.-]*) __relay_r_h=$(printf %s "$__relay_r_h" | tr -cd 'A-Za-z0-9.-');; esac
 [ -n "$__relay_r_h" ] || __relay_r_h=remote
 __relay_r_e= __relay_r_f= __relay_r_l=
-if [ -n "${TMUX-}" ]; then
+if [ -n "${ZELLIJ-}" ]; then
+# zellij sets $ZELLIJ (to "0"), and it passes no OSC out — there is no tmux-style passthrough —
+# so marks cannot reach Relay from inside it (verified on 0.45.1, card #VD2M). Emit nothing.
+__relay_r_z=1
+printf 'relay: zellij does not pass prompt marks through; Relay reads the screen for the prompt\n'
+elif [ -n "${TMUX-}" ]; then
 __relay_r_e='\033Ptmux;\033' __relay_r_f='\033\\'
 case $(tmux show -gv allow-passthrough 2>/dev/null) in on|all) ;;
 *) printf 'relay: tmux needs "set -g allow-passthrough on" for prompt marks\n';; esac
 else case ${STY:+screen}${TERM-} in screen*) __relay_r_e='\033P' __relay_r_f='\033\\' __relay_r_l=200;; esac
 fi
-__relay_r_o() { printf "$__relay_r_e\033]%s\007$__relay_r_f" "$1"; }
+__relay_r_o() { [ -n "${__relay_r_z-}" ] && return 0; printf "$__relay_r_e\033]%s\007$__relay_r_f" "$1"; }
 # Bash text is unavailable; preserve login bindings.
 __relay_r_command() { [ -n "${__relay_r_token-}" ] && __relay_r_o "777;notify;relay-command;$__relay_r_token;$(printf %s "${1-}" | base64 | tr -d '\n');$(printf %s "$PWD" | base64 | tr -d '\n')"; return 0; }
 __relay_r_confirm() { [ -n "${__relay_r_token-}" ] && __relay_r_o "777;notify;relay-shell;$__relay_r_token;$(printf %s "$PATH" | base64 | tr -d '\n')"; return 0; }

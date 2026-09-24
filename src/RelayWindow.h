@@ -2645,18 +2645,18 @@ private:
     // queue, as for a command typed while the terminal is busy). The list is the recently used
     // hosts, then every concrete Host of ~/.ssh/config and its Includes, read afresh each time.
 
-    PaletteItem sshHostItem(const QString &target, const QString &detail) {
+    PaletteItem sshHostItem(const QString &target, const QString &detail, bool persistent = false) {
         PaletteItem item;
         item.key = QStringLiteral("ssh:") + target;
         item.section = QStringLiteral("SSH");
         item.label = target;
         item.detail = detail;
         item.aliases = QStringLiteral("ssh ") + detail;
-        item.run = [this, target] { connectToHost(target); };
+        item.run = [this, target, persistent] { connectToHost(target, persistent); };
         return item;
     }
 
-    QList<PaletteItem> sshMenuItems() {
+    QList<PaletteItem> sshMenuItems(bool persistent = false) {
         QList<PaletteItem> items;
         QHash<QString, QString> details;
         const QList<relay::ssh::Host> hosts = relay::ssh::userHosts();
@@ -2664,11 +2664,11 @@ private:
         QSet<QString> listed;
         for (const QString &target : relay::ssh::recentHosts()) {
             const QString detail = details.value(target);
-            items << sshHostItem(target, detail.isEmpty() ? QStringLiteral("recent") : QStringLiteral("recent · ") + detail);
+            items << sshHostItem(target, detail.isEmpty() ? QStringLiteral("recent") : QStringLiteral("recent · ") + detail, persistent);
             listed.insert(target);
         }
         for (const relay::ssh::Host &host : hosts)
-            if (!listed.contains(host.alias)) items << sshHostItem(host.alias, host.detail());
+            if (!listed.contains(host.alias)) items << sshHostItem(host.alias, host.detail(), persistent);
         if (items.isEmpty()) {
             PaletteItem none;
             none.key = QStringLiteral("ssh:none");
@@ -2689,14 +2689,17 @@ private:
         return {item};
     }
 
-    void openSshMenu() {
+    void openSshMenu(bool persistent = false) {
         QDialog dialog(this);
         dialog.setObjectName(QStringLiteral("sshHostPicker"));
-        dialog.setWindowTitle(QStringLiteral("Connect to SSH"));
+        dialog.setWindowTitle(persistent ? QStringLiteral("Connect to SSH (persistent)")
+                                        : QStringLiteral("Connect to SSH"));
         dialog.resize(600, 420);
         auto *layout = new QVBoxLayout(&dialog);
         auto *filter = new QLineEdit(&dialog);
-        filter->setPlaceholderText(QStringLiteral("Search saved hosts or enter user@host"));
+        filter->setPlaceholderText(persistent
+                                       ? QStringLiteral("Search saved hosts or enter user@host; work survives disconnects")
+                                       : QStringLiteral("Search saved hosts or enter user@host"));
         layout->addWidget(filter);
         auto *list = new QListWidget(&dialog);
         layout->addWidget(list, 1);
@@ -2707,7 +2710,7 @@ private:
         auto *connectButton = buttons->button(QDialogButtonBox::Ok);
         connectButton->setText(QStringLiteral("Connect"));
         layout->addWidget(buttons);
-        const auto hosts = sshMenuItems();
+        const auto hosts = sshMenuItems(persistent);
         auto refresh = [=](const QString &query) {
             list->clear();
             bool exact = false;
@@ -2740,14 +2743,16 @@ private:
         refresh(QString());
         filter->setFocus();
         if (dialog.exec() == QDialog::Accepted && list->currentItem())
-            connectToHost(list->currentItem()->data(Qt::UserRole).toString());
+            connectToHost(list->currentItem()->data(Qt::UserRole).toString(), persistent);
     }
 
-    void connectToHost(const QString &target) {
+    void connectToHost(const QString &target, bool persistent = false) {
         if (target.trimmed().isEmpty()) return;
         if (!addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1) || !m_active) return;
         startNewTabTheme(m_tabs->currentWidget());
-        m_active->queueCommand(relay::ssh::connectCommand(target));
+        m_active->queueCommand(persistent
+                                   ? relay::ssh::persistentCommand(target, relay::ssh::hasLocalMosh())
+                                   : relay::ssh::connectCommand(target));
         relay::ssh::rememberHost(target);
     }
 

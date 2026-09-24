@@ -79,6 +79,13 @@ Detection detect(const QStringList &rows, const Signals &sig);
 // tmux: the last row of the screen is tmux's status bar, the cursor's row is the prompt).
 bool isShellPrompt(const QString &line);
 
+// The cursor's row is that prompt and nothing else of the pane's own text: the row is read only
+// up to the cursor, and what follows must be blank or a multiplexer's pane separator — a zellij
+// or tmux split puts `│` and the neighbour pane's text on the same row after the prompt (card
+// #VD2M: zellij passes no escape sequences out, so the screen, not shell marks, says where the
+// prompt is). `cursorX` past the row's end reads as the row's end.
+bool rowHoldsPrompt(const QString &row, int cursorX);
+
 // "apt is asking: Do you want to continue? [Y/n]" — the take-control banner's label.
 // Empty when nothing is being asked. A password is named, never quoted back with its line.
 QString bannerText(const QString &program, const Detection &detection);

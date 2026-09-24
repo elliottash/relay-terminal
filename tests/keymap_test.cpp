@@ -6,6 +6,7 @@
 #endif
 
 #include <QCoreApplication>
+#include <QKeyEvent>
 #include <QSettings>
 #include <QtTest>
 
@@ -41,6 +42,28 @@ private slots:
         QCOMPARE(keymap.preset(), QStringLiteral("relay"));                                                 // kept
         keymap.clearOverrides();
         QCOMPARE(keymap.actionForKey(QStringLiteral("Ctrl+Shift+A")), QStringLiteral("board.open"));
+    }
+
+    // A multiplexer inside a Relay pane — zellij, tmux — uses plain Alt+arrows to move between
+    // its own panes, so those go to the program; Shift+Alt+arrows are the fallback that still
+    // escapes a full-screen program (owner decision 2026-09-24, card #VD2M).
+    void programKeysGivePlainAltArrowsToTheProgram() {
+        Keymap &keymap = Keymap::instance();
+        keymap.setPreset(QStringLiteral("relay"));
+        keymap.clearOverrides();
+        keymap.setProgramKeys(QStringLiteral("shift-only"));
+        QKeyEvent plainAlt(QEvent::KeyPress, Qt::Key_Left, Qt::AltModifier, QString());
+        QKeyEvent shiftAlt(QEvent::KeyPress, Qt::Key_Left, Qt::AltModifier | Qt::ShiftModifier, QString());
+        QKeyEvent ctrlAlt(QEvent::KeyPress, Qt::Key_Up, Qt::ControlModifier | Qt::AltModifier, QString());
+        QVERIFY(!keymap.actsInsidePrograms(&plainAlt));
+        QVERIFY(!keymap.actsInsidePrograms(&ctrlAlt));
+        QVERIFY(keymap.actsInsidePrograms(&shiftAlt));
+        QCOMPARE(keymap.match(&plainAlt), QStringLiteral("pane.focusLeft"));
+        QCOMPARE(keymap.match(&shiftAlt), QStringLiteral("pane.focusLeft"));
+        // Outside a program both spellings focus panes; inside one only the shifted twin acts.
+        QKeyEvent shiftAltDown(QEvent::KeyPress, Qt::Key_Down, Qt::AltModifier | Qt::ShiftModifier, QString());
+        QCOMPARE(keymap.match(&shiftAltDown), QStringLiteral("pane.focusDown"));
+        QVERIFY(keymap.actsInsidePrograms(&shiftAltDown));
     }
     // The owner's pairing rule (#QWAS): no letter has one Relay action on Ctrl and another on
     // Ctrl+Shift, and the everyday editing keys stay the editor's.

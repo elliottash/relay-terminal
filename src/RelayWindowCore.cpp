@@ -237,6 +237,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
             markForSshHint(m_active, QString());   // an ssh typed here soon teaches Connect to host
         }
         else if (id == QStringLiteral("ssh.connect")) openSshMenu();
+        else if (id == QStringLiteral("ssh.connectPersistent")) openSshMenu(true);
         else if (id == QStringLiteral("ssh.splitSameHost")) splitSameHost();
         else if (id == QStringLiteral("tab.next")) cycleTab(1);
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);

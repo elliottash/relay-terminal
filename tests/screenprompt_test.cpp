@@ -280,6 +280,25 @@ private Q_SLOTS:
         const Detection nothing = detect(rowsOf(QStringLiteral("shell-prompt.txt")), idleShell());
         QVERIFY(waitingLine(QStringLiteral("bash"), nothing).isEmpty());
     }
+
+    // The cursor's row read up to the cursor (card #VD2M): a zellij or tmux side-by-side split
+    // puts the pane separator and the neighbour's text after the prompt, which used to defeat
+    // prompt detection because it required the cursor to sit at the row's end.
+    void rowHoldsPromptAcceptsASeparatorSplit() {
+        QVERIFY(rowHoldsPrompt(QStringLiteral("elliott@spark:~/repos$ │ tail -f log"), 22));
+        QVERIFY(rowHoldsPrompt(QStringLiteral("root@box:~# ┃ make"), 12));
+        QVERIFY(rowHoldsPrompt(QStringLiteral("user@h:/tmp% | vim"), 13));
+        QVERIFY(rowHoldsPrompt(QStringLiteral("elliott@spark:~$ "), 17));
+        QVERIFY(rowHoldsPrompt(QStringLiteral("elliott@spark:~$"), 16));
+        QVERIFY(rowHoldsPrompt(QStringLiteral("elliott@spark:~$"), 99));   // cursor past the row's end
+    }
+
+    void rowHoldsPromptRejectsAnythingElseAfterTheCursor() {
+        QVERIFY(!rowHoldsPrompt(QStringLiteral("elliott@spark:~$ tail -f log"), 16));   // the row's own text
+        QVERIFY(!rowHoldsPrompt(QStringLiteral("echo hello │ world"), 5));             // not a prompt at all
+        QVERIFY(!rowHoldsPrompt(QStringLiteral("no prompt here │ at all"), 4));
+        QVERIFY(!rowHoldsPrompt(QString(), 0));
+    }
 };
 
 QTEST_APPLESS_MAIN(ScreenPromptTests)

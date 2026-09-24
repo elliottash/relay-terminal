@@ -431,9 +431,13 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             PaletteItem hosts = actionItem(panes, QStringLiteral("Connect to SSH…"),
                                            QStringLiteral("Choose a saved or recent host, or enter a new one"),
                                            QStringLiteral("ssh.connect"));
+            PaletteItem hostsPersistent = actionItem(panes, QStringLiteral("Connect to host (persistent)…"),
+                                                     QStringLiteral("mosh (or ssh) into a zellij or tmux session on the host; work survives disconnects and Relay restarts"),
+                                                     QStringLiteral("ssh.connectPersistent"));
             hosts.aliases = QStringLiteral("ssh mosh remote server login");
             hosts.typed = [this](const QString &search) { return sshTypedItems(search); };
             items << hosts;
+            items << hostsPersistent;
         }
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
         items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
@@ -590,7 +594,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                                    "pane.moveToNewTab pane.moveToBackground pane.runInBackground tab.moveToNewWindow pane.close closed.restore closed.list").split(' ')},
             {QStringLiteral("Files and projects"), QStringLiteral("files.explorer files.open board.open tests.open "
                                    "project.pick project.init project.detach").split(' ')},
-            {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.splitSameHost remote.pair "
+            {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.connectPersistent ssh.splitSameHost remote.pair "
                                    "pane.share pane.sharing remote.openShared remote.join").split(' ')},
             {QStringLiteral("Appearance"), QStringLiteral("pane.focusMode pane.autoDim pane.dimToggle pane.brighten "
                                    "pane.darken theme.folder theme.reload").split(' ')},

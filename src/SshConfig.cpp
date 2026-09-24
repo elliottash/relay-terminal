@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTextStream>
 
 #ifndef Q_OS_WIN
@@ -322,6 +323,41 @@ QString shellQuote(const QString &word) {
 QString connectCommand(const QString &target) {
     // `--` never: an alias cannot start with '-', and typedTarget refuses one.
     return QStringLiteral("ssh ") + shellQuote(target);
+}
+
+bool hasLocalMosh() {
+    return !QStandardPaths::findExecutable(QStringLiteral("mosh")).isEmpty();
+}
+
+QString persistentSession(const QString &target) {
+    QString out;
+    for (const QChar &c : target) {
+        if (c.isLetterOrNumber() || c == QLatin1Char('.') || c == QLatin1Char('-') || c == QLatin1Char('_'))
+            out += c;
+        else if (c == QLatin1Char('@'))
+            out += QLatin1Char('-');  // user@host -> user-host: one session per user and host
+    }
+    if (out.isEmpty()) out = QStringLiteral("relay");
+    return QStringLiteral("relay-") + out;
+}
+
+QString persistentCommand(const QString &target, bool haveMosh) {
+    const QString session = persistentSession(target);
+    // One script for the host, run by its sh: re-attach to the session, creating it on first
+    // connect; fall through to tmux's attach-or-create, then to a plain login shell. No exec on
+    // the fallbacks: `command -v ... && exec` only execs when the program exists, and a missing
+    // one leaves the line false so the next runs. Written without single quotes so the whole
+    // script travels as one single-quoted word (shellQuote).
+    const QString inner = QStringLiteral(
+                              "command -v zellij >/dev/null 2>&1 && exec zellij attach --create %1; "
+                              "command -v tmux >/dev/null 2>&1 && exec tmux new -A -s %1; "
+                              "exec \"$SHELL\" -l")
+                              .arg(session);
+    const QString remote = QStringLiteral("sh -c ") + shellQuote(inner);
+    // mosh's `--` ends its own options and starts the remote command; without a local mosh the
+    // fallback needs -t: the multiplexer on the host is a full-screen program.
+    if (haveMosh) return QStringLiteral("mosh ") + shellQuote(target) + QStringLiteral(" -- ") + remote;
+    return QStringLiteral("ssh -t ") + shellQuote(target) + QStringLiteral(" ") + remote;
 }
 
 QString typedTarget(const QString &search) {

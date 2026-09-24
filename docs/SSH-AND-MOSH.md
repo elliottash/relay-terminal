@@ -407,6 +407,34 @@ code with it.
 - No editing of the host's folders: an explorer pane on a remote folder lists and opens, it does
   not rename, delete or create (section 9).
 
+### 11. Zellij (#VD2M)
+
+zellij on a host or in a pane is served by detection and the screen, not by a channel:
+
+- **No passthrough.** zellij (verified 0.45.1) passes no OSC out — not 133, not 7, not even 52 —
+  and has no tmux-style DCS escape. So `shell/remote-integration.sh` detects `$ZELLIJ` (which
+  zellij sets to `0`, truthy by presence, never by value), prints one line saying so, and its
+  `__relay_r_o` wrapper becomes a no-op: marks cannot reach Relay from inside zellij, and
+  emitting them would be noise.
+- **The screen says where the prompt is.** A zellij or tmux side-by-side split puts the pane
+  separator and the neighbour pane's text after the prompt on the cursor's row, which used to
+  defeat the login path's "cursor at the row's end" check. `rowHoldsPrompt`
+  (`src/ScreenPrompt.cpp`) reads the row only up to the cursor and accepts a separator
+  (`│ ┃ ┆ ┇ ┊ ┋ ╎ ╏ ║`, or `|`) after it.
+- **Keys.** zellij and tmux use plain Alt+arrows to move between their own panes, so inside any
+  program those now go to the program; Shift+Alt+arrows are Relay's pane navigation fallback
+  that still escapes a full-screen program (owner decision 2026-09-24).
+- **First run.** A fresh zellij session shows a tips overlay that eats input until ESC —
+  `tests/test_zellij.py` dismisses it the way a person does.
+- **Persistent connects.** "Connect to host (persistent)…" in the palette runs
+  `mosh <target> -- sh -c '…'` (`ssh -t` when this machine has no mosh), where the host script
+  runs `zellij attach --create relay-<user-host>`, or `tmux new -A -s relay-<user-host>` when the
+  host has tmux and no zellij, or a login shell when it has neither. Losing the network, closing
+  the pane or quitting Relay leaves the session running on the host; running the same connect
+  again re-attaches to it. Nothing is installed on the host; the session name is the sanitized
+  target, so the same user and host always meet the same session (zellij, unlike tmux, refuses a
+  second concurrent attach to one session — connect once per host).
+
 ## Research notes
 
 - **Warp** types a bootstrap into the pty after login (detecting the prompt, re-checking after 3 s),
