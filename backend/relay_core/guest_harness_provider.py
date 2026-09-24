@@ -732,11 +732,15 @@ def usage_limits_event(guest_id: str, data: dict, account: str = "") -> dict:
     resets = data.get("resets_available") if isinstance(data, dict) else None
     if isinstance(resets, int) and not isinstance(resets, bool) and resets >= 0:
         event["resets_available"] = resets
+        expires = data.get("resets_expire_at")
+        if resets and isinstance(expires, int) and not isinstance(expires, bool) and expires > 0:
+            event["resets_expire_at"] = expires
     held = {"windows": [dict(w) for w in windows], "updated_at": int(time.time())}
     if "status" in event:
         held["status"] = event["status"]
-    if "resets_available" in event:
-        held["resets_available"] = event["resets_available"]
+    for field in ("resets_available", "resets_expire_at"):
+        if field in event:
+            held[field] = event[field]
     _LAST_LIMITS[key] = held
     return event
 
@@ -1009,6 +1013,26 @@ class HarnessProvider:
             self.harness.compact()
         except HarnessError as exc:
             _log.debug("guest harness compact failed: %s", exc)
+
+    def use_usage_reset(self, confirmed: bool = False) -> dict:
+        """`/usage-reset` (#KQNP): the harness spends one of the login's banked usage resets, or
+        says where it is spent. {"outcome", "message", "url"?, "limits_event"?}: `limits_event`
+        is the `usage_limits` event the refreshed windows make, for the caller to emit."""
+        use = getattr(self.harness, "use_usage_reset", None)
+        if use is None:
+            return {"outcome": "unsupported",
+                    "message": f"{guest.spec(self.guest_id).name} has no usage resets Relay can use."}
+        try:
+            answer = dict(use(confirmed=confirmed) or {})
+        except HarnessError as exc:
+            return {"outcome": "failed", "message": f"The reset was not used: {exc}"}
+        limits = answer.pop("limits", None)
+        if isinstance(limits, dict):
+            event = usage_limits_event(self.guest_id, limits, self.account)
+            if event:
+                self.usage_limits = last_limits(key_of(self.guest_id, self.account))
+                answer["limits_event"] = event
+        return answer
 
     def bind(self, agent) -> None:
         """Remember the pane's Agent, for the turn id the events carry, for the per-call records

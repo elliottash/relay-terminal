@@ -261,6 +261,8 @@ Catalog catalogFrom(const QJsonArray &presets) {
         if (resetsAvailable >= 0) catalog.resetsAvailable.insert(id, resetsAvailable);
         const QJsonObject limits = preset.value(QStringLiteral("limits")).toObject();
         const qint64 updated = limits.value(QStringLiteral("updated_at")).toVariant().toLongLong();
+        const qint64 expires = limits.value(QStringLiteral("resets_expire_at")).toVariant().toLongLong();
+        if (resetsAvailable > 0 && expires > 0) catalog.resetsExpireAt.insert(id, expires);
         if (updated > 0) catalog.limitUpdatedAt.insert(id, updated);
         else if (!preset.value(QStringLiteral("quota")).toObject().isEmpty())
             catalog.limitUpdatedAt.insert(id, QDateTime::currentSecsSinceEpoch());
@@ -1425,7 +1427,7 @@ QString resetText(qint64 resetsAt, qint64 now) {
                                           : resets.toString(QStringLiteral("d MMM")).toLower();
 }
 
-QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable) {
+QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable, qint64 resetsExpireAt) {
     QStringList parts;
     for (const LimitWindow &window : windows) {
         if (window.usedPercent < 0) continue;
@@ -1436,8 +1438,13 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvai
     // The banked usage resets, the figure the CLI's /usage panel counts down (protocol 29.3):
     // shown only when there is at least one, so a provider that never reports the figure and one
     // that reports none left read the same.
-    if (resetsAvailable > 0)
-        parts << QStringLiteral("%1 usage reset%2").arg(resetsAvailable).arg(resetsAvailable == 1 ? QString() : QStringLiteral("s"));
+    if (resetsAvailable > 0) {
+        QString part = QStringLiteral("%1 usage reset%2").arg(resetsAvailable).arg(resetsAvailable == 1 ? QString() : QStringLiteral("s"));
+        // Always the date, not a weekday: a use-by is weeks out, and the day is what to remember.
+        if (resetsExpireAt > 0)
+            part += QStringLiteral(", use by %1").arg(QDateTime::fromSecsSinceEpoch(resetsExpireAt).toString(QStringLiteral("d MMM")).toLower());
+        parts << part;
+    }
     return parts.join(QStringLiteral(" · "));
 }
 

@@ -258,7 +258,8 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             const QString source = str(preset, "key_source");
             const bool hasKey = preset.value(QStringLiteral("has_stored_key")).toBool();
             const QString limits = relay::models::limitsText(catalog.limits.value(id), now,
-                                                             catalog.resetsAvailable.value(id, -1));
+                                                             catalog.resetsAvailable.value(id, -1),
+                                                             catalog.resetsExpireAt.value(id));
             QString status;
             if (id == QStringLiteral("relay-pro")) {
                 status = preset.value(QStringLiteral("access_note")).toString(QStringLiteral("enter your personal access code"));

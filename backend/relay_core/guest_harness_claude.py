@@ -77,6 +77,7 @@ issues/features/2026-09-19-claude-codex-guest-integration.md (GT7X, task t:x2).
 """
 from __future__ import annotations
 
+import datetime as dt
 import difflib
 import json
 import logging
@@ -86,6 +87,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.request
 import uuid
 
 from .guest_harness import (HarnessError, HarnessSteerUncertain, HarnessEvent, HarnessNotAvailable, HarnessStart,
@@ -310,6 +312,7 @@ class ClaudeHarness:
         # disk from then on, whatever this object does.
         self._resumable = False
         self._tools: list[str] = []
+        self._cli_version = ""                        # from `system`/`init`, for the resets read
 
         self._inbox: queue.Queue = queue.Queue()      # everything a turn reads
         self._pending: dict[str, list] = {}           # our control requests, by request_id
@@ -384,7 +387,31 @@ class ClaudeHarness:
                           permissions=permissions, effort=effort)
         self._launch(argv)
         self._handshake()
+        self._refresh_resets()
         return HarnessStart(session_id=self._session_id, model=self._model)
+
+    def _refresh_resets(self) -> None:
+        # Only for the real CLI: a harness on a stand-in process (the tests) has no login whose
+        # figures it could read, and must not reach the network for someone else's.
+        if self._spawn is _spawn:
+            refresh_usage_resets(self._config_dir(), self._cli_version, binary=self._binary)
+
+    def _config_dir(self) -> str:
+        """The login this process runs on: the account's CLAUDE_CONFIG_DIR, else the default."""
+        return (self._env_overrides.get("CLAUDE_CONFIG_DIR")
+                or os.environ.get("CLAUDE_CONFIG_DIR")
+                or os.path.join(os.path.expanduser("~"), ".claude"))
+
+    def use_usage_reset(self, confirmed: bool = False) -> dict:
+        """Claude's banked resets are spent on claude.ai (the owner's rule, 2026-09-23), so
+        nothing is spent here: the answer points at the website's usage page."""
+        held = usage_resets(self._config_dir())
+        left = f" {held[0]} left" if held and held[0] else ""
+        use_by = (" · use by " + time.strftime("%b %-d", time.localtime(held[1]))
+                  if held and held[0] and held[1] else "")
+        return {"outcome": "web", "url": CLAUDE_USAGE_PAGE,
+                "message": f"Claude's usage resets are used on claude.ai{' ·' + left if left else ''}"
+                           f"{use_by}. Opening its usage page."}
 
     def _launch(self, argv: list[str]) -> None:
         log.debug("starting claude harness: %s (cwd=%s)", " ".join(argv), self._cwd)
@@ -691,6 +718,13 @@ class ClaudeHarness:
         elif kind == "rate_limit_event":
             data = _limits_event(message)
             if data:
+                config_dir = self._config_dir()
+                held = usage_resets(config_dir)
+                if held is not None:
+                    data["resets_available"] = held[0]
+                    if held[0] and held[1]:
+                        data["resets_expire_at"] = held[1]
+                self._refresh_resets()
                 emit(HarnessEvent("limits", data))
         elif kind in ("prompt_suggestion", "result", "tool_progress"):
             # `tool_progress` is a running call's elapsed seconds (and `heartbeat` for the tools
@@ -710,6 +744,9 @@ class ClaudeHarness:
                 self._model = str(message.get("model") or self._model)
                 tools = message.get("tools")
                 self._tools = [str(t) for t in tools] if isinstance(tools, list) else []
+                version = message.get("claude_code_version")
+                if isinstance(version, str) and version[:1].isdigit():
+                    self._cli_version = version
             if not self._started_emitted:
                 self._started_emitted = True
                 emit(HarnessEvent("started", {"session_id": self._session_id,
@@ -1249,6 +1286,116 @@ def _usage_event(message: dict, last_usage: dict | None = None, last_model: str 
 # one would reject next — and carry no figure of their own, so `unifiedWindows` is what the
 # event is made of. `status` is allowed | allowed_warning | rejected.
 _CLAUDE_WINDOWS = (("five_hour", "5h"), ("seven_day", "weekly"))
+
+
+# Claude's banked usage-limit resets. Claude Code (2.1.281) calls them `cedar_ember` and reads
+# them from its usage endpoint when asked with `?cedar_ember=1` (recorded 2026-09-23, #KQNP):
+#
+#   GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1
+#   {..., "cedar_ember": {"eligible": true, "ineligible_reason": null,
+#          "grants": [{"id": "opus55-launch-promax-20260921", "resets_total": 1,
+#                      "resets_left": 1, "ends_at": "2026-10-22T16:00:00+00:00",
+#                      "usable_now": true, ...}], ...}}
+#
+# An older CLI's User-Agent gets `"ineligible_reason": "cli_version"` and no grants, so the read
+# names the installed version. The stream the harness reads never mentions them, hence the side
+# read: once at start and again, at most every RESETS_TTL, when a turn reports its windows. The
+# token is the login's own (`.credentials.json`); an expired one is not refreshed here — the CLI
+# refreshes it on its next call — so the read is simply skipped until then.
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1"
+CLAUDE_USAGE_PAGE = "https://claude.ai/settings/usage"
+RESETS_TTL = 15 * 60
+_resets_lock = threading.Lock()
+_resets: dict[str, tuple[int, int]] = {}          # config dir -> (resets left, earliest ends_at)
+_resets_asked: dict[str, float] = {}              # config dir -> when a read last started
+_cli_versions: dict[str, str] = {}
+
+
+def usage_resets(config_dir: str) -> tuple[int, int] | None:
+    """(resets left, earliest use-by as unix seconds or 0) for a login, or None before a read."""
+    with _resets_lock:
+        return _resets.get(config_dir)
+
+
+def parse_resets(payload) -> tuple[int, int] | None:
+    """The `cedar_ember` block as (resets left, earliest ends_at of a grant with any left), or
+    None when the answer says nothing usable (absent, or withheld from an old CLI)."""
+    block = payload.get("cedar_ember") if isinstance(payload, dict) else None
+    if not isinstance(block, dict) or block.get("ineligible_reason") == "cli_version":
+        return None
+    left, ends = 0, []
+    for grant in block.get("grants") or ():
+        n = grant.get("resets_left") if isinstance(grant, dict) else None
+        if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+            continue
+        left += n
+        try:
+            ends.append(int(dt.datetime.fromisoformat(
+                str(grant.get("ends_at")).replace("Z", "+00:00")).timestamp()))
+        except ValueError:
+            pass
+    return left, (min(ends) if ends else 0)
+
+
+def _oauth_token(config_dir: str) -> str:
+    try:
+        with open(os.path.join(config_dir, ".credentials.json"), encoding="utf-8") as fh:
+            oauth = (json.load(fh) or {}).get("claudeAiOauth") or {}
+    except (OSError, ValueError, AttributeError):
+        return ""
+    expires = oauth.get("expiresAt")
+    if isinstance(expires, (int, float)) and expires / 1000 < time.time():
+        return ""
+    token = oauth.get("accessToken")
+    return token if isinstance(token, str) else ""
+
+
+def _installed_version(binary: str) -> str:
+    if binary not in _cli_versions:
+        version = ""
+        try:
+            out = subprocess.run([binary, "--version"], capture_output=True, text=True,
+                                 timeout=20).stdout.split()
+            version = out[0] if out and out[0][:1].isdigit() else ""
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _cli_versions[binary] = version
+    return _cli_versions[binary]
+
+
+def read_usage_resets(config_dir: str, version: str, *, binary: str = BINARY,
+                      opener=None) -> tuple[int, int] | None:
+    """One read of a login's banked resets; remembered for `usage_resets()`. Best effort: no
+    token, no network or an unexpected answer leaves the last figure in place."""
+    token = _oauth_token(config_dir)
+    version = version or _installed_version(binary)
+    if not token or not version:
+        return None
+    request = urllib.request.Request(CLAUDE_USAGE_URL, headers={
+        "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": f"claude-cli/{version} (external, cli)", "Accept": "application/json"})
+    try:
+        with (opener or urllib.request.urlopen)(request, timeout=15) as response:
+            found = parse_resets(json.loads(response.read(1024 * 1024)))
+    except Exception as exc:
+        # Never the exception text: an HTTP client may echo the header back.
+        log.debug("claude usage-resets read failed (%s)", type(exc).__name__)
+        return None
+    if found is not None:
+        with _resets_lock:
+            _resets[config_dir] = found
+    return found
+
+
+def refresh_usage_resets(config_dir: str, version: str, *, binary: str = BINARY,
+                         clock=time.time) -> None:
+    """Start a background read unless one started within RESETS_TTL."""
+    with _resets_lock:
+        if clock() - _resets_asked.get(config_dir, 0) < RESETS_TTL:
+            return
+        _resets_asked[config_dir] = clock()
+    threading.Thread(target=read_usage_resets, args=(config_dir, version),
+                     kwargs={"binary": binary}, name="claude-usage-resets", daemon=True).start()
 
 
 def _limits_event(message: dict) -> dict:

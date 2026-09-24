@@ -6637,6 +6637,7 @@ event whenever the guest reports fresh figures and the provider turns each one i
  "windows": [{"kind": "5h" | "weekly", "used_percent": <0-100 float>,
               "resets_at": <unix seconds int> | null}, ...],
  "resets_available"?: <int ≥ 0>,
+ "resets_expire_at"?: <unix seconds int>,
  "status"?: "allowed" | "allowed_warning" | "rejected"}
 ```
 
@@ -6644,15 +6645,39 @@ so the model picker can show "5h: 62% left, resets 14:30 · weekly: 40% left, re
 provider. `windows` is in that order, at most one row per kind, and only the kinds the guest
 named. `resets_available` is the subscription's banked usage resets — codex's app-server
 returns them as `rateLimitResetCredits.availableCount` beside the rate-limit snapshot, and the
-adapter folds them in; absent means "not reported", not "none left".
+adapter folds them in; absent means "not reported", not "none left". Claude's (Claude Code
+calls them `cedar_ember`) are not on the stream: the adapter reads them from the login's own
+`GET api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1` with its OAuth token, once at
+start and at most every 15 minutes after, summing `grants[].resets_left`; the endpoint withholds
+them from an older CLI (`ineligible_reason: "cli_version"`), so the read names the installed
+version. `resets_expire_at` is the earliest use-by date among grants or credits with any left
+(Claude's `grants[].ends_at`, codex's `credits[].expiresAt`), and is sent only with a count ≥ 1.
+
+**Using a reset (#KQNP).** `{"type": "usage_reset", "id"?, "confirm"?: true}` asks the pane's
+guest to spend one. Without `confirm` nothing is spent; the answer says what would happen.
+The worker answers off its protocol thread with
+
+```
+{"event": "usage_reset", "id": <echo>,
+ "outcome": "confirm" | "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed"
+          | "web" | "unsupported" | "failed",
+ "message": "<a sentence for the pane>", "url"?: "<page to open>"}
+```
+
+preceded, when the windows were read back, by a fresh `usage_limits`. Codex spends it through
+the app-server's `account/rateLimitResetCredit/consume {idempotencyKey}` (the backend picks the
+credit) and then re-reads `account/rateLimits/read`. Claude's resets are spent on claude.ai, so a
+Claude pane answers `web` with `url` its usage page and spends nothing. `confirm` is the pane
+asking the person first: the desktop shows `message` in a yes/no box and sends the request again
+with `confirm: true`.
 
 The worker also emits `usage_limits` for Z.AI and Kimi Code subscription presets after each
 15-minute vendor quota poll. Those events use the same `windows` fields, with `preset` set to
 `glm-coding` or `kimi-code` and no `guest`; Kimi can include a `monthly` window.
 
 The last figures per guest are kept on the worker (`guest_harness_provider.last_limits`)
-and ride on the guest's `presets` row as `limits: {windows, resets_available?, status?,
-updated_at}`, so a picker
+and ride on the guest's `presets` row as `limits: {windows, resets_available?,
+resets_expire_at?, status?, updated_at}`, so a picker
 opened in another pane has them without waiting for a turn; a limit belongs to the account, not
 to a pane. Where the numbers come from, verified against the installed binaries on 2026-09-20:
 Claude Code 2.1.278 writes one `rate_limit_event` per turn to a stream-json host, after the

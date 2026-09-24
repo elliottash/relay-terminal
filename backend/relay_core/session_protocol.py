@@ -48,7 +48,7 @@ GUEST_RECONCILE_EVERY = 5.0
 GUEST_TAIL_POLL_EVERY = 0.5
 GUEST_TAIL_RETRY_EVERY = 1.0
 
-TYPES = {"set_model", "set_effort", "context", "context_breakdown", "compact", "checkpoints", "rewind", "fork", "load_state",
+TYPES = {"set_model", "set_effort", "context", "context_breakdown", "compact", "usage_reset", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
          # pane title (protocol section 18)
@@ -453,6 +453,27 @@ class SessionCommands:
             agent.compact("manual", focus or None)
             agent.autosave()
         self.turns.run_exclusive("compact", task)
+
+    def _usage_reset(self, request):
+        """`/usage-reset` (protocol 29.3, #KQNP): spend one of the guest login's banked usage
+        resets — only with `confirm: true`; without it the answer says what would happen — or,
+        for a guest whose resets are spent on its website, name the page. Off the protocol
+        thread: the spend is a network round trip."""
+        confirmed = request.get("confirm") is True
+        provider = guest_harness_provider.agent_provider(self._agent())
+
+        def run():
+            if provider is None:
+                answer = {"outcome": "unsupported",
+                          "message": "Usage resets belong to a Claude Code or Codex login; "
+                                     "this pane's model has none."}
+            else:
+                answer = provider.use_usage_reset(confirmed)
+            limits = answer.pop("limits_event", None)
+            if limits:
+                self.emit(limits)
+            self.emit({"event": "usage_reset", "id": request.get("id"), **answer})
+        threading.Thread(target=run, name="relay-usage-reset", daemon=True).start()
 
     def _checkpoints(self, request):
         self.emit({"event": "checkpoints", "id": request.get("id"), "items": self._agent().checkpoint_listing()})

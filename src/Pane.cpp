@@ -184,6 +184,12 @@ void Pane::runSlashCommand(const QString &name, const QString &args) {
             else status(QStringLiteral("%1 takes %2.")
                             .arg(modelNameFor(m_currentPreset, paneModel()), levels.join(QStringLiteral(", "))));
         } else if (name == QStringLiteral("compact")) compactNow(args);
+        else if (name == QStringLiteral("usage-reset")) {
+            // The worker's guest spends it or names the page it is spent on (#KQNP); nothing is
+            // spent before the person says yes to the question the answer brings.
+            if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
+            send({{"type", "usage_reset"}});
+        }
         else if (name == QStringLiteral("context")) {
             if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
             m_contextNotePending = true;

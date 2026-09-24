@@ -83,6 +83,7 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from collections import deque
 
 from .guest_harness import (Emit, HarnessError, HarnessSteerUncertain, HarnessEvent, HarnessNotAvailable, HarnessStart,
@@ -351,6 +352,11 @@ class CodexHarness:
                 available = credits.get("availableCount")
                 if isinstance(available, (int, float)) and not isinstance(available, bool):
                     self._limits["resetsAvailable"] = max(0, int(available))
+                # `credits` is null when only the count is known and a list when the rows were
+                # fetched; the earliest `expiresAt` among the available ones is the use-by date.
+                rows = credits.get("credits")
+                if isinstance(rows, list):
+                    self._limits["resetsExpireAt"] = _earliest_expiry(rows)
             self._limits_fresh = bool(self._limits.get("primary") or self._limits.get("secondary"))
 
     def _limits_event(self) -> dict:
@@ -381,7 +387,47 @@ class CodexHarness:
         if isinstance(resets_available, int) and not isinstance(resets_available, bool) \
                 and resets_available >= 0:
             data["resets_available"] = resets_available
+            expires = held.get("resetsExpireAt")
+            if resets_available and isinstance(expires, int) and expires > 0:
+                data["resets_expire_at"] = expires
         return data
+
+    def use_usage_reset(self, confirmed: bool = False) -> dict:
+        """Spend one of the account's banked usage resets (`account/rateLimitResetCredit/consume`)
+        and re-read the windows it refilled. Unconfirmed, nothing is spent: the answer is
+        `confirm` with what would happen, or `noCredit` when the last read found none left.
+        Returns {"outcome", "message", "limits"?}; `limits` is the fresh `limits` event data."""
+        self._require_live()
+        with self._lock:
+            held = dict(self._limits)
+        left = held.get("resetsAvailable")
+        if not confirmed:
+            if left == 0:
+                return {"outcome": "noCredit",
+                        "message": "This Codex account has no usage reset left."}
+            detail = []
+            if isinstance(left, int):
+                detail.append(f"{left} left")
+            expires = held.get("resetsExpireAt")
+            if isinstance(expires, int) and expires > 0:
+                detail.append("use by " + time.strftime("%b %-d", time.localtime(expires)))
+            return {"outcome": "confirm",
+                    "message": "Use a Codex usage reset now? It refills this account's usage "
+                               "limits at once" + (f" ({', '.join(detail)})." if detail else ".")}
+        result = self._request("account/rateLimitResetCredit/consume",
+                               {"idempotencyKey": str(uuid.uuid4())}, timeout=60)
+        outcome = str(result.get("outcome") or "unknown")
+        message = _RESET_OUTCOMES.get(outcome, f"Codex answered {outcome!r} to the reset.")
+        try:
+            answer = self._request("account/rateLimits/read", {}, timeout=30)
+            self._merge_limits(answer.get("rateLimits"), answer.get("rateLimitResetCredits"))
+        except HarnessError as exc:
+            log.debug("codex harness: could not re-read limits after a reset: %s", exc)
+        answer = {"outcome": outcome, "message": message}
+        limits = self._limits_event()
+        if limits:
+            answer["limits"] = limits
+        return answer
 
     def _emit_limits_if_fresh(self, turn: _TurnState) -> None:
         with self._lock:
@@ -1260,6 +1306,25 @@ def catalog_rows(entries, current: str = "") -> list[dict]:
             row["current"] = True
         rows.append(row)
     return rows
+
+
+# What `account/rateLimitResetCredit/consume`'s outcome means, in the pane's words.
+_RESET_OUTCOMES = {
+    "reset": "Codex usage limits reset.",
+    "nothingToReset": "Nothing to reset: no Codex limit window is eligible right now, so the "
+                      "reset was kept.",
+    "noCredit": "This Codex account has no usage reset left.",
+    "alreadyRedeemed": "That Codex reset was already used.",
+}
+
+
+def _earliest_expiry(rows) -> int:
+    """The earliest `expiresAt` (unix seconds) among available reset credits, or 0 for none."""
+    found = [row.get("expiresAt") for row in rows
+             if isinstance(row, dict) and row.get("status", "available") == "available"]
+    found = [int(t) for t in found
+             if isinstance(t, (int, float)) and not isinstance(t, bool) and t > 0]
+    return min(found) if found else 0
 
 
 def _spawn_codex(argv: list[str], cwd: str, env: dict | None = None):

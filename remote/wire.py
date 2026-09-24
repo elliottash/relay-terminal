@@ -374,6 +374,7 @@ WITHHELD_EVENTS: dict[str, str] = {
     "tests_run": "desktop test administration; local paths",
     "tests_suggest": "desktop test administration",
     "usage_limits": "provider account usage information",
+    "usage_reset": "provider account usage information",
     "tryit": "desktop QA staging and results; local paths and instructions",
 
     "key_stored": "key material",

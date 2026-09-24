@@ -1721,7 +1721,8 @@ void ModelPicker::onRowChanged() {
     }
     m_filling = false;
     const QString limits = limitsText(m_context.catalog.limits.value(entry->preset), nowSeconds(),
-                                      m_context.catalog.resetsAvailable.value(entry->preset, -1));
+                                      m_context.catalog.resetsAvailable.value(entry->preset, -1),
+                                      m_context.catalog.resetsExpireAt.value(entry->preset));
     m_limits->setText(limits.isEmpty() ? QString() : entry->provider + QStringLiteral(": ") + limits);
 }
 

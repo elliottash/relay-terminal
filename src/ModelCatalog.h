@@ -144,6 +144,9 @@ struct Catalog {
     // By preset id, the subscription's banked usage resets (usage_limits.resets_available,
     // protocol 29.3): Codex's count today. Absent when the provider has not reported the figure.
     QHash<QString, int> resetsAvailable;
+    // By preset id, the earliest use-by date (unix seconds) of those resets
+    // (usage_limits.resets_expire_at, #KQNP). Absent or 0 when unknown.
+    QHash<QString, qint64> resetsExpireAt;
     // By preset id, the provider's own verdict on the next turn as the last report carried it:
     // "allowed" | "allowed_warning" | "rejected" (usage_limits.status, protocol 29.3). Absent when
     // the provider only gave figures.
@@ -523,7 +526,9 @@ double percentLeft(const Catalog &catalog, const QString &preset);
 QString resetText(qint64 resetsAt, qint64 now);
 // "5h 62% left, resets 14:30 · weekly 40% left, resets tue" — empty with no figures. `now` is
 // unix seconds, for the wording of the reset time (today's hour, else a weekday).
-QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable = -1);
+// With banked resets, "· 1 usage reset, use by 22 oct" follows (the date when known).
+QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable = -1,
+                   qint64 resetsExpireAt = 0);
 // Filter as opencode does: a substring match over the model's name, its id, its provider and its
 // plan, case-insensitive, every word of the query somewhere in the row. The provider is in the
 // haystack on purpose (design edge case 11): typing "openrouter" finds the row and names the entry

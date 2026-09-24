@@ -1092,6 +1092,10 @@ private Q_SLOTS:
         QCOMPARE(limitsText(windows, now, 3), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue · 3 usage resets"));
         QCOMPARE(limitsText(windows, now, 0), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue"));
         QCOMPARE(limitsText({}, now, 2), QStringLiteral("2 usage resets"));
+        // With a use-by date (#KQNP): always the day and month, never a weekday.
+        const qint64 oct22 = QDateTime(QDate(2026, 10, 22), QTime(12, 0)).toSecsSinceEpoch();
+        QCOMPARE(limitsText({}, now, 1, oct22), QStringLiteral("1 usage reset, use by 22 oct"));
+        QCOMPARE(limitsText({}, now, 0, oct22), QString());
     }
 
     void theWorkersLimitsObjectIsReadWindowsAndStatus() {
@@ -1101,7 +1105,7 @@ private Q_SLOTS:
         QJsonObject guest = rows.at(3).toObject();
         guest.insert(QStringLiteral("limits"), QJsonObject{
             {QStringLiteral("windows"), QJsonArray{QJsonObject{{QStringLiteral("kind"), QStringLiteral("5h")}, {QStringLiteral("used_percent"), 100.0}, {QStringLiteral("resets_at"), 2000}}}},
-            {QStringLiteral("resets_available"), 1},
+            {QStringLiteral("resets_available"), 1}, {QStringLiteral("resets_expire_at"), 1792684800},
             {QStringLiteral("status"), QStringLiteral("rejected")}, {QStringLiteral("updated_at"), 1500}});
         rows.replace(3, guest);
         const Catalog catalog = catalogFrom(rows);
@@ -1113,6 +1117,8 @@ private Q_SLOTS:
         // which reads as "not reported" rather than "none left".
         QCOMPARE(catalog.resetsAvailable.value(QStringLiteral("guest:claude")), 1);
         QVERIFY(!catalog.resetsAvailable.contains(QStringLiteral("glm-coding")));
+        QCOMPARE(catalog.resetsExpireAt.value(QStringLiteral("guest:claude")), qint64(1792684800));
+        QVERIFY(!catalog.resetsExpireAt.contains(QStringLiteral("glm-coding")));
         QCOMPARE(catalog.resetsAvailable.value(QStringLiteral("guest:claude")),
                  catalogFrom(rows).resetsAvailable.value(QStringLiteral("guest:claude")));
     }

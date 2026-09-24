@@ -301,7 +301,27 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             const QJsonValue resets = event.value(QStringLiteral("resets_available"));
             const int resetsAvailable = resets.isDouble() ? qMax(0, resets.toInt()) : -1;
             noteLimits(event.value(QStringLiteral("preset")).toString(), windows,
-                       event.value(QStringLiteral("status")).toString(), resetsAvailable);
+                       event.value(QStringLiteral("status")).toString(), resetsAvailable,
+                       event.value(QStringLiteral("resets_expire_at")).toVariant().toLongLong());
+            return true;
+        }
+        if (type == QStringLiteral("usage_reset")) {
+            // `/usage-reset`'s answer (protocol 29.3, #KQNP). `confirm` is Codex asking before it
+            // spends one: yes sends the request again with confirm; `web` is Claude, whose resets
+            // are spent on claude.ai, so its page opens. Everything else is a sentence to show.
+            const QString outcome = event.value(QStringLiteral("outcome")).toString();
+            const QString message = event.value(QStringLiteral("message")).toString();
+            if (outcome == QStringLiteral("confirm")) {
+                if (QMessageBox::question(this, QStringLiteral("Use a usage reset?"), message,
+                                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes)
+                    send({{"type", "usage_reset"}, {"confirm", true}});
+                else status(QStringLiteral("Reset kept."));
+                return true;
+            }
+            const QUrl url(event.value(QStringLiteral("url")).toString());
+            if (outcome == QStringLiteral("web") && url.scheme() == QStringLiteral("https"))
+                QDesktopServices::openUrl(url);
+            if (!message.isEmpty()) status(message);
             return true;
         }
         if (type == QStringLiteral("usage")) {

@@ -746,6 +746,48 @@ class LimitsTests(unittest.TestCase):
         rows["guest:claude"]["limits"]["windows"].clear()
         self.assertEqual(len(ghp.last_limits("claude")["windows"]), 2)
 
+    def test_a_use_by_date_rides_only_with_resets_left(self):
+        windows = [{"kind": "5h", "used_percent": 62, "resets_at": 1789926600}]
+        event = ghp.usage_limits_event("claude", {"windows": windows, "resets_available": 1,
+                                                  "resets_expire_at": 1792684800})
+        self.assertEqual(event["resets_expire_at"], 1792684800)
+        self.assertEqual(ghp.last_limits("claude")["resets_expire_at"], 1792684800)
+        event = ghp.usage_limits_event("claude", {"windows": windows, "resets_available": 0,
+                                                  "resets_expire_at": 1792684800})
+        self.assertNotIn("resets_expire_at", event)
+        self.assertNotIn("resets_expire_at", ghp.last_limits("claude"))
+
+    def test_usage_reset_goes_to_the_harness_and_returns_the_refilled_windows(self):
+        provider = ghp.HarnessProvider.__new__(ghp.HarnessProvider)
+        provider.guest_id, provider.account, provider.usage_limits = "codex", "", {}
+        windows = [{"kind": "5h", "used_percent": 0, "resets_at": 1789926600}]
+        seen = []
+
+        class Harness:
+            def use_usage_reset(self, confirmed=False):
+                seen.append(confirmed)
+                return {"outcome": "reset", "message": "Codex usage limits reset.",
+                        "limits": {"windows": windows, "resets_available": 0}}
+        provider.harness = Harness()
+        answer = provider.use_usage_reset(True)
+        self.assertEqual(seen, [True])
+        self.assertEqual(answer["outcome"], "reset")
+        self.assertNotIn("limits", answer)
+        self.assertEqual(answer["limits_event"]["event"], "usage_limits")
+        self.assertEqual(answer["limits_event"]["resets_available"], 0)
+        self.assertEqual(provider.usage_limits["resets_available"], 0)
+        # A guest without resets says so rather than failing.
+        provider.harness = object()
+        self.assertEqual(provider.use_usage_reset(True)["outcome"], "unsupported")
+
+        class Broken:
+            def use_usage_reset(self, confirmed=False):
+                raise HarnessError("Codex did not answer in time.")
+        provider.harness = Broken()
+        answer = provider.use_usage_reset(True)
+        self.assertEqual(answer["outcome"], "failed")
+        self.assertIn("not used", answer["message"])
+
     def test_a_report_without_usage_resets_leaves_them_unsaid(self):
         # Absent is "not reported", not "none left", so it never rides an event or a row.
         windows = [{"kind": "5h", "used_percent": 62, "resets_at": 1789926600}]

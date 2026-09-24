@@ -1820,8 +1820,12 @@ public:
             if (it.value().isEmpty()) catalog.status.remove(it.key());
             else catalog.status.insert(it.key(), it.value());
         }
-        for (auto it = m_resetsAvailable.constBegin(); it != m_resetsAvailable.constEnd(); ++it)
+        for (auto it = m_resetsAvailable.constBegin(); it != m_resetsAvailable.constEnd(); ++it) {
             catalog.resetsAvailable.insert(it.key(), it.value());
+            const qint64 expires = m_resetsExpireAt.value(it.key());
+            if (expires > 0) catalog.resetsExpireAt.insert(it.key(), expires);
+            else catalog.resetsExpireAt.remove(it.key());
+        }
         return catalog;
     }
     // ----- usage limits (owner, 2026-09-20) ---------------------------------------------------
@@ -1836,7 +1840,7 @@ public:
     // Fresh figures for one preset: the model box and the picker redraw, Options › Models' status
     // line follows, and the failover chain the worker holds is recomputed without the exhausted
     // ones. When the nearest reset lands, the same again, so the row comes back on its own.
-    void noteLimits(const QString &preset, const QList<relay::models::LimitWindow> &windows, const QString &status, int resetsAvailable = -1) {
+    void noteLimits(const QString &preset, const QList<relay::models::LimitWindow> &windows, const QString &status, int resetsAvailable = -1, qint64 resetsExpireAt = 0) {
         if (preset.isEmpty()) return;
         const QStringList before = exhaustedPresets();
         m_limits.insert(preset, windows);
@@ -1844,7 +1848,10 @@ public:
         m_limitStatus.insert(preset, status);
         // Usage resets (protocol 29.3) fold in only when the event reported them, like the wire's
         // own sparse rule: a figure-less event leaves the banked count as it was.
-        if (resetsAvailable >= 0) m_resetsAvailable.insert(preset, resetsAvailable);
+        if (resetsAvailable >= 0) {
+            m_resetsAvailable.insert(preset, resetsAvailable);
+            m_resetsExpireAt.insert(preset, resetsAvailable > 0 ? resetsExpireAt : 0);
+        }
         limitsChanged(before != exhaustedPresets());
     }
     QStringList exhaustedPresets() const {
@@ -8360,6 +8367,7 @@ private:
             {QStringLiteral("compact"), QStringLiteral("[focus]"), QStringLiteral("Summarize older turns to free context")},
             {QStringLiteral("context"), QString(), QStringLiteral("Show context usage and its components")},
             {QStringLiteral("usage"), QString(), QStringLiteral("Open conversation usage by turn (same ⓘ view as /status)")},
+            {QStringLiteral("usage-reset"), QString(), QStringLiteral("Use one of this login's banked usage resets (Codex: asks, then resets; Claude: opens claude.ai)")},
             {QStringLiteral("terminal"), QString(), QStringLiteral("Terminal output for the next prompt: preview, attach, remove; this pane's sharing")},
             {QStringLiteral("rewind"), QString(), QStringLiteral("Rewind chat to an earlier turn (files are not changed)")},
             {QStringLiteral("rewind-code"), QString(), QStringLiteral("Restore files the agent changed since an earlier turn")},
@@ -15775,6 +15783,7 @@ private:
     // The banked usage resets per preset (usage_limits.resets_available): Codex's count today.
     // Absent means the provider has not reported one, which is not the same as none left.
     QHash<QString, int> m_resetsAvailable;
+    QHash<QString, qint64> m_resetsExpireAt;   // their earliest use-by, unix seconds (#KQNP)
     bool m_turnSaw429 = false;
     QString m_failoverTarget;   // the preset the last failover of this turn moved to
     bool m_configuring = false;

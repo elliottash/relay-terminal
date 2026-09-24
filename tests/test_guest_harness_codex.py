@@ -1057,6 +1057,90 @@ class LimitsTest(HarnessCase):
                               credits={"credits": []})
         self.assertEqual(harness._limits_event()["resets_available"], 0)
 
+    def test_the_earliest_available_credit_is_the_use_by_date(self):
+        harness = gh.CodexHarness(codex_path=self.fake_codex, spawn=lambda argv, cwd: None)
+        credits = {"availableCount": 2, "credits": [
+            {"id": "a", "grantedAt": 1, "resetType": "codexRateLimits", "status": "available",
+             "expiresAt": 1792684800},
+            {"id": "b", "grantedAt": 1, "resetType": "codexRateLimits", "status": "redeemed",
+             "expiresAt": 1790000000},
+            {"id": "c", "grantedAt": 1, "resetType": "codexRateLimits", "status": "available",
+             "expiresAt": None}]}
+        harness._merge_limits({"primary": _window(53, 10080, 1790065926)}, credits=credits)
+        event = harness._limits_event()
+        self.assertEqual((event["resets_available"], event["resets_expire_at"]), (2, 1792684800))
+        # `credits: null` means only the count is known: the date read before stays.
+        harness._merge_limits({"primary": _window(53, 10080, 1790065926)},
+                              credits={"availableCount": 1, "credits": None})
+        self.assertEqual(harness._limits_event()["resets_expire_at"], 1792684800)
+        # None left: no date either.
+        harness._merge_limits({"primary": _window(53, 10080, 1790065926)},
+                              credits={"availableCount": 0, "credits": []})
+        self.assertNotIn("resets_expire_at", harness._limits_event())
+
+
+class UsageResetTest(HarnessCase):
+    """`/usage-reset` on a Codex pane (#KQNP): asked first, then spent through
+    `account/rateLimitResetCredit/consume`, and the refilled windows read back."""
+
+    def harness(self, answers):
+        harness = gh.CodexHarness(codex_path=self.fake_codex, spawn=lambda argv, cwd: None)
+        harness._require_live = lambda: None
+        calls = []
+
+        def request(method, params, timeout=None, **_):
+            calls.append((method, params))
+            return answers[method]
+        harness._request = request
+        return harness, calls
+
+    def test_unconfirmed_spends_nothing_and_says_what_it_would_do(self):
+        harness, calls = self.harness({})
+        harness._merge_limits({"primary": _window(98, 300, 1790065926)},
+                              credits={"availableCount": 1, "credits": [
+                                  {"id": "a", "grantedAt": 1, "resetType": "codexRateLimits",
+                                   "status": "available", "expiresAt": 1792684800}]})
+        answer = harness.use_usage_reset()
+        self.assertEqual(answer["outcome"], "confirm")
+        self.assertIn("1 left", answer["message"])
+        self.assertIn("use by Oct", answer["message"])
+        self.assertEqual(calls, [])
+
+    def test_none_left_is_said_without_asking(self):
+        harness, calls = self.harness({})
+        harness._merge_limits({"primary": _window(98, 300, 1790065926)},
+                              credits={"availableCount": 0, "credits": []})
+        self.assertEqual(harness.use_usage_reset()["outcome"], "noCredit")
+        self.assertEqual(calls, [])
+
+    def test_confirmed_consumes_one_credit_and_reads_the_windows_back(self):
+        harness, calls = self.harness({
+            "account/rateLimitResetCredit/consume": {"outcome": "reset"},
+            "account/rateLimits/read": {
+                "rateLimits": {"primary": _window(0, 300, 1790065926),
+                               "secondary": _window(0, 10080, 1790499600)},
+                "rateLimitResetCredits": {"availableCount": 0, "credits": []}}})
+        harness._merge_limits({"primary": _window(98, 300, 1790065926)},
+                              credits={"availableCount": 1, "credits": None})
+        answer = harness.use_usage_reset(confirmed=True)
+        self.assertEqual([c[0] for c in calls],
+                         ["account/rateLimitResetCredit/consume", "account/rateLimits/read"])
+        key = calls[0][1]["idempotencyKey"]
+        self.assertEqual(len(key), 36)
+        self.assertNotIn("creditId", calls[0][1])       # the backend picks the next credit
+        self.assertEqual(answer["outcome"], "reset")
+        self.assertEqual(answer["message"], "Codex usage limits reset.")
+        self.assertEqual(answer["limits"]["resets_available"], 0)
+        self.assertEqual([w["used_percent"] for w in answer["limits"]["windows"]], [0.0, 0.0])
+
+    def test_each_outcome_reads_as_a_sentence(self):
+        for outcome, words in (("nothingToReset", "reset was kept"), ("noCredit", "no usage reset"),
+                               ("alreadyRedeemed", "already used")):
+            harness, _ = self.harness({
+                "account/rateLimitResetCredit/consume": {"outcome": outcome},
+                "account/rateLimits/read": {}})
+            self.assertIn(words, harness.use_usage_reset(confirmed=True)["message"])
+
 
 # ----- when things go wrong -----------------------------------------------------------------------
 
