@@ -642,7 +642,8 @@ def main():
             elif kind == "queue_steer":
                 queue_for(request).steer(request.get("item"))
             elif kind == "queue_unsteer":
-                queue_for(request).unsteer(request.get("request"), request.get("as_request"))
+                queue_for(request).unsteer(request.get("request"), request.get("as_request"),
+                                           request.get("item"))
             elif kind == "cancel":
                 queue_for(request).cancel()
             elif kind == "resume_queue":

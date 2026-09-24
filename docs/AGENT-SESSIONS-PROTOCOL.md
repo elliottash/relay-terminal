@@ -8668,10 +8668,22 @@ counts raw PTY bytes with a floor at rendered size when replacement expands malf
 GUI → worker `terminal_context_update {payload: {mode, records}}` replaces the worker's live
 collection over its private connection. `mode` is `automatic`, `manual` or `off`; Off sends no
 records and immediately revokes reads. No model is called by this update. `ask.context` accepts
-`terminal_context: {mode, records}`: selected full record values copied **at submission**, including
-before routing/queueing. A later command or later output cannot replace those pinned values.
-Ordinary selection is the latest user-origin record. Agent handoff results use their existing
-report path. Shell-less consoles and paired-device prompts receive no automatic terminal records.
+`terminal_context: {mode, records, source?, scope?}` (#XCXD). Without `source`, the selected record
+values are copied **at submission**, including before routing/queueing: a later command or later
+output cannot replace those pinned values, and ordinary selection is the latest user-origin record;
+`source: "pinned"` states that explicitly for an attached revision. `source: "automatic"` — which
+must also carry `scope: {pane_id, generation}` and only a pane may set it — opts the snapshot into
+resolution **at the actual start of the turn**: the worker's authorized live mirror contributes
+in-scope, user-origin records that changed since the last started turn — new commands, a revision
+gained by finishing (result and exit status), or still-running growth — plus every still-running
+command, rendered with an explicit running/incomplete marker. Unchanged completed records are not
+re-sent, and old history is never re-added wholesale. Resolution copies from the mirror only: it
+never infers scope, never crosses pane or generation, and never expands Off, manual, revoked,
+legacy or pinned snapshots. Starting a turn never waits for a running command, and output arriving
+mid-turn is never injected: it reaches the model only through an explicit update, an explicit read,
+or the next turn's snapshot. A steer delivers the snapshot it was sent with, unresolved. Agent
+handoff results use their existing report path. Shell-less consoles and paired-device prompts
+receive no automatic terminal records.
 
 `agent/terminal_context` sets global sharing (default Automatic); the composer chip offers a
 per-pane override, output selection, preview, removal for the next prompt and Ask about this

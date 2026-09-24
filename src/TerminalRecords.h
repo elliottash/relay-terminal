@@ -99,6 +99,12 @@ public:
         return {};
     }
 
+    // #XCXD: the pane/generation scope a refresh-eligible automatic snapshot carries. A
+    // shell restart starts a new generation, so the worker's turn-start refresh can never
+    // mix one generation's records into another's.
+    const QString &pane() const { return m_pane; }
+    const QString &generation() const { return m_generation; }
+
     bool active() const { return m_active; }
     bool awaitingOutput() const { return active() && m_awaitingOutput; }
 

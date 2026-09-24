@@ -4,7 +4,10 @@ Adapters own one Service per worker, call update() only for authenticated GUI
 state, and set_snapshot(context.get('terminal_context')) at EVERY turn boundary
 (including empty turns). Queue the full validated snapshot, never just IDs.
 update replaces the live collection; omitted records are evicted. Snapshots are
-copied and pin revisions, but live Off/manual changes take priority. Eviction only blocks fresh reads.
+copied and pin revisions, but live Off/manual changes take priority. #XCXD: a
+snapshot marked source 'automatic' is resolved to actual turn start by
+Service.resolve_turn_snapshot from the authorized live mirror; legacy and
+pinned snapshots keep the submit-time copy verbatim. Eviction only blocks fresh reads.
 Offsets count Unicode characters in the retained (possibly head/tail) output,
 not original PTY bytes. No terminal, filesystem or history-index access occurs.
 GUI capture removes terminal escapes; logs.scrub is reused as a best-effort
@@ -44,16 +47,38 @@ def _text(value, name, limit, nonempty=False):
         raise ValueError(f'{name} exceeds {limit} UTF-8 bytes')
 
 
+# #XCXD: snapshot-level `source` marks refresh intent. 'pinned' is an explicit attachment
+# revision that must ride unchanged. 'automatic' opts a queued snapshot into turn-start
+# refresh (Service.resolve_turn_snapshot) by the GUI that captured it. Absent means a
+# legacy snapshot: it keeps the #TCXT submit-time-copy behaviour and never expands.
+_SOURCES = {'automatic', 'pinned'}
+
+
 def validate_snapshot(payload):
     """Return a detached normalized JSON snapshot; raise ValueError on bad input.
 
     None means no grant. Off must carry no records. Bounds apply before filtering
-    and to the complete compact JSON payload, including metadata.
+    and to the complete compact JSON payload, including metadata. `source` is
+    optional (#XCXD) and preserved verbatim; it never widens a grant itself.
     """
     if payload is None:
         return {'mode': 'off', 'records': []}
-    if not isinstance(payload, dict) or set(payload) != {'mode', 'records'}:
+    if not isinstance(payload, dict) or not {'mode', 'records'} <= set(payload) <= {'mode', 'records', 'source', 'scope'}:
         raise ValueError('terminal context requires exactly mode and records')
+    if 'source' in payload and (not isinstance(payload['source'], str) or payload['source'] not in _SOURCES):
+        raise ValueError('invalid terminal context source')
+    if 'scope' in payload:
+        # #XCXD: an explicit pane/generation scope anchors a refresh-eligible snapshot's
+        # turn-start refresh. Only source 'automatic' may carry one, and it must: the
+        # mirror alone cannot safely infer which pane a selection belongs to.
+        if payload.get('source') != 'automatic':
+            raise ValueError('terminal context scope requires automatic source')
+        if not isinstance(payload['scope'], dict) or set(payload['scope']) != {'pane_id', 'generation'}:
+            raise ValueError('terminal context scope requires pane_id and generation')
+        _text(payload['scope']['pane_id'], 'scope pane_id', 256, nonempty=True)
+        _text(payload['scope']['generation'], 'scope generation', 256, nonempty=True)
+    if payload.get('source') == 'automatic' and 'scope' not in payload:
+        raise ValueError('refresh-eligible terminal context requires scope')
     mode, records = payload['mode'], payload['records']
     if not isinstance(mode, str) or mode not in MODES:
         raise ValueError('invalid terminal sharing mode')
@@ -92,6 +117,11 @@ def validate_snapshot(payload):
         seen.add(r['command_id'])
         result.append(r)
     normalized = {'mode': mode, 'records': result}
+    if 'source' in payload:
+        normalized['source'] = payload['source']
+    if 'scope' in payload:
+        # Detached copy: a validated refresh-eligible snapshot must validate again.
+        normalized['scope'] = dict(payload['scope'])
     if len(json.dumps(normalized, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) > MAX_SNAPSHOT_BYTES:
         raise ValueError('terminal context exceeds 2 MiB')
     return normalized
@@ -135,6 +165,11 @@ def format_snapshot(payload):
                                      'pane_id', 'generation', 'origin', 'exit_status',
                                      'cwd', 'host', 'command', 'started_at', 'ended_at',
                                      'sequence', 'bytes_seen', 'output')}
+        # #XCXD: a command still running at turn start is explicitly incomplete: no
+        # ended_at/exit_status exists yet and its output excerpt may lag live output.
+        if r['state'] == 'running':
+            ordered = {'status_note': 'running/incomplete: still running when this turn '
+                                      'started; no exit status yet, output excerpt may lag', **ordered}
         rendered = json.dumps(ordered, ensure_ascii=False)
         chunks.append(_clip(rendered, budget))
     return prefix + '\n'.join(chunks)
@@ -171,6 +206,13 @@ class Service:
         self._mode = None
         self._snapshot_mode = 'off'
         self._revoked = set()
+        # #XCXD: what a STARTED turn already saw, recorded at set_snapshot() acceptance —
+        # not at preview or submission — so the next turn-start refresh carries only what
+        # changed since then: per-command revisions and the pane's sequence high-water
+        # mark (over the whole effective grant, so commands that existed but were
+        # unselected are not "new"). Monotonic: an older steer never regresses it.
+        self._accepted = {}
+        self._accepted_seq = -1
 
     def update(self, payload):
         snapshot = validate_snapshot(payload)
@@ -189,6 +231,97 @@ class Service:
             self._revoked = set(self._grants) - {r['command_id'] for r in snapshot['records']}
             self._snapshot_mode = snapshot['mode']
             self._grants = {r['command_id']: r for r in snapshot['records']}
+            # #XCXD: record what a STARTED turn actually saw, at acceptance — not at
+            # preview or submission — so the next turn-start refresh carries only what
+            # changed since. The cursor advances only over the EFFECTIVE grant: a turn
+            # whose sharing was revoked (off, or manual over automatic) saw nothing, so
+            # results that finish behind an off window are still new once sharing
+            # returns. Monotonic: an older steer snapshot never regresses it.
+            revoked = (self._mode == 'off' or snapshot['mode'] == 'off'
+                       or (self._mode == 'manual' and snapshot['mode'] == 'automatic'))
+            if not revoked:
+                for r in snapshot['records']:
+                    self._accepted[r['command_id']] = max(self._accepted.get(r['command_id'], 0), r['revision'])
+                self._accepted_seq = max([self._accepted_seq]
+                                         + [r['sequence'] for r in snapshot['records']]
+                                         + [r['sequence'] for r in self._live.values()])
+                while len(self._accepted) > 4 * MAX_RECORDS:
+                    self._accepted.pop(next(iter(self._accepted)))
+
+    def resolve_turn_snapshot(self, payload):
+        """Refresh an explicitly refresh-eligible snapshot at actual turn start (#XCXD).
+
+        The queue holds what the pane selected when the prompt was submitted; the
+        turn starts later. Only mode 'automatic' with source 'automatic' refreshes —
+        a legacy snapshot (no `source`) and a pinned attachment return verbatim, as
+        does anything once live sharing is off, manual or unknown. Refresh draws
+        only from update()'s authorized live mirror, user-origin records only and
+        within the snapshot's explicit pane/generation `scope`, matching the
+        pane's automatic selection: a listed command that gained a revision (it
+        finished after the prompt queued, gaining output, `ended_at` and an
+        `exit_status`) replaces its queued value in place — unless a later turn
+        already accepted that revision — and a listed still-running command whose
+        captured output grew replaces it too (growth compares `bytes_seen` as well
+        as revision). Commands that started since the last STARTED turn — tracked
+        at set_snapshot() acceptance, not at preview or submission — and every
+        still-running user command append oldest first, still-running ones
+        carrying `state: 'running'` and no exit status, the explicit incomplete
+        marker. With no started turn yet every in-scope user record is new: a
+        prompt queued before the pane's first command still sees its result.
+        Unchanged history is never re-sent, so old records cannot crowd out new
+        output. The result stays capped at 32 records and 2 MiB, dropping oldest
+        records first. set_snapshot() still gates every grant.
+        """
+        requested = validate_snapshot(payload)
+        if requested['mode'] != 'automatic' or requested.get('source') != 'automatic':
+            return requested
+        with self._lock:
+            if self._mode != 'automatic':
+                return requested
+            records = []
+            for queued in requested['records']:
+                live = self._live.get(queued['command_id'])
+                effective = live if (live is not None
+                                     and (live['pane_id'], live['generation']) == (queued['pane_id'], queued['generation'])
+                                     and (live['revision'] > queued['revision']
+                                          or (live['state'] == 'running' and live['bytes_seen'] > queued['bytes_seen']))) else None
+                candidate = effective if effective is not None else queued
+                # An unchanged completed record the previous started turn already carried
+                # is not re-sent — checked against the EFFECTIVE revision, so a stale
+                # queued selection cannot resurrect output a later turn already accepted.
+                # A still-running one stays so each turn sees it incomplete.
+                if candidate['state'] != 'running' and self._accepted.get(candidate['command_id'], -1) >= candidate['revision']:
+                    continue
+                records.append(candidate)
+            # Scope anchor: refresh-eligible snapshots carry an explicit pane/generation
+            # scope (#XCXD) — the mirror alone cannot safely infer which pane a selection
+            # belongs to, so nothing is ever guessed from live state. Agent-origin records
+            # and other panes/generations never leak into an automatic refresh.
+            scope = requested.get('scope')
+            if scope is None:
+                return requested
+            pane, generation = scope['pane_id'], scope['generation']
+            covered = {r['command_id'] for r in records}
+            fresh = [r for r in self._live.values()
+                     if r['command_id'] not in covered
+                     and r['origin'] == 'user'
+                     and (r['pane_id'], r['generation']) == (pane, generation)
+                     and (r['state'] == 'running'
+                          or (r['command_id'] in self._accepted
+                              and r['revision'] > self._accepted[r['command_id']])
+                          or (r['command_id'] not in self._accepted
+                              and (self._accepted_seq < 0 or r['sequence'] > self._accepted_seq)))]
+            fresh.sort(key=lambda r: (r['sequence'], r['started_at']))
+            merged = sorted(records + fresh, key=lambda r: (r['sequence'], r['started_at']))
+            resolved = {'mode': 'automatic', 'source': 'automatic', 'scope': scope,
+                        'records': merged[-MAX_RECORDS:]}
+            while True:
+                try:
+                    return validate_snapshot(resolved)
+                except ValueError:
+                    if len(resolved['records']) <= len(requested['records']):
+                        return requested
+                    resolved = {**resolved, 'records': resolved['records'][1:]}
 
     def preview_snapshot(self, payload):
         """Sanitize a proposed turn grant without changing the active turn.

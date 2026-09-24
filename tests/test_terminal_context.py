@@ -239,5 +239,181 @@ class TerminalContextTests(unittest.TestCase):
             self.assertEqual(got['record']['exit_status'], r['exit_status'])
 
 
+class TurnStartResolutionTests(unittest.TestCase):
+    """#XCXD: automatic terminal context resolves when the turn starts, not when it queues."""
+
+    def setUp(self):
+        self.service = Service()
+
+    def eligible(self, *records):
+        return {'mode': 'automatic', 'source': 'automatic',
+                'scope': {'pane_id': 'pane-a', 'generation': 'login-a'}, 'records': list(records)}
+
+    def test_source_and_scope_field_rules(self):
+        self.assertEqual(validate_snapshot(snapshot(record())), {'mode': 'automatic', 'records': [record()]})
+        pinned = {'mode': 'automatic', 'source': 'pinned', 'records': [record()]}
+        self.assertEqual(validate_snapshot(pinned)['source'], 'pinned')
+        # A refresh-eligible snapshot must say which pane/generation it belongs to, and
+        # only it may carry a scope: legacy and pinned snapshots never do.
+        self.assertEqual(self.eligible(record())['records'], [record()])
+        self.assertEqual(validate_snapshot(self.eligible(record()))['scope'],
+                         {'pane_id': 'pane-a', 'generation': 'login-a'})
+        with self.assertRaises(ValueError):
+            validate_snapshot({'mode': 'automatic', 'source': 'automatic', 'records': []})
+        with self.assertRaises(ValueError):
+            validate_snapshot({'mode': 'automatic', 'source': 'pinned',
+                               'scope': {'pane_id': 'a', 'generation': 'b'}, 'records': []})
+        with self.assertRaises(ValueError):
+            validate_snapshot({'mode': 'automatic', 'records': [],
+                               'scope': {'pane_id': 'a', 'generation': 'b'}})
+        with self.assertRaises(ValueError):
+            validate_snapshot(self.eligible() | {'scope': {'pane_id': '', 'generation': 'b'}})
+        with self.assertRaises(ValueError):
+            validate_snapshot(self.eligible() | {'scope': {'pane_id': 'a'}})
+
+    def test_legacy_snapshots_never_expand(self):
+        running = record('run', state='running', ended_at=None, exit_status=None, revision=0)
+        self.service.update(snapshot(running))
+        done = record('run', revision=1, output='hello there', bytes_seen=11)
+        self.service.update(snapshot(done, record('later', sequence=2)))
+        self.assertEqual(self.service.resolve_turn_snapshot(snapshot(running))['records'], [running])
+        pinned = {'mode': 'automatic', 'source': 'pinned', 'records': [running]}
+        self.assertEqual(self.service.resolve_turn_snapshot(pinned)['records'], [running])
+
+    def test_queued_running_command_reports_result_at_turn_start(self):
+        running = record('run', state='running', ended_at=None, exit_status=None, revision=0, output='hel')
+        self.service.update(snapshot(running))
+        done = record('run', revision=1, output='hello', bytes_seen=5, ended_at=2000, exit_status=0)
+        self.service.update(snapshot(done))
+        resolved = self.service.resolve_turn_snapshot(self.eligible(running))
+        self.assertEqual(resolved['records'], [done])
+        self.service.set_snapshot(resolved)
+        self.assertEqual(self.service.execute('terminal_read', {'command_id': 'run'})['output'], 'hello')
+
+    def test_running_output_growth_replaces_queued_value(self):
+        running = record('run', state='running', ended_at=None, exit_status=None, revision=0,
+                         output='hel', bytes_seen=3)
+        self.service.update(snapshot(running))
+        grown = record('run', state='running', ended_at=None, exit_status=None, revision=0,
+                       output='hello', bytes_seen=5)
+        self.service.update(snapshot(grown))
+        resolved = self.service.resolve_turn_snapshot(self.eligible(running))
+        self.assertEqual(resolved['records'][0]['bytes_seen'], 5)
+        self.assertIn('running/incomplete', format_snapshot(resolved))
+
+    def test_only_changes_since_last_started_turn_are_shared(self):
+        first = record('first')
+        self.service.update(snapshot(first))
+        self.service.set_snapshot(self.eligible(first))
+        # Commands that ran after that turn started are new to the next one; the
+        # unchanged completed record the started turn carried is not re-sent.
+        second, third = record('second', sequence=2), record('third', sequence=3)
+        self.service.update(snapshot(first, second, third))
+        resolved = self.service.resolve_turn_snapshot(self.eligible(first))
+        self.assertEqual([r['command_id'] for r in resolved['records']], ['second', 'third'])
+        self.service.set_snapshot(resolved)
+        # Nothing changed since: nothing is re-sent.
+        self.assertEqual(self.service.resolve_turn_snapshot(self.eligible(third))['records'], [])
+
+    def test_consecutive_auto_turns_do_not_repeat_unchanged_completed_output(self):
+        done = record('done')
+        running = record('run', state='running', ended_at=None, exit_status=None, revision=0)
+        self.service.update(snapshot(done, running))
+        queued = self.eligible(done, running)
+        first = self.service.resolve_turn_snapshot(queued)
+        self.assertEqual([r['command_id'] for r in first['records']], ['done', 'run'])
+        self.service.set_snapshot(first)
+        second = self.service.resolve_turn_snapshot(queued)
+        self.assertEqual([r['command_id'] for r in second['records']], ['run'])
+        self.assertIn('running/incomplete', format_snapshot(second))
+
+    def test_old_history_does_not_crowd_out_new_output(self):
+        old = [record(f'old{i}', sequence=i) for i in range(30)]
+        self.service.update(snapshot(*old))
+        self.service.set_snapshot(self.eligible(*old[:2]))
+        fresh = record('fresh', sequence=99)
+        self.service.update(snapshot(fresh, *old))
+        resolved = self.service.resolve_turn_snapshot(self.eligible(old[0]))
+        self.assertEqual([r['command_id'] for r in resolved['records']], ['fresh'])
+
+    def test_agent_origin_and_foreign_scopes_never_leak(self):
+        mine = record('mine')
+        self.service.update(snapshot(mine))
+        self.service.set_snapshot(self.eligible(mine))
+        agent_run = record('agent-run', origin='agent', sequence=50)
+        other_pane = record('other-pane', pane_id='pane-b', sequence=51)
+        other_gen = record('other-gen', generation='login-b', sequence=52)
+        new_mine = record('new-mine', sequence=53)
+        self.service.update(snapshot(mine, agent_run, other_pane, other_gen, new_mine))
+        # `mine` is unchanged completed and already carried by the started turn; the new
+        # in-scope user command is shared, agent-origin and foreign scopes are not.
+        resolved = self.service.resolve_turn_snapshot(self.eligible(mine))
+        self.assertEqual([r['command_id'] for r in resolved['records']], ['new-mine'])
+        # A queued value is never replaced from another pane or generation either.
+        foreign = record('mine', pane_id='pane-b', revision=9)
+        self.service.update(snapshot(foreign))
+        self.assertEqual(self.service.resolve_turn_snapshot(self.eligible(new_mine))['records'], [new_mine])
+
+    def test_off_and_manual_mirrors_return_the_queued_snapshot(self):
+        running = record('run', state='running', ended_at=None, exit_status=None, revision=0)
+        done = record('run', revision=1)
+        queued = self.eligible(running)
+        self.service.update(snapshot(done, mode='manual'))
+        self.assertEqual(self.service.resolve_turn_snapshot(queued)['records'], [running])
+        self.service.update({'mode': 'off', 'records': []})
+        self.assertEqual(self.service.resolve_turn_snapshot(queued)['records'], [running])
+
+    def test_off_window_does_not_mark_unseen_results_seen(self):
+        running = record('run', state='running', ended_at=None, exit_status=None, revision=0)
+        self.service.update(snapshot(running))
+        self.service.set_snapshot(self.eligible(running))
+        # A turn starts while sharing is off: it is granted nothing and sees nothing.
+        self.service.update({'mode': 'off', 'records': []})
+        self.service.set_snapshot(self.eligible(running))
+        # Sharing returns; both the finished command and one that ran behind the off
+        # window are new to the next started turn.
+        done = record('run', revision=1, output='ok', exit_status=0)
+        behind = record('behind', sequence=9, revision=1)
+        self.service.update(snapshot(done, behind))
+        resolved = self.service.resolve_turn_snapshot(self.eligible(running))
+        self.assertEqual([r['command_id'] for r in resolved['records']], ['run', 'behind'])
+        self.assertEqual(resolved['records'][0]['exit_status'], 0)
+
+    def test_queued_ahead_of_the_command_uses_the_snapshots_scope(self):
+        started = record('started', state='running', ended_at=None, exit_status=None, revision=0)
+        foreign = record('foreign', pane_id='pane-b', sequence=2)
+        agent = record('agent', origin='agent', sequence=3)
+        self.service.update(snapshot(started, foreign, agent))
+        # Empty selection at submission: the snapshot's explicit scope anchors it, and
+        # nothing is inferred from the mirror.
+        resolved = self.service.resolve_turn_snapshot(self.eligible())
+        self.assertEqual([r['command_id'] for r in resolved['records']], ['started'])
+
+    def test_first_turn_after_queueing_sees_command_that_completed(self):
+        # The prompt queued before the pane's first command existed; the command
+        # finished before the turn ever started. Its result and exit status are the
+        # turn's terminal context — an empty selection is not.
+        done = record('run', revision=1, output='done', exit_status=0)
+        self.service.update(snapshot(done))
+        resolved = self.service.resolve_turn_snapshot(self.eligible())
+        self.assertEqual([r['command_id'] for r in resolved['records']], ['run'])
+        self.assertEqual(resolved['records'][0]['exit_status'], 0)
+        self.service.set_snapshot(resolved)
+        self.assertEqual(self.service.execute('terminal_read', {'command_id': 'run'})['output'], 'done')
+
+    def test_stale_queued_selection_not_resent_after_acceptance(self):
+        old = record('run', revision=1, output='first')
+        self.service.update(snapshot(old))
+        queued = self.eligible(old)
+        fresh = record('run', revision=2, output='more')
+        self.service.update(snapshot(fresh))
+        first = self.service.resolve_turn_snapshot(queued)
+        self.assertEqual(first['records'][0]['revision'], 2)
+        self.service.set_snapshot(first)
+        # An older queued entry still holding revision 1 must not resurrect revision 2
+        # output the started turn already carried.
+        self.assertEqual(self.service.resolve_turn_snapshot(queued)['records'], [])
+
+
 if __name__ == '__main__':
     unittest.main()

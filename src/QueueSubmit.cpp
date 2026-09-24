@@ -11,4 +11,38 @@ Decision decide(const State &state) {
     return Decision::StartNow;
 }
 
+int firstRunnable(const ItemView *items, int count, const LaneFacts &facts) {
+    // Walk the list once, in order. The first item of each lane is that lane's head; the
+    // first head whose lane is open is delivered. A head that cannot run — whatever stopped
+    // it, including a guest line whose channel is busy — holds its whole lane: later items of
+    // the same lane are skipped, never passed, so when the lane opens its oldest entry still
+    // goes first. Items of the other lane are simply stepped over until its own head.
+    bool agentSeen = false, terminalSeen = false;
+    for (int i = 0; i < count; ++i) {
+        const ItemView &item = items[i];
+        if (item.kind == ItemKind::Agent) {
+            if (agentSeen) continue;
+            agentSeen = true;
+            if (facts.agentBusy || facts.agentStarting || facts.agentPaused
+                || facts.agentQuestionOpen || facts.agentHeld || !facts.agentConfigured)
+                continue;
+            return i;
+        }
+        if (terminalSeen) continue;
+        terminalSeen = true;
+        if (item.kind == ItemKind::Guest) {
+            // The guest channel is serialized: a line for another guest, a guest that is not
+            // in front, or a busy channel holds the terminal lane's guest head — and with it
+            // the shell commands queued behind it in the same lane.
+            if (!item.guestReady) continue;
+            if (facts.terminalPaused || facts.terminalHeld) continue;
+            return i;
+        }
+        if (facts.terminalActive || facts.terminalPaused || facts.terminalHeld) continue;
+        if (!facts.terminalIdle) continue;
+        return i;
+    }
+    return -1;
+}
+
 }

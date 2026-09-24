@@ -66,9 +66,9 @@ QStringList actionsFor(const Inputs &in, const QString &rowId) {
 
 QString queueHint(bool steerSelected, bool headSteerable, bool rowSelected) {
     if (steerSelected)
-        return QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw · Esc");
-    if (headSteerable) return QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Esc cancel · Shift+Del remove");
-    if (rowSelected) return QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove");
+        return QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw");
+    if (headSteerable) return QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · ↓ leave · Shift+Del remove");
+    if (rowSelected) return QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · ↓ leave · Shift+Del remove");
     return QStringLiteral("↑ select a row · Ctrl+↑↓ move · Shift+Del remove");
 }
 

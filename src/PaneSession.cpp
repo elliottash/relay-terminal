@@ -42,7 +42,18 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
         }
         if (type == QStringLiteral("steer_delivered")) {
             const QJsonArray requestIds = event.value(QStringLiteral("request_ids")).toArray();
+            // A console surface's steered item has no request id the pane could match: the
+            // event's item ids pin the tombstone for it (card #XCXD).
+            if (!m_enterSteerWorkerItem.isEmpty())
+                for (const auto &value : event.value(QStringLiteral("ids")).toArray())
+                    if (m_enterSteerWorkerItem == value.toString())
+                        m_enterSteerStep = relay::queuesubmit::EnterStep::Delivered;
             for (const auto &value : requestIds) {
+                // The prompt this empty-Enter sequence is pinned to reached the turn (card
+                // #XCXD): the sequence stays on it — the next Enter answers that the agent
+                // already has it, never steering the next queued prompt instead.
+                if (m_enterSteerRequest == value.toString())
+                    m_enterSteerStep = relay::queuesubmit::EnterStep::Delivered;
                 for (int i = 0; i < m_steering.size(); ++i) {
                     if (m_steering[i].requestId != value.toString()) continue;
                     const SteerEntry steer = m_steering[i];
@@ -94,6 +105,10 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
         }
         if (type == QStringLiteral("steer_returned")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
+            if (m_enterSteerRequest == requestId) resetEnterSteerSequence();
+            if (!m_enterSteerWorkerItem.isEmpty()
+                && event.value(QStringLiteral("id")).toString() == m_enterSteerWorkerItem)
+                resetEnterSteerSequence();
             for (int i = 0; i < m_steering.size(); ++i) {
                 if (m_steering[i].requestId != requestId) continue;
                 const SteerEntry steer = m_steering[i];

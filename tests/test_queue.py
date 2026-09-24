@@ -567,6 +567,55 @@ class SteerTests(unittest.TestCase):
         self.assertFalse(self.rec.of('interrupting'))
         self.assertEqual(p.calls, 2)
 
+    def test_unsteer_by_item_interrupts_the_turn_card_xcxd(self):
+        # A console surface's queued prompt has no request id the pane could name, and the pane's
+        # third Enter can arrive before the steer's ack, when a request id still does not exist:
+        # the item resolves it (card #XCXD). The request-id form below stays compatible.
+        p = self.use(GatedProvider())
+        first = self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e.get('text') == 'working on first')
+        item = self.sup.submit('from a console surface', 'steer', requeue=False)
+        self.rec.wait(lambda e: e['event'] == 'queue_changed' and e.get('steering'))
+        self.assertTrue(self.sup.unsteer(None, 'i1', item_id=item))
+        escalated = self.rec.wait(lambda e: e['event'] == 'steer_escalated')
+        self.assertEqual((escalated['escalated'], escalated['new_request_id']), (True, 'i1'))
+        self.assertEqual(self.rec.wait(lambda e: e['event'] == 'interrupting')['id'], first)
+        queued = self.rec.wait(lambda e: e['event'] == 'queued' and e.get('request_id') == 'i1')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)
+        # Wait for the escalated turn itself: the first turn's agent_finished is already recorded.
+        self.rec.wait(lambda e: e.get('text') == 'working on from a console surface')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == queued['id'])
+        self.assertEqual(p.prompts, ['first', 'from a console surface'])
+
+    def test_unsteer_by_item_does_nothing_once_delivered_or_foreign_card_xcxd(self):
+        p = self.slow_tool()
+        self.sup.submit('tool please', 'now')
+        self.rec.wait(lambda e: e['event'] == 'tool_started')
+        item = self.sup.submit('also check README', 'steer')
+        p.release()
+        self.rec.wait(lambda e: e['event'] == 'steer_delivered')
+        # Already taken by the turn: neither its own item nor a foreign one escalates anything.
+        self.assertFalse(self.sup.unsteer(None, 'i1', item_id=item))
+        escalated = self.rec.wait(lambda e: e['event'] == 'steer_escalated')
+        self.assertEqual((escalated['escalated'], escalated['ledger_id']), (False, None))
+        self.assertFalse(self.sup.unsteer(None, 'i2', item_id='no-such-item'))
+        self.rec.wait(lambda e: e['event'] == 'steer_escalated')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+
+    def test_unsteer_request_id_form_still_resolves_card_xcxd(self):
+        # The pane's own steers carry a request id: that form keeps working alongside the item
+        # form, and the item is only consulted when the request id does not resolve.
+        p = self.use(GatedProvider())
+        self.sup.submit('first', 'now')
+        self.rec.wait(lambda e: e.get('text') == 'working on first')
+        self.sup.submit('do this instead', 'steer', request_id='s1', requeue=False)
+        self.rec.wait(lambda e: e['event'] == 'queue_changed' and e.get('steering'))
+        self.assertTrue(self.sup.unsteer('s1', 'i1', item_id='no-such-item'))
+        self.rec.wait(lambda e: e['event'] == 'steer_escalated')
+        p.release.release()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+
     def test_remove_withdraws_a_steer_the_turn_has_not_taken(self):
         p = self.use(GatedProvider())
         first = self.sup.submit('first', 'now')

@@ -896,6 +896,7 @@ void enterOnAnEmptyBoxResumesThisConsolesPausedQueue()
     QKeyEvent resume(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
     QCoreApplication::sendEvent(editor, &resume);
     CHECK_EQ(sent.size(), 1);
+    if (sent.size() != 1) return;   // a failure, not a crash that hides every case after it
     CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("resume_queue"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
     CHECK(context.submitted.isEmpty());   // a resume, never a prompt
@@ -1367,11 +1368,9 @@ void answersBypassQueuedPrompts()
         console.showQuestion(QJsonObject{{"id", "question-1"}, {"questions", QJsonArray{
             QJsonObject{{"header", "Scope"}, {"question", "Which?"}, {"options", QJsonArray{
                 QJsonObject{{"label", "First"}}, QJsonObject{{"label", "Second"}}}}},
+            QJsonObject{{"header", "Note"}, {"question", "Anything to add?"}},
             QJsonObject{{"header", "Detail"}, {"question", "Any details?"}}}}});
         sent.clear();
-        enter(); // Empty Enter must not steer queued work while an ask is open.
-        CHECK(sent.isEmpty());
-        CHECK(console.questionOpen());
         // A card's explicit comment/shell chord is not an answer and still reaches its context.
         context.takeSubmit = true;
         console.draftInComposer(QStringLiteral("separate comment"));
@@ -1388,6 +1387,12 @@ void answersBypassQueuedPrompts()
         answer(QStringLiteral("2"));
         CHECK(sent.isEmpty()); // Multiple answers are sent together.
         CHECK(console.questionOpen());
+        // Card #XCXD: a blank Enter skips the current question (Esc no longer does) and does
+        // nothing else — no steer, no resume, and nothing sent until the last question is done.
+        enter();
+        CHECK(sent.isEmpty());
+        CHECK(console.questionOpen());
+        CHECK_EQ(console.queuedPrompts(), 2);
         answer(QStringLiteral("please keep the tests"));
         CHECK(!console.questionOpen());
         CHECK_EQ(sent.size(), 1);
@@ -1395,7 +1400,7 @@ void answersBypassQueuedPrompts()
             CHECK_EQ(sent.first().value("type").toString(), QStringLiteral("question_answer"));
             CHECK_EQ(sent.first().value("id").toString(), QStringLiteral("question-1"));
             CHECK_EQ(sent.first().value("answers").toArray(),
-                     (QJsonArray{QJsonArray{"Second"}, QJsonArray{"please keep the tests"}}));
+                     (QJsonArray{QJsonArray{"Second"}, QJsonArray{}, QJsonArray{"please keep the tests"}}));
         }
         CHECK_EQ(console.queuedPrompts(), 2);
         const auto after = console.queueRows();
@@ -1660,6 +1665,11 @@ void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
 }
 }  // namespace cases
 
+#include "xcxd_queue_cases.h"
+#include "xcxd_ui_cases.h"
+#include "xcxd_review_cases.h"
+#include "xcxd_context_cases.h"
+
 int main(int argc, char **argv)
 {
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
@@ -1678,6 +1688,15 @@ int main(int argc, char **argv)
     qputenv("HOME", scratch.path().toUtf8());
     home = &scratch;
 
+    if (app.arguments().contains(QStringLiteral("--xcxd-only"))) {
+        relay::theme::applyTheme(app);
+        cases::xcxdQueueCases();
+        cases::xcxdReviewCases();
+        cases::xcxdUiCases();
+        cases::xcxdContextCases();
+        if (!failures) std::fprintf(stdout, "queuecontract: all cases passed\n");
+        return failures ? 1 : 0;
+    }
     if (app.arguments().contains(QStringLiteral("--memory-only"))) {
         cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
         return failures ? 1 : 0;

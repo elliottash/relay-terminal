@@ -2,6 +2,19 @@
 #include "Pane.h"
 
 bool Pane::eventFilter(QObject *object, QEvent *event) {
+        // Card #XCXD: the two queue lanes sit side by side on a wide strip and stack on a narrow
+        // one. The layout is chosen when the strip is rebuilt, so a resize that crosses the
+        // boundary rebuilds it once — the cached mode keeps this from looping.
+        if (object == m_queueStrip && event->type() == QEvent::Resize) {
+            const bool stackedNow = m_queueStrip->width() < 640;
+            if (stackedNow != m_queueLanesStacked && m_terminalQueueList && m_terminalQueueList->isVisible())
+                QTimer::singleShot(0, this, [this] {
+                    if (m_queueStrip && m_terminalQueueList && m_terminalQueueList->isVisible()
+                        && (m_queueStrip->width() < 640) != m_queueLanesStacked && !m_rebuildingQueueStrip)
+                        rebuildQueueStrip();
+                });
+            return false;
+        }
         // Answered with the mouse while Y and N were right there: the hint is owed (WARP.md's
         // standing rule). Recorded on the press rather than on `clicked`, because Space on the
         // focused button is `clicked` too and is not the slow path.
@@ -80,20 +93,26 @@ bool Pane::eventFilter(QObject *object, QEvent *event) {
             && (static_cast<QMouseEvent *>(event)->pos() - m_clickOrigin).manhattanLength() < 6)
             hint(QStringLiteral("terminal.click"), QStringLiteral("The prompt box is the input · %1 types into the terminal")
                      .arg(Keymap::instance().shortcutText(QStringLiteral("control.human"))));
-        if (m_queueList && object == m_queueList->viewport() && event->type() == QEvent::MouseButtonRelease
+        // Card #XCXD: the row controls — × everywhere, the send arrow on the agent lane only —
+        // are handled the same way on both lanes' viewports. A terminal row has no send arrow:
+        // it is a command waiting for the shell, not a prompt waiting for the agent.
+        QListWidget *queueLane = nullptr;
+        if (m_queueList && object == m_queueList->viewport()) queueLane = m_queueList;
+        else if (m_terminalQueueList && object == m_terminalQueueList->viewport()) queueLane = m_terminalQueueList;
+        if (queueLane && event->type() == QEvent::MouseButtonRelease
             && static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton) {
             // The × at the right edge of a queue row removes it; on a steer it withdraws it. A steer
             // already being withdrawn has no × to click.
             const QPoint pos = static_cast<QMouseEvent *>(event)->pos();
-            const QModelIndex index = m_queueList->indexAt(pos);
-            if (index.isValid() && index.data(QueueRowDelegate::SendNowRole).toBool()
-                && QueueRowDelegate::sendNowRect(m_queueList->visualRect(index)).contains(pos)) {
+            const QModelIndex index = queueLane->indexAt(pos);
+            if (queueLane == m_queueList && index.isValid() && index.data(QueueRowDelegate::SendNowRole).toBool()
+                && QueueRowDelegate::sendNowRect(queueLane->visualRect(index)).contains(pos)) {
                 sendQueueRowNow(index.data(QueueRowDelegate::RowIdRole).toString());
                 hint(QStringLiteral("queue.send-now.mouse"), relay::ShortcutHints::nextTime(
                     Keymap::instance().shortcutText(QStringLiteral("agent.interrupt"))));
                 return true;
             }
-            if (index.isValid() && pos.x() >= m_queueList->viewport()->width() - 26) {
+            if (index.isValid() && pos.x() >= queueLane->viewport()->width() - 26) {
                 if (index.data(QueueRowDelegate::PendingRole).toBool()) return true;
                 const bool steer = index.data(QueueRowDelegate::KindRole).toString() == QStringLiteral("steer");
                 removeRow(index.data(QueueRowDelegate::RowIdRole).toString());
@@ -519,6 +538,7 @@ void Pane::connectWorker() {
             // submit in this pane is dropped in silence — the worst version of the bug the local
             // dispatch above exists to prevent.
             m_pendingSubmit.clear(); m_previewId.clear(); m_heldDecision = QJsonObject();
+            m_enterSteerBuffered = 0;   // a route that will never be answered takes its presses with it
             // Nobody is left to answer to (#MQ9C): take the ask down rather than leave the pane
             // asking on behalf of a worker that is gone.
             closeQuestion(QStringLiteral("the agent worker stopped"));
@@ -963,7 +983,16 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
             }
         }
         if (submit && mode != QStringLiteral("agent")
-            && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) return;
+            && (!m_pendingSubmit.isEmpty() || !m_heldDecision.isEmpty() || m_loading)) {
+            // Card #XCXD: the box still holds the submitted draft while this route is in flight,
+            // so a repeated Enter sees the same NONEMPTY text — it is the person pressing for
+            // that prompt, not submitting something new. Count it: the second press steers the
+            // prompt into the running turn, the third interrupts and sends it, and nothing after
+            // that changes anything. The presses replay, exactly as counted, when the routing
+            // resolves to an agent.
+            if (m_editor->toPlainText() == m_submittedDraft && m_enterSteerBuffered < 2) ++m_enterSteerBuffered;
+            return;
+        }
         const QString id = QString::number(++m_requestId);
         // A program is blocked reading a line from the terminal: the prompt box answers it
         // instead of queueing a command (issue decision 5). Agent submissions still go to the
@@ -1041,7 +1070,22 @@ void Pane::dispatch(const QJsonObject &decision, const QString &mode) {
         m_routedTerminalSnapshot = {};
         const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
-        if (route == QStringLiteral("empty")) return;
+        if (route == QStringLiteral("empty")) { m_enterSteerBuffered = 0; return; }
+        // Card #XCXD: the Enters pressed while this route was in flight replay now, exactly as
+        // counted — second press steers the prompt into the running turn, third interrupts — and
+        // only when the verdict really routed the text to the agent. A shell or guest verdict
+        // has no agent turn to steer into, so its presses are spent here instead of firing a
+        // spurious steer. The singleShot lands after this submit is queued, which is the prompt
+        // the presses were for; and a free agent ran the prompt as its own turn, leaving nothing
+        // to steer.
+        const int replayEnters = route == QStringLiteral("agent") && !guestInFront()
+                                     ? qMin(m_enterSteerBuffered, 2) : 0;
+        m_enterSteerBuffered = 0;
+        if (replayEnters > 0)
+            QTimer::singleShot(0, this, [this, replayEnters] {
+                if (!m_agentBusy) return;
+                for (int i = 0; i < replayEnters; ++i) emptyEnterSteerSequence();
+            });
         // A command the agent put in the prompt box (protocol 22): its exit goes back to the agent,
         // which replaces the fix loop for this one submission.
         const bool handoff = m_handoffPrefill;
@@ -1645,6 +1689,13 @@ void Pane::printInline(const QString &text, Ink ink) {
     }
 
 void Pane::rebuildQueueStrip() {
+        // Card #XCXD: a resize (showBubble, the lanes stacking) can arrive while the strip is
+        // being rebuilt — through the event filter below — and rebuilding again from inside the
+        // layout teardown corrupted the heap. Re-entrant calls leave now; the resize branch
+        // defers, so the reflow still happens, one event-loop turn later.
+        if (m_rebuildingQueueStrip) return;
+        m_rebuildingQueueStrip = true;
+        struct RebuildDone { bool &flag; ~RebuildDone() { flag = false; } } rebuildDone{m_rebuildingQueueStrip};
         m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_queueStrip) return;
         // The worker's rows for this console's surface count towards the strip being there at
@@ -1654,27 +1705,36 @@ void Pane::rebuildQueueStrip() {
         const QList<WorkerRow> waiting = workerSteers();
         const QList<WorkerRow> queued = workerQueued();
         const bool workerPaused = m_queuePaused && !queued.isEmpty() && !queueSurface().isEmpty();
+        // Card #XCXD: a running shell keeps the strip (and its stop control) up even when
+        // nothing is pending — a stop must not depend on there being a queue to show. A busy
+        // agent alone does not: the Relaying line under the transcript already says it runs and
+        // that Esc stops it, and a strip repeating that was the owner's complaint.
         const bool visible = !m_entries.isEmpty() || m_entriesPaused || !m_steering.isEmpty()
-                          || !waiting.isEmpty() || !queued.isEmpty();
+                          || !waiting.isEmpty() || !queued.isEmpty()
+                          || (processBusy() && m_backend);
         auto *layout = static_cast<QVBoxLayout *>(m_queueStrip->layout());
-        while (QLayoutItem *item = layout->takeAt(0)) {
-            if (QWidget *w = item->widget()) { if (w != m_queueList) w->deleteLater(); }
-            else if (QLayout *l = item->layout()) {
-                while (QLayoutItem *inner = l->takeAt(0)) { if (inner->widget()) inner->widget()->deleteLater(); delete inner; }
+        // Card #XCXD: the lanes nest — a header row, then either one list or two columns that
+        // each carry their own header. Clear every level, keeping only the two list widgets
+        // (they are re-added below); anything else would leak or be reparented onto a deleted
+        // layout on the next rebuild.
+        std::function<void(QLayout *)> clearStripLayout = [&](QLayout *l) {
+            while (QLayoutItem *item = l->takeAt(0)) {
+                if (QWidget *w = item->widget()) { if (w != m_queueList && w != m_terminalQueueList) w->deleteLater(); }
+                else if (QLayout *sub = item->layout()) clearStripLayout(sub);
+                delete item;
             }
-            delete item;
-        }
+        };
+        clearStripLayout(layout);
         m_queueWanted = visible;
         if (visible) showBubble(m_queueStrip); else hideBubble(m_queueStrip);
         if (!visible) return;
         auto *header = new QHBoxLayout;
         const bool held = queueHeldBySelection();
-        auto *title = new QLabel(queueBlocked() || workerPaused ? QStringLiteral("QUEUE · PAUSED")
-                                                               : QStringLiteral("QUEUE"));
+        auto *title = new QLabel(QStringLiteral("QUEUE"));   // each lane says its own state
         title->setObjectName(QStringLiteral("queueTitle"));
         QString why = held ? QStringLiteral("The next item is highlighted and being edited in the prompt box, so the"
-                                            " queue is holding. Enter saves it, Esc drops the edit; either way the"
-                                            " queue runs on.")
+                                            " queue is holding. Enter saves it and the queue runs on; Esc keeps the"
+                                            " text and stops a resource instead.")
                            : QString();
         if (!m_pauseReason.isEmpty()) why = why.isEmpty() ? m_pauseReason : why + QStringLiteral("\nAlso paused: ") + m_pauseReason;
         title->setToolTip(why);
@@ -1686,13 +1746,13 @@ void Pane::rebuildQueueStrip() {
         // Paused by a Stop or a failed turn, with no row holding the queue instead: the two ways
         // back are the Resume button and Enter on the empty prompt box, and the hint says the
         // second one wherever the button is offered (#7JD1).
-        const bool paused = (m_entriesPaused || workerPaused) && !held;
+        const bool paused = (m_entriesPaused || m_agentPaused || workerPaused) && !held;
         auto *hint = new QLabel(!m_selectedSteer.isEmpty()
-                                    ? QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw · Esc")
+                                    ? QStringLiteral("Enter or type to edit · Ctrl+↓ back to the queue · Ctrl+Enter now · Shift+Del withdraw")
                                 : headSteerable
-                                    ? QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Esc cancel · Shift+Del remove")
+                                    ? QStringLiteral("Ctrl+↑ next tool call · Ctrl+↓ move · Enter save · Down off the end leaves · Shift+Del remove")
                                 : inQueueSelection()
-                                    ? QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Esc cancel · Shift+Del remove")
+                                    ? QStringLiteral("↑↓ row · Ctrl+↑↓ move · Enter save · Down off the end leaves · Shift+Del remove")
                                 : paused
                                     ? QStringLiteral("Enter resumes · ↑ take back to edit · × remove")
                                     : QStringLiteral("↑ take back to edit · drag to reorder · × remove"));
@@ -1702,20 +1762,31 @@ void Pane::rebuildQueueStrip() {
             "↑ on the empty prompt box removes the top editable row and restores it as an unsent draft.\n"
             "Enter submits that draft again; the remaining queued rows keep their order.\n"
             "Drag queued rows to reorder; × removes a row. A ↪ row is withdrawn if the agent has not taken it yet.\n"
-            "Rows without editable text stay selected: Ctrl+↑↓ moves them, Shift+Delete removes, Esc leaves.\n"
+            "Agent and Terminal are separate queues: a row only ever moves within its own.\n"
+            "Rows without editable text stay selected: Ctrl+↑↓ moves them, Shift+Delete removes; Enter saves a row.\n"
             "A queue a Stop paused runs again on Enter in the empty prompt box, or on the Resume button;"
             " typing a prompt and sending it resumes the rows behind it too."));
         header->addWidget(hint);
-        if (paused) {
-            auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
-            resume->setToolTip(QStringLiteral("Run the queue again · Enter on the empty prompt box does the same"));
-            connect(resume, &QToolButton::clicked, this, [this] { resumeAgentQueue(); });
-            header->addWidget(resume);
-        }
-        if (m_entries.size() + queued.size() > 1) {
-            auto *clear = new QToolButton; clear->setText(QStringLiteral("Clear")); clear->setFocusPolicy(Qt::NoFocus);
-            connect(clear, &QToolButton::clicked, this, [this] { clearAgentQueue(); });
-            header->addWidget(clear);
+        // Card #XCXD: the shell keeps its own stop control while it runs, with nothing queued
+        // too. The agent's is the Relaying line's "Esc stops", so the strip does not repeat it.
+        // The label shows the live keymap binding when there is one and the card's contextual
+        // key otherwise: Esc when the shell is all that runs, Alt+Esc when the agent runs too.
+        const bool agentRunning = m_agentBusy;
+        const bool shellRunning = processBusy() && m_backend;
+        auto liveKey = [](const char *action, const QString &fallback) {
+            const QString bound = Keymap::instance().shortcutText(QString::fromLatin1(action));
+            return bound.isEmpty() ? fallback : bound;
+        };
+        if (shellRunning) {
+            auto *stop = new QToolButton;
+            const QString shellKey = agentRunning
+                ? liveKey("terminal.interrupt", QStringLiteral("Alt+Esc"))
+                : QStringLiteral("Esc");   // the shell alone: Esc is its key, binding or no binding
+            stop->setText(QStringLiteral("Stop shell (%1)").arg(shellKey));
+            stop->setFocusPolicy(Qt::NoFocus);
+            stop->setToolTip(QStringLiteral("Interrupt the running command · Alt+Esc does it from the keyboard"));
+            connect(stop, &QToolButton::clicked, this, [this] { interruptShell(); });
+            header->addWidget(stop);
         }
         layout->addLayout(header);
         const QString running = runningLabel();
@@ -1724,6 +1795,7 @@ void Pane::rebuildQueueStrip() {
             label->setObjectName(QStringLiteral("queueRunning"));
             layout->addWidget(label);
         }
+        m_queueStrip->installEventFilter(this);
         if (!m_queueList) {
             m_queueList = new QListWidget(m_queueStrip);
             m_queueList->setObjectName(QStringLiteral("queueList"));
@@ -1737,10 +1809,43 @@ void Pane::rebuildQueueStrip() {
             connect(m_queueList->model(), &QAbstractItemModel::rowsMoved, this, [this] { syncEntriesFromList(); });
             connect(m_queueList->model(), &QAbstractItemModel::rowsInserted, this, [this] { if (!m_fillingQueueList) syncEntriesFromList(); });
         }
+        // Card #XCXD: the terminal lane's own list. Dragging reorders it within itself — a row
+        // cannot cross resources because the other lane's list is a different widget — and the
+        // drag persists through syncEntriesFromList, which writes each lane back into its own
+        // slots.
+        if (!m_terminalQueueList) {
+            m_terminalQueueList = new QListWidget(m_queueStrip);
+            m_terminalQueueList->setObjectName(QStringLiteral("terminalQueueList"));
+            m_terminalQueueList->setItemDelegate(new QueueRowDelegate(m_terminalQueueList));
+            m_terminalQueueList->setFocusPolicy(Qt::NoFocus);
+            m_terminalQueueList->setFrameShape(QFrame::NoFrame);
+            m_terminalQueueList->setSelectionMode(QAbstractItemView::SingleSelection);
+            m_terminalQueueList->setDragDropMode(QAbstractItemView::InternalMove);
+            m_terminalQueueList->setDefaultDropAction(Qt::MoveAction);
+            m_terminalQueueList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            connect(m_terminalQueueList->model(), &QAbstractItemModel::rowsMoved, this, [this] { syncEntriesFromList(); });
+            connect(m_terminalQueueList->model(), &QAbstractItemModel::rowsInserted, this, [this] { if (!m_fillingQueueList) syncEntriesFromList(); });
+            // Clicking a terminal row picks the same composite row the keyboard lands on, so
+            // the pane's queue editing works on it without a second selection scheme.
+            connect(m_terminalQueueList, &QListWidget::itemClicked, this, [this](QListWidgetItem *clicked) {
+                const qulonglong id = clicked->data(QueueRowDelegate::EntryIdRole).toULongLong();
+                int entry = -1;
+                for (int i = 0; i < m_entries.size(); ++i)
+                    if (m_entries.at(i).id == id) { entry = i; break; }
+                if (entry < 0) return;
+                int agentCount = 0, lanePos = 0;
+                for (int i = 0; i < m_entries.size(); ++i) if (m_entries.at(i).agent) ++agentCount;
+                const bool agentLane = m_entries.at(entry).agent;
+                for (int i = 0; i < entry; ++i) if (m_entries.at(i).agent == agentLane) ++lanePos;
+                selectQueueRow(steerRowCount() + int(workerSteers().size()) + int(workerQueued().size())
+                             + (agentLane ? lanePos : agentCount + lanePos) + 1);
+            });
+        }
         m_fillingQueueList = true;
         m_queueList->clear();
+        m_terminalQueueList->clear();
         using Row = QueueRowDelegate;
-        QListWidgetItem *current = nullptr;
+        QListWidgetItem *current = nullptr, *terminalCurrent = nullptr;
         // Steers first: they reach the agent before anything queued. Not draggable, because "the
         // next tool call" is not a place among the others; Ctrl+↓ is how one goes back.
         for (const auto &steer : std::as_const(m_steering)) {
@@ -1786,28 +1891,110 @@ void Pane::rebuildQueueStrip() {
                 if (row.id == m_selectedWorkerRow) current = item;
             }
         }
-        for (int i = 0; i < m_entries.size(); ++i) {
-            const QueueEntry &entry = m_entries[i];
-            auto *item = new QListWidgetItem(entry.label(), m_queueList);
-            item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(entry.id));
-            item->setData(Row::AgentRole, entry.agent);
-            item->setData(Row::KindRole, entry.agent ? QStringLiteral("agent") : QStringLiteral("command"));
-            item->setData(Row::RowIdRole, QStringLiteral("entry:%1").arg(entry.id));
-            item->setData(Row::SendNowRole, entry.agent && !entry.written() && entry.guest.isEmpty()
-                                          && m_configured && !m_ask.open());
-            item->setToolTip(entry.text);
-            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
-            if (i == m_selected) current = item;
-        }
+        // Card #XCXD: two lanes, one FIFO per resource. The agent's rows (and every steer) stay
+        // in the main list; the terminal's rows go to their own list beside it. The grouping here
+        // is the order selectQueueRow maps rows through, so the keyboard still walks them.
+        auto fillLane = [this, &current, &terminalCurrent](bool agentLane) {
+            for (int i = 0; i < m_entries.size(); ++i) {
+                const QueueEntry &entry = m_entries[i];
+                if (entry.agent != agentLane) continue;
+                auto *item = new QListWidgetItem(entry.label(), agentLane ? m_queueList : m_terminalQueueList);
+                item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(entry.id));
+                item->setData(Row::AgentRole, entry.agent);
+                item->setData(Row::KindRole, entry.agent ? QStringLiteral("agent") : QStringLiteral("command"));
+                item->setData(Row::RowIdRole, QStringLiteral("entry:%1").arg(entry.id));
+                item->setData(Row::SendNowRole, entry.agent && !entry.written() && entry.guest.isEmpty()
+                                              && m_configured && !m_ask.open());
+                item->setToolTip(entry.text);
+                item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
+                if (i == m_selected) { if (agentLane) current = item; else terminalCurrent = item; }
+            }
+        };
+        fillLane(true);
+        fillLane(false);
         m_fillingQueueList = false;
         if (current) m_queueList->setCurrentItem(current);
         else { m_queueList->clearSelection(); m_queueList->setCurrentRow(-1); }
+        if (terminalCurrent) m_terminalQueueList->setCurrentItem(terminalCurrent);
+        else { m_terminalQueueList->clearSelection(); m_terminalQueueList->setCurrentRow(-1); }
         const int rowHeight = std::max(20, fontMetrics().height() + 8);
-        const int rows = int(m_steering.size()) + int(waiting.size()) + int(queued.size()) + int(m_entries.size());
-        m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, rows)) * rowHeight + 4);
-        m_queueList->setVisible(rows > 0);
+        const int agentRows = int(m_steering.size()) + int(waiting.size()) + int(queued.size())
+                          + int(std::count_if(m_entries.cbegin(), m_entries.cend(), std::mem_fn(&QueueEntry::agent)));
+        const int terminalRows = int(m_entries.size()) - int(std::count_if(m_entries.cbegin(), m_entries.cend(), std::mem_fn(&QueueEntry::agent)));
+        const int rows = agentRows + terminalRows;
+        m_queueList->setFixedHeight(std::min<int>(6, std::max<int>(1, agentRows)) * rowHeight + 4);
+        m_terminalQueueList->setFixedHeight(std::min<int>(6, std::max<int>(1, terminalRows)) * rowHeight + 4);
+        m_queueList->setVisible(agentRows > 0);
+        m_terminalQueueList->setVisible(terminalRows > 0);
         if (current) m_queueList->scrollToItem(current);
-        layout->addWidget(m_queueList);
+        if (terminalCurrent) m_terminalQueueList->scrollToItem(terminalCurrent);
+        // Card #XCXD: each lane owns its state out loud — Agent (prompts and steers, the
+        // worker's queue paused counts here) and Terminal (commands). One resource pausing must
+        // not read as the other's queue stopping, and the strip header no longer offers a
+        // Resume or a Clear that would blur them. The agent lane's Resume is resumeAgentQueue(),
+        // which resumes the worker's queue too; the terminal lane's is its own.
+        auto laneHeader = [this, queued](bool agentLane, int rows, bool lanePaused) {
+            auto *head = new QHBoxLayout;
+            auto *label = new QLabel(lanePaused ? QStringLiteral("%1 · %2 · paused").arg(agentLane ? QStringLiteral("Agent") : QStringLiteral("Terminal")).arg(rows)
+                                                : QStringLiteral("%1 · %2").arg(agentLane ? QStringLiteral("Agent") : QStringLiteral("Terminal")).arg(rows));
+            label->setObjectName(agentLane ? QStringLiteral("agentLaneLabel") : QStringLiteral("terminalLaneLabel"));
+            label->setToolTip(agentLane ? QStringLiteral("Prompts and steers for the agent turn · Esc stops it, Enter on an empty prompt box resumes the lane")
+                                        : QStringLiteral("Commands waiting for the terminal · Alt+Esc interrupts it, Esc when it is all that runs"));
+            head->addWidget(label);
+            head->addStretch(1);
+            if (lanePaused) {
+                auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
+                resume->setObjectName(agentLane ? QStringLiteral("resumeAgentQueue") : QStringLiteral("resumeTerminalQueue"));
+                resume->setToolTip(agentLane ? QStringLiteral("Run the agent's queue again · Enter on the empty prompt box does the same")
+                                             : QStringLiteral("Run the terminal's queue again · the agent lane is not touched"));
+                connect(resume, &QToolButton::clicked, this, [this, agentLane] {
+                    if (agentLane) resumeAgentQueue();
+                    else { m_entriesPaused = false; m_pauseReason.clear(); rebuildQueueStrip(); changed(); pumpQueue(); }
+                });
+                head->addWidget(resume);
+            }
+            if (agentLane && int(m_entries.size()) + queued.size() > 1) {
+                auto *clear = new QToolButton; clear->setText(QStringLiteral("Clear")); clear->setFocusPolicy(Qt::NoFocus);
+                clear->setObjectName(QStringLiteral("clearAgentQueue"));
+                clear->setToolTip(QStringLiteral("Clear the agent's queue"));
+                connect(clear, &QToolButton::clicked, this, [this] { clearAgentQueue(); });
+                head->addWidget(clear);
+            }
+            return head;
+        };
+        const bool agentLanePaused = (agentQueuePaused() || workerPaused) && !held;
+        const bool dual = agentRows > 0 && terminalRows > 0;
+        if (dual) {
+            const bool stacked = m_queueStrip->width() < 640;
+            m_queueLanesStacked = stacked;
+            if (stacked) {
+                layout->addLayout(laneHeader(true, agentRows, agentLanePaused));
+                layout->addWidget(m_queueList);
+                layout->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
+                layout->addWidget(m_terminalQueueList);
+            } else {
+                auto *side = new QHBoxLayout;
+                auto *left = new QVBoxLayout;
+                left->addLayout(laneHeader(true, agentRows, agentLanePaused));
+                left->addWidget(m_queueList);
+                auto *right = new QVBoxLayout;
+                right->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
+                right->addWidget(m_terminalQueueList);
+                side->addLayout(left, 1);
+                side->addLayout(right, 1);
+                layout->addLayout(side);
+            }
+        } else if (agentRows > 0) {
+            m_queueLanesStacked = false;
+            layout->addLayout(laneHeader(true, agentRows, agentLanePaused));
+            layout->addWidget(m_queueList);
+        } else if (terminalRows > 0 || m_entriesPaused) {
+            // Only a lane with rows (or a paused one, for its Resume) gets a header: a running
+            // shell with nothing waiting shows its stop button and no "Terminal · 0".
+            m_queueLanesStacked = false;
+            layout->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
+            layout->addWidget(m_terminalQueueList);
+        }
         placeQueueStrip();
         QTimer::singleShot(0, this, [this] { placeQueueStrip(); });
     }

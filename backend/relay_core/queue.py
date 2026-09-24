@@ -458,16 +458,24 @@ class TurnSupervisor:
                     return
             raise ValueError("That prompt is not queued (it may already have started).")
 
-    def unsteer(self, request_id, as_request_id=None) -> bool:
+    def unsteer(self, request_id, as_request_id=None, item_id=None) -> bool:
         """Third Enter in the pane: a steering prompt the running turn has not taken yet stops that
         turn and runs as its own prompt instead, keeping its ledger entry.
+
+        The steering item is found by ``item_id`` first and by ``request_id`` second (protocol 33,
+        card #XCXD): a console surface's queued prompt has no request id the pane could name — the
+        pane steered it by item — and a third Enter can arrive before the steer has been
+        acknowledged, when the pane still has only the item. The request-id form stays compatible
+        for every steer the pane itself put in flight.
 
         Nothing is escalated once the turn has taken the prompt (``steer_delivered``) or given it
         back (``steer_returned``): the agent has it either way, so there is nothing to interrupt
         for. ``steer_escalated {escalated: false}`` says so.
         """
         with self._lock:
-            item = next((i for i in self._steer if i.get("request_id") == request_id), None)
+            item = next((i for i in self._steer if item_id and i.get("id") == item_id), None)
+            if item is None:
+                item = next((i for i in self._steer if i.get("request_id") == request_id), None)
             if item is None:
                 self._emit({"event": "steer_escalated", "request_id": request_id,
                             "new_request_id": as_request_id, "escalated": False, "ledger_id": None})

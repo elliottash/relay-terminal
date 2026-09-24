@@ -417,9 +417,14 @@ void Pane::handle(const QJsonObject &event) {
             if (m_interruptPending && outcome == QStringLiteral("cancelled")) {
                 m_interruptPending = false;   // replaced by the interrupting prompt; keep the queue going
             } else if (stopped) {
-                pauseQueue(outcome == QStringLiteral("error") ? QStringLiteral("the agent turn failed") : QStringLiteral("the agent was stopped"));
+                // Only the agent's lane (card #XCXD): a stopped turn must not hold the shell
+                // commands queued behind it, and nothing behind it starts while the stop
+                // travels — pauseAgentQueueForStop() has usually paused it already.
+                pauseQueue(QueueResource::Agent,
+                           outcome == QStringLiteral("error") ? QStringLiteral("the agent turn failed")
+                                                              : QStringLiteral("the agent was stopped"));
             }
-            if (m_activeValid && m_active.agent) m_activeValid = false;
+            m_activeAgentValid = false;
             QTimer::singleShot(0, this, [this] { pumpQueue(); rebuildQueueStrip(); });
             // The turn, handed to whatever this console is about (#AGNT step 3). A terminal
             // context wants nothing — the answer is already in the transcript — so this does
@@ -470,7 +475,7 @@ void Pane::handle(const QJsonObject &event) {
             if (outcome == QStringLiteral("done")
                 && (event.value(QStringLiteral("awaiting_reply")).toBool()
                     || relay::panestatus::endsWithQuestion(m_turnText)))
-                pauseQueue(QStringLiteral("the agent asked a question · reply to continue"));
+                pauseQueue(QueueResource::Agent, QStringLiteral("the agent asked a question · reply to continue"));
             // Notified only for news the user was not watching (#XM0T): a turn that ended by
             // asking them something, a finished turn, a failed one.
             if (outcome == QStringLiteral("done")) {
@@ -762,10 +767,10 @@ void Pane::handle(const QJsonObject &event) {
             const bool wasBusy = m_agentBusy;
             // A rejected ask (queue full, invalid prompt) never started; forget it.
             m_pendingPrompts.remove(event.value(QStringLiteral("id")).toString());
-            if (m_activeValid && m_active.agent && event.value(QStringLiteral("id")).toString() == m_activeRequest) {
-                m_activeValid = false;
-                m_entries.prepend(m_active);
-                pauseQueue(QStringLiteral("the worker refused the prompt: ") + text);
+            if (m_activeAgentValid && event.value(QStringLiteral("id")).toString() == m_activeAgentRequest) {
+                m_activeAgentValid = false;
+                m_entries.prepend(m_activeAgent);
+                pauseQueue(QueueResource::Agent, QStringLiteral("the worker refused the prompt: ") + text);
             }
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);

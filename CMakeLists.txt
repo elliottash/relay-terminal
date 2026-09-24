@@ -971,6 +971,9 @@ if(BUILD_TESTING)
     add_executable(relay-consolemode-tests tests/consolemode_test.cpp)
     add_executable(relay-console-harness tests/console_harness.cpp)
     foreach(console_target relay-consolemode-tests relay-console-harness)
+        if(TARGET relay-panedir)
+            target_link_libraries(${console_target} PRIVATE relay-panedir)
+        endif()
         target_include_directories(${console_target} PRIVATE src engine)
         target_link_libraries(${console_target} PRIVATE
             relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands
@@ -1009,6 +1012,8 @@ if(BUILD_TESTING)
     endforeach()
     add_test(NAME consolemode COMMAND relay-consolemode-tests)
     set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_test(NAME queuecontract COMMAND relay-consolemode-tests --xcxd-only)
+    set_tests_properties(queuecontract PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)

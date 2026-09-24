@@ -234,6 +234,73 @@ class TerminalContextIntegrationTests(unittest.TestCase):
         self.assertTrue({'terminal_history', 'terminal_read'} <=
                         {spec['function']['name'] for spec in agent.tools()})
 
+    @staticmethod
+    def eligible(*records):
+        """#XCXD: what the pane marks at submission — refresh-eligible and scoped."""
+        return {'mode': 'automatic', 'source': 'automatic',
+                'scope': {'pane_id': 'pane-a', 'generation': 'login-a'}, 'records': list(records)}
+
+    def test_queued_native_turn_resolves_completed_result_at_actual_start(self):
+        agent, provider = self.native([('terminal_read', {'command_id': 'one'})])
+        queued = self.eligible(record(output='PARTIAL', state='running', ended_at=None,
+                                       exit_status=None, revision=0))
+        agent.terminal_context.update(snapshot(record(
+            output='QUEUED_THEN_DONE', revision=1, exit_status=0, ended_at=2000)))
+        # The prompt queued while the command ran; the command finished long before the
+        # turn actually started. The turn reports result and exit status, not the stale
+        # running excerpt it queued with, and never waits for a command.
+        agent.ask('What did my command print?', context={'terminal_context': queued})
+        payload = json.dumps([m for m in provider.messages if m['role'] == 'user'])
+        self.assertIn('QUEUED_THEN_DONE', payload)
+        self.assertNotIn('PARTIAL', payload)
+        self.assertIn('exit_status', payload)
+        self.assertEqual(self.results()[0]['output'], 'QUEUED_THEN_DONE')
+
+    def test_queued_native_turn_marks_still_running_incomplete(self):
+        agent, provider = self.native()
+        queued = self.eligible()
+        agent.terminal_context.update(snapshot(record(
+            output='STILL_RUNNING_OUTPUT', state='running', ended_at=None, exit_status=None)))
+        agent.ask('What is happening?', context={'terminal_context': queued})
+        payload = json.dumps([m for m in provider.messages if m['role'] == 'user'])
+        self.assertIn('STILL_RUNNING_OUTPUT', payload)
+        self.assertIn('running/incomplete', payload)
+
+    def test_queued_guest_turn_resolves_at_actual_start_without_shell(self):
+        agent, harness, observed = self.guest([('terminal_read', {'command_id': 'one', 'fresh': True})])
+        queued = self.eligible(record(output='GUEST_QUEUED_PARTIAL', state='running',
+                                       ended_at=None, exit_status=None, revision=0))
+        agent.terminal_context.update(snapshot(record(
+            output='GUEST_QUEUED_DONE', revision=1, exit_status=0), mode='automatic'))
+        with mock.patch.object(agent.executor, 'execute', side_effect=AssertionError('must not execute shell')) as execute:
+            agent.ask('What did my command print?', context={'terminal_context': queued})
+        execute.assert_not_called()
+        self.assertEqual(len(observed), 1)
+        self.assertIn('GUEST_QUEUED_DONE', observed[0]['prompt'])
+        self.assertNotIn('GUEST_QUEUED_PARTIAL', observed[0]['prompt'])
+        self.assertEqual(observed[0]['results'][0]['output'], 'GUEST_QUEUED_DONE')
+
+    def test_pinned_queued_snapshot_stays_verbatim_at_actual_start(self):
+        agent, provider = self.native([('terminal_read', {'command_id': 'one'})])
+        pinned = {'mode': 'automatic', 'source': 'pinned',
+                  'records': [record(output='PINNED_REVISION', revision=3)]}
+        agent.terminal_context.update(snapshot(record(output='PINNED_REVISION_LATER', revision=4)))
+        agent.ask('Explain the attached output', context={'terminal_context': pinned})
+        payload = json.dumps([m for m in provider.messages if m['role'] == 'user'])
+        self.assertIn('PINNED_REVISION', payload)
+        self.assertNotIn('PINNED_REVISION_LATER', payload)
+        self.assertEqual(self.results()[0]['record']['revision'], 3)
+
+    def test_sharing_disabled_before_queued_dispatch_never_expands(self):
+        agent, provider = self.native()
+        queued = self.eligible(record(output='QUEUED_BEFORE_OFF'))
+        agent.terminal_context.update(snapshot(record(output='FINISHED_WHILE_OFF', revision=1)))
+        agent.terminal_context.update(snapshot(mode='off'))
+        agent.ask('What did my command print?', context={'terminal_context': queued})
+        payload = json.dumps([m for m in provider.messages if m['role'] == 'user'])
+        self.assertNotIn('FINISHED_WHILE_OFF', payload)
+        self.assertNotIn('QUEUED_BEFORE_OFF', payload)
+
 
 if __name__ == '__main__':
     unittest.main()

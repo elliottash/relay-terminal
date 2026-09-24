@@ -34,7 +34,11 @@ Action decide(const State &state, int key, Qt::KeyboardModifiers mods) {
         return state.selected + 1 < state.count ? Action::MoveDown : Action::None;
     }
     if (plain && enter) return Action::Save;
-    if (key == Qt::Key_Escape) return Action::Cancel;
+    // Card #XCXD: Esc no longer cancels a queue edit — it is not decided here at all. Returning
+    // None lets the key fall through to the pane's interrupt decision (Esc stops the agent, or
+    // the shell when the shell is the only thing running), and the text being edited is left
+    // exactly as it was. Down is the way out of a row: at the last row it leaves the queue
+    // (saving the draft); Esc stops a resource instead.
     // Delete and Backspace are the text's now that the item is being edited in the prompt box, so
     // removing an item takes a modifier. Not Ctrl+D: that is end-of-input for a running program.
     if (mods == Qt::ShiftModifier && key == Qt::Key_Delete) return Action::Remove;

@@ -257,7 +257,7 @@ public:
 // What a line typed into the prompt box means for the ask on screen (#MQ9C,
 // protocol 27.4). Free and pure, so the whole decision sits in one place with nothing of the pane
 // around it: Pane::answerQuestion reads the options off the ask and then only acts on this.
-// Keys are not lines and are not read here: Esc skips the current question (owner, 2026-09-19 —
+// Keys are not lines and are not read here: a blank Enter skips the current question (owner, 2026-09-19 —
 // `Pane::skipQuestion`, which is what `0` and `/skip` below mean) and Ctrl+Shift+Enter sends the
 // box to the shell instead, which is why an ask can never take the terminal away.
 namespace relay::ask {
@@ -527,6 +527,11 @@ private:
 // working.
 class Pane final : public QWidget, public relay::agent::Host {
 public:
+    // The two resources a pane's queue is scheduled between (card #XCXD): the agent, and this
+    // pane's terminal — a shell command or a guest-TUI line. Declared here, ahead of every
+    // signature that names it; the scheduling helpers live further down, with the queue.
+    enum class QueueResource { Agent, Terminal };
+
     struct QueueEntry {
         quint64 id = 0; bool agent = false, fix = false, watch = false;
         bool boardTask = false;   // keep its header chip until this queued task starts
@@ -538,6 +543,11 @@ public:
         QString guest;
         QString remoteToken; // queued shell commands belong to this login only
         QJsonObject terminalSnapshot;
+        // #XCXD: terminal context resolves when this entry's turn actually starts, not when it
+        // queues. contextPinned marks an entry carrying an explicit attachment or handoff
+        // override revision that must ride unchanged; every other entry refreshes from live
+        // records in startAgentEntry().
+        bool contextPinned = false;
         QString text, why; QJsonArray attachments, cards;   // cards: `#K7Q2` referenced in the prompt
         // Wrong-mode hints (2026-09-17): natural marks a terminal submission that reads like an
         // agent request; shellText carries an agent submission that is a runnable shell command.
@@ -693,7 +703,10 @@ public:
         m_assistHold.setSingleShot(true); m_assistHold.setInterval(400);
         connect(&m_assistHold, &QTimer::timeout, this, [this] { releaseHeldDecision(); });
         connect(&m_debounce, &QTimer::timeout, this, [this] { requestRoute(false, QStringLiteral("auto")); });
-        connect(m_editor, &QPlainTextEdit::textChanged, this, [this] { m_debounce.start(); onComposerEdited(); saveComposerDraft(); });
+        connect(m_editor, &QPlainTextEdit::textChanged, this, [this] {
+            m_debounce.start(); onComposerEdited(); saveComposerDraft();
+            if (!m_editor->toPlainText().trimmed().isEmpty()) noteComposerDraft();   // card #XCXD
+        });
         connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, [this] { updateGhost(); });
         // While a command runs: password prompts, answered passwords, and programs waiting for input.
         m_programPoll.setInterval(250);
@@ -1269,8 +1282,10 @@ public:
             m_entries.append(entry);
         }
         if (!m_entries.isEmpty()) {
-            m_entriesPaused = true;
+            m_entriesPaused = true;   // the terminal lane holds after a restore (card #XCXD)…
             m_pauseReason = QStringLiteral("Restored after exit");
+            m_agentPaused = true;   // …and so does the agent lane
+            m_agentPauseReason = QStringLiteral("Restored after exit");
             rebuildQueueStrip();
         }
         // The terminal text this pane had when Relay was last quit (src/WindowState.h). The pane
@@ -1648,7 +1663,15 @@ public:
     bool secretMode() const { return m_secretMode; }
 
     void interruptShell() {
-        if (m_backend) { m_loading = false; m_promptReported = false; clearFix(); sendShellInput(QString(QChar(3))); focusTerminal(); }
+        // Card #XCXD: the terminal lane pauses around the stop, so the commands still waiting in
+        // it survive and run again when it resumes. The interrupt is a Ctrl+C to the foreground
+        // program only — never a forced kill — and does nothing when no program is running. Focus
+        // is left where it was: the composer keeps a person who was typing in it, and the native
+        // terminal keeps its own.
+        if (!m_backend || !processBusy()) return;
+        pauseCommandQueueForStop();
+        m_loading = false; m_promptReported = false; clearFix();
+        sendShellInput(QString(QChar(3)));
     }
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
@@ -1674,13 +1697,20 @@ public:
     // What is waiting on the agent here, both halves of it: what this pane is holding and what
     // the worker holds for this console's surface (card #CTRN).
     int queuedPrompts() const { return int(m_entries.size()) + int(workerQueued().size()); }
-    bool queuePaused() const { return m_entriesPaused || (m_queuePaused && !workerQueued().isEmpty()); }
+    bool queuePaused() const {
+        return m_agentPaused || m_entriesPaused || (m_queuePaused && !workerQueued().isEmpty());
+    }
     void clearAgentQueue() {
         // Both halves of the one queue: what this pane is holding, and what the worker holds for
         // this console's surface (card #CTRN). A terminal pane's surface is empty and `queueOp`
         // sends exactly what it sent before.
         if (!workerQueued().isEmpty()) send(queueOp(QStringLiteral("queue_clear")));
-        m_entries.clear(); m_entriesPaused = false;
+        const quint64 selected = selectedEntryId();
+        for (int i = m_entries.size() - 1; i >= 0; --i)
+            if (m_entries.at(i).agent) m_entries.removeAt(i);
+        keepSelectionOn(selected);
+        clearEmptyLanePauses();
+        resetEnterSteerSequence();
         m_selectedWorkerRow.clear();
         keepSelectionOn(0);   // nothing left to select: the prompt box gives the item's text back
         rebuildQueueStrip(); changed();
@@ -1689,10 +1719,10 @@ public:
     // box (#7JD1). Both halves again — the pane's own entries, and the worker's queue for this
     // console's surface, which is the one a card's Stop paused.
     void resumeAgentQueue() {
-        m_entriesPaused = false; m_pauseReason.clear();
-        send(queueOp(QStringLiteral("resume_queue")));
-        rebuildQueueStrip(); changed();
-        pumpQueue();
+        // Card #XCXD: the agent lane's resume only — the lane button, the console card's queue
+        // and the phone all aim at the agent. The terminal lane has its own resume
+        // (resumeQueue), and a blank Enter picks its lane explicitly (blankEnterRouted).
+        resumeQueue(QueueResource::Agent);
     }
     // Ctrl+Enter: send to the agent. While the agent is busy, stop the current turn and send now.
     // On an empty box with the agent idle it sends the ordinary prompt `Continue` — always, whatever
@@ -1718,6 +1748,9 @@ public:
     void stopAgent() {
         // The surface says which turn Esc is for: a card's runs on that card's own supervisor,
         // so an untagged `cancel` from a card console stopped the *tab's* turn (#CTRN).
+        // Card #XCXD: the agent lane pauses first, so the rows waiting in it survive the stop
+        // and run again on Enter or Resume — stopping a turn is not abandoning its queue.
+        pauseAgentQueueForStop();
         send(queueOp(QStringLiteral("cancel"))); clearFix();
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
     }
@@ -4666,8 +4699,8 @@ private:
         printInline(options.isEmpty()
                         ? QStringLiteral("  Type your answer · /skip or Esc passes · Ctrl+Shift+Enter still runs a command.\n")
                         : (multiple
-                               ? QStringLiteral("  Numbers (\"1,3\"), or your own words · 0 or Esc skips · Ctrl+Shift+Enter still runs a command.\n")
-                               : QStringLiteral("  A number, or your own words · 0 or Esc skips · Ctrl+Shift+Enter still runs a command.\n")),
+                               ? QStringLiteral("  Numbers (\"1,3\"), or your own words · 0 or a blank Enter skips · Ctrl+Shift+Enter still runs a command.\n")
+                               : QStringLiteral("  A number, or your own words · 0 or a blank Enter skips · Ctrl+Shift+Enter still runs a command.\n")),
                     Ink::Note);
         // Esc is the ask's skip now, not the turn's Stop (owner, 2026-09-19), so the footer says
         // where Stop went. It has to: Esc was the only key that stopped a turn unless the user
@@ -6361,7 +6394,9 @@ private:
     }
 
     void showBubble(QWidget *bubble) override {
-        if (!bubble || bubble->isVisible()) return;
+        // isHidden, not isVisible: a bubble hidden while the pane was too small can still report
+        // visible, and then it was never shown again once the pane grew (card #XCXD).
+        if (!bubble || !bubble->isHidden()) return;
         const bool bottom = terminalAtBottom();
         keepPaneSizes([bubble] { bubble->show(); });
         pinTerminalBottom(bottom);
@@ -8141,8 +8176,25 @@ private:
             if (record.isEmpty() && mode == QStringLiteral("automatic")) record = m_terminalRecords.latestUser();
             if (!record.isEmpty()) selected.append(record);
         }
-        return {{QStringLiteral("mode"), mode}, {QStringLiteral("records"), selected}};
+        // #XCXD: mark refresh intent and scope. An explicit attachment is pinned and rides
+        // its entry unchanged; an automatic selection opts into turn-start refresh, scoped
+        // to this pane and shell generation so the worker's mirror can never mix in
+        // another pane's or generation's records — including when the pane has no record
+        // yet, so a prompt queued before the first shell command still resolves at start.
+        QJsonObject snapshot{{QStringLiteral("mode"), mode}, {QStringLiteral("records"), selected}};
+        if (mode == QStringLiteral("automatic") && !m_terminalRemoved) {
+            if (m_terminalAttachment.isEmpty()) {
+                snapshot.insert(QStringLiteral("source"), QStringLiteral("automatic"));
+                snapshot.insert(QStringLiteral("scope"), QJsonObject{
+                    {QStringLiteral("pane_id"), m_terminalRecords.pane()},
+                    {QStringLiteral("generation"), m_terminalRecords.generation()}});
+            } else {
+                snapshot.insert(QStringLiteral("source"), QStringLiteral("pinned"));
+            }
+        }
+        return snapshot;
     }
+
 
     void syncTerminalContext() {
         if (!m_configured) return;
@@ -8587,7 +8639,13 @@ private:
         QueueEntry entry;
         entry.text = trimmed;
         entry.awaitingSkillCatalog = true;
-        entry.terminalSnapshot = terminalSnapshot();
+        // #XCXD: only an explicit attachment rides the deferred entry pinned; an automatic
+        // selection resolves when the entry actually starts.
+        if (hasShell() && !m_terminalAttachment.isEmpty()) {
+            entry.terminalSnapshot = terminalSnapshot();
+            entry.contextPinned = true;
+        }
+        m_terminalAttachment = {}; m_terminalRemoved = false;
         entry.attachments = attachmentsFor(trimmed);
         entry.cards = cardsFor(trimmed);
         for (const QJsonValue &card : entry.cards)
@@ -8643,6 +8701,7 @@ private:
         enum Then { Drop, Edit, ToQueue };
         QString requestId, itemId, text; QJsonArray attachments, cards;
         QJsonObject terminalSnapshot;
+        bool contextPinned = false;   // #XCXD: a pin rides the steer and any requeue of it
         bool withdraw = false; Then then = Drop;
         QString editText;   // Edit: what was put in the prompt box, to tell an untouched copy from an edit
     };
@@ -8767,6 +8826,7 @@ private:
         const quint64 selected = selectedEntryId();
         QueueEntry entry; entry.agent = true; entry.text = steer.text; entry.attachments = steer.attachments; entry.cards = steer.cards;
         entry.terminalSnapshot = steer.terminalSnapshot;
+        entry.contextPinned = steer.contextPinned;   // #XCXD: pinned rides on, otherwise refreshes at start
         entry.id = ++m_entrySerial;
         m_entries.prepend(entry);
         keepSelectionOn(selected);   // every queued index just moved down one
@@ -8787,6 +8847,7 @@ private:
         steer.requestId = QStringLiteral("steer-%1").arg(++m_askSerial);
         steer.text = entry.text; steer.attachments = entry.attachments; steer.cards = entry.cards;
         steer.terminalSnapshot = entry.terminalSnapshot;
+        steer.contextPinned = entry.contextPinned;   // #XCXD: a pin survives the queue round trip
         m_steering.append(steer);
         QJsonObject request{{"type", "ask"}, {"id", steer.requestId}, {"text", entry.text}, {"when", "steer"}, {"requeue", false}};
         syncTerminalContext();
@@ -8798,27 +8859,131 @@ private:
         if (const QJsonArray skills = skillsFor(entry.text); !skills.isEmpty()) request.insert(QStringLiteral("skills"), skills);
         send(request);
         m_lastSteerRequest = steer.requestId; m_lastSteeredAt.start();
-        if (m_entries.isEmpty()) { m_entriesPaused = false; m_pauseReason.clear(); }
+        // Any steer starts the empty-Enter sequence pinned to this prompt (card #XCXD) — this
+        // one, and the one enqueue() issues while a submission's routing is still pending.
+        m_enterSteerStep = relay::queuesubmit::EnterStep::Steered;
+        m_enterSteerRequest = steer.requestId;
+        m_enterSteerDraftSeen = false;
+        clearEmptyLanePauses();
         rebuildQueueStrip(); changed();
         toast(QStringLiteral("Steering · delivered at the agent's next tool call · Enter again to interrupt and send now"));
         return steer.requestId;
     }
 
-    // Empty Enter promotes the head, never the most recently appended prompt (#QFF1).
+    // Empty Enter steers the oldest queued agent prompt, whatever its age (card #XCXD): the
+    // head of the agent lane's FIFO, not the newest append — and a queued shell command ahead
+    // of it is not in the agent's lane, so it never hides the prompt from Enter. The sequence
+    // below, not a timer, decides what the next Enter does.
     bool upgradeFirstQueuedToSteer() {
-        if (!m_agentBusy || m_entries.isEmpty() || !m_lastQueuedAt.isValid() || m_lastQueuedAt.elapsed() > 15000) return false;
-        const QueueEntry &first = m_entries.first();
-        if (!first.agent || first.written()) return false;
-        return !steerQueuedEntry(first.id).isEmpty();
+        if (!m_agentBusy) return false;
+        // The oldest waiting agent prompt may be the worker's, not this pane's (card #XCXD):
+        // console surfaces queue there, and the strip shows that half first. Steer the worker's
+        // head by item — the pane has no request id for it — and pin the item: the next Enter
+        // escalates this item, or learns it was already delivered, and never falls back to a
+        // local prompt while this one is in flight or taken.
+        const QList<WorkerRow> worker = workerQueued();
+        if (!worker.isEmpty()) {
+            QJsonObject steer = queueOp(QStringLiteral("queue_steer"));
+            steer.insert(QStringLiteral("item"), worker.first().id);
+            send(steer);
+            m_enterSteerStep = relay::queuesubmit::EnterStep::Steered;
+            m_enterSteerRequest.clear();
+            m_enterSteerWorkerItem = worker.first().id;
+            m_enterSteerDraftSeen = false;
+            return true;
+        }
+        if (m_entries.isEmpty()) return false;
+        const int index = firstQueuedIndex(QueueResource::Agent);
+        if (index < 0) return false;
+        const QueueEntry &entry = m_entries.at(index);
+        if (entry.written()) return false;
+        m_enterSteerWorkerItem.clear();
+        return !steerQueuedEntry(entry.id).isEmpty();
     }
 
-    // A third Enter on the empty prompt box, right after the steer: stop the running turn and run
-    // that prompt as its own turn instead.
-    bool escalateSteerToInterrupt() {
-        if (!m_agentBusy || !m_lastSteeredAt.isValid() || m_lastSteeredAt.elapsed() > 15000) return false;
-        if (!sendSteerNow(m_lastSteerRequest)) return false;
+    // The next Enter on the empty prompt box, right after the steer: stop the running turn and
+    // run that same prompt as its own turn instead. The sequence has no timer: it is pinned to
+    // the steered prompt until that prompt replies, is taken back, or a new draft replaces it.
+    bool escalateSteerToInterruptByItem(const QString &itemId) {
+        if (!m_agentBusy || itemId.isEmpty()) return false;
+        QJsonObject unsteer = queueOp(QStringLiteral("queue_unsteer"));
+        unsteer.insert(QStringLiteral("item"), itemId);
+        unsteer.insert(QStringLiteral("as_request"), QString::number(++m_requestId));
+        send(unsteer);
+        status(QStringLiteral("Interrupting the current turn to send it now…"));
+        return true;
+    }
+    bool escalateSteerToInterrupt(const QString &steerRequest) {
+        if (!m_agentBusy) return false;
+        // The pin is a worker item: the item names it — a third Enter can arrive before the
+        // steer's ack, when a request id still does not exist — and the worker resolves the item
+        // itself (protocol 33, card #XCXD).
+        if (steerRequest.isEmpty() && !m_enterSteerWorkerItem.isEmpty()) {
+            QJsonObject unsteer = queueOp(QStringLiteral("queue_unsteer"));
+            unsteer.insert(QStringLiteral("item"), m_enterSteerWorkerItem);
+            unsteer.insert(QStringLiteral("as_request"), QString::number(++m_requestId));
+            send(unsteer);
+            status(QStringLiteral("Interrupting the current turn to send it now…"));
+            return true;
+        }
+        if (steerRequest.isEmpty()) return false;
+        if (!sendSteerNow(steerRequest)) return false;
         m_lastSteeredAt.invalidate();
         return true;
+    }
+
+    // The empty-Enter sequence (card #XCXD): the first Enter steers the oldest queued agent
+    // prompt into the running turn; the next interrupts the turn and sends *that same prompt*
+    // now — or, when the turn already took it, answers that it already has it. There is no
+    // fallthrough to the next queued prompt: the sequence ends where the prompt did.
+    bool emptyEnterSteerSequence() {
+        const relay::queuesubmit::EnterAction action =
+            relay::queuesubmit::enterStepAction(m_enterSteerStep, m_enterSteerDraftSeen);
+        if (m_enterSteerDraftSeen) {   // a new draft replaced whatever this was pinned to
+            m_enterSteerDraftSeen = false;
+            resetEnterSteerSequence();
+        }
+        switch (action) {
+        case relay::queuesubmit::EnterAction::SteerOldest:
+            return upgradeFirstQueuedToSteer();
+        case relay::queuesubmit::EnterAction::SendNow: {
+            // Escalate the prompt the sequence is pinned to — request or worker item — not
+            // whichever steer steered last.
+            const QString pinned = m_enterSteerRequest;
+            const QString workerItem = m_enterSteerWorkerItem;
+            resetEnterSteerSequence();
+            if (pinned.isEmpty() && !workerItem.isEmpty()) return escalateSteerToInterruptByItem(workerItem);
+            return escalateSteerToInterrupt(pinned);
+        }
+        case relay::queuesubmit::EnterAction::AlreadyDelivered:
+            // The pinned prompt reached the turn and stayed there. The sequence stays pinned
+            // to it — a tombstone (card #XCXD): repeated Enter answers the same thing and
+            // never falls through to the next queued prompt. A new draft, a take-back or the
+            // prompt being returned lifts it.
+            status(QStringLiteral("The agent already has it · nothing was interrupted"));
+            return true;
+        case relay::queuesubmit::EnterAction::Idle:
+            return false;
+        }
+        return false;
+    }
+
+    void resetEnterSteerSequence() {
+        m_enterSteerStep = relay::queuesubmit::EnterStep::Idle;
+        m_enterSteerRequest.clear();
+        m_enterSteerWorkerItem.clear();
+        m_enterSteerBuffered = 0;   // a sequence that ends takes its buffered presses with it
+    }
+
+    // Called when a non-empty draft appears in the box: whatever the empty-Enter sequence was
+    // pinned to is stale — the person is writing something new — so the next empty Enter
+    // starts a fresh sequence at the head of the agent lane (card #XCXD).
+    void noteComposerDraft() {
+        m_enterSteerDraftSeen = true;
+        // A changed draft voids the buffered presses too. The box being rewritten with the very
+        // text whose route is still in flight is not a change: those presses are for it.
+        if (m_pendingSubmit.isEmpty() || m_editor->toPlainText() != m_submittedDraft)
+            m_enterSteerBuffered = 0;
     }
 
     // Stop the running turn and run this steer as its own turn instead: the third Enter, or
@@ -8841,6 +9006,7 @@ private:
         unsteer.insert(QStringLiteral("as_request"), requestId);
         send(unsteer);
         status(QStringLiteral("Interrupting the current turn to send it now…"));
+        resetEnterSteerSequence();   // its prompt is running as a turn now; the sequence is done
         return true;
     }
 
@@ -8875,7 +9041,7 @@ private:
                 // Keep the selected row's index without replacing its in-progress edit.
                 if (m_selected > i) --m_selected;
             }
-            m_entriesPaused = false; m_pauseReason.clear();
+            m_agentPaused = false; m_agentPauseReason.clear();   // this lane, not the shell's
             if (m_agentBusy) m_interruptPending = true;
             startAgentEntry(entry, false, m_agentBusy ? QStringLiteral("interrupt") : QStringLiteral("now"));
             rebuildQueueStrip(); changed();
@@ -9711,7 +9877,10 @@ private:
                 m_loading = false; clearFix(); setNative(true);
                 m_handoffNext = false;
                 answerTerminalCommand(false, QStringLiteral("failed"), QStringLiteral("The shell did not acknowledge the command, so Enter was not sent."));
-                if (m_activeValid && !m_active.agent) { m_activeValid = false; m_activeLoaded = false; m_entriesPaused = !m_entries.isEmpty(); rebuildQueueStrip(); }
+                if (m_activeValid) { m_activeValid = false; m_activeLoaded = false;
+                    if (firstQueuedIndex(QueueResource::Terminal) >= 0)
+                        pauseQueue(QueueResource::Terminal, QStringLiteral("the shell command could not be sent"));
+                    rebuildQueueStrip(); }
                 status(QStringLiteral("Shell did not acknowledge the editor text. Enter was NOT sent. Inspect the native input line; try --clean-shell."));
             }
         });
@@ -10444,7 +10613,7 @@ private:
         if (asked) what = QStringLiteral("waiting for your answer");
         // While an ask is up Esc skips the question instead (#MQ9C, owner 2026-09-19), so the line
         // offers the key that is actually live and the tooltip says where Stop went.
-        const QString keyHint = asked ? QStringLiteral("Esc skips it") : QStringLiteral("%1 stops").arg(stopWord);
+        const QString keyHint = asked ? QStringLiteral("A blank Enter skips it") : QStringLiteral("%1 stops").arg(stopWord);
         const QString action = waiting.isEmpty() || asked ? what + QStringLiteral("…") : what;
         const QString label = QStringLiteral("Relaying · %1 · %2 s · %3")
                                   .arg(action)
@@ -10458,7 +10627,7 @@ private:
                                 label,
                                 asked
                                     ? QStringLiteral("The agent asked you something and its turn is blocked on the answer "
-                                                     "(%1 s so far). Esc skips this question. %2.")
+                                                     "(%1 s so far). A blank Enter skips this question. %2.")
                                           .arg(seconds).arg(stopTurnHint())
                                       : QStringLiteral("The agent has been on this turn for %1 s. %2 stops it.")
                                           .arg(seconds).arg(stopWord));
@@ -11124,15 +11293,8 @@ public:
         if (to == QLatin1String("to_queue")) { withdrawSteer(rowId.mid(6), SteerEntry::ToQueue); return true; }
         const quint64 id = rowId.mid(6).toULongLong();
         if (to == QLatin1String("steer")) return !steerQueuedEntry(id).isEmpty();
-        int from = -1;
-        for (int i = 0; i < m_entries.size(); ++i) if (m_entries[i].id == id) { from = i; break; }
-        const int target = from + (to == QLatin1String("up") ? -1 : 1);
-        if (from < 0 || target < 0 || target >= m_entries.size()) return false;
-        const quint64 selected = selectedEntryId();
-        m_entries.move(from, target);
-        keepSelectionOn(selected);   // a row the desktop is editing keeps its highlight, wherever it went
-        rebuildQueueStrip(); changed();
-        return true;
+        // Card #XCXD: same lane only — the desktop sees the same grouped rows the desk does.
+        return moveQueuedWithinLane(id, to == QLatin1String("up") ? -1 : 1);
     }
     // Take a row back for the phone's prompt box: a steer is withdrawn, a queued row removed, and
     // the text goes to the phone. Nothing lands in this pane's own prompt box.
@@ -11159,8 +11321,10 @@ public:
     // this decides: with nothing paused it is the no-op the desk's empty Enter is, and the
     // `pane_state` that follows either way says what the queue is now.
     bool remoteQueueResume() {
-        if (!queuePaused()) return false;
-        resumeAgentQueue();
+        if (!queuePaused() && !m_agentBusy) return false;
+        // The desk's blank Enter, whole: the paused intended lane resumes, else the steer
+        // sequence runs — same route, same order (#7JD1's phone half, card #XCXD).
+        blankEnterRouted();
         return true;
     }
 
@@ -11997,7 +12161,7 @@ private:
     relay::queuesubmit::State queueSubmitState() const {
         relay::queuesubmit::State state;
         state.agentBusy = m_agentBusy;
-        state.agentTurnStarting = m_activeValid && m_active.agent;
+        state.agentTurnStarting = m_activeAgentValid;
         return state;
     }
 
@@ -12042,9 +12206,12 @@ private:
         // side, which is all a terminal pane's queue ever is, because it sends one `ask` at a
         // time; the worker's half resumes on that `ask` itself (`TurnSupervisor.submit`), which
         // is what keeps this pane's wire byte-for-byte what it was. Nothing is sent from here.
-        const bool resumingEntries = m_entriesPaused;
-        if (m_entriesPaused) {
-            m_entriesPaused = false; m_pauseReason.clear();
+        // A submit is a resume for the lane it lands in (card #XCXD): an agent prompt clears
+        // the agent lane's pause. The terminal lane's pause, if any, is not this submit's to
+        // clear — a stopped shell stays stopped until its own lane is resumed.
+        const bool resumingEntries = m_agentPaused;
+        if (m_agentPaused) {
+            m_agentPaused = false; m_agentPauseReason.clear();
             rebuildQueueStrip(); changed();
         }
         QueueEntry entry;
@@ -12052,6 +12219,13 @@ private:
         entry.shellText = shellText;
         entry.noHandoff = m_remoteSubmit;
         if (!m_remoteSubmit && hasShell()) entry.terminalSnapshot = terminalOverride.isEmpty() ? terminalSnapshot() : terminalOverride;
+        // #XCXD: an explicit attachment or override rides the entry pinned; an automatic
+        // selection is not kept — it resolves from live records when the turn actually starts
+        // (startAgentEntry), so queueing ahead of a finishing command reports its result
+        // instead of the running state it queued with.
+        entry.contextPinned = !entry.terminalSnapshot.isEmpty()
+                              && (!terminalOverride.isEmpty() || !m_terminalAttachment.isEmpty());
+        if (!entry.contextPinned) entry.terminalSnapshot = {};
         m_terminalAttachment = {}; m_terminalRemoved = false;
         if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
@@ -12171,7 +12345,11 @@ private:
 
     void submitTerminal(const QString &text, bool watch, bool natural = false, bool handoff = false) {
         m_shareFailed = m_shareFinished = false;   // the pane is in use again (shareStatus, protocol 6.3)
-        if (m_entries.isEmpty() && !m_activeValid && shellIdleForQueue()) {
+        // The terminal lane alone decides (card #XCXD): a queued agent prompt no longer holds
+        // a shell command back, and FIFO still holds within the resource — when the terminal
+        // lane has entries waiting, this command joins behind them.
+        if (firstQueuedIndex(QueueResource::Terminal) < 0 && !m_activeValid && shellIdleForQueue()
+            && !terminalLaneBlocked()) {
             m_handoffNext = handoff;
             if (!runInTerminal(text, watch, 0, natural)) m_handoffNext = false;
             return;
@@ -12286,10 +12464,30 @@ private:
         // The terminal's directory always goes along: `cd` in the terminal must move the agent too.
         QJsonObject context{{"terminal_cwd", m_cwd}};
         syncTerminalContext();
+        // #XCXD: an unpinned entry resolves its terminal context at actual turn start. It
+        // carries the pane's automatic selection — never an unsent attachment, which stays
+        // pinned to the prompt it was attached to — marked eligible and scoped so the
+        // worker resolves it against the live mirror when the turn really starts: a
+        // command that finished after queueing reports its result and exit status, a
+        // still-running one stays running/incomplete, and nothing waits for a command.
+        QJsonObject turnContext = entry.terminalSnapshot;
+        if (!entry.noHandoff && !entry.fix && !entry.handoff && hasShell() && !entry.contextPinned && !m_remoteSubmit) {
+            const QString mode = terminalSharingMode();
+            const bool automatic = mode == QStringLiteral("automatic") && !m_terminalRemoved;
+            QJsonArray selected;
+            if (automatic) { const QJsonObject latest = m_terminalRecords.latestUser(); if (!latest.isEmpty()) selected.append(latest); }
+            turnContext = {{QStringLiteral("mode"), mode}, {QStringLiteral("records"), selected}};
+            if (automatic) {
+                turnContext.insert(QStringLiteral("source"), QStringLiteral("automatic"));
+                turnContext.insert(QStringLiteral("scope"), QJsonObject{
+                    {QStringLiteral("pane_id"), m_terminalRecords.pane()},
+                    {QStringLiteral("generation"), m_terminalRecords.generation()}});
+            }
+        }
         if (!entry.noHandoff && !entry.fix && !entry.handoff && hasShell())
             context.insert(QStringLiteral("terminal_context"), terminalSharingMode() == QStringLiteral("off")
                 ? QJsonObject{{"mode", "off"}, {"records", QJsonArray{}}}
-                : entry.terminalSnapshot.isEmpty() ? QJsonObject{{"mode", "manual"}, {"records", QJsonArray{}}} : entry.terminalSnapshot);
+                : turnContext.isEmpty() ? QJsonObject{{"mode", "manual"}, {"records", QJsonArray{}}} : turnContext);
         // An ssh or mosh login: which host, and whether the agent can run commands there over the
         // user's own connection (docs/SSH-AND-MOSH.md, section 7).
         if (const QJsonObject login = loginContext(); !login.isEmpty()) context.insert(QStringLiteral("remote_session"), login);
@@ -12316,12 +12514,22 @@ private:
             m_boardTaskCard.clear();   // the running turn now owns the same header chip
             refreshCardChip();
         }
-        if (fromQueue) { m_active = entry; m_activeValid = true; m_activeRequest = requestId; }
+        // The agent lane's own reservation (card #XCXD): it never occupies `m_active`, which
+        // is the terminal lane's, so a shell command behind it can still start.
+        if (fromQueue) { m_activeAgent = entry; m_activeAgentValid = true; m_activeAgentRequest = requestId; }
     }
 
-    // Start the head when its resource is free. Guest prompts do not need the launch command to exit.
+    // Start each lane's head when that lane's resource is free (card #XCXD). One entry per
+    // lane per pump, the oldest first: relay::queuesubmit::firstRunnable owns the rule — a
+    // blocked head holds its own lane and nothing in it passes, while the other lane keeps
+    // flowing — and the delivery below closes its lane before the loop asks again. Guest
+    // prompts do not need the launch command to exit, and the guest's serialized channel is
+    // the guest's alone; it is never delivered to the native shell.
     void pumpQueue() {
-        if (queueBlocked() || m_entries.isEmpty()) return;
+        if (m_entries.isEmpty()) return;
+        clearEmptyLanePauses();   // a stale pause cannot hold the first item of a new burst
+        // A /command typed before the skill catalog or the guest arrived still has to learn
+        // what it is; that decision belongs to the head alone, before either lane sees it.
         QueueEntry head = m_entries.first();
         if (head.awaitingSkillCatalog) {
             if (!m_configured) return;
@@ -12343,26 +12551,70 @@ private:
                 pumpQueue();
                 return;
             }
+            m_entries[0] = head;
         }
-        if (!relay::queuesubmit::queueResourceAvailable(!head.guest.isEmpty(), m_activeValid)) return;
         const quint64 selected = selectedEntryId();
-        if (!head.guest.isEmpty()) {
-            if (!guestInFront() || !m_guestDelivery.available(m_guestBusy) || head.guest != m_guest) return;
-            m_entries.removeFirst();
-            if (!typeIntoGuest(head.guest, head.text)) m_entries.prepend(head);
-        } else if (head.agent) {
-            if (m_agentBusy || !m_configured) return;
-            m_entries.removeFirst();
-            startAgentEntry(head, true);
-        } else {
-            if (!shellIdleForQueue()) return;
-            m_entries.removeFirst();
-            m_active = head; m_activeValid = true; m_activeLoaded = false;
-            m_handoffNext = head.handoff;
-            if (!runInTerminal(head.text, head.watch, 0, head.natural)) { m_handoffNext = false; m_entries.prepend(head); m_activeValid = false; return; }
+        bool delivered = false, agentClosed = false, terminalClosed = false;
+        while (!m_entries.isEmpty()) {
+            // The selection holds only the lane of the entry it is on (card #XCXD): the
+            // highlighted entry must not run out from under its edit — so the hold is the
+            // selected entry *being its lane's head*, matched by id and recomputed after
+            // every delivery — and the other lane is free to keep flowing.
+            const auto selectedAt = std::find_if(m_entries.cbegin(), m_entries.cend(),
+                [&](const QueueEntry &entry) { return entry.id == selected; });
+            const int selectedIndex = selectedAt == m_entries.cend() ? -1 : int(selectedAt - m_entries.cbegin());
+            const int agentHead = firstQueuedIndex(QueueResource::Agent);
+            const int terminalHead = firstQueuedIndex(QueueResource::Terminal);
+            relay::queuesubmit::LaneFacts facts;
+            facts.agentBusy = m_agentBusy;
+            facts.agentStarting = m_activeAgentValid || agentClosed;
+            facts.agentPaused = m_agentPaused;
+            facts.agentQuestionOpen = m_ask.open();   // the agent's question holds the agent's queue
+            facts.agentHeld = selectedIndex >= 0 && selectedIndex == agentHead;
+            facts.agentConfigured = m_configured;
+            facts.terminalActive = m_activeValid;
+            facts.terminalPaused = m_entriesPaused || terminalClosed;
+            facts.terminalHeld = selectedIndex >= 0 && selectedIndex == terminalHead;
+            facts.terminalIdle = shellIdleForQueue();
+            QVector<relay::queuesubmit::ItemView> items;
+            items.reserve(m_entries.size());
+            for (const QueueEntry &entry : m_entries) {
+                relay::queuesubmit::ItemView view;
+                if (entry.agent) {
+                    view.kind = relay::queuesubmit::ItemKind::Agent;
+                } else if (!entry.guest.isEmpty()) {
+                    view.kind = relay::queuesubmit::ItemKind::Guest;
+                    view.guestReady = entry.guest == m_guest && guestInFront()
+                                      && m_guestDelivery.available(m_guestBusy);
+                } else {
+                    view.kind = relay::queuesubmit::ItemKind::Shell;
+                }
+                items.append(view);
+            }
+            const int index = relay::queuesubmit::firstRunnable(items.constData(), items.size(), facts);
+            if (index < 0) break;
+            const QueueEntry entry = m_entries.takeAt(index);
+            delivered = true;
+            if (entry.agent) {
+                agentClosed = true;
+                startAgentEntry(entry, true);
+            } else if (!entry.guest.isEmpty()) {
+                terminalClosed = true;
+                if (!typeIntoGuest(entry.guest, entry.text)) m_entries.insert(index, entry);
+            } else {
+                terminalClosed = true;
+                m_active = entry; m_activeValid = true; m_activeLoaded = false;
+                m_handoffNext = entry.handoff;
+                if (!runInTerminal(entry.text, entry.watch, 0, entry.natural)) {
+                    m_handoffNext = false; m_entries.insert(index, entry); m_activeValid = false;
+                    break;   // nothing about the shell changed; the queue keeps its order
+                }
+            }
         }
-        keepSelectionOn(selected);   // every index below the head just moved up one
-        rebuildQueueStrip(); changed();
+        if (delivered) {
+            keepSelectionOn(selected);   // every index below a delivered entry moved up
+            rebuildQueueStrip(); changed();
+        }
     }
 
     // ----- editing a queued item in the prompt box ----------------------------------------------
@@ -12377,7 +12629,16 @@ private:
     // there is no second piece of state to keep in step. It also covers the item drifting to the
     // front while it is being edited: the moment it becomes the head, the hold applies.
     bool queueHeldBySelection() const { return m_selected == 0 && !m_entries.isEmpty(); }
-    bool queueBlocked() const { return m_entriesPaused || m_ask.open() || queueHeldBySelection(); }
+    // The selection holds only the lane of the entry being edited (card #XCXD); the other
+    // lane keeps flowing while the top item sits under the prompt box.
+    bool laneHeldBySelection(QueueResource resource) const {
+        return m_selected == 0 && !m_entries.isEmpty() && resourceOf(m_entries.first()) == resource;
+    }
+    bool agentLaneBlocked() const { return m_agentPaused || m_ask.open() || laneHeldBySelection(QueueResource::Agent); }
+    bool terminalLaneBlocked() const { return m_entriesPaused || laneHeldBySelection(QueueResource::Terminal); }
+    // The legacy whole-queue view, for the strip and worker-facing status: held when either
+    // of the pane's two lanes is blocked.
+    bool queueBlocked() const { return agentLaneBlocked() || terminalLaneBlocked(); }
 
     // Show a queued item in the prompt box. The text is the row's, not the user's, so it is not
     // remembered in prompt history and it must not be treated as a draft.
@@ -12447,9 +12708,45 @@ private:
                 if (queued[i].id == m_selectedWorkerRow) return steerRowCount() + i;
             return -1;
         }
-        return (m_selected >= 0 && m_selected < m_entries.size())
-                   ? steerRowCount() + int(workerQueued().size()) + m_selected
-                   : -1;
+        if (m_selected < 0 || m_selected >= m_entries.size()) return -1;
+        // The same grouped order selectQueueRow walks: agent lane, then terminal lane.
+        return steerRowCount() + int(workerQueued().size())
+               + laneOrderedIndices().indexOf(m_selected);
+    }
+
+    // Move a queued entry one step within its own lane (card #XCXD): the step lands on the
+    // nearest entry of the same resource, clamping there — the lane's FIFO is the only order
+    // it has, so it never crosses into the other resource's rows. Returns false at the
+    // lane's edge (or for an entry that is not queued), which is what the keys and the
+    // desktop's row moves both report.
+    bool moveQueuedWithinLane(quint64 id, int direction) {
+        int from = -1;
+        for (int i = 0; i < m_entries.size(); ++i) if (m_entries[i].id == id) { from = i; break; }
+        if (from < 0) return false;
+        const QueueResource resource = resourceOf(m_entries.at(from));
+        int target = from;
+        if (direction < 0) {
+            for (int i = from - 1; i >= 0; --i)
+                if (resourceOf(m_entries.at(i)) == resource) { target = i; break; }
+        } else {
+            for (int i = from + 1; i < m_entries.size(); ++i)
+                if (resourceOf(m_entries.at(i)) == resource) { target = i; break; }
+        }
+        if (target == from) return false;
+        const quint64 selected = selectedEntryId();
+        m_entries.move(from, target);
+        keepSelectionOn(selected);
+        rebuildQueueStrip(); changed();
+        return true;
+    }
+    // The grouped order the queue strip shows (card #XCXD): the agent lane's entries first,
+    // then the terminal's, each in list order — the lane's FIFO. Both row mappings and the
+    // lane-scoped moves go through this one order.
+    QList<int> laneOrderedIndices() const {
+        QList<int> order;
+        for (int i = 0; i < m_entries.size(); ++i) if (m_entries.at(i).agent) order.append(i);
+        for (int i = 0; i < m_entries.size(); ++i) if (!m_entries.at(i).agent) order.append(i);
+        return order;
     }
     void selectQueueRow(int row) {
         const QStringList steers = liveSteers();
@@ -12460,7 +12757,13 @@ private:
         const QList<WorkerRow> queued = workerQueued();
         const int fromQueued = row - steerRowCount();
         if (fromQueued < queued.size()) { selectWorkerRow(queued[fromQueued].id); return; }
-        selectQueueEntry(fromQueued - int(queued.size()));
+        // Card #XCXD: entry rows are grouped by resource — the agent's lane first, then the
+        // terminal's — so the row past the worker's queue indexes that grouped order, not
+        // m_entries as it lies.
+        const QList<int> laneOrder = laneOrderedIndices();
+        const int grouped = fromQueued - int(queued.size());
+        if (grouped < 0 || grouped >= laneOrder.size()) return;
+        selectQueueEntry(laneOrder[grouped]);
     }
 
     // Show a steer in the prompt box, like a queued item. It is still a steer while the text is
@@ -12494,6 +12797,9 @@ private:
         const QString requestId = m_selectedSteer;
         if (requestId.isEmpty()) return;
         m_selectedSteer.clear();
+        // Card #XCXD: taking the pinned steer back into the box ends the empty-Enter sequence —
+        // it is a draft again, and the next empty Enter starts fresh at the lane's head.
+        if (requestId == m_enterSteerRequest) resetEnterSteerSequence();
         withdrawSteer(requestId, SteerEntry::Edit);
     }
     // The queue changed under a selection (an item started running, one was removed, rows were
@@ -12509,7 +12815,7 @@ private:
 
     void queueEditHint() {
         hint(QStringLiteral("queue.edit"),
-             QStringLiteral("Editing a queued item · ↑↓ move between items · Enter saves · Esc cancels"));
+             QStringLiteral("Editing a queued item · ↑↓ move between items · Enter saves · Down off the end leaves · Esc stops a resource"));
     }
 
     // Up from an empty composer takes the pending item back as an ordinary unsent draft.
@@ -12543,10 +12849,90 @@ private:
         status(QStringLiteral("Taken back · edit the draft and press Enter to submit again"));
     }
 
-    void pauseQueue(const QString &reason) {
-        if (m_entries.isEmpty()) return;
-        m_entriesPaused = true; m_pauseReason = reason;
+    // ----- the two queue lanes (card #XCXD) ----------------------------------------------------
+    // Every queued entry belongs to exactly one resource, and each resource has its own pause,
+    // its own active reservation and its own FIFO: the agent lane, and this pane's terminal
+    // lane (shell commands, and guest-TUI lines that share the guest's serialized input
+    // channel). Stopping one resource pauses only that resource's lane, and the other lane
+    // keeps flowing. relay::queuesubmit::firstRunnable owns the scheduling rule; these own the
+    // state and the switches the UI stops things through.
+    static QueueResource resourceOf(const QueueEntry &entry) {
+        return entry.agent ? QueueResource::Agent : QueueResource::Terminal;
+    }
+    // The oldest entry still waiting for `resource` — the head of that lane's FIFO, or -1.
+    int firstQueuedIndex(QueueResource resource) const {
+        for (int i = 0; i < m_entries.size(); ++i)
+            if (resourceOf(m_entries.at(i)) == resource) return i;
+        return -1;
+    }
+    bool agentQueuePaused() const { return m_agentPaused; }
+    // The agent lane as the person sees it paused: this pane's own half, or the worker's
+    // backlog for this console's surface, which is what a card's Stop pauses. A blank Enter
+    // resumes either (#7JD1); the strip's lane header already reads them together.
+    bool agentLanePaused() const { return m_agentPaused || (m_queuePaused && !workerQueued().isEmpty()); }
+    bool shellQueuePaused() const { return m_entriesPaused; }   // the terminal lane's pause
+    QString agentPauseReason() const { return m_agentPauseReason; }
+    void pauseQueue(QueueResource resource, const QString &reason) {
+        // No empty check (card #XCXD): the worker holds the console surfaces' half of the
+        // agent queue on its own, so an agent-lane pause stands even when this pane's list is
+        // empty. A pause for a lane with nothing queued is dropped by the next pump.
+        if (resource == QueueResource::Agent) {
+            if (m_agentPaused && m_agentPauseReason == reason) return;
+            m_agentPaused = true; m_agentPauseReason = reason;
+        } else {
+            if (m_entriesPaused && m_pauseReason == reason) return;
+            m_entriesPaused = true; m_pauseReason = reason;
+        }
         rebuildQueueStrip(); changed();
+    }
+    // The legacy single-queue callers: a queued terminal command exiting non-zero pauses the
+    // terminal lane (the resource it ran on).
+    void pauseQueue(const QString &reason) { pauseQueue(QueueResource::Terminal, reason); }
+    void resumeQueue(QueueResource resource) {
+        if (resource == QueueResource::Agent) {
+            // The worker holds the console surfaces' half of the agent queue: resume it too.
+            send(queueOp(QStringLiteral("resume_queue")));
+            if (!m_agentPaused) { pumpQueue(); return; }
+            m_agentPaused = false; m_agentPauseReason.clear();
+        } else {
+            if (!m_entriesPaused) { pumpQueue(); return; }
+            m_entriesPaused = false; m_pauseReason.clear();
+        }
+        rebuildQueueStrip(); changed(); pumpQueue();
+    }
+    // Card #XCXD: the blank Enter, once no ask and no selection edit owns it, goes to exactly
+    // one place. The intended lane first — the box's `!`/`*` aim, defaulting to the agent
+    // lane when it has anything paused and the terminal's otherwise — and a paused lane
+    // resumes before anything steers, whatever the other lane is doing (an agent turn running
+    // no longer holds back a terminal-lane resume). Then, for the agent lane only, the steer
+    // sequence: a shell-aimed box never steers, queue and all.
+    bool blankEnterRouted() {
+        const QString aimed = mode();
+        const bool shellAimed = aimed == QStringLiteral("shell");
+        if (!shellAimed && agentLanePaused()) { resumeQueue(QueueResource::Agent); return true; }
+        if (shellAimed) {
+            if (shellQueuePaused()) { resumeQueue(QueueResource::Terminal); return true; }
+            return false;   // a shell-aimed Enter has no steer sequence to run
+        }
+        if (aimed == QStringLiteral("agent")) return emptyEnterSteerSequence();
+        if (shellQueuePaused()) { resumeQueue(QueueResource::Terminal); return true; }
+        return emptyEnterSteerSequence();
+    }
+    // A Stop pauses only the resource it stops, before the stop is issued (card #XCXD), so
+    // nothing queued behind it starts while the stop travels.
+    void pauseAgentQueueForStop() { pauseQueue(QueueResource::Agent, QStringLiteral("the agent was stopped")); }
+    void pauseCommandQueueForStop() { pauseQueue(QueueResource::Terminal, QStringLiteral("the shell was stopped")); }
+    // A lane's pause ends with its last entry: an emptied lane has nothing left to hold. The
+    // agent lane is not empty while the worker still holds the console surfaces' backlog for
+    // it (card #XCXD) — its pause stands until that half is empty too, or is resumed or
+    // cleared on purpose.
+    void clearEmptyLanePauses() {
+        if (m_agentPaused && firstQueuedIndex(QueueResource::Agent) < 0 && workerQueued().isEmpty()) {
+            m_agentPaused = false; m_agentPauseReason.clear();
+        }
+        if (m_entriesPaused && firstQueuedIndex(QueueResource::Terminal) < 0) {
+            m_entriesPaused = false; m_pauseReason.clear();
+        }
     }
 
     void removeEntry(quint64 id) {
@@ -12554,13 +12940,18 @@ private:
         for (int i = 0; i < m_entries.size(); ++i)
             if (m_entries[i].id == id) { m_entries.removeAt(i); break; }
         keepSelectionOn(selected);
-        if (m_entries.isEmpty()) { m_entriesPaused = false; m_pauseReason.clear(); }
+        clearEmptyLanePauses();
         rebuildQueueStrip(); changed();
         pumpQueue();   // removing the highlighted head releases the queue
     }
 
     void syncEntriesFromList() {
         if (!m_queueList) return;
+        // Card #XCXD: two lanes, two lists — the agent's rows in this one, the terminal's in
+        // their own. Each lane's new order is written back into that lane's slots in m_entries
+        // only, so a drag in either list neither drops the other lane's rows nor moves a row
+        // from one resource to the other. Steers live with the agent lane, so the promotion
+        // below is untouched by what the terminal's list says.
         saveQueueEdit();   // m_entries is still in the old order, so the index is still the right one
         const quint64 selected = selectedEntryId();
         // Steers keep their place at the top whatever the drop said. A queued row dropped above or
@@ -12570,15 +12961,31 @@ private:
         int lastSteerRow = -1;
         for (int row = 0; row < m_queueList->count(); ++row)
             if (m_queueList->item(row)->data(QueueRowDelegate::KindRole).toString() == QStringLiteral("steer")) lastSteerRow = row;
+        auto laneOrder = [this](QListWidget *list, bool agentLane) {
+            QList<QueueEntry> ordered;
+            if (!list) return ordered;
+            for (int row = 0; row < list->count(); ++row) {
+                const quint64 id = list->item(row)->data(QueueRowDelegate::EntryIdRole).toULongLong();
+                if (id == 0) continue;
+                for (const auto &entry : std::as_const(m_entries))
+                    if (entry.id == id && entry.agent == agentLane) { ordered.append(entry); break; }
+            }
+            return ordered;
+        };
+        const QList<QueueEntry> agentOrder = laneOrder(m_queueList, true);
+        const QList<QueueEntry> terminalOrder = laneOrder(m_terminalQueueList, false);
         QList<QueueEntry> ordered;
+        int agentSlots = 0, terminalSlots = 0, ai = 0, ti = 0;
+        for (const auto &entry : std::as_const(m_entries)) (entry.agent ? agentSlots : terminalSlots)++;
+        for (const auto &entry : std::as_const(m_entries))
+            ordered.append(entry.agent ? (ai < agentOrder.size() ? agentOrder.at(ai++) : entry)
+                                       : (ti < terminalOrder.size() ? terminalOrder.at(ti++) : entry));
         quint64 promoted = 0;
         for (int row = 0; row < m_queueList->count(); ++row) {
             const quint64 id = m_queueList->item(row)->data(QueueRowDelegate::EntryIdRole).toULongLong();
-            if (id == 0) continue;
-            for (const auto &entry : std::as_const(m_entries)) if (entry.id == id) { ordered.append(entry); break; }
-            if (row < lastSteerRow && !promoted) promoted = id;
+            if (id != 0 && row < lastSteerRow && !promoted) promoted = id;
         }
-        const bool whole = ordered.size() == m_entries.size();   // not mid-drop, with a row in two places
+        const bool whole = agentOrder.size() == agentSlots && terminalOrder.size() == terminalSlots;   // not mid-drop
         bool moved = false;
         if (whole) {
             for (int i = 0; i < ordered.size(); ++i) moved = moved || ordered[i].id != m_entries[i].id;
@@ -12634,6 +13041,17 @@ private:
         }
         const bool enter = k == Qt::Key_Return || k == Qt::Key_Enter;
         // Answers own Enter before queue navigation/escalation and completion popups (#QAN1).
+        // Card #XCXD: an open ask owns the blank Enter — all of it, whatever kind of ask. A
+        // question is skipped (Esc no longer does that); an approval is left exactly as it was,
+        // with a line saying an answer is required, because an unanswered approval is a deny and
+        // a blank key must not decide it. Either way the Enter is consumed here: it never falls
+        // through to resume a queue or steer a turn while something is being asked.
+        if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
+            && m_ask.open()) {
+            if (!m_ask.approval) skipQuestion();
+            else status(QStringLiteral("An approval needs an answer · a blank Enter does not deny it"));
+            return true;
+        }
         if (m_ask.open() && enter
             && (mods == Qt::ControlModifier || (mods == Qt::NoModifier && m_modeValue != QStringLiteral("shell")))) {
             requestRoute(true, QStringLiteral("agent"));
@@ -12682,10 +13100,6 @@ private:
             m_editor->moveCursor(QTextCursor::End);
             return true;
         }
-        // Enter queues; Enter again steers at the next tool call; Enter a third time interrupts.
-        if (mods == Qt::NoModifier && enter && m_editor->toPlainText().trimmed().isEmpty()
-            && (escalateSteerToInterrupt() || upgradeFirstQueuedToSteer()))
-            return true;
         // And with nothing left to escalate, Enter on an empty box **resumes a queue a Stop
         // paused** (#7JD1; owner, 2026-09-21: "why don't we just copy the functionality and have
         // enter resume"). One rule on every surface — Stop pauses, Enter resumes — so a card's
@@ -12695,20 +13109,33 @@ private:
         // box it always sends `Continue` (#SXF1), and the queue resumes behind that prompt like
         // any other submit. A row being edited in the box owns Enter (it holds the queue rather
         // than pausing it), so the selection is left to the queue-navigation block below.
+        // The blank Enter's queue half, in order (card #XCXD): the intended lane's pause
+        // resumes first — one lane, never both — and only then, for the agent lane, the steer
+        // sequence (oldest prompt, pinned, escalating, no fallthrough). It sits after the ask
+        // block above and after selection edits: a question and an edit both outrank it.
         if (mods == Qt::NoModifier && enter && !inQueueSelection()
-            && relay::continueturn::enterResumes({m_agentBusy,
-                                                  m_editor->toPlainText().trimmed().isEmpty(),
-                                                  queuePaused()})) {
-            resumeAgentQueue();
+            && m_editor->toPlainText().trimmed().isEmpty() && blankEnterRouted())
             return true;
-        }
         // Ctrl+C with nothing selected in the prompt box copies what is highlighted in the
         // terminal — the reasoning is a fold there now, so its selection is the terminal's.
         if (mods == Qt::ControlModifier && k == Qt::Key_C && !m_editor->textCursor().hasSelection() && copySelection())
             return true;
-        // Esc stops a running program, so Ctrl+C is left to copying.
-        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy && m_editor->toPlainText().isEmpty()
+        // Card #XCXD: Alt+Esc interrupts the shell and only the shell, whatever the agent is
+        // doing and whatever is being edited. Autorepeat is swallowed so a key held down cannot
+        // spill a stop from one resource onto another.
+        if (mods == Qt::AltModifier && k == Qt::Key_Escape && processBusy() && m_backend) {
+            if (key->isAutoRepeat()) return true;
+            interruptShell();
+            toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
+            return true;
+        }
+        // Esc stops a running program when the shell is the only resource running (the agent's
+        // Esc is decided further down), so Ctrl+C is left to copying.
+        if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy
+            && !(m_atList && m_atList->isVisible()) && !(m_cardList && m_cardList->isVisible())
+            && !readingAloudShown()
             && processBusy() && m_backend) {
+            if (key->isAutoRepeat()) return true;
             interruptShell();
             toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
             return true;
@@ -12838,9 +13265,10 @@ private:
             case Action::MoveDown: {
                 if (onWorkerRow) { moveWorkerRow(k == Qt::Key_Up ? -1 : 1); return true; }
                 saveQueueEdit();
-                const int to = m_selected + (k == Qt::Key_Up ? -1 : 1);
-                m_entries.move(m_selected, to);
-                selectQueueEntry(to);
+                // Card #XCXD: the move stays in the selected entry's lane — one step along
+                // its own FIFO, clamped at the lane's edge instead of crossing into the
+                // other resource's rows.
+                moveQueuedWithinLane(selectedEntryId(), k == Qt::Key_Up ? -1 : 1);
                 return true;
             }
             case Action::Steer: {
@@ -12894,12 +13322,11 @@ private:
         }
         // --- end subagents UI ---
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && m_agentBusy) {
-            // An ask is up: Esc skips that question rather than stopping the turn (owner,
-            // 2026-09-19). The turn is blocked on the person reading it, so the key under their
-            // hand should get them past the question, not end the work they are being asked about.
-            // There is no second Esc that stops either — on the last question Esc sends the answers
-            // and the turn carries on — and the ask's footer says where Stop is instead.
-            if (skipQuestion()) return true;
+            // Card #XCXD: Esc no longer skips a question — a blank Enter does (further up), and an
+            // approval is never skipped by a key. When both resources run, Esc stops the agent;
+            // the shell's stop has Alt+Esc all to itself. An autorepeat is swallowed so a held
+            // key cannot spill the stop onto the shell once the agent has stopped.
+            if (key->isAutoRepeat()) return true;
             stopAgent();
             toast(QStringLiteral("Agent interrupted"));
             return true;
@@ -15704,6 +16131,35 @@ private:
     QList<QueueEntry> m_entries;
     QueueEntry m_active;
     bool m_activeValid = false, m_activeLoaded = false, m_entriesPaused = false;
+    // The terminal lane's active entry is `m_active` above. The agent lane has its own
+    // reservation (card #XCXD): an agent entry that left the queue holds the agent slot until
+    // the worker's busy report — or the turn's end — releases it, without ever blocking the
+    // terminal lane. `m_agentPaused` is the agent lane's own pause, separate from the terminal
+    // lane's `m_entriesPaused`/`m_pauseReason`, so one lane can be stopped while the other
+    // keeps flowing.
+    QueueEntry m_activeAgent;
+    bool m_activeAgentValid = false;
+    QString m_activeAgentRequest;
+    bool m_agentPaused = false;
+    QString m_agentPauseReason;
+    // The empty-Enter steer sequence (card #XCXD): which step the sequence is on, the request
+    // it is pinned to, and whether a non-empty draft has been typed since. A new draft resets
+    // the sequence; a delivered steer stays pinned to its own prompt instead of falling
+    // through to the next one.
+    relay::queuesubmit::EnterStep m_enterSteerStep = relay::queuesubmit::EnterStep::Idle;
+    QString m_enterSteerRequest;
+    // The worker's queued item the sequence is pinned to, when the oldest waiting agent prompt
+    // was the worker's and not this pane's (card #XCXD): a console surface's item has no
+    // request id the pane could name, so the pin carries the item instead.
+    QString m_enterSteerWorkerItem;
+    bool m_enterSteerDraftSeen = false;
+    // The Enters pressed while a submission's auto routing was still pending (card #XCXD).
+    // The box keeps the submitted draft while the route is in flight, so these presses see the
+    // same NONEMPTY text — they are presses for that prompt, not new submits: the second one
+    // steers it into the running turn and the third interrupts and sends it now. They are
+    // counted (capped at those two; nothing further changes), not dropped, and replayed in
+    // exactly that number when the routing resolves — and only for an agent verdict.
+    int m_enterSteerBuffered = 0;
     bool m_interruptPending = false, m_fillingQueueList = false;
     QString m_activeRequest, m_pauseReason;
     quint64 m_entrySerial = 0;
@@ -15711,7 +16167,9 @@ private:
     QString m_selectedSteer;   // the steer row selected in the queue list (its request id); see selectSteer
     QString m_selectedWorkerRow;   // a row of the *worker's* queue, by its item id (card #CTRN)
     QElapsedTimer m_selectionDroppedAt;   // a selected steer left the list and nothing took its place (forgetSteer)
-    QListWidget *m_queueList = nullptr, *m_atList = nullptr;
+    QListWidget *m_queueList = nullptr, *m_terminalQueueList = nullptr, *m_atList = nullptr;
+    bool m_queueLanesStacked = false;   // #XCXD: the dual-lane layout the strip was last built in
+    bool m_rebuildingQueueStrip = false; // #XCXD: rebuilds must not nest — a resize during one reflows later
     // Switchboard: the `#K7Q2` picker and the card rows behind it (protocol 17.2, 17.6).
     QListWidget *m_cardList = nullptr;
     relay::board::IndexFeed m_cardIndex;

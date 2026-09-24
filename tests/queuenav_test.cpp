@@ -88,13 +88,17 @@ private slots:
     }
 
     // ----- leaving -------------------------------------------------------------------------
-    void enter_saves_and_escape_cancels() {
+    void enter_saves_and_escape_reaches_the_pane() {
         QCOMPARE(key(selected(1), Qt::Key_Return), Action::Save);
         QCOMPARE(key(selected(1), Qt::Key_Enter), Action::Save);
-        QCOMPARE(key(selected(1), Qt::Key_Escape), Action::Cancel);
+        // Card #XCXD: Esc no longer cancels the edit — it falls through to the pane's interrupt
+        // decision and the row's text is preserved untouched.
+        QCOMPARE(key(selected(1), Qt::Key_Escape), Action::None);
     }
-    void escape_cancels_whatever_modifiers_are_held() {
-        QCOMPARE(key(selected(1), Qt::Key_Escape, Qt::ShiftModifier), Action::Cancel);
+    void escape_reaches_the_pane_whatever_modifiers_are_held() {
+        QCOMPARE(key(selected(1), Qt::Key_Escape, Qt::ShiftModifier), Action::None);
+        // Alt+Esc must reach the pane's shell-interrupt handler while a row is being edited too.
+        QCOMPARE(key(selected(1), Qt::Key_Escape, Qt::AltModifier), Action::None);
     }
 
     // ----- reordering and removing ---------------------------------------------------------
@@ -136,7 +140,7 @@ private slots:
     void shift_delete_and_enter_reach_a_steer_too() {
         QCOMPARE(key(withSteers(0), Qt::Key_Delete, Qt::ShiftModifier), Action::Remove);
         QCOMPARE(key(withSteers(0), Qt::Key_Return), Action::Save);
-        QCOMPARE(key(withSteers(0), Qt::Key_Escape), Action::Cancel);
+        QCOMPARE(key(withSteers(0), Qt::Key_Escape), Action::None);   // #XCXD: the pane decides Esc now
     }
     void ctrl_down_on_a_steer_sends_it_back_to_the_queue() {
         QCOMPARE(key(withSteers(0), Qt::Key_Down, Qt::ControlModifier), Action::Unsteer);
