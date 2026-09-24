@@ -689,6 +689,9 @@ class VerifiedTests(TempBoardTest):
         self.assertIn("has no `Answer:` under '1. Reads right?'", B.unverified_reasons(card)[0])
         card = self.card(base + "## Human QA\n1. Reads right?\n    Answer: yes\n", human="required", criteria="reads right")
         self.assertTrue(B.verified(card))
+        card = self.card(base + "## Human QA\n1. Reads right?\n    Answer: yes\n"
+                         "2. Are the labels correct?\n", human="required", criteria="reads right")
+        self.assertFalse(B.verified(card))
         self.assertTrue(B.verified(self.card(base, human="optional", criteria="reads right")))
 
     def test_verified_needs_the_receipt_when_a_sign_off_is_required(self):
@@ -721,6 +724,9 @@ class VerifiedTests(TempBoardTest):
         self.assertGreater(B.human_review_priority(needs_answer), 0)
         needs_answer.body += "## Human QA\n1. Read the result?\n    Answer: yes\n"
         self.assertEqual(B.human_review_priority(needs_answer), 0)
+        needs_answer.body += "2. Are the labels correct?\n"
+        self.assertGreater(B.human_review_priority(needs_answer), 0)
+        needs_answer.body += "    Answer: yes\n"
         needs_answer.set("verify", {"artifact": "text", "primary": "person", "effort": "high",
                                     "human": "none", "sign_off": "publish", "stakes": "reputation"})
         self.assertGreater(B.human_review_priority(needs_answer), 0)

@@ -3614,7 +3614,7 @@ class BoardTools:
             return
         if verify.get("human") == "required" and self.context.actor != OWNER_ACTOR:
             questions = B.human_qa_questions(card.body)
-            if not any(answered for _, answered in questions):
+            if not questions or any(not answered for _, answered in questions):
                 open_q = [q for q, answered in questions if not answered]
                 missing = (f"the question {open_q[0]!r} has no `Answer:` line under it" if open_q
                            else "`## Human QA` holds no question for them yet — write one from "

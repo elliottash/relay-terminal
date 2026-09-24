@@ -484,7 +484,7 @@ def unverified_reasons(card: "Card") -> list[str]:
         reasons.append("no primary evidence: no `## Verdict` and no passing `### Check` under `## Tests`")
     if verify and verify.get("human") == "required":
         questions = human_qa_questions(card.body)
-        if not any(answered for _, answered in questions):
+        if not questions or any(not answered for _, answered in questions):
             open_q = [q for q, answered in questions if not answered]
             reasons.append("the person's answer is missing: verify.human is required and `## Human QA` "
                            + (f"has no `Answer:` under {open_q[0]!r}" if open_q
@@ -518,7 +518,8 @@ def human_review_priority(card: "Card") -> int:
     if not verify or verify.get("deferred"):
         return 0
     questions = human_qa_questions(card.body)
-    needs_answer = verify.get("human") == "required" and not any(done for _, done in questions)
+    needs_answer = verify.get("human") == "required" and (
+        not questions or any(not done for _, done in questions))
     needs_sign_off = verify.get("sign_off", "none") != "none" and not has_receipt(card.body)
     if not (needs_answer or needs_sign_off):
         return 0
