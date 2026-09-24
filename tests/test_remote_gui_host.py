@@ -1034,9 +1034,20 @@ class AlwaysOnTests(unittest.TestCase):
                               and devices()[-1]["items"][-1].get("online") is True,
                               what="the devices line saying the phone is online")
                 self.assertEqual(devices()[-1]["items"][-1]["name"], "iPhone")
+                self.assertEqual(devices()[-1]["items"][-1]["panes"], [])
                 await client.send({"t": "panes_get"})
                 listed = await client.expect("panes")
                 self.assertEqual([item["id"] for item in listed["items"]], ["p1"])
+                before = len(devices())
+                await client.send({"t": "pane_focus", "pane": "p1"})
+                await h.until(lambda: len(devices()) > before and
+                              devices()[-1]["items"][-1]["panes"] == ["p1"],
+                              what="the focused pane reported")
+                before = len(devices())
+                await client.send({"t": "pane_blur", "pane": "p1"})
+                await h.until(lambda: len(devices()) > before and
+                              devices()[-1]["items"][-1]["panes"] == [],
+                              what="the blurred pane cleared")
                 await client.close()
                 await h.until(lambda: h.state()["devices"] == 0, what="the phone gone")
                 await h.until(lambda: devices()[-1]["items"][-1].get("online") is False,

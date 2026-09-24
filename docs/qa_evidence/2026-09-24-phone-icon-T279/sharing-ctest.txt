@@ -1,0 +1,8 @@
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 29: sharing
+1/1 Test #29: sharing ..........................   Passed    0.06 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.06 sec

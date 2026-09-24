@@ -94,7 +94,8 @@ the GUI never links a crypto library and this process never touches a widget.
                                           replaced by a newer pairing code) or "expired"
     {"t":"ask","id":N,"name":"...","platform":"...","fingerprint":"...","code":"12345","peer":"..."}
     {"t":"paired","device":"...","name":"...","capability":"..."}
-    {"t":"devices","items":[{id, name, platform, capability, fingerprint, password_entry, online}]}
+    {"t":"devices","items":[{id, name, platform, capability, fingerprint, password_entry, online,
+                                panes:["p1", ...]}]}  live pane subscriptions for the header icon
     {"t":"remote_state","on":bool,"address":"...","base":"...","online":bool,"devices":N,
      "reason":"..."}                      the always-on service, whenever any field changes:
                                           `on` the service is up, `online` registered with the
@@ -127,7 +128,7 @@ the GUI never links a crypto library and this process never touches a widget.
      "fingerprint":"AB12 CD34 EF56","peer":"192.0.2.7","role":"viewer","pane":"p1",
      "panes":["p1"],"invite":"<id>"}                        someone at the door; answer with
                                                             `knock_answer` within two minutes
-    {"t":"participants","items":[{"id","name","platform","role","panes","invite",
+    {"t":"participants","items":[{"id","name","platform","role","panes","viewing","invite",
      "fingerprint","expires","online","driving"}],"invites":[{"id","panes","role","uses",
      "expires"}]}
     {"t":"prompt_ask","id":"<prompt id>","participant":"<id>","name":"alice","pane":"p1",
@@ -876,6 +877,7 @@ class Sidecar:
         # first "connected" would land before anyone was listening for it.
         self.host.on_link(lambda online, reason: self.publish_state())
         self.host.on_devices(lambda count: (self.publish_state(), self.report_devices()))
+        self.host.on_presence(lambda: (self.report_devices(), self.report_participants()))
         self.host.codes.on_state(self.code_state)
         # One `window_active` signal, two readers: the notification presence rule of section 9 and
         # "guests can act only while I am present" (10.5). The hub passes it on to the notifier.
@@ -1506,10 +1508,15 @@ class Sidecar:
         self._notify_new_joiners()
         online = {channel.participant_id for channel in self.host.channels.values()
                   if channel.participant_id and not channel.closed}
+        viewing = {}
+        for channel in self.host.channels.values():
+            if channel.participant_id and not channel.closed:
+                viewing.setdefault(channel.participant_id, set()).update(channel.subscribed)
         self.emit({"t": "participants", "items": [
             {"id": p.participant_id, "name": p.name, "platform": p.platform, "role": p.role,
              "panes": p.panes, "invite": p.invite, "fingerprint": p.fingerprint,
              "expires": round(p.expires, 3), "online": p.participant_id in online,
+             "viewing": sorted(viewing.get(p.participant_id, set())),
              "driving": [pane for pane in p.panes
                          if self.host.control_holder(pane) == p.participant_id]}
             for p in self.host.guests.live()],
@@ -1551,11 +1558,17 @@ class Sidecar:
         if self.host is not None:
             online = {channel.device_id for channel in self.host.channels.values()
                       if channel.device_id and not channel.closed}
+        watching = {}
+        if self.host is not None:
+            for channel in self.host.channels.values():
+                if channel.device_id and not channel.closed:
+                    watching.setdefault(channel.device_id, set()).update(channel.subscribed)
         self.emit({"t": "devices", "items": [
             {"id": device.device_id, "name": device.name, "platform": device.platform,
              "capability": device.capability, "fingerprint": device.fingerprint,
              "password_entry": device.password_entry,
-             "online": device.device_id in online}
+             "online": device.device_id in online,
+             "panes": sorted(watching.get(device.device_id, set()))}
             for device in self.devices.live()]})
 
     async def stop(self) -> None:

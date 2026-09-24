@@ -268,6 +268,8 @@ void SharingTest::theOwnersOwnPhoneIsADriverToo()
     // its keystroke has a pane to take back (#W5N2).
     Model model;
     model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    model.setDevices(items(R"([{"id":"dev1","name":"Pixel 9","online":true,"panes":["p1"]},
+                               {"id":"dev2","online":true,"panes":["p1"]}])"));
     QVERIFY(model.deviceDriverOn(QStringLiteral("p1")).isEmpty());
 
     model.setControl(QStringLiteral("p1"), QStringLiteral("owner"), QStringLiteral("this desktop"),
@@ -332,16 +334,28 @@ void SharingTest::theChipSaysWhatIsGoingOn()
     model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
     // Not shared at all: no chip.
     QVERIFY(model.chip(QStringLiteral("p1"), false).text.isEmpty());
-    // Shared, nobody else on it: the phone glyph is sufficient, so its display text is empty.
+    // Published but nobody has opened it: no icon.
     const ChipState phoneOnly = model.chip(QStringLiteral("p1"), true);
     QVERIFY(phoneOnly.text.isEmpty());
-    QVERIFY(phoneOnly.tooltip.contains(QStringLiteral("Shared with your phone")));
+    QVERIFY(!phoneOnly.visible);
     QVERIFY(!phoneOnly.guestDriving);
 
+    model.setDevices(items(R"([{"id":"d1","name":"iPhone","online":true,"panes":["p1"]}])"));
+    const ChipState phoneViewing = model.chip(QStringLiteral("p1"), true);
+    QVERIFY(phoneViewing.visible);
+    QVERIFY(phoneViewing.tooltip.contains(QStringLiteral("iPhone")));
+    model.setDevices(items(R"([{"id":"d1","name":"iPhone","online":true,"panes":[]}])"));
+    QVERIFY(!model.chip(QStringLiteral("p1"), true).visible);
+    model.setDevices(items(R"([{"id":"d1","name":"iPhone","online":false,"panes":["p1"]}])"));
+    QVERIFY(!model.chip(QStringLiteral("p1"), true).visible);
+
     model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"]}])"), {});
+    QVERIFY(!model.chip(QStringLiteral("p1"), true).visible);
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"],"viewing":["p1"]}])"), {});
+    QVERIFY(model.chip(QStringLiteral("p1"), true).visible);
     QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("1 guest"));
-    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"]},
-                                    {"id":"b2","name":"bob","role":"viewer","panes":["p1"]}])"), {});
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"],"viewing":["p1"]},
+                                    {"id":"b2","name":"bob","role":"viewer","panes":["p1"],"viewing":["p1"]}])"), {});
     QCOMPARE(model.chip(QStringLiteral("p1"), true).text, QStringLiteral("2 guests"));
     QVERIFY(model.chip(QStringLiteral("p1"), true).tooltip.contains(QStringLiteral("alice (editor)")));
 
@@ -352,6 +366,8 @@ void SharingTest::theChipSaysWhatIsGoingOn()
     QCOMPARE(driving.text, QStringLiteral("alice is typing"));
     QVERIFY(driving.guestDriving);
     QVERIFY(driving.tooltip.contains(QStringLiteral("take it straight back")));
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"],"online":false}])"), {});
+    QVERIFY(!model.chip(QStringLiteral("p1"), true).visible);
 }
 
 // The hub says who is connected and who holds each pane's control token on the `participants`
@@ -362,7 +378,7 @@ void SharingTest::theParticipantsLineCarriesPresenceAndControl()
     Model model;
     model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
     model.setParticipants(items(R"([
-        {"id":"a1","name":"alice","role":"editor","panes":["p1"],"online":true,"driving":["p1"]},
+        {"id":"a1","name":"alice","role":"editor","panes":["p1"],"viewing":["p1"],"online":true,"driving":["p1"]},
         {"id":"b2","name":"bob","role":"viewer","panes":["p1"],"online":false,"driving":[]}
     ])"), {});
     QCOMPARE(model.driverOn(QStringLiteral("p1")), QStringLiteral("alice"));

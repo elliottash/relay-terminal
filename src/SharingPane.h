@@ -65,6 +65,7 @@ inline constexpr int kPromptSeconds = 600;
 struct Participant {
     QString id, name, platform, role, fingerprint, invite;
     QStringList panes;
+    QStringList viewingPanes;   // panes open on a live guest channel
     QStringList drivingPanes;   // the panes whose control token they hold, as the hub reports it
     qint64 expires = 0;         // seconds this participant record has left
     bool online = true;         // a record outlives the connection: they may be away, not gone
@@ -110,6 +111,7 @@ struct SharedPane {
 // guest: it is the owner, on another screen, and the pane's top line is the only place it shows.
 struct Device {
     QString id, name, platform;
+    QStringList panes;       // panes this connected device currently has open
     bool online = false;     // holding a live channel right now
     QString capability;      // "full" (watch and type) or "view", as the sidecar reports it
     bool passwords = false;  // may answer a password prompt (section 6.7); off until turned on
@@ -170,6 +172,7 @@ struct ShareOptions {
 
 // What the pane's own header says. Empty when this pane is not shared at all.
 struct ChipState {
+    bool visible = false;   // a connected person or device is viewing this pane
     QString text;            // empty for icon-only, otherwise "2 guests" or "alice is typing"
     QString tooltip;
     bool guestDriving = false;
@@ -243,7 +246,7 @@ public:
     int waiting() const { return int(m_requests.size()); }
     bool anyShared() const { return !m_shared.isEmpty(); }
 
-    // The pane header's chip. `phone` is whether the pane is shared at all.
+    // The pane header's chip. `phone` is whether the pane is published.
     ChipState chip(const QString &pane, bool phone) const;
 
 private:

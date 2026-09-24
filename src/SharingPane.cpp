@@ -179,6 +179,8 @@ void Model::setParticipants(const QJsonArray &items, const QJsonArray &invites)
                         || item.value(QStringLiteral("online")).toBool();
         for (const QJsonValue &pane : item.value(QStringLiteral("panes")).toArray())
             person.panes << pane.toString();
+        for (const QJsonValue &pane : item.value(QStringLiteral("viewing")).toArray())
+            person.viewingPanes << pane.toString();
         for (const QJsonValue &pane : item.value(QStringLiteral("driving")).toArray())
             person.drivingPanes << pane.toString();
         m_participants.append(person);
@@ -387,6 +389,8 @@ void Model::setDevices(const QJsonArray &items)
         device.name = item.value(QStringLiteral("name")).toString();
         device.platform = item.value(QStringLiteral("platform")).toString();
         device.online = item.value(QStringLiteral("online")).toBool();
+        for (const QJsonValue &pane : item.value(QStringLiteral("panes")).toArray())
+            device.panes << pane.toString();
         // "full" or "view", and whether it may answer a password prompt (section 6.7): what the
         // Devices page says beside each one (#SMDX). An older sidecar sends neither; a record
         // without a capability is read as the full one, which is what pairing granted then.
@@ -495,8 +499,23 @@ ChipState Model::chip(const QString &pane, bool phone) const
 {
     ChipState state;
     if (!phone) return state;
-    const QString driver = driverOn(pane);
-    const int guests = guestsOn(pane);
+    QList<Participant> viewers;
+    for (const Participant &person : participantsOn(pane))
+        if (person.online && person.viewingPanes.contains(pane)) viewers << person;
+    QStringList devices;
+    for (const Device &device : m_devices)
+        if (device.online && device.panes.contains(pane))
+            devices << (device.name.isEmpty() ? device.id : device.name);
+    state.visible = !viewers.isEmpty() || !devices.isEmpty();
+    if (!state.visible) return state;
+    const int guests = viewers.size();
+    QString driver = driverOn(pane);
+    if (!driver.isEmpty()) {
+        bool online = false;
+        for (const Participant &person : viewers)
+            if (person.driving) online = true;
+        if (!online) driver.clear();
+    }
     if (!driver.isEmpty()) {
         state.guestDriving = true;
         state.text = QStringLiteral("%1 is typing").arg(driver);
@@ -509,7 +528,7 @@ ChipState Model::chip(const QString &pane, bool phone) const
     // this is not `guestDriving` — but the header has to say it, or the pane looks idle while a
     // phone types into it.
     const QString device = deviceDriverOn(pane);
-    if (!device.isEmpty()) {
+    if (!device.isEmpty() && devices.contains(device)) {
         state.text = QStringLiteral("%1 is typing").arg(device);
         state.tooltip = QStringLiteral(
             "%1 holds this pane's keyboard, so what you type there reaches this terminal.\n"
@@ -517,15 +536,14 @@ ChipState Model::chip(const QString &pane, bool phone) const
         return state;
     }
     if (guests == 0) {
-        state.tooltip = QStringLiteral(
-            "Shared with your phone: it sees this pane and can type into it.\n"
-            "The share chip under the prompt box shows the code or stops it.");
+        state.tooltip = QStringLiteral("Viewed on %1.").arg(devices.join(QStringLiteral(", ")));
         return state;
     }
     state.text = guests == 1 ? QStringLiteral("1 guest") : QStringLiteral("%1 guests").arg(guests);
     QStringList names;
-    for (const Participant &person : participantsOn(pane))
+    for (const Participant &person : viewers)
         names << QStringLiteral("%1 (%2)").arg(person.name, person.role);
+    names << devices;
     state.tooltip = QStringLiteral("Shared with %1.\nYou are typing; nobody else holds this "
                                    "pane's keyboard.").arg(names.join(QStringLiteral(", ")));
     return state;

@@ -655,6 +655,7 @@ class Host:
         # How many of the owner's **own** devices hold a live channel. Guests are never counted:
         # a participant's channel carries a `participant_id` and no `device_id`.
         self._device_watchers: list[Callable[[int], None]] = []
+        self._presence_watchers: list[Callable[[], None]] = []
         self._devices_reported = 0
         # Per-device push origins (section 9). `home` is the first rendezvous this hub registered
         # with — the sidecar's own — and is what a device origin of "" means. `tokens` keeps a
@@ -952,6 +953,15 @@ class Host:
         """Be told how many of the owner's own devices are connected, when it changes."""
         self._device_watchers.append(callback)
 
+    def on_presence(self, callback: Callable[[], None]) -> None:
+        """Be told when a connected viewer opens, leaves or closes a pane."""
+        self._presence_watchers.append(callback)
+
+    def _presence_changed(self) -> None:
+        for callback in list(self._presence_watchers):
+            with contextlib.suppress(Exception):
+                callback()
+
     def devices_online(self) -> int:
         """The owner's own paired devices holding a live channel right now.
 
@@ -965,6 +975,7 @@ class Host:
         """A channel's handshake named a device or a participant (``Channel._handshake``)."""
         if channel.device_id:
             self._devices_changed()
+        self._presence_changed()
 
     def _devices_changed(self) -> None:
         count = self.devices_online()
@@ -1042,6 +1053,7 @@ class Host:
             if channel.participant_id:
                 await self._participant_left(channel)
             self._devices_changed()
+            self._presence_changed()
 
     async def _send_envelope(self, kind: int, channel: bytes, payload: bytes) -> None:
         if self.socket is None:
@@ -2487,6 +2499,7 @@ class Host:
     async def _on_pane_focus(self, channel: Channel, message: dict) -> None:
         pane = self._pane_of(message)
         channel.subscribed.add(pane)
+        self._presence_changed()
         stream = self.stream(f"agent:{pane}")
         for item in list(stream.ring)[-40:]:
             await channel.send(item)
@@ -2503,6 +2516,7 @@ class Host:
     async def _on_pane_blur(self, channel: Channel, message: dict) -> None:
         pane = message.get("pane", "")
         channel.subscribed.discard(pane)
+        self._presence_changed()
         if self.screens and channel.device_id:
             self.source.release(pane, channel.device_id)
 

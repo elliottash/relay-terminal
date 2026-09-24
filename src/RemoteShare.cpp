@@ -208,7 +208,9 @@ void RemoteShare::handle(const QJsonObject &message)
                             .arg(m_pendingAsk.name, m_pendingAsk.platform));
     } else if (kind == QLatin1String("devices")) {
         m_devices = message.value(QStringLiteral("items")).toArray();
+        m_sharing.setDevices(m_devices);
         emit devicesChanged(m_devices);
+        emit sharingModelChanged();
     } else if (kind == QLatin1String("input")) {
         const QString paneId = message.value(QStringLiteral("pane")).toString();
         auto it = m_panes.find(paneId);
@@ -493,6 +495,8 @@ void RemoteShare::handle(const QJsonObject &message)
     } else if (kind == QLatin1String("stopped")) {
         m_running = false;
         m_remoteState = remotesettings::State{};
+        m_sharing.setDevices(QJsonArray{});
+        emit sharingModelChanged();
         emit startedChanged();
         emit remoteStateChanged();
     }

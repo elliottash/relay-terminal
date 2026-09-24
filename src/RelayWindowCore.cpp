@@ -1483,14 +1483,14 @@ void RelayWindow::refreshPaneStatus() {
                 }
                 const QString remoteLine = pane->remoteCommandLine();
                 const bool shared = pane->sharedWithPhone();
-                chrome->setStatus(state, remoteLine, shared);
+                const relay::sharing::ChipState chip =
+                    relay::RemoteShare::instance().sharingModel().chip(pane->sessionToken(), shared);
+                chrome->setStatus(state, remoteLine, chip.visible);
                 // How many subagents this pane's agent has running (card #YMSR): the same count
                 // the state above was resolved from, so the badge and the glyph cannot disagree.
                 chrome->setSubagents(facts.liveSubagents);
                 // Shared with how many people, and who is driving when it is not the owner.
-                const relay::sharing::ChipState chip =
-                    relay::RemoteShare::instance().sharingModel().chip(pane->sessionToken(), shared);
-                if (shared) chrome->setSharing(chip.text, chip.tooltip, chip.guestDriving);
+                chrome->setSharing(chip.text, chip.tooltip, chip.guestDriving);
                 if (!remoteLine.isEmpty()) sshSessionSeen(pane, remoteLine);
                 states << state;
                 usage << pane->usageSample();
