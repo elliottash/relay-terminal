@@ -1162,6 +1162,26 @@ private slots:
         QVERIFY(hasRow(local.compactSection(), QStringLiteral("local:bonsai/error")));
     }
 
+    void compactLocalModelsCanRetryWhenTheWorkerStarts() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        wire.ready = false;
+        local.refresh();
+        QVERIFY(rowById(local.compactSection(), QStringLiteral("local:summary-empty"))
+                    .label.contains(QStringLiteral("Start a pane's agent")));
+        const SettingRow reload = rowById(local.compactSection(), QStringLiteral("local:reload"));
+        QVERIFY(reload.run);
+        wire.ready = true;
+        reload.run();
+        QCOMPARE(wire.idsOf(QStringLiteral("local_endpoints")).size(), 1);
+        QVERIFY(rowById(local.compactSection(), QStringLiteral("local:summary-empty"))
+                    .label.contains(QStringLiteral("Reading")));
+        local.handleEvent({{"event", "local_endpoints"}, {"items", QJsonArray{}}});
+        QVERIFY(rowById(local.compactSection(), QStringLiteral("local:summary-empty"))
+                    .label.contains(QStringLiteral("No local models")));
+    }
+
     void theStatusWordFollowsTheProbe() {
         LocalModelsSettings local;
         Wire wire;

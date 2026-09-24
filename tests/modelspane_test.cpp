@@ -245,7 +245,9 @@ private Q_SLOTS:
             setup.label = QStringLiteral("Set up a local model with the helper agent");
             setup.buttonText = QStringLiteral("Ask helper…");
             setup.run = [] {};
-            sources.rows << heading << setup << local;
+            sources.rows.prepend(local);
+            sources.rows.prepend(setup);
+            sources.rows.prepend(heading);
             return QList<SettingsSection>{sources};
         });
         int refreshes = 0;

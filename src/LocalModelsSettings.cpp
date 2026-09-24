@@ -82,7 +82,9 @@ bool LocalModelsSettings::probeIsUseful(const QJsonObject &probe) {
 
 void LocalModelsSettings::refresh() {
     m_asked = true;
-    if (send) send({{"type", "local_endpoints"}, {"id", QString(kEndpointsId)}});
+    m_waiting = send && send({{"type", "local_endpoints"}, {"id", QString(kEndpointsId)}});
+    m_unavailable = !m_waiting;
+    if (onChanged) onChanged();
 }
 
 void LocalModelsSettings::findServers() {
@@ -137,6 +139,8 @@ void LocalModelsSettings::handleEvent(const QJsonObject &event) {
     const QString type = event.value(QStringLiteral("event")).toString();
     const QString id = event.value(QStringLiteral("id")).toString();
     if (type == QStringLiteral("local_endpoints")) {
+        m_waiting = false;
+        m_unavailable = false;
         m_endpoints = event.value(QStringLiteral("items")).toArray();
         for (const QJsonValue &value : m_endpoints) probeEndpoint(value.toObject());
     } else if (type == QStringLiteral("local_probed")) {
@@ -433,8 +437,9 @@ SettingsSection LocalModelsSettings::section() {
                                "No key, and nothing leaves the machine. Relay never starts or stops one.");
     if (m_endpoints.isEmpty())
         out.rows << infoRow(QStringLiteral("local:empty"),
-                            m_asked ? QStringLiteral("No local endpoints yet. Find a server below, or add one by address.")
-                                    : QStringLiteral("Reading the registry…"));
+                            m_unavailable ? QStringLiteral("Start a pane's agent, then refresh this page to read local models.")
+                                          : m_waiting || !m_asked ? QStringLiteral("Reading the registry…")
+                                                                  : QStringLiteral("No local endpoints yet. Find a server below, or add one by address."));
     for (const QJsonValue &value : m_endpoints) addEndpointRows(out, value.toObject());
     addFindRows(out);
     addAddressRows(out);
@@ -459,8 +464,9 @@ SettingsSection LocalModelsSettings::compactSection() {
     out.rows << headingRow(out.title);
     if (m_endpoints.isEmpty()) {
         out.rows << infoRow(QStringLiteral("local:summary-empty"),
-                            m_asked ? QStringLiteral("No local models saved yet.")
-                                    : QStringLiteral("Reading local models…"));
+                            m_unavailable ? QStringLiteral("Start a pane's agent, then reload local models.")
+                                          : m_waiting || !m_asked ? QStringLiteral("Reading local models…")
+                                                                  : QStringLiteral("No local models saved yet."));
     }
     for (const QJsonValue &value : m_endpoints) {
         SettingsSection endpointRows;
@@ -476,6 +482,13 @@ SettingsSection LocalModelsSettings::compactSection() {
             }
         }
     }
+    SettingRow reload;
+    reload.kind = SettingRow::Button;
+    reload.id = QStringLiteral("local:reload");
+    reload.label = QStringLiteral("Reload local models");
+    reload.buttonText = QStringLiteral("Reload");
+    reload.run = [this] { refresh(); };
+    out.rows << reload;
     return out;
 }
 

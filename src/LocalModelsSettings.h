@@ -85,6 +85,8 @@ private:
     QJsonObject m_draft;                        // Add by address: the last `local_probed`
     QString m_address, m_draftModel, m_findNote, m_addNote;
     bool m_asked = false;                       // the registry has been read at least once
+    bool m_waiting = false;                     // a registry read is in flight
+    bool m_unavailable = false;                 // no pane worker was ready to read it
     bool m_finding = false;
 };
 
