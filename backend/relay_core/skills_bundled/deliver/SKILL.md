@@ -2,18 +2,6 @@
 name: deliver
 description: Work a request through the Board: check it is not done, claim its card, plan, execute, verify. "/deliver", "deliver this", "work this card".
 short: 'Deliver a request through the Board: claim a card, plan, execute, verify.'
-profile: |
-  artifact: code
-  primary: script
-  human: none
-  effort: medium
-  stakes: rework
-  blast: capability
-  regularity: routine
-  executable: yes
-  rot: low
-  confidential: no
-  money: no
 ---
 
 # Deliver a request through the Board
@@ -157,14 +145,6 @@ you when the card has none; the user corrects the proposal, and their correction
     judgement is the user's.
   Relay stamps `implemented_by` with your provider/model and `verified_by` on whoever closes the
   card, so never type either — and never type `session`.
-- **Verified means the whole `verify` block is met** (`relay_core.board.verified`): the primary
-  evidence is on the card — a `## Verdict`, or a passing `### Check` under `## Tests` — *and* the
-  person's `Answer:` sits under a `## Human QA` question when `human: required` (offer
-  `needs-qa-human`, never `done`), *and* a line beginning `Receipt:` in `## Verdict` or
-  `## Execution Summary` records the sign-off when one is required, *and* `deferred` is not set.
-  `board_move_card` refuses `done` (and, while deferred, the QA lanes) until all of that holds;
-  a deferred card shows "unverified until …" on its row, and clearing `deferred` through
-  `fields.verify` — recorded in the thread under your name — is the only way on.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
 - **Show it working, in a picture.** Relay draws images inline (#1MGS), so a change a person can
