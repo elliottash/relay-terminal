@@ -256,6 +256,17 @@ def _cards_phrase(cards: list[str]) -> str:
     return "turns on " + (", ".join(ids[:-1]) + " and " + ids[-1] if ids else "the board")
 
 
+def board_block(request: dict | None) -> dict | None:
+    """The `board` block of a `configure` request with its top-level `qa` folded in (#C3Q2),
+    so the QA switch travels with the board settings through every rebuild of the tools — the
+    owner's half in `configure`, the agent's in `agent_tools`, and every re-point after."""
+    request = request or {}
+    block, qa = request.get("board"), request.get("qa")
+    if isinstance(qa, dict) and (block is None or isinstance(block, dict)):
+        return {**(block or {}), "qa": qa}
+    return block
+
+
 def parse_board(block) -> dict:
     """The `board` block of a `configure` or `set_board`, normalized (protocol 19.1, 19.11 and 19.12).
 
@@ -275,6 +286,9 @@ def parse_board(block) -> dict:
                  a project may ask for by name.  It never affects reading: a board is found
                  wherever it already is, in `B.BOARD_FOLDERS` order.
       `autonomy`, `limits`  as before.
+      `qa`       the QA policy floor's global layer (#C3Q2): `{verification: ask|automatic}`
+                 from Options › Agent › QA.  `configure` copies its top-level `qa` in here so
+                 the block travels with the board settings; `board.yaml qa:` overrides it.
     """
     if block is None:
         block = {}
@@ -284,7 +298,8 @@ def parse_board(block) -> dict:
     if type(attach) is not bool:
         raise ValueError("board.attach must be true or false.")
     out = {"raw": dict(block), "attach": attach, "state": "ready",
-           "autonomy": block.get("autonomy"), "limits": block.get("limits")}
+           "autonomy": block.get("autonomy"), "limits": block.get("limits"),
+           "qa": block.get("qa") if isinstance(block.get("qa"), dict) else None}
     for key in ("dir", "project"):
         value = block.get(key)
         if value is not None and not isinstance(value, str):
@@ -447,7 +462,7 @@ class BoardCommands:
         """
         self.workspace = str(workspace) if workspace else None
         self.pane_token = check_pane_token((request or {}).get("pane_token"))
-        return self._point(workspace, parse_board((request or {}).get("board")), agent=False)
+        return self._point(workspace, parse_board(board_block(request)), agent=False)
 
     def _point(self, workspace: str | None, settings: dict, *, agent: bool = True) -> dict | None:
         """Point this worker at the board these settings name.  The body `set_board` shares.
@@ -491,7 +506,7 @@ class BoardCommands:
 
     def _build(self, board: B.Board, state: str, settings: dict, *, actor: str) -> BoardTools:
         tools = BoardTools(board, emit=self.emit, autonomy=settings.get("autonomy"),
-                           limits=settings.get("limits"),
+                           limits=settings.get("limits"), qa=settings.get("qa"),
                            context=ToolContext(actor=actor,
                                                pane=os.environ.get("RELAY_PANE_ID") or None),
                            enforce_limits=actor != "owner", duplicate_check=actor != "owner",
@@ -569,7 +584,7 @@ class BoardCommands:
 
     def agent_tools(self, workspace: str | None, request: dict | None = None) -> BoardTools | None:
         """The *agent's* instance of the tools for this workspace (guardrails on)."""
-        settings = parse_board((request or {}).get("board"))
+        settings = parse_board(board_block(request))
         board, state = self._resolve(workspace, settings)
         if board is None:
             return None
@@ -887,6 +902,11 @@ class BoardCommands:
         if "pane_token" in request:
             self.pane_token = check_pane_token(request.get("pane_token"))
         block = request["board"]
+        # A re-point keeps the QA switch its `configure` carried (#C3Q2): the pane changed
+        # boards, not its Options.
+        previous = getattr(self, "settings", None) or {}
+        if isinstance(block, dict) and "qa" not in block and isinstance(previous.get("qa"), dict):
+            block = {**block, "qa": previous["qa"]}
         # `board: null` detaches. It is not the same as a `configure` with no board block at all,
         # which still walks up from the workspace; an explicit null says "this pane has none".
         settings = parse_board(block if block is not None else {"attach": False})

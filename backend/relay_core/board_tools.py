@@ -49,6 +49,7 @@ from typing import Callable, Sequence
 from . import board as B
 from . import qa_verifiers as QA
 from .skills import PROFILE_VERIFY_KEYS
+from . import qa_policy as QP
 from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
@@ -1397,7 +1398,7 @@ class BoardTools:
                  context: ToolContext | None = None, state_path: Path | str | None = None,
                  clock: Callable[[], float] = time.time, enforce_limits: bool = True,
                  duplicate_check: bool = True, state: str = "ready", project: str | None = None,
-                 init=None, pane_token: str | None = None):
+                 init=None, pane_token: str | None = None, qa: dict | None = None):
         self.board = board
         #: This pane's session token, from `configure {pane_token}` (protocol 19.19), or None for
         #: the Board worker and for tests.  `board_claim` writes it onto the card as
@@ -1423,6 +1424,11 @@ class BoardTools:
         self.context = context or ToolContext()
         config = board.config()
         agent_config = config.get("agent") if isinstance(config.get("agent"), dict) else {}
+        #: The QA policy floor (#C3Q2): `board.yaml qa:` over `configure.qa` (Options › Agent ›
+        #: QA's one switch) over `qa_policy.DEFAULTS`.  Applied silently to every `verify`
+        #: block these tools write (`_apply_qa_floor`), decides whether a verifier's pass may
+        #: close a card (`_qa_ask_gate`), and is stated in one line on every `board_read`.
+        self.qa_policy = QP.parse(config.get("qa"), qa)
         # `autonomy: off` in board.yaml reads back as the YAML boolean false, so map it here
         # rather than making every board.yaml quote the word.
         raw = agent_config.get("autonomy")
@@ -2085,6 +2091,8 @@ class BoardTools:
                            "done": t.done, "depth": t.depth, "card": t.card,
                            "blocked_by": list(t.blocked_by)}
                           for t in card.tasks()],
+                # The QA policy floor this board works under (#C3Q2), agent-facing.
+                "qa_policy": QP.effective_line(self.qa_policy),
                 "thread_total": len(entries),
                 "thread": [{"entry_id": e.entry_id, "author": e.author, "kind": e.kind,
                             "attrs": dict(e.attrs), "text": e.text} for e in tail]}
@@ -2111,6 +2119,60 @@ class BoardTools:
             block["verified_by"] = verified
             block["verifier_family"] = QA.family(verified)
         return block
+
+    def _qa_floor(self, card: B.Card, verify: dict) -> tuple[dict, list[str]]:
+        """`qa_policy.apply` over one normalized block for this card (#C3Q2): the lineage rule
+        reads the card's `qa` recommendation (protocol 19.15) without its commit list."""
+        implementer = str(card.front.get("implemented_by") or "").strip()
+        qa = QA.recommend_here(implementer) if implementer else None
+        return QP.apply(self.qa_policy, verify, qa)
+
+    def _apply_qa_floor(self, card: B.Card) -> list[str]:
+        """Run the floor over the `verify` block already on the card, in place, and return the
+        notes (agent-facing only: they ride in the tool result, never in a thread event or on a
+        row).  A card without a readable block is left alone: `fields.verify` is the way to fix
+        one, and the floor does not guess at what it cannot read."""
+        raw = card.front.get("verify") if card.type == "work" else None
+        if raw is None:
+            return []
+        try:
+            verify = B.validate_verify(raw)
+        except B.BoardError:
+            return []
+        floored, notes = self._qa_floor(card, verify)
+        if notes:
+            card.set("verify", floored)
+        return notes
+
+    def _qa_ask_gate(self, card: B.Card, old_status: str, status: str) -> str:
+        """The one switch a user sees of the floor (#C3Q2, Options › Agent › QA › Verification).
+
+        A verifying session — one closing a card out of `needs-verification` or a QA lane —
+        may move a card whose plan needs no person (`verify.human` not `required`) to `done`
+        only under `verification: automatic`; under `ask` (the default) the card is the user's
+        to close and the move is refused in one sentence offering `needs-verification`.  Returns
+        the one-line note for the result when the close is automatic, "" otherwise.  A card
+        with no `verify` block, the owner's own close, a self-close out of `executing` (the
+        medium tier) and a card whose person has answered are not this gate's.
+        """
+        if status != "done" or self.context.actor == OWNER_ACTOR:
+            return ""
+        if old_status not in QA_STATUSES and old_status != "needs-verification":
+            return ""
+        try:
+            verify = B.verify_block(card)
+        except B.BoardError:
+            return ""
+        if verify is None or verify.get("human") == "required":
+            return ""
+        if QP.closes_automatically(self.qa_policy, verify):
+            return ("closed automatically: Verification is automatic and the plan needs no "
+                    f"person (verify.human: {verify.get('human', 'none')})")
+        raise BoardToolError(
+            f"#{card.id} is the user's to close (Verification: ask me before closing any card), "
+            "so leave it in needs-verification with the evidence and they move it to done.",
+            code="board_refused", requires="user_close", offer="needs-verification",
+            id=card.id or "")
 
     # ---- writes ---------------------------------------------------------------
     def _record(self, action: str, card: B.Card, summary: str, before: bytes | None,
@@ -2290,6 +2352,9 @@ class BoardTools:
             raise BoardToolError("base_hash must be the 64-character `hash` returned by board_read.")
         card = self._card(card_id)
         before = card.path.read_bytes()
+        # The QA policy floor (#C3Q2): what `verify` was when this write began, and the notes
+        # the floor leaves for the agent when it changes the block this write puts on the card.
+        verify_before, qa_notes = card.front.get("verify"), []
         current = B.file_hash(card.path)
         if current != base_hash:
             # The hash is named in the message as well as the fields: a model that mistyped or
@@ -2332,6 +2397,9 @@ class BoardTools:
                         value = B.validate_verify(value)
                     except B.BoardError as exc:
                         raise BoardToolError(f"{exc}.", code="board_refused", field=key) from exc
+                    # Floored before it is stored (#C3Q2), so the change line names the block
+                    # that stands; the notes say what the floor did.
+                    value, qa_notes = self._qa_floor(card, value)
                 old = card.front.get(key)
                 if value is None:
                     card.drop(key)
@@ -2397,6 +2465,11 @@ class BoardTools:
                 card.set("verify", block)
                 changes.append(verify_note)
 
+        # A block this write put on the card by another route than `fields.verify` (a loaded
+        # skill's default) meets the same floor (#C3Q2).
+        if not qa_notes and card.front.get("verify") is not None \
+                and card.front.get("verify") != verify_before:
+            qa_notes = self._apply_qa_floor(card)
         size = self._thread_size(card)
         self.board.save(card, base_hash=base_hash)
         self.writes_this_turn += 1
@@ -2409,6 +2482,7 @@ class BoardTools:
         write_id = self._record("update", card, summary, before, size)
         return {"id": card.id, "hash": B.file_hash(card.path), "changes": changes,
                 "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites],
+                **({"qa_policy": qa_notes} if qa_notes else {}),
                 **({"verify_defaulted_from": defaulted_from} if defaulted_from else {}),
                 **({"note": verify_note} if verify_note else {})}
 
@@ -2440,6 +2514,9 @@ class BoardTools:
         # `done` and the QA lanes; `human: required` needs the person's answer; a sign-off
         # needs its receipt.
         self._verify_gate(card, status)
+        # And the one switch (#C3Q2): under `ask` a verifier does not close a card whose plan
+        # needs no person; under `automatic` it does, and the result says so in one line.
+        qa_note = self._qa_ask_gate(card, old_status, status)
         # `section` parks the card in a manual section — a column that collects nothing — and an
         # empty string takes it out (#3XZV). Its status is left alone either way.
         section_arg = args.get("section")
@@ -2598,7 +2675,8 @@ class BoardTools:
                 "rank": card.rank,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
-                "write_id": write_id, "summary": summary}
+                "write_id": write_id, "summary": summary,
+                **({"qa_policy": qa_note} if qa_note else {})}
 
     def set_priority(self, card_id: str, priority) -> dict:
         """The pane's flag click (protocol 19.3 ``board_priority``, card #VKFV).
@@ -2817,6 +2895,7 @@ class BoardTools:
             raise BoardToolError("force must be true or false.")
         token = self.pane_token or ""
         card = self._card(card_id)
+        verify_before = card.front.get("verify")       # the QA policy floor (#C3Q2), see below
         if card.type != "work":
             raise BoardToolError(f"#{card_id} is a {card.type} card; only a work card is claimed "
                                  "and worked. Use board_comment to say something about this one.")
@@ -2874,6 +2953,9 @@ class BoardTools:
         moved_from = card.path if target is not None else None
         if target is not None and target.exists():
             raise BoardToolError(f"a different file already sits at {target.relative_to(self.board.repo)}.")
+        # A `verify` block the claim put on the card meets the QA policy floor (#C3Q2).
+        qa_notes = (self._apply_qa_floor(card) if card.front.get("verify") is not None
+                    and card.front.get("verify") != verify_before else [])
         size = self._thread_size(card)
         self.board.save(card, base_hash=base_hash)
         if target is not None:
@@ -2899,6 +2981,7 @@ class BoardTools:
                 "session": token or None, "entry_id": entry.entry_id,
                 "hash": B.file_hash(card.path), "write_id": write_id, "summary": summary,
                 **({"reminder": reminder} if reminder else {}),
+                **({"qa_policy": qa_notes} if qa_notes else {}),
                 **({"verify_defaulted_from": defaulted_from} if defaulted_from else {}),
                 **({"note": verify_note} if verify_note else {}),
                 **({} if token else {"warning": NO_TOKEN_NOTE}),

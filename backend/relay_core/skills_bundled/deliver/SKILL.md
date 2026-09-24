@@ -165,6 +165,14 @@ you when the card has none; the user corrects the proposal, and their correction
   `board_move_card` refuses `done` (and, while deferred, the QA lanes) until all of that holds;
   a deferred card shows "unverified until …" on its row, and clearing `deferred` through
   `fields.verify` — recorded in the thread under your name — is the only way on.
+- **The QA policy floor is applied for you** (`relay_core.qa_policy`; defaults `ask_at_stakes:
+  money`, `ai_may_gate_after: never`, `sample_after: never`, tuned per project in `board.yaml
+  qa:`): a block whose `stakes` reach the floor gets `human: required`, an `ai-text` /
+  `ai-visual` primary moves to `also` with the next rung as primary, and a `sample` is dropped —
+  the result's `qa_policy` notes say what changed, and `board_read` states the floor in one line.
+  Under *Verification: ask* (Options › Agent › QA, the default) a card whose plan needs no person
+  still waits in `needs-verification` for the user to close, so as a verifying session you offer
+  that and never `done`; under *automatic* your pass closes it and your reply says so in one line.
 - A question for the user goes on the card as a `question` comment with your recommendation, and
   the card goes to `discussing` with `waiting_on: owner`.
 - **Show it working, in a picture.** Relay draws images inline (#1MGS), so a change a person can

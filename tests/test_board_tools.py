@@ -3585,5 +3585,195 @@ class VerifyDefaultTests(BoardToolsTest):
         self.assertNotIn("regularity", verify)
 
 
+class QaPolicyFloorTests(BoardToolsTest):
+    """The QA policy floor (#C3Q2) as the tools apply it: silently, before a `verify` block is
+    stored, reported only in the tool result; and the one switch, ask against automatic."""
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create(title="Reconcile the invoices", request="reconcile the invoices")
+
+    def tools_with(self, qa=None, config=None, turn="t-2"):
+        """A second instance on the same board: `qa` is what `configure.qa` sends, `config` a
+        whole board.yaml to write first (the project layer)."""
+        if config is not None:
+            (self.root / B.BOARD_CONFIG).write_text(config, encoding="utf-8")
+        tools = T.BoardTools(
+            self.board, emit=self.events.append, qa=qa,
+            context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5-5", pane="3"),
+            state_path=self.repo / ".relay" / "board-rate.json", pane_token=self.pane_token)
+        tools.begin_turn(turn)
+        return tools
+
+    def set_verify(self, block, tools=None):
+        tools = tools or self.tools
+        current = tools.run("board_read", {"id": self.card_id})["hash"]
+        return tools.run("board_update_card", {"id": self.card_id, "base_hash": current,
+                                               "fields": {"verify": block}})
+
+    def verify_of(self):
+        return self.board.card_by_id(self.card_id).front.get("verify")
+
+    def move(self, status, tools=None, **extra):
+        return (tools or self.tools).run("board_move_card", {"id": self.card_id, "status": status,
+                                                             "reason": f"to {status}", **extra})
+
+    # ---- the three silent rules, through fields.verify
+    def test_stakes_at_the_floor_raise_human_to_required(self):
+        # The failure the card names: a `stakes: money`, `human: none` block accepted as written.
+        result = self.set_verify({"artifact": "number", "primary": "script", "effort": "low",
+                                  "stakes": "money", "human": "none"})
+        self.assertNotIn("error", result, result)
+        verify = self.verify_of()
+        self.assertEqual(verify["human"], "required")
+        self.assertTrue(verify["criteria"])
+        self.assertEqual(len(result["qa_policy"]), 2)
+        self.assertIn("human none → required (stakes money is at or above the floor money)",
+                      result["qa_policy"][0])
+        # Stored already floored: the change line names the block that stands, and the notes
+        # are the agent's alone -- none of them reach the thread.
+        self.assertIn("required", "".join(result["changes"]))
+        self.assertNotIn("qa policy", self.thread_text(self.card_id))
+        self.assertEqual([str(p) for p in self.board.check()], [])
+
+    def test_an_ai_primary_is_downgraded_to_also(self):
+        result = self.set_verify({"artifact": "text", "primary": "ai-text", "also": ["probe"],
+                                  "effort": "low"})
+        self.assertNotIn("error", result, result)
+        verify = self.verify_of()
+        self.assertEqual(verify["primary"], "probe")
+        self.assertEqual(verify["also"], ["ai-text"])
+        self.assertEqual(verify["human"], "none")
+        self.assertEqual(result["qa_policy"], ["qa policy: primary ai-text → probe, ai-text kept "
+                                               "in also (AI gating is off)"])
+        # Nothing else to fall back on: person, and then a person must look.
+        result = self.set_verify({"artifact": "visual", "primary": "ai-visual", "effort": "low"})
+        verify = self.verify_of()
+        self.assertEqual((verify["primary"], verify["also"], verify["human"]),
+                         ("person", ["ai-visual"], "required"))
+
+    def test_a_sample_is_dropped_when_sampling_is_off(self):
+        result = self.set_verify({"artifact": "code", "primary": "script", "effort": "low",
+                                  "sample": "1/10 after 30"})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("sample", self.verify_of())
+        self.assertEqual(result["qa_policy"], ["qa policy: sample '1/10 after 30' dropped "
+                                               "(sampling is off)"])
+
+    def test_a_block_within_the_floor_gets_no_note(self):
+        result = self.set_verify({"artifact": "code", "primary": "script", "also": ["ai-text"],
+                                  "effort": "low", "stakes": "rework"})
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("qa_policy", result)
+        self.assertEqual(self.verify_of()["also"], ["ai-text"])
+
+    def test_board_read_states_the_effective_floor(self):
+        line = self.tools.run("board_read", {"id": self.card_id})["qa_policy"]
+        self.assertEqual(line, "verification ask: every card waits in needs-verification for the "
+                               "user to close; human required from stakes money; AI may gate "
+                               "never; sampling never")
+
+    # ---- the layers
+    def test_configure_qa_is_the_global_layer(self):
+        tools = self.tools_with(qa={"verification": "automatic"})
+        self.assertEqual(tools.qa_policy.verification, "automatic")
+        self.assertEqual(tools.qa_policy.source["verification"], "global")
+        self.assertIn("verification automatic (Options)",
+                      tools.run("board_read", {"id": self.card_id})["qa_policy"])
+        # `parse_board` carries it with the board block, which is how `configure` hands it on.
+        self.assertEqual(P.parse_board({"qa": {"verification": "automatic"}})["qa"],
+                         {"verification": "automatic"})
+        self.assertIsNone(P.parse_board({"qa": "automatic"})["qa"])
+        self.assertIsNone(P.parse_board({})["qa"])
+
+    def test_the_project_qa_block_overrides_the_global_switch(self):
+        tools = self.tools_with(qa={"verification": "automatic"},
+                                config=CONFIG + "qa: {verification: ask, ask_at_stakes: never, "
+                                                "sample_after: always}\n")
+        policy = tools.qa_policy
+        self.assertEqual((policy.verification, policy.ask_at_stakes, policy.sample_after),
+                         ("ask", "never", "always"))
+        self.assertEqual(policy.source["verification"], "project")
+        self.assertEqual(policy.ai_may_gate_after, "never")            # untouched: the default
+        self.assertIn("verification ask (board.yaml)",
+                      tools.run("board_read", {"id": self.card_id})["qa_policy"])
+        # And the project floor is the one applied: money stakes no longer need a person, a
+        # sample stands.
+        result = self.set_verify({"artifact": "number", "primary": "script", "effort": "low",
+                                  "stakes": "money", "sample": "1/10"}, tools)
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("qa_policy", result)
+        self.assertEqual((self.verify_of()["human"], self.verify_of()["sample"]), ("none", "1/10"))
+
+    def test_a_bad_project_value_is_named_and_ignored(self):
+        tools = self.tools_with(config=CONFIG + "qa: {verification: sometimes}\n")
+        self.assertEqual(tools.qa_policy.verification, "ask")
+        line = tools.run("board_read", {"id": self.card_id})["qa_policy"]
+        self.assertIn("ignored: board.yaml qa.verification 'sometimes' is not a value it takes", line)
+
+    # ---- ask against automatic
+    def land(self, tools=None):
+        """The card in needs-verification with a plan that needs no person."""
+        self.set_verify({"artifact": "code", "primary": "script", "effort": "low"}, tools)
+        self.move("executing", tools)
+        result = self.move("needs-verification", tools)
+        self.assertNotIn("error", result, result)
+
+    def test_in_ask_mode_a_verifier_does_not_close_a_card_needing_no_person(self):
+        # The failure the card names: an ask-mode card closed by a verifier.
+        self.land()
+        verifier = self.tools_with()
+        result = self.move("done", verifier)
+        self.assertEqual(result["code"], "board_refused")
+        self.assertEqual(result["requires"], "user_close")
+        self.assertEqual(result["offer"], "needs-verification")
+        self.assertIn("Verification: ask me before closing any card", result["error"])
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-verification")
+        # `optional` is still "needs no person".
+        self.set_verify({"artifact": "code", "primary": "script", "effort": "low",
+                         "human": "optional", "criteria": "reads well"}, verifier)
+        self.assertEqual(self.move("done", verifier)["code"], "board_refused")
+
+    def test_in_automatic_mode_the_verifiers_pass_closes_it_and_says_so(self):
+        self.land()
+        verifier = self.tools_with(qa={"verification": "automatic"})
+        result = self.move("done", verifier)
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["qa_policy"], "closed automatically: Verification is automatic "
+                                              "and the plan needs no person (verify.human: none)")
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "done")
+
+    def test_the_gate_is_only_the_verifiers_close(self):
+        # The owner's own close from the Board is never this gate's.
+        self.land()
+        owner = self.tools_with()
+        owner.context.actor = T.OWNER_ACTOR
+        self.assertEqual(self.move("done", owner)["status"], "done")
+        # Nor a self-close out of executing (the medium tier), nor a card with no plan.
+        other = self.create(title="Rename a flag", request="rename it")
+        self.tools.run("board_move_card", {"id": other, "status": "executing", "reason": "on it"})
+        current = self.tools.run("board_read", {"id": other})["hash"]
+        self.tools.run("board_update_card", {"id": other, "base_hash": current, "fields": {
+            "verify": {"artifact": "code", "primary": "script", "effort": "low"}}})
+        result = self.tools.run("board_move_card", {"id": other, "status": "done", "reason": "tests pass"})
+        self.assertEqual(result["status"], "done")
+        third = self.create(title="Older card", request="from before the block")
+        for status in ("executing", "needs-verification", "done"):
+            result = self.tools.run("board_move_card", {"id": third, "status": status, "reason": status})
+            self.assertNotIn("error", result, result)
+        self.assertNotIn("qa_policy", result)
+
+    def test_a_person_required_card_is_the_verify_gates_not_this_ones(self):
+        self.set_verify({"artifact": "text", "primary": "level", "effort": "low",
+                         "human": "required", "criteria": "the summary is fair"})
+        self.move("executing")
+        self.move("needs-verification")
+        verifier = self.tools_with(qa={"verification": "automatic"})
+        result = self.move("done", verifier)
+        self.assertEqual(result["requires"], "human_qa_answer")
+        self.assertEqual(result["offer"], "needs-qa-human")
+
+
 if __name__ == "__main__":       # pragma: no cover
     unittest.main()

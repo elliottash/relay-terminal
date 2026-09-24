@@ -745,6 +745,28 @@ class AskTests(ProtocolTest):
         with self.assertRaises(ValueError):
             self.commands.dispatch({"type": "board_ask", "card": card_id, "text": "  "})
 
+    def test_configure_qa_reaches_both_halves_and_survives_a_re_point(self):
+        """Options › Agent › QA's one switch (#C3Q2) rides with the board block into the owner's
+        tools, the agent's, and a `set_board` re-point that names no `qa` of its own."""
+        self.commands.configure(str(self.repo), {"qa": {"verification": "automatic"}})
+        self.assertEqual(self.commands.tools.qa_policy.verification, "automatic")
+        self.assertEqual(self.commands.tools.qa_policy.source["verification"], "global")
+        agent = self.commands.agent_tools(str(self.repo), {"qa": {"verification": "automatic"}})
+        self.assertEqual(agent.qa_policy.verification, "automatic")
+        # The fold itself: a board block keeps its keys, a null block stays null, a `qa` that is
+        # not an object is not carried.
+        self.assertEqual(P.board_block({"board": {"dir": "x"}, "qa": {"verification": "ask"}}),
+                         {"dir": "x", "qa": {"verification": "ask"}})
+        self.assertIsNone(P.board_block({"board": None}))
+        self.assertEqual(P.board_block({"board": {"dir": "x"}, "qa": "automatic"}), {"dir": "x"})
+        self.assertEqual(P.board_block({"qa": {"verification": "ask"}}), {"qa": {"verification": "ask"}})
+        # A re-point to the same board (no `qa` in the request) keeps the switch.
+        self.commands.set_board({"type": "set_board", "id": "q1", "board": {"dir": str(self.repo)}})
+        self.assertEqual(self.commands.tools.qa_policy.verification, "automatic")
+        # And a fresh configure without it is back to the default.
+        self.commands.configure(str(self.repo), {})
+        self.assertEqual(self.commands.tools.qa_policy.verification, "ask")
+
     def test_a_stale_board_block_caps_nothing(self):
         """An older GUI still sends `board.limits.max_card_turns`; the worker ignores it, and
         no number of running card turns is refused (owner, 2026-09-19, #0Z13)."""
