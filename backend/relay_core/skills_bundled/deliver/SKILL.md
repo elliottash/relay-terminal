@@ -2,6 +2,18 @@
 name: deliver
 description: Work a request through the Board: check it is not done, claim its card, plan, execute, verify. "/deliver", "deliver this", "work this card".
 short: 'Deliver a request through the Board: claim a card, plan, execute, verify.'
+profile: |
+  artifact: code
+  primary: script
+  human: none
+  effort: medium
+  stakes: rework
+  blast: capability
+  regularity: routine
+  executable: yes
+  rot: low
+  confidential: no
+  money: no
 ---
 
 # Deliver a request through the Board

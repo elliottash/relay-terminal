@@ -6,7 +6,9 @@ Warp, Claude and Codex skills are read as compatible external sources, alongside
 Relay ships in relay_core/skills_bundled (see bundled_dir).
 The agent sees a compact list of names and one trigger line each — the frontmatter's optional
 `short:`, or the opening of its `description:` — and loads a skill's full text with a tool before
-following it. Only the default locations (see default_directories) or configured directories are read, and every
+following it. A skill may also declare a task profile (#MSJ0, the factors of #1QKM §7) in a
+`profile: |` block of `key: value` lines; it rides on `skills_list` and `load_skill`, never on the
+catalogue line, so the prompt costs nothing for it. Only the default locations (see default_directories) or configured directories are read, and every
 path stays inside its skill folder, because agent tools run without a per-action approval.
 """
 from __future__ import annotations
@@ -77,6 +79,84 @@ def parse_frontmatter(text: str) -> dict[str, str]:
     return fields
 
 
+# The task profile a SKILL.md may declare (#MSJ0). The verify keys are the card `verify` block's
+# (#WFRA), so a card worked under the skill can inherit them; the server keys are the stable
+# factors of #1QKM §7 that live on the skill rather than on a case. Values are closed vocabularies
+# except the free-text ones; `also` is a comma-separated list of modes.
+PROFILE_MODES = ("script", "probe", "metric", "ai-text", "ai-visual", "level", "pairwise", "person", "world")
+PROFILE_VOCAB: dict[str, tuple[str, ...]] = {
+    "artifact": ("code", "text", "number", "visual", "audio", "system", "physical", "decision"),
+    "primary": PROFILE_MODES,
+    "also": PROFILE_MODES,
+    "human": ("none", "optional", "required"),
+    "sign_off": ("none", "money", "publish", "send", "delete", "legal", "clinical"),
+    "effort": ("low", "medium", "high"),
+    "stakes": ("nuisance", "rework", "money", "reputation", "harm"),
+    "blast": ("case", "capability"),
+    "regularity": ("routine", "mixed", "novel"),
+    "executable": ("yes", "no"),
+    "rot": ("low", "medium", "high"),
+    "confidential": ("yes", "no"),
+    "money": ("yes", "no"),
+}
+PROFILE_TEXT = ("criteria", "sample", "deferred", "rot_reason", "location")
+PROFILE_VERIFY_KEYS = ("artifact", "primary", "also", "deferred", "human", "criteria", "sample", "sign_off",
+                       "effort", "stakes", "blast")
+PROFILE_KEYS = tuple(PROFILE_VOCAB) + PROFILE_TEXT
+_PROFILE_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$")
+
+
+def parse_profile(text: str, warnings: list[str] | None = None) -> dict:
+    """The `profile:` block's `key: value` lines as a dict; `also` becomes a list.
+
+    Nothing here is fatal: an unknown key, a value outside its vocabulary or a line that is not
+    `key: value` is dropped and described in `warnings` (when a list is given), because a skill
+    whose profile has a typo is still a skill the agent should be able to load. Vocabulary values
+    are lower-cased; free-text values (criteria, sample, deferred, rot_reason, location) are kept
+    as written, minus surrounding quotes.
+    """
+    profile: dict = {}
+    sink = warnings if warnings is not None else []
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = _PROFILE_LINE.match(line)
+        if not match:
+            sink.append(f"profile line {number} is not key: value ({line[:40]!r})")
+            continue
+        key, value = match.group(1).lower(), _unquote(match.group(2))
+        if key in profile:
+            sink.append(f"profile key {key!r} repeated; the first value is kept")
+            continue
+        if key in PROFILE_TEXT:
+            if value:
+                profile[key] = value
+            continue
+        if key not in PROFILE_VOCAB:
+            sink.append(f"profile has unknown key {key!r} (known: {', '.join(PROFILE_KEYS)})")
+            continue
+        allowed = PROFILE_VOCAB[key]
+        if key == "also":
+            items, bad = [], []
+            for part in value.split(","):
+                mode = part.strip().lower()
+                if not mode:
+                    continue
+                (items if mode in allowed else bad).append(mode)
+            if bad:
+                sink.append(f"profile also: {', '.join(bad)} not in {', '.join(allowed)}")
+            if items:
+                profile[key] = list(dict.fromkeys(items))
+            continue
+        lowered = value.lower()
+        if lowered not in allowed:
+            sink.append(f"profile {key}: {value!r} not in {', '.join(allowed)}")
+            continue
+        profile[key] = lowered
+    return profile
+
+
 def _clip(text: str, limit: int) -> str:
     """The first `limit` characters of `text`, ending on a sentence if one falls near the limit.
 
@@ -105,6 +185,10 @@ class Skill:
     #: that does not have one is given the opening of its own description, clipped — the
     #: descriptions themselves are the author's and are never rewritten here.
     short: str = ""
+    #: The `profile:` block (#MSJ0), parsed by parse_profile: empty when the skill declares none.
+    profile: dict = field(default_factory=dict)
+    #: What parse_profile could not use — reported beside the index's `skipped`, never fatal.
+    profile_warnings: list[str] = field(default_factory=list)
 
     def trigger(self, limit: int = MAX_SHORT) -> str:
         """The catalogue line's text: what tells the model this is the skill to load."""
@@ -174,9 +258,16 @@ class SkillIndex:
                     else:
                         index.skipped.append(f"{entry.name}: duplicate skill name (first directory wins)")
                     continue
+                warnings: list[str] = []
+                profile = parse_profile(fields.get("profile", ""), warnings)
+                # A profile fault is not a skipped skill, but `skipped` is the one list every
+                # surface already shows (configured.skills_skipped, the Skills dialog's status
+                # line), so it is reported there, prefixed so it reads as what it is.
+                index.skipped.extend(f"{entry.name}: {warning} (skill still loads)" for warning in warnings)
                 index.skills[entry.name] = Skill(entry.name, fields.get("name", entry.name) or entry.name,
                                                  description, root,
-                                                 " ".join(fields.get("short", "").split()))
+                                                 " ".join(fields.get("short", "").split()),
+                                                 profile, warnings)
         return index
 
     def prompt_section(self) -> str:
@@ -297,7 +388,7 @@ class SkillIndex:
                 files.append(str(path.relative_to(skill.root)))
         return {"skill": skill.id, "name": skill.name,
                 "content": data[:MAX_SKILL_BYTES].decode("utf-8", "replace"),
-                "truncated": truncated, "files": files}
+                "truncated": truncated, "files": files, "profile": dict(skill.profile)}
 
     def commands(self) -> list[dict]:
         """`configured.skill_commands`: what the composer offers as `/name` (protocol 11)."""

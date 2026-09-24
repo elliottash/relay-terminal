@@ -2766,6 +2766,17 @@ prompt as lower-priority guidance. `load_skill` returns up to 64 KiB of `SKILL.m
 folder's file list; `read_skill_file` reads a text file inside the folder. Symlinks, `..` and
 binary files are refused. Skipped folders are reported in `configured.skills_skipped`.
 
+A `SKILL.md` may also declare a task profile (#MSJ0) in a `profile: |` frontmatter block of
+`key: value` lines: the card `verify` keys of #WFRA (`artifact`, `primary`, `also`, `human`,
+`criteria`, `sample`, `sign_off`, `effort`, `stakes`, `blast`, `deferred`) plus the server-only
+factors of #1QKM §7 (`regularity`, `executable`, `rot` with `rot_reason`, `confidential`,
+`money`, `location`), parsed by `skills.parse_profile` with closed vocabularies. The profile rides
+on `Skill.profile`, on every `skills_list` item and on `load_skill`'s result, never on the
+catalogue line, so the prompt costs nothing for it; an unknown key or an out-of-vocabulary value
+is a warning in `skills_skipped` ("<name>: profile … (skill still loads)") and on the item's
+`profile_warnings`, never a reason to drop the skill. The bundled `deliver` skill and the five
+templates in `docs/skills-examples/` are the worked profiles.
+
 GUI: `src/SkillsDialog.*` (non-modal, from `/skills`, the palette or Agent options) lists
 `skills_list` items with a checkbox per skill (unchecked names go to QSettings `skills/exclude`,
 sent in `configure.skills.exclude` for new sessions), "overridden" for `shadowed_by`. Refine sends

@@ -11,7 +11,7 @@ from pathlib import Path
 from relay_core import skill_manage, skills
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
-from relay_core.skills import SkillError, SkillIndex, parse_frontmatter
+from relay_core.skills import SkillError, SkillIndex, parse_frontmatter, parse_profile
 from relay_core.tools import ToolExecutor
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -371,6 +371,131 @@ class BundledSkillTests(unittest.TestCase):
             index = SkillIndex.load([mine, skills.bundled_dir()])
             self.assertEqual(index.skills['local-model-setup'].description, 'my own version')
             self.assertTrue(any('duplicate' in reason for reason in index.skipped))
+
+
+class ProfileTests(unittest.TestCase):
+    """#MSJ0: a SKILL.md may declare a task profile in a `profile: |` frontmatter block."""
+
+    PROFILED = ('---\nname: buy\ndescription: Buy a domain\nprofile: |\n  artifact: system\n  primary: probe\n'
+                '  also: script, ai-text\n  human: required\n  criteria: "name, price and renewal match"\n'
+                '  sign_off: money\n  effort: low\n  stakes: money\n  blast: case\n  regularity: routine\n'
+                '  executable: yes\n  rot: medium\n  rot_reason: registrar API changes\n  confidential: no\n'
+                '  money: yes\n---\n# Buy\nStep one.\n')
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.base = Path(self.temp.name) / 'skills'
+        write(self.base / 'buy' / 'SKILL.md', self.PROFILED)
+        write(self.base / 'plain' / 'SKILL.md', '---\nname: plain\ndescription: No profile\n---\nBody\n')
+        write(self.base / 'typo' / 'SKILL.md', '---\nname: typo\ndescription: Typo in profile\nprofile: |\n'
+              '  primary: probe\n  stake: money\n  human: sometimes\n  also: script, nonsense\n  just words\n---\nBody\n')
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_parse_profile_reads_vocabularies_lists_and_free_text(self):
+        warnings = []
+        profile = parse_profile(parse_frontmatter(self.PROFILED)['profile'], warnings)
+        self.assertEqual(warnings, [])
+        self.assertEqual(profile['primary'], 'probe')
+        self.assertEqual(profile['also'], ['script', 'ai-text'])
+        self.assertEqual(profile['human'], 'required')
+        self.assertEqual(profile['criteria'], 'name, price and renewal match')
+        self.assertEqual(profile['rot_reason'], 'registrar API changes')
+        self.assertEqual((profile['sign_off'], profile['stakes'], profile['money']), ('money', 'money', 'yes'))
+        # Vocabulary values are case-insensitive; an empty block is no profile at all.
+        self.assertEqual(parse_profile('Primary: Script\nHUMAN: None')['human'], 'none')
+        self.assertEqual(parse_profile(''), {})
+
+    def test_unknown_key_is_a_warning_not_an_error(self):
+        warnings = []
+        profile = parse_profile('primary: script\ncolour: blue', warnings)
+        self.assertEqual(profile, {'primary': 'script'})
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("unknown key 'colour'", warnings[0])
+        self.assertIn('known: artifact, primary', warnings[0])
+
+    def test_bad_values_are_warnings_and_dropped(self):
+        warnings = []
+        profile = parse_profile('human: sometimes\nalso: script, nonsense\nstakes: MONEY\nrot: high\nrot: low\nnot a line',
+                                warnings)
+        self.assertEqual(profile, {'also': ['script'], 'stakes': 'money', 'rot': 'high'})
+        text = '\n'.join(warnings)
+        self.assertIn("human: 'sometimes' not in none, optional, required", text)
+        self.assertIn('also: nonsense not in', text)
+        self.assertIn("'rot' repeated", text)
+        self.assertIn('line 6 is not key: value', text)
+
+    def test_index_carries_the_profile_and_reports_warnings_beside_skipped(self):
+        index = SkillIndex.load([self.base])
+        self.assertEqual(sorted(index.skills), ['buy', 'plain', 'typo'])   # a bad profile never skips a skill
+        self.assertEqual(index.skills['buy'].profile['primary'], 'probe')
+        self.assertEqual(index.skills['plain'].profile, {})
+        self.assertEqual(index.skills['typo'].profile, {'primary': 'probe', 'also': ['script']})
+        self.assertEqual(len(index.skills['typo'].profile_warnings), 4)
+        reported = [line for line in index.skipped if line.startswith('typo: ')]
+        self.assertEqual(len(reported), 4)
+        self.assertTrue(all(line.endswith('(skill still loads)') for line in reported))
+        self.assertIn("typo: profile has unknown key 'stake'", '\n'.join(reported))
+        self.assertFalse([line for line in index.skipped if line.startswith('buy')])
+
+    def test_load_skill_result_carries_the_profile(self):
+        index = SkillIndex.load([self.base])
+        loaded = index.load_skill('buy')
+        self.assertEqual(loaded['profile']['sign_off'], 'money')
+        self.assertEqual(loaded['profile']['also'], ['script', 'ai-text'])
+        self.assertEqual(index.load_skill('plain')['profile'], {})
+        json.dumps(loaded)   # what the worker sends back must serialise
+
+    def test_skills_list_items_carry_the_profile_and_its_warnings(self):
+        rows = {item['name']: item for item in skill_manage.list_skills([self.base])}
+        self.assertEqual(rows['buy']['profile']['primary'], 'probe')
+        self.assertEqual(rows['buy']['profile']['human'], 'required')
+        self.assertNotIn('profile_warnings', rows['buy'])
+        self.assertNotIn('profile', rows['plain'])
+        self.assertEqual(rows['typo']['profile'], {'primary': 'probe', 'also': ['script']})
+        self.assertEqual(len(rows['typo']['profile_warnings']), 4)
+
+    def test_the_catalogue_line_is_unchanged_by_a_profile(self):
+        index = SkillIndex.load([self.base])
+        section = index.prompt_section()
+        self.assertIn('- buy: Buy a domain\n', section)
+        self.assertNotIn('probe', section)
+        self.assertNotIn('primary', section)
+        self.assertNotIn('sign_off', section)
+
+    def test_the_six_example_profiles_parse_clean(self):
+        bundled = SkillIndex.load([skills.bundled_dir()])
+        deliver = bundled.skills['deliver'].profile
+        self.assertEqual((deliver['primary'], deliver['human'], deliver['effort']), ('script', 'none', 'medium'))
+        self.assertEqual((deliver['stakes'], deliver['blast'], deliver['regularity']), ('rework', 'capability', 'routine'))
+        self.assertEqual((deliver['executable'], deliver['rot'], deliver['confidential'], deliver['money']),
+                         ('yes', 'low', 'no', 'no'))
+        self.assertEqual(bundled.skills['deliver'].profile_warnings, [])
+        examples = SkillIndex.load([ROOT / 'docs' / 'skills-examples'])
+        self.assertEqual(sorted(examples.skills),
+                         ['analysis-run', 'domain-purchase', 'referee-report', 'server-health-check', 'slide-deck'])
+        self.assertEqual(examples.skipped, [])
+        for skill in examples.skills.values():
+            self.assertEqual(skill.profile_warnings, [], skill.id)
+            for key in ('artifact', 'primary', 'human', 'effort', 'stakes', 'blast', 'regularity', 'executable',
+                        'rot', 'confidential', 'money'):
+                self.assertIn(key, skill.profile, f'{skill.id} lacks {key}')
+            if skill.profile['human'] != 'none':
+                self.assertIn('criteria', skill.profile, skill.id)
+            if skill.profile['rot'] != 'low':
+                self.assertIn('rot_reason', skill.profile, skill.id)
+        by = examples.skills
+        self.assertEqual((by['referee-report'].profile['primary'], by['referee-report'].profile['also']), ('level', ['ai-text']))
+        self.assertEqual((by['referee-report'].profile['confidential'], by['referee-report'].profile['rot']), ('yes', 'high'))
+        self.assertEqual((by['domain-purchase'].profile['primary'], by['domain-purchase'].profile['sign_off'],
+                          by['domain-purchase'].profile['money']), ('probe', 'money', 'yes'))
+        self.assertEqual((by['slide-deck'].profile['primary'], by['slide-deck'].profile['also']), ('script', ['ai-visual', 'pairwise']))
+        self.assertIn('rehearsed', by['slide-deck'].profile['criteria'])
+        self.assertEqual((by['analysis-run'].profile['primary'], by['analysis-run'].profile['blast']), ('metric', 'capability'))
+        self.assertIn('ai-visual', by['analysis-run'].profile['also'])
+        self.assertEqual((by['server-health-check'].profile['primary'], by['server-health-check'].profile['executable'],
+                          by['server-health-check'].profile['location']), ('probe', 'yes', 'remote'))
 
 
 class RealSkillsTest(unittest.TestCase):

@@ -25,7 +25,7 @@ from pathlib import Path
 
 from . import sidecall
 from .skills import (MAX_SKILL_BYTES, NAME, SkillError, SkillIndex, bundled_dir, default_directories,
-                     imports_root, parse_frontmatter, refined_dir)
+                     imports_root, parse_frontmatter, parse_profile, refined_dir)
 
 ALLOW_FILE_URLS = False      # tests only
 GIT_TIMEOUT = 120
@@ -113,6 +113,12 @@ def list_skills(directories, exclude=(), workspace=None) -> list[dict]:
                     "path": str(manifest), "source": label, "excluded": entry.name in excluded}
             if fields.get("refined_from"):
                 item["refined_from"] = fields["refined_from"]
+            warnings: list[str] = []
+            profile = parse_profile(fields.get("profile", ""), warnings)
+            if profile:
+                item["profile"] = profile      # the task profile (#MSJ0); the dialog's verify line
+            if warnings:
+                item["profile_warnings"] = warnings
             if entry.name in seen:
                 item["shadowed_by"] = seen[entry.name]
             else:
