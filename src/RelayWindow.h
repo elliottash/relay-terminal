@@ -1328,9 +1328,42 @@ private:
     }
 
     ToolPane *createModelsPane(const QString &cwd) {
-        // The providers tab is Options › Models' own section, drawn by Options' own renderer: one
-        // renderer, two hosts (design 5.8). `true` drops the row that would be a door to here.
-        auto *view = new relay::ModelsPane([this] { return QList<relay::SettingsSection>{modelsSection(true)}; });
+        // Sources combines the hosted-provider rows and a short local-model summary in one
+        // embedded Options page. The two full Options sections remain the source of their state.
+        auto viewRef = std::make_shared<QPointer<relay::ModelsPane>>();
+        auto *view = new relay::ModelsPane([this, viewRef] {
+            relay::SettingsSection sources = modelsSection(true);
+            sources.rows += localModels().compactSection().rows;
+            relay::SettingRow setup;
+            setup.kind = relay::SettingRow::Button;
+            setup.id = QStringLiteral("models.local.setup");
+            setup.label = QStringLiteral("Set up a local model with the helper agent");
+            setup.detail = QStringLiteral("The helper surveys this machine and walks you through the choices.");
+            setup.buttonText = QStringLiteral("Ask helper…");
+            setup.run = [viewRef] {
+                if (!*viewRef) return;
+                QTimer::singleShot(0, viewRef->data(), [viewRef] {
+                    if (*viewRef) (*viewRef)->helperDraft(QStringLiteral(
+                        "/skill local-model-setup Help me set up a local model for Relay on this machine. "
+                        "Start with the read-only survey and ask before installing or downloading anything."));
+                });
+            };
+            sources.rows << setup;
+            relay::SettingRow more;
+            more.kind = relay::SettingRow::Button;
+            more.id = QStringLiteral("models.local.more");
+            more.label = QStringLiteral("More local settings");
+            more.detail = QStringLiteral("Find servers, add an address, remove a model or change compatibility settings.");
+            more.buttonText = QStringLiteral("Open Options…");
+            more.run = [this] {
+                openSettingsPane(relay::SettingsPane::Mode::Options,
+                                 relay::LocalModelsSettings::sectionId());
+            };
+            sources.rows << more;
+            return QList<relay::SettingsSection>{sources};
+        });
+        *viewRef = view;
+        view->onSourcesShown = [this] { localModels().refresh(); };
         auto *tool = new ToolPane(ToolPane::Kind::Models, view, view, cwd);
         tool->setProperty("paneType", QStringLiteral("models"));
         relay::theme::polishWindow(tool);

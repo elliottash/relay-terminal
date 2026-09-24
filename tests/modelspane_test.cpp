@@ -226,6 +226,46 @@ private Q_SLOTS:
         QVERIFY(pane.providers()->embedded());
     }
 
+    void sourcesShowsLocalRowsAndRefreshesOnlyOnEntry() {
+        ModelsPane pane([] {
+            SettingsSection sources = providerSections()().first();
+            SettingRow heading;
+            heading.kind = SettingRow::Heading;
+            heading.id = QStringLiteral("heading:Local models");
+            heading.label = QStringLiteral("Local models");
+            SettingRow local;
+            local.kind = SettingRow::Button;
+            local.id = QStringLiteral("models.local.more");
+            local.label = QStringLiteral("More local settings");
+            local.buttonText = QStringLiteral("Open Options…");
+            local.run = [] {};
+            SettingRow setup;
+            setup.kind = SettingRow::Button;
+            setup.id = QStringLiteral("models.local.setup");
+            setup.label = QStringLiteral("Set up a local model with the helper agent");
+            setup.buttonText = QStringLiteral("Ask helper…");
+            setup.run = [] {};
+            sources.rows << heading << setup << local;
+            return QList<SettingsSection>{sources};
+        });
+        int refreshes = 0;
+        pane.onSourcesShown = [&] { ++refreshes; };
+        pane.resize(420, 720);
+        pane.show();
+        pane.showTab(ModelsPane::providersTab());
+        QVERIFY(pane.providers()->visibleRowIds().contains(QStringLiteral("models.local.more")));
+        QVERIFY(pane.providers()->visibleRowIds().contains(QStringLiteral("models.local.setup")));
+        if (const QString evidence = qEnvironmentVariable("RELAY_QHEE_EVIDENCE"); !evidence.isEmpty())
+            QVERIFY(pane.grab().save(evidence));
+        QCOMPARE(refreshes, 1);
+        pane.providers()->rebuild();
+        pane.showTab(ModelsPane::providersTab());
+        QCOMPARE(refreshes, 1);
+        pane.showTab(ModelsPane::availableTab());
+        pane.showTab(ModelsPane::providersTab());
+        QCOMPARE(refreshes, 2);
+    }
+
     void everyTabKeepsItsMainControlsInANarrowPane() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high")}});
         Served served;

@@ -50,6 +50,9 @@ public:
     std::function<void()> onSetupWithAgent;                 // "Set up a model with the agent…"
 
     SettingsSection section();
+    // A Sources-page summary over the same registry and row callbacks. Discovery, removal and
+    // compatibility switches remain on the full Options page.
+    SettingsSection compactSection();
     // The section came to the front, or Refresh was pressed: read the registry, then probe each
     // endpoint once.
     void refresh();

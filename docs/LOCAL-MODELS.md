@@ -7,7 +7,10 @@ address. No key, no account, nothing leaves the machine. Card `#24XJ`; code in
 
 ## Use one
 
-In the GUI: **Options › Local models** (Ctrl+Shift+O, then the tab after Models). *Find servers*
+In the GUI, **Models › Sources** shows saved local models with status, Test and Refresh. Its
+**Set up a local model with the helper agent** button drafts the `local-model-setup` skill request
+in the Models helper; you decide when to send it. **More local settings** opens **Options › Local
+models** for discovery, address entry, removal and compatibility controls. There, *Find servers*
 knocks on the four loopback ports and offers a Save for each one that answered; *Add by address*
 takes a URL, detects what it serves and saves that. A saved endpoint is one row with its model, its
 window and a status word (ready · sleeping · loading · not running, with the command that starts

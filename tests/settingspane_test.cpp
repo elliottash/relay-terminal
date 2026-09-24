@@ -1139,6 +1139,29 @@ private slots:
         QVERIFY2(row.detail.endsWith(QStringLiteral("checking…")), qPrintable(row.detail));
     }
 
+    void compactLocalModelsKeepsTheUsefulEndpointActions() {
+        LocalModelsSettings local;
+        Wire wire;
+        wire.attach(&local);
+        QVERIFY(hasRow(local.compactSection(), QStringLiteral("local:summary-empty")));
+        local.handleEvent(endpointsEvent());
+        const SettingsSection compact = local.compactSection();
+        const SettingRow endpoint = rowById(compact, QStringLiteral("local:bonsai"));
+        QCOMPARE(endpoint.buttonTexts, (QStringList{QStringLiteral("Test"), QStringLiteral("Refresh")}));
+        QVERIFY(endpoint.detail.contains(QStringLiteral("131,072 tokens")));
+        QVERIFY(!hasRow(compact, QStringLiteral("local:bonsai/tool_text_recovery")));
+        QVERIFY(!hasRow(compact, QStringLiteral("local:find")));
+        endpoint.onButton(0);
+        QCOMPARE(wire.last(QStringLiteral("test_key")).value(QStringLiteral("preset")).toString(),
+                 QStringLiteral("local:bonsai"));
+        endpoint.onButton(1);
+        QCOMPARE(wire.last(QStringLiteral("local_endpoint_save")).value(QStringLiteral("detect")).toBool(), true);
+        local.handleEvent(probedEvent(QStringLiteral("lm-ep:local:bonsai"),
+                                      QStringLiteral("http://127.0.0.1:8080/v1"),
+                                      QStringLiteral("down"), {}, QStringLiteral("Start llama-server")));
+        QVERIFY(hasRow(local.compactSection(), QStringLiteral("local:bonsai/error")));
+    }
+
     void theStatusWordFollowsTheProbe() {
         LocalModelsSettings local;
         Wire wire;

@@ -452,4 +452,31 @@ SettingsSection LocalModelsSettings::section() {
     return out;
 }
 
+SettingsSection LocalModelsSettings::compactSection() {
+    SettingsSection out;
+    out.id = sectionId();
+    out.title = QStringLiteral("Local models");
+    out.rows << headingRow(out.title);
+    if (m_endpoints.isEmpty()) {
+        out.rows << infoRow(QStringLiteral("local:summary-empty"),
+                            m_asked ? QStringLiteral("No local models saved yet.")
+                                    : QStringLiteral("Reading local models…"));
+    }
+    for (const QJsonValue &value : m_endpoints) {
+        SettingsSection endpointRows;
+        addEndpointRows(endpointRows, value.toObject());
+        for (SettingRow row : endpointRows.rows) {
+            if (row.kind == SettingRow::Buttons) {
+                // Keep the useful checks here; removal and compatibility settings are in Options.
+                row.buttonTexts = QStringList{QStringLiteral("Test"), QStringLiteral("Refresh")};
+                row.ruleAbove = out.rows.size() > 1;
+                out.rows << row;
+            } else if (row.kind == SettingRow::Info) {
+                out.rows << row;
+            }
+        }
+    }
+    return out;
+}
+
 }  // namespace relay

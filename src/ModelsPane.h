@@ -141,6 +141,9 @@ public:
     QString currentTab() const;
     void setFilter(const QString &text);
     void focusFilter();
+    // Sources reads the local endpoint registry when it comes to the front. The window supplies
+    // the callback; the pane itself has no worker and never probes on a redraw.
+    std::function<void()> onSourcesShown;
     // The class the priorities page's highlight is in. Reading it is how a test says "it opened on
     // the served pane's mode"; it was the class tab in front until the page became sections.
     QString tier() const;

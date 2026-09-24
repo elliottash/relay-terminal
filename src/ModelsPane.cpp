@@ -329,6 +329,7 @@ QString ModelsPane::tier() const {
 void ModelsPane::showTab(const QString &id) {
     const int index = tabIds().indexOf(id);
     if (index < 0) return;
+    const bool enteringSources = id == providersTab() && currentTab() != id;
     if (m_tabs->currentIndex() != index) {
         const QSignalBlocker block(m_tabs);
         m_tabs->setCurrentIndex(index);
@@ -337,6 +338,7 @@ void ModelsPane::showTab(const QString &id) {
     helperScreenMoved();
     if (id == providersTab()) {
         m_pages->setCurrentWidget(m_providersPage);
+        if (enteringSources && onSourcesShown) onSourcesShown();
         return;
     }
     if (id == jobsTab()) {
