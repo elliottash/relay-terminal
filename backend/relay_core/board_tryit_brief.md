@@ -164,7 +164,7 @@ result, which stays sealed.
 - **Do not ask the person to run tests, attach evidence, filter a list or open a flame graph.**
   Those are mechanical. If one of them is genuinely part of the judgement, do it yourself first
   and ask about the result.
-- **Do not touch `issues/bug_intake.txt` or `issues/feature_intake.txt`** — the owner's inboxes —
+- **Do not touch the board's `bug_intake.txt` or `feature_intake.txt`** — the owner's inboxes —
   and never run a git command that writes.
 
 ## 7. If you cannot open it

@@ -54,7 +54,7 @@ Doing less than asked and explaining why is a good outcome; a confident wrong me
 - **Nothing is deleted.** There is no delete tool. A merged card keeps its file, its id and its
   text, and is closed as `dropped` pointing at the survivor; a closed card is `done` or `dropped`
   with a reason. Never make a `#ID` someone wrote down stop resolving.
-- **`issues/bug_intake.txt` and `issues/feature_intake.txt` are the user's inboxes.** Never read
+- **The board's `bug_intake.txt` and `feature_intake.txt` are the user's inboxes.** Never read
   them into cards, never edit them, never mention tidying them.
 - **The user's words are the record.** A `## Issue` section is quoted, not improved. If you must
   rewrite one, the old text is kept in the thread automatically — say in your reply that you did it.

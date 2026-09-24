@@ -62,7 +62,7 @@ What it refuses to do, and why:
     swap fail instead of overwriting. On a failed swap it recomputes the merge against the new
     tip and tries again.
   * It gates on `git diff --name-only TIP NEW`: the commit must touch exactly your paths.
-  * It never commits `issues/bug_intake.txt`, `issues/feature_intake.txt` or any `*.orig`.
+  * It never commits `.board/bug_intake.txt`, `.board/feature_intake.txt` or any `*.orig`.
 
 Exit codes: 0 fine, 1 usage or environment error, 2 `doctor` found something, 3 a merge
 conflict or a swap that could not be completed, 4 the commit is held for review (contested or
@@ -87,7 +87,7 @@ DEFAULT_STALE_MINUTES = 15
 # A session that has not run a land.py command for this long is not editing anything any
 # more: `who` and `doctor` call it stale and contest detection ignores it.
 IDLE_HOURS = 12
-NEVER_COMMIT = ("issues/bug_intake.txt", "issues/feature_intake.txt")
+NEVER_COMMIT = (".board/bug_intake.txt", ".board/feature_intake.txt")
 # Variables that would silently redirect a git command at someone else's index or work tree.
 GIT_ENV_STRIP = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
                  "GIT_COMMON_DIR", "GIT_NAMESPACE")

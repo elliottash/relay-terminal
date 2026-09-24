@@ -30,3 +30,25 @@ already existed. The new board passed `Board.check()` and the generated `AGENTS.
 The final migration of this repository's `issues/` board is pending coordination with live
 sessions that hold and edit its more than 1,000 tracked files. Its location stays unchanged until
 those sessions can be stopped or handed over without losing their writes.
+
+## Final step: this repository (2026-09-24)
+
+After a full Relay restart on the new build, the owner moved the board by hand while Relay was
+closed: `mv issues .board` plus a temporary `issues -> .board` compatibility link. The link was
+then lowered for the rename commit itself, because `land.py` reads `issues/…` through a symlink
+and would have resurrected the old tree; it went back up immediately after the commit.
+
+- Pre-move backup: `/home/elliott/data/relay-checkout-archive/2026-09-23-GRT2-pre-restart/`
+  (git bundle of all refs, full uncommitted-work patch, every untracked file, a complete
+  `issues/` copy, and Relay session state), with `manifest.json`.
+- Post-move check: `.board/board.yaml`, `POLICY.md` and `BOARD.md` present; zero files missing
+  against the backup (`diff -rq` shows only cards and threads other sessions touched between the
+  backup and the move); `board_list` resolves 681 cards with `.board/` paths.
+- The rename commit carries 1,158 `issues/…` deletions and 1,208 `.board/…` additions, the
+  regenerated `POLICY.md` and pointer blocks (hidden-folder `rg --hidden` guidance included),
+  `.gitattributes` moved to `.board/threads/*.md` and `.board/cases.jsonl`, `WARP.md`, and the
+  intake-file paths in `scripts/land.py` and the two board briefs. `.board/.private/` and
+  `.board/cases.jsonl` stay untracked, as they were under `issues/`.
+- Live sessions after the restart resolve `.board/` first (new `BOARD_FOLDERS` order), so no
+  writer used `issues/` while the link was down. Sessions holding pre-move `land.py` claims on
+  `issues/…` paths will conflict-abort harmlessly and can re-begin against `.board/…`.

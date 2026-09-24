@@ -1,3 +1,0 @@
-highlight text to copy doesnt seem to work in the agent's thinking bubble.
-
-you should still be able to cancel a task that is queued for the next tool call, if its still waiting.

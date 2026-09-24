@@ -1,3 +1,0 @@
-visual language is needed to communicate a pane is in an ssh / remote session.
-
-add skills as /skill clean-commit

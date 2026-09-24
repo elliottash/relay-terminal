@@ -6,12 +6,13 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 
 ## Working rules
 
-- **Issues:** file-based tracker in `issues/` (conventions in `issues/README.md`, based on the
-  global issue-tracking skill). Sections are the stage list — inbox, discussing, planning, planned,
+- **Issues:** file-based tracker in `.board/` (conventions in `.board/README.md`, based on the
+  global issue-tracking skill). The folder is hidden, so a plain project-wide `rg` skips it:
+  search with `rg --hidden` or name `.board/` explicitly. Sections are the stage list — inbox, discussing, planning, planned,
   executing, needs verification, needs QA, done — and Relay makes each stage move itself at the
   event that earns it; a section may also collect nothing and be filled by hand (`section:`).
   Implemented work lands in `needs-verification` (then QA) with implementer evidence under
-  `docs/qa_evidence/YYYY-MM-DD-<slug>/` and a QA checklist. `issues/POLICY.md` is the generated
+  `docs/qa_evidence/YYYY-MM-DD-<slug>/` and a QA checklist. `.board/POLICY.md` is the generated
   copy of the rules Relay's own pane agents get in their system prompt — read it when you have no
   `board_*` tools, because it also says how to make each of those calls by editing files.
 - **Build:** `scripts/relay-build`, never `cmake --build` by hand: it locks `build/`
