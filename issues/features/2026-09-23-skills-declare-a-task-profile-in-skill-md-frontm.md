@@ -10,8 +10,8 @@ rank: zzzzzzzzzzzzzzzzzzzi
 created: '2026-09-23'
 source: owner, Relay conversation, 2026-09-23
 implemented_by: anthropic/claude-fable-5-1
-verify: {artifact: code, primary: script, also: [ai-text], human: optional, criteria: the six example profiles parse clean with no warnings, and an unknown key or bad value warns without dropping the skill, sign_off: none, effort: medium}
-links: {plans: [], commits: [52e22a8e04d5395fea06bf5608f533c5198219d5], evidence: [], related: [1QKM, BX7B, WFRA], github: null}
+verify: {artifact: code, primary: script, also: [ai-text], human: optional, criteria: 'the six example profiles parse clean with no warnings, and an unknown key or bad value warns without dropping the skill', sign_off: none, effort: medium}
+links: {plans: [], commits: [52e22a8e04d5395fea06bf5608f533c5198219d5, 333091b16026ad04bc0d267c057d41193993494a, 1701a68f13e6bdb43474c7b3f66bbc1d5d586cf7], evidence: [], related: [1QKM, BX7B, WFRA], github: null}
 ---
 # Skills declare a task profile in SKILL.md frontmatter; a card worked under a skill inherits its verify defaults and effort
 
@@ -41,7 +41,7 @@ so skill development and maintenance could be an important new component we need
 - [x] `deliver` profile and five template skills in `docs/skills-examples/` <!-- t:p3 -->
 - [x] tests: `tests/test_skills.py` ProfileTests <!-- t:p5 -->
 - [x] `docs/ARCHITECTURE.md` Skills section <!-- t:p6 -->
-- [ ] `board_claim`/`board_update_card` fill `verify` from a loaded skill's profile (follow-up: needs `board_tools.py`, owned by the #WFRA session) <!-- t:p7 -->
+- [x] `board_claim`/`board_update_card` fill `verify` from a loaded skill's profile <!-- t:p7 -->
 
 ## Execution Summary
 - `backend/relay_core/skills.py`: `PROFILE_VOCAB`, `PROFILE_TEXT`, `PROFILE_VERIFY_KEYS` and `parse_profile(text, warnings)`; `Skill.profile` and `Skill.profile_warnings`; `SkillIndex.load` parses the block and appends each warning to `skipped` as `<name>: profile … (skill still loads)`, so it reaches `configured.skills_skipped` and the dialog's status tooltip with no change to `worker.py`; `load_skill` returns `profile`. The catalogue line (`trigger`) and `prompt_section` are untouched.
@@ -50,7 +50,8 @@ so skill development and maintenance could be an important new component we need
 - `docs/skills-examples/{referee-report,domain-purchase,slide-deck,analysis-run,server-health-check}/SKILL.md`: five template skills, each a short procedure with a full profile matching #1QKM §7's worked profiles. They are under `docs/` rather than `skills_bundled/templates/` because `skills_bundled/` is indexed as live skills and a `templates/` folder there would show up as a skipped "no SKILL.md" entry in every session; the card's `.relay/skills` wording was read the same way.
 - `docs/ARCHITECTURE.md` "### Skills": the profile block, where it rides, how warnings surface.
 - **Owner steer 2026-09-23: no dialog line.** The Done-means line about a second line in `src/SkillsDialog` was dropped after the code was written and reverted: "ideally, most of this is just in the agent's work and the user doesn't see it directly." The profile is agent-facing data — `skills_list` items, `load_skill`'s result, and the examples — with no C++ change on this card.
-- **Skipped, by instruction:** the Done-means line "a pane's turn that has loaded a profiled skill and then calls `board_claim`/`board_update_card` on a card with no `verify` fills it from the profile" — it lives in `board_tools.py`, which the #WFRA session owns; `PROFILE_VERIFY_KEYS` in `skills.py` is the subset that hook should copy. `tests/test_board_tools.py` (default-from-skill, explicit wins) goes with it.
+- **The verify-default hook (t:p7, landed after #WFRA's `board_tools.py`):** `ToolContext.skills` is the per-turn record of the skills in context — `Agent` fills it from every `load_skill` result and from the `kind: skill` attachments of a `/name` invocation, right after `BoardTools.begin_turn` clears it. `BoardTools._verify_from_skills` reads it on `board_claim` and on `board_update_card` when the work card has no `verify` and no explicit `fields.verify` was passed: exactly one loaded skill with verify keys writes the card's `verify` from `PROFILE_VERIFY_KEYS` (only the keys present, through `validate_verify`), with `verify_defaulted_from: <id>` and the note `verify defaulted from skill <id>` in the result, the claim summary and the update's changes; two or more profiled skills default nothing and the note names them; a profile that fails validation (say `human: required` without `criteria`) is reported in the note, not written. An explicit `fields.verify` always wins and gets no note. Agent-facing only: the note is in the tool result and the thread event, nowhere a user reads. Documented in protocol 19.21. Commit 333091b1.
+- **Found on the way (commit 1701a68f):** this card's own `verify.criteria` held a comma, `board.yaml_value` wrote it unquoted inside the flow map, and `Board.cards()` raised on re-read for the whole board. `_flow_item` now quotes a scalar holding a comma or a bracket inside `[...]`/`{...}` (a bare colon stays plain, so URLs and `run:unit` signals and every other card in the repo are unchanged byte for byte); this card's front matter is quoted by hand in the same commit as this note.
 
 ## Tests
-`PYTHONPATH=backend python3 -m unittest tests.test_skills`
+`PYTHONPATH=backend python3 -m unittest tests.test_skills tests.test_board_tools` — `ProfileTests` and `VerifyDefaultTests` (default on claim, on update, explicit wins, two profiled skills, no verify keys, invalid profile, turn reset, the bundled `deliver` profile).
