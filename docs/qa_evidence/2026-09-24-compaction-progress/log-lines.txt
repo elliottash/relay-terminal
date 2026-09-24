@@ -1,0 +1,1 @@
+2026-09-24T23:35:44.383Z INFO relay.models model_selection model=small preset=local:small role=main applies=after_compaction current_model=big origin=interactive run_id=4783bb39e691414b9e54b4a9135c0055 build_id=source-959828993b9bb7c38aee

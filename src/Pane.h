@@ -13902,7 +13902,8 @@ private:
 
     // The worker asked: the agent called `board_create_card` in a project with no Switchboard, and
     // its turn thread is parked on the answer (19.12). The pane owns the dialog and always answers,
-    // so this never simply ignores the request: a trigger the rules refuse is answered `false`.
+    // so this never simply ignores the request: while its own question about this project is up,
+    // that question carries the answer, and a trigger the rules refuse is answered `false`.
     void handleBoardInitRequest(const QJsonObject &event) {
         const QString id = event.value(QStringLiteral("id")).toString();
         const QString project = event.value(QStringLiteral("project")).toString();
@@ -13916,6 +13917,16 @@ private:
         const relay::projectinit::Decision decision =
             relay::projectinit::decide(relay::projectinit::Trigger::AgentCard, situation);
         if (!decision.asks()) {
+            // The one refused reason that is not a no: this pane's own question about this very
+            // project is already up — an agent-work question the user has not answered yet (#NSYT).
+            // It becomes this request's answer: the user's click creates the board and completes
+            // the parked card, or releases it. Answering `false` here instead made the pane decline
+            // in the user's name, and the conversation refused every later board call.
+            if ((m_initStage == InitStage::Probing || m_initStage == InitStage::Asking)
+                && m_initProject == project) {
+                m_initRequestId = id;
+                return;
+            }
             send({{QStringLiteral("type"), QStringLiteral("board_init_answer")},
                   {QStringLiteral("id"), id}, {QStringLiteral("accept"), false}});
             return;
