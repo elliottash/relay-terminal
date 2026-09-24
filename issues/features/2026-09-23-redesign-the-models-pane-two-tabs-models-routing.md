@@ -1,7 +1,7 @@
 ---
 id: 00G1
 type: work
-status: planned
+status: needs-verification
 labels: [feature, models, ui, design]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
@@ -9,7 +9,8 @@ session: 31883d9c-ec40-4d0e-a526-58a4648ecccd
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Owner in a Relay guest session (Claude Code), 2026-09-23
-links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
+links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd, e9f709ef, 5e265e54, 9f3ce6e0, 8bf46bde, 3718b34e, 89e46943], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/, docs/qa_evidence/2026-09-23-00G1-redesign/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
+verify: {artifact: visual, primary: probe, also: [script, ai-visual], human: optional, criteria: "Open all five tabs in a narrow pane and confirm the controls are legible and edits persist.", sign_off: none, effort: medium}
 ---
 # Redesign the five Models tabs and clarify their labels
 
@@ -53,6 +54,8 @@ The Models pane still has exactly five tabs: Providers, Available, Priorities, E
 **Verify:** targeted model picker, Models pane, and Jobs tests; a measured rapid-toggle interaction; manual completion of each Done-means task in a narrow and normal pane; screenshots in `docs/qa_evidence/<date>-00G1/`.
 **Visible tab headers:** Start with Sources | Enabled | Pick order | Effort | Agent jobs. Keep the existing `providers`, `available`, `priorities`, `effort`, and `jobs` IDs in tab data and layout state. Check the five labels together at the supported narrow width; shorten only the visible words if needed, and use tooltips to preserve the full meaning. Update tab-label assertions and screenshots accordingly.
 
+**2026-09-23 execution split:** Dispatch Sources (`RelayWindow` provider section and related settings), Enabled (`ModelPicker` availability paths), and Agent jobs (`JobsTab`) in parallel. Pick order and Effort also live in `ModelPicker`, so dispatch them in sequence after Enabled to avoid simultaneous edits to that widget. Each subagent owns only its assigned files, uses `land.py`, runs focused checks without a full suite, and reports a commit. The parent integrates layout and behavior, then builds once at low parallelism after the machine has memory, runs targeted tests, and captures five live tab views.
+
 ## Decisions
 - Owner, 2026-09-23: "no i want the 5 tabs still". Preserve five distinct pages and their responsibilities: Providers, Available, Priorities, Effort, and Jobs.
 - Owner, 2026-09-23: "but change the tab headers to make them more intuitive, especially available and priorities; jobs too". Rename their visible headers. Proposed labels: **Sources, Enabled, Pick order, Effort, Agent jobs**. Keep stable internal IDs so saved tab selection still opens the same page.
@@ -62,8 +65,30 @@ The Models pane still has exactly five tabs: Providers, Available, Priorities, E
 
 ![Five tabs at 420 px on the Pick order page](docs/qa_evidence/2026-09-23-00G1-labels/03-priorities.png)
 ![Five tabs at 420 px on the Agent jobs page](docs/qa_evidence/2026-09-23-00G1-labels/05-jobs.png)
+2026-09-23, five-tab rebuild: Relay subagents implemented Sources (account groups first, then local models and profiles), Enabled (searchable provider groups with immediate On/Off editing), Pick order (readable ranked lists, visible add/move/tie/remove actions, fallback and Alt+M cutoff help), Effort (supported levels and direct per-row selection), and Agent jobs (inherited/custom status and inline ranked-list editing). Internal tab IDs and stored routing formats remain stable. The final app build was captured from an isolated profile, including a 420 px narrow-pane check.
+
+![Sources accounts in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/06-live-sources.png)
+![Sources local-model section in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/12-live-local.png)
+![Enabled model groups in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/07-live-enabled.png)
+![Pick order actions in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/08-live-order.png)
+![Effort selectors in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/09-live-effort.png)
+![Agent jobs inline editor in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/11-live-jobs-selected.png)
 
 ## Tests
-- `scripts/relay-build --target relay-modelspane-tests` — passed.
-- `xvfb-run -a build/relay-modelspane-tests` — 24 passed, 0 failed.
-- Isolated config screenshot run: `RELAY_N4PW_EVIDENCE=docs/qa_evidence/2026-09-23-00G1-labels xvfb-run -a build/relay-modelspane-tests everyTabKeepsItsMainControlsInANarrowPane` — passed; five images captured.
+- `ctest -R modelpicker`
+- `ctest -R modelspane`
+- `ctest -R jobstab`
+- `ctest -R settings`
+- `manual: docs/qa_evidence/2026-09-23-00G1-redesign/`
+
+`RELAY_JOBS=1 scripts/relay-build --target relay-modelpicker-tests relay-jobstab-tests relay-settings-tests relay-modelspane-tests` and `RELAY_JOBS=1 scripts/relay-build --target relay` passed. The four focused CTest suites passed together on the final revision (6.08 s). The 420 px widget capture test passed. The rapid-toggle test checks immediate state after each click, final persisted state, and notifications; a human-perceived latency threshold has not been measured.
+
+### Check 2026-09-23 23:23
+- passed · ctest:modelpicker — ctest -R modelpicker passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+- passed · ctest:modelspane — ctest -R modelspane passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+- passed · ctest:jobstab — ctest -R jobstab passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+- passed · ctest:settings — ctest -R settings passed for this revision on spark-dcc9, 2026-09-24T03:23:08Z
+- not-applicable · manual:docs/qa_evidence/2026-09-23-00G1-redesign/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-00G1-redesign/
+- notice · ctest:modelpicker — ctest -R modelpicker is slow: p95 2.59 s, p50 1.78 s
+- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.86 s, p50 1.60 s
+history: thread
