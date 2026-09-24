@@ -294,10 +294,12 @@ struct VerifyPlan {
     static VerifyPlan fromJson(const QJsonValue &value);
 };
 
-// The card page's Verify strip, one line: `Verify: probe · also ai-visual, pairwise · person
-// required: <criteria> · effort medium`. Empty parts are left out, a deferred plan is prefixed
-// `unverified until <deferred> · `, and a card with no block says "No verify plan yet" so the
-// strip is on every card page and the absence is what is read, not a blank.
+// What of the block the person is shown, one line: `Your review: <criteria> · effort medium`
+// when the plan asks for them (`human` required or optional), `Needs your sign-off: publish`
+// when `sign_off` is more than none, `Unverified until <deferred>` when the card is knowingly
+// waiting. Owner steer 2026-09-23: most of the block is the agent's work and the user does not
+// see it directly, so a card whose plan is fully machine-verified shows nothing at all — no
+// placeholder, no "no plan yet". Empty when there is nothing for a person in it.
 QString verifyStripText(const VerifyPlan &plan);
 // The rest of the block for the strip's tooltip, one `key: value` per line in the card's own
 // order, so the fields the strip leaves out (artifact, sample, sign-off, stakes, blast) are a

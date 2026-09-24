@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QBoxLayout>
+#include <optional>
 #include <QPushButton>
 #include <QDir>
 #include <QScrollArea>
@@ -460,11 +461,12 @@ void BoardPaneTests::tryItOpenKeepsWindowsPathsWithSpaces()
     }
 }
 
-// The Verify strip (#WFRA): one line under the Try it strip, on every card page. A card whose
-// `board_card` carries a `verify` block draws it as the ladder's sentence; a card with none says
-// "No verify plan yet"; and the same pane re-reading a card whose block was removed goes back to
-// saying so — the strip is read off the event, never kept. Failure shows as a card page with a
-// block and no strip, or the last card's plan shown on the next card.
+// The Verify strip (#WFRA): what of the card's `verify` block is the person's business, one
+// line under the Try it strip (owner steer 2026-09-23: shown only when a person is needed). A
+// plan that asks for a review, a sign-off or a deferral draws it; a card with no block and a
+// fully machine-verified card draw nothing at all, and the same pane re-reading a card whose
+// block changed goes quiet or speaks again — the strip is read off the event, never kept.
+// Failure shows as the agent's work put in front of the person, or their part of it hidden.
 void BoardPaneTests::theVerifyStripReadsTheCardsVerifyBlock()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -472,22 +474,27 @@ void BoardPaneTests::theVerifyStripReadsTheCardsVerifyBlock()
     view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("in-progress")),
                              row(QStringLiteral("SSRQ"), QStringLiteral("inbox"))}));
+    auto arrive = [&view, &sent](const QString &id, std::optional<QJsonObject> verify) {
+        auto reply = cardArrived(id);
+        reply.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+        if (verify)
+            reply.insert(QStringLiteral("verify"), *verify);
+        view.handleEvent(reply);
+    };
     view.openCard(QStringLiteral("K7Q2"));
-    auto reply = cardArrived(QStringLiteral("K7Q2"));
-    reply.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
-    reply.insert(QStringLiteral("verify"),
-                 QJsonObject{{"artifact", "visual"}, {"primary", "probe"},
-                             {"also", QJsonArray{"ai-visual", "pairwise"}},
-                             {"human", "required"}, {"criteria", "the strip reads as one line"},
-                             {"sign_off", "none"}, {"effort", "medium"}, {"stakes", "rework"},
-                             {"blast", "capability"}});
-    view.handleEvent(reply);
+    arrive(QStringLiteral("K7Q2"),
+           QJsonObject{{"artifact", "visual"}, {"primary", "probe"},
+                       {"also", QJsonArray{"ai-visual", "pairwise"}},
+                       {"human", "required"}, {"criteria", "the strip reads as one line"},
+                       {"sign_off", "none"}, {"effort", "medium"}, {"stakes", "rework"},
+                       {"blast", "capability"}});
     auto *strip = view.findChild<QLabel *>(QStringLiteral("boardVerifyStrip"));
     QVERIFY(strip);
     QCOMPARE(strip->text(),
-             QStringLiteral("<span style=\"color:%1\">Verify: probe · also ai-visual, pairwise · "
-                            "person required: the strip reads as one line · effort medium</span>")
-                 .arg(relay::theme::Warning.name()));
+             QStringLiteral("<span style=\"color:%1\">Your review: the strip reads as one line · "
+                            "effort medium</span>")
+                 .arg(relay::theme::TextMuted.name()));
+    QVERIFY(strip->isVisibleTo(&view));
     QVERIFY(strip->toolTip().contains(QStringLiteral("artifact: visual")));
     // Under the Try it strip and above the body, where the card's machine-read strips live.
     auto *document = view.findChild<QWidget *>(QStringLiteral("boardCardDocument"));
@@ -498,37 +505,46 @@ void BoardPaneTests::theVerifyStripReadsTheCardsVerifyBlock()
     QVERIFY(column->indexOf(tryStrip) < column->indexOf(strip));
     QVERIFY(column->indexOf(strip) < column->indexOf(document));
     // Evidence for the card (docs/qa_evidence/2026-09-23-WFRA-strip): the directory this names
-    // gets a grab of the page with the block and one without.
+    // gets a grab of the page with something to review and one with nothing to see.
     const QString captureDir = qEnvironmentVariable("RELAY_VERIFY_STRIP_SCREENSHOTS");
     if (!captureDir.isEmpty()) {
         view.resize(1100, 800);
         view.show();
-        QVERIFY(view.grab().save(QDir(captureDir).filePath(QStringLiteral("card-with-verify-block.png"))));
+        QVERIFY(view.grab().save(QDir(captureDir).filePath(QStringLiteral("card-asking-for-review.png"))));
     }
 
-    // The next card has no block: the strip says so, in the muted ink, and keeps no plan.
+    // The next card has no block at all: no strip, not a placeholder. The page is the card.
     view.openCard(QStringLiteral("SSRQ"));
-    auto plain = cardArrived(QStringLiteral("SSRQ"));
-    plain.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
-    view.handleEvent(plain);
-    QCOMPARE(strip->text(), QStringLiteral("<span style=\"color:%1\">No verify plan yet</span>")
-                                .arg(relay::theme::TextMuted.name()));
+    arrive(QStringLiteral("SSRQ"), std::nullopt);
+    QVERIFY(strip->text().isEmpty());
     QVERIFY(strip->toolTip().isEmpty());
-    QVERIFY(strip->isVisibleTo(&view));
+    QVERIFY(!strip->isVisibleTo(&view));
     if (!captureDir.isEmpty())
-        QVERIFY(view.grab().save(QDir(captureDir).filePath(QStringLiteral("card-without-verify-block.png"))));
+        QVERIFY(view.grab().save(QDir(captureDir).filePath(QStringLiteral("card-with-nothing-to-verify.png"))));
 
-    // A deferred plan that asks no person is muted and says what it waits for.
+    // A deferral the person should know about, with no review asked: one muted line for it.
     view.openCard(QStringLiteral("K7Q2"));
-    auto deferred = cardArrived(QStringLiteral("K7Q2"));
-    deferred.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
-    deferred.insert(QStringLiteral("verify"),
-                    QJsonObject{{"primary", "script"}, {"deferred", "the fixture lands"},
-                                {"human", "none"}, {"effort", "low"}});
-    view.handleEvent(deferred);
-    QCOMPARE(strip->text(), QStringLiteral("<span style=\"color:%1\">Verify: unverified until the "
-                                           "fixture lands · script · effort low</span>")
+    arrive(QStringLiteral("K7Q2"), QJsonObject{{"primary", "script"},
+                                               {"deferred", "the fixture lands"},
+                                               {"human", "none"}, {"effort", "low"}});
+    QCOMPARE(strip->text(), QStringLiteral("<span style=\"color:%1\">Unverified until the "
+                                           "fixture lands</span>")
                                 .arg(relay::theme::TextMuted.name()));
+
+    // A sign-off beyond `none`: theirs to give.
+    view.openCard(QStringLiteral("K7Q2"));
+    arrive(QStringLiteral("K7Q2"), QJsonObject{{"primary", "script"}, {"human", "none"},
+                                               {"sign_off", "publish"}, {"effort", "low"}});
+    QCOMPARE(strip->text(), QStringLiteral("<span style=\"color:%1\">Needs your sign-off: "
+                                           "publish</span>")
+                                .arg(relay::theme::TextMuted.name()));
+
+    // A fully machine-verified plan: the same quiet page as a card with no block.
+    view.openCard(QStringLiteral("K7Q2"));
+    arrive(QStringLiteral("K7Q2"), QJsonObject{{"primary", "script"}, {"human", "none"},
+                                               {"sign_off", "none"}, {"effort", "low"}});
+    QVERIFY(strip->text().isEmpty());
+    QVERIFY(!strip->isVisibleTo(&view));
 }
 
 // What `RelayWindow::deliverToConsoles` asks of an unsurfaced event before showing it to a card

@@ -953,27 +953,27 @@ VerifyPlan VerifyPlan::fromJson(const QJsonValue &value)
 QString verifyStripText(const VerifyPlan &plan)
 {
     if (!plan.present)
-        return QStringLiteral("No verify plan yet");
+        return QString();
     QStringList parts;
-    if (!plan.deferred.isEmpty())
-        parts << QStringLiteral("unverified until %1").arg(plan.deferred);
-    if (!plan.primary.isEmpty())
-        parts << plan.primary;
-    if (!plan.also.isEmpty())
-        parts << QStringLiteral("also %1").arg(plan.also.join(QStringLiteral(", ")));
-    // `human: none` is the ordinary case and says nothing; the other two say whether the
-    // person's look is asked for or required, and on what the criteria say they should judge.
-    if (!plan.human.isEmpty() && plan.human != QStringLiteral("none")) {
-        QString person = QStringLiteral("person %1").arg(plan.human);
-        if (!plan.criteria.isEmpty())
-            person += QStringLiteral(": %1").arg(plan.criteria);
-        parts << person;
+    // The one thing a person has to do: their review. `required` and `optional` both mean the
+    // plan expects a person's eye (owner steer 2026-09-23: shown only when a person is needed),
+    // the criteria is what they are asked to judge, and the effort rides along because it says
+    // how big the ask is. `human: none` — the ordinary card — is not the person's business.
+    if (plan.human == QStringLiteral("required") || plan.human == QStringLiteral("optional")) {
+        QString review = plan.criteria.isEmpty()
+                             ? QStringLiteral("Your review")
+                             : QStringLiteral("Your review: %1").arg(plan.criteria);
+        if (!plan.effort.isEmpty())
+            review += QStringLiteral(" · effort %1").arg(plan.effort);
+        parts << review;
     }
-    if (!plan.effort.isEmpty())
-        parts << QStringLiteral("effort %1").arg(plan.effort);
-    if (parts.isEmpty())
-        return QStringLiteral("Verify:");
-    return QStringLiteral("Verify: %1").arg(parts.join(QStringLiteral(" · ")));
+    // A sign-off beyond `none` is also theirs: the card cannot close without them.
+    if (!plan.signOff.isEmpty() && plan.signOff != QStringLiteral("none"))
+        parts << QStringLiteral("Needs your sign-off: %1").arg(plan.signOff);
+    // And the one thing they need to know: the card is knowingly unverified for now.
+    if (!plan.deferred.isEmpty())
+        parts << QStringLiteral("Unverified until %1").arg(plan.deferred);
+    return parts.join(QStringLiteral(" · "));
 }
 
 QString verifyPlanDetail(const VerifyPlan &plan)

@@ -2070,11 +2070,13 @@ public:
         connect(m_tryOpen, &QPushButton::clicked, this, [this] { openTry(); });
         connect(m_tryAnswer, &QLineEdit::returnPressed, this, [this] { answerTry(); });
 
-        // The Verify strip (#WFRA, the QA ladder): the card's `verify:` block as one line, the
-        // same place and face as the Try it strip above it. Unlike that strip it is on every
-        // card page — a card with no block says so, because the absence of a plan is what the
-        // person is meant to notice. No button and no editing: the block is written by the
-        // agent at planning and by `board_update_card`, and this is only where it is read.
+        // The Verify strip (#WFRA, the QA ladder): what of the card's `verify:` block is the
+        // person's business, one line in the same place and face as the Try it strip above it.
+        // Most of the block is the agent's work and the user does not see it directly (owner
+        // steer 2026-09-23), so the strip is shown only when there is something for them in it
+        // — a review, a sign-off, or a deferral — and hidden otherwise. No button and no
+        // editing: the block is written by the agent at planning and by `board_update_card`,
+        // and this is only where it is read.
         m_verifyPlanLine = new QLabel(this);
         m_verifyPlanLine->setObjectName(QStringLiteral("boardVerifyStrip"));
         m_verifyPlanLine->setWordWrap(true);
@@ -2609,19 +2611,19 @@ public:
     }
 
     // The Verify strip's line (#WFRA): `board::verifyStripText` says the words, this only inks
-    // them. Muted throughout: the plan is a fact about the card, not a call for a person's eye —
-    // except that a plan which asks for a person is drawn in the amber that means one, and a
-    // card with no plan at all says so in the muted ink like any other empty field.
+    // them, in the muted colour throughout — the strip is a note about the card, not a call to
+    // arms. Hidden when the plan leaves nothing for a person (owner steer 2026-09-23): a card
+    // with no block at all and a fully machine-verified card look the same, which is the point.
     void showVerifyPlan(const QJsonValue &block)
     {
         const board::VerifyPlan plan = board::VerifyPlan::fromJson(block);
         const QString text = board::verifyStripText(plan);
-        const bool asksAPerson = plan.present && !plan.human.isEmpty()
-                                 && plan.human != QStringLiteral("none");
-        m_verifyPlanLine->setText(QStringLiteral("<span style=\"color:%1\">%2</span>")
-                                      .arg(asksAPerson ? theme::Warning.name() : theme::TextMuted.name(),
-                                           text.toHtmlEscaped()));
-        m_verifyPlanLine->setToolTip(plan.present ? board::verifyPlanDetail(plan) : QString());
+        m_verifyPlanLine->setText(text.isEmpty() ? QString()
+                                                 : QStringLiteral("<span style=\"color:%1\">%2</span>")
+                                                       .arg(theme::TextMuted.name(),
+                                                            text.toHtmlEscaped()));
+        m_verifyPlanLine->setVisible(!text.isEmpty());
+        m_verifyPlanLine->setToolTip(text.isEmpty() ? QString() : board::verifyPlanDetail(plan));
     }
 
     // A `tests_check` answer (31.2): the findings as clickable rows and at most three action
