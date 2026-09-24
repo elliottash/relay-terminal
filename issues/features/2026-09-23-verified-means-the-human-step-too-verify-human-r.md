@@ -12,7 +12,7 @@ created: '2026-09-23'
 source: owner, Relay conversation, 2026-09-23
 implemented_by: anthropic/claude-fable-5-1
 verify: {artifact: code, primary: script, also: [ai-text], human: optional, criteria: each refusal names the card and the missing thing in one sentence, sign_off: none, effort: medium}
-links: {plans: [], commits: [c40c6695254620c6ee282b7b1f56802d68fedef2, e5e69ff78ea88ca0458d43c68f1bb1f02492a579, 65b0f6ffb5d56fb8569e6ef76c2a05aef7b6ea16], evidence: [], related: [BX7B, 1QKM, JNYN], github: null}
+links: {plans: [], commits: [e6c33832162d1312b7b06fef7da948248f1c5228, c40c6695254620c6ee282b7b1f56802d68fedef2, e5e69ff78ea88ca0458d43c68f1bb1f02492a579, 65b0f6ffb5d56fb8569e6ef76c2a05aef7b6ea16], evidence: [], related: [BX7B, 1QKM, JNYN], github: null}
 ---
 # Verified means the human step too: `verify.human: required` gates done, and deferred verification is an honest state
 
@@ -43,6 +43,7 @@ i think i want to expand the verification concept . a card has a designation of 
 
 ## Execution Summary
 Commits c40c6695 (code, tests, skill), e5e69ff7 (repair: c40c6695 had also carried the `profile:` frontmatter another session left uncommitted in `deliver/SKILL.md`; taken back) and 65b0f6ff (the skill's step-5 paragraph alone). `relay_core.board.verified(card)` is the one definition; `unverified_reasons(card)` lists what is missing in ladder order: not deferred, primary evidence (`## Verdict` or a `### Check` under `## Tests` whose lines are all `passed` / `not-applicable` with one `passed`), the person's `Answer:` when `human: required`, a `Receipt:` line in `## Verdict` or `## Execution Summary` when `sign_off` ≠ `none`; an invalid block is itself a reason. `board_move_card` (`_verify_gate`, after `_human_qa_gate`) refuses with `board_refused`: `requires: verify_deferred` (+ `until`) for `done` or a `needs-qa-*` lane while deferred, for any actor; `requires: human_qa_answer`, `offer: needs-qa-human` for an agent's `done` under `human: required` with no answered question (the owner at the keyboard is the answer, as before); `requires: receipt`, `sign_off` named, for `done` without a receipt, for any actor. The existing open-question refusal is kept and now says `(verify.human: required)` and offers the lane. Clearing `deferred` via `fields.verify` appends `verify.deferred cleared by <actor> (was …)` to the update's thread event. `check` warns `not_verified` on a `done` card whose block is not met. `board_list` rows and `BOARD.md` show `unverified until <text>`; the card-page strip is the GUI session's.
+- Owner steer 2026-09-23 (agent-facing only): each refusal is one sentence — the one place the user meets the block — and at row level only the deferred card's `unverified until …` shows (`BOARD.md` status cell; `board_list` row field `unverified_until` with the bare condition).
 
 ## Tests
 - `PYTHONPATH=backend python3 -m unittest tests.test_board.VerifiedTests`

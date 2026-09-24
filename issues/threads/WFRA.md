@@ -18,3 +18,6 @@ Claimed · subagent wfra-gui of pane 9b541d35, GUI side: `VerifyPlan` + `verifyS
 
 <!-- relay:entry 20260924T031234Z-wi author=agent kind=event model=claude-fable-5-1 pane=9b541d35 -->
 - ✦ agent moved this card · Executing → Needs verification · Python side landed in 39eedbfb: schema, validation, check, BOARD.md column, tools, policy, skill, protocol 19.21; the card-page strip is the GUI session's · implemented_by anthropic/claude-fable-5-1
+
+<!-- relay:entry 20260924T031954Z-wfras author=agent kind=event model=claude-fable-5-1 pane=9b541d35 -->
+- ✦ agent noted owner steer 2026-09-23: agent-facing only · Verify column dropped from BOARD.md and board_list rows; the block travels in board_read / the board_card event alone, the deferred card's `unverified until …` is the only user-facing row text, the claim reminder stays in the tool result

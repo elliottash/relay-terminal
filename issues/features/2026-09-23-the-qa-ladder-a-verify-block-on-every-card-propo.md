@@ -11,7 +11,7 @@ created: '2026-09-23'
 source: owner, Relay conversation, 2026-09-23
 implemented_by: anthropic/claude-fable-5-1
 verify: {artifact: code, primary: script, also: [ai-text, ai-visual], human: optional, criteria: the claim reminder and a refusal read as one sentence each and the strip reads in one line, sign_off: none, effort: medium}
-links: {plans: [], commits: [39eedbfb687440ce50740859a18353641a5d1e5b, d1c9c9af6e608f826c924f0a92ebf9fc7f7d4961], evidence: [docs/qa_evidence/2026-09-23-WFRA-strip/], related: [BX7B, 1QKM, WC3E, JNYN, 74Y5], github: null}
+links: {plans: [], commits: [e6c33832162d1312b7b06fef7da948248f1c5228, 39eedbfb687440ce50740859a18353641a5d1e5b, d1c9c9af6e608f826c924f0a92ebf9fc7f7d4961], evidence: [docs/qa_evidence/2026-09-23-WFRA-strip/], related: [BX7B, 1QKM, WC3E, JNYN, 74Y5], github: null}
 ---
 # The QA ladder: a `verify` block on every card, proposed by the agent, shown on the card page
 
@@ -50,6 +50,7 @@ agent should make this suggestion, and also the effort level, per task.
 
 ## Execution Summary
 - Python half (subagent wfra-backend): Python side, commit 39eedbfb (#WFRA). `relay_core.board` gained the ladder's vocabulary (`VERIFY_*`), `validate_verify` (refuses naming the bad key or value; normalizes: `also` a list, `human`/`sign_off` default `none`), `verify_block`, `verify_summary` and `deferred_text`; `verify` is a work-card field and round-trips as a flow map. `Board.check` errors `bad_verify` and warns `missing_verify` from `executing` on (live statuses only; closed cards are history). `BOARD.md` has a Verify column (primary mode + `person` / `person?` flag, or `unverified until …`), and `board_list` rows carry the same `verify` cell. `board_tools`: `board_update_card fields.verify` validates; `board_read` returns the block normalized under `front.verify` (so the `board_card` event carries it) and names an invalid stored one in `verify_error`; `board_claim` returns a one-line `reminder` when the card has none. Policy rule 11 (two lines: the block is capped at 3 KB by `tests/test_system_prompt.py`, so rules 5-8 and 10 lost a few words and the ladder itself lives in the `deliver` skill step 4 and the tool description), `issues/POLICY.md` regenerated, protocol 19.21 documents the wire shape for the GUI. The card-page strip (`BoardPane.cpp`) is the GUI session's and draws from `front.verify`.
+- Owner steer 2026-09-23 (agent-facing only): the Verify column was removed from `BOARD.md` and the summary cell from `board_list` rows — the block reaches the agent through `board_read` / the `board_card` event alone; the only user-facing row text is a deferred card's `unverified until …` (`BOARD.md` status cell, `board_list` field `unverified_until`), and the claim reminder lives in the tool result only.
 - GUI half (subagent wfra-gui): the Verify strip on the card page — `board::VerifyPlan`, `verifyStripText`, `verifyPlanDetail` in `src/BoardModel.*`, `showVerifyPlan` and the `boardVerifyStrip` label under the Try it strip in `src/BoardPane.cpp`; commit d1c9c9af, evidence bf950a9a (`docs/qa_evidence/2026-09-23-WFRA-strip/`).
 
 ## Tests
