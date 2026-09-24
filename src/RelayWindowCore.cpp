@@ -936,6 +936,7 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
             else if (action == QStringLiteral("splitDown")) w->runAction(QStringLiteral("pane.splitDown"));
             else if (action == QStringLiteral("splitSameHost")) w->runAction(QStringLiteral("ssh.splitSameHost"));
             else if (action == QStringLiteral("equalize")) w->runAction(QStringLiteral("pane.equalize"));
+            else if (action == QStringLiteral("runBackground")) w->runAction(QStringLiteral("pane.runInBackground"));
             else if (action == QStringLiteral("close")) w->closePane(guard, true);
         };
         // Grey the menu's "Equalize pane sizes" while this pane is alone in its tab: any other
@@ -1164,7 +1165,8 @@ QWidget *RelayWindow::buildNode(const QJsonObject &node) {
                                                  board.value(QStringLiteral("hidden")).toArray(),
                                                  board.value(QStringLiteral("sort")).toString(),
                                                  board.value(QStringLiteral("labels")).toArray(),
-                                                 board.value(QStringLiteral("self_closed")).toArray());
+                                                 board.value(QStringLiteral("self_closed")).toArray(),
+                                                 board.value(QStringLiteral("grouping")).toString());
                 // Which of the signals rows were open (#AQ6X), set on the view rather than through
                 // one more argument: both are folded by default, so an older node opens nothing.
                 if (relay::BoardView *board_view = tool->board()) {
@@ -1655,4 +1657,3 @@ void RelayWindow::closePane(QWidget *pane, bool record) {
         if (focusNext) { setActiveLeaf(focusNext); focusLeaf(focusNext); }
         updateTitles();
     }
-

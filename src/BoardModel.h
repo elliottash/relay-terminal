@@ -120,6 +120,19 @@ Sort sortFromId(const QString &id);
 // "Title A→Z", "Title Z→A" — the word for what is on, in a notice or a tooltip.
 QString sortTitle(Sort sort);
 
+// ---- grouping (#ESDF, owner 2026-09-21: "i think it would be better if that was one of the sort
+// options. instead the stage should be a column") ------------------------------------------------
+//
+// Whether the list is cut into a section per stage or is one run of cards. `Flat` is the default
+// for a new pane (owner, 2026-09-21, "yes"): every shown card in one list, in the sort that is on
+// across the whole of it, each row naming its stage in the Stage column. `Sections` is the board
+// as it was — a header per status with the sort inside each. The Stage header toggles the two.
+enum class Grouping { Sections, Flat };
+// "sections", "flat" — the id the pane's layout node keeps — and back; an unknown id reads as
+// Sections, and an *empty* one (a node saved before the choice existed) as the default, Flat.
+QString groupingId(Grouping grouping);
+Grouping groupingFromId(const QString &id);
+
 // ---- the list's columns (owner, 2026-09-19: "add a 'created' and 'updated' column") ----------
 //
 // The header row over the list, left to right: the priority flag, the card itself, then when it
@@ -306,10 +319,16 @@ struct Row {
     QString signalKey;        // Signal: the signal's key (`ctest:panelayout`), never a card id
     int indent = 0;           // Signal: 1 for a member of a group, or a dismissed signal under
                               // its toggle — the row is drawn one step in from its parent
+    QString stage;            // Card, flat list only (#ESDF): the Stage column's text — the
+                              // card's exact status, or "Verified". Empty under sections, whose
+                              // header already says it
 };
 
 // The card rows of one section, top to bottom.
 QStringList cardsInSection(const QList<Row> &rows, const QString &columnId);
+// Every card row of the list, top to bottom: what a drag or Alt+Shift+↑↓ reorders against when
+// the list is flat (#ESDF), where one stage's cards are not a contiguous run.
+QStringList cardsInList(const QList<Row> &rows);
 
 // Where a drop lands: `beforeRow` is the row index the card would be inserted in front of
 // (0 … rows.size()). The point just above a section header belongs to the section above it, so a
@@ -384,6 +403,10 @@ public:
     // The order the cards inside a section come in (above). `rows()` and `cards()` both follow it.
     void setSort(Sort sort) { m_sort = sort; }
     Sort sort() const { return m_sort; }
+    // Sections or one flat list (#ESDF, above). `rows()` follows it; `cards()` and `sections()`
+    // do not — a section still exists in a flat list, it is only not drawn as a header.
+    void setGrouping(Grouping grouping) { m_grouping = grouping; }
+    Grouping grouping() const { return m_grouping; }
     // Which section this card belongs in, or empty when no section collects its status.
     QString sectionOf(const Card &card) const;
     int openCount() const;                               // filtered, not done or dropped
@@ -405,6 +428,10 @@ public:
     // in this set draws them as ordinary rows under it. Nothing folds while a filter is active,
     // here as for a section header: a search that hid its own matches would be a search that does
     // nothing, so a matching self-closed card is an ordinary row and there is no fold row at all.
+    //
+    // Flat (#ESDF): no headers and no fold rows — every shown card of every section `hidden` does
+    // not name, in the sort across the whole list (Manual is the board's global rank), each with
+    // its `stage`. `collapsed` and `selfClosedOpen` say nothing then: folding is a section's.
     QList<Row> rows(const QSet<QString> &collapsed, const QSet<QString> &hidden = {},
                     const QSet<QString> &selfClosedOpen = {}) const;
 
@@ -461,6 +488,7 @@ private:
     QSet<QString> m_searchIds;
     QSet<QString> m_labelFilter;
     Sort m_sort = Sort::Manual;
+    Grouping m_grouping = Grouping::Sections;
 };
 
 }  // namespace board

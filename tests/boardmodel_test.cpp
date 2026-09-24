@@ -371,6 +371,8 @@ private slots:
     void statusTitlesAreHumanReadable();
     void everySectionSaysWhatItIsFor();
     void theRowListIsHeadersThenCards();
+    void aFlatListIsEveryShownCardInOneOrder();
+    void theStageHeaderTogglesTheFlatListAndTheChoiceIsKept();
     void badgesSayWhatTheCardCarries();
     void aClaimedCardCarriesThePanesSession();
     void aClaimedRowSaysWhichPaneHoldsItAndWhetherItIsStillOpen();
@@ -872,6 +874,65 @@ void BoardModelTests::theRowListIsHeadersThenCards()
     QCOMPARE(relay::board::rowOfCard(folded, QStringLiteral("K7Q2")), -1);
 }
 
+// #ESDF (owner, 2026-09-21: "i think it would be better if that was one of the sort options.
+// instead the stage should be a column"): flat is one run of cards, sorted across the whole list,
+// each naming its stage, with the checkboxes, label chips and filter still composing.
+void BoardModelTests::aFlatListIsEveryShownCardInOneOrder()
+{
+    using relay::board::Grouping;
+    using relay::board::Sort;
+    QCOMPARE(relay::board::groupingFromId(QStringLiteral("flat")), Grouping::Flat);
+    QCOMPARE(relay::board::groupingFromId(QStringLiteral("sections")), Grouping::Sections);
+    QCOMPARE(relay::board::groupingFromId(QString()), Grouping::Flat);        // the default
+    QCOMPARE(relay::board::groupingFromId(QStringLiteral("nope")), Grouping::Sections);
+    for (const Grouping g : {Grouping::Flat, Grouping::Sections})
+        QCOMPARE(relay::board::groupingFromId(relay::board::groupingId(g)), g);
+
+    Model model;
+    model.setConfig(config());
+    QJsonObject a = row("AAA1", "inbox", "features", "b"), b = row("BBB2", "ready", "features", "a"),
+                c = row("CCC3", "needs-qa-human", "features", "c"),
+                d = row("DDD4", "done", "features", "d");
+    a.insert(QStringLiteral("updated"), QStringLiteral("2026-09-10T08:00:00Z"));
+    b.insert(QStringLiteral("updated"), QStringLiteral("2026-09-12T08:00:00Z"));
+    c.insert(QStringLiteral("updated"), QStringLiteral("2026-09-11T08:00:00Z"));
+    d.insert(QStringLiteral("updated"), QStringLiteral("2026-09-13T08:00:00Z"));
+    a.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("gui")});
+    c.insert(QStringLiteral("labels"), QJsonArray{QStringLiteral("gui")});
+    model.reset(rows({a, b, c, d}));
+    model.setGrouping(Grouping::Flat);
+
+    // Recently updated is the board's most recent cards whatever their stage: no headers, no
+    // fold rows, every row a card naming its stage (the exact status, not the section's name).
+    model.setSort(Sort::RecentlyUpdated);
+    const QList<Row> flat = model.rows({QStringLiteral("ready"), QStringLiteral("done")});
+    QCOMPARE(sketch(flat), (QStringList{"DDD4", "BBB2", "CCC3", "AAA1"}));
+    for (const Row &r : flat)
+        QCOMPARE(r.kind, Row::Card);
+    QCOMPARE(flat.at(2).stage, QStringLiteral("Needs QA (human)"));
+    QCOMPARE(flat.at(2).columnId, QStringLiteral("needs-qa"));
+    QCOMPARE(flat.at(0).stage, QStringLiteral("Done"));
+    QCOMPARE(relay::board::cardsInList(flat), (QStringList{"DDD4", "BBB2", "CCC3", "AAA1"}));
+    // Manual is the board's global rank, across stages.
+    model.setSort(Sort::Manual);
+    QCOMPARE(sketch(model.rows({})), (QStringList{"BBB2", "AAA1", "CCC3", "DDD4"}));
+    // An unticked section is off the page; the label chips and the filter narrow the rest.
+    model.setSort(Sort::RecentlyUpdated);
+    QCOMPARE(sketch(model.rows({}, {QStringLiteral("done")})), (QStringList{"BBB2", "CCC3", "AAA1"}));
+    model.setLabelFilter({QStringLiteral("gui")});
+    QCOMPARE(sketch(model.rows({})), (QStringList{"CCC3", "AAA1"}));
+    model.setFilter(QStringLiteral("status:inbox"));
+    QCOMPARE(sketch(model.rows({})), (QStringList{"AAA1"}));
+    model.setFilter(QString());
+    model.setLabelFilter({});
+    // Sections is the board as it was, with no stage cell: its header already says it.
+    model.setGrouping(Grouping::Sections);
+    const QList<Row> sectioned = model.rows({});
+    QCOMPARE(sectioned.first().kind, Row::Section);
+    for (const Row &r : sectioned)
+        QVERIFY(r.stage.isEmpty());
+}
+
 void BoardModelTests::badgesSayWhatTheCardCarries()
 {
     Card card = Card::fromJson(row("K7Q2", "needs-qa-human", "features"));
@@ -1174,6 +1235,63 @@ void BoardModelTests::theViewSendsAMoveWhenACardIsDropped()
 // button to adding header columns that you click on ... and sorting is within section"): a click on
 // a cell orders the cards inside every section by that column, a second click turns it round, a
 // third gives the board its own drag order back.
+// The Stage header is the grouping (#ESDF): a new pane opens flat and newest-updated first, a
+// click groups by stage with the board's own order, another click goes flat again, and the choice
+// rides the layout node.
+void BoardModelTests::theStageHeaderTogglesTheFlatListAndTheChoiceIsKept()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.restoreGrouping(QString());       // what createBoardPane does for a new pane
+    QCOMPARE(view.grouping(), QStringLiteral("flat"));
+    QCOMPARE(view.sortOrder(), QStringLiteral("updated"));
+    QJsonObject a = row("AAA1", "inbox", "features", "a"), b = row("BBB2", "ready", "features", "b");
+    a.insert(QStringLiteral("updated"), QStringLiteral("2026-09-10T08:00:00Z"));
+    b.insert(QStringLiteral("updated"), QStringLiteral("2026-09-12T08:00:00Z"));
+    view.handleEvent(opened({a, b}));
+    QCOMPARE(sketch(view.rows()), (QStringList{"BBB2", "AAA1"}));
+    QCOMPARE(listOf(view)->count(), view.rows().size());
+
+    auto *stage = view.findChild<QToolButton *>(QStringLiteral("boardHeaderStage"));
+    QVERIFY(stage);
+    QCOMPARE(stage->text(), QStringLiteral("STAGE"));
+    QVERIFY(!stage->property("active").toBool());
+    // ← on a card in a flat list folds nothing that would come back as a hidden header.
+    view.selectCard(QStringLiteral("AAA1"));
+    QTest::keyPress(listOf(view), Qt::Key_Left);
+    QCOMPARE(sketch(view.rows()), (QStringList{"BBB2", "AAA1"}));
+
+    stage->click();
+    QCOMPARE(view.grouping(), QStringLiteral("sections"));
+    QCOMPARE(view.sortOrder(), QStringLiteral("manual"));
+    QVERIFY(stage->property("active").toBool());
+    QVERIFY(relay::board::rowOfSection(view.rows(), QStringLiteral("inbox")) >= 0);
+    stage->click();
+    QCOMPARE(view.grouping(), QStringLiteral("flat"));
+    QCOMPARE(view.sortOrder(), QStringLiteral("updated"));
+
+    // A saved Sections pane comes back grouped, with its own sort; an unknown id reads as Sections.
+    relay::BoardView restored(QStringLiteral("/tmp/workspace"));
+    restored.setSortOrder(QStringLiteral("title"));
+    restored.restoreGrouping(QStringLiteral("sections"));
+    QCOMPARE(restored.grouping(), QStringLiteral("sections"));
+    QCOMPARE(restored.sortOrder(), QStringLiteral("title"));
+    // A flat pane saved in Manual keeps Manual: only an empty id is the new-pane default.
+    relay::BoardView manual(QStringLiteral("/tmp/workspace"));
+    manual.restoreGrouping(QStringLiteral("flat"));
+    QCOMPARE(manual.sortOrder(), QStringLiteral("manual"));
+    // In Manual a flat drag reorders across stages and never changes the card's status.
+    QList<QJsonObject> sent;
+    manual.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    manual.handleEvent(opened({a, b}));
+    QCOMPARE(sketch(manual.rows()), (QStringList{"AAA1", "BBB2"}));
+    manual.selectCard(QStringLiteral("BBB2"));
+    QTest::keyPress(listOf(manual), Qt::Key_Up, Qt::AltModifier | Qt::ShiftModifier);
+    QVERIFY(!sent.isEmpty());
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_move"));
+    QCOMPARE(sent.last().value(QStringLiteral("before")).toString(), QStringLiteral("AAA1"));
+    QVERIFY(!sent.last().contains(QStringLiteral("status")));
+}
+
 void BoardModelTests::theColumnHeaderSortsTheListWithinASection()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));

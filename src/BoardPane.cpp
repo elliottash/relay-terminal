@@ -299,12 +299,27 @@ bool dateColumnsFit(const QFont &font, int width)
     return width >= keep;
 }
 
+// The Stage column of a flat list (#ESDF): the widest stage name in the badges' font, so every
+// row's stage lines up and the header's STAGE sits over the same cell.
+int stageColumnWidth(const QFont &font)
+{
+    return QFontMetrics(smaller(font, 0.85)).horizontalAdvance(QStringLiteral("Needs verification"))
+           + 6;
+}
+
+// Whether a row can carry the Stage column beside the two dates. A narrower flat row names its
+// stage as a status badge instead, so the stage is never simply gone.
+bool stageColumnFits(const QFont &font, int width)
+{
+    return dateColumnsFit(font, width - stageColumnWidth(font) - kDateGap);
+}
+
 // Where everything on one card row goes, relative to the row's top-left corner. The badges that
 // do not fit are already gone (board::fitBadges) and the title is elided into what is left, so a
 // narrow pane loses decoration before it loses meaning.
 struct CardShape {
-    QRect priorityRect, idRect, idCopyRect, titleRect, createdRect, updatedRect;
-    QString title, created, updated;
+    QRect priorityRect, idRect, idCopyRect, titleRect, createdRect, updatedRect, stageRect;
+    QString title, created, updated, stage;   // `stage` is empty but in a flat list (#ESDF)
     bool dates = false;                 // the two date columns are on this row
     QList<QPair<board::Badge, QRect>> badges;
     int height = 0;
@@ -313,8 +328,8 @@ struct CardShape {
 // `sessionLive` says whether the pane the card was claimed by is still open (#R9G7): it only
 // changes what the claim chip says, but it is measured with the rest of the badges, so it has to
 // be known before the row is laid out.
-CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font, int width,
-                    bool sessionLive = true)
+CardShape cardShape(const board::Card &card, bool showStatus, const QString &stage,
+                    const QFont &font, int width, bool sessionLive = true)
 {
     CardShape shape;
     const QFontMetrics metrics(font);
@@ -349,6 +364,19 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QFont &font,
         shape.created = board::dateCell(card.created);
         shape.updated = board::dateCell(card.updated);
         contentRight = shape.createdRect.left() - kDateGap;
+    }
+    // The Stage column, left of the dates, when the list is flat (#ESDF) and the row is wide
+    // enough; otherwise the stage rides the badges as the status one.
+    if (!stage.isEmpty()) {
+        if (stageColumnFits(font, width)) {
+            const int column = stageColumnWidth(font);
+            shape.stageRect = QRect(contentRight - column, 0, column, shape.height);
+            shape.stage = QFontMetrics(smaller(font, 0.85)).elidedText(stage, Qt::ElideRight,
+                                                                      column);
+            contentRight = shape.stageRect.left() - kDateGap;
+        } else {
+            showStatus = true;
+        }
     }
     const int available = qMax(40, contentRight - x);
 
@@ -555,7 +583,7 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
-        return QSize(width, cardShape(*card, row->showStatus, option.font, width,
+        return QSize(width, cardShape(*card, row->showStatus, row->stage, option.font, width,
                                      sessionLive(*card)).height);
     }
 
@@ -610,7 +638,7 @@ public:
         const board::Row *row = rowAt(rowIndex);
         if (!row || row->kind != board::Row::Card)
             return QRect();
-        return cardShape(board::Card{}, false, m_list->font(), rowWidth())
+        return cardShape(board::Card{}, false, QString(), m_list->font(), rowWidth())
             .priorityRect.translated(itemRect.topLeft());
     }
 
@@ -624,7 +652,7 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QRect();
-        return cardShape(*card, row->showStatus, m_list->font(), rowWidth(), sessionLive(*card))
+        return cardShape(*card, row->showStatus, row->stage, m_list->font(), rowWidth(), sessionLive(*card))
             .idCopyRect.translated(itemRect.topLeft());
     }
 
@@ -639,7 +667,7 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QString();
-        const CardShape shape = cardShape(*card, row->showStatus, m_list->font(), rowWidth(),
+        const CardShape shape = cardShape(*card, row->showStatus, row->stage, m_list->font(), rowWidth(),
                                           sessionLive(*card));
         for (const auto &placed : shape.badges)
             if (placed.first.kind == board::Badge::Label
@@ -816,7 +844,7 @@ private:
         const board::Card *card = m_model->card(row.cardId);
         if (!card)
             return;
-        const CardShape shape = cardShape(*card, row.showStatus, option.font, rect.width(),
+        const CardShape shape = cardShape(*card, row.showStatus, row.stage, option.font, rect.width(),
                                           sessionLive(*card));
         const QPoint origin = rect.topLeft();
         const bool selected = option.state & QStyle::State_Selected;
@@ -875,6 +903,14 @@ private:
                               Qt::AlignLeft | Qt::AlignVCenter, shape.created);
             painter->drawText(shape.updatedRect.translated(origin),
                               Qt::AlignLeft | Qt::AlignVCenter, shape.updated);
+        }
+        if (!shape.stage.isEmpty()) {
+            painter->save();
+            painter->setFont(smaller(option.font, 0.85));
+            painter->setPen(theme::TextMuted);
+            painter->drawText(shape.stageRect.translated(origin),
+                              Qt::AlignLeft | Qt::AlignVCenter, shape.stage);
+            painter->restore();
         }
 
         const QFont badgeFont = smaller(option.font, 0.85);
@@ -1009,9 +1045,22 @@ public:
                 continue;
             m_layout->addWidget(cell);
             // The stretch sits between the card's own label and the two date columns, which are
-            // the table's right-hand columns.
-            if (column == board::SortColumn::Card)
+            // the table's right-hand columns. The Stage cell (#ESDF) goes after it, left of the
+            // dates, over the rows' Stage column.
+            if (column == board::SortColumn::Card) {
                 m_layout->addStretch(1);
+                m_stage = new QToolButton(this);
+                m_stage->setObjectName(QStringLiteral("boardHeaderStage"));
+                m_stage->setToolButtonStyle(Qt::ToolButtonTextOnly);
+                m_stage->setCursor(Qt::PointingHandCursor);
+                m_stage->setFocusPolicy(Qt::NoFocus);
+                m_stage->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+                connect(m_stage, &QToolButton::clicked, this, [this] {
+                    if (onStage)
+                        onStage();
+                });
+                m_layout->addWidget(m_stage);
+            }
         }
         layoutCells();
         updateCells();
@@ -1019,6 +1068,8 @@ public:
 
     // Which column was clicked: the pane turns it into the sort that is on.
     std::function<void(board::SortColumn)> onSort;
+    // The Stage cell was clicked (#ESDF): the pane toggles sections and the flat list.
+    std::function<void()> onStage;
 
     // The list the cells line up with: its width decides where they sit and whether the two date
     // columns fit at all (the rows ask the same question of the same width, so a header whose
@@ -1036,6 +1087,16 @@ public:
             return;
         m_sort = sort;
         m_ready = true;
+        updateCells();
+    }
+
+    // Sections or flat (#ESDF): STAGE wears the accent while the list is grouped by stage, and
+    // the sort cells' tips say whether they order each section or the whole list.
+    void setGrouping(board::Grouping grouping)
+    {
+        if (grouping == m_grouping)
+            return;
+        m_grouping = grouping;
         updateCells();
     }
 
@@ -1087,6 +1148,13 @@ private:
                 cell->setFixedWidth(column);
             cell->setVisible(!date || dates);
         }
+        if (m_stage) {
+            QFont cellFont = monoFont(base, 0.85);
+            cellFont.setLetterSpacing(QFont::PercentageSpacing, 106);
+            m_stage->setFont(cellFont);
+            m_stage->setMinimumHeight(QFontMetrics(cellFont).height() + 6);
+            m_stage->setFixedWidth(stageColumnWidth(base));
+        }
     }
 
     // What each cell says: its name, and its arrow when it is the sort that is on.
@@ -1104,16 +1172,31 @@ private:
             if (active == i && column != board::SortColumn::Priority)
                 text += board::sortAscending(m_sort) ? QStringLiteral(" ▲") : QStringLiteral(" ▼");
             cell->setText(text);
-            cell->setToolTip(cellTooltip(column, m_sort));
+            cell->setToolTip(cellTooltip(column, m_sort, m_grouping));
             cell->setProperty("active", active == i);
             cell->style()->unpolish(cell);
             cell->style()->polish(cell);
+        }
+        if (m_stage) {
+            const bool sections = m_grouping == board::Grouping::Sections;
+            m_stage->setText(QStringLiteral("STAGE"));
+            m_stage->setToolTip(sections
+                                    ? QStringLiteral("Grouped by stage: a section per status. "
+                                                     "Click for one list of every card, each "
+                                                     "row naming its stage.")
+                                    : QStringLiteral("One list of every card, each row naming its "
+                                                     "stage. Click to group the cards into a "
+                                                     "section per stage."));
+            m_stage->setProperty("active", sections);
+            m_stage->style()->unpolish(m_stage);
+            m_stage->style()->polish(m_stage);
         }
     }
 
     // The tip: what the column is and the orders a click walks through, in the order it walks
     // through them — so the cycle back to the board's own drag order is written where it happens.
-    static QString cellTooltip(board::SortColumn column, board::Sort current)
+    static QString cellTooltip(board::SortColumn column, board::Sort current,
+                               board::Grouping grouping)
     {
         const board::Sort first = board::nextColumnSort(column, board::Sort::Manual);
         const board::Sort second = board::nextColumnSort(column, first);
@@ -1129,13 +1212,17 @@ private:
                                   "board's own order.")
                 .arg(what, board::sortTitle(current).toLower(),
                      board::sortTitle(board::nextColumnSort(column, current)).toLower());
-        return QStringLiteral("Order the cards inside each section by %1: %2, then %3, then the "
-                              "board's own order — the one drag and drop writes.")
-            .arg(what, board::sortTitle(first).toLower(), board::sortTitle(second).toLower());
+        return QStringLiteral("Order the cards %1 by %2: %3, then %4, then the board's own order "
+                              "— the one drag and drop writes.")
+            .arg(grouping == board::Grouping::Flat ? QStringLiteral("of the whole list")
+                                                   : QStringLiteral("inside each section"),
+                 what, board::sortTitle(first).toLower(), board::sortTitle(second).toLower());
     }
 
     QHBoxLayout *m_layout = nullptr;
     QToolButton *m_cell[4] = {nullptr, nullptr, nullptr, nullptr};
+    QToolButton *m_stage = nullptr;
+    board::Grouping m_grouping = board::Grouping::Sections;
     QListWidget *m_list = nullptr;
     board::Sort m_sort = board::Sort::Manual;
     bool m_ready = false;
@@ -1491,11 +1578,24 @@ public:
     // Public so the pane's keyboard move and a test can take the same path as the mouse.
     void drop(const QString &card, int header, int before)
     {
-        const auto [columnId, slot] =
-            board::dropTarget(*m_rows, header >= 0 ? header + 1 : before);
-        if (columnId.isEmpty())
-            return;
-        const QStringList order = board::cardsInSection(*m_rows, columnId);
+        auto [columnId, slot] = board::dropTarget(*m_rows, header >= 0 ? header + 1 : before);
+        QStringList order;
+        if (columnId.isEmpty()) {
+            // A flat list (#ESDF): no header owns the point, so the drop reorders the card among
+            // every row and it stays in its own section — a stage changes by Alt+Shift+←/→ or
+            // the card's menu there, never by where it was let go.
+            const int own = board::rowOfCard(*m_rows, card);
+            if (own < 0 || board::rowOfSection(*m_rows, m_rows->at(own).columnId) >= 0)
+                return;
+            columnId = m_rows->at(own).columnId;
+            order = board::cardsInList(*m_rows);
+            slot = 0;
+            for (int i = 0; i < qBound(0, before, int(m_rows->size())); ++i)
+                if (m_rows->at(i).kind == board::Row::Card)
+                    ++slot;
+        } else {
+            order = board::cardsInSection(*m_rows, columnId);
+        }
         const int from = order.indexOf(card);
         const int target = from >= 0 && from < slot ? slot - 1 : slot;
         if (from >= 0 && target == from)
@@ -4619,6 +4719,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_columnHeader->onSort = [this](board::SortColumn column) {
         setSortOrder(board::sortId(board::nextColumnSort(column, m_model.sort())));
     };
+    m_columnHeader->onStage = [this] { toggleGrouping(); };
     listLayout->addWidget(m_columnHeader);
     m_list = new RowList(&m_rows, m_listPane);
     m_columnHeader->setList(m_list);
@@ -7461,13 +7562,16 @@ void BoardView::updateCounts()
         const QString id = m_checkIds.at(i);
         const int header = board::rowOfSection(m_rows, id);
         const QString title = sectionTitle(id);
+        // A flat list (#ESDF) has no headers to read the count off: its cards are the count.
+        const int held = header >= 0 ? m_rows.at(header).count
+                                     : int(board::cardsInSection(m_rows, id).size());
         QString tip;
         if (m_hidden.contains(id))
             tip = QStringLiteral("%1 — hidden; tick to put the section back").arg(title);
-        else if (header >= 0)
+        else if (header >= 0 || held > 0)
             tip = QStringLiteral("%1 · %2 card%3 — untick to hide the section")
-                      .arg(title).arg(m_rows.at(header).count)
-                      .arg(m_rows.at(header).count == 1 ? QString() : QStringLiteral("s"));
+                      .arg(title).arg(held)
+                      .arg(held == 1 ? QString() : QStringLiteral("s"));
         else
             tip = QStringLiteral("%1 — nothing matches the filter").arg(title);
         box->setToolTip(withMeaning(tip, id));
@@ -7788,8 +7892,41 @@ void BoardView::setSortOrder(const QString &id)
 // right, because the sort rides the layout node and the header reads the model.
 void BoardView::syncColumnHeader()
 {
-    if (m_columnHeader)
-        m_columnHeader->setSort(m_model.sort());
+    if (!m_columnHeader)
+        return;
+    m_columnHeader->setSort(m_model.sort());
+    m_columnHeader->setGrouping(m_model.grouping());
+}
+
+void BoardView::restoreGrouping(const QString &id)
+{
+    const board::Grouping grouping = board::groupingFromId(id);
+    m_model.setGrouping(grouping);
+    if (id.isEmpty() && grouping == board::Grouping::Flat && m_model.sort() == board::Sort::Manual)
+        m_model.setSort(board::Sort::RecentlyUpdated);
+    syncColumnHeader();
+    if (m_open)
+        rebuild();
+}
+
+// The Stage header's click (#ESDF): the board a section per stage, or one list of every card
+// with the stage in its own column.
+void BoardView::toggleGrouping()
+{
+    const bool toFlat = m_model.grouping() == board::Grouping::Sections;
+    m_model.setGrouping(toFlat ? board::Grouping::Flat : board::Grouping::Sections);
+    if (toFlat && m_model.sort() == board::Sort::Manual)
+        m_model.setSort(board::Sort::RecentlyUpdated);
+    else if (!toFlat)
+        m_model.setSort(board::Sort::Manual);
+    syncColumnHeader();
+    rebuild();
+    const int at = board::rowOfCard(m_rows, m_selected);
+    if (at >= 0)
+        selectRow(at);
+    showNotice(toFlat ? QStringLiteral("One list, %1. Click STAGE to group by stage again.")
+                            .arg(board::sortTitle(m_model.sort()).toLower())
+                      : QStringLiteral("Grouped by stage. Click STAGE for one list of every card."), false);
 }
 
 // One click on a row's flag (#VKFV): raise it (left) or lower it (right), clamped at −1…+3.
@@ -8898,7 +9035,11 @@ void BoardView::reorder(int delta)
     if (at < 0)
         return;
     const QString columnId = m_rows.at(at).columnId;
-    const QStringList order = board::cardsInSection(m_rows, columnId);
+    // In a flat list (#ESDF) a place up or down is the row above or below, whatever its stage;
+    // the card keeps its own section, so only its rank moves.
+    const QStringList order = m_model.grouping() == board::Grouping::Flat
+                                  ? board::cardsInList(m_rows)
+                                  : board::cardsInSection(m_rows, columnId);
     const int from = order.indexOf(m_selected);
     const int slot = from + delta;
     if (from < 0 || slot < 0 || slot >= order.size())
@@ -8948,6 +9089,10 @@ void BoardView::foldSelected()
             toggleSection(columnId);
         return;
     }
+    // A flat list (#ESDF) has no section to fold: ← on a card does nothing rather than fold a
+    // header that is not on the page.
+    if (m_model.grouping() == board::Grouping::Flat)
+        return;
     const int at = board::rowOfCard(m_rows, m_selected);
     if (at < 0)
         return;

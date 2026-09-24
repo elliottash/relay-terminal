@@ -279,6 +279,16 @@ public:
     QString sortOrder() const { return board::sortId(m_model.sort()); }
     void setSortOrder(const QString &id);
 
+    // Sections or one flat list (#ESDF), as the id the layout node keeps: "sections" or "flat".
+    // `restoreGrouping` is the saved pane's (and a new pane's) way in: an empty id — a new pane,
+    // or a node saved before the choice existed — is the default, Flat, and a Flat pane still in
+    // Manual opens Recently updated, which is what the flat list is for. `toggleGrouping` is the
+    // Stage header's click: into Flat from Manual turns on Recently updated, and back to Sections
+    // puts the board's own order back.
+    QString grouping() const { return board::groupingId(m_model.grouping()); }
+    void restoreGrouping(const QString &id);
+    void toggleGrouping();
+
     // The labels whose chips beside the section checkboxes are ticked (#VKFV): a card is on the
     // page only when it carries every one of them. Same shape and same home in the layout node
     // as the hidden sections, saved and restored with them.

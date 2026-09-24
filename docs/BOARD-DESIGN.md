@@ -321,9 +321,30 @@ is later; an older worker sends none and those sorts fall back to `created`), an
 **Title Z→A**. Any order but Manual takes the manual reorder off — a drop inside the card's own
 section and Alt+Shift+↑↓ answer with a notice pointing back at the header, while drops *between*
 sections still move, because they write a status and not a place. The choice is saved with the
-window's layout (`{"board": {"workspace", "collapsed", "hidden", "labels", "sort"}}`) and each pane keeps its
-own. The two date cells are the row's right-hand columns (below), and they go, labels and all,
-when the pane is too narrow to carry them.
+window's layout (`{"board": {"workspace", "collapsed", "hidden", "labels", "sort", "grouping"}}`) and
+each pane keeps its own. The two date cells are the row's right-hand columns (below), and they go,
+labels and all, when the pane is too narrow to carry them.
+
+**Grouping.** (#ESDF, owner 2026-09-21: "switchboard needs an easy way to show me recent cards
+without the section ordering ... i think it would be better if that was one of the sort options.
+instead the stage should be a column" — and asked whether flat should be the default: "yes and
+yes") The header carries one more cell, **STAGE**, left of the dates. A click toggles the list
+between two groupings: **sections** — the board as it was, a header per status with the sort
+inside each — and **flat**, one unsectioned list of every shown card ordered by the same sorts
+across the whole of it, which makes **Recently updated** the board's most recent cards whatever
+their stage. In flat each row names its stage in its own Stage column (the card's exact status,
+or "Verified"; a row too narrow for the column falls back to the status badge, so the stage is
+never simply gone), folding is off — there is no header to fold — and the section checkboxes,
+label chips and text filter keep composing as filters. Entering flat from Manual turns on
+Recently updated, because that is what the flat list is for; returning to sections puts the
+board's own order back. STAGE wears the accent while the list is grouped by stage, the way the
+active sort cell wears its arrow, and its tooltip says what the click will do. A drag in flat
+reorders the card among every row and never changes its stage — a stage moves by Alt+Shift+←/→
+or the card's menu — and Alt+Shift+↑↓ likewise reorder across stages under Manual. Flat is the
+default for a new pane (`grouping: "flat"`, Recently updated); a pane saved before the choice
+existed reads the same way, and a pane saved `sections` comes back sectioned with its own sort.
+Verified and Done keep their `✓ verifier` and status badges in flat — only their headers are
+gone. The choice is saved per pane as `grouping` beside the sort.
 
 **Keyboard.** Up/Down walk the card rows of the whole list, stepping over the headers; PageUp/Down
 and Home/End likewise; Enter opens; Left folds the selection's section and stands on the nearest

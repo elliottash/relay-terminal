@@ -512,7 +512,9 @@ public:
                                                    // (#AQ6X): "signals", "dismissed". Same shape
                                                    // as `self_closed`, and folded by default.
                                                    {"signals", m_board->openSignals()},
-                                                   {"sort", m_board->sortOrder()}}}};
+                                                   {"sort", m_board->sortOrder()},
+                                                   // Sections or one flat list (#ESDF).
+                                                   {"grouping", m_board->grouping()}}}};
         if (m_subagent) return m_subagent->node();
         // The Activity pane (card #QT8C) comes back open beside its owner, empty until the
         // next event; `owner` is the owner's scrollback id, the key the subagent pane uses too.

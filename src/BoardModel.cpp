@@ -5,6 +5,7 @@
 
 #include <QRegularExpression>
 
+#include <QHash>
 #include <QJsonValue>
 #include <QLocale>
 #include <QTimeZone>
@@ -244,6 +245,18 @@ QString sortTitle(Sort sort)
         break;
     }
     return QStringLiteral("Manual");
+}
+
+QString groupingId(Grouping grouping)
+{
+    return grouping == Grouping::Flat ? QStringLiteral("flat") : QStringLiteral("sections");
+}
+
+Grouping groupingFromId(const QString &id)
+{
+    if (id.isEmpty() || id == QStringLiteral("flat"))
+        return Grouping::Flat;
+    return Grouping::Sections;
 }
 
 QString columnTitle(SortColumn column)
@@ -939,6 +952,15 @@ QStringList cardsInSection(const QList<Row> &rows, const QString &columnId)
     return out;
 }
 
+QStringList cardsInList(const QList<Row> &rows)
+{
+    QStringList out;
+    for (const Row &row : rows)
+        if (row.kind == Row::Card)
+            out << row.cardId;
+    return out;
+}
+
 QPair<QString, int> dropTarget(const QList<Row> &rows, int beforeRow)
 {
     if (rows.isEmpty())
@@ -1479,6 +1501,31 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
         grouped[section] << card;
     }
     QList<Row> out;
+    if (m_grouping == Grouping::Flat) {
+        // One run of cards (#ESDF): the section checkboxes still take a stage off the page, and
+        // the sort orders the whole list rather than each section, so Recently updated is the
+        // board's most recent cards whatever their stage.
+        QList<Card> all;
+        QHash<QString, QString> sectionOfCard;
+        for (const Column &column : list) {
+            if (hidden.contains(column.id))
+                continue;
+            for (const Card &card : grouped.value(column.id)) {
+                all << card;
+                sectionOfCard.insert(card.id, column.id);
+            }
+        }
+        for (const Card &card : sorted(all, false)) {
+            Row row;
+            row.kind = Row::Card;
+            row.columnId = sectionOfCard.value(card.id);
+            row.cardId = card.id;
+            row.stage = row.columnId == verifiedSection() ? sectionTitle(verifiedSection())
+                                                          : statusTitle(card.status);
+            out << row;
+        }
+        return out;
+    }
     for (const Column &column : list) {
         if (hidden.contains(column.id))
             continue;      // its checkbox is unticked: the section is not on the page at all

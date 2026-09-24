@@ -5039,7 +5039,8 @@ public:
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
                               const QJsonArray &hidden = {}, const QString &sort = QString(),
                               const QJsonArray &labels = {},
-                              const QJsonArray &selfClosed = {}) {
+                              const QJsonArray &selfClosed = {},
+                              const QString &grouping = QString()) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         if (!hidden.isEmpty()) view->setHiddenSections(hidden);
@@ -5048,6 +5049,9 @@ public:
         if (!selfClosed.isEmpty()) view->setOpenSelfClosed(selfClosed);
         // The sort the pane was saved with; empty (or unknown) leaves it Manual.
         if (!sort.isEmpty()) view->setSortOrder(sort);
+        // Sections or one flat list (#ESDF); empty — a new pane, or a node saved before the
+        // choice existed — is the flat list the owner asked for, newest-updated first.
+        view->restoreGrouping(grouping);
         auto *tool = new ToolPane(view, workspace);
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
@@ -7781,7 +7785,7 @@ private:
 
     void runBackgroundPane(Pane *pane) {
         if (!pane || !pane->agentReady()) { notice(QStringLiteral("Choose an agent before running in background.")); return; }
-        if (pane->agentBusy()) { notice(QStringLiteral("This agent is already running. Use Move to background.")); return; }
+        if (pane->agentBusy()) { moveBackgroundPane(pane); return; }
         const QString task = pane->composerText().trimmed();
         if (task.isEmpty()) { notice(QStringLiteral("Type a task before running in background.")); return; }
         pane->markBackgroundTask(true);
