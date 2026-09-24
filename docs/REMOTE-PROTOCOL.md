@@ -301,7 +301,12 @@ The client shows the three model events as the desktop does (`↻ X takes over a
 is not interrupted`, `→ now on X`, `✗ <the reason, naming both models>`) and keeps a per-pane model
 indicator from them (issue 3ES1).
 
-Forwarded as `{t: "agent", pane, seq, event: {...the worker event verbatim...}}`.
+Forwarded as `{t: "agent", pane, seq, event: {...the worker event verbatim...}}` — with one
+exception: a `conversations` event is scrubbed (`Host._scrub`) before it enters the replay ring or
+the fan-out. Every location key — `session_dir`, `workspace`, `cwd`, `raw_cwd`, `resume_cwd`,
+`files`, `path`, `resume_command`, `fork_command` — is dropped at every depth, because the desktop
+uses those to resume sessions while a device opens a conversation by the per-publish token in
+`pane_state` (§16). Ids and titles pass; the desktop's own event object is not mutated.
 
 **A few events have a capability floor** (`EVENT_FLOOR` / `floor_for` in `remote/wire.py`, read by
 the fan-out per device, as the allow-list is). `sessions`, `conversations` and `conversation` name
