@@ -1,0 +1,22 @@
+# #SDR1 conversations scrub — verification evidence
+
+Date: 2026-09-24
+
+## What was checked
+
+- Fix already committed in a3594364 (remote/host.py `Host._scrub`, tests/test_remote_gui_host.py ComposeTests::test_conversation_locations_never_enter_wire_or_replay). Working tree clean for both files; no land.py claims on them.
+
+## Test run
+
+```
+test_conversation_locations_never_enter_wire_or_replay (tests.test_remote_gui_host.ComposeTests.test_conversation_locations_never_enter_wire_or_replay) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.068s
+
+OK
+```
+
+## Doc alignment
+
+docs/REMOTE-PROTOCOL.md §"agent events" said worker events are forwarded verbatim; added the conversations-scrub exception naming the exact key set of Host._scrub. Committed as 4e4b7783c64059f359320c5024b06506faaa6417.
