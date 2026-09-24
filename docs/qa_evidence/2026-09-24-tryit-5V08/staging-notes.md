@@ -1,0 +1,1 @@
+The staged file is a short invented DOCX with a heading, formatted sentence and two-cell table. It opens in a separate Relay profile under `/tmp/claude-1000/tryit/5v08`, using the local `build-fast/relay` binary. The file is a disposable copy; edits do not touch a personal document. Remote DOCX files and complex Word objects are outside this scenario.

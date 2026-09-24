@@ -51,3 +51,12 @@ manual: docs/qa_evidence/2026-09-24-5v08-docx/docx-editor.png
 
 ### Check
 2026-09-24: Both DOCX bridge tests and the file pane suite passed; the fast Relay app target built. A saved fixture reopened in python-docx with edited italic text and an intact table. The screenshot was captured from the Qt pane.
+
+## Try it
+bash docs/qa_evidence/2026-09-24-tryit-5V08/stage.sh
+
+In the disposable DOCX that opens, try a short text edit and one formatting change, then save it. The sample has a heading, a formatted sentence and a table.
+
+About 2 minutes: Would this editor support the kinds of DOCX changes you expect to make in Relay?
+
+Expected: docs/qa_evidence/2026-09-24-tryit-5V08/expected.md (sealed until you answer)
