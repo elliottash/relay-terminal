@@ -58,11 +58,10 @@ manual: docs/qa_evidence/2026-09-23-21KQ/
 
 `PYTHONPATH=backend python3 -m unittest tests.test_skills tests.test_agent_context`: 52 passed. `RELAY_SESSION=card21kq scripts/relay-build --target relay`: built. `xvfb-run -a ctest --test-dir build -R '^modelspane$' --output-on-failure`: 1/1 passed. The Xvfb driver also asserted that the helper click did not save `personal` to the account registry.
 
-### Check 2026-09-23 20:02
-- passed · unittest:tests.test_skills — tests/test_skills.py passed for this revision on spark-dcc9, 2026-09-24T00:02:33Z
-- passed · unittest:tests.test_agent_context — tests/test_agent_context.py passed for this revision on spark-dcc9, 2026-09-24T00:02:33Z
-- passed · ctest:modelspane — ctest -R modelspane passed for this revision on spark-dcc9, 2026-09-24T00:02:33Z
+### Check 2026-09-23 20:06
+- passed · unittest:tests.test_skills — tests/test_skills.py passed for this revision on spark-dcc9, 2026-09-24T00:06:22Z
+- passed · unittest:tests.test_agent_context — tests/test_agent_context.py passed for this revision on spark-dcc9, 2026-09-24T00:06:22Z
+- passed · ctest:modelspane — ctest -R modelspane passed for this revision on spark-dcc9, 2026-09-24T00:06:22Z
 - not-applicable · manual:docs/qa_evidence/2026-09-23-21KQ/ — manual evidence, recorded by hand: docs/qa_evidence/2026-09-23-21KQ/
-- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.60 s, p50 0.51 s
-- warning · card — none of the listed tests is named after anything this card changed (issues/features/2026-09-23-guide-users-through-adding-guest-subscription-ac.md, issues/threads/21KQ.md)
+- notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.62 s, p50 1.60 s
 history: thread
