@@ -357,6 +357,37 @@ class LandingHunks(LandCase):
         self.assertEqual(registry["sessions"]["bob"]["claims"], [])
         self.assertEqual(registry["sessions"]["alice"]["claims"], ["f.txt"])
 
+    def test_a_selection_names_one_paths_hunks_not_the_whole_commit(self):
+        # --only-hunk f.txt:1 narrows f.txt's hunks, nothing else: every other claimed path
+        # lands whole. #DT6Z: a session held a digest, added --only-hunk for one path, read
+        # the unchanged digest as its command having been honoured and filed the tool as
+        # broken — so the review now says outright which paths no selection names, and the
+        # confirm hint says the digest pins the tree, not the flags.
+        self.land("begin", "alice", "f.txt", "big.txt")
+        self.land("begin", "bob", "f.txt", "big.txt")
+        edit_line(self.repo / "f.txt", 2, "BOB")
+        edit_line(self.repo / "big.txt", 5, "OTHER EDIT")
+        edit_line(self.repo / "big.txt", 55, "SECOND EDIT")
+        held = self.land("commit", "bob", "-m", "bob", "--only-hunk", "f.txt:1", expect=4)
+        self.assertIn("still wholly in this commit — no selection named them: big.txt",
+                      held.stdout)
+        self.assertIn("not the flags you", held.stdout)
+        self.assertNotIn("the same command", held.stdout)
+        self.assertEqual(self.tip_text("f.txt"), TEN_LINES)      # nothing landed yet
+        # Confirming that digest lands the tree it pinned: f.txt's hunk *and* big.txt whole.
+        self.land("commit", "bob", "-m", "bob", "--only-hunk", "f.txt:1",
+                  "--confirm", self.digest(held))
+        self.assertIn("BOB", self.tip_text("f.txt"))
+        self.assertIn("OTHER EDIT", self.tip_text("big.txt"))
+        self.assertIn("SECOND EDIT", self.tip_text("big.txt"))
+
+    def test_no_selection_line_when_no_selection_was_given(self):
+        self.land("begin", "alice", "f.txt")
+        self.land("begin", "bob", "f.txt")
+        edit_line(self.repo / "f.txt", 2, "BOB")
+        held = self.land("commit", "bob", "-m", "bob", expect=4)
+        self.assertNotIn("no selection named them", held.stdout)
+
     def test_a_second_commit_from_the_same_session_works(self):
         self.land("begin", "mine", "f.txt")
         edit_line(self.repo / "f.txt", 2, "FIRST")

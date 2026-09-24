@@ -944,7 +944,7 @@ class PathInfo:
         return "%s: %s" % (self.path, "; ".join(bits))
 
 
-def print_review(log, root, branch, infos, plans, held, digest):
+def print_review(log, root, branch, infos, plans, held, digest, unselected=()):
     log("")
     log("HELD: nothing was committed, nothing in the working tree was touched.")
     for path in held:
@@ -974,9 +974,21 @@ def print_review(log, root, branch, infos, plans, held, digest):
     for path in sorted(plans):
         log("  %s" % infos[path].stat())
     log("")
-    log("  land all of it:  rerun the same command with --confirm %s" % digest)
+    if unselected:
+        log("")
+        # --only-hunk reads as narrowing the whole landing, and a session that held a
+        # digest, added a selection for one path and saw the same digest again read that
+        # as the command being honoured (#DT6Z records how that went). Say the opposite
+        # outright while the reader is looking at the path list.
+        log("  still wholly in this commit — no selection named them: %s"
+            % ", ".join(unselected))
+    log("")
+    log("  land all of it:  rerun with --confirm %s" % digest)
+    log("                    (the digest pins the tree printed above, not the flags you")
+    log("                     reached it with)")
     log("  leave hunks out: --exclude-hunk <path>:<n>[,<n>-<m>]   (repeatable)")
-    log("  or keep a few:   --only-hunk <path>:<n>[,<n>-<m>]      (lands only those)")
+    log("  or keep a few:   --only-hunk <path>:<n>[,<n>-<m>]      (those hunks of that")
+    log("                     one path only — other paths land whole, as listed above)")
     log("Hunks left out are neither committed nor touched: they stay in the working tree and a "
         "later commit picks them up. Either flag prints a new digest.")
     log("The digest covers the tip of %s and the exact bytes of every path, so an edit in the "
@@ -1368,6 +1380,13 @@ def cmd_commit(args, log):
         digest = content_digest(tip, plans)
         held = sorted(path for path in plans
                       if infos[path].contested or infos[path].stale or infos[path].from_base)
+        # Paths a --exclude-hunk/--only-hunk selection says nothing about: they land whole.
+        # The review names them, because "only" reads as narrowing the whole landing (#DT6Z:
+        # a session held a digest, added --only-hunk for one path, and read the unchanged
+        # digest as its command having been honoured — then filed the tool as broken).
+        unselected = sorted(path for path in plans
+                            if (excludes or onlys)
+                            and path not in excludes and path not in onlys)
 
         log("onto %s (tip %s), %d path(s), digest %s:"
             % (branch, tip[:12], len(plans), digest))
@@ -1379,7 +1398,7 @@ def cmd_commit(args, log):
                 log("--- %s" % path)
                 sys.stdout.write(unified(rev_bytes(repo, tip, path), plans[path][0], path))
             if held:
-                print_review(log, root, branch, infos, plans, held, digest)
+                print_review(log, root, branch, infos, plans, held, digest, unselected)
                 log("(--dry-run, so nothing was committed either way.)")
             if any(is_cxx_path(path) for path in plans) and not args.no_verify:
                 log("(a real commit would also build this exact tree in %s before the swap.)"
@@ -1393,14 +1412,14 @@ def cmd_commit(args, log):
                        "sitting in it, and the tree that went onto the branch did not."
                        % ", ".join(held))
         if args.confirm and args.confirm != digest:
-            print_review(log, root, branch, infos, plans, held, digest)
+            print_review(log, root, branch, infos, plans, held, digest, unselected)
             raise Fail("--confirm %s does not match this commit's digest %s. Something that "
                        "feeds the commit moved since you were shown that digest: a working-tree "
                        "edit, a different --exclude-hunk/--only-hunk selection, or %s advancing. "
                        "Nothing was landed. Read the hunks above and rerun with --confirm %s."
                        % (args.confirm, digest, branch, digest), code=4)
         if held and args.confirm != digest:
-            print_review(log, root, branch, infos, plans, held, digest)
+            print_review(log, root, branch, infos, plans, held, digest, unselected)
             raise Fail("held for review: %s. Nothing was landed."
                        % ", ".join("%s (%s)" % (path, "; ".join(infos[path].reasons()))
                                    for path in held), code=4)
