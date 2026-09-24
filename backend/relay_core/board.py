@@ -500,16 +500,17 @@ def verified(card: "Card") -> bool:
     return not unverified_reasons(card)
 
 
-def verify_summary(verify: Mapping | None) -> str:
-    """One short cell: the primary mode and the person flag (`probe · person`, `script`,
-    `ai-text · person?` when optional), or `unverified until …` while deferred."""
-    if not verify:
+def verify_note(card: "Card") -> str:
+    """The one row-level text a user sees of the `verify` block (owner steer 2026-09-23: the
+    block itself is agent-facing, in `board_read` and the `board_card` event): `unverified
+    until …` while verification is deferred, "" once it is not."""
+    try:
+        verify = verify_block(card)
+    except BoardError:
         return ""
-    if verify.get("deferred"):
+    if verify and verify.get("deferred"):
         return f"unverified until {deferred_text(verify)}"
-    human = str(verify.get("human") or "none")
-    flag = " · person" if human == "required" else " · person?" if human == "optional" else ""
-    return f"{verify.get('primary', '')}{flag}"
+    return ""
 
 
 class BoardError(Exception):
@@ -1760,8 +1761,8 @@ class Board:
             title = str(tab.get("title") or tab["id"]).replace("-", " ").title()
             lines.append(f"## {title} ({len(group)})")
             lines.append("")
-            lines.append("| Card | Title | Status | Verify | Assignee | Tasks | Thread |")
-            lines.append("|---|---|---|---|---|---|---|")
+            lines.append("| Card | Title | Status | Assignee | Tasks | Thread |")
+            lines.append("|---|---|---|---|---|---|")
             for card in sorted(group, key=lambda c: (_status_order(c), c.rank, str(c.path))):
                 rel = str(card.path.relative_to(self.root))
                 items = card.tasks()
@@ -1770,14 +1771,12 @@ class Board:
                 thread = self.thread_path(card.id or "", card.private) if card.id else None
                 link = (f"[{len(self.thread(card.id, card.private))}]"
                         f"({THREADS_FOLDER}/{card.id}.md)") if thread and thread.exists() else ""
-                # The Verify cell (#WFRA): the primary mode and the person flag, or
-                # "unverified until …" while deferred (#1AA6); an invalid block says so.
-                try:
-                    verify = verify_summary(verify_block(card))
-                except BoardError:
-                    verify = "invalid"
+                # Owner steer 2026-09-23: no Verify column — the block is agent-facing
+                # (#WFRA); the one row-level text is the deferred card's note (#1AA6).
+                note = verify_note(card)
+                status_cell = f"{card.status} · {note}" if note else card.status
                 lines.append(f"| `#{card.id or '????'}` | [{_escape_cell(card.title)}]({rel}) "
-                             f"| {card.status} | {_escape_cell(verify)} "
+                             f"| {_escape_cell(status_cell)} "
                              f"| {_escape_cell(str(card.front.get('assignee') or ''))} "
                              f"| {tasks} | {link} |")
             lines.append("")

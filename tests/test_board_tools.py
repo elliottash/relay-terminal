@@ -3269,8 +3269,10 @@ class VerifyFieldTests(BoardToolsTest):
         read = self.tools.run("board_read", {"id": card_id})
         self.assertIn("verify.primary 'vibes'", read["verify_error"])
         self.assertEqual(read["front"]["verify"]["primary"], "vibes")   # as written, not dropped
+        # The row stays clean (owner steer 2026-09-23): nothing of the block is user-facing.
         row = next(r for r in self.tools.run("board_list", {})["cards"] if r["id"] == card_id)
-        self.assertEqual(row["verify"], "invalid")
+        self.assertNotIn("verify", row)
+        self.assertNotIn("unverified_until", row)
 
     def test_a_claim_without_a_block_carries_a_one_line_reminder(self):
         card_id = self.create()
@@ -3279,18 +3281,27 @@ class VerifyFieldTests(BoardToolsTest):
         self.assertIn(f"#{card_id} has no `verify` block", result["reminder"])
         self.assertIn("## Done means", result["reminder"])
         self.assertNotIn("\n", result["reminder"])
+        # Owner steer 2026-09-23: the reminder lives in the tool result alone, never in the
+        # thread or any user-facing text.
+        self.assertNotIn("has no `verify` block", self.thread_text(card_id))
         self.assertNotIn("error", self.update(card_id, fields={"verify": self.BLOCK}))
         again = self.tools.run("board_claim", {"id": card_id})
         self.assertNotIn("error", again, again)
         self.assertNotIn("reminder", again)
 
-    def test_list_rows_carry_the_verify_cell(self):
-        with_block = self.create(title="Has block")
-        self.update(with_block, fields={"verify": dict(self.BLOCK, primary="probe", human="required")})
-        without = self.create(title="No block", request="a different request with no block")
+    def test_list_rows_carry_only_the_deferred_note(self):
+        # Owner steer 2026-09-23: rows carry no verify summary (agent-facing in board_read),
+        # only `unverified_until` on a deferred card.
+        plain = self.create(title="Has block")
+        self.update(plain, fields={"verify": dict(self.BLOCK, primary="probe", human="required")})
+        empty = self.create(title="No block", request="a second request without a block")
+        deferred = self.create(title="Deferred", request="a third request, deferred")
+        self.update(deferred, fields={"verify": dict(self.BLOCK, deferred="until the pilot runs")})
         rows = {r["id"]: r for r in self.tools.run("board_list", {})["cards"]}
-        self.assertEqual(rows[with_block]["verify"], "probe · person")
-        self.assertNotIn("verify", rows[without])
+        self.assertNotIn("verify", rows[plain])
+        self.assertNotIn("unverified_until", rows[plain])
+        self.assertNotIn("unverified_until", rows[empty])
+        self.assertEqual(rows[deferred]["unverified_until"], "the pilot runs")
 
     def test_the_policy_the_skill_and_the_tool_say_to_propose_it(self):
         policy = T.policy_text()
@@ -3338,6 +3349,8 @@ class VerifyGateTests(BoardToolsTest):
         self.assertEqual(refused["offer"], "needs-qa-human")
         self.assertIn(f"#{card_id} needs the person's answer", refused["error"])
         self.assertIn("the strip reads in one line", refused["error"])
+        self.assertNotIn(". ", refused["error"])             # one sentence, owner steer
+        self.assertTrue(refused["error"].endswith("."))
         self.assertEqual(self.board.card_by_id(card_id).status, "inbox")
         # The lane it offers is open.
         result = self.move(card_id, "needs-qa-human", evidence="docs/qa_evidence/2026-09-23-x/")
@@ -3379,6 +3392,8 @@ class VerifyGateTests(BoardToolsTest):
         self.assertEqual(refused["sign_off"], "publish")
         self.assertIn(f"#{card_id} needs a publish sign-off", refused["error"])
         self.assertIn("`Receipt:`", refused["error"])
+        self.assertNotIn(". ", refused["error"])             # one sentence, owner steer
+        self.assertTrue(refused["error"].endswith("."))
         card_hash = self.tools.run("board_read", {"id": card_id})["hash"]
         self.tools.run("board_update_card", {"id": card_id, "base_hash": card_hash,
                                              "append_section": {"heading": "Execution Summary",
@@ -3403,11 +3418,13 @@ class VerifyGateTests(BoardToolsTest):
             self.assertEqual(refused["requires"], "verify_deferred")
             self.assertIn(f"#{card_id} is unverified until the pilot runs (owner: Sam)", refused["error"])
             self.assertEqual(refused["until"], "the pilot runs (owner: Sam)")
+            self.assertNotIn(". ", refused["error"])         # one sentence, owner steer
+            self.assertTrue(refused["error"].endswith("."))
         self.assertEqual(self.board.card_by_id(card_id).status, "inbox")
         # Landing for a verifier is still open: deferring is about the verdict, not the work.
         self.assertNotIn("error", self.move(card_id, "needs-verification"))
         row = next(r for r in self.tools.run("board_list", {})["cards"] if r["id"] == card_id)
-        self.assertEqual(row["verify"], "unverified until the pilot runs (owner: Sam)")
+        self.assertEqual(row["unverified_until"], "the pilot runs (owner: Sam)")
         # The owner too: a deferred card is a fact about the world, not a judgement.
         self.tools.context.actor = T.OWNER_ACTOR
         self.assertEqual(self.move(card_id, "done")["requires"], "verify_deferred")

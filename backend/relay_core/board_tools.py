@@ -1946,9 +1946,11 @@ class BoardTools:
                 "updated": self._updated_at(card),
                 "milestone": card.front.get("milestone"),
                 "topic": card.front.get("topic"),
-                # The Verify cell of the row (#WFRA, #1AA6): primary mode and person flag, or
-                # "unverified until …"; absent when the card has no block.
-                **({"verify": self._verify_cell(card)} if card.front.get("verify") is not None else {}),
+                # Owner steer 2026-09-23: rows carry no verify summary — the block is
+                # agent-facing in `board_read` — only the deferred note the user sees (#1AA6),
+                # as the bare condition ("the pilot runs"), absent otherwise.
+                **({"unverified_until": note.removeprefix("unverified until ")}
+                    if (note := B.verify_note(card)) else {}),
                 "implemented_by": card.front.get("implemented_by"),
                 # Who closed it: out of a QA lane (#T71W), or — when this equals `implemented_by` —
                 # the pane that both wrote and closed the card, which is what makes it **self-
@@ -2023,13 +2025,6 @@ class BoardTools:
         out = [self._row(c, counts) for c in rows[:limit]]
         return {"cards": out, "total": len(rows), "truncated": len(rows) > limit,
                 "tabs": [t for t in self._tab_map()], "autonomy": self.autonomy}
-
-    @staticmethod
-    def _verify_cell(card: B.Card) -> str:
-        try:
-            return B.verify_summary(B.verify_block(card))
-        except B.BoardError:
-            return "invalid"
 
     def _card(self, card_id: str) -> B.Card:
         card = self.board.card_by_id(card_id)
@@ -3221,10 +3216,9 @@ class BoardTools:
         if verify.get("deferred"):
             until = B.deferred_text(verify)
             raise BoardToolError(
-                f"#{card.id} is unverified until {until}: its verification is deferred "
-                f"(verify.deferred), so it does not move to {status}. When it has been verified, "
-                "clear `deferred` with board_update_card fields.verify — the thread records who "
-                "did — and move it then.",
+                f"#{card.id} is unverified until {until} (verify.deferred), so it does not move "
+                f"to {status}; clear `deferred` through board_update_card fields.verify once it "
+                "has been verified, and move it then.",
                 code="board_refused", requires="verify_deferred", id=card.id or "", until=until)
         if status != "done":
             return
@@ -3236,17 +3230,17 @@ class BoardTools:
                            else "`## Human QA` holds no question for them yet — write one from "
                                 f"the criteria: {verify.get('criteria', '')}")
                 raise BoardToolError(
-                    f"#{card.id} needs the person's answer before it is done: verify.human is "
-                    f"required and {missing}. Move it to needs-qa-human instead; the person "
+                    f"#{card.id} needs the person's answer before it is done (verify.human: "
+                    f"required, and {missing}), so move it to needs-qa-human and the person "
                     "answers on the card.",
                     code="board_refused", requires="human_qa_answer", offer="needs-qa-human",
                     id=card.id or "", questions=open_q)
         sign_off = str(verify.get("sign_off") or "none")
         if sign_off != "none" and not B.has_receipt(card.body):
             raise BoardToolError(
-                f"#{card.id} needs a {sign_off} sign-off before it is done: add a line beginning "
-                "`Receipt:` to `## Verdict` or `## Execution Summary` saying who confirmed it, "
-                "when and where, then move it.",
+                f"#{card.id} needs a {sign_off} sign-off before it is done: add a `Receipt:` "
+                "line to `## Verdict` or `## Execution Summary` saying who confirmed it, when "
+                "and where, then move it.",
                 code="board_refused", requires="receipt", sign_off=sign_off, id=card.id or "")
 
     def _signal_gate(self, card: B.Card, old_status: str, status: str) -> None:

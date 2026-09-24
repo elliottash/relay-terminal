@@ -4201,10 +4201,13 @@ key. A stored block that does not validate is passed through as written and name
              "sign_off": "none", "effort": "medium"}}
 ```
 
-The card page draws it as one strip under the action row — `Verify: probe · also ai-visual,
-pairwise · person required: <criteria> · effort medium` — and `No verify plan yet` without one;
-`board_list` rows and `BOARD.md` carry the same short cell (`probe · person`, `ai-text · person?`
-for optional, `unverified until <deferred>`).
+Owner steer 2026-09-23: the block is agent-facing — it travels in `board_read` and the
+`board_card` event, and nowhere else. `board_list` rows and `BOARD.md` carry **no** verify
+column; the one row-level text a user sees is the deferred card's note, sent as
+`unverified_until` (string, absent otherwise) on a `board_list` row and rendered beside the
+status in `BOARD.md` (`executing · unverified until the pilot runs`). The card page draws the
+strip — `Verify: probe · also ai-visual, pairwise · person required: <criteria> · effort
+medium`, and `No verify plan yet` without one.
 
 **Verified (#1AA6)** is `relay_core.board.verified(card)`, one definition shared by the move
 rules, `check` and the strip: primary evidence on the card (a `## Verdict`, or a `### Check`
@@ -4215,7 +4218,8 @@ beginning `Receipt:` in `## Verdict` or `## Execution Summary` when `sign_off` �
 `board_move_card` refuses (`board_refused`) accordingly: `requires: "verify_deferred"` for
 `done` or a `needs-qa-*` lane while deferred; `requires: "human_qa_answer"` with
 `offer: "needs-qa-human"` for `done` under `human: required` and no answered question;
-`requires: "receipt"` with `sign_off` named for `done` without a receipt. Clearing `deferred`
+`requires: "receipt"` with `sign_off` named for `done` without a receipt — each refusal one
+sentence, the one place a user meets the block. Clearing `deferred`
 goes through `fields.verify` and the update's thread event records who cleared it.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)

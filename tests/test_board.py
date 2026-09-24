@@ -571,26 +571,27 @@ class VerifyBlockTests(TempBoardTest):
         write(self.root / "features" / "2026-09-23-c.md", good.to_text())
         self.assertEqual([p.code for p in self.board.check() if p.code.endswith("verify")], [])
 
-    def test_the_index_shows_the_primary_mode_and_the_person_flag(self):
+    def test_the_index_shows_no_verify_column_only_the_deferred_note(self):
+        # Owner steer 2026-09-23: the block is agent-facing, so no Verify column; the one
+        # row-level text is the deferred card's note beside its status.
         write(self.root / "features" / "2026-09-23-a.md",
               B.new_card("work", "Person looks", "executing", card_id="K7Q2", rank="0m",
                          verify=dict(self.GOOD, primary="probe")).to_text())
         write(self.root / "features" / "2026-09-23-b.md",
-              B.new_card("work", "Optional look", "executing", card_id="M3XJ", rank="0n",
-                         verify=dict(self.GOOD, primary="ai-text", human="optional")).to_text())
-        write(self.root / "features" / "2026-09-23-c.md",
               B.new_card("work", "Deferred", "executing", card_id="P4QT", rank="0o",
                          verify={"artifact": "system", "primary": "world", "effort": "high",
                                  "deferred": "until the pilot runs (owner: Sam)"}).to_text())
-        write(self.root / "features" / "2026-09-23-d.md",
+        write(self.root / "features" / "2026-09-23-c.md",
               B.new_card("work", "No block", "ready", card_id="Z9QT", rank="0p").to_text())
         text = self.board.index_markdown()
-        self.assertIn("| Card | Title | Status | Verify | Assignee | Tasks | Thread |", text)
-        self.assertIn("| executing | probe · person |", text)
-        self.assertIn("| executing | ai-text · person? |", text)
-        self.assertIn("| executing | unverified until the pilot runs (owner: Sam) |", text)
-        self.assertIn("| ready |  |", text)
-        self.assertEqual(B.verify_summary(None), "")
+        self.assertIn("| Card | Title | Status | Assignee | Tasks | Thread |", text)
+        self.assertNotIn("| Verify ", text)
+        self.assertIn("(features/2026-09-23-a.md) | executing |", text)   # no note, plain status
+        self.assertIn("| executing · unverified until the pilot runs (owner: Sam) |", text)
+        self.assertEqual(text.count("unverified until"), 1)     # the deferred card alone
+        self.assertEqual(B.verify_note(self.board.card_by_id("K7Q2")), "")
+        self.assertEqual(B.verify_note(self.board.card_by_id("P4QT")),
+                         "unverified until the pilot runs (owner: Sam)")
         self.assertEqual(B.deferred_text({"deferred": "Until Monday"}), "Monday")
 
 
