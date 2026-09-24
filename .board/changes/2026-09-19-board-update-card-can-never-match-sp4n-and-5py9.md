@@ -1,10 +1,14 @@
 ---
 id: E6XC
 type: work
-status: planned
+status: needs-verification
 labels: [bug, switchboard]
+assignee: agent
+implemented_by: glm/glm-5.3
+session: 40bcc267-38f3-4bf8-8da8-5987cc87fa4b
 rank: zzzzzzzzr
 created: '2026-09-19'
+verify: {artifact: code, primary: script, also: [], human: none, criteria: 'board_read hash is 64 hex for every card (regression test), #5PY9 and #SP4N carry their labels, base_hash error names the received length and ends', sign_off: none, effort: low, stakes: rework, blast: capability}
 source: board cleanup pass, 2026-09-19
 links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
@@ -46,3 +50,17 @@ Unstick #5PY9 and #SP4N (their labels), pin down why `board_read` produced non-6
 - `board_read` on #5PY9 and #SP4N after step 2 shows the new labels.
 - Full board sweep: a one-off `python3 -c` over `issues/**/*.md` asserting every `file_hash` is 64 hex chars, output pasted into the card thread as evidence.
 - Existing board tests still pass (`python3 -m pytest tests/ -k board`).
+
+## Execution Summary
+Step 1 settled the question: `Board.file_hash` (`backend/relay_core/board.py:1312`) has **one** commit in its whole history — `1806cf9b`, 2026-09-17, Switchboard phase 0 — and is a plain `hashlib sha256().hexdigest()`: 64 lowercase hex by definition, with no change since. Nothing ran between 2026-09-18 and 2026-09-21 that could have varied the length, and today's `board_read` of both cards returns 64 characters (SP4N's is the 63-character copy with its final `a` restored). **Conclusion: agent transcription, not a code bug** — the 2026-09-19 readings dropped a character.
+
+- **Labels**: `board_update_card` wrote #5PY9 → `[bug, gui]` and #SP4N → `[settings, gui, ux, palette, feature]`; both writes matched on their `board_read` hashes, which is the blocker-gone proof.
+- **Regression test** (`tests/test_board_tools.py`): `test_read_returns_the_hash_the_update_tool_needs` now asserts `^[0-9a-f]{64}$` on every `board_read` hash.
+- **Self-diagnosing error** (`backend/relay_core/board_tools.py`, base_hash gate): a wrong-length hash now gets "Got 63 characters ('4d18…f16a')" plus how to copy it whole; `test_base_hash_is_required_and_must_look_like_a_hash` covers the wording.
+
+Landed as `a14aca14d338` (land.py held it for review because the snapshot came from `--base main`; all four hunks verified mine, a stray EOF-newline hunk left uncommitted).
+
+## Tests
+- `PYTHONPATH=backend python3 -m unittest tests.test_board_tools` — **312 tests, OK** (includes the two extended tests).
+- `git log -L 1312,1316:backend/relay_core/board.py` — one commit (2026-09-17) in `file_hash`'s history; combined with today's successful hash-matched writes on #5PY9 and #SP4N, the code-bug branch is closed.
+- The 4 hunks of `a14aca14d338` reviewed in land.py's held-for-review before `--confirm`.

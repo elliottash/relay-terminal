@@ -26,3 +26,23 @@ The plan has the Run agent check the 2026-09-19 git history to settle which, app
 
 <!-- relay:entry 20260924T043421Z-na author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260924T223838Z-e3 author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
+- ✦ agent claimed this card · assignee agent, Planned → Executing, implemented_by glm/glm-5.3, session 40bcc267
+
+<!-- relay:entry 20260924T223838Z-rk author=agent kind=progress model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 pane_token=40bcc267-38f3-4bf8-8da8-5987cc87fa4b -->
+Claimed (40bcc267) · working on it from a terminal pane
+
+Delivering per the card's plan: git-history check, the two blocked label fixes, 64-hex regression test, self-diagnosing base_hash error.
+
+<!-- relay:entry 20260924T223845Z-3w author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
+- ✦ agent updated this card · verify: (unset) → {"artifact": "code", "primary": "script", "also": [], "human": "none", "criteria…
+
+<!-- relay:entry 20260924T224303Z-qk author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260924T224307Z-99 author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260924T224311Z-xy author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
+- ✦ agent moved this card · Executing → Needs verification · All four planned steps done: history check (transcription, not code), labels applied, regression test, self-diagnosing error; landed a14aca14d338, 312 tests OK. · implemented_by glm/glm-5.3

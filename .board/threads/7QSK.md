@@ -24,8 +24,11 @@ python3 -m unittest tests.test_conv_index.ProtocolTests.test_scope_project_uses_
 tests.test_conv_index.IndexTests.test_scope_and_filters` OK; boardworkspace-tests failures
 (6) pre-existing at HEAD, anchors absent from HEAD's headers as well.
 
-<!-- relay:entry 20260924T131804Z-f2 author=relay kind=landed -->
+<!-- relay:entry 20260924T131804Z-f2 author=relay kind=event -->
 ### Relay · 2026-09-24 13:18
 landed 74ec27ceab7b36a41bac55d430602134d9eb2091 on main (card #7QSK, needs-verification). The
 verify tree built clean; two unrelated RelayWindow.h hunks from session e728 (#E728) were left
 uncommitted in the working tree, untouched.
+
+<!-- relay:entry 20260924T224102Z-0b author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
+- ✦ agent moved this card · needs_qa_llm → Needs verification · Data repair for #43XK: the card was created by hand with the folder spelling 'needs_qa_llm', which the checker rejects; the land report in its own thread (74ec27ce, 2026-09-24 13:18Z) records the intent as needs-verification. · implemented_by glm/glm-5.3
