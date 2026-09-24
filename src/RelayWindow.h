@@ -7885,8 +7885,12 @@ public:
 private:
 
     void runBackgroundPane(Pane *pane) {
+        // An agent already working here (native turn, guest CLI turn, live subagents) moves
+        // to the background as-is: the button and Ctrl+Alt+Enter hand the live pane over
+        // instead of submitting a second task (#BGRN). A guest pane needs no configured
+        // native agent for that, so this check comes before the readiness one.
+        if (pane && pane->agentActive()) { moveBackgroundPane(pane); return; }
         if (!pane || !pane->agentReady()) { notice(QStringLiteral("Choose an agent before running in background.")); return; }
-        if (pane->agentBusy()) { moveBackgroundPane(pane); return; }
         const QString task = pane->composerText().trimmed();
         if (task.isEmpty()) { notice(QStringLiteral("Type a task before running in background.")); return; }
         pane->markBackgroundTask(true);
@@ -7912,7 +7916,7 @@ private:
     }
 
     void moveBackgroundPane(Pane *pane) {
-        if (!pane || !pane->agentBusy()) { notice(QStringLiteral("No running agent to move to background.")); return; }
+        if (!pane || !pane->agentActive()) { notice(QStringLiteral("No running agent to move to background.")); return; }
         if (pane->backgroundTaskState() == QStringLiteral("needs-you")) {
             notice(QStringLiteral("Answer the agent's question before moving it to background.")); return;
         }

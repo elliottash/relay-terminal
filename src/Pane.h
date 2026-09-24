@@ -904,6 +904,10 @@ public:
     void toggleNative() { setNative(!m_native); }
     bool agentBusy() const { return m_agentBusy; }
     bool agentReady() const { return m_configured; }
+    // An agent is working here: a native Relay turn, a guest CLI's turn, or live subagents
+    // (#BGRN). Run in background (button or Ctrl+Alt+Enter) moves such a pane as-is instead
+    // of submitting a second task from the draft.
+    bool agentActive() const { return m_agentBusy || m_guestBusy || m_subagents.liveCount() > 0; }
     // Only on close/list refresh, not on the input poll. Foreground state alone misses a
     // shell's `command &`, stopped jobs, and worker jobs left running after an agent turn.
     bool hasCloseWork() const {

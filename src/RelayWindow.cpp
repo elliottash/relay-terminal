@@ -451,7 +451,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
         items << actionItem(panes, QStringLiteral("Close pane"), QStringLiteral("Then the tab, then the window"), QStringLiteral("pane.close"));
         items << actionItem(panes, QStringLiteral("Move pane to new tab"), QStringLiteral("Keeps the shell and agent running"), QStringLiteral("pane.moveToNewTab"));
         items << actionItem(panes, QStringLiteral("Move to background"), QStringLiteral("Keep the agent running outside the layout"), QStringLiteral("pane.moveToBackground"));
-        items << actionItem(panes, QStringLiteral("Run in background"), QStringLiteral("Send the prompt, then free this pane's space"), QStringLiteral("pane.runInBackground"));
+        items << actionItem(panes, QStringLiteral("Run in background"), QStringLiteral("A live agent moves there; otherwise the prompt is sent"), QStringLiteral("pane.runInBackground"));
         {
             // "Auto-resize" is what the owner calls it (#GSJ7), so the name is searchable and the
             // detail says it: this is the entry the "?" list shows, and the drag hint teaches it.

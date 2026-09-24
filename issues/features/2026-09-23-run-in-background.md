@@ -1,13 +1,14 @@
 ---
 id: BGRN
 type: work
-status: needs-verification
+status: executing
 labels: [feature, panes, switchboard, notifications]
 assignee: agent
-implemented_by: openai/gpt-6-sol via codex
-session: b9142532-7085-4094-aa52-9b0d7dcb36c2
+implemented_by: glm/glm-5.3
+session: 804974a4-5d39-4d2b-ab8f-9cb075d2fb42
 rank: m
 created: '2026-09-23'
+verify: {artifact: system, primary: person, also: [], human: none, criteria: 'With any agent active in a pane (native turn, guest CLI turn, or live subagents), the composer''s Run in background button and Ctrl+Alt+Enter move that pane to the background, draft untouched; idle + empty composer still says ''Type a task before running in background.''; an asking agent still says ''Answer the agent''s question before moving it to background.''', sign_off: none, effort: medium, stakes: rework}
 source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
 links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3, 676961d64fba9dc43f9337e174cce97d23856a1d, 5c57dde24ea1502eec0f9d9cb7ebf3a4044b1bfd], evidence: [docs/qa_evidence/2026-09-23-bgrn/, docs/qa_evidence/2026-09-23-bgrn-shortcut/], related: [RG0Z], github: null}
 ---
@@ -29,6 +30,7 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 >
 > how about ctrl alt enter also triggers run in the background
 > and make the hover on the run-in-background button show the shortcut
+> make it where, if an agent is active, if you click run in background opr ctrl alt enter, it puts it in the background
 
 ## Decisions
 - **Both entry points, Board first.** Board **Run** (today's Execute) goes to the background by default, with **Run in pane** as the alternative. In a pane, backgrounding is an explicit handoff: **Run in background** for a new task, **Move to background** for one already running. Both share one background list, one set of header counts and one notification path, and opening from either reveals the same live session with its context.
@@ -62,6 +64,8 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 - A task that isn't ready never hides: the pane says why and offers the next step.
 - "Execute" appears nowhere in the UI, hints or docs; it reads "Run". Failure shows up as a hidden pane with no count, a count that disagrees with the list, a duplicate notification, or a green count while the work is unfinished.
 - The composer Run in background button is immediately to the left of the auto / agent / terminal mode picker. Ctrl+Alt+Enter invokes that same action from the composer, while Ctrl+Enter retains send-now. With no agent configured, the shortcut shows the readiness reason and preserves the draft.
+- When an agent is active, clicking the composer Run in background button or pressing Ctrl+Alt+Enter in the composer moves that same live pane to the background without submitting the draft again.
+- Both paths preserve the running session and any composer draft; an idle agent still starts a typed task in the background.
 
 ## Plan
 **Goal:** Run in background from panes and from the Board, header counts for background work, readiness and completion semantics you can trust, and the Plan → Run → Verify terminology.
@@ -101,6 +105,7 @@ links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e272
 Implemented live-pane background ownership with request-linked working, needs-you, done, failed and interrupted states, header counts, one notification per state change, and open/stop navigation. Board Run now backgrounds by default, with Run in pane as the visible alternative; pane composer, header and Actions expose background handoff. Claude task tools are disabled, and Codex plan updates feed Relay todos. Restored background windows appear interrupted after restart. See `docs/qa_evidence/2026-09-23-bgrn/` for the isolated UI probe.
 Followup: placed the composer button immediately before the mode picker, moved Ctrl+Alt+Enter from send-now to `pane.runInBackground`, and kept the shortcut active only in the composer. The button and shortcut use the same pane action.
 Tooltip followup: the Run in background button displays the current shortcut as “Ctrl+Alt+Enter” on hover and refreshes when the keybinding changes. An unbound action shows only “Run in background”.
+Active-agent followup: `Pane::agentActive()` (native turn, guest CLI turn, or live subagents) now drives both entry points — `runBackgroundPane` checks it before agent readiness and the draft, so the Run in background button and Ctrl+Alt+Enter move a live pane to the background as-is, guest panes included, without submitting the composer draft; `moveBackgroundPane` accepts any active agent, and its live `backgroundTaskState()` guard still holds an asking agent in the foreground. Keymap and Actions descriptions say both behaviours. Evidence: `docs/qa_evidence/2026-09-24-bgrn-active-agent/`.
 
 ## Tests
 - `scripts/relay-build --target relay-requests-tests --target relay` — built successfully.
@@ -113,3 +118,7 @@ Tooltip followup: the Run in background button displays the current shortcut as 
 - `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn-shortcut/drive.sh` — isolated screenshot of adjacent controls and the no-agent shortcut guard; see `docs/qa_evidence/2026-09-23-bgrn-shortcut/`.
 - `scripts/relay-build --target relay` and the exact committed-tree build in `scripts/land.py` passed for the tooltip update.
 - `xvfb-run -a bash docs/qa_evidence/2026-09-23-bgrn-shortcut/drive.sh` passed; `tooltip.png` visibly shows “Run in background (Ctrl+Alt+Enter)” on hover.
+- `RELAY_SESSION=bgrn_active scripts/relay-build` — `Built target relay` (full binary with the change).
+- `ctest --test-dir build -R '^(actionpalette|keymap|panestatus)$'` — 3/3 passed (keymap covers the Ctrl+Alt+Return / Ctrl+Alt+Enter binding to `pane.runInBackground`).
+- `relay-consolemode-tests` fails to link in the shared tree from another session's half-landed `panedir` code in `src/PaneRuntime.cpp` (undefined `relay::panedir::Directory::instance()`); not this change's files, and absent from a tree of tip+these-paths.
+- No new unit test: the dispatch lives in `RelayWindow` and no existing test constructs a `RelayWindow`; the predicate is an OR over private flags (`m_agentBusy`, `m_guestBusy`, `m_subagents`) that only worker events set. Manual steps in `docs/qa_evidence/2026-09-24-bgrn-active-agent/README.md`.

@@ -93,3 +93,34 @@ Make the Run in background tooltip show Ctrl+Alt+Enter and follow live keybindin
 
 <!-- relay:entry 20260923T211609Z-ra author=agent kind=note model=claude-opus-5-5 pane=6b0b0195 turn=d20c4203bb934061b37f73dc69f56a6d/6445f3f6e3cf43be8539a62e7066ec2d -->
 `tests/boardremote_test.cpp` `executeGoesThroughTheWindowsHookAndClaimsTheCard` still expects the phone status "Execute on #K7Q2 from iPhone". Since `854c097d`, `BoardRemote.cpp` says "Run on …", so `ctest -R boardremote` fails at HEAD. It looks like a one-line test update. Seen while testing #6W9X; not changed there.
+
+<!-- relay:entry 20260924T011108Z-yt author=agent kind=event model=gpt-6-sol pane=898489a0 turn=f7f5845743eb494180db888dac56d352/2ce696d9abed4a5dad65bd64dc3ec4d8 -->
+- ✦ agent claimed this card · Needs verification → Executing, session 898489a0
+
+<!-- relay:entry 20260924T011108Z-yu author=agent kind=progress model=gpt-6-sol pane=898489a0 turn=f7f5845743eb494180db888dac56d352/2ce696d9abed4a5dad65bd64dc3ec4d8 pane_token=898489a0-8eac-4b9f-9577-4aa9d5e39117 -->
+Claimed (898489a0) · working on it from a terminal pane
+
+Extend Run in background so the button and Ctrl+Alt+Enter move an already active agent into the background.
+
+<!-- relay:entry 20260924T011121Z-cp author=agent kind=event model=gpt-6-sol pane=898489a0 turn=f7f5845743eb494180db888dac56d352/2ce696d9abed4a5dad65bd64dc3ec4d8 -->
+- ✦ agent updated this card · appended to `## Issue`
+
+<!-- relay:entry 20260924T011126Z-82 author=agent kind=event model=gpt-6-sol pane=898489a0 turn=f7f5845743eb494180db888dac56d352/2ce696d9abed4a5dad65bd64dc3ec4d8 -->
+- ✦ agent updated this card · appended to `## Done means`
+
+<!-- relay:entry 20260924T043004Z-zy author=agent kind=note model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+The user re-sent this request to my pane (Relay pane 804974a4) after the claiming session 898489a0 held it for 3h15m with no land.py snapshots of the files involved and no commit. Taking the card over on the user's instruction; the claim note in the thread from 01:11Z is superseded, not undone.
+
+<!-- relay:entry 20260924T043011Z-9w author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+- ✦ agent claimed this card · implemented_by glm/glm-5.3, session 804974a4
+
+<!-- relay:entry 20260924T043011Z-bz author=agent kind=progress model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 pane_token=804974a4-5d39-4d2b-ab8f-9cb075d2fb42 -->
+Claimed (804974a4) · working on it from a terminal pane
+
+User re-sent the request to this pane after 3h15m of no progress and no snapshots from the previous claimant. Fixing the dispatch: Run-in-background button / Ctrl+Alt+Enter with an active agent (native turn, guest CLI turn, or live subagents) moves that agent to the background.
+
+<!-- relay:entry 20260924T043736Z-ym author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+- ✦ agent updated this card · verify: (unset) → {"artifact": "system", "primary": "person", "also": [], "human": "none", "criter…; appended to `## Execution Summary`
+
+<!-- relay:entry 20260924T043746Z-kq author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+- ✦ agent updated this card · appended to `## Tests`
