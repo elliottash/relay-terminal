@@ -305,6 +305,9 @@ private Q_SLOTS:
             auto *list = pane.picker()->list();
             QVERIFY(!list->isColumnHidden(ColModel));
             QVERIFY(list->isColumnHidden(ColVia));
+            auto *orderActions = pane.picker()->findChild<QWidget *>(QStringLiteral("modelOrderActions"));
+            QVERIFY(orderActions);
+            QCOMPARE(orderActions->isVisible(), tab == ModelsPane::prioritiesTab());
             if (tab == ModelsPane::effortTab()) {
                 QVERIFY(!list->isColumnHidden(ColReasoning));
                 QCOMPARE(list->headerItem()->text(ColReasoning), QStringLiteral("selected level"));

@@ -1431,7 +1431,7 @@ void ModelPicker::rebuild() {
     m_sortLabel->setVisible(all);
     m_sort->setVisible(all);
     m_orderHelp->setVisible(!all && !effortPage());
-    m_orderActions->setVisible(m_hosted && sectionsPage());
+    m_orderActions->setVisible(m_hosted && m_tier == kClasses);
     m_orderHelp->setText(QStringLiteral("Top to bottom: first choice, then fallbacks. Equal ranks draw randomly.")
                          + (sectionsPage() || boxClassTier(m_tier)
                                 ? QStringLiteral(" Alt+M shows checked rows through each class's cutoff.") : QString()));
