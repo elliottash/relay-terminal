@@ -19,12 +19,15 @@ with every hook recorded into `driver.log`. No sidecar, no window chrome, no net
 | `09-people-again-offer-withdrawn.png` | switching to People: `driver.log` shows `onPairCodeRevoke RPFU` — leaving Devices withdraws the code | leaving Devices revokes the code |
 | `10-chip-two-actions.png` | The whole Relay app in an isolated Xvfb profile: the share chip menu contains exactly **Share this pane…** and **Sharing…** | two menu actions in every state |
 | `11-sharing-opened.png` | Selecting **Sharing…** opens the Sharing pane on People | Sharing… opens the Sharing pane |
+| `12-top-right-sharing.png` | The whole app's top-right plug menu has **Sharing…** first, followed by Pair a phone…, the remote-control toggle and both join actions | top-right menu retains its connection actions and reaches Sharing |
+| `13-top-right-sharing-opened.png` | Selecting that **Sharing…** entry while Models has focus opens the Sharing pane beside the terminal | top-right Sharing works from a tool pane |
 
 `driver.log` records the hook calls in order. "focus after ask: (none)" is Xvfb reporting no active
 window for `QApplication::focusWidget()`; `tests/sharingpane_test.cpp` (offscreen) asserts that Refuse
 has the focus after `focusView()` with an ask showing.
 
 Shots 10–11 run the built `relay` under Xvfb with separate config, data and workspace directories.
-The chip was clicked with Xdotool, then **Sharing…** was clicked. The shared-state menu, "Pair a
-phone…" from the plug menu, and `RemoteShare::attach()` against a live sidecar still need a
+The chip was clicked with Xdotool, then **Sharing…** was clicked. Shots 12–13 repeat that path
+from the top-right plug, using the exact committed-tree binary from `land.py`'s build gate.
+The shared-state menu, live pairing and `RemoteShare::attach()` against a sidecar still need a
 verifier's live check.
