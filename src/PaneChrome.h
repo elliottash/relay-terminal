@@ -75,6 +75,7 @@ inline void reloadColourMode() {
     colourModeCache() = ps::colourModeFrom(QSettings().value(QStringLiteral("appearance/pane_colours")).toString());
 }
 
+
 inline ps::TypeStyle styleOf(const QWidget *leaf) {
     if (!leaf) return {};
     return ps::typeStyle(leaf->property("paneType").toString(), colourMode(), tokens(), leaf->property("paneLabel").toString());
@@ -376,6 +377,18 @@ protected:
         p.setPen(style.text);
         const QRectF text(glyph.right() + 7, 0, width() - glyph.right() - 7 - m_rightInset, height());
         p.drawText(text, Qt::AlignLeft | Qt::AlignVCenter, QFontMetrics(font).elidedText(style.label, Qt::ElideRight, int(text.width())));
+        // #MXMG: the Board and Sessions & Projects bands end in a faint larger copy of their own
+        // glyph — jacks for the switchboard, the terminal list for conversations — so the two
+        // lists the owner reads side by side are told apart by more than a hairline of hue.
+        // Theirs alone: a watermark on every band would be ornament carrying no information.
+        if (style.glyph == relay::panestatus::Glyph::Switchboard
+            || style.glyph == relay::panestatus::Glyph::Sessions) {
+            const qreal size = 22;
+            const QRectF mark(width() - m_rightInset - size - 10, (height() - size) / 2.0, size, size);
+            relay::chrome::paintTypeGlyph(
+                p, mark, style.glyph,
+                QColor(style.ink.red(), style.ink.green(), style.ink.blue(), 46));
+        }
     }
 
 public:
@@ -771,10 +784,16 @@ public:
     // changes how they look without a theme switch.
     static void refreshAll() {
         relay::chrome::reloadColourMode();
+        relay::panestatus::reloadListHue();   // #MXMG: the lists read this cache at paint time
         for (QWidget *top : QApplication::topLevelWidgets())
             for (QWidget *widget : top->findChildren<QWidget *>()) {
                 if (auto *tool = dynamic_cast<ToolPane *>(widget)) tool->refreshBand();
                 else if (auto *chrome = dynamic_cast<PaneChrome *>(widget)) { chrome->place(); chrome->update(); }
+                // #MXMG: the two lists whose selection follows the pane's hue repaint, because
+                // they read it at paint time and the option that just changed is the hue's source.
+                else if (widget->objectName() == QStringLiteral("boardList")
+                         || widget->objectName() == QStringLiteral("sessionsTree"))
+                    widget->update();
             }
     }
 

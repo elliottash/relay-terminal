@@ -5,7 +5,7 @@ status: executing
 labels: [feature, design, switchboard, sessions, ui]
 assignee: agent
 implemented_by: glm/glm-5.3
-session: f0559dc0-7c61-4eb9-8784-3ecd8e8acf7c
+session: c0052f54-4678-4ceb-aee5-0e026541c22c
 rank: zzzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
 verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'The two panes are distinguishable in a screenshot at a glance: different selection/header hue, different row shapes, different typography, stronger bands.', sign_off: none, effort: medium, stakes: nuisance}
@@ -68,3 +68,19 @@ tells you what you are looking at. 3 to 6 are refinements to try once those land
 - The pane name stays "Sessions & Projects" (decision above); no rename.
 - Screenshots of both panes side by side in the evidence folder show the two are distinguishable at a glance.
 - Not in scope: filter-bar streamlining (#1Q5V), grouping changes (suggestion 4).
+
+## Execution Summary
+Implemented 1, 2, 3 and 6 on 2026-09-24 (suggestions 4 stays unimplemented by decision, 5 moved to #1Q5V, 7 settled with no change).
+
+- **Hue past the band.** `PaneStatus::listHue(paneType, tokens)` (new, `src/PaneStatus.{h,cpp}`) hands a pane's band hue to its list; `PaneChrome::refreshAll()` drops its cache when `appearance/pane_colours` changes, so the lists follow the bands at once; with colours off it returns invalid and callers keep the theme accent. The Board's rows select in brass (band, edge, drag indicator — `src/BoardPane.cpp`, `boardHue()`), its active sort header wears the board's own brass instead of the app accent (`src/Theme.cpp`); the Sessions & Projects tree's selection palette carries the shell hue (`src/Conversations.cpp`, reapplied at paint when it drifts).
+- **Row shapes.** The Board's Stage column is now a pill (`stageInk()`: done=success green, executing=agent violet, the four verifier-waiting stages=warning amber, dropped/deferred muted, rest neutral; the Status badge wears the same ink when the column does not fit). Sessions titles are set bold; the two-line row, tags and relative time were already there (#P7SJ).
+- **Typography.** The stage pill is mono, upper-cased, letter-spaced (`stagePillFont()`), measured with the same font it paints with; Sessions keeps proportional type.
+- **Band.** `typeStyle()` gives board and sessions a +0.05 tint, and their bands end in a faint 22px watermark of their own glyph (jacks / the terminal list) — theirs only.
+- Built green via `scripts/relay-build`. Evidence: `docs/qa_evidence/2026-09-24-mxmg-board-vs-sessions/` — Sessions list captures from `relay-conversations-tests listScreenshot` (bold titles, two-line rows); **no Board-pane capture was taken** (the Xvfb staging route was the unfinished part when the owner closed the card out), so the Board side is verified by code reading + build only; the ai-visual pass should capture both panes from the landed build.
+- `ConversationsTest::sessionsDropdownsRespondToMouseChoices` fails, but **fails at HEAD too** (clean export, fresh build) — filed separately, not this card's regression.
+
+## Tests
+- `scripts/relay-build` — green (the land build gate re-builds the exact committed tree).
+- `relay-conversations-tests listScreenshot refreshKeepsTheSelectionAndWhatWasUnfolded managerGroupsByProjectAndSearches` — 5 passed, 0 failed; `listScreenshot` wrote the evidence PNGs.
+- `ctest --test-dir build -R 'conversations|boardpane|boardmodel'` — boardpane and boardmodel suites pass; conversations has one failure, `sessionsDropdownsRespondToMouseChoices`, which **fails at HEAD in a clean export** (fresh cmake + build under /tmp) — pre-existing, filed as #9ESY, not this change.
+- Visual: Sessions captures in the evidence folder show bold two-line rows; no Board-pane capture (see Execution Summary) — the ai-visual pass on the landed build covers the side-by-side criterion.

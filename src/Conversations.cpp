@@ -4,6 +4,7 @@
 #include "ModelCatalog.h"
 #include "CopyOnSelect.h"
 #include "OutputLinks.h"     // `session:` in an answer is this pane's own link (#AGNT step 8)
+#include "PaneStatus.h"      // listHue: this pane's rows select in its band's hue (#MXMG)
 #include "Theme.h"           // the collapsed row's ink
 
 #include <QAbstractTextDocumentLayout>
@@ -573,6 +574,25 @@ public:
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
 
         const bool selected = opt.state & QStyle::State_Selected;
+        // #MXMG: the selected row selects in this pane's own hue — shell blue like the band
+        // above it — instead of the accent every list shares, so the Sessions & Projects
+        // pane is recognisable from its rows alone. The tint lives on the tree's palette,
+        // not in this delegate, so the style draws it the same way for the branch rows and
+        // the empty fallback path; it is reapplied here whenever it drifts, which is what
+        // flips it back when the pane-colour option changes.
+        namespace t = relay::theme;
+        const QColor hue = relay::panestatus::listHue(
+            QStringLiteral("sessions"),
+            {t::Background, t::Text, t::TextMuted, t::Shell, t::Agent, t::Success, t::Warning,
+             t::Error, t::Action, t::Tool});
+        const QColor band = hue.isValid() ? QColor(hue.red(), hue.green(), hue.blue(), 42)
+                                         : QColor(t::Accent.red(), t::Accent.green(), t::Accent.blue(), 42);
+        if (m_tree->palette().color(QPalette::Highlight) != band) {
+            QPalette palette = m_tree->palette();
+            palette.setColor(QPalette::Highlight, band);
+            palette.setColor(QPalette::HighlightedText, palette.color(QPalette::Text));
+            m_tree->setPalette(palette);
+        }
         const QColor ink = selected ? opt.palette.color(QPalette::HighlightedText)
                                     : opt.palette.color(QPalette::Text);
         QColor muted = selected ? ink : opt.palette.color(QPalette::PlaceholderText);
@@ -592,7 +612,14 @@ public:
         }
         // The title owns the first line: a narrow pane must not turn "Fix the FTS index" into
         // "Fix the …" to make room for tags. The tags lead the second line, the summary follows.
-        const QFontMetrics metrics(opt.font);
+        // The title is set in bold (#MXMG): where the Board's rows are instruments — mono,
+        // upper-case, letter-spaced — these are conversations, and a conversation starts
+        // with its own name set the way prose names things. DemiBold at the same point size,
+        // so the two-line sizeHint still measures what paints.
+        QFont titleFont(opt.font);
+        titleFont.setWeight(QFont::DemiBold);
+        const QFontMetrics metrics(titleFont);
+        painter->setFont(titleFont);
         painter->setPen(ink);
         painter->drawText(QRect(rect.left(), rect.top(), rect.width(), metrics.height()),
                           Qt::AlignLeft | Qt::AlignVCenter, metrics.elidedText(title, Qt::ElideRight, rect.width()));

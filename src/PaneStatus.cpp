@@ -2,6 +2,7 @@
 #include "PaneStatus.h"
 
 #include <QDateTime>
+#include <QSettings>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
@@ -348,7 +349,14 @@ TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &toke
     else if (kind.glyph == Glyph::Options) hue = tokens.success;
     else if (kind.type == QStringLiteral("sessions")) hue = tokens.shell;
     else hue = tokens.tool;
-    TypeStyle style = tinted(hue, tokens, mode == ColourMode::Off ? 0.06 : tintStrength(tokens));
+    // #MXMG: the Board and Sessions & Projects are the two lists that are read side by side
+    // and were told apart by a hairline of colour alone, so their bands carry a notch more
+    // of their hue than a generic tool pane's — a stronger tint, still a tint.
+    const bool listPane = mode != ColourMode::Off
+        && (kind.type == QStringLiteral("board") || kind.type == QStringLiteral("sessions"));
+    TypeStyle style = tinted(hue, tokens,
+                             mode == ColourMode::Off ? 0.06
+                                                     : tintStrength(tokens) + (listPane ? 0.05 : 0.0));
     style.label = label.isEmpty() ? kind.label : label;
     style.glyph = kind.glyph;
     style.group = kind.group;
@@ -465,4 +473,25 @@ QColor mix(const QColor &a, const QColor &b, double weightOfA) {
 
 bool isLight(const QColor &background) { return luminance(background) > 0.35; }
 
+// ----- the list hue (#MXMG) -------------------------------------------------------------------
+//
+// typeStyle()'s cache of the pane-colour option: read once, dropped by reloadListHue().
+namespace {
+ColourMode g_listHueMode = ColourMode::ByType;
+bool g_listHueLoaded = false;
+}
+
+QColor listHue(const QString &paneType, const Tokens &tokens) {
+    if (!g_listHueLoaded)
+        reloadListHue();
+    if (g_listHueMode == ColourMode::Off)
+        return QColor();
+    return typeStyle(paneType, g_listHueMode, tokens).ink;
+}
+
+void reloadListHue() {
+    g_listHueMode = colourModeFrom(
+        QSettings().value(QStringLiteral("appearance/pane_colours")).toString());
+    g_listHueLoaded = true;
+}
 }  // namespace relay::panestatus

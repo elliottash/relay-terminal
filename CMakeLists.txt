@@ -91,7 +91,7 @@ target_include_directories(relay-board PUBLIC src)
 # line (protocol 23). Both came in through relay-helperchat until card #AGNT step 9 retired it.
 # relay-modelcatalog: a card comment records the model id its turn ran on; the page names the
 # model (card #MDL1, rule 1), through the same `nameOf` as everywhere else.
-target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog relay-panestatus ${RELAY_QT}::Widgets)
 target_compile_options(relay-board PRIVATE ${RELAY_WARNINGS})
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the
@@ -332,7 +332,7 @@ target_include_directories(relay-conversations PUBLIC src)
 # the foot of it (#FEJQ, card #AGNT step 7).
 # relay-modelcatalog: history records the model id the API took, and both panes print its *name*
 # (card #MDL1, rule 1) — `relay::models::nameOf`, the same derivation as everywhere else.
-target_link_libraries(relay-conversations PUBLIC relay-agentcontext relay-modelcatalog ${RELAY_QT}::Widgets)
+target_link_libraries(relay-conversations PUBLIC relay-agentcontext relay-modelcatalog relay-panestatus ${RELAY_QT}::Widgets)
 target_compile_options(relay-conversations PRIVATE ${RELAY_WARNINGS})
 
 # Shared workspace manager pages (card #P7SJ). Callback-only widgets, independently testable.

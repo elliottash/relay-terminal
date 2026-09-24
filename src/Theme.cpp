@@ -826,11 +826,12 @@ QCheckBox#boardLabelCheck:hover { color: @text; }
    adding header columns that you click on"): the Card, Created and Updated cells a click sorts by.
    Engraved like the section headers they sit above — mono, upper case, letter-spaced, and the font
    is set in code so sizeHint() measures what paints — muted until the pointer or the sort is on
-   them. The sort that is on wears the accent and its arrow. */
+   them. The sort that is on wears the board's own brass (#MXMG, not the app-wide accent: this
+   header belongs to the switchboard's material palette) and its arrow. */
 QWidget#boardColumnHeader { background: transparent; }
 QToolButton#boardHeaderCard, QToolButton#boardHeaderStage, QToolButton#boardHeaderCreated, QToolButton#boardHeaderUpdated { color: @muted; background: transparent; border: none; border-radius: 4px; padding: 0; }
 QToolButton#boardHeaderCard:hover, QToolButton#boardHeaderStage:hover, QToolButton#boardHeaderCreated:hover, QToolButton#boardHeaderUpdated:hover { color: @text; }
-QToolButton#boardHeaderCard[active="true"], QToolButton#boardHeaderStage[active="true"], QToolButton#boardHeaderCreated[active="true"], QToolButton#boardHeaderUpdated[active="true"] { color: @accent; }
+QToolButton#boardHeaderCard[active="true"], QToolButton#boardHeaderStage[active="true"], QToolButton#boardHeaderCreated[active="true"], QToolButton#boardHeaderUpdated[active="true"] { color: @boardMetal; }
 /* The ⚑ over the flag column (card #VKFV): same cell styles as its neighbours, and the accent
    alone carries the active state — the cell is one glyph wide, with no room for an arrow. */
 QToolButton#boardHeaderPriority { color: @muted; background: transparent; border: none; border-radius: 4px; padding: 0; }

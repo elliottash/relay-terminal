@@ -179,6 +179,15 @@ struct TypeStyle {
 // own name as the label, so a new pane type is styled by setting the property and nothing else.
 // `label` overrides the default label when not empty (the `paneLabel` property).
 TypeStyle typeStyle(const QString &paneType, ColourMode mode, const Tokens &tokens, const QString &label = QString());
+
+// The hue a pane of this type's *own list* selects in (#MXMG): the colour its band wears, so
+// the pane tells you where you are below its header too, not only on it. The option is read
+// once and cached (reloadListHue() drops the cache — PaneChrome::refreshAll() calls it after
+// the option changes, and callers ask at paint time, so the lists follow the bands at once).
+// Returns an invalid colour when pane colours are off: the caller then keeps the theme's
+// shared accent, because "off" should not leave one list warmer than the rest.
+QColor listHue(const QString &paneType, const Tokens &tokens);
+void reloadListHue();
 // The remote-session header: hatched ground, hairline and chip. Independent of the mode.
 TypeStyle remoteStyle(const Tokens &tokens);
 // The chip that says a phone is watching or driving the pane (Relay's "remote share").

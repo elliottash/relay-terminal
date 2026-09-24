@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BoardPane.h"
 #include "ModelCatalog.h"   // nameOf: a comment's `model=` is an id; the page prints the name
+#include "PaneStatus.h"   // listHue: the hue this pane's band wears, which its rows select in (#MXMG)
 #include "Projects.h"   // which folder of a project is its board: `switchboard/`, else `issues/`
 #include "ToolLabel.h"
 
@@ -175,6 +176,51 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
     default:
         return {theme::TextMuted, theme::Border};
     }
+}
+
+// The hue the Board's rows select in (#MXMG): the brass its band wears — or, with pane
+// colours off, the accent every other list selects in, because "off" should not leave this
+// one pane warmer than the rest. Asked per row: a couple of colour mixes, the cheapest thing
+// in this paint path.
+QColor boardHue() {
+    namespace t = relay::theme;
+    const QColor hue = relay::panestatus::listHue(
+        QStringLiteral("board"),
+        {t::Background, t::Text, t::TextMuted, t::Shell, t::Agent, t::Success, t::Warning,
+         t::Error, t::Action, t::Tool});
+    return hue.isValid() ? hue : t::Accent;
+}
+
+// The Stage pill's ink (#MXMG). Only the stages that already own a colour in the app's
+// vocabulary wear one: done is the green of a finished checklist, executing the agent's
+// violet, the stages that wait on a verifier the amber of "waiting on someone". Every other
+// stage stays neutral — the pill is shape first; a second rainbow on every row would carry
+// no more information than the words already do.
+QPair<QColor, QColor> stageInk(const QString &status)
+{
+    if (status == QStringLiteral("done") || status == QStringLiteral("Verified"))
+        return {theme::Success, mix(theme::Success, theme::Surface, 0.55)};
+    if (status == QStringLiteral("executing"))
+        return {theme::Agent, mix(theme::Agent, theme::Surface, 0.55)};
+    static const QStringList waiting{QStringLiteral("needs-verification"),
+                                     QStringLiteral("needs-qa-llm"), QStringLiteral("needs-qa-human"),
+                                     QStringLiteral("needs-review")};
+    if (waiting.contains(status))
+        return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
+    if (status == QStringLiteral("dropped") || status == QStringLiteral("deferred"))
+        return {theme::TextMuted, theme::BorderStrong};
+    return {theme::Text, theme::BorderStrong};
+}
+
+// The Stage pill's face (#MXMG): mono and letter-spaced like the id and the engraved
+// headers, small caps by upper-casing the way the headers do it — the switchboard's
+// instrument typeface, where the Sessions & Projects list keeps proportional type.
+QFont stagePillFont(const QFont &base)
+{
+    QFont font = monoFont(base, 0.78);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 0.4);
+    font.setWeight(QFont::DemiBold);
+    return font;
 }
 
 // The flag at the head of a card row (#VKFV): an empty ring when the card carries no priority —
@@ -371,8 +417,8 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QString &sta
         if (stageColumnFits(font, width)) {
             const int column = stageColumnWidth(font);
             shape.stageRect = QRect(contentRight - column, 0, column, shape.height);
-            shape.stage = QFontMetrics(smaller(font, 0.85)).elidedText(stage, Qt::ElideRight,
-                                                                      column);
+            shape.stage = QFontMetrics(stagePillFont(font)).elidedText(stage, Qt::ElideRight,
+                                                                 column);
             contentRight = shape.stageRect.left() - kDateGap;
         } else {
             showStatus = true;
@@ -752,13 +798,13 @@ private:
         const bool focused = m_list->hasFocus();
         if (selected || hover) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
+            painter->setBrush(selected ? alpha(boardHue(), focused ? 34 : 20)
                                        : mix(theme::BoardFace, theme::Text, 0.05));
             painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
         }
         if (selected) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(focused ? theme::Accent : theme::BorderStrong);
+            painter->setBrush(focused ? boardHue() : theme::BorderStrong);
             painter->drawRoundedRect(QRectF(rect.left() + 1, rect.top() + 3, 2.0,
                                             rect.height() - 6), 1, 1);
         }
@@ -790,13 +836,13 @@ private:
         const bool focused = m_list->hasFocus();
         if (selected || hover) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
+            painter->setBrush(selected ? alpha(boardHue(), focused ? 34 : 20)
                                        : mix(theme::BoardFace, theme::Text, 0.05));
             painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
         }
         if (selected) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(focused ? theme::Accent : theme::BorderStrong);
+            painter->setBrush(focused ? boardHue() : theme::BorderStrong);
             painter->drawRoundedRect(QRectF(rect.left() + 1, rect.top() + 3, 2.0,
                                             rect.height() - 6), 1, 1);
         }
@@ -855,13 +901,13 @@ private:
         // edge — a 2px bar at the left, so it is visible without a fill loud enough to hurt.
         if (selected || hover) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(selected ? alpha(theme::Accent, focused ? 34 : 20)
+            painter->setBrush(selected ? alpha(boardHue(), focused ? 34 : 20)
                                        : mix(theme::BoardFace, theme::Text, 0.05));
             painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
         }
         if (selected) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(focused ? theme::Accent : theme::BorderStrong);
+            painter->setBrush(focused ? boardHue() : theme::BorderStrong);
             painter->drawRoundedRect(QRectF(rect.left() + 1, rect.top() + 3, 2.0,
                                             rect.height() - 6), 1, 1);
         }
@@ -905,11 +951,26 @@ private:
                               Qt::AlignLeft | Qt::AlignVCenter, shape.updated);
         }
         if (!shape.stage.isEmpty()) {
+            // The Stage as a pill (#MXMG): mono small caps like the id and the engraved
+            // headers, wearing the stage's ink (stageInk) over an unlit edge. cardShape
+            // measured this column with the same font, so the elide agrees with what
+            // paints. Upper-cased here, not in the model, the way the headers do it.
+            const QFont stageFont = stagePillFont(option.font);
+            const QFontMetrics stageMetrics(stageFont);
+            const QString text = stageMetrics.elidedText(
+                shape.stage.toUpper(), Qt::ElideRight, shape.stageRect.width() - 12);
+            const auto [ink, edge] = stageInk(row.stage);
+            const qreal pillWidth = qMin<qreal>(stageMetrics.horizontalAdvance(text) + 12,
+                                                shape.stageRect.width());
+            const QRectF pill(shape.stageRect.left(), shape.stageRect.center().y() - 8.5,
+                              pillWidth, 17.0);
             painter->save();
-            painter->setFont(smaller(option.font, 0.85));
-            painter->setPen(theme::TextMuted);
-            painter->drawText(shape.stageRect.translated(origin),
-                              Qt::AlignLeft | Qt::AlignVCenter, shape.stage);
+            painter->setFont(stageFont);
+            painter->setPen(QPen(edge, 1.0));
+            painter->setBrush(theme::Surface);
+            painter->drawRoundedRect(pill.adjusted(0.5, 0.5, -0.5, -0.5), 4, 4);
+            painter->setPen(ink);
+            painter->drawText(pill, Qt::AlignCenter, text);
             painter->restore();
         }
 
@@ -917,7 +978,10 @@ private:
         painter->setFont(badgeFont);
         for (const auto &placed : shape.badges) {
             const QRect box = placed.second.translated(origin);
-            const auto [ink, edge] = badgeInk(placed.first.kind);
+            // A Status badge is the stage riding the badges when the column did not fit
+            // (#ESDF): it wears the stage's ink (#MXMG), the same colour its pill would.
+            const auto [ink, edge] = placed.first.kind == board::Badge::Status
+                ? stageInk(row.stage) : badgeInk(placed.first.kind);
             if (edge.isValid()) {
                 painter->setPen(QPen(edge, 1.0));
                 painter->setBrush(theme::Surface);
@@ -1558,8 +1622,8 @@ protected:
             return;
         if (m_dropHeader >= 0 && m_dropHeader < count()) {
             const QRect rect = visualItemRect(item(m_dropHeader));
-            painter.setPen(QPen(alpha(theme::Accent, 130), 1.0));
-            painter.setBrush(alpha(theme::Accent, 26));
+            painter.setPen(QPen(alpha(boardHue(), 130), 1.0));
+            painter.setBrush(alpha(boardHue(), 26));
             painter.drawRoundedRect(QRectF(rect).adjusted(2.5, 2.5, -2.5, -1.5), 5, 5);
             return;
         }
@@ -1569,7 +1633,7 @@ protected:
             y = row < count() ? visualItemRect(item(row)).top()
                               : visualItemRect(item(count() - 1)).bottom() + 1;
         }
-        painter.setPen(QPen(theme::Accent, 2.0, Qt::SolidLine, Qt::RoundCap));
+        painter.setPen(QPen(boardHue(), 2.0, Qt::SolidLine, Qt::RoundCap));
         painter.drawLine(QPointF(kRowPadX, y), QPointF(viewport()->width() - kRowPadX, y));
     }
 
