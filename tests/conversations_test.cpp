@@ -8,6 +8,11 @@
 #include <QFontMetrics>
 #include <algorithm>
 #include "SessionInfo.h"
+// Keymap.h holds a raw-string preset table moc cannot parse, and moc parses this file
+// for its own test class (see tests/keymap_test.cpp for the same guard).
+#ifndef Q_MOC_RUN
+#include "Keymap.h"
+#endif
 
 #include <QAction>
 #include <QAbstractItemView>
@@ -747,6 +752,16 @@ private slots:
         popover.setDimState(90, true);
         QVERIFY(dim->isChecked());
         QVERIFY(dim->text().contains(QStringLiteral("Restore automatic")));
+        // Hovering the dim button names the toggle's key, read from the live keymap so a
+        // rebinding reads correctly (nothing is appended when the action is unbound).
+        const QString dimKeys = Keymap::instance().shortcutText(
+            QStringLiteral("pane.dimToggle"));
+        QVERIFY(!dimKeys.isEmpty());
+        QVERIFY2(dim->toolTip().contains(QStringLiteral("(%1)").arg(dimKeys)),
+                 qPrintable(dim->toolTip()));
+        QVERIFY(dim->toolTip().contains(QStringLiteral("Alt+wheel")));
+        popover.setDimState(0, false);
+        QVERIFY(dim->toolTip().contains(QStringLiteral("(%1)").arg(dimKeys)));
         QTest::mouseClick(&info, Qt::LeftButton);
         QCOMPARE(infoClicks, 1);   // the circle-i's original Conversation info action is intact
 

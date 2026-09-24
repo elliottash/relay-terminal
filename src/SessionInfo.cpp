@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SessionInfo.h"
 #include "CopyOnSelect.h"
+#include "Keymap.h"
 #include "ModelCatalog.h"
 
 #include <QApplication>
@@ -536,8 +537,12 @@ void PaneInfoPopover::setDimState(int amount, bool manual) {
     m_dim->setChecked(manual);
     m_dim->setText(manual ? QStringLiteral("◐  Restore automatic dimming")
                           : QStringLiteral("◐  Dim pane"));
-    m_dim->setToolTip(QStringLiteral("%1% dimmed · Alt+wheel adjusts this pane")
-                          .arg(amount));
+    // The toggle's key is read from the keymap, in the house "… (keys)" style, so a rebinding
+    // reads correctly here too. Nothing is appended while the action is unbound.
+    const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.dimToggle"));
+    QString tooltip = QStringLiteral("%1% dimmed · Alt+wheel adjusts this pane").arg(amount);
+    if (!keys.isEmpty()) tooltip += QStringLiteral(" · toggle (%1)").arg(keys);
+    m_dim->setToolTip(tooltip);
 }
 
 bool PaneInfoPopover::eventFilter(QObject *object, QEvent *event) {
