@@ -2874,9 +2874,10 @@ void TerminalView::paintTablePreview(QPainter &p, const QRect &box, const MediaI
     const auto fitted = [](const QString &text, int width) {
         return text.size() <= width ? text : text.left(std::max(0, width - 1)) + QStringLiteral("…");
     };
-    QFont bold = p.font();
-    bold.setBold(true);
-    const QFont normal = p.font();
+    // The terminal's own cell fonts: widths are counted in cells, so the bars and the rule's `┼`
+    // only line up in a font whose every character is one cell wide.
+    const QFont &bold = m_fonts[1];
+    const QFont &normal = m_fonts[0];
     const int left = box.left() + m_cw;
     const auto drawRow = [&](const QStringList &row, int line) {
         int x = left;
