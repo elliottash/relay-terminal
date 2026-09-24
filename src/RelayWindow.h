@@ -1359,12 +1359,21 @@ private:
         auto viewRef = std::make_shared<QPointer<relay::ModelsPane>>();
         auto *view = new relay::ModelsPane([this, viewRef] {
             relay::SettingsSection sources = modelsSection(true);
+            // Keep account setup first, local servers next, and profiles last. Each row retains
+            // the callback and ID from its Options section, so these are the same controls.
+            const int profilesAt = [&sources] {
+                for (int i = 0; i < sources.rows.size(); ++i)
+                    if (sources.rows.at(i).id == QStringLiteral("heading:profiles")) return i;
+                return sources.rows.size();
+            }();
+            const QList<relay::SettingRow> profiles = sources.rows.mid(profilesAt);
+            sources.rows = sources.rows.mid(0, profilesAt);
             sources.rows += localModels().compactSection().rows;
             relay::SettingRow setup;
             setup.kind = relay::SettingRow::Button;
             setup.id = QStringLiteral("models.local.setup");
-            setup.label = QStringLiteral("Set up a local model with the helper agent");
-            setup.detail = QStringLiteral("The helper surveys this machine and walks you through the choices.");
+            setup.label = QStringLiteral("Set up a local model");
+            setup.detail = QStringLiteral("The helper checks this machine and guides setup.");
             setup.buttonText = QStringLiteral("Ask helper…");
             setup.run = [viewRef] {
                 if (!*viewRef) return;
@@ -1378,14 +1387,15 @@ private:
             relay::SettingRow more;
             more.kind = relay::SettingRow::Button;
             more.id = QStringLiteral("models.local.more");
-            more.label = QStringLiteral("More local settings");
-            more.detail = QStringLiteral("Find servers, add an address, remove a model or change compatibility settings.");
+            more.label = QStringLiteral("Find or manage local servers");
+            more.detail = QStringLiteral("Find, add, remove or configure a local server in Options.");
             more.buttonText = QStringLiteral("Open Options…");
             more.run = [this] {
                 openSettingsPane(relay::SettingsPane::Mode::Options,
                                  relay::LocalModelsSettings::sectionId());
             };
             sources.rows << more;
+            sources.rows += profiles;
             return QList<relay::SettingsSection>{sources};
         });
         *viewRef = view;
