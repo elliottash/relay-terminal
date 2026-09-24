@@ -1683,7 +1683,12 @@ gateway address (tests point it at a loopback HTTP server).
 `hosted_quota` is also emitted **without an `id`** after every model call that went through the
 gateway (the pane's turns, the tiers' side calls, the key test), read from the reply's
 `X-Relay-Quota-Limit`, `-Used` and `-Resets-At` headers, including on a refusal. `limit` and `used`
-are tokens for the day; `resets_at` is unix seconds.
+are tokens for the day; `resets_at` is unix seconds. After a Relay Free **image** call
+(`media_generate {kind: image}` served by the `relay-image` role) the same event carries the day's
+picture count in addition: `image_limit`, `image_used` and `image_resets_at`, read from the reply's
+`X-Relay-Image-*` headers. Images are counted per picture, not per token, so the two counts ride
+one event; a gateway that serves no images sends no `image_*` fields and the chip shows only the
+token quota.
 
 **Refusals.** A gateway error body is Relay's own JSON, `{"error": {"code, message, resets_at"}}`,
 and is the one provider body the worker reads: `code` picks the sentence the user sees, `message`

@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS usage (
     cost_micros INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (installation_id, day)
 );
+CREATE TABLE IF NOT EXISTS image_usage (
+    installation_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    images INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (installation_id, day)
+);
 CREATE TABLE IF NOT EXISTS spend (
     day TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -360,6 +366,42 @@ class Store:
                     " output_tokens = output_tokens + excluded.output_tokens,"
                     " cost_micros = cost_micros + excluded.cost_micros",
                     (day, provider, role, input_tokens, output_tokens, cost_micros))
+
+    def image_usage(self, installation_id: str, limit: int) -> Usage:
+        """Today's image count for one installation, in the same shape as token usage so the
+        same headers and chip can carry it."""
+        row = self.db.execute(
+            "SELECT images FROM image_usage WHERE installation_id = ? AND day = ?",
+            (installation_id, day_of())).fetchone()
+        return Usage(limit, output_tokens=row["images"] if row else 0)
+
+    def reserve_image(self, installation_id: str, limit: int) -> Usage | None:
+        """Admit one image against today's count: the whole price is known upfront, so unlike
+        ``reserve`` there is no estimate to hold — the count itself is the hold, released by
+        ``settle_image`` when the upstream never produced the picture."""
+        day = day_of()
+        with self.db:
+            self.db.execute(
+                "INSERT OR IGNORE INTO image_usage (installation_id, day) VALUES (?, ?)",
+                (installation_id, day))
+            row = self.db.execute(
+                "SELECT images FROM image_usage WHERE installation_id = ? AND day = ?",
+                (installation_id, day)).fetchone()
+            if row["images"] >= limit:
+                return None
+            self.db.execute(
+                "UPDATE image_usage SET images = images + 1 WHERE installation_id = ? AND day = ?",
+                (installation_id, day))
+        return Usage(limit, output_tokens=row["images"] + 1)
+
+    def settle_image(self, installation_id: str, counted: bool = True) -> None:
+        """``counted`` is false when nothing reached upstream: give the held image back."""
+        if counted:
+            return
+        with self.db:
+            self.db.execute(
+                "UPDATE image_usage SET images = MAX(0, images - 1)"
+                " WHERE installation_id = ? AND day = ?", (installation_id, day_of()))
 
     def recent_requests(self, installation_id: str, seconds: int = 60) -> int:
         return self.db.execute(

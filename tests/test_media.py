@@ -111,5 +111,113 @@ class MediaTests(unittest.TestCase):
             self.service.generate({"quote_id": quoted["quote_id"]})
 
 
+RELAY_FREE_ROLE = {"role": "relay-image", "model": "black-forest-labs/flux.2-klein-4b",
+                   "price_usd": 0.003, "resolutions": ["1024x1024", "1536x1024"],
+                   "aspect_ratios": ["1:1", "3:2"]}
+
+
+class FakeHostedSession:
+    """The slice of the hosted session media.py reads, with no network: the cached image
+    quota, and either a picture or a refusal from ``POST /images``."""
+
+    def __init__(self, *, image=None, reply=None, error=None):
+        self.image_quota_value = image
+        self.reply, self.error = reply, error
+        self.payloads = []
+
+    def quota(self):
+        return {"limit": 250000, "used": 1200, "resets_at": 452257800}
+
+    def image_quota(self):
+        return self.image_quota_value
+
+    def image(self, payload):
+        self.payloads.append(payload)
+        if self.error is not None:
+            raise media.hosted.HostedUnavailable(self.error[0], self.error[1])
+        return self.reply
+
+
+class RelayFreeImageTests(unittest.TestCase):
+    """A keyless install makes a picture on Relay Free's gateway; an install with its own
+    OpenRouter key never passes through it."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        profile = mock.patch.dict("os.environ", {"XDG_DATA_HOME": self.temp.name})
+        profile.start()
+        self.addCleanup(profile.stop)
+        keyless = mock.patch.object(media.keystore, "lookup",
+                                    side_effect=lambda key: "test-key" if key == "fal" else None)
+        keyless.start()
+        self.addCleanup(keyless.stop)
+        self.session = FakeHostedSession(
+            image={"limit": 10, "used": 3, "resets_at": 452257800},
+            reply={"created": 1, "data": [{"b64_json": base64.b64encode(PNG).decode()}],
+                   "usage": {"cost": 0.003}})
+        for patch in (mock.patch.object(media.hosted, "available", return_value=True),
+                      mock.patch.object(media.hosted, "image_roles",
+                                        return_value=[RELAY_FREE_ROLE]),
+                      mock.patch.object(media.hosted, "session", return_value=self.session)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.service = media.MediaTools(Workspace(self.temp.name))
+
+    def test_keyless_image_quotes_and_generates_on_relay_free(self):
+        events = []
+        self.service.emit = events.append
+        quoted = self.service.quote({"kind": "image", "prompt": "a lighthouse",
+                                     "output_path": "art"})
+        self.assertEqual((quoted["provider"], quoted["model"]), ("relay-free", "relay-image"))
+        self.assertEqual(quoted["estimated_usd"], 0.003)
+        self.assertIn("7 remaining", quoted["price_source"])
+        result = self.service.generate({"quote_id": quoted["quote_id"]})
+        self.assertEqual(Path(result["path"]).read_bytes(), PNG)
+        self.assertEqual(result["provider"], "relay-free")
+        self.assertEqual(self.session.payloads,
+                         [{"model": "relay-image", "prompt": "a lighthouse"}])
+        # The image just spent is announced for the chip, with both counts.
+        self.assertEqual(events, [{"event": "hosted_quota", "limit": 250000, "used": 1200,
+                                   "resets_at": 452257800, "image_limit": 10, "image_used": 3,
+                                   "image_resets_at": 452257800}])
+
+    def test_an_own_openrouter_key_never_uses_the_gateway(self):
+        with mock.patch.object(media.keystore, "lookup", return_value="test-key"):
+            quoted = self.service.quote({"kind": "image", "prompt": "a lighthouse"})
+        self.assertEqual(quoted["provider"], "openrouter")
+        self.assertEqual(self.session.payloads, [])
+
+    def test_relay_free_is_named_and_its_settings_checked(self):
+        quoted = self.service.quote({"kind": "image", "provider": "relay-free",
+                                     "prompt": "a lighthouse", "resolution": "1536x1024"})
+        self.assertEqual(quoted["provider"], "relay-free")
+        result = self.service.generate({"quote_id": quoted["quote_id"]})
+        self.assertEqual(self.session.payloads[-1]["resolution"], "1536x1024")
+        with self.assertRaisesRegex(media.MediaError, "not supported by Relay Free"):
+            self.service.quote({"kind": "image", "provider": "relay-free", "prompt": "x",
+                                "resolution": "999x999"})
+        with mock.patch.object(media.hosted, "image_roles", return_value=[]):
+            with self.assertRaisesRegex(media.MediaError, "needs a openrouter key"):
+                self.service.quote({"kind": "image", "prompt": "x"})
+            with self.assertRaisesRegex(media.MediaError, "not available here"):
+                self.service.quote({"kind": "image", "provider": "relay-free", "prompt": "x"})
+
+    def test_exhaustion_words_the_persons_own_providers(self):
+        self.session.error = ("Relay Free images used for today.", "quota_exhausted")
+        quoted = self.service.quote({"kind": "image", "prompt": "a lighthouse"})
+        with self.assertRaisesRegex(media.MediaError,
+                                    "daily images are used up.*OpenRouter key"):
+            self.service.generate({"quote_id": quoted["quote_id"]})
+
+    def test_catalog_offers_relay_free_with_its_allowance(self):
+        info = self.service.catalog()["image"]["relay_free"]
+        self.assertEqual(info["available"], True)
+        self.assertEqual(info["role"], "relay-image")
+        self.assertEqual(info["model"], "black-forest-labs/flux.2-klein-4b")
+        self.assertEqual(info["price_usd"], 0.003)
+        self.assertEqual((info["images_limit"], info["images_left_today"]), (10, 7))
+
+
 if __name__ == "__main__":
     unittest.main()

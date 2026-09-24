@@ -49,6 +49,13 @@ class Role:
     max_input_chars: int
     effort: str = "medium"           # when the client names none
     max_effort: str = "medium"       # the client's own ask is clamped to this
+    # "chat" proxies /chat/completions; "images" (POST /v1/images) generates one picture per call
+    # on the upstream's /images endpoint, priced per image rather than per token.
+    kind: str = "chat"
+    # Images roles only: the resolutions (first is the default) and aspect ratios the gateway
+    # accepts. Empty means the role is chat-only.
+    resolutions: tuple[str, ...] = ()
+    aspect_ratios: tuple[str, ...] = ()
 
 
 def effort_rank(effort: str) -> int:
@@ -67,6 +74,9 @@ class Provider:
     # model -> (input USD per million tokens, output USD per million tokens)
     price_per_mtok: dict[str, tuple[float, float]]
     effort_style: str = "reasoning_effort"
+    # model -> flat USD per generated image, for a role of kind "images". Every model an images
+    # role serves must be here, exactly as every chat model must be in price_per_mtok.
+    price_per_image: dict[str, float] = field(default_factory=dict)
 
     def key(self) -> str:
         """Read at request time, so a rotated key in the environment of a restarted process is
@@ -78,12 +88,19 @@ class Provider:
         price_in, price_out = self.price_per_mtok[model]
         return round(input_tokens * price_in + output_tokens * price_out)
 
+    def image_cost_micros(self, model: str) -> int:
+        """The cost of one image in millionths of a dollar, at any accepted resolution."""
+        return round(self.price_per_image[model] * 1_000_000)
+
 
 @dataclass(frozen=True)
 class Quota:
     tokens_per_day: int
     requests_per_minute: int
     concurrency_per_install: int
+    # Images are counted per picture, not per token: one call is one image. 0 means the /v1/images
+    # route is off, and a config that serves an images role with 0 is refused at startup.
+    images_per_day: int = 0
 
 
 @dataclass(frozen=True)
@@ -190,10 +207,20 @@ def _providers(section, allow_loopback: bool) -> dict[str, Provider]:
                 raise ConfigError(f"{where}.price_per_mtok[{model!r}] must be "
                                   "[input_usd_per_mtok, output_usd_per_mtok].")
             prices[model] = (float(pair[0]), float(pair[1]))
+        image_prices_raw = raw.get("price_per_image", {})
+        if not isinstance(image_prices_raw, dict):
+            raise ConfigError(f"{where}.price_per_image must be an object of model -> usd.")
+        image_prices: dict[str, float] = {}
+        for model, price in image_prices_raw.items():
+            if isinstance(price, bool) or not isinstance(price, (int, float)) or price < 0:
+                raise ConfigError(f"{where}.price_per_image[{model!r}] must be "
+                                  "a price in USD per image.")
+            image_prices[model] = float(price)
         style = raw.get("effort_style", "reasoning_effort")
         if style not in EFFORT_STYLES:
             raise ConfigError(f"{where}.effort_style must be one of {', '.join(EFFORT_STYLES)}.")
         out[name] = Provider(name=name, key_env=key_env.strip(), price_per_mtok=prices,
+                             price_per_image=image_prices,
                              base_url=_base_url(name, str(raw.get("base_url", "")), allow_loopback),
                              effort_style=style)
     return out
@@ -211,6 +238,9 @@ def _roles(section, providers: dict[str, Provider]) -> dict[str, Role]:
             raise ConfigError(f"{where}: unsupported reserved Pro role.")
         if not isinstance(raw, dict):
             raise ConfigError(f"{where} must be an object.")
+        kind = raw.get("kind", "chat")
+        if kind not in ("chat", "images"):
+            raise ConfigError(f"{where}.kind must be 'chat' or 'images'.")
         upstreams_raw = raw.get("upstreams")
         if not isinstance(upstreams_raw, list) or not upstreams_raw:
             raise ConfigError(f"{where}.upstreams must be a non-empty list.")
@@ -225,7 +255,11 @@ def _roles(section, providers: dict[str, Provider]) -> dict[str, Role]:
                 raise ConfigError(f"{here}.provider must name a configured provider.")
             if not isinstance(model, str) or not model.strip():
                 raise ConfigError(f"{here}.model is required.")
-            if model not in providers[provider].price_per_mtok:
+            if kind == "images":
+                if model not in providers[provider].price_per_image:
+                    raise ConfigError(f"{here}: no price for {model!r} under providers.{provider}."
+                                      "price_per_image; every served image model must be priced.")
+            elif model not in providers[provider].price_per_mtok:
                 raise ConfigError(f"{here}: no price for {model!r} under providers.{provider}."
                                   "price_per_mtok; every served model must be priced.")
             extra = entry.get("extra", {})
@@ -238,6 +272,24 @@ def _roles(section, providers: dict[str, Provider]) -> dict[str, Role]:
                                       + (" (use effort / max_effort on the role)."
                                          if reserved.startswith("reasoning") else "."))
             upstreams.append(Upstream(provider=provider, model=model, extra=dict(extra)))
+        if kind == "images":
+            resolutions_raw = raw.get("resolutions")
+            if (not isinstance(resolutions_raw, list) or not resolutions_raw
+                    or any(not isinstance(r, str) or not r.strip() for r in resolutions_raw)):
+                raise ConfigError(f"{where}.resolutions must be a non-empty list like "
+                                  '["1024x1024", "1536x1024"]; the first is the default.')
+            ratios_raw = raw.get("aspect_ratios", [])
+            if not isinstance(ratios_raw, list) or any(
+                    not isinstance(a, str) or not a.strip() for a in ratios_raw):
+                raise ConfigError(f"{where}.aspect_ratios must be a list like [\"1:1\", \"3:2\"] or absent.")
+            out[name] = Role(name=name, upstreams=tuple(upstreams),
+                             max_output_tokens=0,
+                             max_input_chars=min(_int(raw, "max_input_chars", where, default=4000),
+                                                 MAX_REQUEST_BYTES),
+                             kind=kind,
+                             resolutions=tuple(r.strip() for r in resolutions_raw),
+                             aspect_ratios=tuple(a.strip() for a in ratios_raw))
+            continue
         effort = _effort(raw, "effort", where, "medium")
         max_effort = _effort(raw, "max_effort", where, "medium")
         if effort_rank(effort) > effort_rank(max_effort):
@@ -270,7 +322,13 @@ def parse(data: dict, environ: dict | None = None) -> Config:
         raise ConfigError("quota must be an object.")
     quota = Quota(tokens_per_day=_int(quota_raw, "tokens_per_day", "quota"),
                   requests_per_minute=_int(quota_raw, "requests_per_minute", "quota"),
-                  concurrency_per_install=_int(quota_raw, "concurrency_per_install", "quota"))
+                  concurrency_per_install=_int(quota_raw, "concurrency_per_install", "quota"),
+                  images_per_day=_int(quota_raw, "images_per_day", "quota", minimum=0, default=0))
+    for role in roles.values():
+        if role.kind == "images" and quota.images_per_day < 1:
+            raise ConfigError(f"quota.images_per_day must be at least 1 when roles.{role.name} "
+                              "serves images; set the per-install daily image count, or remove "
+                              "the role to keep /v1/images off.")
 
     limits_raw = data.get("limits", {})
     if not isinstance(limits_raw, dict):

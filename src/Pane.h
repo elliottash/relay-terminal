@@ -5472,6 +5472,8 @@ private:
         m_quotaLimit = quota.value(QStringLiteral("limit")).toVariant().toLongLong();
         m_quotaUsed = quota.value(QStringLiteral("used")).toVariant().toLongLong();
         m_quotaResets = quota.value(QStringLiteral("resets_at")).toVariant().toLongLong();
+        m_imageQuotaLimit = quota.value(QStringLiteral("image_limit")).toVariant().toLongLong();
+        m_imageQuotaUsed = quota.value(QStringLiteral("image_used")).toVariant().toLongLong();
         // A fresh allowance retires the offer to add a key: the next exhaustion may make it again.
         if (m_quotaLimit > 0 && m_quotaUsed < m_quotaLimit) m_hostedOfferShown = false;
         updateQuotaLabel();
@@ -5494,12 +5496,21 @@ private:
         } else {
             // Rounded down: an allowance with one call spent must not read as untouched.
             const double left = std::max(0.0, 100.0 * double(m_quotaLimit - m_quotaUsed) / double(m_quotaLimit));
-            m_quotaLabel->setText((plan + QStringLiteral(" · %1% left")).arg(left > 0 && left < 10 ? QString::number(std::floor(left * 10) / 10, 'f', 1)
-                                                                                           : QString::number(std::floor(left), 'f', 0)));
-            m_quotaLabel->setProperty("warn", left <= 10.0);
-            m_quotaLabel->setToolTip(QStringLiteral("%1 of %2 tokens today%3")
+            QString text = (plan + QStringLiteral(" · %1% left")).arg(left > 0 && left < 10 ? QString::number(std::floor(left * 10) / 10, 'f', 1)
+                                                                                           : QString::number(std::floor(left), 'f', 0));
+            QString detail = QStringLiteral("%1 of %2 tokens today%3")
                 .arg(QLocale().toString(std::min(m_quotaUsed, m_quotaLimit)), QLocale().toString(m_quotaLimit),
-                     m_quotaResets > 0 ? QStringLiteral(" · resets at %1").arg(localClock(m_quotaResets)) : QString()));
+                     m_quotaResets > 0 ? QStringLiteral(" · resets at %1").arg(localClock(m_quotaResets)) : QString());
+            if (m_imageQuotaLimit > 0) {
+                // A picture a day: counted apart from tokens, so it gets its own clause —
+                // "Free · 73% left · 4 images left", warn only when the last one is gone.
+                const qint64 imagesLeft = std::max<qint64>(0, m_imageQuotaLimit - m_imageQuotaUsed);
+                text += QStringLiteral(" · %1 image%2 left").arg(imagesLeft).arg(imagesLeft == 1 ? QString() : QStringLiteral("s"));
+                detail += QStringLiteral(" · %1 of %2 images today").arg(m_imageQuotaUsed).arg(m_imageQuotaLimit);
+            }
+            m_quotaLabel->setText(text);
+            m_quotaLabel->setProperty("warn", left <= 10.0 || (m_imageQuotaLimit > 0 && m_imageQuotaUsed >= m_imageQuotaLimit));
+            m_quotaLabel->setToolTip(detail);
         }
         m_quotaLabel->style()->unpolish(m_quotaLabel); m_quotaLabel->style()->polish(m_quotaLabel);
         m_quotaLabel->show();
@@ -16285,6 +16296,9 @@ private:
     // m_hostedOfferShown: the add-a-key dialog went up for the current exhaustion (once per pane).
     QLabel *m_quotaLabel = nullptr;
     qint64 m_quotaLimit = 0, m_quotaUsed = 0, m_quotaResets = 0;
+    // The same event's image count (protocol 13.9, `image_*` fields): a keyless install's
+    // pictures are counted per day, not per token, and the chip says how many are left.
+    qint64 m_imageQuotaLimit = 0, m_imageQuotaUsed = 0;
     bool m_hostedOfferShown = false;
     QToolButton *m_interruptButton = nullptr;
     int m_menuFileLine = 0;   // the line the right-clicked path pointed at, for "Open file"

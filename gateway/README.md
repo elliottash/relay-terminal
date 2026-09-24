@@ -71,8 +71,10 @@ everyone as one address. Leave it unset only when the port is reached directly.
 | `providers.<name>.key_env` | Environment variable holding the key. Read on every request, so restarting after editing the env file rotates it. |
 | `providers.<name>.effort_style` | How the provider takes the effort: `reasoning` sends `{"reasoning": {"effort": "medium"}}` (OpenRouter); `reasoning_effort` sends `"reasoning_effort": "medium"` (OpenAI, DeepSeek, Gemini's OpenAI endpoint; the default); `none` sends nothing, for a model with no knob. |
 | `providers.<name>.price_per_mtok` | `model -> [input USD per million, output USD per million]`. The example's numbers are OpenRouter's list prices as fetched from `https://openrouter.ai/api/v1/models` on 2026-09-18 (GLM-5.3-Flash 0.09/0.30, DeepSeek V4.1 Flash 0.15/0.60, Gemini 3.5 Flash-Lite 0.30/2.50); re-check them when a role's upstream changes, because they are what the ceilings count. |
-| `quota` | Per installation: `tokens_per_day` (input plus output, UTC day), `requests_per_minute`, `concurrency_per_install`. |
-| `limits` | `global_concurrency`, `spend_per_day_usd` and `spend_per_month_usd` (all providers together), `per_provider_per_day_usd`, `registrations_per_ip_per_hour`, `challenges_per_ip_per_hour`. |
+| `providers.<name>.price_per_image` | `model -> USD per picture`, for a role of `kind: "images"`. Every model an images role serves must be priced here, exactly as every chat model must be in `price_per_mtok`: a served image model with no price is refused at startup. |
+| `roles.<name>.kind` | `"chat"` (the default) or `"images"`. An images role serves `POST /v1/images` on the upstream's `/images` endpoint, one picture per call, with `resolutions` (first is the default) and `aspect_ratios` it accepts and `max_input_chars` for the prompt. An images role also requires `quota.images_per_day` > 0 — never a route that spends with nothing counting it. |
+| `quota` | Per installation: `tokens_per_day` (input plus output, UTC day), `requests_per_minute`, `concurrency_per_install`, `images_per_day` (pictures per day, counted separately from tokens; the example sets 10). |
+| `limits` | `global_concurrency`, `spend_per_day_usd` and `spend_per_month_usd` (all providers together — an image's whole price is checked against these *before* the call, because it is known upfront), `per_provider_per_day_usd`, `registrations_per_ip_per_hour`, `challenges_per_ip_per_hour`. |
 | `token_ttl_seconds` | How long a registration token lives (at least 60). Clients re-register silently. |
 | `client_ip_header` | See cloudflared above. |
 | `upstream_connect_timeout`, `upstream_stall_timeout` | Seconds; defaults 20 and 120. |
@@ -87,7 +89,7 @@ Every refusal is `{"error": {"code", "message", "resets_at"?}}`:
 |---|---|---|
 | 401 | `token_expired` | No token, an unknown one, or one past its TTL. The client registers again. |
 | 400 | `bad_request` | A field outside the allow-list, `model` not a role, a malformed message, a body over the role's size. |
-| 429 | `quota_exhausted` | The installation's `tokens_per_day` is used; `resets_at` is the next UTC midnight. |
+| 429 | `quota_exhausted` | The installation's `tokens_per_day` — or, on `POST /v1/images`, its `images_per_day` — is used; `resets_at` is the next UTC midnight. |
 | 429 | `rate_limited` | Requests per minute, concurrent requests per installation, or per-address registration. |
 | 503 | `free_unavailable` | A spend ceiling is hit, the gateway is at `global_concurrency`, no upstream answered, or the database failed (the gateway fails closed). |
 | 502 | `free_unavailable` | An upstream refused the rebuilt request outright (a 4xx other than 429, or a redirect). Check the config and the key. |
@@ -146,6 +148,16 @@ UPDATE usage SET input_tokens = 0, output_tokens = 0
 To raise the allowance for everyone, edit `quota.tokens_per_day` and restart. A per-plan
 allowance (`installations.plan` is stored and returned to the client) is the hook for a later
 paid or sponsored tier; nothing reads it yet beyond echoing it.
+
+Images are their own allowance: `quota.images_per_day` pictures per installation per day, in the
+`image_usage` table, with the token quota untouched. The whole price of a picture is known before
+the call, so unlike chat it is checked against `spend_per_day_usd` and `spend_per_month_usd`
+*before* the upstream is called, and settled after. To give one installation more pictures today:
+
+```sql
+UPDATE image_usage SET images = 0
+  WHERE installation_id = '<id>' AND day = date('now');
+```
 
 ## Running it locally
 

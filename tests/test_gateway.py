@@ -83,6 +83,16 @@ class FakeUpstream:
                     return
                 if kind == "slow":
                     outer.slow_gate.wait(5)
+                if self.path.endswith("/images"):
+                    # An OpenRouter-images reply: the picture as base64, nothing else.
+                    reply = json.dumps({"created": 1, "data": [
+                        {"b64_json": base64.b64encode(b"FAKE_IMAGE_BYTES").decode()}]}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(reply)))
+                    self.end_headers()
+                    self.wfile.write(reply)
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Connection", "close")
@@ -114,12 +124,15 @@ class FakeUpstream:
 def config_for(upstream_base: str, *, main=("ok",), prices=(0.5, 1.5), tokens_per_day=100000,
                requests_per_minute=100, concurrency_per_install=2, spend_per_day=20.0,
                registrations_per_ip=10, extra_role=None, connect_timeout=2.0,
-               effort_style="reasoning") -> dict:
+               effort_style="reasoning", images_per_day=0, image_price=0.01,
+               image_upstream=("ok",)) -> dict:
     """A config whose providers are the fake upstream's behaviours, one provider per path."""
     kinds = ("ok", "fail503", "fail400", "redirect", "json", "slow", "mid")
     providers = {kind: {"base_url": f"{upstream_base}/{kind}", "key_env": KEY_ENV,
                         "effort_style": effort_style,
-                        "price_per_mtok": {"fake-model": list(prices)}} for kind in kinds}
+                        "price_per_mtok": {"fake-model": list(prices)},
+                        "price_per_image": {"fake-image-model": image_price}}
+                 for kind in kinds}
     roles = {
         "relay-main": {"upstreams": [{"provider": kind, "model": "fake-model"} for kind in main],
                        "effort": "low", "max_effort": "medium",
@@ -129,11 +142,20 @@ def config_for(upstream_base: str, *, main=("ok",), prices=(0.5, 1.5), tokens_pe
                        "effort": "minimal", "max_effort": "medium",
                        "max_output_tokens": 50, "max_input_chars": 2000},
     }
+    if images_per_day:
+        roles["relay-image"] = {
+            "kind": "images",
+            "upstreams": [{"provider": kind, "model": "fake-image-model"}
+                          for kind in image_upstream],
+            "resolutions": ["64x64", "128x64"],
+            "aspect_ratios": ["1:1", "2:1"],
+            "max_input_chars": 4000}
     if extra_role:
         roles.update(extra_role)
     return {"roles": roles, "providers": providers,
             "quota": {"tokens_per_day": tokens_per_day, "requests_per_minute": requests_per_minute,
-                      "concurrency_per_install": concurrency_per_install},
+                      "concurrency_per_install": concurrency_per_install,
+                      "images_per_day": images_per_day},
             "limits": {"global_concurrency": 8, "spend_per_day_usd": spend_per_day,
                        "spend_per_month_usd": 1000, "per_provider_per_day_usd": {},
                        "registrations_per_ip_per_hour": registrations_per_ip,
@@ -428,7 +450,8 @@ class GatewayTests(unittest.TestCase):
         # A dollar a token: the first call costs $110, past the $20 day ceiling.
         gateway = self.gateway(prices=(1_000_000, 1_000_000))
         self.assertEqual(gateway.call_json("GET", "/v1/health")[2],
-                         {"ok": True, "roles": ["relay-lite", "relay-main"], "open": True})
+                         {"ok": True, "roles": ["relay-lite", "relay-main"], "open": True,
+                          "images": []})
         token, _ = gateway.token()
         self.assertEqual(gateway.chat(token)[0], 200)
         self.assertAlmostEqual(gateway.store.spend_today(), 110.0)
@@ -587,21 +610,162 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(gateway.call("GET", "/v1/health")[0], 503)
         self.assertEqual(self.upstream.requests, [])
 
+    # ---- images ---------------------------------------------------------------------------------
+
+    def image(self, gateway, token, prompt=PROMPT, model="relay-image", **fields):
+        return gateway.call("POST", "/v1/images",
+                            {"model": model, "prompt": prompt, **fields}, token=token)
+
+    def test_image_serves_counts_and_quotes(self):
+        gateway = self.gateway(images_per_day=2, image_price=0.01)
+        token, _ = gateway.token()
+        status, headers, raw = self.image(gateway, token)
+        self.assertEqual(status, 200, raw)
+        reply = json.loads(raw)
+        self.assertEqual(base64.b64decode(reply["data"][0]["b64_json"]), b"FAKE_IMAGE_BYTES")
+        self.assertEqual(headers["X-Relay-Image-Limit"], "2")
+        self.assertEqual(headers["X-Relay-Image-Used"], "1")
+
+        # What reached upstream: the operator's key, the model, the default resolution,
+        # and the prompt the client sent — the gateway adds nothing.
+        sent = self.upstream.requests[-1]
+        self.assertEqual(sent["path"], "/ok/images")
+        self.assertEqual(sent["authorization"], "Bearer upstream-secret")
+        self.assertEqual(sent["body"]["model"], "fake-image-model")
+        self.assertEqual(sent["body"]["prompt"], PROMPT)
+        self.assertEqual(sent["body"]["resolution"], "64x64")
+
+        # The image is counted against its own allowance, not the token one...
+        status, _, quota = gateway.call_json("GET", "/v1/quota", token=token)
+        self.assertEqual(quota["used"], 0)
+        self.assertEqual(quota["images"], {"limit": 2, "used": 1,
+                                           "resets_at": quota["images"]["resets_at"]})
+        # ...and its price is settled into the operator's spend ledger.
+        self.assertEqual(gateway.store.spend_today(), 0.01)
+
+        status, headers, _ = self.image(gateway, token)
+        self.assertEqual((status, headers["X-Relay-Image-Used"]), (200, "2"))
+        status, headers, body = self.image(gateway, token)
+        self.assertEqual(status, 429)
+        self.assertEqual(json.loads(body)["error"]["code"], "quota_exhausted")
+        self.assertEqual(headers["X-Relay-Image-Used"], "2")
+        self.assertIn("resets_at", json.loads(body)["error"])
+
+    def test_image_health_lists_the_role(self):
+        gateway = self.gateway(images_per_day=2, image_price=0.01)
+        status, _, health = gateway.call_json("GET", "/v1/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(health["images"], [{"role": "relay-image", "model": "fake-image-model",
+                                             "price_usd": 0.01, "resolutions": ["64x64", "128x64"],
+                                             "aspect_ratios": ["1:1", "2:1"]}])
+
+    def test_image_validation(self):
+        gateway = self.gateway(images_per_day=2)
+        token, _ = gateway.token()
+        for body, why in (
+                ({"model": "relay-main", "prompt": PROMPT}, "chat role"),
+                ({"model": "nope", "prompt": PROMPT}, "unknown role"),
+                ({"model": "relay-image"}, "no prompt"),
+                ({"model": "relay-image", "prompt": ""}, "empty prompt"),
+                ({"model": "relay-image", "prompt": "x" * 4001}, "too long"),
+                ({"model": "relay-image", "prompt": PROMPT, "resolution": "999x999"}, "resolution"),
+                ({"model": "relay-image", "prompt": PROMPT, "aspect_ratio": "9:9"}, "aspect ratio")):
+            status, _, raw = gateway.call("POST", "/v1/images", body, token=token)
+            self.assertEqual(status, 400, (why, raw))
+            self.assertEqual(json.loads(raw)["error"]["code"], "bad_request", why)
+        # A named aspect ratio and resolution pass through as sent.
+        status, _, _ = self.image(gateway, token, resolution="128x64", aspect_ratio="2:1")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.upstream.requests[-1]["body"]["resolution"], "128x64")
+        self.assertEqual(self.upstream.requests[-1]["body"]["aspect_ratio"], "2:1")
+        # None of it reached upstream.
+        self.assertEqual(len(self.upstream.requests), 1)
+
+    def test_image_failover_and_refusal(self):
+        gateway = self.gateway(images_per_day=2, image_upstream=("fail503", "ok"))
+        token, _ = gateway.token()
+        status, _, raw = self.image(gateway, token)
+        self.assertEqual(status, 200, raw)                        # failed over to the second upstream
+        self.assertEqual(self.upstream.requests[-1]["path"], "/ok/images")
+
+        gateway = self.gateway(images_per_day=2, image_upstream=("fail400",))
+        token, _ = gateway.token()
+        with self.assertLogs("relay.gateway", level="INFO") as logs:
+            status, _, raw = self.image(gateway, token)
+            self.assertEqual(status, 502)
+            self.assertEqual(json.loads(raw)["error"]["code"], "free_unavailable")
+            self.assertNotIn("retried", json.loads(raw)["error"])   # one upstream, no failover
+        self.assertTrue(any("error=upstream_refused" in line for line in logs.output))
+        self.assertFalse(any(PROMPT in line for line in logs.output))
+        # The refused picture is not counted.
+        self.assertEqual(self._image_used(gateway, token), 0)
+
+    def _image_used(self, gateway, token):
+        """Read the installation's image count through /v1/quota."""
+        status, _, quota = gateway.call_json("GET", "/v1/quota", token=token)
+        self.assertEqual(status, 200)
+        return quota["images"]["used"]
+
+    def test_image_spending_ceiling_refuses_before_the_call(self):
+        gateway = self.gateway(images_per_day=2, image_price=0.01, spend_per_day=0.005)
+        token, _ = gateway.token()
+        status, _, raw = self.image(gateway, token)
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(raw)["error"]["code"], "free_unavailable")
+        self.assertEqual(self._image_used(gateway, token), 0)
+        self.assertEqual(gateway.store.spend_today(), 0.0)
+        self.assertEqual(self.upstream.requests, [])              # nothing reached upstream
+
 
 class ConfigTests(unittest.TestCase):
     def test_example_config_loads(self):
         path = os.path.join(os.path.dirname(__file__), "..", "gateway", "gateway.example.json")
         env = {"GATEWAY_OPENROUTER_KEY": "k"}
         config = config_mod.load(path, env)
-        self.assertEqual(sorted(config.roles), ["relay-flash", "relay-lite", "relay-main"])
+        self.assertEqual(sorted(config.roles),
+                         ["relay-flash", "relay-image", "relay-lite", "relay-main"])
         self.assertEqual(config.roles["relay-lite"].max_output_tokens, 512)
+        image = config.roles["relay-image"]
+        self.assertEqual(image.kind, "images")
+        self.assertEqual(image.resolutions, ("1024x1024", "1536x1024", "1024x1536"))
+        self.assertEqual(image.resolutions[0], "1024x1024")
+        self.assertEqual(config.providers["openrouter"].image_cost_micros(image.upstreams[0].model),
+                         3000)
         self.assertEqual([(r.effort, r.max_effort) for r in config.roles.values()],
-                         [("medium", "medium"), ("low", "medium"), ("minimal", "medium")])
+                         [("medium", "medium"), ("low", "medium"), ("minimal", "medium"),
+                          ("medium", "medium")])
         self.assertEqual(config.providers["openrouter"].effort_style, "reasoning")
         self.assertEqual(config.providers["deepseek"].effort_style, "reasoning_effort")
         self.assertEqual(config.client_ip_header, "cf-connecting-ip")
         with self.assertRaises(config_mod.ConfigError):
             config_mod.load(path, {})                          # the key is missing
+
+    def test_image_role_needs_a_price_and_an_allowance(self):
+        """A served image model with no price is refused at startup, exactly like a chat model —
+        and an image role with no per-install allowance is refused too: never a route that
+        spends with nothing counting it."""
+        data = config_for("http://127.0.0.1:1", images_per_day=2)
+        data["providers"]["ok"].pop("price_per_image")
+        with self.assertRaises(config_mod.ConfigError):
+            config_mod.parse(data, {KEY_ENV: "k"})
+
+        data = config_for("http://127.0.0.1:1", images_per_day=2)
+        data["providers"]["ok"]["price_per_image"] = {"other-model": 0.01}
+        with self.assertRaises(config_mod.ConfigError):
+            config_mod.parse(data, {KEY_ENV: "k"})
+
+        data = config_for("http://127.0.0.1:1", images_per_day=0)
+        data["roles"]["relay-image"] = {"kind": "images",
+                                        "upstreams": [{"provider": "ok",
+                                                       "model": "fake-image-model"}],
+                                        "resolutions": ["64x64"]}
+        with self.assertRaises(config_mod.ConfigError):
+            config_mod.parse(data, {KEY_ENV: "k"})
+
+        data = config_for("http://127.0.0.1:1", images_per_day=2)
+        del data["roles"]["relay-image"]["resolutions"]
+        with self.assertRaises(config_mod.ConfigError):
+            config_mod.parse(data, {KEY_ENV: "k"})
 
     def test_effort_settings_are_checked(self):
         data = config_for("http://127.0.0.1:1")

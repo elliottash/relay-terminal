@@ -486,9 +486,11 @@ regenerates `issues/BOARD.md`. A repository without `issues/board.yaml` never se
   imported.
 - **Relay Free.** A fresh install with no key uses Relay Free, an included daily allowance served
   by a Relay-operated gateway that holds the provider keys (Main, Flash and Lite are GLM,
-  DeepSeek and Gemini through OpenRouter to start). It is one more provider row: pick any other
-  provider and it is out of the path. Prompts, the conversation and tool results go to the gateway
-  and on to the provider. `docs/RELAY-FREE.md` has the
+  DeepSeek and Gemini through OpenRouter to start; images are FLUX.2 Klein through the same
+  gateway). It is one more provider row: pick any other provider and it is out of the path. Prompts,
+  the conversation, tool results and — on Relay Free — image prompts go to the gateway and on to the
+  provider; with your own OpenRouter key an image prompt, like a chat prompt, goes nowhere near
+  Relay's server. `docs/RELAY-FREE.md` has the
   details and the quotas.
 - **Network path.** Requests on your own key go to the provider you configure. Relay Free
   requests go through Relay's gateway.

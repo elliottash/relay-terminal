@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from . import hosted
 from . import keystore
 from .tools import Workspace
 
@@ -188,9 +189,13 @@ def _settings(choice):
 
 
 class MediaTools:
-    def __init__(self, workspace: Workspace, cancel_event=None):
+    def __init__(self, workspace: Workspace, cancel_event=None, emit=None):
         self.workspace = workspace
         self.cancel_event = cancel_event
+        # The agent's event sink: a Relay Free image carries the day's image count on its
+        # response headers, which becomes a hosted_quota event for the chip, exactly as a
+        # hosted chat turn's quota does.
+        self.emit = emit
         digest = hashlib.sha256(str(workspace.root).encode()).hexdigest()[:16]
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "relay/media-jobs" / digest
         self.jobs_dir = base
@@ -242,11 +247,35 @@ class MediaTools:
         return {"image": {"provider": "openrouter", "default_model": IMAGE_DEFAULT,
                           "models": [{"id": model, "capabilities": self._image_catalog().get(model),
                                       "endpoints": self._image_pricing(model)}
-                                     for model in IMAGE_MODELS]},
+                                     for model in IMAGE_MODELS],
+                          "relay_free": self._relay_free_image_info()},
                 "music": {"models": list(LYRIA_MODELS), "elevenlabs": bool(keystore.lookup("fal") or keystore.lookup("elevenlabs"))},
                 "sfx": {"model": "eleven_text_to_sound_v2", "available": bool(keystore.lookup("fal") or keystore.lookup("elevenlabs"))},
                 "video": [{"id": model, "capabilities": self._video_catalog().get(model)} for model in VIDEO_MODELS],
                 "keys": {name: bool(keystore.lookup(name)) for name in ("openrouter", "fal", "elevenlabs")}}
+
+    def _relay_free_role(self):
+        """The gateway's first image role, or None when it serves none (hosted disabled here,
+        unreachable, or no image role deployed): images then need the person's own key, as before."""
+        if not hosted.available():
+            return None
+        roles = hosted.image_roles()
+        return roles[0] if roles else None
+
+    def _relay_free_image_info(self):
+        """What the catalog says about Relay Free images: the model, the price the gateway
+        charges against the daily allowance, and how many are left when a quota is known."""
+        role = self._relay_free_role()
+        if role is None:
+            return {"available": False}
+        info = {"available": True, "role": role.get("role"), "model": role.get("model"),
+                "price_usd": role.get("price_usd"), "resolutions": role.get("resolutions"),
+                "aspect_ratios": role.get("aspect_ratios")}
+        quota = hosted.session().image_quota()   # cached from the last exchange; no network here
+        if quota:
+            info["images_left_today"] = max(0, quota.get("limit", 0) - quota.get("used", 0))
+            info["images_limit"] = quota.get("limit")
+        return info
 
     def _select(self, args):
         kind = args.get("kind")
@@ -266,15 +295,35 @@ class MediaTools:
             raise MediaError(f"Unsupported {kind} setting: {', '.join(sorted(extra))}.")
         provider = choice.get("provider")
         if kind in ("image", "video"):
-            if provider not in (None, "openrouter"):
-                raise MediaError("Images and videos use OpenRouter.")
-            provider = "openrouter"
-            model = choice.get("model") or (IMAGE_DEFAULT if kind == "image" else "google/veo-3.1-lite")
-            if kind == "video" and model not in VIDEO_MODELS:
-                raise MediaError("Video model must be standard Seedance 2.0 or Veo 3.1 Lite.")
-            if kind == "image" and model not in IMAGE_MODELS:
-                raise MediaError("Image model must be FLUX.2 Klein 4B or Gemini 3.1 Flash Lite Image.")
-            choice["model"] = model
+            if provider not in (None, "openrouter") and not (kind == "image" and provider == "relay-free"):
+                raise MediaError("Images and videos use OpenRouter"
+                                 + ("; a keyless install can also use Relay Free for images." if kind == "image" else "")
+                                 + ".")
+            if kind == "image" and provider == "relay-free":
+                role = self._relay_free_role()
+                if role is None:
+                    raise MediaError("Relay Free image generation is not available here. "
+                                     "Add an OpenRouter key in Options › Models › API keys.")
+                choice["model"] = role.get("role") or "relay-image"
+                choice["upstream_model"] = role.get("model")
+            else:
+                provider = "openrouter"
+                model = choice.get("model") or (IMAGE_DEFAULT if kind == "image" else "google/veo-3.1-lite")
+                if kind == "video" and model not in VIDEO_MODELS:
+                    raise MediaError("Video model must be standard Seedance 2.0 or Veo 3.1 Lite.")
+                if kind == "image" and model not in IMAGE_MODELS:
+                    raise MediaError("Image model must be FLUX.2 Klein 4B or Gemini 3.1 Flash Lite Image.")
+                choice["model"] = model
+                # A keyless install still gets images: Relay Free serves them when its gateway
+                # lists an image role. An install with an OpenRouter key never uses the gateway,
+                # and a provider named outright is respected.
+                if (kind == "image" and choice.get("provider") is None
+                        and not keystore.lookup("openrouter")
+                        and self._relay_free_role() is not None):
+                    role = self._relay_free_role()
+                    provider = "relay-free"
+                    choice["model"] = role.get("role") or "relay-image"
+                    choice["upstream_model"] = role.get("model")
         elif kind == "music":
             provider = provider or ("fal" if keystore.lookup("fal") else "elevenlabs" if keystore.lookup("elevenlabs") else "openrouter")
             if provider not in ("openrouter", "fal", "elevenlabs"):
@@ -294,7 +343,7 @@ class MediaTools:
             if provider not in ("fal", "elevenlabs"):
                 raise MediaError("Sound effects need a fal.ai or ElevenLabs key.")
             choice["model"] = "eleven_text_to_sound_v2"
-        if not keystore.lookup(provider):
+        if provider != "relay-free" and not keystore.lookup(provider):
             raise MediaError(f"{kind} needs a {provider} key. Add it in Options › Models › API keys.")
         choice["provider"] = provider
         duration = choice.get("duration")
@@ -334,7 +383,18 @@ class MediaTools:
                     raise MediaError(f"{setting} is not supported by {choice['model']}.")
             if row.get("supported_durations") and choice["duration"] not in row["supported_durations"]:
                 raise MediaError("Duration is not supported by the selected video model.")
-        if kind == "image":
+        if kind == "image" and provider == "relay-free":
+            # The gateway validates these too; checking here gives the better error and no round trip.
+            role = self._relay_free_role() or {}
+            for setting, field in (("resolution", "resolutions"), ("aspect_ratio", "aspect_ratios")):
+                value = choice.get(setting)
+                if value is None:
+                    continue
+                allowed = role.get(field) or []
+                if allowed and value not in allowed:
+                    raise MediaError(f"{setting} is not supported by Relay Free "
+                                     f"({', '.join(map(str, allowed))}).")
+        if kind == "image" and provider != "relay-free":
             row = self._image_catalog().get(choice["model"], {})
             if not row and (choice.get("resolution") or choice.get("aspect_ratio")):
                 raise MediaError("Image catalog unavailable; retry model-specific settings later.")
@@ -397,6 +457,18 @@ class MediaTools:
         elif choice["kind"] == "music" and choice["provider"] == "openrouter":
             estimate = 0.04 if choice["model"] == LYRIA_MODELS[0] else 0.08
             source = "OpenRouter Lyria published per-song rate; check current price"
+        elif choice["kind"] == "image" and choice["provider"] == "relay-free":
+            role = self._relay_free_role() or {}
+            price = role.get("price_usd")
+            quota = hosted.session().image_quota()   # known once any Relay Free exchange ran
+            if isinstance(price, (int, float)) and price > 0:
+                estimate = round(float(price), 4)
+                source = "Relay Free gateway, per image"
+            else:
+                source = "Relay Free gateway (price not published); no key is charged"
+            if quota:
+                source += (f"; 1 of the {quota.get('limit', '?')} free images left today "
+                           f"({max(0, quota.get('limit', 0) - quota.get('used', 0))} remaining)")
         elif choice["kind"] == "image" and choice["model"] == IMAGE_DEFAULT:
             for endpoint in self._image_pricing(IMAGE_DEFAULT):
                 for price in endpoint.get("pricing", []):
@@ -467,6 +539,8 @@ class MediaTools:
         if time.time() - quoted > QUOTE_SECONDS:
             raise MediaError("Media quote expired. Quote the request again.")
         provider = choice["provider"]
+        if provider == "relay-free":
+            return self._generate_relay_free_image(choice, estimate)
         key = keystore.lookup(provider)
         if not key:
             raise MediaError(f"The {provider} key is no longer available.")
@@ -537,6 +611,54 @@ class MediaTools:
         return {"path": self._save(choice, raw), "kind": kind, "model": choice["model"],
                 "settings": _settings(choice),
                 "provider": provider, "estimated_usd": estimate, "actual_usd": None}
+
+    def _generate_relay_free_image(self, choice, estimate):
+        """One picture through the Relay Free gateway: the hosted session's bearer token, the
+        gateway's own key upstream. No key of the person's is used or needed."""
+        role = self._relay_free_role()
+        if role is None:
+            raise MediaError("Relay Free image generation is not available here; quote the "
+                             "request again. Add an OpenRouter key in Options › Models › API keys.")
+        payload = {"model": choice["model"], "prompt": choice["prompt"]}
+        for field in ("resolution", "aspect_ratio"):
+            if field in choice:
+                payload[field] = choice[field]
+        self._check_cancel()
+        try:
+            reply = hosted.session().image(payload)
+        except hosted.HostedUnavailable as error:
+            self._emit_relay_free_quota()
+            message = str(error)
+            if error.code == "quota_exhausted":
+                message = ("Relay Free's daily images are used up. Add your own OpenRouter key "
+                           "in Options › Models › API keys to keep making images.")
+            raise MediaError(message) from None
+        self._emit_relay_free_quota()
+        images = reply.get("data") or []
+        if not images or not isinstance(images[0], dict):
+            raise MediaError("Relay Free returned no image.")
+        raw = _b64(images[0].get("b64_json"))
+        return {"path": self._save(choice, raw), "kind": "image", "model": choice["model"],
+                "settings": _settings(choice), "provider": "relay-free",
+                "estimated_usd": estimate,
+                "actual_usd": (reply.get("usage") or {}).get("cost", estimate)}
+
+    def _emit_relay_free_quota(self):
+        """One ``hosted_quota`` event with both counts, so the chip counts the image just spent.
+        The image exchange's response headers were recorded by ``Session.image``."""
+        if self.emit is None:
+            return
+        session = hosted.session()
+        event = {"event": "hosted_quota"}
+        event.update(session.quota() or {})
+        image = session.image_quota()
+        if image:
+            event.update({f"image_{field}": value for field, value in image.items()})
+        if len(event) > 1:
+            try:
+                self.emit(event)
+            except Exception:          # the chip is a courtesy; never fail a finished image
+                pass
 
     def job(self, args):
         identifier = args.get("job_id")

@@ -41,10 +41,18 @@ output cap, so the mapping changes without a desktop release.
 | `relay-main` | agent turns, planning, audits, judgment | OpenRouter `z-ai/glm-5.3-flash` | a GLM host |
 | `relay-flash` | terminal driving, subagents, short coding loops | OpenRouter `deepseek/deepseek-v4.1-flash` | DeepSeek direct |
 | `relay-lite` | routing, titles, labels, tiny decisions | OpenRouter `google/gemini-3.5-flash-lite` | Gemini direct, once the data-use terms are confirmed for a billed project |
+| `relay-image` | one picture per call (`media_generate {kind: image}` on a keyless install) | OpenRouter `black-forest-labs/flux.2-klein-4b` | the cheaper of it and Gemini 3.1 Flash Lite Image, by the startup price check |
 
 Every Phase 1 upstream is a pay-as-you-go API on one OpenRouter key. Subscription plans (the GLM
 Coding Plan, Kimi Code, MiniMax Token Plan) are never used upstream: their terms forbid backing a
 service with an individual plan.
+
+`relay-image` is a role of `kind: "images"`: it is served on `POST /v1/images`, priced per picture
+(`providers.<name>.price_per_image`) rather than per token, and counted against its own daily
+allowance (`quota.images_per_day`, ten per installation by default) as well as the operator's spend
+ceilings. A keyless desktop falls back to it for images when `/v1/health` lists it; an install with
+its own OpenRouter key sends image prompts to OpenRouter directly and never through the gateway,
+exactly as chat does.
 
 ## What the desktop does
 
@@ -73,8 +81,9 @@ service with an individual plan.
 | `POST /v1/challenge` | — | `{challenge, ephemeral_public, expires_in}` |
 | `POST /v1/register` | `{static_pubkey, challenge, proof, client: {version}}` | `{installation_id, token, expires_in, plan, quota: {limit, used, resets_at}}` |
 | `POST /v1/chat/completions` | OpenAI chat shape; `model` is a role id | SSE stream; headers `X-Relay-Quota-Limit`, `X-Relay-Quota-Used`, `X-Relay-Quota-Resets-At` |
-| `GET /v1/quota` | bearer | `{limit, used, resets_at, plan}` |
-| `GET /v1/health` | — | `{ok, roles, open}` |
+| `POST /v1/images` | `{model: role id of kind "images", prompt, resolution?, aspect_ratio?}` | OpenRouter images shape (`data[0].b64_json`) unchanged; headers `X-Relay-Quota-*` and `X-Relay-Image-Limit`, `X-Relay-Image-Used`, `X-Relay-Image-Resets-At` |
+| `GET /v1/quota` | bearer | `{limit, used, resets_at, plan, images?: {limit, used, resets_at}}` |
+| `GET /v1/health` | — | `{ok, roles, open, images: [{role, model, price_usd, resolutions, aspect_ratios}]}` |
 
 Errors are `{"error": {"code", "message", "resets_at", "retried"}}` with codes `bad_request` (400),
 `token_expired` (401), `quota_exhausted` and `rate_limited` (429), `free_unavailable` (503).

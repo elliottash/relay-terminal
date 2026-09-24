@@ -663,7 +663,8 @@ class Agent:
         self.terminal_context = terminal_context.Service()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills,
                                      policy=security.policy_from(security_options or {}))
-        self.media = media.MediaTools(self.executor.workspace, self.cancel_event)
+        self.media = media.MediaTools(self.executor.workspace, self.cancel_event,
+                                      emit=self._provider_emit)
         # Card #K2FV: the approval checklist. A configure that says nothing about approvals gets
         # allow-all — the cautious set before the first-launch choice is the GUI's default to send
         # (approvals_chosen: false), not a property of a bare Agent (the tests' and the subagents').

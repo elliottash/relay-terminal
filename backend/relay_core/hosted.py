@@ -50,6 +50,15 @@ TIMEOUT = 20.0
 MAX_BODY = 64 * 1024
 QUOTA_HEADERS = {"limit": "X-Relay-Quota-Limit", "used": "X-Relay-Quota-Used",
                  "resets_at": "X-Relay-Quota-Resets-At"}
+# The per-day image count rides its own headers (``/v1/images``, relay-image) so a reply can
+# carry the token quota and the image count side by side without one being read as the other.
+IMAGE_QUOTA_HEADERS = {"limit": "X-Relay-Image-Limit", "used": "X-Relay-Image-Used",
+                       "resets_at": "X-Relay-Image-Resets-At"}
+# A picture is a few MiB of base64, unlike any JSON this module otherwise exchanges.
+MAX_IMAGE_BODY = 32 * 1024 * 1024
+# And generating one takes far longer than a chat exchange: the socket timeout is per read,
+# but the first byte of the reply can wait for the whole picture.
+IMAGE_TIMEOUT = 240.0
 # The gateway's error codes and how each reads in a pane. The server's own `message` is Relay's
 # text, not a model provider's, but it still only ever stands in for an unknown code: the wording
 # the user sees is decided here, where it can name the way out (a key of their own).
@@ -258,10 +267,20 @@ def upstream_retried(body: bytes | None) -> bool:
 
 def quota_from_headers(headers) -> dict | None:
     """``{limit, used, resets_at}`` from a response's ``X-Relay-Quota-*`` headers, or None."""
+    return _quota_from_headers(headers, QUOTA_HEADERS)
+
+
+def image_quota_from_headers(headers) -> dict | None:
+    """``{limit, used, resets_at}`` from a response's ``X-Relay-Image-*`` headers: the day's
+    image count, in the same shape as the token quota."""
+    return _quota_from_headers(headers, IMAGE_QUOTA_HEADERS)
+
+
+def _quota_from_headers(headers, table: dict) -> dict | None:
     if headers is None:
         return None
     out = {}
-    for field, name in QUOTA_HEADERS.items():
+    for field, name in table.items():
         value = headers.get(name)
         if value is None:
             return None
@@ -306,6 +325,7 @@ class Session:
         self._token = ""
         self._expires = 0.0
         self._quota: dict | None = None
+        self._image_quota: dict | None = None
         self.plan = ""
         self.installation_id = ""
 
@@ -344,6 +364,19 @@ class Session:
                 self._quota = quota
         return quota
 
+    def image_quota(self) -> dict | None:
+        """The last ``{limit, used, resets_at}`` image count seen, or None before any exchange."""
+        with self._lock:
+            return dict(self._image_quota) if self._image_quota else None
+
+    def note_image_quota(self, headers) -> dict | None:
+        """Record the image count a response's headers carry, for the same event."""
+        quota = image_quota_from_headers(headers)
+        if quota is not None:
+            with self._lock:
+                self._image_quota = quota
+        return quota
+
     def fetch_quota(self) -> dict:
         """``GET /v1/quota`` (relative to the base, like ``/chat/completions``): the live allowance, for the keys modal and the chip on demand."""
         reply = self._get("/quota")
@@ -352,6 +385,9 @@ class Session:
             raise HostedUnavailable("Relay Free: the hosted service sent a quota it could not read.")
         with self._lock:
             self._quota = quota
+            images = _quota_from_body(reply.get("images"))
+            if images is not None:          # a gateway that does not serve images sends none
+                self._image_quota = images
             if isinstance(reply.get("plan"), str):
                 self.plan = reply["plan"]
         return quota
@@ -363,6 +399,57 @@ class Session:
         """Drop the cached token (tests, and a gateway that says the token is gone)."""
         with self._lock:
             self._token, self._expires = "", 0.0
+
+    def image(self, payload: dict) -> dict:
+        """``POST /v1/images``: one picture. The reply is far bigger than ``MAX_BODY`` (a picture
+        is a few MiB of base64), so it gets its own cap; everything else — the error wording, the
+        one retry on a refused token — is the same exchange as chat's. On success the quota
+        headers it carries are recorded, exactly as the chat transport records them.
+        """
+        def send(token: str) -> dict:
+            request = urllib.request.Request(
+                self.base + "/images", data=json.dumps(payload, ensure_ascii=False).encode(),
+                headers={"Content-Type": "application/json", "User-Agent": "Relay/0.1",
+                         "Authorization": "Bearer " + token}, method="POST")
+            return self._exchange_image(request)
+
+        try:
+            return send(self.token())
+        except HostedUnavailable as exc:
+            if exc.code != "token_expired":
+                raise
+        # Once, with a fresh token, as the chat transport does.
+        return send(self.token(force=True))
+
+    def _exchange_image(self, request) -> dict:
+        try:
+            with self._opener_().open(request, timeout=IMAGE_TIMEOUT) as response:
+                raw = response.read(MAX_IMAGE_BODY + 1)
+                self.note_quota(response.headers)
+                self.note_image_quota(response.headers)
+        except urllib.error.HTTPError as error:
+            body = error.read(MAX_IMAGE_BODY) if getattr(error, "fp", None) is not None else b""
+            text, code, resets_at = describe_error(error.code, body)
+            logs.event(_log, "hosted_refused", level_name="error", path="/v1/images",
+                       status=error.code, code=code)
+            raise HostedUnavailable(text, code, resets_at) from None
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            text = str(reason) if type(reason).__name__ == "ProviderError" else type(reason).__name__
+            logs.event(_log, "hosted_unreachable", level_name="error", path="/v1/images",
+                       reason=text)
+            raise HostedUnavailable(f"Relay Free: could not reach the hosted service ({text}). "
+                                    "Check connectivity, or use one of your own providers.") from None
+        if len(raw) > MAX_IMAGE_BODY:
+            raise HostedUnavailable("Relay Free: the hosted service's reply is too large.")
+        try:
+            reply = json.loads(raw)
+        except ValueError:
+            raise HostedUnavailable("Relay Free: the hosted service sent a reply it could not read."
+                                    ) from None
+        if not isinstance(reply, dict):
+            raise HostedUnavailable("Relay Free: the hosted service sent a reply it could not read.")
+        return reply
 
     # ----- the challenge / proof / register exchange ----------------------------------------
     def _register(self) -> None:
@@ -477,9 +564,46 @@ def reset(new: Session | None = None) -> None:
     global _session
     with _session_lock:
         _session = new
+    reset_image_roles_cache()
 
 
 def status() -> dict:
     """What the ``presets`` event says about the Relay Free row: usable here, and the last quota."""
     ready = available()
-    return {"available": ready, "quota": session().quota() if ready else None}
+    return {"available": ready, "quota": session().quota() if ready else None,
+            "image_quota": session().image_quota() if ready else None}
+
+
+_image_roles_cache: dict | None = None
+_image_roles_when = 0.0
+_image_roles_lock = threading.Lock()
+
+
+def image_roles(clock=time.time) -> list[dict]:
+    """The gateway's image roles from ``GET /v1/health`` — public, no token, cached ten minutes —
+    as ``[{role, model, price_usd, resolutions, aspect_ratios}]``. Empty when the gateway serves
+    none or cannot be reached: images then need the person's own key, as before."""
+    global _image_roles_cache, _image_roles_when
+    with _image_roles_lock:
+        if _image_roles_cache is not None and clock() - _image_roles_when < 600:
+            return _image_roles_cache
+    try:
+        request = urllib.request.Request(base_url() + "/health",
+                                         headers={"User-Agent": "Relay/0.1"}, method="GET")
+        with urllib.request.build_opener().open(request, timeout=TIMEOUT) as response:
+            reply = json.loads(response.read(MAX_BODY + 1))
+        roles = reply.get("images") if isinstance(reply, dict) else None
+        if not isinstance(roles, list):
+            roles = []
+    except (ValueError, OSError):
+        roles = []                  # an unreachable or odd gateway simply serves no images
+    with _image_roles_lock:
+        _image_roles_cache, _image_roles_when = roles, clock()
+    return roles
+
+
+def reset_image_roles_cache() -> None:
+    """Tests point the session at a new gateway; the health cache must not outlive it."""
+    global _image_roles_cache, _image_roles_when
+    with _image_roles_lock:
+        _image_roles_cache, _image_roles_when = None, 0.0

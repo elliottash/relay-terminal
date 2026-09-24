@@ -41,6 +41,7 @@ if __package__ in (None, ""):                      # running the file directly
 from remote import httpd, ws
 
 from . import config as config_mod
+from . import images as images_mod
 from . import proxy, validate
 from .config import Config
 from .store import CHALLENGE_TTL, Installation, Store, StoreError, derive_installation_id, \
@@ -71,6 +72,13 @@ def error(status: int, code: str, message: str, resets_at: int | None = None,
 def quota_headers(usage) -> dict[str, str]:
     return {"X-Relay-Quota-Limit": str(usage.limit), "X-Relay-Quota-Used": str(usage.as_dict()["used"]),
             "X-Relay-Quota-Resets-At": str(usage.resets_at)}
+
+
+def image_headers(usage) -> dict[str, str]:
+    """The per-day image count in the same shape as the token quota, on its own headers so a
+    reply can carry both without the chip mistaking one for the other."""
+    return {"X-Relay-Image-Limit": str(usage.limit), "X-Relay-Image-Used": str(usage.as_dict()["used"]),
+            "X-Relay-Image-Resets-At": str(usage.resets_at)}
 
 
 def diagnostic_bodies_enabled() -> bool:
@@ -252,11 +260,18 @@ def build(store: Store, config: Config) -> httpd.Server:
             if isinstance(installation, httpd.Response):
                 return installation
             usage = store.usage(installation.id, config.quota.tokens_per_day)
+            images = (store.image_usage(installation.id, config.quota.images_per_day)
+                      if config.quota.images_per_day > 0 else None)
         except StoreError:
             log.exception("quota: database failure")
             return error(503, "free_unavailable", "Relay Free is unavailable right now.")
-        response = httpd.Response.json({**usage.as_dict(), "plan": installation.plan})
-        response.headers = quota_headers(usage)
+        payload = {**usage.as_dict(), "plan": installation.plan}
+        headers = quota_headers(usage)
+        if images is not None:
+            payload["images"] = images.as_dict()
+            headers.update(image_headers(images))
+        response = httpd.Response.json(payload)
+        response.headers = headers
         return response
 
     @server.route("GET", "/v1/health")
@@ -266,7 +281,20 @@ def build(store: Store, config: Config) -> httpd.Server:
         except StoreError:
             return httpd.Response.json({"ok": False, "roles": sorted(config.roles), "open": False},
                                        status=503)
-        return httpd.Response.json({"ok": True, "roles": sorted(config.roles), "open": is_open})
+        # The image roles also carry what a keyless desktop needs to quote them: the model, the
+        # price the gateway charges against the allowance, and the accepted settings.
+        image_roles = []
+        for name, role in config.roles.items():
+            if role.kind != "images" or not role.upstreams:
+                continue
+            upstream = role.upstreams[0]
+            image_roles.append({"role": name, "model": upstream.model,
+                                "price_usd": config.providers[upstream.provider]
+                                             .price_per_image.get(upstream.model, 0.0),
+                                "resolutions": list(role.resolutions),
+                                "aspect_ratios": list(role.aspect_ratios)})
+        return httpd.Response.json({"ok": True, "roles": sorted(config.roles), "open": is_open,
+                                    "images": image_roles})
 
     # ---- completions ---------------------------------------------------------------------------
 
@@ -373,6 +401,133 @@ def build(store: Store, config: Config) -> httpd.Server:
 
         return httpd.Response.stream(stream(), content_type=completion.content_type,
                                      headers=quota_headers(usage))
+
+    # ---- images ---------------------------------------------------------------------------------
+
+    @server.route("POST", "/v1/images")
+    async def images_route(request: ws.Request, body: bytes) -> httpd.Response:
+        """One picture per call on a role of kind ``images``: the same bearer, the same
+        admission order as chat, counted per picture rather than per token. The upstream's
+        reply body is returned unchanged."""
+        unavailable = error(503, "free_unavailable", "Relay Free is unavailable right now.")
+        try:
+            housekeeping()
+            installation = authenticated(request)
+            if isinstance(installation, httpd.Response):
+                return installation
+            if ceilings_hit() is not None:
+                return error(503, "free_unavailable", "Relay Free has reached its spending limit "
+                             "for now; use your own provider key.")
+        except StoreError:
+            log.exception("images: database failure")
+            return unavailable
+
+        refused = gate.admit(installation.id)
+        if refused == "global":
+            return error(503, "free_unavailable", "Relay Free is busy; try again in a moment.")
+        if refused == "install":
+            return error(429, "rate_limited", "this installation already has "
+                         f"{config.quota.concurrency_per_install} requests in flight.",
+                         resets_at=int(time.time()) + 5)
+        reserved = False
+        try:
+            try:
+                if store.recent_requests(installation.id) >= config.quota.requests_per_minute:
+                    return error(429, "rate_limited", "too many requests this minute.",
+                                 resets_at=int(time.time()) + 60)
+                fields = httpd.json_body(body)
+            except StoreError:
+                log.exception("images: database failure")
+                return unavailable
+            except ValueError as exc:
+                return error(400, "bad_request", str(exc))
+            model = fields.get("model")
+            if not isinstance(model, str) or not model:
+                return error(400, "bad_request", "model is required.")
+            role = config.roles.get(model)
+            if role is None or role.kind != "images":
+                return error(400, "bad_request", "model must name an image role like relay-image.")
+            prompt = fields.get("prompt")
+            if not isinstance(prompt, str) or not 1 <= len(prompt) <= role.max_input_chars:
+                return error(400, "bad_request", f"prompt must be 1 to {role.max_input_chars} "
+                             "characters.")
+            resolution = fields.get("resolution", role.resolutions[0])
+            if resolution not in role.resolutions:
+                return error(400, "bad_request",
+                             f"resolution must be one of {', '.join(role.resolutions)}.")
+            aspect = fields.get("aspect_ratio")
+            if aspect is not None and role.aspect_ratios and aspect not in role.aspect_ratios:
+                return error(400, "bad_request",
+                             f"aspect_ratio must be one of {', '.join(role.aspect_ratios)} or absent.")
+            try:
+                upstreams = open_upstreams(role)
+                if not upstreams:
+                    return error(503, "free_unavailable", f"{role.name} has reached its spending "
+                                 "limit for today; use your own provider key.")
+                # The whole price is known upfront, so no image starts that today's ceiling
+                # could not pay for: the check chat can only make afterwards, made before.
+                cost_usd = max(config.provider_for(up).image_cost_micros(up.model)
+                               for up in upstreams) / 1_000_000
+                if (store.spend_today() + cost_usd > config.limits.spend_per_day_usd
+                        or store.spend_month() + cost_usd > config.limits.spend_per_month_usd):
+                    return error(503, "free_unavailable", "Relay Free has reached its spending "
+                                 "limit for now; use your own provider key.")
+                token_usage = store.usage(installation.id, config.quota.tokens_per_day)
+                usage = store.image_usage(installation.id, config.quota.images_per_day)
+                admitted = store.reserve_image(installation.id, config.quota.images_per_day)
+                if admitted is None:
+                    return error(429, "quota_exhausted", "Relay Free images used for today.",
+                                 resets_at=usage.resets_at,
+                                 headers={**quota_headers(token_usage), **image_headers(usage)})
+                usage = admitted
+                store.note("image", installation.id, role=role.name)
+                store.touch(installation.id)
+            except StoreError:
+                log.exception("images: database failure")
+                return unavailable
+            reserved = True
+        finally:
+            if not reserved:
+                gate.release(installation.id)
+
+        started = time.monotonic()
+        outcome = await asyncio.to_thread(images_mod.generate, config, role, prompt,
+                                          resolution, aspect)
+        try:
+            if outcome.status != 200 or outcome.body is None:
+                try:
+                    store.settle_image(installation.id, counted=False)
+                    store.settle(installation.id, 0, 0, 0, 0, "", role.name, counted=False)
+                except StoreError:
+                    log.exception("images: database failure releasing a reservation")
+                status = 503 if outcome.status in (0, *proxy.RETRYABLE_STATUSES) else 502
+                log.info("image install=%s role=%s provider=%s model=%s status=%d total_ms=%d "
+                         "error=%s attempts=%d", installation_hash(installation.id), role.name,
+                         outcome.provider or "-", outcome.model or "-", status,
+                         int((time.monotonic() - started) * 1000), outcome.error or "-",
+                         outcome.attempts)
+                return error(status, "free_unavailable", "Relay Free could not generate the "
+                             "image; try again shortly.", retried=max(0, outcome.attempts - 1))
+            try:
+                store.settle(installation.id, 0, 0, 0,
+                             config.providers[outcome.provider].image_cost_micros(outcome.model),
+                             outcome.provider, role.name)
+            except StoreError:
+                log.exception("images: database failure settling usage")
+            log.info("image install=%s role=%s provider=%s model=%s status=200 total_ms=%d",
+                     installation_hash(installation.id), role.name, outcome.provider,
+                     outcome.model, int((time.monotonic() - started) * 1000))
+            response = httpd.Response(status=200, body=outcome.body,
+                                      content_type="application/json")
+            try:
+                response.headers = {**quota_headers(store.usage(installation.id,
+                                                                config.quota.tokens_per_day)),
+                                    **image_headers(usage)}
+            except StoreError:
+                log.exception("images: database failure reading quota")
+            return response
+        finally:
+            gate.release(installation.id)
 
     return server
 
