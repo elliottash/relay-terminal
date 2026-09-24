@@ -410,6 +410,17 @@ class IndexTests(unittest.TestCase):
         self.assertEqual({item["turn"] for item in one["items"]}, {1})
         self.assertRaises(ValueError, self.index.conversation, "c" * 32)
 
+    def test_conversation_limit_keeps_the_newest_entries(self):
+        self.index.update_session(session(extra_turn="what about pelicans in Brazil"), self.root)
+        full = self.index.conversation("a" * 32)["items"]
+        self.assertGreater(len(full), 3)
+        # The limit bites off the oldest entries, never the newest: a restored pane has to end
+        # where the conversation ended (#KDB4), and the preview to show its latest turns.
+        capped = self.index.conversation("a" * 32, limit=3)["items"]
+        self.assertEqual(capped, full[-3:])
+        # What is kept still reads in conversation order.
+        self.assertEqual([item["turn"] for item in capped], sorted(item["turn"] for item in capped))
+
     def test_delete_removes_rows_files_and_blobs(self):
         store = SessionStore(self.root / "sessions", index=self.index)
         data = session()
