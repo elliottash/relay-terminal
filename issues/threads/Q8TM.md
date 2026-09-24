@@ -21,3 +21,13 @@ Taking #Q8TM from Codex planning: implement guest-session resume cursors and swi
     resumed_session/catchup_*, turn record fields, logs guest_catchup*). 8 new/changed
     FakeHarness tests + protocol doc. Would-land run 113/113 OK. Evidence:
     docs/qa_evidence/2026-09-24-guest-switch-resume-Q8TM/. Moved to needs-verification.
+- id: 20260924T045700Z-q8tm-sha
+  ts: '2026-09-24T04:57:00Z'
+  kind: evidence
+  by: bd9e4ae0
+  body: |
+    Landed as 11847c on main (code, tests, protocol doc, card, evidence). kqnp's concurrent
+    usage-reset hunks in the same three files were left uncommitted for their session, per
+    land.py's contested-hunk selection. One follow-up observed on the landed tree: the
+    catalogue-test race #JXFT now also fires under tests.test_guest_harness_provider +
+    tests.test_model_switch (~2/7 runs); evidence appended to that card's thread.
