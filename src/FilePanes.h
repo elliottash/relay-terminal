@@ -31,6 +31,7 @@ class QToolButton;
 class QTreeView;
 
 namespace relay {
+class DocxEditor;
 
 // ----- right-click menus (issues #D60R, V9V1) ---------------------------------------------------
 //
@@ -199,7 +200,7 @@ private:
 // first and asks (Merge / Overwrite / Reload) rather than write over a change nobody has seen.
 class FilePreview : public QWidget {
 public:
-    enum class Kind { None, Text, Markdown, Image, Pdf, Info };
+    enum class Kind { None, Text, Markdown, Image, Pdf, Docx, Info };
 
     explicit FilePreview(QWidget *parent = nullptr);
     ~FilePreview() override;
@@ -324,6 +325,7 @@ private:
     void showMarkdown(const QString &path, qint64 size);
     bool showImage(const QString &path, qint64 size);
     void showPdf(const QString &path);
+    void showDocx(const QString &path);
     void showInfo(const QString &path, const QString &mime, const QString &message = QString());
     QString readCapped(const QString &path, qint64 size);
     void setNotice(const QString &text);
@@ -362,6 +364,7 @@ private:
     QStackedWidget *m_stack = nullptr;
     QPlainTextEdit *m_textView = nullptr;
     QTextBrowser *m_markdownView = nullptr;
+    DocxEditor *m_docxView = nullptr;
     QScrollArea *m_imageArea = nullptr;
     QWidget *m_pdfPage = nullptr, *m_infoPage = nullptr;
     struct Private;

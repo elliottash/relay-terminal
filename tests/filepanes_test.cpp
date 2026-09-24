@@ -18,6 +18,7 @@
 #include <QTextBlock>
 #include <QTextLayout>
 #include <QTextBrowser>
+#include <QTextEdit>
 #include <QToolButton>
 #include <QTreeView>
 #include <ctime>
@@ -76,6 +77,53 @@ QStringList menuIds(const QList<relay::FileMenuItem> &items) {
 class FilePanesTests : public QObject {
     Q_OBJECT
 private slots:
+    void docxOpensEditsAndSavesInPane() {
+        QTemporaryDir temp;
+        const QString source = QStringLiteral(RELAY_SOURCE_DIR "/tests/fixtures/relay_docx_edit.docx");
+        const QString path = temp.filePath(QStringLiteral("edited.docx"));
+        QVERIFY(QFile::copy(source, path));
+        FilePreview preview;
+        preview.resize(1000, 700);
+        preview.show();
+        QVERIFY(preview.open(path));
+        if (!qEnvironmentVariableIsEmpty("RELAY_SHOT_DIR"))
+            QVERIFY(preview.grab().save(qEnvironmentVariable("RELAY_SHOT_DIR") + QStringLiteral("/docx-editor.png")));
+        QCOMPARE(preview.kind(), FilePreview::Kind::Docx);
+        QVERIFY(preview.isEditable());
+        QVERIFY(preview.text().contains(QStringLiteral("formatted paragraph")));
+        auto *paragraph = preview.findChild<QTextEdit *>(QStringLiteral("docxParagraph1"));
+        QVERIFY(paragraph);
+        const int start = paragraph->toPlainText().indexOf(QStringLiteral("formatted"));
+        QVERIFY(start >= 0);
+        QTextCursor cursor = paragraph->textCursor();
+        cursor.setPosition(start);
+        cursor.setPosition(start + 9, QTextCursor::KeepAnchor);
+        paragraph->setTextCursor(cursor);
+        cursor.insertText(QStringLiteral("revised"));
+        QTextCursor selected = paragraph->textCursor();
+        selected.setPosition(start);
+        selected.setPosition(start + 7, QTextCursor::KeepAnchor);
+        paragraph->setTextCursor(selected);
+        auto *italic = preview.findChild<QToolButton *>(QStringLiteral("docxItalic"));
+        QVERIFY(italic);
+        QVERIFY(italic->isEnabled());
+        italic->click();
+        QVERIFY(preview.isDirty());
+        QVERIFY(preview.title().startsWith(QStringLiteral("● ")));
+        QVERIFY(preview.save());
+        QVERIFY(!preview.isDirty());
+        QVERIFY(preview.reload());
+        QVERIFY(preview.text().contains(QStringLiteral("revised paragraph")));
+        auto *reopened = preview.findChild<QTextEdit *>(QStringLiteral("docxParagraph1"));
+        QVERIFY(reopened);
+        const int revised = reopened->toPlainText().indexOf(QStringLiteral("revised"));
+        QTextCursor check = reopened->textCursor();
+        check.setPosition(revised + 2);
+        reopened->setTextCursor(check);
+        QVERIFY(reopened->currentCharFormat().fontWeight() >= QFont::Bold);
+        QVERIFY(reopened->currentCharFormat().fontItalic());
+    }
+
     void explorerNavigatesIntoFolderAndUp() {
         QTemporaryDir temp;
         QVERIFY(QDir(temp.path()).mkdir(QStringLiteral("sub")));

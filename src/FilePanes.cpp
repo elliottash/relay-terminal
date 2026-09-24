@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "FilePanes.h"
+#include "DocxEditor.h"
 #include "CopyOnSelect.h"
 #include "Hints.h"
 #include "Keymap.h"
@@ -1089,6 +1090,14 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     relay::installCopyOnSelect(m_markdownView);
     m_stack->addWidget(m_markdownView);
 
+    m_docxView = new DocxEditor;
+    m_docxView->setObjectName(QStringLiteral("filePreviewDocx"));
+    m_stack->addWidget(m_docxView);
+    m_docxView->onDirtyChanged = [this](bool) {
+        updateTitleText();
+        if (onTitleChanged) onTitleChanged(title());
+    };
+
     m_imageArea = new QScrollArea;
     m_imageArea->setObjectName(QStringLiteral("filePreviewImageArea"));
     m_imageArea->setAlignment(Qt::AlignCenter);
@@ -1213,10 +1222,12 @@ QString FilePreview::title() const {
 }
 
 bool FilePreview::isDirty() const {
+    if (m_kind == Kind::Docx) return m_docxView->isDirty();
     return m_editable && m_textView->document()->isModified();
 }
 
 QString FilePreview::text() const {
+    if (m_kind == Kind::Docx) return m_docxView->plainText();
     return m_textView->toPlainText();
 }
 
@@ -1285,7 +1296,9 @@ bool FilePreview::open(const QString &path) {
     const QString suffix = info.suffix().toLower();
     const QByteArray mimeName = mime.name().toLatin1();
 
-    if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown") || mime.inherits(QStringLiteral("text/markdown"))) {
+    if (suffix == QStringLiteral("docx")) {
+        showDocx(absolute);
+    } else if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown") || mime.inherits(QStringLiteral("text/markdown"))) {
         showMarkdown(absolute, size);
     } else if (mime.inherits(QStringLiteral("application/pdf"))) {
         showPdf(absolute);
@@ -1393,7 +1406,9 @@ void FilePreview::showRemoteContent(const QByteArray &content) {
     const QString suffix = QFileInfo(m_remotePath).suffix().toLower();
     const QByteArray mimeName = mime.name().toLatin1();
     setNotice(QString());
-    if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown") || mime.inherits(QStringLiteral("text/markdown"))) {
+    if (suffix == QStringLiteral("docx")) {
+        showRemoteInfo(mime.name(), QStringLiteral("DOCX rich editing is available for local files in this build."));
+    } else if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown") || mime.inherits(QStringLiteral("text/markdown"))) {
         showRemoteText(content, true);
     } else if (mime.inherits(QStringLiteral("application/pdf"))) {
         if (!showRemotePdf(content)) showRemoteInfo(mime.name(), m_notice);
@@ -1560,7 +1575,7 @@ void FilePreview::setEditable(bool on) {
     // The pane opens ready to type in, and Ctrl+S (a WidgetWithChildren shortcut) has a focused
     // widget to fire from: the host's focusInput() sets the focus on this widget, and the proxy
     // passes it to the editor. A read-only preview keeps the focus itself, as it always did.
-    setFocusProxy(on ? m_textView : nullptr);
+    setFocusProxy(on ? (m_kind == Kind::Docx ? static_cast<QWidget *>(m_docxView) : static_cast<QWidget *>(m_textView)) : nullptr);
     updateEditButton();
 }
 
@@ -1611,6 +1626,13 @@ void FilePreview::watchForReconnect() {
 
 bool FilePreview::save() {
     if (!m_editable) return false;
+    if (m_kind == Kind::Docx) {
+        QString error;
+        if (!m_docxView->save(&error)) { setNotice(error); return false; }
+        setNotice(QStringLiteral("Saved · %1").arg(QLocale().toString(QTime::currentTime(), QLocale::ShortFormat)));
+        rewatch();
+        return true;
+    }
     if (!m_textView->document()->isModified()) return true;
     if (!isRemote()) {
         // Never over a change nobody has seen (#F8R7): the disk is compared with the base first,
@@ -2078,6 +2100,17 @@ void FilePreview::showPdf(const QString &path) {
 #else
     showInfo(path, QStringLiteral("application/pdf"), QStringLiteral("PDF preview is not available in this build."));
 #endif
+}
+
+void FilePreview::showDocx(const QString &path) {
+    QString error;
+    if (!m_docxView->open(path, &error)) {
+        showInfo(path, QStringLiteral("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), error);
+        return;
+    }
+    m_kind = Kind::Docx;
+    m_stack->setCurrentWidget(m_docxView);
+    setEditable(true);
 }
 
 void FilePreview::showInfo(const QString &path, const QString &mime, const QString &message) {

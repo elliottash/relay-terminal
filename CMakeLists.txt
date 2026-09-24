@@ -212,7 +212,9 @@ target_include_directories(relay-textmerge PUBLIC src)
 target_link_libraries(relay-textmerge PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-textmerge PRIVATE ${RELAY_WARNINGS})
 
-add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h)
+add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h src/DocxEditor.cpp src/DocxEditor.h)
+target_compile_definitions(relay-filepanes PRIVATE
+    RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay" RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(relay-filepanes PUBLIC src)
 target_link_libraries(relay-filepanes PUBLIC relay-remotefiles relay-hints relay-textmerge ${RELAY_QT}::Widgets)
 target_compile_options(relay-filepanes PRIVATE ${RELAY_WARNINGS})
@@ -813,6 +815,7 @@ if(BUILD_TESTING)
     set_tests_properties(keymap PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-filepanes-tests tests/filepanes_test.cpp)
     target_link_libraries(relay-filepanes-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
+    target_compile_definitions(relay-filepanes-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME filepanes COMMAND relay-filepanes-tests)
     set_tests_properties(filepanes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     # Card #F8R7: the three-way merge, and an open file pane reconciling in-place writes, atomic
