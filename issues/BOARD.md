@@ -377,7 +377,7 @@
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 | `#DKEW` | [change board hotkey to ctrl shift b?](features/done/2026-09-22-change-board-hotkey-to-ctrl-shift-b.md) | dropped |  |  | [6](threads/DKEW.md) |
 
-## Bugs (259)
+## Bugs (260)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -444,6 +444,7 @@
 | `#K6KP` | [A replacement Relay can erase the previous panes and tabs](changes/2026-09-23-restart-loses-panes-and-tabs.md) | needs-verification | codex |  | [4](threads/K6KP.md) |
 | `#GR7P` | [Make every Sessions dropdown visibly effective](changes/2026-09-23-sessions-dropdowns-ineffective.md) | needs-verification | codex |  | [5](threads/GR7P.md) |
 | `#J8QP` | [Sessions open note covers guest sessions and other windows](changes/2026-09-23-sessions-open-note-covers-guests.md) | needs-verification | codex |  | [5](threads/J8QP.md) |
+| `#7QSK` | [Sessions pane in another project lists the launching project's sessions](changes/2026-09-24-sessions-pane-in-another-project-lists-the-la.md) | needs-verification | relay |  | [3](threads/7QSK.md) |
 | `#SC7P` | [Make the Sessions project scope selector effective](changes/2026-09-23-sessions-project-scope-selector-resets.md) | needs-verification | codex |  | [5](threads/SC7P.md) |
 | `#P4C7` | [Keep Sessions project groups collapsed across refreshes](changes/2026-09-23-sessions-projects-reopen-after-collapse.md) | needs-verification | codex |  | [5](threads/P4C7.md) |
 | `#E7FP` | [Shift+Enter keeps focus in the Sessions manager](changes/2026-09-23-shift-enter-keeps-sessions-focus.md) | needs-verification | codex |  | [6](threads/E7FP.md) |

@@ -15,6 +15,8 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QFile>
+#include <QFileInfo>
 #include <QFrame>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -2375,6 +2377,36 @@ private slots:
                   unfolded ? "unfolded" : "collapsed", (cpuMs() - cpuBefore) / keys,
                   double(wall.elapsed()) / keys);
         }
+    }
+    // Card #7QSK: the Sessions pane's "This project" scope must follow the pane's live terminal
+    // directory (OSC 7), not the workspace frozen when the pane was made — a pane cd'd into
+    // ~/repos/x in a window launched in ~/repos/y listed y's sessions. The request is built
+    // inside Pane::bindSessionManager, which needs a live worker, so the rule is pinned on the
+    // source the way the Board's openOutputTarget test pins its routing.
+    void theScopeFilterFollowsTheLiveTerminalDirectory() {
+        const auto bodyOf = [](const QString &text, const QString &signature) {
+            const int start = text.indexOf(signature);
+            if (start < 0) return QString();
+            const int end = text.indexOf(QStringLiteral("\n    }"), start);
+            return end > start ? text.mid(start, end - start) : QString();
+        };
+        QFile pane(QStringLiteral(RELAY_SOURCE_DIR "/src/Pane.h"));
+        QVERIFY2(pane.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(pane.fileName()));
+        const QString bind = bodyOf(QString::fromUtf8(pane.readAll()),
+            QStringLiteral("void bindSessionManager(relay::conversations::SessionManager *view) {"));
+        QVERIFY2(!bind.isEmpty(), "Pane::bindSessionManager() is gone");
+        QVERIFY2(bind.contains(QStringLiteral(
+                      "message.insert(QStringLiteral(\"workspace\"),\n"
+                      "                           self->m_cwd.isEmpty() ? self->m_workspace : self->m_cwd);")),
+                 "the conversations request carries the frozen launch workspace again");
+        QFile window(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+        QVERIFY2(window.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(window.fileName()));
+        const QString link = bodyOf(QString::fromUtf8(window.readAll()),
+            QStringLiteral("void linkSessionsPane(ToolPane *tool, Pane *owner) {"));
+        QVERIFY2(!link.isEmpty(), "RelayWindow::linkSessionsPane() is gone");
+        QVERIFY2(link.contains(QStringLiteral(
+                      "view->setProject(QFileInfo(owner->cwd().isEmpty() ? owner->workspace() : owner->cwd()).fileName());")),
+                 "the scope label names the frozen launch project again");
     }
 };
 

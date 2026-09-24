@@ -7877,7 +7877,12 @@ public:
             if (!self) return;
             QJsonObject message = request;
             message.insert(QStringLiteral("type"), QStringLiteral("conversations"));
-            message.insert(QStringLiteral("workspace"), self->m_workspace);
+            // The scope's "This project" follows where this pane's terminal has cd'd to (OSC 7),
+            // not `m_workspace` — frozen at creation, inherited from the directory Relay was
+            // launched in, the thing that made one project's sessions list in every pane of every
+            // window (card #7QSK; the same rule the Board's candidateProject() took in #JN7X).
+            message.insert(QStringLiteral("workspace"),
+                           self->m_cwd.isEmpty() ? self->m_workspace : self->m_cwd);
             message.insert(QStringLiteral("id"), QStringLiteral("conv-list"));
             // Options › Privacy (review B1, protocol 26.7): whether Relay indexes the guests' own
             // sessions at all. It travels with every listing, so the worker needs no second

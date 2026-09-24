@@ -3830,7 +3830,9 @@ public:
             if (ownerTool && ownerTool->property("workspaceOwner").value<QObject *>() == owner)
                 ownerTool->setProperty("workspaceOwner", QVariant());
         });
-        view->setProject(QFileInfo(owner->workspace().isEmpty() ? owner->cwd() : owner->workspace()).fileName());
+        // The label names the project the scope actually narrows to, so it follows the live
+        // terminal directory first (card #7QSK) — `workspace()` is the frozen launch dir.
+        view->setProject(QFileInfo(owner->cwd().isEmpty() ? owner->workspace() : owner->cwd()).fileName());
         // Bind requests to the initiating pane; Resume resolves its destination below.
         owner->bindSessionManager(view);
         QPointer<ToolPane> guard(tool);
