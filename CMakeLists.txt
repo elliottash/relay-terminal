@@ -469,6 +469,14 @@ target_include_directories(relay-agentcontext PUBLIC src)
 target_link_libraries(relay-agentcontext PUBLIC relay-outputlinks ${RELAY_QT}::Core)
 target_compile_options(relay-agentcontext PRIVATE ${RELAY_WARNINGS})
 
+# relay-panedir (card #R5TC): pane addresses (`p<n>`, never reused) and the directory one pane's
+# agent messages another through. PaneHooks are std::function only, so no window is included;
+# QtCore and the log line, nothing else.
+add_library(relay-panedir STATIC src/PaneAddress.cpp src/PaneAddress.h src/PaneDirectory.cpp src/PaneDirectory.h)
+target_include_directories(relay-panedir PUBLIC src)
+target_link_libraries(relay-panedir PUBLIC relay-logging ${RELAY_QT}::Core)
+target_compile_options(relay-panedir PRIVATE ${RELAY_WARNINGS})
+
 # Agent replies in the terminal: streaming Markdown to ANSI (headings, emphasis, code, lists,
 # quotes, links, tables), word-wrapped to the pane's width. Plain QtCore so chunk boundaries can
 # be tested without a terminal.
@@ -626,6 +634,7 @@ if(RELAY_BUILD_APP)
         src/ProfilePane.cpp src/ProfilePane.h
         src/RemoteShare.cpp src/RemoteShare.h)
     find_package(${RELAY_QT} REQUIRED COMPONENTS Network)
+    target_link_libraries(relay PRIVATE relay-panedir)   # cross-pane messages (#R5TC)
     target_link_libraries(relay PRIVATE relay-closedlist relay-localmodels relay-projects relay-escapees relay-appcommands)
     # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
@@ -1012,6 +1021,10 @@ if(BUILD_TESTING)
     add_executable(relay-agentcontext-tests tests/agentcontext_test.cpp)
     target_link_libraries(relay-agentcontext-tests PRIVATE relay-agentcontext ${RELAY_QT}::Test)
     add_test(NAME agentcontext COMMAND relay-agentcontext-tests)
+    # Cross-pane addresses and delivery (#R5TC): every refusal code, wake/no_wake, depth one.
+    add_executable(relay-panedirectory-tests tests/panedirectory_test.cpp)
+    target_link_libraries(relay-panedirectory-tests PRIVATE relay-panedir ${RELAY_QT}::Test)
+    add_test(NAME panedirectory COMMAND relay-panedirectory-tests)
     add_executable(relay-contextmeter-tests tests/contextmeter_test.cpp)
     target_include_directories(relay-contextmeter-tests PRIVATE src)
     target_link_libraries(relay-contextmeter-tests PRIVATE ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
