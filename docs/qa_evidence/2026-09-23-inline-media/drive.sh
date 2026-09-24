@@ -37,6 +37,7 @@ with wave.open(str(work / 'tone.wav'), 'wb') as sound:
     sound.setnchannels(1); sound.setsampwidth(2); sound.setframerate(8000)
     sound.writeframes(b''.join(struct.pack('<h', int(12000*math.sin(2*math.pi*440*i/8000))) for i in range(16000)))
 (work / 'numbers.csv').write_text('Item,Value\nSmall,2\nLarge,10\n')
+(work / 'long.csv').write_text('Run,Seconds,Result\n' + ''.join(f'run-{n},{n * 7 % 50},{"pass" if n % 5 else "fail"}\n' for n in range(40)))
 (work / 'chart.html').write_text('<!doctype html><html><body style="background:#101827;color:#f6f7ff;font:40px sans-serif"><h1>Interactive chart</h1><svg width="900" height="400"><polyline points="60,320 300,80 550,240 820,30" fill="none" stroke="#75caff" stroke-width="12"/></svg><p>Click the snapshot to open this live page.</p></body></html>')
 (work / 'demo.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300"><rect width="900" height="300" fill="#1c314a"/><text x="70" y="185" fill="#ffbd6b" font-size="90">SVG preview</text></svg>')
 frames = []
@@ -154,6 +155,6 @@ PY
     then animated=1; break; fi
 done
 [[ $animated == 1 ]] || { echo 'animated GIF did not advance between screenshots' >&2; exit 1; }
-command 'clear; relay-show animate.webp'
+command 'clear; relay-show animate.webp; relay-show long.csv'
 shot 08-webp
 printf 'done: %s\n' "$out"
