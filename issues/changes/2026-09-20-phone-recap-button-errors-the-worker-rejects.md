@@ -1,10 +1,13 @@
 ---
 id: WMXN
 type: work
-status: planned
+status: needs-verification
+assignee: agent
+implemented_by: glm/glm-5.3
+session: cbe2c0ba-c9c2-45a0-b49a-ca215c9a7f3b
 rank: zzzzzzzzzzzzzz
 created: '2026-09-20'
-links: {plans: [], commits: [], evidence: [], related: [MVGR], github: null}
+links: {commits: [8fc8d60b, 9be5a16], evidence: [docs/qa_evidence/2026-09-24-recap-phone-manual/], github: null, plans: [], related: [MVGR]}
 ---
 # the phone's recap button errors: it sends reason "remote", which the worker rejects
 
@@ -51,3 +54,25 @@ Pressing Recap on a phone prints a recap in the pane, rendered like a manual one
 - `pytest tests/test_session_protocol.py -k recap` — worker recap handling (validation, dedupe) is unchanged and green.
 - `pytest tests/test_pane_view.py -k recap` and `pytest tests/test_remote_security.py -k recap` — the phone-side wire is untouched.
 - Behaviour: grep proves no `recap_request` in `src/` still sends `\"remote\"`. If a paired phone or a sidecar harness is available, press Recap and see the recap block print in the pane with no error; otherwise code inspection plus the tests above stands as evidence — the only changed byte is the reason string, and the worker's acceptance of `manual` is already covered by `tests/test_session_protocol.py:339`.
+
+## Execution Summary
+Executed 2026-09-24. The plan's one-word change was **already on `main`**: commit `8fc8d60b` (2026-09-20 18:25, "recap: the phone's Recap button sends a reason the worker accepts (#WMXN, #PH0N)") changed `hooks.recap` in `src/Pane.h` to `{"reason", "manual"}` and added the comment explaining why. So no code change was made this turn — executing meant verifying the landed fix against the plan's Verify section:
+
+- Grep: no `recap_request` anywhere in `src/`/`backend/`/`remote/`/`app/` still sends `"remote"` — the reasons sent to the worker are `manual` (phone hook, `src/Pane.h:7322`; desktop actions menu, :4472) and `away` (:8921, :8938). The phone↔GUI wire message (`src/RemoteShare.cpp:186`) still carries no reason.
+- Worker acceptance of `manual`, and its always-runs (no dedupe-skip) behaviour, asserted by `test_away_recap_not_repeated` (`tests/test_session_protocol.py:369-373`) — passes.
+- Phone-side tests green (`test_pane_view` recap test, `test_remote_security` guest-reach test containing the recap wire entry).
+- Build: the one-word change has compiled on `main` since Sep 20; nothing new to build this turn (the working tree also carries another session's uncommitted #R5TC edits in `src/Pane.h`, which are untouched).
+
+One unrelated failure was met while testing: `test_compact_resume_recap_and_plan_execute` fails at its **plan_execute** tail — reproduced on a clean `git archive main` export, so pre-existing and independent of this card (which changed no Python). Already filed as #P4XN.
+
+No paired phone was available, so per the plan's fallback the evidence is code inspection plus the targeted tests: `docs/qa_evidence/2026-09-24-recap-phone-manual/`.
+
+## Tests
+Run 2026-09-24 via `PYTHONPATH=backend python3 -m unittest` (the suite is unittest; the plan's `pytest … -k recap` maps to `unittest -k`):
+
+- `tests.test_session_protocol.ProtocolHandlerTests.test_away_recap_not_repeated` — **ok** (worker: `manual` accepted and always runs, `away` deduped).
+- `tests.test_pane_view -k recap` → `test_recap_is_under_the_pane_menu_and_sends_recap_request` — **ok** (phone-side UI sends `recap_request`).
+- `tests.test_remote_security.GuestReachTests.test_no_message_at_all_reaches_the_pane_a_guest_was_not_invited_to` — **ok** (`-k recap` matches no test *name* in that file; this is the test whose `EVERY_PANE_MESSAGE` table holds the `recap_request` wire entry, `tests/test_remote_security.py:530`).
+- `tests.test_session_protocol.ProtocolHandlerTests.test_compact_resume_recap_and_plan_execute` — **fails at its plan_execute tail** (line 347): pre-existing on clean `main` (reproduced on a `git archive main` export), unrelated to this card, filed as #P4XN. Its recap assertions before that point pass.
+
+Full outputs in `docs/qa_evidence/2026-09-24-recap-phone-manual/evidence.md`.
