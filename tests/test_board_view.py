@@ -385,12 +385,14 @@ class BoardViewTests(unittest.TestCase):
                     "JSON.stringify([...document.querySelectorAll('.rb-row')].map(e => e.querySelector('.rb-chip-status') ? e.querySelector('.rb-chip-status').textContent : ''))"))
                 self.assertEqual(len([c for c in chips if c]), len(expected))
                 self.assertEqual(chips[0], "Discussing")
+                await self.shot(browser, "phone-390x844-board-recent")
                 # "Stages" brings the sections back exactly, and the choice is kept; "Recent"
                 # returns to the one list.
                 await self.open_stages(browser)
                 self.assertEqual(await browser.evaluate(
                     "JSON.stringify([...document.querySelectorAll('.rb-section')].slice(0, 2).map(e => e.dataset.section))"),
                     '["waiting-on-you","inbox"]')
+                await self.shot(browser, "phone-390x844-board-stages")
                 self.assertEqual(await browser.evaluate("localStorage.getItem('relay-board-grouping')"),
                                  '"sections"')
                 await browser.evaluate("document.querySelector('.rb-view[data-view=\"recent\"]').click()")
