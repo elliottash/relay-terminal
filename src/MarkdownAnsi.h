@@ -96,7 +96,8 @@ public:
     void setInlineImages(bool on) { m_images = on; }
     bool inlineImages() const { return m_images; }
     void setImageBaseDir(const QString &dir) { m_imageBase = dir; }
-    // The pane's width in columns: a picture is fitted into min(columns, kImageMaxColumns).
+    // The pane's width in columns: a picture is fitted into min(columns, kImageMaxColumns), and a
+    // table wider than it wraps inside its cells to fit (#15G5). 0: unknown, nothing is fitted.
     void setImageColumns(int columns) { m_imageColumns = columns; }
     // The pixel size of one cell, when the caller knows it; else kImageCellPixels.
     void setImageCellPixels(QSize pixels) { m_imageCell = pixels; }

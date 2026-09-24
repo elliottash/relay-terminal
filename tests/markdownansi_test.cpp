@@ -150,6 +150,78 @@ private slots:
                                      "a    │    1\nlong │  200\nafter\n"));
     }
 
+    // A table wider than the pane wraps inside its cells, between words, so every line fits and
+    // the columns stay lined up (#15G5). Each body row gets a faint rule above it once any row wraps.
+    void wideTableWrapsInsideCells() {
+        const QString md = QStringLiteral(
+            "| Case | What happens |\n|---|---|\n"
+            "| None | The first Enter queues the draft and the second one steers it into the running turn |\n"
+            "| 1: A | Append D after A |\n");
+        MarkdownAnsi renderer;
+        renderer.setImageColumns(40);
+        QString out = renderer.feed(md);
+        out += renderer.finish();
+        const QStringList lines = plain(out).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        for (const QString &line : lines)
+            QVERIFY2(line.size() <= 39, qPrintable(line));
+        const int bar = lines.first().indexOf(QStringLiteral("│"));
+        QVERIFY(bar > 0);
+        for (const QString &line : lines)   // every row's bar in the same column
+            QCOMPARE(line.indexOf(line.contains(QStringLiteral("┼")) ? QStringLiteral("┼") : QStringLiteral("│")), bar);
+        QString second;
+        for (const QString &line : lines) second += line.mid(bar + 2).trimmed() + QLatin1Char(' ');
+        QVERIFY2(second.simplified().contains(QStringLiteral(
+            "The first Enter queues the draft and the second one steers it into the running turn")), qPrintable(second));
+        int rules = 0;
+        for (const QString &line : lines) rules += line.contains(QStringLiteral("┼")) ? 1 : 0;
+        QCOMPARE(rules, 2);   // under the header, and between the two body rows
+        // Same table, a pane wide enough: one line per row and no rules between them.
+        MarkdownAnsi wide;
+        wide.setImageColumns(200);
+        QString unwrapped = wide.feed(md);
+        unwrapped += wide.finish();
+        QCOMPARE(unwrapped, render(md));
+    }
+
+    void tableCellBreaksAndStyledWraps() {
+        // `<br>` is a line break inside the cell.
+        QCOMPARE(plain(render(QStringLiteral("| a | b |\n|---|---|\n| one<br>two | x |\n"))),
+                 QStringLiteral("a   │ b\n────┼──\none │ x\ntwo │  \n"));
+        // A bold run that wraps is bold on both lines; its style does not leak past the cell.
+        MarkdownAnsi renderer;
+        renderer.setImageColumns(20);
+        QString out = renderer.feed(QStringLiteral("| k | v |\n|---|---|\n| x | **alpha beta gamma delta** |\n"));
+        out += renderer.finish();
+        const QStringList lines = out.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        int bold = 0;
+        for (const QString &line : lines)
+            if (plain(line).contains(QStringLiteral("gamma")) || plain(line).contains(QStringLiteral("delta"))) {
+                QVERIFY2(line.contains(QStringLiteral("\x1b[1")) || line.contains(QStringLiteral(";1m")) || line.contains(QStringLiteral(";1;")), qPrintable(line));
+                ++bold;
+            }
+        QVERIFY(bold >= 1);
+        for (const QString &line : lines) QVERIFY2(plain(line).size() <= 19, qPrintable(plain(line)));
+    }
+
+    // A link label that wraps is a link on each of its lines, and each line goes back to the prose
+    // run's anchor at its end, so the padding and the column bar after it never belong to the label.
+    void wrappedTableLinkIsClosedPerLine() {
+        MarkdownAnsi renderer;
+        renderer.setLinkAnchor(QStringLiteral("relay://prose/7"));
+        renderer.setImageColumns(20);
+        QString out = renderer.feed(QStringLiteral("| k | v |\n|---|---|\n| x | [alpha beta gamma delta](https://x.org/a) |\n"));
+        out += renderer.finish();
+        // The label's link carries its target as a fragment; the prose run's own anchor does not.
+        const QString open = QStringLiteral("\x1b]8;;relay://prose/7#");
+        const QString base = QStringLiteral("\x1b]8;;relay://prose/7\x1b\\");
+        for (const QString &line : out.split(QLatin1Char('\n'))) {
+            if (line.contains(open))   // no line ends inside the label
+                QVERIFY2(line.lastIndexOf(base) > line.lastIndexOf(open), qPrintable(plainer(line)));
+            if (plainer(line).contains(QStringLiteral("gamma")))   // the continuation re-opens it
+                QVERIFY(line.indexOf(open) >= 0 && line.indexOf(open) < line.indexOf(QStringLiteral("gamma")));
+        }
+    }
+
     // With inline media on, a table is still only the drawn table: no "open sortable table" row
     // under it (#15G5). `relay show data.csv` is where a sortable table comes from.
     void inlineTableIsOnlyTheDrawnTable() {

@@ -646,6 +646,7 @@ QVector<FoldLine> foldForMarkdown(const QString &markdown, const Palette &palett
     if (markdown.isEmpty()) return out;
     MarkdownAnsi renderer;
     renderer.setLinkAnchor(options.linkAnchor);   // #MDKN: a link's label in a fold is a link too
+    renderer.setImageColumns(cells);   // a wide table wraps inside its cells, not at the fold's edge
     appendMarkdown(out, renderer.feed(markdown) + renderer.finish(), palette);
     while (!out.isEmpty() && out.first().spans.isEmpty()) out.removeFirst();
     while (!out.isEmpty() && out.last().spans.isEmpty()) out.removeLast();

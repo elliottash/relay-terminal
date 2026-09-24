@@ -743,6 +743,86 @@ QString MarkdownAnsi::renderInline(const QString &text, bool bold) const {
     return rendered;
 }
 
+// One rendered table cell cut into lines of at most `width` columns (#15G5): between words where
+// it can, mid-word only when a word is wider than the column. The cell is already styled, so a
+// line that starts part way through a bold run or a link re-opens it, and a line that ends inside
+// a link's label goes back to `base` (the prose run's own anchor, #MDKN, or no link at all), so
+// the padding and the `│` after it are not part of the label.
+static QStringList wrapTableCell(const QString &rendered, int width, const QString &base) {
+    struct State { QString sgr, link; };
+    const auto reopen = [](const State &s) { return s.sgr + s.link; };
+    const auto close = [&base](const State &s) {
+        return s.link.isEmpty() || s.link == base ? QString() : base.isEmpty() ? osc8(QString()) : base;
+    };
+    QStringList lines;
+    QString line;
+    int lineWidth = 0;
+    State state, breakState;
+    int breakAt = -1, breakWidth = 0;   // the last space in `line`: where it would break
+    for (int i = 0; i < rendered.size();) {
+        const QChar c = rendered.at(i);
+        if (c == QChar(0x1b)) {   // an escape: no width, but it changes what a new line re-opens
+            int end = i + 1;
+            const bool string = end < rendered.size() && (rendered.at(end) == QLatin1Char(']') || rendered.at(end) == QLatin1Char('_'));
+            if (string) {
+                end += 1;
+                while (end < rendered.size() && rendered.at(end) != QChar(0x07) && rendered.at(end) != QChar(0x1b)) ++end;
+                if (end < rendered.size() && rendered.at(end) == QChar(0x1b)) ++end;
+                if (end < rendered.size()) ++end;   // BEL, or the `\` of ST
+            } else {
+                while (end < rendered.size() && !rendered.at(end).isLetter()) ++end;
+                if (end < rendered.size()) ++end;
+            }
+            const QString esc = rendered.mid(i, end - i);
+            if (!string && esc.endsWith(QLatin1Char('m'))) {
+                if (esc == QStringLiteral("\x1b[m") || esc.startsWith(QStringLiteral("\x1b[0;")) || esc == QStringLiteral("\x1b[0m"))
+                    state.sgr = esc;
+                else
+                    state.sgr += esc;
+            } else if (esc.startsWith(QStringLiteral("\x1b]8;"))) {
+                const int uri = esc.indexOf(QLatin1Char(';'), 4) + 1;
+                const bool closes = uri <= 0 || uri >= esc.size() || esc.at(uri) == QChar(0x1b) || esc.at(uri) == QChar(0x07);
+                state.link = closes ? QString() : esc;
+            }
+            line += esc;
+            i = end;
+            continue;
+        }
+        const int n = c.isHighSurrogate() && i + 1 < rendered.size() ? 2 : 1;
+        const QString ch = rendered.mid(i, n);
+        i += n;
+        if (lineWidth + 1 > width) {
+            if (ch == QStringLiteral(" ")) {   // the space the line ends on is the break
+                lines << line + close(state);
+                line = reopen(state);
+                lineWidth = 0;
+                breakAt = -1;
+                continue;
+            }
+            if (breakAt >= 0) {
+                const QString tail = line.mid(breakAt + 1);
+                lines << line.left(breakAt) + close(breakState);
+                line = reopen(breakState) + tail;
+                lineWidth -= breakWidth + 1;
+            } else {
+                lines << line + close(state);
+                line = reopen(state);
+                lineWidth = 0;
+            }
+            breakAt = -1;
+        }
+        if (ch == QStringLiteral(" ") && lineWidth > 0) {
+            breakAt = line.size();
+            breakWidth = lineWidth;
+            breakState = state;
+        }
+        line += ch;
+        ++lineWidth;
+    }
+    lines << line;
+    return lines;
+}
+
 QString MarkdownAnsi::renderTable() {
     const QStringList rows = m_table;
     m_table.clear();
@@ -757,12 +837,18 @@ QString MarkdownAnsi::renderTable() {
         return out;
     }
 
-    QList<QStringList> cells;
+    // Each cell is a list of lines: `<br>` inside a cell is a line break, the only one GFM has.
+    static const QRegularExpression lineBreak(QStringLiteral("<br\\s*/?>"), QRegularExpression::CaseInsensitiveOption);
+    QList<QList<QStringList>> cells;
     int columns = 0;
     for (int r = 0; r < rows.size(); ++r) {
         if (r == 1) continue;
-        QStringList rendered;
-        for (const QString &cell : tableCells(rows.at(r))) rendered << renderInline(cell, r == 0);
+        QList<QStringList> rendered;
+        for (const QString &cell : tableCells(rows.at(r))) {
+            QStringList parts;
+            for (const QString &part : cell.split(lineBreak)) parts << renderInline(part.trimmed(), r == 0);
+            rendered << parts;
+        }
         columns = std::max(columns, int(rendered.size()));
         cells << rendered;
     }
@@ -773,27 +859,84 @@ QString MarkdownAnsi::renderTable() {
         if (s.startsWith(QLatin1Char(':')) && s.endsWith(QLatin1Char(':'))) align[col] = QLatin1Char('c');
         else if (s.endsWith(QLatin1Char(':'))) align[col] = QLatin1Char('r');
     }
-    for (const QStringList &row : cells)
-        for (int col = 0; col < row.size(); ++col) widths[col] = std::max(widths[col], visibleWidth(row.at(col)));
+    QVector<int> longestWord(columns, 1);
+    for (const QList<QStringList> &row : cells)
+        for (int col = 0; col < row.size(); ++col)
+            for (const QString &part : row.at(col)) {
+                widths[col] = std::max(widths[col], visibleWidth(part));
+                for (const QString &word : part.split(QLatin1Char(' ')))
+                    longestWord[col] = std::max(longestWord[col], visibleWidth(word));
+            }
 
+    // A table wider than the pane is fitted to it by wrapping inside its cells (#15G5); left to the
+    // terminal, each row would wrap at the pane's edge and the columns would fall apart. Every
+    // column first gets its longest word (or all of itself, if that is less), then the rest of the
+    // width goes to the columns that still want more, narrowest wants filled first. When not even
+    // the words fit, the same sharing runs from nothing and long words break.
+    const int available = m_imageColumns > 0 ? m_imageColumns - 1 - 3 * (columns - 1) : 0;
+    int natural = 0;
+    for (int w : widths) natural += w;
+    if (available >= 2 * columns && natural > available) {
+        QVector<int> fitted(columns, 1);
+        int minimum = 0;
+        for (int col = 0; col < columns; ++col) minimum += std::min(widths.at(col), longestWord.at(col));
+        if (minimum <= available)
+            for (int col = 0; col < columns; ++col) fitted[col] = std::min(widths.at(col), longestWord.at(col));
+        int left = available;
+        for (int w : fitted) left -= w;
+        QVector<int> order(columns);
+        for (int col = 0; col < columns; ++col) order[col] = col;
+        std::sort(order.begin(), order.end(), [&](int a, int b) { return widths.at(a) - fitted.at(a) < widths.at(b) - fitted.at(b); });
+        for (int k = 0; k < columns; ++k) {
+            const int col = order.at(k);
+            const int give = std::min(widths.at(col) - fitted.at(col), left / (columns - k));
+            fitted[col] += give;
+            left -= give;
+        }
+        widths = fitted;
+    }
+
+    // Every row's lines first: once any row takes more than one line, a faint rule goes between
+    // the body rows, or the lines of one row read as the next row.
+    const QString baseLink = m_linkAnchor.isEmpty() ? QString() : osc8(m_linkAnchor);
+    QList<QList<QStringList>> wrappedRows;
+    QVector<int> heights;
+    bool multiLine = false;
+    for (int r = 0; r < cells.size(); ++r) {
+        QList<QStringList> wrapped;
+        int height = 1;
+        for (int col = 0; col < columns; ++col) {
+            QStringList lines;
+            if (col < cells.at(r).size())
+                for (const QString &part : cells.at(r).at(col)) lines << wrapTableCell(part, widths.at(col), baseLink);
+            height = std::max(height, int(lines.size()));
+            wrapped << lines;
+        }
+        wrappedRows << wrapped;
+        heights << height;
+        multiLine = multiLine || height > 1;
+    }
+    QStringList dashes;
+    for (int col = 0; col < columns; ++col) dashes << QString(widths.at(col), QChar(0x2500));
+    const QString rule = sgr(m_palette.dim) + dashes.join(QStringLiteral("─┼─")) + kReset + QLatin1Char('\n');
     const QString bar = sgr(m_palette.dim) + QStringLiteral(" │ ");
     for (int r = 0; r < cells.size(); ++r) {
-        QString line;
-        for (int col = 0; col < columns; ++col) {
-            const QString cell = col < cells.at(r).size() ? cells.at(r).at(col) : QString();
-            const int pad = widths.at(col) - visibleWidth(cell);
-            const int before = align.at(col) == QLatin1Char('r') ? pad : align.at(col) == QLatin1Char('c') ? pad / 2 : 0;
-            if (col > 0) line += bar;
-            line += sgr(QStringLiteral("0;") + m_palette.base) + QString(before, QLatin1Char(' '));
-            line += cell;
-            line += sgr(QStringLiteral("0;") + m_palette.base) + QString(pad - before, QLatin1Char(' '));
+        const QList<QStringList> &wrapped = wrappedRows.at(r);
+        if (r > 1 && multiLine) out += rule;
+        for (int k = 0; k < heights.at(r); ++k) {
+            QString line;
+            for (int col = 0; col < columns; ++col) {
+                const QString cell = wrapped.at(col).value(k);
+                const int pad = std::max(0, widths.at(col) - visibleWidth(cell));
+                const int before = align.at(col) == QLatin1Char('r') ? pad : align.at(col) == QLatin1Char('c') ? pad / 2 : 0;
+                if (col > 0) line += bar;
+                line += sgr(QStringLiteral("0;") + m_palette.base) + QString(before, QLatin1Char(' '));
+                line += cell;
+                line += sgr(QStringLiteral("0;") + m_palette.base) + QString(pad - before, QLatin1Char(' '));
+            }
+            out += line + kReset + QLatin1Char('\n');
         }
-        out += line + kReset + QLatin1Char('\n');
-        if (r == 0) {
-            QStringList dashes;
-            for (int col = 0; col < columns; ++col) dashes << QString(widths.at(col), QChar(0x2500));
-            out += sgr(m_palette.dim) + dashes.join(QStringLiteral("─┼─")) + kReset + QLatin1Char('\n');
-        }
+        if (r == 0) out += rule;
     }
     return out;
 }
