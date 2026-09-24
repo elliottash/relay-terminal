@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-615 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
+641 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
 
-## Features (354)
+## Features (367)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
@@ -19,9 +19,10 @@
 | `#KKYC` | [Clicking a folder: open the explorer or navigate there?](features/2026-09-18-clicking-a-folder-opens-or-navigates.md) | discussing | owner |  |  |
 | `#3F8V` | [switchboard tests support agent](features/2026-09-19-switchboard-tests-support-agent.md) | discussing |  |  | [5](threads/3F8V.md) |
 | `#GZAE` | [if i did ctrl alt m in the switchboard, it moved me to a pane](features/2026-09-20-if-i-did-ctrl-alt-m-in-the-switchboard-it-moved.md) | discussing |  |  | [14](threads/GZAE.md) |
-| `#SJTR` | [Tests becomes the front door to a QA attack system: agents that try to break the project](features/2026-09-21-tests-becomes-the-front-door-to-a-qa-attack-system.md) | discussing |  |  | [9](threads/SJTR.md) |
+| `#SJTR` | [Tests becomes the front door to a QA attack system: agents that try to break the project](features/2026-09-21-tests-becomes-the-front-door-to-a-qa-attack-system.md) | discussing |  |  | [10](threads/SJTR.md) |
 | `#9R2V` | [kimi-code preset: refresh OAuth tokens per turn so panes don't 401 after ~15 min](features/2026-09-21-kimi-code-preset-refresh-oauth-tokens-per-turn-s.md) | discussing |  |  | [6](threads/9R2V.md) |
 | `#P2W8` | [Editable artifact workspace: linked editor, terminal/agent and preview panes, with human and agent editing the same file](features/2026-09-23-editable-artifact-workspace-linked-editor-termin.md) | discussing |  |  | [5](threads/P2W8.md) |
+| `#R246` | [Where security review belongs in the Board tool row](features/2026-09-23-where-security-review-belongs-in-the-board-tool.md) | discussing |  |  | [2](threads/R246.md) |
 | `#AG7R` | [What an agent still cannot do in Relay, read off the catalog rather than remembered](features/2026-09-20-after-you-fix-that-one-do-a-broader-review-of-wha.md) | planning | claude-code |  | [12](threads/AG7R.md) |
 | `#QEKA` | [remember my word wrap settings in the text editor](features/2026-09-22-remember-my-word-wrap-settings-in-the-text-edito.md) | planning |  |  | [3](threads/QEKA.md) |
 | `#2Y96` | [The agent's file sandbox is the tab's project, or the directory the pane is in, and never the directory Relay was launched from](features/2026-09-19-agent-sandbox-follows-the-tab-project.md) | planned |  |  | [9](threads/2Y96.md) |
@@ -29,12 +30,12 @@
 | `#ZKR0` | [The Switchboard shows the GitHub sync: the plan before the first run, progress, and conflicts](features/2026-09-19-github-sync-in-the-switchboard.md) | planned |  | 0/7 |  |
 | `#YJK8` | [Portable terminal engine for macOS and Windows](features/2026-09-17-portable-terminal-engine.md) | planned |  |  |  |
 | `#P4GP` | [Website and beta release](features/2026-09-17-website-and-beta-release.md) | planned |  |  |  |
+| `#Q8TM` | [Preserve context while reducing model-switch token use across guest and native models](features/2026-09-23-reuse-guest-sessions-and-cut-model-switch-context.md) | planned | codex |  | [1](threads/Q8TM.md) |
 | `#6WKR` | [Save and load workspace snapshots](features/2026-09-23-save-and-load-workspace-snapshots.md) | planned |  |  | [7](threads/6WKR.md) |
 | `#05J2` | [Export settings, and an optional sync across machines](features/2026-09-17-settings-export-and-sync.md) | planned |  |  |  |
 | `#S976` | [A program input mode: type into the running program, with its own completions](features/2026-09-17-program-input-mode.md) | planned |  |  |  |
 | `#4TNY` | [Text editing for text files: word wrap, syntax highlighting, find](features/2026-09-18-text-editing-for-text-files.md) | planned | agent |  |  |
 | `#3AZG` | [Cut a new GitHub release with the /connect (join) work so the laptop can install it](features/2026-09-19-cut-a-new-github-release-with-the-connect-join-w.md) | planned |  |  | [2](threads/3AZG.md) |
-| `#R5TC` | [One pane's agent sends a message to another, inside one Relay](features/2026-09-19-relay-terminals-talk-to-each-other-and-to-claude.md) | planned | agent | 0/15 |  |
 | `#V2HM` | [Let the agent fill in a password without ever seeing it](features/2026-09-19-let-the-agent-fill-in-a-password-without-seeing-i.md) | planned | agent | 0/9 |  |
 | `#4QM4` | [Measure the author x reviewer matrix: for Claude-made bugs, is Kimi or GLM the better reviewer?](features/2026-09-19-measure-the-author-x-reviewer-matrix-for-claude.md) | planned |  | 0/9 | [2](threads/4QM4.md) |
 | `#736Y` | [check /plan behavior when you type text after.](features/2026-09-19-check-plan-behavior-when-you-type-text-after.md) | planned |  |  | [1](threads/736Y.md) |
@@ -44,18 +45,22 @@
 | `#4DS8` | [in options, make "microphone" a dropdown from available microphones, rather than…](features/2026-09-20-in-options-make-microphone-a-dropdown-from-avail.md) | planned |  |  | [7](threads/4DS8.md) |
 | `#XHH4` | [potential bug: switchboard agent didnt recognize a session id.](features/2026-09-20-potential-bug-switchboard-agent-didnt-recognize.md) | planned |  |  | [7](threads/XHH4.md) |
 | `#9EZJ` | [include reasoning summaries for codex / claude to fill the reasoning bubbles](features/2026-09-21-include-reasoning-summaries-for-codex-claude-to.md) | planned |  |  | [7](threads/9EZJ.md) |
-| `#BG2Y` | [ctrl + enter should activate guest agents, like typing a first entry](features/2026-09-23-ctrl-enter-should-activate-guest-agents-like-typ.md) | planned |  |  | [7](threads/BG2Y.md) |
-| `#F8R7` | [Protect open artifact buffers from external and agent edits](features/2026-09-23-protect-open-artifact-buffers-from-external-and.md) | planned |  | 0/5 | [5](threads/F8R7.md) |
-| `#E85D` | [Link editor, console and typed preview panes as an artifact workspace](features/2026-09-23-link-editor-console-and-typed-preview-panes-as-a.md) | planned |  | 0/5 | [5](threads/E85D.md) |
-| `#C0Q8` | [Define Relay task-plugin manifests, activation and tool contracts](features/2026-09-23-define-relay-task-plugin-manifests-activation-an.md) | planned |  | 0/5 | [5](threads/C0Q8.md) |
-| `#WYGY` | [Build the TeX-to-PDF document workspace](features/2026-09-23-build-the-tex-to-pdf-document-workspace.md) | planned |  | 0/6 | [5](threads/WYGY.md) |
-| `#33G0` | [Build Python and Stata analysis workspaces with shared execution state](features/2026-09-23-build-python-and-stata-analysis-workspaces-with.md) | planned |  | 0/6 | [5](threads/33G0.md) |
-| `#MDA7` | [Inline media after images: playable sound, interactive charts, and the rest](features/2026-09-22-inline-media-sound-charts.md) | ready | claude-code | 0/8 | [4](threads/MDA7.md) |
-| `#MEMS` | [Learned user memory as confirmed suggestions, remembered rejections, and Claude/Codex import and replace](features/2026-09-22-memory-suggestions-rejections-guest-import.md) | executing | claude-code |  | [5](threads/MEMS.md) |
+| `#C3Q2` | [Automatic or not: a QA policy floor in Options and per-project overrides in board.yaml](features/2026-09-23-automatic-or-not-a-qa-policy-floor-in-options-an.md) | planned |  |  | [3](threads/C3Q2.md) |
+| `#95VZ` | [A case ledger: every served case recorded with its server, who served it, cost, signal and verdict](features/2026-09-23-a-case-ledger-every-served-case-recorded-with-it.md) | planned |  |  | [2](threads/95VZ.md) |
+| `#BGRN` | [Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done](features/2026-09-23-run-in-background.md) | executing | agent |  | [34](threads/BGRN.md) |
+| `#R5TC` | [One pane's agent sends a message to another, inside one Relay](features/2026-09-19-relay-terminals-talk-to-each-other-and-to-claude.md) | executing | agent | 0/15 | [8](threads/R5TC.md) |
 | `#3KB7` | [A Security section in Options, gathering what the agent may reach](features/2026-09-19-a-security-section-in-options.md) | executing | agent | 8/10 | [10](threads/3KB7.md) |
 | `#YZ8G` | [systematic QA skilling needed](features/2026-09-19-systematic-qa-skilling-needed.md) | executing | claude-code |  | [38](threads/YZ8G.md) |
-| `#ESDF` | [switchboard needs an easy way to show me recent cards without the section orderi…](features/2026-09-21-switchboard-needs-an-easy-way-to-show-me-recent.md) | executing | agent |  | [13](threads/ESDF.md) |
+| `#00G1` | [Redesign the five Models tabs and clarify their labels](features/2026-09-23-redesign-the-models-pane-two-tabs-models-routing.md) | executing | agent |  | [34](threads/00G1.md) |
 | `#7JD1` | [Stop pauses the queue, Enter resumes it — on the pane and on a phone](features/2026-09-21-stop-pauses-the-queue-enter-resumes-it-on-the-pa.md) | executing | agent |  | [7](threads/7JD1.md) |
+| `#F8R7` | [Protect open artifact buffers from external and agent edits](features/2026-09-23-protect-open-artifact-buffers-from-external-and.md) | executing | agent | 0/5 | [9](threads/F8R7.md) |
+| `#E85D` | [Link editor, console and typed preview panes as an artifact workspace](features/2026-09-23-link-editor-console-and-typed-preview-panes-as-a.md) | executing | agent | 0/5 | [8](threads/E85D.md) |
+| `#C0Q8` | [Define Relay task-plugin manifests, activation and tool contracts](features/2026-09-23-define-relay-task-plugin-manifests-activation-an.md) | executing | agent | 0/5 | [9](threads/C0Q8.md) |
+| `#WYGY` | [Build the TeX-to-PDF document workspace](features/2026-09-23-build-the-tex-to-pdf-document-workspace.md) | executing | agent | 0/6 | [9](threads/WYGY.md) |
+| `#33G0` | [Build Python and Stata analysis workspaces with shared execution state](features/2026-09-23-build-python-and-stata-analysis-workspaces-with.md) | executing | agent | 0/6 | [9](threads/33G0.md) |
+| `#GRT2` | [Make .board the default and migrate existing local project boards](features/2026-09-23-make-board-the-default-and-migrate-existing-loca.md) | executing | agent | 3/5 | [8](threads/GRT2.md) |
+| `#MSJ0` | [Skills declare a task profile in SKILL.md frontmatter; a card worked under a skill inherits its verify defaults and effort](features/2026-09-23-skills-declare-a-task-profile-in-skill-md-frontm.md) | executing | agent | 5/6 | [4](threads/MSJ0.md) |
+| `#V1VM` | [Collect usage resets (credits) and window reset times with subscription usage stats](features/2026-09-23-collect-usage-resets-credits-and-window-reset-ti.md) | executing | agent |  | [6](threads/V1VM.md) |
 | `#GWXM` | [Keyboard shortcut to step through files, folders and links in output](features/2026-09-17-keyboard-jump-to-output-links.md) | needs-verification | codex |  | [11](threads/GWXM.md) |
 | `#SWPH` | [The Switchboard on the phone: cards, threads and the card actions, by touch](features/2026-09-20-the-switchboard-on-the-phone.md) | needs-verification | claude-code | 4/4 | [5](threads/SWPH.md) |
 | `#SHRP` | [The Sharing pane says what varies: your phones once at the top, guests where there are any, one row per quiet pane](features/2026-09-21-sharing-pane-one-list-not-a-block-per-pane.md) | needs-verification | claude-code | 3/3 | [3](threads/SHRP.md) |
@@ -78,7 +83,7 @@
 | `#C1NP` | [Show cleanup operations in the Switchboard agent terminal](features/2026-09-21-cleanup-terminal-operations.md) | needs-verification | codex |  | [8](threads/C1NP.md) |
 | `#EQM2` | [Opening a pane evenly redistributes the tab](features/2026-09-21-opening-new-panes-evenly-spreads-the-tab.md) | needs-verification | codex | 3/3 | [6](threads/EQM2.md) |
 | `#P1CP` | [Put pane identity and dimming controls in the info hover popover](features/2026-09-21-pane-id-and-dim-controls-in-info-popover.md) | needs-verification | codex | 3/3 | [7](threads/P1CP.md) |
-| `#P7SJ` | [One pane for Projects, Sessions, and Globals](features/2026-09-21-projects-sessions-globals.md) | needs-verification | codex | 5/5 | [14](threads/P7SJ.md) |
+| `#P7SJ` | [One pane for Projects, Sessions, and Globals](features/2026-09-21-projects-sessions-globals.md) | needs-verification | codex | 5/5 | [16](threads/P7SJ.md) |
 | `#C8KM` | [Open Recently closed in a modal from Actions](features/2026-09-21-recently-closed-modal.md) | needs-verification | codex |  | [6](threads/C8KM.md) |
 | `#R6BS` | [Publish refreshed builds and website downloads](features/2026-09-21-refresh-public-builds.md) | needs-verification | codex | 6/6 | [14](threads/R6BS.md) |
 | `#GD8K` | [Codex delegates through Relay so its tasks and child sessions are visible](features/2026-09-21-relay-owned-guest-delegation.md) | needs-verification | codex |  | [8](threads/GD8K.md) |
@@ -95,9 +100,10 @@
 | `#A7CP` | [Alt+A closes the active subagent pane](features/2026-09-22-alt-a-close-subagent-pane.md) | needs-verification | codex |  | [6](threads/A7CP.md) |
 | `#PCBG` | [Confirm closing active panes and let work continue in the background](features/2026-09-22-confirm-active-pane-close.md) | needs-verification | agent | 3/3 | [10](threads/PCBG.md) |
 | `#MH7P` | [Helper agent on the Models pane](features/2026-09-22-helper-agent-on-the-models-pane.md) | needs-verification | claude-code |  | [4](threads/MH7P.md) |
+| `#MDA7` | [Inline media after images: playable sound, interactive charts, and the rest](features/2026-09-22-inline-media-sound-charts.md) | needs-verification | agent | 8/8 | [20](threads/MDA7.md) |
 | `#QWAS` | [Adopt the QWEASDZXC default keymap: Board, Sessions, Projects, explorer, Actions/help](features/2026-09-22-qweasdzxc-default-keymap.md) | needs-verification | agent |  | [17](threads/QWAS.md) |
 | `#RSME` | [One Resume action in Sessions](features/2026-09-22-sessions-single-resume.md) | needs-verification | codex |  | [3](threads/RSME.md) |
-| `#1MGS` | [Show images inline: in the terminal and in the agent conversation](features/2026-09-22-show-images-inline.md) | needs-verification | claude-code |  | [8](threads/1MGS.md) |
+| `#1MGS` | [Show images inline: in the terminal and in the agent conversation](features/2026-09-22-show-images-inline.md) | needs-verification | claude-code |  | [9](threads/1MGS.md) |
 | `#SPSG` | [Give Sessions and Projects one entry point and consistent toggling](features/2026-09-22-single-sessions-projects-entry.md) | needs-verification |  |  | [9](threads/SPSG.md) |
 | `#7KPN` | [Name providers, not models, in Add provider](features/2026-09-23-add-provider-names-only.md) | needs-verification | codex |  | [5](threads/7KPN.md) |
 | `#BXMS` | [Pick a pane's model only from its box; the box offers "all models" and "model settings"](features/2026-09-23-box-picker-all-models-and-settings.md) | needs-verification | agent |  | [2](threads/BXMS.md) |
@@ -111,7 +117,6 @@
 | `#Z8P4` | [Let the prompt box expand for long prompts](features/2026-09-23-prompt-box-grows-with-long-text.md) | needs-verification | codex |  | [6](threads/Z8P4.md) |
 | `#C7NQ` | [Remove the Continue section from Sessions](features/2026-09-23-remove-continue-section-from-sessions.md) | needs-verification | agent |  | [10](threads/C7NQ.md) |
 | `#R7ST` | [Restart Relay only after the old instance exits](features/2026-09-23-restart-relay-after-old-instance-exits.md) | needs-verification | codex |  | [3](threads/R7ST.md) |
-| `#BGRN` | [Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done](features/2026-09-23-run-in-background.md) | needs-verification | agent |  | [30](threads/BGRN.md) |
 | `#Z8DR` | [Save unfinished prompt drafts on exit and crash](features/2026-09-23-save-unfinished-prompt-drafts.md) | needs-verification | codex |  | [6](threads/Z8DR.md) |
 | `#Y4MT` | [Preview Sessions rows on mouse click before resuming](features/2026-09-23-session-click-previews-before-resume.md) | needs-verification | codex |  | [5](threads/Y4MT.md) |
 | `#N8F4` | [Keep the session manager newest first by default](features/2026-09-23-session-manager-newest-first-default.md) | needs-verification | codex |  | [3](threads/N8F4.md) |
@@ -125,14 +130,15 @@
 | `#F11S` | [F11 toggles fullscreen](features/2026-09-22-f11-fullscreen.md) | needs-verification | codex |  | [7](threads/F11S.md) |
 | `#XP7N` | [Let the agent request to exit planning mode](features/2026-09-21-agent-request-exit-plan-mode.md) | needs-verification | codex |  | [22](threads/XP7N.md) |
 | `#QRC1` | [Up recalls a queued command as an unsent draft](features/2026-09-21-up-recalls-queued-command.md) | needs-verification | codex |  | [5](threads/QRC1.md) |
-| `#QSN1` | [Queue send-now arrow](features/2026-09-22-queue-send-now-arrow.md) | needs-verification | codex |  | [8](threads/QSN1.md) |
+| `#QSN1` | [Queue send-now arrow](features/2026-09-22-queue-send-now-arrow.md) | needs-verification | codex |  | [10](threads/QSN1.md) |
 | `#R0PE` | [Prefix subagent tracker summaries with their role](features/2026-09-22-subagent-role-summary.md) | needs-verification | codex |  | [9](threads/R0PE.md) |
 | `#SBGN` | [General subagents without role tags, with explicit blocked outcomes](features/2026-09-22-simplify-subagents.md) | needs-verification | codex |  | [6](threads/SBGN.md) |
 | `#SG4P` | [Blank lines around shell commands](features/2026-09-21-shell-command-spacing.md) | needs-verification | codex |  | [6](threads/SG4P.md) |
 | `#SPB2` | [Fresh integrated build for sphinxpad](features/2026-09-22-fresh-build-sphinxpad.md) | needs-verification | codex |  | [7](threads/SPB2.md) |
-| `#STPC` | [Remove the step count from the Relaying notifier](features/2026-09-22-remove-relaying-step-count.md) | needs-verification | codex |  | [7](threads/STPC.md) |
+| `#STPC` | [Remove the step count from the Relaying notifier](features/2026-09-22-remove-relaying-step-count.md) | needs-verification | codex |  | [9](threads/STPC.md) |
 | `#TCXT` | [Give agents recent command and output context from their terminal pane](features/2026-09-22-terminal-context-for-agents.md) | needs-verification | codex | 6/7 | [13](threads/TCXT.md) |
-| `#M7RY` | [User memory research, review and interview in Globals](features/2026-09-22-user-memory-and-interview.md) | needs-verification | codex |  | [7](threads/M7RY.md) |
+| `#M7RY` | [User memory research, review and interview in Globals](features/2026-09-22-user-memory-and-interview.md) | needs-verification | codex |  | [9](threads/M7RY.md) |
+| `#MEMS` | [Learned user memory as confirmed suggestions, remembered rejections, and Claude/Codex import and replace](features/2026-09-22-memory-suggestions-rejections-guest-import.md) | needs-verification | agent |  | [12](threads/MEMS.md) |
 | `#WWB2` | [Word-wrap toggle in the file editor header](features/2026-09-22-editor-wrap-button.md) | needs-verification | codex |  | [6](threads/WWB2.md) |
 | `#MAGP` | [Actions modal palette: search, groups, and Ctrl+? help](features/2026-09-22-actions-modal-palette.md) | needs-verification |  |  | [14](threads/MAGP.md) |
 | `#CMPA` | [Compass layout and directional navigation for Actions](features/2026-09-23-compass-actions-palette.md) | needs-verification | codex |  | [21](threads/CMPA.md) |
@@ -142,7 +148,7 @@
 | `#SFZC` | [common-word folder names get highlighted in agent messages](features/2026-09-19-common-word-folder-names-get-highlighted-in-agen.md) | needs-verification | agent |  | [26](threads/SFZC.md) |
 | `#25XG` | [Refused tool calls keep the ✗ but render in neutral ink, not red](features/2026-09-19-refused-tool-calls-keep-the-but-render-in-neutra.md) | needs-verification | agent |  | [29](threads/25XG.md) |
 | `#8YQ9` | [Switchboard page agent (switchboard-as-context) + new-project survey, clean-up and per-section triage buttons](features/2026-09-19-switchboard-page-agent-switchboard-as-context-cl.md) | needs-verification | agent | 9/9 | [43](threads/8YQ9.md) |
-| `#SXF1` | [ctrl + enter to continue](features/2026-09-19-ctrl-enter-to-continue.md) | needs-verification | agent |  | [37](threads/SXF1.md) |
+| `#SXF1` | [ctrl + enter to continue](features/2026-09-19-ctrl-enter-to-continue.md) | needs-verification | agent |  | [44](threads/SXF1.md) |
 | `#NQP9` | [when board is done planning, send a notification, but dont instantly move the ac…](features/2026-09-19-when-board-is-done-planning-send-a-notification.md) | needs-verification | agent |  | [16](threads/NQP9.md) |
 | `#AGNT` | [An agent is the prompt box: one agent surface, one context per setting, and the helper becomes a pane](features/2026-09-20-the-queue-doesnt-work-like-the-main-terminal-and.md) | needs-verification | claude-code |  | [21](threads/AGNT.md) |
 | `#FEJQ` | [One helper system: the Switchboard agent, helpers in Options/Actions/Sessions, and agents that drive the app](features/2026-09-19-allow-agents-to-control-the-relay-app-and-add-he.md) | needs-verification | agent |  | [19](threads/FEJQ.md) |
@@ -169,7 +175,7 @@
 | `#SDXE` | [bug: pane sizes jiggle in response to content](features/2026-09-20-bug-pane-sizes-jiggle-in-response-to-content.md) | needs-verification | agent |  | [14](threads/SDXE.md) |
 | `#DC4J` | [changing models during rate limit retries -- bug](features/2026-09-20-changing-models-during-rate-limit-retries.md) | needs-verification | agent |  | [24](threads/DC4J.md) |
 | `#1V4F` | [codex bugs](features/2026-09-20-codex-bug-it-couldnt-see-previous-conversation-t.md) | needs-verification | claude-code |  | [17](threads/1V4F.md) |
-| `#CTRN` | [A card turn is an ordinary console turn: the last surface that still has its own agent](features/2026-09-21-are-the-terminal-agent-and-switchboard-agent-th.md) | needs-verification | agent |  | [23](threads/CTRN.md) |
+| `#CTRN` | [A card turn is an ordinary console turn: the last surface that still has its own agent](features/2026-09-21-are-the-terminal-agent-and-switchboard-agent-th.md) | needs-verification | agent |  | [25](threads/CTRN.md) |
 | `#DPJB` | [Priority flags on the card page: shift them by clicking, and let agents set priority](features/2026-09-20-priority-flags-on-the-card-page-shift-them-by-cl.md) | needs-verification |  |  | [6](threads/DPJB.md) |
 | `#7BM4` | [Switchboard as the project's tooling hub: a Tests section with Check, a Test suites pane, a Profile button, and what else fits](features/2026-09-20-switchboard-tooling-hub-tests-profile-and-what-else.md) | needs-verification | codex | 6/6 | [41](threads/7BM4.md) |
 | `#1NW3` | [A board tool-call line unfolds on click; only the #ID opens the card](features/2026-09-20-a-board-tool-call-line-unfolds-on-click-only-the.md) | needs-verification | agent |  | [10](threads/1NW3.md) |
@@ -183,14 +189,17 @@
 | `#C9VT` | [make it where, highlight to copy only works if there are at least 3 letters or n…](features/2026-09-20-make-it-where-highlight-to-copy-only-works-if-th.md) | needs-verification | agent |  | [14](threads/C9VT.md) |
 | `#RG0Z` | [add a "hide until you need me" mode](features/2026-09-21-add-a-hide-until-you-need-me-mode.md) | needs-verification | codex |  | [16](threads/RG0Z.md) |
 | `#S53Z` | [i dont want to use # for labels, just card codes.](features/2026-09-21-i-dont-want-to-use-for-labels-just-card-codes.md) | needs-verification | agent | 3/3 | [24](threads/S53Z.md) |
+| `#ESDF` | [switchboard needs an easy way to show me recent cards without the section orderi…](features/2026-09-21-switchboard-needs-an-easy-way-to-show-me-recent.md) | needs-verification | agent |  | [26](threads/ESDF.md) |
 | `#7QFW` | [User-input band: one solid block, and a cyan band for shell commands](features/2026-09-21-user-input-band-one-solid-block-and-a-cyan-band.md) | needs-verification | agent |  | [9](threads/7QFW.md) |
 | `#D8AP` | [Include the active pane in dim while working](features/2026-09-21-dim-active-pane.md) | needs-verification | codex |  | [9](threads/D8AP.md) |
 | `#RKP3` | [Priorities page: move buttons, cross-section drags, honest footer](features/2026-09-22-priorities-page-move-buttons-cross-section-drags.md) | needs-verification | agent | 6/6 | [10](threads/RKP3.md) |
+| `#QHEE` | [Add concise local models section to Models Sources tab](features/2026-09-23-add-concise-local-models-section-to-models-sourc.md) | needs-verification | agent |  | [9](threads/QHEE.md) |
 | `#BKMC` | [Make Ctrl+Shift+Z redo a recent text undo, otherwise restore closed](features/2026-09-23-make-ctrl-shift-z-redo-a-recent-text-undo-otherw.md) | needs-verification | agent |  | [17](threads/BKMC.md) |
 | `#2K7Q` | [Navigate directories with Left and Right in File Explorer](features/2026-09-23-navigate-directories-with-left-and-right-in-file.md) | needs-verification | agent |  | [11](threads/2K7Q.md) |
 | `#0C0V` | [Token efficiency for every model: usage view, bounded tool output, stable prefix, cheaper subagents, economic compaction](features/2026-09-23-token-efficiency-for-every-model-usage-view-boun.md) | needs-verification | agent |  | [15](threads/0C0V.md) |
 | `#R3YN` | [Put the Relaying status above the prompt](features/2026-09-21-relaying-status-above-the-prompt.md) | needs-verification | codex | 5/5 | [6](threads/R3YN.md) |
 | `#MCP7` | [One command to refresh the model defaults when new models ship](features/2026-09-22-refresh-model-defaults-repeatably.md) | needs-verification | claude-code |  | [4](threads/MCP7.md) |
+| `#BG2Y` | [ctrl + enter should activate guest agents, like typing a first entry](features/2026-09-23-ctrl-enter-should-activate-guest-agents-like-typ.md) | needs-verification | agent |  | [17](threads/BG2Y.md) |
 | `#WJ0H` | [Agent reminders with a distinct notification and audible bell](features/2026-09-23-agent-reminders-with-a-distinct-notification-and.md) | needs-verification | agent |  | [16](threads/WJ0H.md) |
 | `#Z55B` | [Land pending checkout work and clean the shared tree](features/2026-09-23-land-pending-checkout-work-and-clean-the-shared.md) | needs-verification | agent |  | [9](threads/Z55B.md) |
 | `#HS7V` | [Make .relay the canonical home for skills and instructions](features/2026-09-23-make-relay-the-canonical-home-for-skills-and-ins.md) | needs-verification | agent |  | [11](threads/HS7V.md) |
@@ -199,6 +208,10 @@
 | `#TYH4` | [Link printed session IDs to new panes](features/2026-09-23-link-printed-session-ids-to-new-panes.md) | needs-verification | agent |  | [11](threads/TYH4.md) |
 | `#243T` | [Reduce Relay rebuild time by separating Pane and RelayWindow implementations](features/2026-09-23-reduce-relay-rebuild-time-by-separating-pane-and.md) | needs-verification | agent |  | [12](threads/243T.md) |
 | `#WM4K` | [Search active conversations from the Actions palette](features/2026-09-23-search-active-conversations-from-the-actions-pal.md) | needs-verification | agent |  | [23](threads/WM4K.md) |
+| `#WFRA` | [The QA ladder: a `verify` block on every card, proposed by the agent, shown on the card page](features/2026-09-23-the-qa-ladder-a-verify-block-on-every-card-propo.md) | needs-verification | agent | 6/6 | [8](threads/WFRA.md) |
+| `#21KQ` | [Guide users through adding guest subscription accounts in Providers](features/2026-09-23-guide-users-through-adding-guest-subscription-ac.md) | needs-verification | agent |  | [18](threads/21KQ.md) |
+| `#1AA6` | [Verified means the human step too: `verify.human: required` gates done, and deferred verification is an honest state](features/2026-09-23-verified-means-the-human-step-too-verify-human-r.md) | needs-verification | agent | 5/6 | [7](threads/1AA6.md) |
+| `#W92V` | [Open background agents in panes of the current window](features/2026-09-23-open-background-agents-in-panes-of-the-current-w.md) | needs-verification | agent |  | [9](threads/W92V.md) |
 | `#T4BS` | [Share whole tab: a partner gets every pane in the tab, and each pane added to it](features/needs_qa_llm/2026-09-18-share-whole-tab.md) | needs-qa-llm | agent |  |  |
 | `#JQ7R` | [Join someone's shared session from Relay itself: /join CODE, then the PIN](features/needs_qa_llm/2026-09-18-join-a-shared-session-from-relay.md) | needs-qa-llm | agent |  |  |
 | `#803C` | [One "new pane" button: a pane on the right, placed by dragging](features/needs_qa_llm/2026-09-18-one-new-pane-button.md) | needs-qa-llm | agent |  |  |
@@ -358,16 +371,15 @@
 | `#BH3R` | [Diff adds and removals: black-or-white text on the green/red fill, not green/red text](features/done/2026-09-19-diff-adds-and-removals-black-or-white-text-on-th.md) | done |  |  | [5](threads/BH3R.md) |
 | `#74Y5` | [Built to be driven: the QA agent walks each step of the user experience, and apps expose a way to be driven by name](features/done/2026-09-21-built-to-be-driven-the-qa-agent-walks-the-ux-and-spends-human-time-last.md) | done | codex |  | [9](threads/74Y5.md) |
 | `#62M4` | [the phone indicator in the panes, remove the word phone -- the icon is enough](features/done/2026-09-22-the-phone-indicator-in-the-panes-remove-the-word.md) | done | codex | 4/4 | [11](threads/62M4.md) |
-| `#XB7H` | [Rename models: opus 5 → opus 5.5, gpt-5.6-sol/luna → gpt-6-sol/luna](features/done/2026-09-22-rename-models-opus-5-opus-5-5-gpt-5-6-sol-luna-g.md) | done | agent |  | [13](threads/XB7H.md) |
+| `#XB7H` | [Rename models: opus 5 → opus 5.5, gpt-5.6-sol/luna → gpt-6-sol/luna](features/done/2026-09-22-rename-models-opus-5-opus-5-5-gpt-5-6-sol-luna-g.md) | done | agent |  | [14](threads/XB7H.md) |
 | `#KH72` | [Model roles in settings: main, fast, terminal-use, subagent, Switchboard, chores, vision](features/done/2026-09-17-model-roles-and-fast-agent.md) | dropped | agent |  | [1](threads/KH72.md) |
 | `#JM2M` | [A pane's share of the machine: CPU and memory in the header chip and the tab](features/done/2026-09-19-a-pane-s-share-of-the-machine-cpu-and-memory-in.md) | dropped |  |  | [1](threads/JM2M.md) |
 | `#DKEW` | [change board hotkey to ctrl shift b?](features/done/2026-09-22-change-board-hotkey-to-ctrl-shift-b.md) | dropped |  |  | [6](threads/DKEW.md) |
 
-## Bugs (250)
+## Bugs (260)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#C8SV` | [SIGSEGV immediately after a Globals suggestion acceptance event](changes/2026-09-23-sigsegv-after-globals-suggestion-accepted.md) | inbox |  |  | [2](threads/C8SV.md) |
 | `#SFP6` | [edit_file's over-size refusal reuses read_file wording and gives no way out](changes/2026-09-19-edit-file-s-over-size-refusal-reuses-read-file-w.md) | inbox |  |  | [7](threads/SFP6.md) |
 | `#E6XC` | [board_update_card can never match #SP4N and #5PY9: their file hashes are not 64 characters](changes/2026-09-19-board-update-card-can-never-match-sp4n-and-5py9.md) | inbox |  |  | [1](threads/E6XC.md) |
 | `#QAJQ` | [tabProjectChip stylesheet sits under the 9pt font floor (buttonfit fails at HEAD)](changes/2026-09-19-tabprojectchip-stylesheet-sits-under-the-9pt-fon.md) | inbox |  |  | [2](threads/QAJQ.md) |
@@ -376,11 +388,11 @@
 | `#8EJ4` | [five stale board tests fail at HEAD: policy wording, stage lifecycle, import](changes/2026-09-20-five-stale-board-tests-fail-at-head-policy-wordi.md) | inbox |  |  | [1](threads/8EJ4.md) |
 | `#VASY` | [Three board tests fail on main: the policy phrase and an extra thread entry per write](changes/2026-09-20-three-board-tests-fail-on-main-the-policy-phrase.md) | inbox |  |  | [2](threads/VASY.md) |
 | `#RSJY` | [A paired device's grant cannot be raised short of revoke-and-re-pair](changes/2026-09-20-a-paired-device-s-grant-cannot-be-raised-short-o.md) | inbox |  |  | [2](threads/RSJY.md) |
-| `#VZ8C` | [ctest:consolemode fails](changes/2026-09-22-ctest-consolemode-fails.md) | inbox |  |  | [1](threads/VZ8C.md) |
 | `#NYXV` | [tests.test_tier_lists: relay-pro cloud rows fail test_every_cloud_row_carries_both_keys (3 subtests, pre-existing at HEAD)](changes/2026-09-23-tests-test-tier-lists-relay-pro-cloud-rows-fail.md) | inbox |  |  | [1](threads/NYXV.md) |
-| `#XJ2B` | [unittest:unittest.loader._FailedTest.test_board_protocol fails](changes/2026-09-23-unittest-unittest-loader-failedtest-test-board-p.md) | inbox |  |  | [1](threads/XJ2B.md) |
-| `#229N` | [run:unittest failed as a whole run](changes/2026-09-23-run-unittest-failed-as-a-whole-run.md) | inbox |  |  | [1](threads/229N.md) |
 | `#YZZT` | [Mid-turn guest model switch leaves the old harness attached](changes/2026-09-23-mid-turn-guest-model-switch-leaves-the-old-harne.md) | inbox |  |  | [1](threads/YZZT.md) |
+| `#15ZE` | [8 settings-pane source-text tests fail after #243T moved window bodies into .cpp files](changes/2026-09-23-8-settings-pane-source-text-tests-fail-after-243.md) | inbox |  |  | [1](threads/15ZE.md) |
+| `#9ACN` | [Models pane narrow-layout test: the fifth tab overflows the tab bar](changes/2026-09-23-models-pane-narrow-layout-test-the-fifth-tab-ove.md) | inbox |  |  | [1](threads/9ACN.md) |
+| `#D9AQ` | [boardworkspace/boardremote/boardexecute suites fail at clean tip](changes/2026-09-23-boardworkspace-boardremote-boardexecute-suites-f.md) | inbox |  |  | [2](threads/D9AQ.md) |
 | `#RCPF` | [A recap on a desktop with no keys is written by Relay Free, unasked](changes/2026-09-21-a-recap-spends-relay-free-on-a-desktop-with-no-keys.md) | discussing |  |  | [1](threads/RCPF.md) |
 | `#W7DC` | [Double-click selection on a real row in a folded view returns one character](changes/2026-09-21-double-click-real-row-in-folded-view.md) | discussing |  |  | [2](threads/W7DC.md) |
 | `#5BAS` | [main does not compile on Qt6 (Pane.h:1028), and boardmodel_test.cpp does not compile at all](changes/2026-09-20-main-does-not-compile-on-qt6-pane-h-and-boardmodel-test.md) | discussing |  |  | [4](threads/5BAS.md) |
@@ -392,13 +404,15 @@
 | `#X275` | [SWITCHBOARD-FORMAT 2.2 documents the removed `plan` card type](changes/2026-09-20-switchboard-format-2-2-documents-the-removed-pla.md) | discussing |  |  | [3](threads/X275.md) |
 | `#2CDS` | [Checked in "models in the picker" but not offered by the main tier's add-picker](changes/2026-09-21-checked-in-models-in-the-picker-but-not-offered.md) | discussing |  |  | [6](threads/2CDS.md) |
 | `#3BPH` | [boardexecute test fails at HEAD: Execute/Plan/Verify buttons never appear in the open card](changes/2026-09-22-boardexecute-test-fails-at-head-execute-plan-ver.md) | discussing |  |  | [4](threads/3BPH.md) |
+| `#1ZNS` | [Router false positive: sentence starting with a non-English command word routes to shell](changes/2026-09-23-router-false-positive-sentence-starting-with-a-n.md) | discussing |  |  | [6](threads/1ZNS.md) |
 | `#GBN4` | [A guest's board comment is missing from the thread when its turn fails afterwards](changes/2026-09-23-guest-comment-lost-when-the-turn-fails-after-it.md) | planned |  |  | [7](threads/GBN4.md) |
+| `#C8SV` | [SIGSEGV immediately after a Globals suggestion acceptance event](changes/2026-09-23-sigsegv-after-globals-suggestion-accepted.md) | planned | agent |  | [12](threads/C8SV.md) |
 | `#GPF7` | [Guest planning test assumes PLAN MODE is the first prompt text](changes/2026-09-21-guest-plan-prefix-test.md) | planned |  |  | [10](threads/GPF7.md) |
 | `#9MYY` | [TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText](changes/2026-09-17-terminalview-hot-paths-linkat-rebuild-per-hover.md) | planned |  |  | [3](threads/9MYY.md) |
 | `#BVK1` | [The bevel stylesheet still keys the pane's button row on a property nothing sets](changes/2026-09-19-the-bevel-stylesheet-still-keys-the-pane-row-on.md) | planned | agent |  |  |
 | `#WMXN` | [the phone's recap button errors: it sends reason "remote", which the worker rejects](changes/2026-09-20-phone-recap-button-errors-the-worker-rejects.md) | planned |  |  | [6](threads/WMXN.md) |
-| `#PRM2` | [One look at the pairing dialog costs two to four pairing rooms, and a code shown across an off/on is dead](changes/2026-09-21-one-look-at-the-pairing-dialog-costs-several-pairing-rooms.md) | executing | codex |  | [4](threads/PRM2.md) |
-| `#SDR1` | [The pane agent's `conversations` event carries `session_dir`, an absolute path, to `full` devices](changes/2026-09-21-the-conversations-event-carries-session-dir-to-a-phone.md) | executing | codex |  | [5](threads/SDR1.md) |
+| `#PRM2` | [One look at the pairing dialog costs two to four pairing rooms, and a code shown across an off/on is dead](changes/2026-09-21-one-look-at-the-pairing-dialog-costs-several-pairing-rooms.md) | executing | codex |  | [8](threads/PRM2.md) |
+| `#SDR1` | [The pane agent's `conversations` event carries `session_dir`, an absolute path, to `full` devices](changes/2026-09-21-the-conversations-event-carries-session-dir-to-a-phone.md) | executing | codex |  | [9](threads/SDR1.md) |
 | `#W3KD` | [board_move_card cannot retire an alias card: "unknown tab 'aliases'"](changes/2026-09-20-board-move-card-cannot-retire-an-alias-card-unk.md) | needs-verification | agent | 2/2 | [3](threads/W3KD.md) |
 | `#X7NB` | [Drop the plan card type: the protocol already says plans live on the work card](changes/2026-09-20-drop-the-plan-card-type-the-protocol-already-say.md) | needs-verification | agent | 6/6 | [3](threads/X7NB.md) |
 | `#H6VQ` | [The Sessions helper could not open a conversation, and nothing answered its app_open](changes/2026-09-20-sessions-helper-did-nothing-when-asked-to-open-pa.md) | needs-verification | claude-code |  | [5](threads/H6VQ.md) |
@@ -411,11 +425,11 @@
 | `#T8SB` | [Show all subagents in the tabbed pane](changes/2026-09-21-missing-subagent-tabs.md) | needs-verification | codex |  | [8](threads/T8SB.md) |
 | `#SFC1` | [Shift-click file links should open externally](changes/2026-09-21-shift-click-file-links-open-externally.md) | needs-verification | codex |  | [5](threads/SFC1.md) |
 | `#D7AV` | [Detect skill slash commands as agent input](changes/2026-09-21-skill-slash-agent-detection.md) | needs-verification | codex |  | [7](threads/D7AV.md) |
-| `#QG4C` | [The command queue does not work with claude / codex](changes/2026-09-21-the-command-queue-doesnt-seem-to-work-with-claude.md) | needs-verification | codex | 1/2 | [11](threads/QG4C.md) |
+| `#QG4C` | [The command queue does not work with claude / codex](changes/2026-09-21-the-command-queue-doesnt-seem-to-work-with-claude.md) | needs-verification | codex | 1/2 | [12](threads/QG4C.md) |
 | `#TG7Q` | [Serialize TUI guest prompts independently of the launch command](changes/2026-09-21-tui-guest-queue-delivery.md) | needs-verification | codex-tui-a2 |  | [3](threads/TG7Q.md) |
 | `#ACDG` | [Make command discovery complete and shortcut help consistent](changes/2026-09-22-action-discovery-and-shortcut-help-gaps.md) | needs-verification |  |  | [6](threads/ACDG.md) |
 | `#BMS1` | [Board model selection agrees with the card agent](changes/2026-09-22-board-model-selection.md) | needs-verification | codex |  | [3](threads/BMS1.md) |
-| `#RWND` | [Collapse rewound terminal output into a saved-output link](changes/2026-09-22-collapse-rewound-output.md) | needs-verification | codex |  | [10](threads/RWND.md) |
+| `#RWND` | [Collapse rewound terminal output into a saved-output link](changes/2026-09-22-collapse-rewound-output.md) | needs-verification | codex |  | [12](threads/RWND.md) |
 | `#DNR7` | [Down leaves the composer only from its bottom visual row](changes/2026-09-22-down-arrow-composer-row.md) | needs-verification | codex |  | [3](threads/DNR7.md) |
 | `#CP3M` | [Guest aggregate usage triggers spurious compaction and inflated token savings](changes/2026-09-22-guest-compaction-counts-turn-usage-as-context.md) | needs-verification | agent |  | [7](threads/CP3M.md) |
 | `#KYPR` | [Resolve global versus local shortcuts and preserve program help](changes/2026-09-22-keyboard-focus-precedence-and-program-help.md) | needs-verification |  |  | [6](threads/KYPR.md) |
@@ -449,20 +463,20 @@
 | `#AVR8` | [Refresh Priorities when Available changes](changes/2026-09-22-availability-priorities-refresh.md) | needs-verification | codex |  | [9](threads/AVR8.md) |
 | `#AZP7` | [Ctrl plus/minus does not zoom auxiliary panes](changes/2026-09-22-auxiliary-pane-keyboard-zoom.md) | needs-verification | codex |  | [10](threads/AZP7.md) |
 | `#BGSP` | [Background job completion removes the gap before the next shell command](changes/2026-09-22-background-command-spacing.md) | needs-verification | codex |  | [9](threads/BGSP.md) |
-| `#BRS2` | [Resuming a guest conversation drops Relay MCP tools](changes/2026-09-23-resume-drops-guest-mcp.md) | needs-verification | codex |  | [3](threads/BRS2.md) |
-| `#CDP7` | [Codex does not appear in Priorities](changes/2026-09-22-codex-missing-from-priorities.md) | needs-verification | codex-models-a1 |  | [11](threads/CDP7.md) |
+| `#BRS2` | [Resuming a guest conversation drops Relay MCP tools](changes/2026-09-23-resume-drops-guest-mcp.md) | needs-verification | codex |  | [6](threads/BRS2.md) |
+| `#CDP7` | [Codex does not appear in Priorities](changes/2026-09-22-codex-missing-from-priorities.md) | needs-verification | codex-models-a1 |  | [14](threads/CDP7.md) |
 | `#CEW2` | [Ctrl+click file links opens edit mode](changes/2026-09-22-ctrl-click-edit.md) | needs-verification | codex |  | [5](threads/CEW2.md) |
-| `#MPA2` | [Available models missing from Priorities on sphinxpad](changes/2026-09-22-available-models-missing-priorities.md) | needs-verification | codex |  | [4](threads/MPA2.md) |
-| `#VPR7` | [New OpenRouter models require a restart to appear in Priorities](changes/2026-09-22-openrouter-priorities-refresh.md) | needs-verification | codex-models-a1 |  | [10](threads/VPR7.md) |
+| `#MPA2` | [Available models missing from Priorities on sphinxpad](changes/2026-09-22-available-models-missing-priorities.md) | needs-verification | codex |  | [7](threads/MPA2.md) |
+| `#VPR7` | [New OpenRouter models require a restart to appear in Priorities](changes/2026-09-22-openrouter-priorities-refresh.md) | needs-verification | codex-models-a1 |  | [13](threads/VPR7.md) |
 | `#PBKR` | [Leaving Plan restores the previous model selection](changes/2026-09-22-plan-restores-selection.md) | needs-verification | codex |  | [7](threads/PBKR.md) |
 | `#PH9G` | [Entering Plan activates High](changes/2026-09-22-plan-activates-high.md) | needs-verification | codex |  | [8](threads/PH9G.md) |
 | `#P7CK` | [Click PLAN to leave plan mode](changes/2026-09-22-plan-chip-click.md) | needs-verification | codex |  | [6](threads/P7CK.md) |
-| `#QAN1` | [Question answers wait behind queued prompts](changes/2026-09-22-question-answers-queued.md) | needs-verification | codex |  | [15](threads/QAN1.md) |
-| `#QFF1` | [Repeated Enter sends the head of the queue](changes/2026-09-22-enter-queue-order.md) | needs-verification | codex |  | [11](threads/QFF1.md) |
+| `#QAN1` | [Question answers wait behind queued prompts](changes/2026-09-22-question-answers-queued.md) | needs-verification | codex |  | [17](threads/QAN1.md) |
+| `#QFF1` | [Repeated Enter sends the head of the queue](changes/2026-09-22-enter-queue-order.md) | needs-verification | codex |  | [13](threads/QFF1.md) |
 | `#SRA7` | [Pane resize should preserve the top visible scrollback location](changes/2026-09-22-resize-preserve-scrollback-top.md) | needs-verification | codex |  | [6](threads/SRA7.md) |
-| `#S7GX` | [Guest agents can execute commands and use files over the active SSH connection](changes/2026-09-22-guest-ssh-tools.md) | needs-verification | codex | 4/4 | [17](threads/S7GX.md) |
+| `#S7GX` | [Guest agents can execute commands and use files over the active SSH connection](changes/2026-09-22-guest-ssh-tools.md) | needs-verification | codex | 4/4 | [19](threads/S7GX.md) |
 | `#S7KC` | [SSH commands share local lifecycle, spacing and activity behavior](changes/2026-09-22-ssh-command-lifecycle.md) | needs-verification | codex | 3/4 | [16](threads/S7KC.md) |
-| `#S7CX` | [SSH composer uses the remote filesystem and verified host identity](changes/2026-09-22-ssh-host-context.md) | needs-verification | codex | 3/4 | [13](threads/S7CX.md) |
+| `#S7CX` | [SSH composer uses the remote filesystem and verified host identity](changes/2026-09-22-ssh-host-context.md) | needs-verification | codex | 3/4 | [15](threads/S7CX.md) |
 | `#CPY4` | [Copy id on the phone says nothing, copies nothing on iOS, and the sheet jumps every minute](changes/2026-09-22-phone-copy-id-says-nothing-and-copies-nothing.md) | needs-verification | claude-code |  | [7](threads/CPY4.md) |
 | `#EFT9` | [The phone's reasoning-level chip is stale, reads "✓▾high", and never learns a pick was refused](changes/2026-09-22-phone-reasoning-level-chip-stale-and-mis-drawn.md) | needs-verification | claude-code |  | [9](threads/EFT9.md) |
 | `#KBD7` | [The phone's Send button puts the keyboard straight back up, and the blur it undoes breaks Enter](changes/2026-09-22-phone-send-button-leaves-the-keyboard-up.md) | needs-verification | claude-code |  | [6](threads/KBD7.md) |
@@ -473,7 +487,7 @@
 | `#RCN8` | [The phone Board's reply box loses a half-typed draft, and Return ignores the mode selector](changes/2026-09-22-phone-reply-box-loses-a-draft-and-return-ignores-the-mode.md) | needs-verification | claude-code |  | [5](threads/RCN8.md) |
 | `#TBR2` | [The phone terminal bar clips every sentence it says, and an `agent` device is told it may only watch](changes/2026-09-22-phone-terminal-bar-clips-every-sentence.md) | needs-verification | claude-code |  | [5](threads/TBR2.md) |
 | `#K3RT` | [Inline output other than your own line still keeps the colours it was printed in](changes/2026-09-19-inline-output-other-than-your-own-line-does-not.md) | needs-verification | codex |  | [7](threads/K3RT.md) |
-| `#4NXH` | [A guest session (Codex/Claude Code) cannot use the Switchboard's board_* tools](changes/2026-09-20-a-guest-session-codex-claude-code-cannot-use-the.md) | needs-verification | codex | 3/3 | [21](threads/4NXH.md) |
+| `#4NXH` | [A guest session (Codex/Claude Code) cannot use the Switchboard's board_* tools](changes/2026-09-20-a-guest-session-codex-claude-code-cannot-use-the.md) | needs-verification | codex | 3/3 | [24](threads/4NXH.md) |
 | `#2MF1` | [#3XZV's stage-move thread entry breaks two board_ask protocol tests (bisected to 4f5acd43)](changes/2026-09-20-3xzv-s-stage-move-thread-entry-breaks-two-board.md) | needs-verification | agent |  | [16](threads/2MF1.md) |
 | `#VN69` | [Malformed tool-call JSON leaks into a card thread's agent reply](changes/2026-09-20-malformed-tool-call-json-leaks-into-a-card-threa.md) | needs-verification |  |  | [10](threads/VN69.md) |
 | `#YJG7` | [A spent Z.AI Coding Plan quota is retried as a transient 429, and the pane never says when it resets](changes/2026-09-20-a-spent-z-ai-coding-plan-quota-is-retried-as-a-t.md) | needs-verification | codex-hg26-p2 |  | [16](threads/YJG7.md) |
@@ -481,8 +495,13 @@
 | `#VJDD` | [Restored pane scrollback loses all formatting and colors](changes/2026-09-20-restored-pane-scrollback-loses-all-formatting-an.md) | needs-verification | agent |  | [9](threads/VJDD.md) |
 | `#TKN7` | [Adding a model by hand to a tier list starts it at the top reasoning level, not a default](changes/2026-09-21-adding-a-model-by-hand-to-a-tier-list-starts-it.md) | needs-verification | agent | 6/7 | [20](threads/TKN7.md) |
 | `#YX8Q` | [Models priorities tab: rank change appears to do nothing](changes/2026-09-22-models-priorities-tab-rank-change-appears-to-do.md) | needs-verification |  |  | [6](threads/YX8Q.md) |
+| `#VZ8C` | [ctest:consolemode fails](changes/2026-09-22-ctest-consolemode-fails.md) | needs-verification | agent |  | [14](threads/VZ8C.md) |
 | `#W1B8` | [Board Run starts a default guest immediately](changes/2026-09-23-board-run-starts-a-default-guest-immediately.md) | needs-verification | agent |  | [19](threads/W1B8.md) |
 | `#KSKH` | [Card consoles aren't independent: set_tab takes a card's persist key, and one card's writes print in another's console](changes/2026-09-23-card-consoles-aren-t-independent-set-tab-takes-a.md) | needs-verification | agent |  | [15](threads/KSKH.md) |
+| `#HJ1T` | [Models pane checkboxes lag: every tick fans out to every pane synchronously](changes/2026-09-23-models-pane-checkboxes-lag-every-tick-fans-out-t.md) | needs-verification | agent |  | [7](threads/HJ1T.md) |
+| `#KHY0` | [Separate ad hoc QA probes and surface protocol exception clusters](changes/2026-09-23-separate-ad-hoc-qa-probes-and-surface-protocol-e.md) | needs-verification | agent |  | [12](threads/KHY0.md) |
+| `#D09N` | [Delegated agents fail before their first tool with AttributeError](changes/2026-09-23-delegated-agents-fail-before-their-first-tool-wi.md) | needs-verification | agent |  | [11](threads/D09N.md) |
+| `#04EC` | [relay-build: cap parallel jobs to the memory limit so agent builds cannot OOM the pane](changes/2026-09-23-relay-build-cap-parallel-jobs-to-the-memory-limi.md) | needs-verification | agent |  | [7](threads/04EC.md) |
 | `#JN7X` | [The Switchboard is the board of the project a pane is in, not one global board](changes/needs_qa_llm/2026-09-18-switchboard-is-per-project-not-global.md) | needs-qa-llm | agent |  | [1](threads/JN7X.md) |
 | `#1BK1` | [PageUp / PageDown scroll the terminal from the prompt box](changes/needs_qa_llm/2026-09-17-composer-page-scroll.md) | needs-qa-llm | agent |  |  |
 | `#M2C1` | [The model box does nothing when you pick anything that is not a provider](changes/needs_qa_llm/2026-09-18-model-dropdown-selection.md) | needs-qa-llm | agent |  |  |
@@ -556,7 +575,7 @@
 | `#S1JP` | [A link clicked inside a file preview replaces the file with no way back](changes/needs_qa_llm/2026-09-18-preview-link-has-no-way-back.md) | needs-qa-llm | agent |  |  |
 | `#ZW95` | [Tab completion adds a stray "-" after a folder](changes/needs_qa_llm/2026-09-18-tab-completion-adds-a-stray-dash.md) | needs-qa-llm | agent |  |  |
 | `#3W58` | [Markdown files are not rendered as Markdown](changes/needs_qa_llm/2026-09-18-markdown-files-do-not-render.md) | needs-qa-llm | agent |  |  |
-| `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/needs_qa_llm/2026-09-19-configure-protocol-error-nameerror-opaque.md) | needs-qa-llm | codex | 5/5 | [8](threads/40SN.md) |
+| `#40SN` | [A failed configure shows only "Protocol error (NameError)." and the pane never recovers](changes/needs_qa_llm/2026-09-19-configure-protocol-error-nameerror-opaque.md) | needs-qa-llm | codex | 5/5 | [9](threads/40SN.md) |
 | `#7FD3` | ["open in pane" inside a fold always said the call's detail was gone — even one second after the call](changes/needs_qa_llm/2026-09-19-open-in-pane-inside-a-fold-said-the-detail-was-g.md) | needs-qa-llm | agent | 1/2 | [5](threads/7FD3.md) |
 | `#M109` | [The provider dialog: a local server needs no consent box, and the warning says what is wrong](changes/needs_qa_llm/2026-09-18-provider-dialog-local-server-and-specific-warning.md) | needs-qa-llm | agent |  | [1](threads/M109.md) |
 | `#E99H` | [File tools refuse absolute paths and parent traversal; the owner does not want that constraint](changes/needs_qa_llm/2026-09-18-file-tools-refuse-absolute-paths-and-parent-trav.md) | needs-qa-llm |  |  | [6](threads/E99H.md) |
@@ -585,7 +604,7 @@
 | `#5G43` | [new cards getting put into in progress rather than inbox](changes/needs_qa_llm/2026-09-19-new-cards-are-getting-put-into-in-progress-rathe.md) | needs-qa-llm |  |  | [9](threads/5G43.md) |
 | `#JXWT` | [Ctrl+E then Ctrl+arrow should place the pane (Ctrl still held)](changes/needs_qa_llm/2026-09-19-ctrl-e-then-ctrl-arrow-should-place-the-pane-ctr.md) | needs-qa-llm |  |  | [4](threads/JXWT.md) |
 | `#ACT1` | [A saved Activity pane drops its whole tab on reopen](changes/done/2026-09-21-a-saved-activity-pane-drops-its-whole-tab-on-reopen.md) | done | codex |  | [8](threads/ACT1.md) |
-| `#CFG1` | [Two consoles in one tab reconfigure the helper worker twice a second, forever](changes/done/2026-09-21-two-consoles-reconfigure-the-helper-in-a-loop.md) | done | codex |  | [15](threads/CFG1.md) |
+| `#CFG1` | [Two consoles in one tab reconfigure the helper worker twice a second, forever](changes/done/2026-09-21-two-consoles-reconfigure-the-helper-in-a-loop.md) | done | codex |  | [17](threads/CFG1.md) |
 | `#SHCK` | [Clicking "Guest prompts run immediately" on the Sharing pane crashed Relay](changes/done/2026-09-21-clicking-guest-prompts-run-immediately-crashed-relay.md) | done |  |  |  |
 | `#P1CS` | [A guest pane refused an image because "sonnet" is not a model id](changes/done/2026-09-21-relay-told-me-claude-doesnt-take-images.md) | done | claude-code |  | [2](threads/P1CS.md) |
 | `#ADTR` | [The remote audit log records pairing and push subscriptions, but not invites, knocks, admits or guest prompts](changes/done/2026-09-21-the-remote-audit-log-misses-invites-knocks-admits-and-guest-prompts.md) | done | codex |  | [7](threads/ADTR.md) |
@@ -614,17 +633,23 @@
 | `#D0MC` | [relay-models check: relay-* ranking rows are always "unserved" — served compares display names to the ranking ids](changes/done/2026-09-23-relay-models-check-relay-ranking-rows-are-always.md) | done | agent |  | [8](threads/D0MC.md) |
 | `#0VEG` | [collection:unittest:tests.test_board_protocol fails](changes/done/2026-09-23-collection-unittest-tests-test-board-protocol-fa.md) | done | agent |  | [10](threads/0VEG.md) |
 | `#PJ2H` | [unittest:tests.test_board_protocol.AgentWiringTests.test_plan_mode_keeps_the_reads_and_drops_the_writes fails](changes/done/2026-09-23-unittest-tests-test-board-protocol-agentwiringte.md) | done | agent |  | [7](threads/PJ2H.md) |
+| `#D3WW` | [Restore pending pane queue after exit](changes/done/2026-09-23-restore-pending-pane-queue-after-exit.md) | done | agent |  | [9](threads/D3WW.md) |
+| `#7XN0` | [Guest delegation cannot select or switch Claude Opus subagents](changes/done/2026-09-23-guest-delegation-cannot-select-or-switch-claude.md) | done | agent |  | [10](threads/7XN0.md) |
 | `#72NR` | [Per-pane 80 ms shell poll re-parses state.json and probes /proc every tick](changes/done/2026-09-17-per-pane-80-ms-shell-poll-re-parses-state-json-a.md) | dropped |  |  | [3](threads/72NR.md) |
 | `#DJX7` | [land.py's name gate cannot land a card move in one commit (rename collapse)](changes/done/2026-09-19-land-py-s-name-gate-cannot-land-a-card-move-in-o.md) | dropped |  |  | [4](threads/DJX7.md) |
 | `#5C4Z` | [bug: dragging cards between sections didnt work](changes/done/2026-09-19-bug-dragging-cards-between-sections-didnt-work.md) | dropped |  |  | [11](threads/5C4Z.md) |
+| `#XJ2B` | [unittest:unittest.loader._FailedTest.test_board_protocol fails](changes/done/2026-09-23-unittest-unittest-loader-failedtest-test-board-p.md) | dropped | agent |  | [5](threads/XJ2B.md) |
+| `#229N` | [run:unittest failed as a whole run](changes/done/2026-09-23-run-unittest-failed-as-a-whole-run.md) | dropped | agent |  | [5](threads/229N.md) |
 
-## Design (4)
+## Design (6)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
 | `#MEPR` | [Task plugins: a workspace kind adds a language router, a runner, tools and a layout (first two: TeX-to-PDF, and a Python/Stata kernel IDE)](design/2026-09-23-task-plugins-a-workspace-kind-adds-a-language-ro.md) | discussing |  |  | [5](threads/MEPR.md) |
-| `#SEJ2` | [Ctrl+Enter or Shift+Enter for open-external vs edit-here in file panes](design/2026-09-20-ctrl-enter-or-shift-enter-for-open-external-vs-e.md) | executing | agent | 5/7 | [12](threads/SEJ2.md) |
+| `#BX7B` | [Broaden verification into a QA pane with card-specific human review](design/2026-09-23-broaden-verification-into-a-qa-pane-with-card-sp.md) | discussing |  |  | [7](threads/BX7B.md) |
+| `#1QKM` | [Cards build servers, servers serve cases: skills as the Switchboard's second object, across knowledge work](design/2026-09-23-cards-build-servers-servers-serve-cases-skills-a.md) | discussing |  |  | [7](threads/1QKM.md) |
 | `#RCP9` | [Generate a final recap when a session closes](design/2026-09-23-final-recap-on-session-close.md) | needs-verification | codex |  | [16](threads/RCP9.md) |
+| `#SEJ2` | [Ctrl+Enter or Shift+Enter for open-external vs edit-here in file panes](design/2026-09-20-ctrl-enter-or-shift-enter-for-open-external-vs-e.md) | needs-verification | agent | 7/7 | [20](threads/SEJ2.md) |
 | `#XHXX` | [Survey Warp, Claude, and Codex plugin ecosystems for Relay](design/2026-09-23-survey-warp-claude-and-codex-plugin-ecosystems-f.md) | needs-verification | agent |  | [12](threads/XHXX.md) |
 
 ## Marketing (3)
@@ -635,11 +660,12 @@
 | `#D3M0` | [Show a real workflow across agent harnesses](marketing/2026-09-23-multiple-harnesses-demo.md) | planned |  | 0/3 | [1](threads/D3M0.md) |
 | `#W9ST` | [Refresh the website from changes since its last update](marketing/2026-09-21-website-refresh.md) | needs-verification | codex |  | [5](threads/W9ST.md) |
 
-## Planning (4)
+## Planning (5)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
-| `#M8S2` | [Scope simultaneous subscription accounts in Relay](planning/2026-09-23-multiple-subscription-routing.md) | planned | codex |  | [4](threads/M8S2.md) |
 | `#265N` | [Cleanup audit follow-ups: judgment-call dead code, deprecated spike alias, unscanned areas](planning/2026-09-17-cleanup-audit-follow-ups-judgment-call-dead-code.md) | planned |  | 0/7 | [10](threads/265N.md) |
-| `#HG26` | [Debug and hygiene workstream grounded in runtime logs and signals](planning/2026-09-22-debug-hygiene-workstream.md) | needs-verification | codex |  | [5](threads/HG26.md) |
+| `#VZ54` | [Several Z.AI / Kimi Code plan keys side by side](planning/2026-09-23-several-z-ai-kimi-code-plan-keys-side-by-side.md) | planned |  |  | [1](threads/VZ54.md) |
+| `#M8S2` | [Run several Claude Code and Codex logins side by side](planning/2026-09-23-multiple-subscription-routing.md) | needs-verification | agent |  | [20](threads/M8S2.md) |
+| `#HG26` | [Debug and hygiene workstream grounded in runtime logs and signals](planning/2026-09-22-debug-hygiene-workstream.md) | needs-verification | codex |  | [6](threads/HG26.md) |
 | `#XZZB` | [Improve the options (Settings) menu](planning/needs_qa_llm/2026-09-17-improve-the-options-settings-menu.md) | needs-qa-llm |  |  | [6](threads/XZZB.md) |
