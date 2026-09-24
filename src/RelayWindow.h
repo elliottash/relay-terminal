@@ -649,6 +649,10 @@ public:
     // notification is clicked.
     void revealPane(Pane *pane) {
         if (!pane || pane->window() != this) return;
+        if (property("backgroundSession").toBool()) {
+            m_manager->focusPane(pane->sessionToken());
+            return;
+        }
         if (QWidget *page = pageOf(pane)) m_tabs->setCurrentWidget(page);
         setActiveLeaf(pane);
         setProperty("backgroundSession", false);
@@ -656,6 +660,28 @@ public:
         raise();
         activateWindow();
         focusLeaf(pane);
+    }
+
+    // Opening a background session moves its live pane into this window. The hidden holder
+    // closes after its last leaf is detached; the pane's worker and conversation travel intact.
+    bool openBackgroundPane(Pane *pane) {
+        auto *source = pane ? dynamic_cast<RelayWindow *>(pane->window()) : nullptr;
+        if (!source || source == this || !source->property("backgroundSession").toBool()) return false;
+        QWidget *anchor = m_activeLeaf;
+        if (!anchor || !pageOf(anchor)) {
+            QWidget *page = m_tabs->currentWidget();
+            const auto leaves = page ? leavesIn(page) : QList<QWidget *>{};
+            anchor = leaves.isEmpty() ? nullptr : leaves.first();
+        }
+        if (!source->takeLeaf(pane)) return false;
+        if (anchor) {
+            if (QWidget *page = pageOf(anchor)) m_tabs->setCurrentWidget(page);
+            insertBeside(anchor, pane, Qt::Horizontal, false);
+            setActiveLeaf(pane);
+        } else adoptLeafAsTab(pane);
+        m_manager->scheduleSave();
+        revealPane(pane);
+        return true;
     }
 
     QWidget *activeLeaf() const { return m_activeLeaf; }

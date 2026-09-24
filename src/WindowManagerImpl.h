@@ -329,6 +329,23 @@ inline void WindowManager::focusPane(const QString &token) {
     for (RelayWindow *window : std::as_const(m_windows)) {
         Pane *pane = window->findPaneByToken(token);
         if (!pane) continue;
+        if (window->property("backgroundSession").toBool()) {
+            QWidget *active = QApplication::activeWindow();
+            RelayWindow *target = nullptr;
+            for (QWidget *widget = active; widget && !target; widget = widget->parentWidget())
+                target = dynamic_cast<RelayWindow *>(widget);
+            if (!target || target == window || target->property("backgroundSession").toBool()) {
+                target = nullptr;
+                for (RelayWindow *candidate : std::as_const(m_windows))
+                    if (candidate && candidate != window && candidate->isVisible()
+                        && !candidate->property("backgroundSession").toBool()) {
+                        target = candidate;
+                        break;
+                    }
+            }
+            if (target) target->openBackgroundPane(pane);
+            return;
+        }
         window->revealPane(pane);
         return;
     }
@@ -355,8 +372,7 @@ inline bool WindowManager::handleOpen(const QJsonObject &request) {
             for (RelayWindow *window : std::as_const(m_windows))
                 if (Pane *pane = window->findPaneByToken(QUrl::fromPercentEncoding(parts.at(0).toUtf8()))) {
                     pane->openCallLink(target);
-                    window->revealPane(pane);
-                    window->raise(); window->activateWindow();
+                    focusPane(pane->sessionToken());
                     return true;
                 }
             return false;

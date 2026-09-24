@@ -1021,7 +1021,7 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
             Pane *other = paneWithSession(sessionId, dir, guard);
             auto *w = other ? dynamic_cast<RelayWindow *>(other->window()) : nullptr;
             if (!w) return false;
-            w->revealPane(other);
+            w->m_manager->focusPane(other->sessionToken());
             other->toast(QStringLiteral("This session was already open here"));
             return true;
         };
