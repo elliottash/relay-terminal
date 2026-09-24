@@ -1,0 +1,65 @@
+>* © seed (3) - cpu00%-mem 00% = +
+
+© — Run the notes QA sweep as a background auto
+subagent.
+
+eee
+
+® Models BR
+
+Initialize a project and create a Board here?
+/tmp/claude-1000/tryit/mSfz/seed
+Creates /tmp/claude-1 000/tryit/mSfz/seed/.board/ — and nothing else.
+
+Not now No Yes:
+Shell commands or agent prompts. 2? for help 7) auto
+
+imp/claude-1000/tryit/mSfz/seed «99% left_ Free relayf Y med v
+
+u
+
+© main idle | from the prompt to select main ctx 7.3k - agents ~29 tok
+
+¥ al notes QA sweep done - 0:00 - 2 tools -~29 tok (relay-mainy (bg
+
+© Approvals 8
+
+Relay's agent runs commands and edits files without stopping to ask.
+That is what makes it fast, and it is what we recommend.
+It runs with your user's permissions, inside the pane's workspace.
+
+Until you choose, the cautious set asks first: edits, deletions, reads outside the workspace,
+your terminal and your programs.
+
+Allow everything — recommended Choose what needs approval
+
+Shared model settings - choose an individual pane's active model in its model box
+
+Sources Enabled Pickorder Effort Agent jobs
+
+Search options
+
++ add provider =
+a custom endpoint, or kimi, z.ai, minimax, openai, anthropic, google, deepseek,
+
+y Subscription keys
+relay pro
+Enter your Relay Pro access code. : per-person access through relay's hosted
+service. 10}
+add code. check access
+Y API keys and endpoints
+openrouter
+no key yet «get one at https//openrouterai/keys-one q) _{“aGd Key, =
+key for every model; also relay's router and chores
+model.
+import keys a
+Copy API keys from Warp, OpenCode, Claude Code or Codex into Relay's import keys...
+keyring. Subscription sign-ins are not API keys.
+Local models
+Start a pane’s agent, then reload local models.
+Reload local models Reload
+
+Set up a local model
+The helper checks this machine and guides setup.
+
+@Helper Agent (Alt+Q)
