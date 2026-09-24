@@ -1,0 +1,5 @@
+<!-- relay:entry 20260924T025131Z-28 author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
+- ✦ agent created this card in Planned · issues/features/2026-09-23-the-qa-ladder-a-verify-block-on-every-card-propo.md
+
+<!-- relay:entry 20260924T025224Z-fg author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
+- ✦ agent updated this card · parent: (unset) → BX7B; component: (unset) → ["worker", "gui"]; replaced `## Done means`

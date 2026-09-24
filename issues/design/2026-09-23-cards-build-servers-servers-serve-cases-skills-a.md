@@ -167,3 +167,4 @@ Three cautions from the economics that the design should keep: the human signal 
 - 2026-09-23, owner: the vocabulary is card / server (program, skill) / case. "A card is built, a case is served. A program serves the case algorithmically; a skill serves it intelligently."
 - 2026-09-23, owner: a case served by a person counts and belongs in the same record as program- and skill-served cases ("think about a doctor or lawyer using relay to help with their case work").
 - 2026-09-23, owner: there is no single rule for whether a failed case files a card automatically.
+- 2026-09-23, owner: "yes, document it, and lets build all the functionality, and we can experiment with how to phase in complexity without overwhelming the user." The QA ladder is documented on #BX7B; the build is phased there as #WFRA → #1AA6 → #MSJ0 → #C3Q2 → #95VZ → the QA pane (#BX7B) → a Skills registry. This card stays the design record.

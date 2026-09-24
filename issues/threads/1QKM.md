@@ -15,3 +15,6 @@
 
 <!-- relay:entry 20260924T014108Z-f7 author=agent kind=event model=claude-fable-5-1 pane=9b541d35 -->
 - ✦ agent updated this card · inserted `### 7. The task profile` before Open questions, added open question 6, pointer in §3
+
+<!-- relay:entry 20260924T025357Z-0r author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
+- ✦ agent updated this card · appended to `## Decisions`

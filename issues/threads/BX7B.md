@@ -9,3 +9,9 @@
 
 <!-- relay:entry 20260923T233535Z-0h author=agent kind=decision model=gpt-6-sol pane=3ee099ee turn=a8aa6eac04d048c7ba96c1232b953cda/8a26851ced2445a4a2e5eaaec1932736 -->
 Owner: “i dont like the terminology "Try It". that doesnt make sense for a human veridying the results of an ML analysis for example.” “i think we need a separate QA pane where human involvement will differ based on the goals of the card.” “i think i want to expand the verification concept . a card has a designation of whether human QA is needed. in that case, "verified" will require that.” Recorded as direction for design, with implementation details open.
+
+<!-- relay:entry 20260924T025214Z-44 author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["JNYN", "YZ8G", "WC3E",… → {"plans": [], "commits": [], "evidence": ["reports/Knowledge work across project…; appended to `## Discussion points`
+
+<!-- relay:entry 20260924T025339Z-4h author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
+- ✦ agent updated this card · replaced `## Plan`
