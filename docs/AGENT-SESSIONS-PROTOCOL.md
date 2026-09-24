@@ -3612,11 +3612,7 @@ gets `error {code: "board_not_initialized"}`.
 The two callers wait differently, and have to. The agent's tool call is on the turn thread, so it
 **blocks** there, watching the agent's `cancel_event` the way `terminal_command` does (21/22): Stop
 raises `Cancelled` out of the tool and nothing is created. No timeout — the pane owns the dialog and
-always answers it: when its own question about this very project is already on screen, the request
-is linked to that question and answered by the user's click on it, never answered `false` on the
-spot (#NSYT, 2026-09-24 — an instant `false` read as the user's no and silenced the rest of the
-conversation). An instant `false` remains for the reasons that are the user's own no: a remembered
-no, and a guest's pane, which cannot be asked. The owner's `board_create` arrives on the protocol thread, which is the thread
+always answers it. The owner's `board_create` arrives on the protocol thread, which is the thread
 the answer has to come in on, so it cannot block: the write is **parked** and replayed on the yes.
 
 `board_created`'s `files` is `["board/board.yaml", "board/.gitignore",
