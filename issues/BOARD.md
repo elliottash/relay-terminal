@@ -2,9 +2,9 @@
      edit the card files and regenerate. -->
 # Board
 
-647 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
+641 cards. Format: [docs/BOARD-FORMAT.md](../docs/BOARD-FORMAT.md).
 
-## Features (370)
+## Features (368)
 
 | Card | Title | Status | Assignee | Tasks | Thread |
 |---|---|---|---|---|---|
