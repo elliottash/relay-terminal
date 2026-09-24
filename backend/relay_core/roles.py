@@ -1043,7 +1043,8 @@ class RoleResolver:
         return self._main(role)
 
     # ----- failover (card #G9VE) ----------------------------------------------------------
-    def fallback_candidate(self, fallback, tier: str, exclude, hosts=(), role: str = "main") -> Resolved | None:
+    def fallback_candidate(self, fallback, tier: str, exclude, hosts=(), role: str = "main",
+                           quota: bool = False) -> Resolved | None:
         """One entry of the Options › Models priority list as a failover target (owner,
         2026-09-20), or None when it cannot take this turn.
 
@@ -1073,6 +1074,12 @@ class RoleResolver:
         preset_id = fallback.get("preset")
         if not isinstance(preset_id, str) or not preset_id or preset_id in exclude:
             return None
+        if quota and is_guest_preset(preset_id):
+            if not self.guest_check(guest_id_of(preset_id)):
+                return None
+            tier = validate_tier(tier)
+            guest_preset, base_url, model, _extra, effort = self._guest_target(fallback)
+            return self._guest(role, guest_preset, base_url, model, effort, "failover", tier)
         preset = _preset(preset_id)
         if preset is None:
             return None
@@ -1081,7 +1088,7 @@ class RoleResolver:
         skip_hosts = {_hostname(PRESETS[p].base_url) for p in exclude if p in PRESETS}
         skip_hosts |= {(h or "").lower() for h in hosts}
         skip_hosts.discard("")
-        if _hostname(preset.base_url) in skip_hosts:
+        if not quota and _hostname(preset.base_url) in skip_hosts:
             return None
         tier = validate_tier(tier)
         try:

@@ -133,18 +133,8 @@ void Pane::handle(const QJsonObject &event) {
             if (!m_pendingAgentMode.isEmpty()) {
                 m_agentMode = m_pendingAgentMode;
                 m_pendingAgentMode.clear();
-                if (m_agentMode == QStringLiteral("plan")
-                    && relay::rolestore::rankedOverrideSet(QStringLiteral("planning"))) {
+                if (m_agentMode == QStringLiteral("plan"))
                     setAgentRole(QStringLiteral("high"), false);
-                } else if (m_agentMode == QStringLiteral("plan")) {
-                    const relay::models::Entry drawn = relay::models::drawTier(modelCatalog(), QStringLiteral("high"));
-                    if (!drawn.key.isEmpty()) {
-                        QString effort;
-                        for (const auto &item : relay::models::curation::activeTierList(QStringLiteral("high")))
-                            if (item.key == drawn.key) { effort = item.effort; break; }
-                        setAgentRole(QStringLiteral("high"), false, {drawn.key, effort});
-                    } else setAgentRole(QStringLiteral("high"), false);
-                }
                 send({{"type", "set_mode"}, {"mode", m_agentMode}});
             }
             noteGuestPreset(event);   // Tier A (29.4): the guest is this pane's agent from here on

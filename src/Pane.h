@@ -4434,18 +4434,8 @@ public:
         if (!m_configured) { status(QStringLiteral("No agent provider is configured.")); return; }
         // Entering Plan selects the same role (and remembered model) as /high. Do not
         // toggle: a pane already on High must stay there, including on repeated Plan.
-        if (mode == QStringLiteral("plan") && m_agentMode != QStringLiteral("plan")
-            && relay::rolestore::rankedOverrideSet(QStringLiteral("planning"))) {
+        if (mode == QStringLiteral("plan") && m_agentMode != QStringLiteral("plan"))
             setAgentRole(QStringLiteral("high"), false);
-        } else if (mode == QStringLiteral("plan") && m_agentMode != QStringLiteral("plan")) {
-            const relay::models::Entry drawn = relay::models::drawTier(modelCatalog(), QStringLiteral("high"));
-            if (!drawn.key.isEmpty()) {
-                QString effort;
-                for (const auto &item : relay::models::curation::activeTierList(QStringLiteral("high")))
-                    if (item.key == drawn.key) { effort = item.effort; break; }
-                setAgentRole(QStringLiteral("high"), false, {drawn.key, effort});
-            } else setAgentRole(QStringLiteral("high"), false);
-        }
         send({{"type", "set_mode"}, {"mode", mode}});
     }
     void togglePlanMode() { setAgentMode(m_agentMode == QStringLiteral("plan") ? QStringLiteral("build") : QStringLiteral("plan")); }

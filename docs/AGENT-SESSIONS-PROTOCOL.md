@@ -1357,8 +1357,9 @@ whole agent of its own with its own transcript: it can take a turn from its firs
 half-way through. Those roles skip a guest entry at resolution and at failover alike, without a note,
 because it is not a missing key, and take the next entry of the list instead; a role pinned to a guest
 is refused the same way. `lite` and `local` are never a guest's at all. For the same reason a guest is
-**never a failover target** on any list, `high` included (15.2.2): a turn cannot be moved onto a harness
-mid-way.
+not a normal failover target on any list, `high` included (15.2.2). A confirmed quota refusal is
+the exception (#495G): when no answer or tool action has escaped, Relay can start a fresh guest
+harness on another ranked account and hand it the conversation.
 
 **A harness pane's background jobs run on Relay Free** (v3.11, 2026-09-21; owner: "so if somebody just
 has a harness, the flash chores run on relay flash?" — "i agree"). When a background role finds nothing
@@ -2290,7 +2291,7 @@ started answer does not, because that text is already on the user's screen.
 New event, emitted before the retried model call:
 
 `provider_retry {turn_id?, reason: "stall" | "truncated" | "http" | "failover" | "failover_ended" |
-"route_dropped" | "switch", attempt, max_attempts, seconds, step, text}`
+"route_dropped" | "switch" | "quota_exhausted", attempt, max_attempts, seconds, step, text}`
 
 `seconds` is sent only for `"stall"`; `status` (the HTTP status that was refused) by `"http"` and
 `"switch"` — a pane that saw a 429 retried and then the turn leave the provider treats that
@@ -2387,7 +2388,7 @@ OpenRouter where the user opted that model in, and then nowhere: the turn fails.
 |---|---|---|
 | a pane's own turn (Main), and a subagent's | `tiers.main`; with none sent, the `fallbacks` option (12.1) | the entry **after** the pane's current `(preset, model)` when the list names it — the entries above were ranked higher and the user chose not to be on them — else **the top**: a model picked by hand, off the list, falls back to the Main list from the top |
 | a pane on a Flash or Local model (`RoleResolver.turn_tier`: the list that names it, else the provider's own tier table) | `tiers.flash` / `tiers.local`; with none sent, the Main list as above | the same rule |
-| a plan turn (High) | `tiers.high` | the entry after the one the turn is running on — after the guest entry, for a turn that started on a guest's harness (13.7, v4.4; a guest entry matches the guest whatever model its CLI reported), onto ordinary providers only: the harness is ended as the turn leaves it, and a guest is never a target. With the list spent — or none sent, High's default being the pane's own model — the routing is dropped and the turn finishes on the pane's own model (15.2.3), and only if that fails too does the Main list start |
+| a plan turn (High) | `tiers.high` | the entry after the one the turn is running on — after a guest entry, the guest matches regardless of the model its CLI reported. A quota refusal may move to another guest; an ordinary failure moves only to an API provider. With the list spent — or none sent, High's default being the pane's own model — the routing is dropped and the turn finishes on the pane's own model (15.2.3), and only if that fails too does the Main list start |
 | a side call on a tiered role (`flash` / `lite` / `local` / `high`: summaries, suggestions, chores, the audit, the loop check) | that tier's list, when one was sent | the entry after the one it resolved to; then the call fails as it always did, with its own model's error. No list, or a role pinned to its own endpoint: no chain. A guest entry is skipped here as it is at resolution (13.7): a background role cannot be handed a harness, and no turn can be moved onto one mid-way |
 
 **Resolution is not failover.** A background role that found nothing usable in its list never reaches
@@ -2399,11 +2400,22 @@ Each entry is asked once, at **its own level** when it names one (the pane's lev
 new provider's words), and never one
 without a stored key, one already tried this turn, one whose endpoint has the same hostname as a
 preset already tried (Z.AI's standard API and its Coding Plan are two keys for one service, and a
-service that is down is down for both), or a guest harness (it serves a turn from its first step —
-a pane's, or a plan turn's, 13.7 — never one under way); such an entry is skipped silently for
+service that is down is down for both), or a guest harness, except on a confirmed quota refusal;
+such an entry is skipped silently for
 the one below it. A step that has already streamed part of an answer is never moved either, for
 the reason 15.2 gives: that text is on the user's screen and a second provider would write a
 second answer under it.
+
+**Quota exhaustion (#495G).** A structured `quota_exhausted` refusal is routed separately from
+transport failures. The account is held until its reported reset or a newer allowed limits report;
+banked usage reset credits are never spent by routing. The remaining allowed entries are drawn
+probabilistically within each rank using the smaller of their fresh 5-hour and weekly remaining
+percentage per hour until reset. A quota refusal excludes the account, not the provider hostname,
+so another Claude Code or Codex login can take the turn. A fresh guest harness receives the
+conversation handover. The same request is retried only before answer text or a guest tool action;
+a partial answer or tool action ends that turn without replay, and the next turn routes around the
+held account. `failover: false` still disables the move. Ordinary transport failures keep the
+hostname exclusion and do not gain guest harness targets.
 
 The move is a model change, not a swapped socket: the failed provider's response is closed first,
 the conversation is converted to the new provider's reasoning dialect (`adapt_history`), and the
@@ -2446,8 +2458,8 @@ rank order — and the agent reads the chain once when the turn's first move is 
 order). For each entry in turn
 `RoleResolver.fallback_candidate` builds that preset at that model, at the entry's level or else the
 pane's, on the same terms as any candidate: the same key lookup, never the failing preset or another
-key on its host, never a preset already asked this turn. A saved local endpoint is allowed (the
-user ranked it), a guest harness never is; an entry that cannot take the turn is skipped silently
+key on its host for transport failures, never a preset already asked this turn. A saved local endpoint is allowed (the
+user ranked it); a guest harness is allowed only for a quota refusal. An entry that cannot take the turn is skipped silently
 for the next. The entry names the model, so a Flash pane goes to whatever the user ranked, not to
 "the same tier on another provider": the tier it carries is the effort and the record. Until
 2026-09-20 there was a catalog chain after the ranked model — the same tier on every other keyed

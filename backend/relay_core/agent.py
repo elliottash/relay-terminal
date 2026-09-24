@@ -41,7 +41,7 @@ from .context import DEFAULT_THRESHOLD, ContextTracker
 from .planning import (EXIT_PLAN_MODE_SPEC, validate_exit_args,
                        PLAN_MODE_NOTE, WRITE_PLAN_SPEC, guest_plan_prompt, plan_from_reply,
                        validate_mode, validate_plan_args, write_plan)
-from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset
+from .roles import GUEST_BASE_SCHEME, guest_id_of, is_guest_preset, ordered_candidates
 from .presets import (apply_effort, context_window_for, effort_levels, effort_style, infer_effort,
                       model_efforts, model_name, model_supports_vision, resolve_preset,
                       tier_default, validate_effort)
@@ -729,6 +729,10 @@ class Agent:
         # The failover swap a turn is running under, or None (card #G9VE): the pane's own
         # provider, config and preset, put back when the turn ends.
         self._failover: dict | None = None
+        # A quota refusal remains a routing hold for this pane until the named reset or a newer
+        # allowed limits report. A partial guest answer is never replayed; the next turn draws
+        # its replacement before asking the exhausted account again (#495G).
+        self._quota_blocked: dict | None = None
         # Routed models this turn already gave up on (`_drop_routing`), as (preset id, hostname).
         # A failover started afterwards skips them: the planning or vision provider that just
         # refused is not a spare worth asking again.
@@ -3093,12 +3097,24 @@ class Agent:
         model) then takes one step back: the routing ends and the rest of the turn runs on the
         pane's own model (`_drop_routing`). Only if that model fails too does the Main list start.
         """
+        if self._quota_hold_active():
+            self._produced_output = False  # this is a new call, not a replay of the failed one
+            self._begin_quota_failover(ProviderError("This subscription is exhausted.",
+                                                    code="quota_exhausted"), record, step)
         while True:
             try:
                 return self._model_call_on_provider(record, ctx, step)
             except ProviderTruncated:
                 raise
             except ProviderError as exc:
+                if exc.code in ("quota_exhausted", "provider_quota_exhausted"):
+                    if self._next_plan_model(exc, record, step):
+                        continue
+                    if self._drop_routing(exc, record, step):
+                        continue
+                    if self._begin_quota_failover(exc, record, step):
+                        continue
+                    raise
                 if self._next_plan_model(exc, record, step):
                     continue
                 if self._drop_routing(exc, record, step):
@@ -3200,8 +3216,125 @@ class Agent:
         if not callable(chain):
             return [dict(entry) for entry in self.fallbacks]
         return [dict(entry) for entry in chain(
-            tier, self.preset.id if self.preset else None, self.config.model, self.fallbacks,
+            tier, self._routing_preset(), self.config.model, self.fallbacks,
             **({"entries": self.ranked_failover} if self.ranked_failover else {}))]
+
+    def _routing_preset(self) -> str | None:
+        if self.preset is not None:
+            return self.preset.id
+        from . import guest_harness_provider as ghp
+        return ghp.config_preset(self.config)
+
+    def _quota_hold_active(self) -> bool:
+        hold = self._quota_blocked
+        if not hold or hold["preset"] != self._routing_preset():
+            return False
+        if hold["resets_at"] and time.time() >= hold["resets_at"]:
+            self._quota_blocked = None
+            return False
+        from . import guest_harness_provider as ghp
+        preset = hold["preset"]
+        if is_guest_preset(preset):
+            limits = ghp.last_limits(ghp.preset_key(preset))
+        else:
+            from . import provider_limits
+            limits = provider_limits.last(preset)
+        if (limits.get("updated_at", 0) > hold["marked"]
+                and limits.get("status") != "rejected"
+                and all(w.get("used_percent", 0) < 100 for w in limits.get("windows") or ())):
+            self._quota_blocked = None
+            return False
+        return True
+
+    def _begin_quota_failover(self, exc: ProviderError, record: dict, step: int) -> bool:
+        """Retry a quota refusal on another allowed account, including the same CLI service."""
+        from . import guest_harness_provider as ghp
+        current = self._routing_preset()
+        if self._failover is None and current:
+            retry_after = getattr(exc, "retry_after_s", None)
+            release_at = exc.resets_at or (time.time() + retry_after
+                                           if isinstance(retry_after, (int, float))
+                                           and retry_after > 0 else None)
+            self._quota_blocked = {"preset": current, "resets_at": release_at,
+                                   "marked": int(time.time())}
+        if (not self.failover or self.roles is None or self.cancel_event.is_set()
+                or self._vision or self._planning):
+            return False
+        # A guest may have run a shell or edited a file without sending answer text. Its whole
+        # request cannot be replayed after that; the hold routes its *next* turn instead.
+        if self._produced_output or record.get("guest_tools_seen"):
+            return False
+        swap = self._failover
+        if swap is None:
+            tier = self._failover_tier()
+            chain = ordered_candidates(self._failover_chain(tier), choose=True)
+            swap = {"turn_id": record["turn_id"], "provider": self.provider,
+                    "config": self.config, "preset": self.preset, "window": self.context.window,
+                    "effort": self.effort, "injected": self._injected_provider,
+                    "guest_session_data": getattr(self, "_guest_session_data", None),
+                    "tried": {current} if current else set(), "hosts": set(),
+                    "fallbacks": chain, "next": 0, "switches": 0,
+                    "max_attempts": len(chain), "names": [], "errors": {}, "tier": tier,
+                    "from_model": self.config.model, "first_error": exc, "quota": True}
+        else:
+            swap["errors"][_provider_name(self.config.model, self.preset)] = str(exc)[:600]
+            if current:
+                swap["tried"].add(current)
+        tier = swap.get("tier") or self._failover_tier()
+        target = replacement = None
+        while swap["next"] < len(swap["fallbacks"]):
+            entry = swap["fallbacks"][swap["next"]]
+            swap["next"] += 1
+            target = self.roles.fallback_candidate(entry, tier, swap["tried"],
+                                                   quota=True)
+            if target is None:
+                continue
+            if is_guest_preset(target.preset_id):
+                request = {"guest": {"model": target.config.model or None,
+                                     "effort": target.effort or None,
+                                     "permissions": getattr(swap["provider"], "permissions", "bypass")}}
+                try:
+                    replacement = ghp.start_provider(target.preset_id, request,
+                                                     str(self.executor.workspace.root),
+                                                     self.stall_timeout_s,
+                                                     skill_index=self.executor.skills)
+                except ValueError:
+                    swap["tried"].add(target.preset_id)
+                    target = None
+                    continue
+            else:
+                replacement = self._hook_preempt(_with_first_token(
+                    _provider_for(target.config, self.stall_timeout_s), self.first_token_timeout_s))
+            break
+        if target is None or replacement is None:
+            return False
+        if self.provider is not swap["provider"] and isinstance(self.provider, ghp.HarnessProvider):
+            self.provider.close()
+        from_model = self.config.model
+        self._ensure_no_open_response(record["turn_id"], "quota_failover")
+        self._close_thinking(record)
+        swap["tried"].add(target.preset_id)
+        swap["switches"] += 1
+        self._failover = swap
+        self.provider = replacement
+        self._injected_provider = isinstance(replacement, ghp.HarnessProvider)
+        if self._injected_provider:
+            ghp.attach(self, replacement)
+        else:
+            self._guest_session_data = None
+        if target.effort is not None:
+            self.effort = None
+        target_preset = resolve_preset(target.preset_id, target.config.base_url, target.config.model)
+        self._adopt_model(target.config, target_preset)
+        swap["names"].append(_provider_name(target.config.model, target_preset))
+        swap["last_model"], swap["last_preset"] = target.config.model, target.preset_id
+        record["retries"] = record.get("retries", 0) + 1
+        self.emit({"event": "provider_retry", "turn_id": record["turn_id"],
+                   "reason": "quota_exhausted", "attempt": swap["switches"],
+                   "max_attempts": swap["max_attempts"], "from_model": from_model,
+                   "to_model": target.config.model, "to_preset": target.preset_id,
+                   "step": step, "text": "Usage exhausted; continuing on another subscription."})
+        return True
 
     def _next_plan_model(self, exc: Exception, record: dict, step: int) -> bool:
         """A plan turn whose model will not answer moves to the next entry of the High list.
@@ -3218,8 +3351,12 @@ class Agent:
         swap nests inside the plan one, whose model was picked for a different reason.
         """
         swap = self._planning
+        quota = isinstance(exc, ProviderError) and exc.code in (
+            "quota_exhausted", "provider_quota_exhausted")
         if (swap is None or self._vision or not self.failover or self.roles is None
-                or not swap.get("adopted") or self._injected_provider or self._produced_output
+                or not swap.get("adopted") or (self._injected_provider and not quota)
+                or self._produced_output
+                or (quota and record.get("guest_tools_seen"))
                 or self.cancel_event.is_set() or not isinstance(exc, ProviderError)):
             return False
         chain = getattr(self.roles, "failover_chain", None)
@@ -3237,6 +3374,8 @@ class Agent:
                 swap["chain"] = [dict(entry) for entry in chain(
                     "high", failed_preset, self.config.model,
                     **({"entries": custom} if custom else {}))]
+                if quota:
+                    swap["chain"] = ordered_candidates(swap["chain"], choose=True)
                 swap["tried"], swap["hosts"], swap["moves"] = set(), set(), 0
                 swap["max_moves"] = len(swap["chain"])
             if failed_preset:
@@ -3246,7 +3385,15 @@ class Agent:
             target = None
             while target is None and swap["chain"]:
                 target = self.roles.fallback_candidate(swap["chain"].pop(0), "high", swap["tried"],
-                                                       swap["hosts"], role="planning")
+                                                       swap["hosts"], role="planning", quota=quota)
+                if target is not None and is_guest_preset(target.preset_id):
+                    guest = self._start_plan_guest(record["turn_id"], target)
+                    if guest is None:
+                        swap["tried"].add(target.preset_id)
+                        target = None
+                    else:
+                        self._end_route_guest(swap)
+                        swap["guest"] = guest
         except Exception as bad:                            # a failover must never break the turn
             logs.event(_log, "provider_failover_unavailable", level_name="error",
                        session=self.session_id, turn=record["turn_id"], step=step,
@@ -3420,7 +3567,14 @@ class Agent:
         swap, self._failover = self._failover, None
         if not swap:
             return
+        from . import guest_harness_provider as ghp
+        if self.provider is not swap["provider"] and isinstance(self.provider, ghp.HarnessProvider):
+            self.provider.close()
         self.provider = swap["provider"]
+        self._injected_provider = swap.get("injected", self._injected_provider)
+        self._guest_session_data = swap.get("guest_session_data")
+        if isinstance(self.provider, ghp.HarnessProvider):
+            ghp.attach(self, self.provider)
         self.effort = swap["effort"]
         # The restore is a model change too: the history goes back into this provider's dialect and
         # the context bar back onto this model's window.

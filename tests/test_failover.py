@@ -205,6 +205,41 @@ class FailoverTests(unittest.TestCase):
         return [e for e in self.events if e['event'] == 'provider_retry'
                 and e['reason'] != 'failover_ended']
 
+    def test_quota_exhaustion_retries_on_an_allowed_subscription(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('usage exhausted', 'quota_exhausted',
+                                                       9_999_999_999))
+        self.stubs['kimi-k3'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(self.stubs['kimi-k3'].calls, 1)
+        self.assertEqual(self.retries()[0]['reason'], 'quota_exhausted')
+        self.assertEqual(agent.config.model, MAIN.model)
+        self.assertTrue(agent._quota_hold_active())
+        agent.ask('another turn')
+        self.assertEqual(self.stubs[MAIN.model].calls, 1)  # held until reset
+        self.assertEqual(self.stubs['kimi-k3'].calls, 2)
+
+    def test_quota_after_partial_output_waits_until_next_turn(self):
+        self.stubs[MAIN.model] = Streamer(ProviderError('usage exhausted', 'quota_exhausted',
+                                                        9_999_999_999))
+        self.stubs['kimi-k3'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI)
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+        agent.ask('continue')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual(self.stubs['kimi-k3'].calls, 1)
+
+    def test_quota_fallback_obeys_off_switch(self):
+        self.stubs[MAIN.model] = Refuser(ProviderError('usage exhausted', 'quota_exhausted'))
+        self.stubs['kimi-k3'] = Answerer()
+        agent = self.agent(roles=resolver({'kimi': 'k'}), fallbacks=KIMI, failover=False)
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'error')
+        self.assertEqual(self.stubs['kimi-k3'].calls, 0)
+
     def test_a_failing_provider_hands_the_turn_to_the_first_entry_of_the_list(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('Provider HTTP 429 for glm-5.3.'))
         spare = Answerer()

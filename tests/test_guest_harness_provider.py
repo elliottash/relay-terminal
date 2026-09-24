@@ -24,6 +24,7 @@ from relay_core.agent import Agent                     # noqa: E402
 from relay_core.guest_harness import (MAX_TOOL_OUTPUT_CHUNK, HarnessError,  # noqa: E402
                                       HarnessNotAvailable)
 from relay_core.provider import Cancelled, ProviderConfig, ProviderError, content_parts  # noqa: E402
+from relay_core.roles import RoleResolver               # noqa: E402
 from guest_harness_fake import FakeHarness, ev         # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -711,6 +712,65 @@ class LimitsTests(unittest.TestCase):
     def setUp(self):
         ghp._LAST_LIMITS.clear()
         self.addCleanup(ghp._LAST_LIMITS.clear)
+
+    def test_guest_quota_refusal_keeps_a_structured_reason(self):
+        with mock.patch.object(ghp.time, "time", return_value=1000):
+            error = ghp.guest_failure("usage limit reached", {"windows": [
+                {"kind": "5h", "used_percent": 100, "resets_at": 4600}]})
+        self.assertEqual(error.code, "quota_exhausted")
+        self.assertEqual(error.resets_at, 4600)
+        self.assertEqual(ghp.guest_failure("network disconnected", {}).code, "")
+
+    def test_exhausted_guest_retries_on_another_login_without_spending_a_reset(self):
+        first, provider = build([{"events": [], "result": ("usage limit reached", "error", {})}])
+        second = FakeHarness([{"events": [ev("delta", text="other login")],
+                               "result": ("other login", "end", {})}])
+        second.start(cwd="/tmp")
+        other_config = ProviderConfig("harness://claude/other", "claude-fake", "", {}, 32_768)
+        other = ghp.HarnessProvider(other_config, second, "claude")
+        other.account = "other"
+        roles = RoleResolver(guest_config(), "guest:claude", tiers={"main": [
+            {"preset": "guest:claude", "model": ""},
+            {"preset": "guest:claude:other", "model": "claude-fake"}]},
+            guest_check=lambda _id: True)
+        with tempfile.TemporaryDirectory() as ws, mock.patch.object(ghp, "start_provider", return_value=other):
+            events = []
+            agent = Agent(guest_config(), ws, events.append, provider=provider, roles=roles,
+                          track_requests=False, completion_check=False, todo_tool=False)
+            ghp.attach(agent, provider)
+            agent.ask("hello")
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(len(second.sent), 1)
+        self.assertIs(agent.provider, provider)
+        self.assertTrue(any(e["event"] == "provider_retry" and e["reason"] == "quota_exhausted"
+                            for e in events))
+        self.assertFalse(any(name == "use_usage_reset" for name, *_ in second.calls))
+
+    def test_guest_tool_before_quota_refusal_is_not_replayed(self):
+        first, provider = build([{"events": [
+            ev("tool_started", call_id="c1", tool="run_command", input={"command": "true"}),
+            ev("tool_result", call_id="c1", tool="run_command", output="", ok=True)],
+            "result": ("usage limit reached", "error", {})}])
+        second = FakeHarness([{"events": [], "result": ("continued", "end", {})}])
+        second.start(cwd="/tmp")
+        other = ghp.HarnessProvider(ProviderConfig("harness://claude/other", "claude-fake", "", {}, 32_768),
+                                    second, "claude")
+        other.account = "other"
+        roles = RoleResolver(guest_config(), "guest:claude", tiers={"main": [
+            {"preset": "guest:claude", "model": ""},
+            {"preset": "guest:claude:other", "model": "claude-fake"}]},
+            guest_check=lambda _id: True)
+        with tempfile.TemporaryDirectory() as ws, mock.patch.object(ghp, "start_provider", return_value=other):
+            events = []
+            agent = Agent(guest_config(), ws, events.append, provider=provider, roles=roles,
+                          track_requests=False, completion_check=False, todo_tool=False)
+            ghp.attach(agent, provider)
+            agent.ask("do work")
+            self.assertEqual(events[-1]["event"], "error")
+            self.assertEqual(len(second.sent), 0)
+            agent.ask("continue")
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(len(second.sent), 1)
 
     def test_limits_become_usage_limits_and_are_remembered(self):
         windows = [{"kind": "5h", "used_percent": 62, "resets_at": 1789926600},

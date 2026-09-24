@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import importlib
 import json
+import re
 import shutil
 import subprocess
 import threading
@@ -45,6 +46,20 @@ from .provider import (DEFAULT_STALL_TIMEOUT, Cancelled, ProviderConfig, Provide
                        cache_counts, message_images)
 
 _log = logs.get("guest_harness")
+
+_QUOTA_REFUSAL = re.compile(r"(?:usage|weekly|five.hour|rate) limit (?:reached|exceeded)|"
+                            r"(?:quota|usage) exhausted|out of (?:usage|quota)", re.I)
+
+
+def guest_failure(text: str, limits: dict) -> ProviderError:
+    """Preserve a guest's quota refusal as a reason the router can safely act on."""
+    if not (_QUOTA_REFUSAL.search(text) or limits.get("status") == "rejected"):
+        return ProviderError(text)
+    now = int(time.time())
+    resets = [w.get("resets_at") for w in limits.get("windows") or ()
+              if isinstance(w, dict) and w.get("used_percent", 0) >= 100
+              and isinstance(w.get("resets_at"), (int, float)) and w["resets_at"] > now]
+    return ProviderError(text, code="quota_exhausted", resets_at=int(max(resets)) if resets else None)
 
 # A `presets` row's id, and the scheme its ProviderConfig carries so nothing downstream mistakes a
 # guest for an HTTP endpoint (29.3).
@@ -1262,8 +1277,9 @@ class HarnessProvider:
             raise
         except HarnessError as exc:
             turn.close_thinking()
-            raise ProviderError(str(exc) or turn.error_text
-                                or f"{guest.spec(self.guest_id).name} ended the turn with an error.") from None
+            raise guest_failure(str(exc) or turn.error_text
+                                or f"{guest.spec(self.guest_id).name} ended the turn with an error.",
+                                self.usage_limits) from None
         except Exception as exc:
             turn.close_thinking()
             raise ProviderError(f"{guest.spec(self.guest_id).name}'s harness failed "
@@ -1282,8 +1298,9 @@ class HarnessProvider:
             # unfinished request open. What was streamed is already on the user's screen.
             raise Cancelled("Stopped.")
         if stop_reason == "error":
-            raise ProviderError(getattr(result, "text", "") or turn.error_text
-                                or f"{guest.spec(self.guest_id).name} ended the turn with an error.")
+            raise guest_failure(getattr(result, "text", "") or turn.error_text
+                                or f"{guest.spec(self.guest_id).name} ended the turn with an error.",
+                                self.usage_limits)
         turn.finish(getattr(result, "usage", None) or {})
         self.catchup = None
         _note_cursor(agent, self, messages, getattr(result, "text", "") or "")
@@ -1504,6 +1521,8 @@ class _Turn:
     # ----- tool calls -----------------------------------------------------------------------
     def _on_tool_started(self, data: dict) -> None:
         self.close_thinking()
+        if self.record is not None:
+            self.record["guest_tools_seen"] = True
         call_id = str(data.get("call_id") or "") or "guest-" + uuid.uuid4().hex[:12]
         name, guest_tool = self._tool_name(data)
         source = data.get("input")
