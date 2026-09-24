@@ -2161,7 +2161,7 @@ class Agent:
             record = self.turn_log.get(turn_id) if isinstance(turn_id, str) else None
             if record is None:
                 raise ValueError("Unknown turn_id (only the last 50 turns are kept).")
-            items = [transcript_item(m) for m in list(record["messages"])]
+            items = transcript_items(list(record["messages"]))
             return {"event": "turn_transcript", "turn_id": turn_id, "outcome": record["outcome"],
                     "running": record["elapsed_ms"] is None, "items": items}
 
@@ -4668,6 +4668,55 @@ def transcript_item(message: dict) -> dict:
     if message.get("role") == "tool" and message.get("tool_call_id"):
         item["tool_call_id"] = message["tool_call_id"]
     return item
+
+
+def transcript_items(messages: list) -> list:
+    """A whole transcript in transcript_item's shape, with each landed tool call paired to its
+    message (protocol 23): the tool item carries the call's name and its § 23 result label, so a
+    surface opening the transcript starts on one folded tool row per call instead of the raw
+    json.dumps result. Assistant tool_calls keeps only calls whose result has not landed yet, so
+    a still-running call stays named and a landed one does not appear twice."""
+    calls: dict = {}
+    for message in messages:
+        for call in message.get("tool_calls") or []:
+            call_id = call.get("id")
+            if not call_id:
+                continue
+            function = call.get("function") or {}
+            args = function.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    args = {}
+            calls[call_id] = (function.get("name") or "", args if isinstance(args, dict) else {})
+    landed = {m.get("tool_call_id") for m in messages
+              if m.get("role") == "tool" and m.get("tool_call_id")}
+    items = []
+    for message in messages:
+        item = transcript_item(message)
+        if message.get("role") == "tool" and message.get("tool_call_id") in calls:
+            name, args = calls[message["tool_call_id"]]
+            item["tool"] = name
+            try:
+                result = json.loads(message.get("content") or "")
+            except ValueError:
+                result = None
+            if isinstance(result, dict):
+                item["label"] = tool_labels.result_label(name, args, result)
+        elif message.get("tool_calls"):
+            pending = []
+            for call in message["tool_calls"]:
+                if call.get("id") in landed:
+                    continue          # its landed row is the tool item itself, just below
+                name = (call.get("function") or {}).get("name")
+                pending.append(("%s (pending)" % name) if call.get("pending") else name)
+            if pending:
+                item["tool_calls"] = pending
+            else:
+                item.pop("tool_calls", None)
+        items.append(item)
+    return items
 
 
 def _conversation_only_checkpoints(state: dict) -> dict:

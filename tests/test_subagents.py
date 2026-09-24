@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from relay_core import skills as skills_mod
-from relay_core.agent import Agent
+from relay_core.agent import Agent, transcript_items
 from relay_core.agents_defs import AgentDefinition, READ_ONLY_TOOLS, load_catalog
 from relay_core.provider import Cancelled, ProviderConfig
 from relay_core.queue import TurnSupervisor
@@ -327,6 +327,59 @@ class CapTests(Base):
         for i in range(1, 7):
             self.rec.wait(lambda e, i=i: e['event'] == 'subagent_finished' and e['id'] == f'a{i}')
         self.assertEqual(self.hub.max_active, 4)
+
+
+class TranscriptItemsTests(unittest.TestCase):
+    """The subagent snapshot pairs each landed tool call with its message (protocol 23), so a
+    surface opening a subagent starts on one folded tool row per call, not raw json.dumps."""
+
+    def call(self, call_id, name, args, pending=False):
+        entry = {'id': call_id, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}}
+        if pending:
+            entry['pending'] = True
+        return entry
+
+    def test_landed_calls_carry_tool_and_label(self):
+        messages = [
+            {'role': 'user', 'content': 'fix the test'},
+            {'role': 'assistant', 'content': 'reading', 'tool_calls': [
+                self.call('c1', 'read_file', {'path': 'tests/test_foo.py'}),
+                self.call('c2', 'run_command', {'command': 'pytest -x'}),
+            ]},
+            {'role': 'tool', 'tool_call_id': 'c1',
+             'content': json.dumps({'ok': True, 'path': '/w/tests/test_foo.py', 'lines': ['assert 1 == 2']})},
+            {'role': 'tool', 'tool_call_id': 'c2', 'content': json.dumps({'ok': False, 'error': 'exit 1'})},
+        ]
+        items = transcript_items(messages)
+        self.assertEqual([i['role'] for i in items], ['user', 'assistant', 'tool', 'tool'])
+        # The landed calls are gone from the assistant's ⚙ line: each is its own row now.
+        self.assertNotIn('tool_calls', items[1])
+        for item, name in ((items[2], 'read_file'), (items[3], 'run_command')):
+            self.assertEqual(item['tool'], name)
+            self.assertTrue(item['label']['title'])                 # § 23 label survives the wire
+            self.assertIn(item['label']['kind'], ('read', 'run'))
+        self.assertTrue(items[2]['label']['ok'])
+        self.assertFalse(items[3]['label']['ok'])
+        self.assertEqual(items[2]['label']['title'], 'read tests/test_foo.py')
+
+    def test_running_call_keeps_its_name(self):
+        messages = [
+            {'role': 'user', 'content': 'go'},
+            {'role': 'assistant', 'content': '', 'tool_calls': [
+                self.call('c1', 'read_file', {'path': 'a.py'}),
+                self.call('c2', 'edit_file', {'path': 'a.py'}, pending=True),
+            ]},
+        ]
+        items = transcript_items(messages)
+        self.assertEqual(items[1]['tool_calls'], ['read_file', 'edit_file (pending)'])
+
+    def test_unpaired_tool_message_stays_raw(self):
+        # A window that cut off the assistant's calls (subscribe takes the last 200): the tool
+        # message keeps the old bare shape and the surface renders it as capped lines.
+        messages = [{'role': 'tool', 'tool_call_id': 'c9', 'content': '{"ok": true}'}]
+        item = transcript_items(messages)[0]
+        self.assertNotIn('tool', item)
+        self.assertNotIn('label', item)
 
 
 class StopAndMessageTests(Base):

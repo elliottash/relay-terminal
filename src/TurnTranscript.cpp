@@ -198,10 +198,18 @@ void TurnTranscriptView::renderLog() {
             // and nothing but that (be81edb). A list of calls the agent already made is not.
             if (!calls.isEmpty()) add(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), relay::theme::Tool, false);
         } else if (role == QStringLiteral("tool")) {
-            QStringList lines = content.split(QLatin1Char('\n'));
-            const int total = lines.size();
-            if (total > 12) { lines = lines.mid(0, 12); lines << QStringLiteral("… %1 more lines").arg(total - 12); }
-            add(lines.join(QLatin1Char('\n')) + QLatin1Char('\n'), relay::theme::TextMuted, false);
+            // Protocol 23: the worker pairs the call with its result (transcript_items), so the
+            // transcript opens on the same one-line summary the live view shows; a worker from
+            // before that sends bare JSON, still rendered as capped lines.
+            if (message.contains(QStringLiteral("label"))) {
+                const toollabel::Label label = toollabel::fromEvent(message);
+                add(label.line() + QLatin1Char('\n'), relay::theme::Tool, false);
+            } else {
+                QStringList lines = content.split(QLatin1Char('\n'));
+                const int total = lines.size();
+                if (total > 12) { lines = lines.mid(0, 12); lines << QStringLiteral("… %1 more lines").arg(total - 12); }
+                add(lines.join(QLatin1Char('\n')) + QLatin1Char('\n'), relay::theme::TextMuted, false);
+            }
         }
     }
     if (items.isEmpty()) add(QStringLiteral("(Transcript not available from this worker.)\n"), relay::theme::TextMuted, false);

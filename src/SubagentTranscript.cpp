@@ -563,10 +563,31 @@ void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
                 for (const auto &call : message.value(QStringLiteral("tool_calls")).toArray()) calls << call.toString();
                 if (!calls.isEmpty()) append(QStringLiteral("⚙ ") + calls.join(QStringLiteral(", ")) + QLatin1Char('\n'), Ink::Tool);
             } else if (role == QStringLiteral("tool")) {
-                QStringList lines = content.split(QLatin1Char('\n'));
-                const int total = lines.size();
-                if (total > 12) { lines = lines.mid(0, 12); lines << QStringLiteral("… %1 more lines").arg(total - 12); }
-                append(lines.join(QLatin1Char('\n')) + QLatin1Char('\n'), Ink::ToolOutput);
+                // Protocol 23: the worker pairs each landed call with its message
+                // (transcript_items), so the snapshot opens on the same folded row the live view
+                // shows and the raw result stays one fold away. A worker from before that sends
+                // bare JSON, still rendered as capped lines.
+                if (message.contains(QStringLiteral("label")) || message.contains(QStringLiteral("tool"))) {
+                    ToolCall call;
+                    call.label = toollabel::fromEvent(message);
+                    call.done = true;
+                    call.detail = content.left(8000);
+                    const int start = m_log->document()->characterCount() - 1;
+                    append(QStringLiteral(" \n"), Ink::Tool);   // a block to rewrite in place
+                    call.line = QTextCursor(m_log->document());
+                    call.line.setPosition(start);
+                    call.after = QTextCursor(m_log->document());
+                    call.after.setPosition(m_log->document()->characterCount() - 1);
+                    call.after.setKeepPositionOnInsert(true);   // later rows are appended past the fold
+                    m_calls.append(call);
+                    forgetCalls();
+                    drawRow(m_calls.last());
+                } else {
+                    QStringList lines = content.split(QLatin1Char('\n'));
+                    const int total = lines.size();
+                    if (total > 12) { lines = lines.mid(0, 12); lines << QStringLiteral("… %1 more lines").arg(total - 12); }
+                    append(lines.join(QLatin1Char('\n')) + QLatin1Char('\n'), Ink::ToolOutput);
+                }
             }
         }
         appendNote(QStringLiteral("── live ──"));

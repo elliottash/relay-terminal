@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import prompt_profiles
-from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent
+from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent, transcript_items
 from .agents_defs import DEFAULT_ALIASES, EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
 from .presets import PRESETS, TIER_DEFAULTS, apply_effort, match_preset
 from .provider import Cancelled, ProviderConfig
@@ -1159,10 +1159,9 @@ class SubagentManager:
                 raise ValueError(f"Unknown subagent {agent_id!r}.")
             sub.subscribed = bool(on)
             if on:
-                messages = [{"role": m.get("role"), "content": str(m.get("content") or "")[:8000],
-                             **({"tool_calls": [c.get("function", {}).get("name") for c in m["tool_calls"]]}
-                                if m.get("tool_calls") else {})}
-                            for m in list(sub.agent.messages)[1:]][-200:]
+                # transcript_items pairs each landed tool call with its result label (protocol 23),
+                # so the surface opens on folded tool rows instead of raw json.dumps results.
+                messages = transcript_items(list(sub.agent.messages)[1:][-200:])
                 self._emit({"event": "subagent_transcript", "id": sub.id, "status": sub.status, "messages": messages})
 
     def list(self) -> list[dict]:

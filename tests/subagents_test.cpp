@@ -416,6 +416,31 @@ private slots:
         QCOMPARE(closes, 1);
     }
 
+    // A worker built after protocol 23 pairs each landed call with its message (backend
+    // transcript_items): the snapshot opens on the same folded tool row the live view shows, the
+    // raw json.dumps result stays one fold away, and a call still running keeps its ⚙ name.
+    void transcriptSnapshotOpensOnToolRows() {
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        view.handleEvent(json("{'event':'subagent_transcript','id':'a1','status':'running','messages':["
+            "{'role':'user','content':'Fix the failing test in foo.py'},"
+            "{'role':'assistant','content':'Reading it first.'},"
+            "{'role':'tool','tool':'read_file','tool_call_id':'c1',"
+            "'content':'{\\\"ok\\\":true,\\\"path\\\":\\\"/w/tests/test_foo.py\\\",\\\"lines\\\":[\\\"assert 1 == 2\\\"]}',"
+            "'label':{'kind':'read','running':'reading tests/test_foo.py','title':'read tests/test_foo.py','ok':true}},"
+            "{'role':'assistant','content':'','tool_calls':['edit_file (pending)']},"
+            "{'role':'assistant','content':'Done.'}]}"));
+        const QString text = view.plainText();
+        QVERIFY(text.contains(QStringLiteral("▸ read tests/test_foo.py")));
+        QVERIFY(text.contains(QStringLiteral("⚙ edit_file (pending)")));
+        QVERIFY(!text.contains(QStringLiteral("assert 1 == 2")));   // not the first paint any more
+        QCOMPARE(view.toolLines(), QStringList{QStringLiteral("▸ read tests/test_foo.py")});
+        QCOMPARE(view.toolCallCount(), 1);
+        view.toggleToolCall(0);                                      // the fold holds the raw result
+        QVERIFY(view.plainText().contains(QStringLiteral("assert 1 == 2")));
+        view.toggleToolCall(0);
+        QVERIFY(!view.plainText().contains(QStringLiteral("assert 1 == 2")));
+    }
+
     // Card #TK9C, protocol § 23: one concise line per tool call, rewritten in place when the call
     // lands, with the detail one click away.
     void transcriptDrawsOneLinePerToolCall() {
