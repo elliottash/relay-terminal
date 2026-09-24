@@ -321,6 +321,27 @@ class DefaultTests(unittest.TestCase):
 
 
 class TiedRankTests(unittest.TestCase):
+    def test_effective_availability_uses_fractional_hours_and_tighter_window(self):
+        now = 100000
+        limits = {"updated_at": now, "windows": [
+            {"kind": "five_hour", "used_percent": 70, "resets_at": now + 5400},
+            {"kind": "weekly", "used_percent": 40, "resets_at": now + 10800}]}
+        self.assertAlmostEqual(model_roles._usage_weight("kimi", now, limits), 20.0)
+        limits["windows"][1]["used_percent"] = 70
+        self.assertAlmostEqual(model_roles._usage_weight("kimi", now, limits), 10.0)
+        limits["windows"][0]["used_percent"] = 100
+        self.assertEqual(model_roles._usage_weight("kimi", now, limits), 0)
+        limits["updated_at"] = now - 1801
+        self.assertIsNone(model_roles._usage_weight("kimi", now, limits))
+
+    def test_exhausted_account_is_absent_from_a_tied_draw(self):
+        now = 100000
+        rows = [{"preset": "kimi", "rank": 1}, {"preset": "glm", "rank": 1}]
+        limits = {"kimi": {"updated_at": now, "windows": [
+            {"kind": "five_hour", "used_percent": 100, "resets_at": now + 3600}]}}
+        self.assertEqual([r["preset"] for r in model_roles.ordered_candidates(
+            rows, choose=True, limits_lookup=limits.get, now=now)], ["glm"])
+
     def test_legacy_rows_keep_distinct_ranks_and_ties_can_draw_both(self):
         rows = [{"preset": "kimi", "model": "kimi-k3"},
                 {"preset": "glm", "model": "glm-5.3"}]

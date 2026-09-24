@@ -1251,25 +1251,27 @@ Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double u
         const Entry *entry = catalog.find(item.key);
         if (!entry || !entry->usable || exhausted(catalog, entry->preset, now)) continue;
         if (rank < bestRank) { peers.clear(); bestRank = rank; }
-        double weight = 1.0;
+        double weight = -1.0;  // no recent applicable window: neutral against known peers
         const qint64 updated = catalog.limitUpdatedAt.value(entry->preset);
         // A quota report older than half an hour is no evidence of what is left now.
         if (updated > 0 && updated <= now && now - updated <= 1800) {
-            double remaining = 1.0;
-            double urgency = 0.0;
-            bool known = false;
             for (const LimitWindow &window : catalog.limits.value(entry->preset)) {
                 if (window.usedPercent < 0 || window.resetsAt <= now) continue;
-                known = true;
-                remaining = qMin(remaining, qBound(0.0, (100.0 - window.usedPercent) / 100.0, 1.0));
-                const double hours = double(window.resetsAt - now) / 3600.0;
-                urgency = qMax(urgency, std::exp(-hours / 24.0));
+                const double hours = qMax(double(window.resetsAt - now) / 3600.0, 0.25);
+                const double rate = qBound(0.0, 100.0 - window.usedPercent, 100.0) / hours;
+                weight = weight < 0 ? rate : qMin(weight, rate);
             }
-            if (known) weight += 4.0 * remaining * urgency;
         }
         peers << Candidate{*entry, weight};
     }
     if (peers.isEmpty()) return {};
+    QList<double> known;
+    for (const Candidate &peer : peers)
+        if (peer.weight > 0) known << peer.weight;
+    std::sort(known.begin(), known.end());
+    const double neutral = known.isEmpty() ? 1.0 : known.at(known.size() / 2);
+    for (Candidate &peer : peers)
+        if (peer.weight < 0) peer.weight = neutral;
     if (peers.size() == 1) return peers.first().entry;
     if (unitDraw < 0 || unitDraw >= 1) unitDraw = QRandomGenerator::global()->generateDouble();
     double total = 0;
@@ -1432,7 +1434,11 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvai
     for (const LimitWindow &window : windows) {
         if (window.usedPercent < 0) continue;
         QString part = QStringLiteral("%1 %2% left").arg(window.kind).arg(qRound(qBound(0.0, 100.0 - window.usedPercent, 100.0)));
-        if (window.resetsAt > 0) part += QStringLiteral(", resets %1").arg(resetText(window.resetsAt, now));
+        if (window.resetsAt > 0) {
+            part += QStringLiteral(", resets %1").arg(resetText(window.resetsAt, now));
+            if (window.resetsAt > now)
+                part += QStringLiteral(" (%1 h)").arg(QString::number(double(window.resetsAt - now) / 3600.0, 'f', 1));
+        }
         parts << part;
     }
     // The banked usage resets, the figure the CLI's /usage panel counts down (protocol 29.3):

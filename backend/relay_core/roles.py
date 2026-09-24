@@ -13,7 +13,6 @@ resolver records a one-line warning, which the worker emits in ``model_roles``.
 from __future__ import annotations
 
 import copy
-import math
 import random
 import time
 import urllib.parse
@@ -481,8 +480,8 @@ def _list_entry(tier: str, value) -> dict | None:
 
 
 def _usage_weight(preset_id: str | None, now: int | None = None,
-                  limits: dict | None = None) -> float:
-    """Give recent unused allowance nearing reset up to five shares of a tied draw."""
+                  limits: dict | None = None) -> float | None:
+    """Remaining percentage per hour until reset; None means no fresh evidence."""
     if now is None:
         now = int(time.time())
     if limits is None and is_guest_preset(preset_id):
@@ -492,21 +491,22 @@ def _usage_weight(preset_id: str | None, now: int | None = None,
         from . import provider_limits
         limits = provider_limits.last(preset_id)
     if not isinstance(limits, dict):
-        return 1.0
+        return None
     updated = limits.get("updated_at")
     if type(updated) not in (int, float) or not 0 <= now - updated <= 1800:
-        return 1.0
-    remaining, urgency, known = 1.0, 0.0, False
+        return None
+    rates = []
     for window in limits.get("windows") or ():
         if not isinstance(window, dict):
             continue
         used, reset = window.get("used_percent"), window.get("resets_at")
         if type(used) not in (int, float) or type(reset) not in (int, float) or reset <= now:
             continue
-        known = True
-        remaining = min(remaining, max(0.0, min(1.0, (100.0 - used) / 100.0)))
-        urgency = max(urgency, math.exp(-(reset - now) / 86400.0))
-    return 1.0 + 4.0 * remaining * urgency if known else 1.0
+        hours = max((reset - now) / 3600.0, 0.25)
+        rates.append(max(0.0, min(100.0, 100.0 - used)) / hours)
+    if limits.get("status") == "rejected":
+        return 0.0
+    return min(rates) if rates else None
 
 
 def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
@@ -523,13 +523,23 @@ def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
         draw = random.random
     for rank in sorted(groups):
         group = groups[rank].copy()
+        if choose:
+            group = [entry for entry in group
+                     if _usage_weight(entry.get("preset"), now,
+                                      limits_lookup(entry.get("preset")) if limits_lookup else None) != 0]
         while group:
             if not choose or len(group) == 1:
                 result.append(group.pop(0))
                 continue
-            weights = [_usage_weight(e.get("preset"), now,
-                                     limits_lookup(e.get("preset")) if limits_lookup else None)
-                       for e in group]
+            scores = [_usage_weight(e.get("preset"), now,
+                                    limits_lookup(e.get("preset")) if limits_lookup else None)
+                      for e in group]
+            fresh = sorted(score for score in scores if score is not None and score > 0)
+            neutral = fresh[len(fresh) // 2] if fresh else 1.0
+            weights = [neutral if score is None else score for score in scores]
+            if not any(weights):
+                result.extend(group)
+                break
             position = max(0.0, min(float(draw()), 0.999999999999)) * sum(weights)
             selected = len(group) - 1
             for index, weight in enumerate(weights):

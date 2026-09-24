@@ -1084,13 +1084,13 @@ private Q_SLOTS:
         QList<LimitWindow> windows;
         windows << LimitWindow{QStringLiteral("5h"), 38, QDateTime(QDate(2026, 9, 20), QTime(14, 30)).toSecsSinceEpoch()};
         windows << LimitWindow{QStringLiteral("weekly"), 60, QDateTime(QDate(2026, 9, 22), QTime(3, 0)).toSecsSinceEpoch()};
-        QCOMPARE(limitsText(windows, now), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue"));
+        QCOMPARE(limitsText(windows, now), QStringLiteral("5h 62% left, resets 14:30 (5.5 h) · weekly 40% left, resets tue (42.0 h)"));
         QCOMPARE(limitsText({}, now), QString());
         QCOMPARE(limitsText({LimitWindow{QStringLiteral("5h"), -1, 0}}, now), QString());
         // Banked usage resets (protocol 29.3) join the line only when there is at least one.
-        QCOMPARE(limitsText(windows, now, 1), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue · 1 usage reset"));
-        QCOMPARE(limitsText(windows, now, 3), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue · 3 usage resets"));
-        QCOMPARE(limitsText(windows, now, 0), QStringLiteral("5h 62% left, resets 14:30 · weekly 40% left, resets tue"));
+        QCOMPARE(limitsText(windows, now, 1), QStringLiteral("5h 62% left, resets 14:30 (5.5 h) · weekly 40% left, resets tue (42.0 h) · 1 usage reset"));
+        QCOMPARE(limitsText(windows, now, 3), QStringLiteral("5h 62% left, resets 14:30 (5.5 h) · weekly 40% left, resets tue (42.0 h) · 3 usage resets"));
+        QCOMPARE(limitsText(windows, now, 0), QStringLiteral("5h 62% left, resets 14:30 (5.5 h) · weekly 40% left, resets tue (42.0 h)"));
         QCOMPARE(limitsText({}, now, 2), QStringLiteral("2 usage resets"));
         // With a use-by date (#KQNP): always the day and month, never a weekday.
         const qint64 oct22 = QDateTime(QDate(2026, 10, 22), QTime(12, 0)).toSecsSinceEpoch();
@@ -1493,6 +1493,27 @@ private Q_SLOTS:
         QCOMPARE(drawTier(catalog, tier, now, 0.7).key, QStringLiteral("kimi-code|k3"));
         catalog.limits[QStringLiteral("glm-coding")] = {LimitWindow{QStringLiteral("weekly"), 100, now + 3600}};
         QCOMPARE(drawTier(catalog, tier, now, 0.9).key, QStringLiteral("kimi-code|k3"));
+    }
+
+    void effectiveAvailabilityUsesFractionalHoursAndTighterWindow() {
+        Catalog catalog = catalogFrom(presets());
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 1},
+            {QStringLiteral("kimi-code|k3"), QStringLiteral("high"), 1}});
+        const qint64 now = 100000;
+        catalog.limitUpdatedAt[QStringLiteral("glm-coding")] = now;
+        catalog.limitUpdatedAt[QStringLiteral("kimi-code")] = now;
+        // 30% / 1.5 h = 20 points/h; the weekly 60% / 3 h is equally tight.
+        catalog.limits[QStringLiteral("glm-coding")] = {
+            LimitWindow{QStringLiteral("5h"), 70, now + 5400},
+            LimitWindow{QStringLiteral("weekly"), 40, now + 10800}};
+        catalog.limits[QStringLiteral("kimi-code")] = {
+            LimitWindow{QStringLiteral("weekly"), 70, now + 10800}}; // 10 points/h
+        QCOMPARE(drawTier(catalog, tier, now, 0.60).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(drawTier(catalog, tier, now, 0.80).key, QStringLiteral("kimi-code|k3"));
+        catalog.limits[QStringLiteral("glm-coding")][1].usedPercent = 70; // now 10 points/h
+        QCOMPARE(drawTier(catalog, tier, now, 0.60).key, QStringLiteral("kimi-code|k3"));
     }
 
     // Owner, 2026-09-21: a harness he ranked first is what a new pane starts on. Being installed

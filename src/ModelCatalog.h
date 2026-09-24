@@ -524,7 +524,7 @@ double percentLeft(const Catalog &catalog, const QString &preset);
 // When a reset lands, in the words the limits line uses: today's "14:30", "tue" within a week,
 // else "23 sep". Empty when `resetsAt` is unknown (0).
 QString resetText(qint64 resetsAt, qint64 now);
-// "5h 62% left, resets 14:30 · weekly 40% left, resets tue" — empty with no figures. `now` is
+// "5h 62% left, resets 14:30 (5.5 h) · weekly 40% left, resets tue (42.0 h)" — empty with no figures. `now` is
 // unix seconds, for the wording of the reset time (today's hour, else a weekday).
 // With banked resets, "· 1 usage reset, use by 22 oct" follows (the date when known).
 QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable = -1,

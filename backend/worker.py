@@ -741,7 +741,7 @@ def main():
                 resolved = (agent.roles.resolve_entry(role, {"preset": pick,
                                                              "model": request.get("model"),
                                                              "effort": request.get("effort")})
-                            if isinstance(pick, str) and pick.strip() else agent.roles.resolve(role))
+                            if isinstance(pick, str) and pick.strip() else agent.roles.choose_role(role))
                 if board.refuse_model_selection(request, resolved.config):
                     continue
                 new_role = "main" if resolved.is_main else role
