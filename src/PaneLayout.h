@@ -159,6 +159,23 @@ QList<QPointer<QSplitter>> enclosingSplitters(QWidget *pane);
 // tiles the page evenly at every level a drag could have left uneven, not just one splitter.
 QList<QPointer<QSplitter>> splittersIn(QWidget *root);
 
+// ----- how space moves when the panes in a tab change (card #QVGQ) -----------------------------
+//
+// Adding spreads, rearranging keeps, closing gives back in proportion:
+//
+//   * ADDING a pane — a new terminal (#EQM2), anything opened for a pane (Sessions, Settings, a
+//     file, Review, Info, a fork: RelayWindow::dockBeside), Execute / Verify / Try it beside the
+//     Switchboard, and the ← ↑ ↓ that finishes placing a new pane — puts it in with
+//     sizesAfterDock, then equalizes the whole tab (sizesAfterEqualize, so a Switchboard keeps
+//     its floor). RelayWindow::spreadAfterAdding is the one call that does it.
+//   * REARRANGING — the move keys, dragging a pane, docking beneath a neighbour — keeps every
+//     size the person set: only the anchor's share is divided (sizesAfterDock below), or one
+//     equal share of the page for a pane moved past its edge (sizesAfterEdgeDock).
+//   * CLOSING hands the freed space to the panes left in that splitter in proportion to their
+//     sizes (QSplitter's own behaviour, measured: 596:298 → 797:399), so a hand-set ratio stays.
+//     Restoring a closed pane puts back the sizes recorded when it closed.
+//   * Alt+0 (pane.equalize) is the spread on demand.
+
 // ----- docking a pane beside a neighbour (owner, 2026-09-19) -----------------------------------
 //
 // Inserting a pane into a splitter that already runs that way used to give every child an equal

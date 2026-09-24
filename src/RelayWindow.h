@@ -3771,6 +3771,7 @@ public:
             // for; browsing Projects/Globals alone never starts an otherwise unwanted terminal.
             owner = createPane(paneNode(existing->cwd()));
             insertBeside(existing, owner, Qt::Horizontal, true);
+            spreadAfterAdding(owner);
         }
         openSessionsFor(owner, query, tab);
     }
@@ -5193,6 +5194,7 @@ public:
             try { pane = w->createPane({{"cwd", workspace}, {"workspace", workspace}}); }
             catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return; }
             w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+            w->spreadAfterAdding(pane);
             w->setActive(pane);
             focusLeaf(pane);
             pane->queueCommand(command);
@@ -5218,6 +5220,7 @@ public:
             // The board keeps its list/card split (#BXCN): the new terminal's half comes out of
             // the panes beside the board, not out of the board itself.
             w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+            w->spreadAfterAdding(pane);
             w->setActive(pane);
             focusLeaf(pane);
             if (runInBackground) pane->markBackgroundTask(true);
@@ -5263,6 +5266,7 @@ public:
             try { pane = w->createPane(spec); }
             catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return QString(); }
             w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
+            w->spreadAfterAdding(pane);
             w->setActive(pane);
             focusLeaf(pane);
             // A guest verifier goes through the pane's own Tier A / Tier B decision: the
@@ -6382,6 +6386,16 @@ private:
     // pane too narrow to share. Splits, moves and drags name their side and call insertBeside.
     void dockBeside(QWidget *anchor, QWidget *pane) {
         insertBeside(anchor, pane, relay::panes::dockOrientation(anchor->width()), false);
+        spreadAfterAdding(pane);
+    }
+
+    // Adding a pane spreads the tab; rearranging and closing keep the person's sizes (card
+    // #QVGQ, the model in PaneLayout.h). Every path that ADDS a pane ends here once it is in its
+    // splitter: equalizePage, with the Switchboard's floor, once Qt has laid out a newly wrapped
+    // splitter. Keep it out of insertBeside(), which also powers moves and drags.
+    void spreadAfterAdding(QWidget *pane) {
+        QPointer<QWidget> pageGuard(pageOf(pane));
+        QTimer::singleShot(0, pane, [this, pageGuard] { if (pageGuard) equalizePage(pageGuard); });
     }
 
     void split(Qt::Orientation orientation) {
@@ -6400,12 +6414,7 @@ private:
         catch (const std::exception &error) { QMessageBox::critical(this, QStringLiteral("Relay"), QString::fromUtf8(error.what())); return; }
         insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
         setActive(pane);
-        // Opening a pane is also a request to make room for it cleanly: once Qt has laid out a
-        // newly wrapped splitter, redistribute every splitter in this tab. Keep this out of
-        // insertBeside(), which also powers pane moves and drags and must preserve the sizes the
-        // person arranged by hand.
-        QPointer<QWidget> pageGuard(pageOf(pane));
-        QTimer::singleShot(0, pane, [this, pageGuard] { if (pageGuard) equalizePage(pageGuard); });
+        spreadAfterAdding(pane);   // #EQM2
         // Take the keyboard now and again once the splitter, the engine view and the pane's own
         // startup have settled. A deferred focus on its own loses to anything that focuses while
         // the pane is being inserted, and the pane then has no keyboard at all: nothing typed
@@ -6484,6 +6493,7 @@ private:
         if (direction != relay::panes::Direction::Right) {   // Right is where it already is
             if (!takeLeaf(pane) || !anchor || !pane) return;
             insertBeside(anchor, pane, relay::panes::orientationFor(direction), relay::panes::towardStart(direction));
+            spreadAfterAdding(pane);   // the arrow finishes an add, so it spreads like one
         }
         setActiveLeaf(pane); focusLeaf(pane);
         updateTitles();
