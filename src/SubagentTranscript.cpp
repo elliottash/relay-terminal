@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QScopeGuard>
 #include <QScrollBar>
 #include <QSettings>
 #include <QStackedWidget>
@@ -124,6 +125,16 @@ SubagentTranscriptView::SubagentTranscriptView(const QString &id, QWidget *paren
     m_log->viewport()->installEventFilter(this);
     m_log->setToolTip(QStringLiteral("Click a ▸ tool line to fold its detail open, and again to fold it shut"));
     layout->addWidget(m_log, 1);
+    // "Relaying for main agent · …" over the message box while the agent works (card #XDZP),
+    // where the main pane has its own "Relaying · …" line, in the agent's violet.
+    m_busy = new QLabel; m_busy->setTextFormat(Qt::PlainText);
+    m_busy->setObjectName(QStringLiteral("subagentBusyLine"));
+    m_busy->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_busy->hide();
+    layout->addWidget(m_busy);
+    m_busyClock = new QTimer(this);
+    m_busyClock->setInterval(1000);
+    connect(m_busyClock, &QTimer::timeout, this, [this] { refreshBusy(); });
     m_input = new QLineEdit;
     m_input->setObjectName(QStringLiteral("subagentInput"));
     m_input->setPlaceholderText(QStringLiteral("Message %1 · Enter sends (resumes it if finished) · Esc back to the main agent").arg(id));
@@ -164,6 +175,7 @@ void SubagentTranscriptView::setEnded(bool ended) {
     m_input->setEnabled(!ended);
     m_input->setPlaceholderText(ended ? QStringLiteral("%1 ended with the previous session · Esc back to the main agent").arg(m_id)
                                       : QStringLiteral("Message %1 · Enter sends (resumes it if finished) · Esc back to the main agent").arg(m_id));
+    refreshBusy();
     if (ended) {
         appendNote(restoredMark());
         m_status->setText(QStringLiteral("%1 %2 · ended with the previous session").arg(SubagentModel::statusIcon(m_lastStatus), m_lastStatus));
@@ -181,6 +193,37 @@ void SubagentTranscriptView::setRow(const SubagentRow &row, qint64 elapsedMs) {
     if (row.background) parts << QStringLiteral("background");
     if (row.live() && !row.lastActivity.isEmpty()) parts << row.lastActivity;
     m_status->setText(parts.join(QStringLiteral(" · ")));
+    m_elapsedMs = elapsedMs;
+    m_elapsedSince.start();
+    refreshBusy();
+}
+
+QString SubagentTranscriptView::busyText() const {
+    const bool live = m_lastStatus == QStringLiteral("waiting") || m_lastStatus == QStringLiteral("running");
+    if (m_ended || !live) return {};
+    // What it is doing right now, the way the main pane's line says it: the running call's gerund,
+    // "thinking" between calls, or still waiting for a slot.
+    QString what = QStringLiteral("thinking");
+    if (m_lastStatus == QStringLiteral("waiting")) what = QStringLiteral("waiting to start");
+    for (int i = m_calls.size() - 1; i >= 0; --i) {
+        const ToolCall &call = m_calls.at(i);
+        if (call.done || call.thinking) continue;
+        if (!call.label.running.isEmpty()) what = call.label.running;
+        break;
+    }
+    const qint64 ms = m_elapsedMs + (m_elapsedSince.isValid() ? m_elapsedSince.elapsed() : 0);
+    return QStringLiteral("Relaying for main agent · %1… · %2 s").arg(what).arg(ms / 1000);
+}
+
+void SubagentTranscriptView::refreshBusy() {
+    const QString text = busyText();
+    if (text.isEmpty()) { m_busyClock->stop(); m_busy->clear(); m_busy->hide(); return; }
+    m_busy->setStyleSheet(QStringLiteral("color: %1;").arg(theme::Agent.name()));   // live theme
+    m_busy->setText(text);
+    m_busy->setToolTip(QStringLiteral("This subagent is working for the main agent; "
+                                      "its row in the main agent's running-agents list stops it."));
+    m_busy->show();
+    if (!m_busyClock->isActive()) m_busyClock->start();
 }
 
 void SubagentTranscriptView::focusInput() { m_input->setFocus(Qt::OtherFocusReason); }
@@ -545,6 +588,7 @@ QStringList SubagentTranscriptView::toolLines() const {
 }
 
 void SubagentTranscriptView::handleEvent(const QJsonObject &event) {
+    const auto busy = qScopeGuard([this] { refreshBusy(); });   // the line follows the running call (#XDZP)
     const QString type = event.value(QStringLiteral("event")).toString();
     if (type == QStringLiteral("subagent_transcript")) {
         m_log->clear(); m_atLineStart = true; m_snapshot = true;

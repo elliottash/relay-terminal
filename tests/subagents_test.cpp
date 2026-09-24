@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLineEdit>
+#include <QLabel>
 #include <QPlainTextEdit>
 #include <QSettings>
 #include <QTextBlock>
@@ -61,6 +62,35 @@ void feedTodos(relay::RequestLedgerModel *ledger, const QStringList &items) {
 class SubagentsTests : public QObject {
     Q_OBJECT
 private slots:
+    // Card #XDZP: a working subagent's pane says so above its message box, and for whom.
+    void transcriptBusyLineSaysRelayingForMainAgent() {
+        SubagentTranscriptView view(QStringLiteral("a1"));
+        view.resize(600, 400); view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        auto *line = view.findChild<QLabel *>(QStringLiteral("subagentBusyLine"));
+        QVERIFY(line);
+        QVERIFY(line->isHidden());
+        relay::SubagentRow row;
+        row.id = QStringLiteral("a1"); row.type = QStringLiteral("explore");
+        row.status = QStringLiteral("waiting");
+        view.setRow(row, 0);
+        QCOMPARE(view.busyText(), QStringLiteral("Relaying for main agent · waiting to start… · 0 s"));
+        QVERIFY(line->isVisible());
+        row.status = QStringLiteral("running");
+        view.setRow(row, 12400);
+        QCOMPARE(view.busyText(), QStringLiteral("Relaying for main agent · thinking… · 12 s"));
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_started','tool':'read_file','call_id':'c1',"
+                              "'label':{'kind':'read','running':'reading src/Pane.h','title':'read src/Pane.h'}}}"));
+        QVERIFY(view.busyText().startsWith(QStringLiteral("Relaying for main agent · reading src/Pane.h… · ")));
+        QCOMPARE(line->text(), view.busyText());
+        view.handleEvent(json("{'event':'subagent_event','payload':{'event':'tool_result','tool':'read_file','call_id':'c1',"
+                              "'label':{'kind':'read','title':'read src/Pane.h','ok':true}}}"));
+        QVERIFY(view.busyText().startsWith(QStringLiteral("Relaying for main agent · thinking… · ")));
+        row.status = QStringLiteral("done");
+        view.setRow(row, 30000);
+        QVERIFY(view.busyText().isEmpty());
+        QVERIFY(line->isHidden());
+    }
     void transcriptMarkdownAndThinkingMatchPane() {
         if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENT_SCREENSHOT")) relay::theme::applyTheme(*qApp);
         QSettings settings;

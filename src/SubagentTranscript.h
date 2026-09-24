@@ -13,6 +13,7 @@
 #include "ToolLabel.h"
 #include "CallLines.h"
 #include <QColor>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonObject>
 #include <QPointer>
@@ -29,6 +30,7 @@ class QLineEdit;
 class QPlainTextEdit;
 class QStackedWidget;
 class QTabBar;
+class QTimer;
 class QToolButton;
 
 namespace relay {
@@ -66,6 +68,10 @@ public:
     QString type() const { return m_type; }
     QString description() const { return m_description; }
     QString statusText() const { return m_lastStatus; }
+    // The line above the message box while the agent works (card #XDZP): the main pane's
+    // "Relaying · …" line, said for whom — "Relaying for main agent · reading x… · 12 s". Empty,
+    // and the line hidden, when the agent is not running. For tests.
+    QString busyText() const;
 
     // A tool line whose diff is too big to print inline (`open: {"type": "diff"}`, more than 12
     // changed lines) was clicked. The host opens it in a diff pane (src/DiffView.h); this view has
@@ -117,10 +123,14 @@ private:
     int callAt(int blockNumber) const;
     int indexOfCall(const QString &callId) const;
     void forgetCalls();
+    void refreshBusy();
     QString m_id, m_type, m_description, m_lastStatus;
     QHBoxLayout *m_header = nullptr;
     QToolButton *m_close = nullptr;
-    QLabel *m_title = nullptr, *m_status = nullptr;
+    QLabel *m_title = nullptr, *m_status = nullptr, *m_busy = nullptr;
+    QTimer *m_busyClock = nullptr;   // ticks the seconds while the agent runs
+    qint64 m_elapsedMs = 0;          // as of the last setRow
+    QElapsedTimer m_elapsedSince;    // since the last setRow
     QPlainTextEdit *m_log = nullptr;
     QLineEdit *m_input = nullptr;
     QVector<ToolCall> m_calls;
