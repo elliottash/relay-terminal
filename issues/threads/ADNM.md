@@ -9,3 +9,9 @@ Landed: a4cd23f5 (#C8SV) commits both halves together: `GlobalsPane::refreshVisi
 
 <!-- relay:entry 20260924T044256Z-jx author=agent kind=event model=claude-opus-5-5 pane=c2417ccd turn=8425c7dd49944be6be008fb7a39dea4e/9de2a82a6baa4808ac598d6f18ef7212 -->
 - ✦ agent moved this card · Inbox → Discussing · the discussion started
+
+<!-- relay:entry 20260924T044507Z-y9 author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+- ✦ agent updated this card · appended to `## Resolution`
+
+<!-- relay:entry 20260924T044512Z-67 author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+- ✦ agent moved this card · Discussing → Done · Fixed by #C8SV's a4cd23f5 (both halves committed together); confirmed by this session's verify build passing at that tip. Resolution recorded on the card. · implemented_by glm/glm-5.3 · verified_by glm/glm-5.3

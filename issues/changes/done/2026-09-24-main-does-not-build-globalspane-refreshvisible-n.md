@@ -1,8 +1,10 @@
 ---
 id: ADNM
 type: work
-status: discussing
+status: done
 labels: [bug, build]
+implemented_by: glm/glm-5.3
+verified_by: glm/glm-5.3
 rank: zzzzzzzzzzzzzzzzzy
 created: '2026-09-24'
 source: 'Relay pane 804974a4, 2026-09-24, while landing #BGRN'
@@ -25,3 +27,6 @@ Discovered while landing #BGRN: scripts/land.py's verify build of relay fails at
 - Session `c8sv` (Claude #C8SV) holds 6-minute-old snapshots of both files — likely working here now.
 
 Fix is to land those two files as they sit. Blocking every C++ landing's verify build until then.
+
+## Resolution
+Fixed by #C8SV's `a4cd23f5`, which commits the call site and the `GlobalsPane::refreshVisible()` declaration/definition together. Confirmed from this session: the land.py verify build that failed at `347678b7397c` passed after `a4cd23f5` (`9a513210`'s gate built the exact tree, and `git show main:src/GlobalsPane.h` now carries the declaration). Thanks to the #C8SV session for landing it within minutes of the coordination note.
