@@ -29,7 +29,9 @@ public:
 private:
     void rebuild();
     void selectionChanged();
+    void activateCurrent();
     QString selectedPath() const;
+    bool eventFilter(QObject *object, QEvent *event) override;
     QList<Record> m_projects;
     QStringList m_declined, m_pinned;
     QJsonArray m_sessions;

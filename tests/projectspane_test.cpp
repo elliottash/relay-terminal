@@ -65,6 +65,31 @@ private slots:
         QCOMPARE(path, QStringLiteral("/tmp/declined"));
         QCOMPARE(search->text(), QStringLiteral("declined"));
     }
+    void enterResumesSessionWithoutTheButton() {
+        ProjectsPane pane;
+        Record r; r.path = QStringLiteral("/tmp/demo"); r.name = QStringLiteral("demo");
+        pane.setProjects({r});
+        QJsonObject session{{"session_id", "s1"}, {"title", "Active work"}, {"project_path", r.path}};
+        pane.setActiveSessions({session});
+        QJsonObject resumed;
+        pane.onResume = [&](const QJsonObject &s) { resumed = s; };
+        auto *tree = pane.findChild<QTreeWidget *>();
+        tree->setCurrentItem(tree->topLevelItem(0)->child(0));
+        // Enter on the session row is the Resume button, not a dead key.
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(resumed, session);
+        // Enter from the search box resumes the current row too: type to filter, hit enter.
+        resumed = {};
+        QTest::keyClick(pane.findChild<QLineEdit *>(), Qt::Key_Enter);
+        QCOMPARE(resumed, session);
+        // On a project row Enter only folds or unfolds; it must not fire the resume path.
+        resumed = {};
+        tree->setCurrentItem(tree->topLevelItem(0));
+        const bool wasExpanded = tree->topLevelItem(0)->isExpanded();
+        QTest::keyClick(tree, Qt::Key_Return);
+        QCOMPARE(resumed, QJsonObject());
+        QCOMPARE(tree->topLevelItem(0)->isExpanded(), !wasExpanded);
+    }
 };
 QTEST_MAIN(ProjectsPaneTest)
 #include "projectspane_test.moc"

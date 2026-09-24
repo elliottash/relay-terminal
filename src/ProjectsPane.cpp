@@ -2,6 +2,8 @@
 #include "ProjectsPane.h"
 #include "ProjectPicker.h"
 #include <QDateTime>
+#include <QCoreApplication>
+#include <QKeyEvent>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QHeaderView>
@@ -46,6 +48,8 @@ ProjectsPane::ProjectsPane(QWidget *parent) : QWidget(parent) {
     m_tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_tree->header()->setStretchLastSection(true);
     m_tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_search->installEventFilter(this);
+    m_tree->installEventFilter(this);
     layout->addWidget(m_tree, 1);
     m_details = new QLabel(QStringLiteral("Choose a project to see its details."));
     m_details->setObjectName(QStringLiteral("projectsDetails"));
@@ -157,5 +161,48 @@ void ProjectsPane::selectionChanged() {
             .arg(r.path, r.board == QLatin1String(kBoardRepo) ? QStringLiteral("Board available") : QStringLiteral("No Board yet"), stamp(r.lastAttached), reasonText(r.reason), stamp(r.knownSince)));
         break;
     }
+}
+// Enter is the row's primary action, matching the sessions list in the same pane: a session row
+// goes to that session without the button, and a project row merely folds or unfolds. Everything
+// else keeps the tree's own keys.
+void ProjectsPane::activateCurrent() {
+    auto *row = m_tree->currentItem();
+    if (!row) return;
+    const QString kind = row->data(0, Kind).toString();
+    if (kind == QLatin1String("session")) {
+        if (onResume) onResume(row->data(0, Session).toJsonObject());
+        return;
+    }
+    if (row->childCount() > 0) row->setExpanded(!row->isExpanded());
+}
+bool ProjectsPane::eventFilter(QObject *object, QEvent *event) {
+    if (event->type() != QEvent::KeyPress) return QWidget::eventFilter(object, event);
+    auto *key = static_cast<QKeyEvent *>(event);
+    const int k = key->key();
+    if (object == m_search) {
+        if ((k == Qt::Key_Return || k == Qt::Key_Enter) && key->modifiers() == Qt::NoModifier) {
+            activateCurrent();
+            return true;
+        }
+        if (k == Qt::Key_Up || k == Qt::Key_Down || k == Qt::Key_PageUp || k == Qt::Key_PageDown) {
+            QCoreApplication::sendEvent(m_tree, event);
+            return true;
+        }
+        if (k == Qt::Key_Escape && !m_search->text().isEmpty()) {
+            m_search->clear();
+            return true;
+        }
+    } else if (object == m_tree) {
+        if ((k == Qt::Key_Return || k == Qt::Key_Enter) && key->modifiers() == Qt::NoModifier) {
+            activateCurrent();
+            return true;
+        }
+        if (k == Qt::Key_Slash && key->modifiers() == Qt::NoModifier) {
+            m_search->setFocus();
+            m_search->selectAll();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(object, event);
 }
 }
