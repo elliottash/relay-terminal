@@ -1,0 +1,13 @@
+01-people-empty
+02-people-invite-form-on-build
+03-people-link-made
+04-people-meeting-code
+05-people-knock-guest-and-invite
+06-devices-idle
+  onPairRequest
+  onPairCodeRequest
+07-devices-pairing-offer
+  focus after ask: (none)
+08-devices-ask
+  onPairCodeRevoke RPFU
+09-people-again-offer-withdrawn

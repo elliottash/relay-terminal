@@ -887,34 +887,53 @@ void SharingView::buildDevicesPage()
     m_alwaysOnLine->hide();
     column->addWidget(m_alwaysOnLine);
 
-    // Which address the phone should reach this machine on. Getting it wrong is the most likely
-    // reason a phone says it cannot reach the site, so the choice is in front of the QR code.
-    m_address = new QComboBox;
-    m_address->setObjectName(QStringLiteral("sharingAddressPick"));
-    m_address->setToolTip(QStringLiteral(
-        "The address your phone will open. The tailnet name comes first when tailscale can serve "
-        "it: a real certificate, no warning to accept, and it works from anywhere the phone is "
-        "signed in to your tailnet. relay-terminal.ai works from anywhere with no warning; the "
-        "links go through it instead of this machine. Use the network address when the phone is "
-        "on the same Wi-Fi."));
-    m_address->hide();
-    QObject::connect(m_address, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
-        const QString address = m_address->itemData(index).toString();
-        if (!address.isEmpty() && onAddressPick) onAddressPick(address);
-    });
-    column->addWidget(m_address);
-    // Why the warning-free address is not on offer, when it is not. An absent entry and an entry
-    // that needs one command run once look identical in a list, so the sentence is shown.
-    m_addressNote = plain(QString(), "settingsRowDetail");
-    m_addressNote->hide();
-    column->addWidget(m_addressNote);
-
-    column->addWidget(heading(QStringLiteral("Your devices")));
-    m_deviceRows = new QWidget;
-    m_deviceColumn = new QVBoxLayout(m_deviceRows);
-    m_deviceColumn->setContentsMargins(0, 0, 0, 0);
-    m_deviceColumn->setSpacing(6);
-    column->addWidget(m_deviceRows);
+    // In reading order: a device asking to be paired comes first, because it is the one thing
+    // here with a clock on it; then the offer ("Add a device…", or the QR and the code while an
+    // offer is live) with the address it is made for under it; and the devices already paired
+    // last, because they need nothing from you. The first screenshots of this page had the ask
+    // and the offer below the device list, out of view (#SMDX evidence).
+    // ----- the approval card: what a phone claims to be, and the code that proves it is the
+    // phone in your hand rather than whoever else saw the QR code -------------------------------
+    m_askCard = card();
+    auto *askColumn = qobject_cast<QVBoxLayout *>(m_askCard->layout());
+    m_askText = plain(QString(), "settingsRowLabel");
+    askColumn->addWidget(m_askText);
+    m_askCode = plain(QString(), "settingsRowLabel");
+    m_askCode->setObjectName(QStringLiteral("sharingAskCode"));
+    m_askCode->setAlignment(Qt::AlignCenter);
+    // In points, like every other size in the app (docs/ARCHITECTURE.md, "Legible text"): a pixel
+    // size ignores the desktop's font scaling. 21pt is the 28px this used to be at 96 dpi.
+    m_askCode->setStyleSheet(QStringLiteral("font-size: 21pt; font-weight: 600; letter-spacing: 6px;"));
+    askColumn->addWidget(m_askCode);
+    auto *askRow = new FlowRow;
+    // Refuse is the default and holds the focus. Allowing is a deliberate click — never a stray
+    // Return on a card that just appeared while the person was typing somewhere else.
+    m_askRefuse = button(QStringLiteral("Refuse"),
+                         QStringLiteral("Turn this down. Nothing happens and the device is told."));
+    askRow->add(m_askRefuse);
+    // Watching and typing are separate grants, because they are very different things to hand
+    // out: one shows a device everything on the screen, the other gives it the keyboard of a
+    // live shell. The protocol already enforces the difference on every message.
+    auto *allowView = button(QStringLiteral("Allow viewing"),
+                             QStringLiteral("The device can watch this pane and read its history. "
+                                            "It cannot type."));
+    askRow->add(allowView);
+    auto *allowType = button(QStringLiteral("Allow typing"),
+                             QStringLiteral("The device can watch and, after taking over, run "
+                                            "anything you could."));
+    askRow->add(allowType);
+    askColumn->addWidget(askRow);
+    QObject::connect(m_askRefuse, &QPushButton::clicked, this, [this] { answerAsk(false, QString()); });
+    QObject::connect(allowView, &QPushButton::clicked, this,
+                     [this] { answerAsk(true, QStringLiteral("view")); });
+    QObject::connect(allowType, &QPushButton::clicked, this,
+                     [this] { answerAsk(true, QStringLiteral("full")); });
+    m_askCard->hide();
+    column->addWidget(m_askCard);
+    m_askResult = plain(QString(), "settingsRowLabel");
+    m_askResult->setObjectName(QStringLiteral("sharingAskResult"));
+    m_askResult->hide();
+    column->addWidget(m_askResult);
 
     m_addDevice = button(QStringLiteral("Add a device…"),
                          QStringLiteral("A code to type on your phone, or a QR to scan. It sees "
@@ -1006,48 +1025,38 @@ void SharingView::buildDevicesPage()
     m_pairCard->hide();
     column->addWidget(m_pairCard);
 
-    // ----- the approval card: what a phone claims to be, and the code that proves it is the
-    // phone in your hand rather than whoever else saw the QR code -------------------------------
-    m_askCard = card();
-    auto *askColumn = qobject_cast<QVBoxLayout *>(m_askCard->layout());
-    m_askText = plain(QString(), "settingsRowLabel");
-    askColumn->addWidget(m_askText);
-    m_askCode = plain(QString(), "settingsRowLabel");
-    m_askCode->setObjectName(QStringLiteral("sharingAskCode"));
-    m_askCode->setAlignment(Qt::AlignCenter);
-    // In points, like every other size in the app (docs/ARCHITECTURE.md, "Legible text"): a pixel
-    // size ignores the desktop's font scaling. 21pt is the 28px this used to be at 96 dpi.
-    m_askCode->setStyleSheet(QStringLiteral("font-size: 21pt; font-weight: 600; letter-spacing: 6px;"));
-    askColumn->addWidget(m_askCode);
-    auto *askRow = new FlowRow;
-    // Refuse is the default and holds the focus. Allowing is a deliberate click — never a stray
-    // Return on a card that just appeared while the person was typing somewhere else.
-    m_askRefuse = button(QStringLiteral("Refuse"),
-                         QStringLiteral("Turn this down. Nothing happens and the device is told."));
-    askRow->add(m_askRefuse);
-    // Watching and typing are separate grants, because they are very different things to hand
-    // out: one shows a device everything on the screen, the other gives it the keyboard of a
-    // live shell. The protocol already enforces the difference on every message.
-    auto *allowView = button(QStringLiteral("Allow viewing"),
-                             QStringLiteral("The device can watch this pane and read its history. "
-                                            "It cannot type."));
-    askRow->add(allowView);
-    auto *allowType = button(QStringLiteral("Allow typing"),
-                             QStringLiteral("The device can watch and, after taking over, run "
-                                            "anything you could."));
-    askRow->add(allowType);
-    askColumn->addWidget(askRow);
-    QObject::connect(m_askRefuse, &QPushButton::clicked, this, [this] { answerAsk(false, QString()); });
-    QObject::connect(allowView, &QPushButton::clicked, this,
-                     [this] { answerAsk(true, QStringLiteral("view")); });
-    QObject::connect(allowType, &QPushButton::clicked, this,
-                     [this] { answerAsk(true, QStringLiteral("full")); });
-    m_askCard->hide();
-    column->addWidget(m_askCard);
-    m_askResult = plain(QString(), "settingsRowLabel");
-    m_askResult->setObjectName(QStringLiteral("sharingAskResult"));
-    m_askResult->hide();
-    column->addWidget(m_askResult);
+    // Which address the phone should reach this machine on. Getting it wrong is the most likely
+    // reason a phone says it cannot reach the site, so the choice is in front of the QR code.
+    m_address = new QComboBox;
+    m_address->setObjectName(QStringLiteral("sharingAddressPick"));
+    m_address->setToolTip(QStringLiteral(
+        "The address your phone will open. The tailnet name comes first when tailscale can serve "
+        "it: a real certificate, no warning to accept, and it works from anywhere the phone is "
+        "signed in to your tailnet. relay-terminal.ai works from anywhere with no warning; the "
+        "links go through it instead of this machine. Use the network address when the phone is "
+        "on the same Wi-Fi."));
+    m_address->hide();
+    QObject::connect(m_address, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
+        const QString address = m_address->itemData(index).toString();
+        if (!address.isEmpty() && onAddressPick) onAddressPick(address);
+    });
+    column->addWidget(m_address);
+    // Why the warning-free address is not on offer, when it is not. An absent entry and an entry
+    // that needs one command run once look identical in a list, so the sentence is shown.
+    m_addressNote = plain(QString(), "settingsRowDetail");
+    m_addressNote->hide();
+    column->addWidget(m_addressNote);
+
+    column->addWidget(heading(QStringLiteral("Your devices")));
+    m_deviceRows = new QWidget;
+    m_deviceColumn = new QVBoxLayout(m_deviceRows);
+    m_deviceColumn->setContentsMargins(0, 0, 0, 0);
+    m_deviceColumn->setSpacing(6);
+    column->addWidget(m_deviceRows);
+
+
+
+
 
     column->addStretch(1);
 }
@@ -1191,6 +1200,7 @@ void SharingView::startPairing()
     m_addDevice->hide();
     m_pairStatus->setText(QStringLiteral("Starting…"));
     m_pairCard->show();
+    m_devicesScroll->ensureWidgetVisible(m_pairCard);
     refreshPairingService();
 }
 
@@ -1405,6 +1415,7 @@ void SharingView::showAsk(const DeviceAsk &ask)
     m_askCode->setText(ask.code);
     m_askCard->show();
     refreshTabs();
+    m_devicesScroll->ensureWidgetVisible(m_askCard);
     // Bring the question forward, with Refuse holding the focus. Focus set while the card was
     // hidden would not stick, so it is set here, the moment there is something to refuse.
     showPage(Page::Devices);
