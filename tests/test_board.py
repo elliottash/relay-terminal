@@ -550,6 +550,25 @@ class VerifyBlockTests(TempBoardTest):
         self.assertNotIn("verify", B.ALLOWED_FIELDS["memory"])
         self.assertIsNone(B.verify_block(B.new_card("work", "None yet", "ready", card_id="M3XJ")))
 
+    def test_a_comma_or_bracket_in_criteria_is_quoted_and_comes_back_whole(self):
+        # #MSJ0: an unquoted comma inside the flow map split the block on re-read and the card
+        # stopped parsing at all; the writer quotes what `_split_flow` would cut at.
+        card = B.new_card("work", "Commas", "executing", card_id="K7Q2", rank="0m")
+        criteria = "parses clean, warns on a bad key [not fatal], and keeps {the skill}"
+        card.set("verify", B.validate_verify(dict(self.GOOD, criteria=criteria, human="required")))
+        card.set("labels", ["a, b", "plain"])
+        text = card.to_text()
+        self.assertIn("criteria: 'parses clean, warns on a bad key [not fatal], and keeps {the skill}'", text)
+        self.assertIn("labels: ['a, b', plain]", text)
+        again = B.Card.parse(text)
+        self.assertEqual(B.verify_block(again)["criteria"], criteria)
+        self.assertEqual(again.front["labels"], ["a, b", "plain"])
+        # A top-level scalar keeps its plain spelling, and so does a bare colon inside a
+        # collection (URLs, `run:unit` signals): existing files stay byte-identical.
+        self.assertEqual(B.yaml_value("one, two"), "one, two")
+        self.assertEqual(B.yaml_value({"signal": "run:unit", "evidence": ["https://x.test/a?b=1"]}),
+                         "{signal: run:unit, evidence: [https://x.test/a?b=1]}")
+
     def test_check_errors_on_an_invalid_block_and_warns_when_a_working_card_has_none(self):
         bad = B.new_card("work", "Bad block", "executing", card_id="K7Q2", rank="0m",
                          verify={"artifact": "code", "primary": "vibes", "effort": "low"})

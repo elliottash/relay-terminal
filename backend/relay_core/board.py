@@ -575,11 +575,30 @@ def yaml_scalar(value) -> str:
     return _quote(text) if _needs_quote(text) else text
 
 
+#: What splits a scalar inside a flow collection on the way back in: `_split_flow` cuts at a
+#: comma and counts brackets.  A bare colon is fine there (`_split_key` wants `: `), so URLs and
+#: `run:unit` signals in `links` stay plain and existing files stay byte-identical.
+_FLOW_SPLIT_RE = re.compile(r"[,\[\]{}]")
+
+
+def _flow_item(value) -> str:
+    """A scalar or collection inside `[...]` / `{...}`.
+
+    A `verify.criteria` written as `parses clean, and warns` split at the comma on re-read and
+    the whole card stopped parsing (#MSJ0), so a scalar holding flow punctuation is quoted.
+    """
+    if isinstance(value, (list, tuple, dict)):
+        return yaml_value(value)
+    if isinstance(value, str) and _FLOW_SPLIT_RE.search(value):
+        return _quote(value)
+    return yaml_scalar(value)
+
+
 def yaml_value(value) -> str:
     if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(yaml_value(v) for v in value) + "]"
+        return "[" + ", ".join(_flow_item(v) for v in value) + "]"
     if isinstance(value, dict):
-        return "{" + ", ".join(f"{yaml_scalar(k)}: {yaml_value(v)}" for k, v in value.items()) + "}"
+        return "{" + ", ".join(f"{yaml_scalar(k)}: {_flow_item(v)}" for k, v in value.items()) + "}"
     return yaml_scalar(value)
 
 
