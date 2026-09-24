@@ -15,3 +15,6 @@ Owner: “i dont like the terminology "Try It". that doesnt make sense for a hum
 
 <!-- relay:entry 20260924T025339Z-4h author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
 - ✦ agent updated this card · replaced `## Plan`
+
+<!-- relay:entry 20260924T030015Z-cc author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/8ad1f26287f14ba7b2b36b0f49a5d081 -->
+- ✦ agent updated this card · appended to `## Decisions`

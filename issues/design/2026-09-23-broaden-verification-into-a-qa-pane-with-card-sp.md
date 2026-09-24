@@ -48,6 +48,7 @@ Asked once per task, cheapest and strongest oracle first. The agent stops at the
 
 ## Decisions
 Owner's stated direction, 2026-09-23: “i dont like the terminology "Try It". that doesnt make sense for a human veridying the results of an ML analysis for example.” “i think we need a separate QA pane where human involvement will differ based on the goals of the card.” “i think i want to expand the verification concept . a card has a designation of whether human QA is needed. in that case, "verified" will require that.” The designation and pane behavior still need design.
+- 2026-09-23, owner: "ideally, most of this is just in the agent's work and the user doesn't see it directly." Applied across the build: the `verify` block, the skill profile and the policy floor are agent-facing data and rules; the user meets them only as a one-line review request when a person is needed, an "unverified until …" state, a refusal sentence, and a single Options switch (ask | automatic). No BOARD.md column, no Skills-dialog line, no placeholder strip on cards that need no person.
 
 ## Plan
 **Goal.** Build the whole QA ladder, phased so each step adds one visible thing and nothing asks the user a question they did not ask for.
