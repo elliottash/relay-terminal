@@ -9,7 +9,7 @@ session: 0e39b062-479d-4ac5-8b40-973c81d6c97b
 rank: zzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 verify: {artifact: visual, primary: person, also: [script], human: optional, criteria: 'The live boxed transcript has a violet outline and violet `Agent - [model]` header in a remote session or program.', sign_off: none, effort: low, stakes: rework, blast: case}
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-ee11-agent-box/], related: [], github: null}
+links: {plans: [], commits: [b0532fb5b2a9eb9e1c8c52d581414f2077742048], evidence: [docs/qa_evidence/2026-09-24-ee11-agent-box/], related: [], github: null}
 ---
 # Violet agent transcript box in remote sessions and programs
 
