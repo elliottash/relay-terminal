@@ -505,6 +505,29 @@ memory: {autonomy: auto}
 A tab names either a `folder` (a category) or a `filter` across categories. Its presence is also
 the switch that tells Relay and the agents that this repository has a Board.
 
+**QA policy (#C3Q2).** An optional `qa:` block tunes the QA policy floor for this project, over
+the one global switch in Options › Agent › QA (`configure.qa`) and the defaults in
+`relay_core.qa_policy`. Every key is optional; the project value overrides the global one.
+
+```yaml
+qa: {verification: ask, ask_at_stakes: money, ai_may_gate_after: never, sample_after: never}
+```
+
+- `verification:` `ask` (the default: a card whose plan needs no person still waits in
+  needs-verification for the user to close) or `automatic` (a verifier's pass closes it).
+- `ask_at_stakes:` the `verify.stakes` word from which `human` is raised to `required` —
+  `nuisance`, `rework`, `money` (default), `reputation`, `harm` — or `always` / `never`.
+- `ai_may_gate_after:` and `sample_after:` `never` (default), `always`, or a number of verified
+  cases the reviewer must have on record (the #95VZ ledger; until it lands a number reads as
+  "not yet") before `ai-text` / `ai-visual` may be the `primary` rung, or a `sample` line may
+  stand. AI gating also needs the card's `qa` block to name a verifier outside the author's lineage.
+
+The worker applies the floor silently to every `verify` block it writes — `human` raised, an AI
+primary moved to `also` with the next non-AI rung (or `person`) as primary, a `sample` dropped —
+and reports it only in the tool result the agent reads (`qa_policy` notes); `board_read` states
+the effective floor in one `qa_policy` line, where a value a key does not take is named and
+ignored. No card changes when the file is edited: the floor meets a block when it is written.
+
 **Sections.** `columns:` is the ordered list of sections the one list is divided into, and two
 optional keys say the rest:
 

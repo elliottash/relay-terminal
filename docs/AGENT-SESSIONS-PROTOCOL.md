@@ -4228,6 +4228,27 @@ beginning `Receipt:` in `## Verdict` or `## Execution Summary` when `sign_off` �
 sentence, the one place a user meets the block. Clearing `deferred`
 goes through `fields.verify` and the update's thread event records who cleared it.
 
+**The QA policy floor (#C3Q2, v4.10, 2026-09-23)** is `relay_core.qa_policy`, three layers deep:
+defaults in code (`ask_at_stakes: money`, `ai_may_gate_after: never`, `sample_after: never`,
+`verification: ask`), the global switch `configure.qa: {verification: ask|automatic}` from
+Options › Agent › QA (the only row a user sees; `parse_board` carries it with the `board`
+block), and a project's `board.yaml qa:` block, which overrides the global value key by key
+(docs/BOARD-FORMAT.md §4). `BoardTools` applies it **silently** to every block it writes —
+`fields.verify`, and the block a claim or update defaults from a skill profile — before the
+block is stored: `stakes` at or above the floor raises `human` to `required` (a missing
+`criteria` is filled with one line to replace); `ai-text` / `ai-visual` as `primary` moves to
+`also` and the next non-AI rung in `also`, or `person`, becomes `primary`, unless the policy
+allows AI gating *and* the card's `qa` block names a verifier outside the author's lineage; a
+`sample` is dropped unless sampling is allowed. What it did is a list of one-sentence notes
+under `qa_policy` in the `board_update_card` / `board_claim` result, never in a thread event or
+on a row, and `board_read` carries the effective floor as one `qa_policy` line. The switch:
+under `ask`, a verifying session moving a card out of `needs-verification` or a QA lane to
+`done` when the plan needs no person (`human` not `required`) is refused in one sentence
+(`board_refused`, `requires: "user_close"`, `offer: "needs-verification"`) — the card is the
+user's to close; under `automatic` the move proceeds and the result's `qa_policy` string says
+`closed automatically: …` for the reply's one line. The owner's own close, a self-close out
+of `executing`, a card with no block and a card whose person has answered are not gated.
+
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
 Issue `#G8DK`. An alias is a saved terminal command or agent prompt with `{{parameter}}`

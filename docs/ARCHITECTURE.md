@@ -3130,7 +3130,9 @@ keybindings.json).
   opens the Actions palette over the same catalog (#MAGP).
 - **Options** — Ctrl+Shift+O and Ctrl+, (`app.settings`), and the gear in the title bar. One sub-tab
   per section (General, Appearance, Models, Terminal, Agent, Voice, Privacy, Keyboard) and the rows as
-  real controls.
+  real controls. The Agent tab's QA heading holds one row, *Verification* (ask | automatic, QSettings
+  `qa/verification`, sent as `configure.qa.verification`): the only user-facing piece of the QA policy
+  floor in `relay_core.qa_policy` (#C3Q2), whose other keys are code defaults and `board.yaml qa:`.
 
 Each mode is its own pane, beside the focused pane in the splitter layout like the explorer and the
 Board — a full pane, not a strip over the right edge (owner, 2026-09-18). **Both can be open
