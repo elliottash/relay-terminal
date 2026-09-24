@@ -21,7 +21,6 @@
 #include "Pane.h"
 
 #include <QApplication>
-#include <QAbstractItemView>
 #include <QComboBox>
 #include <QPointer>
 #include <QTemporaryDir>
@@ -1001,14 +1000,6 @@ void effortMenuFollowsTheActiveRoleModel()
     console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"preset", "guest:codex"},
                                            {"model", "gpt-6-astra"}, {"agent_role", "high"}, {"effort", "max"}});
     CHECK_EQ(levels(), (QStringList{"low", "medium", "high", "xhigh", "max", "ultra"}));
-    if (const QString capture = qEnvironmentVariable("RELAY_EFFORT_CAPTURE"); !capture.isEmpty()) {
-        console.resize(950, 500);
-        console.show();
-        effort->showPopup();
-        QApplication::processEvents();
-        CHECK(effort->view()->grab().save(capture));
-        effort->hidePopup();
-    }
     console.setAgentRole(QStringLiteral("high"), false,
                          {QStringLiteral("guest:codex|gpt-6-sol"), QStringLiteral("max")});
     console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"preset", "guest:codex"},
