@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzz
 created: '2026-09-24'
 verify: {artifact: visual, primary: probe, also: [script], human: optional, criteria: The empty Board prompt has no dead band and a live turn remains readable., sign_off: none, effort: low}
 source: Relay pane, 2026-09-24
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-board-empty-console/board-empty-console.png], related: [], github: null}
+links: {plans: [], commits: [d56c92747bdc635dd7800af458ae88c53db32085], evidence: [docs/qa_evidence/2026-09-24-board-empty-console/board-empty-console.png], related: [], github: null}
 ---
 # Collapse empty Board agent transcript above prompt
 
