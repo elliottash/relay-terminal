@@ -1972,19 +1972,20 @@ void Pane::rebuildQueueStrip() {
         m_terminalQueueList->setVisible(terminalRows > 0);
         if (current) m_queueList->scrollToItem(current);
         if (terminalCurrent) m_terminalQueueList->scrollToItem(terminalCurrent);
-        // Card #XCXD: each lane owns its state out loud — Agent (prompts and steers, the
-        // worker's queue paused counts here) and Terminal (commands). One resource pausing must
-        // not read as the other's queue stopping, and the strip header no longer offers a
-        // Resume or a Clear that would blur them. The agent lane's Resume is resumeAgentQueue(),
-        // which resumes the worker's queue too; the terminal lane's is its own.
+        // Card #XCXD: each lane owns its state — Agent (prompts and steers, the worker's queue
+        // paused counts here) and Terminal (commands). One resource pausing must not read as the
+        // other's queue stopping, and the strip header no longer offers a Resume or a Clear that
+        // would blur them. The agent lane's Resume is resumeAgentQueue(), which resumes the
+        // worker's queue too; the terminal lane's is its own. Owner, 2026-09-24: no "Agent · N" /
+        // "Terminal · N" labels — which lane is which is obvious from the rows, so a header only
+        // exists when it has something to do: a Resume, or the agent lane's Clear.
         auto laneHeader = [this, queued](bool agentLane, int rows, bool lanePaused) {
             auto *head = new QHBoxLayout;
-            auto *label = new QLabel(lanePaused ? QStringLiteral("%1 · %2 · paused").arg(agentLane ? QStringLiteral("Agent") : QStringLiteral("Terminal")).arg(rows)
-                                                : QStringLiteral("%1 · %2").arg(agentLane ? QStringLiteral("Agent") : QStringLiteral("Terminal")).arg(rows));
-            label->setObjectName(agentLane ? QStringLiteral("agentLaneLabel") : QStringLiteral("terminalLaneLabel"));
-            label->setToolTip(agentLane ? QStringLiteral("Prompts and steers for the agent turn · Esc stops it, Enter on an empty prompt box resumes the lane")
-                                        : QStringLiteral("Commands waiting for the terminal · Alt+Esc interrupts it, Esc when it is all that runs"));
-            head->addWidget(label);
+            if (lanePaused) {
+                auto *label = new QLabel(QStringLiteral("paused"));
+                label->setObjectName(agentLane ? QStringLiteral("agentLaneLabel") : QStringLiteral("terminalLaneLabel"));
+                head->addWidget(label);
+            }
             head->addStretch(1);
             if (lanePaused) {
                 auto *resume = new QToolButton; resume->setText(QStringLiteral("Resume")); resume->setFocusPolicy(Qt::NoFocus);
@@ -2007,22 +2008,25 @@ void Pane::rebuildQueueStrip() {
             return head;
         };
         const bool agentLanePaused = (agentQueuePaused() || workerPaused) && !held;
+        const bool agentLaneHasClear = int(m_entries.size()) + queued.size() > 1;
+        const bool agentHead = agentLanePaused || agentLaneHasClear;
+        const bool terminalHead = m_entriesPaused;
         const bool dual = agentRows > 0 && terminalRows > 0;
         if (dual) {
             const bool stacked = m_queueStrip->width() < 640;
             m_queueLanesStacked = stacked;
             if (stacked) {
-                layout->addLayout(laneHeader(true, agentRows, agentLanePaused));
+                if (agentHead) layout->addLayout(laneHeader(true, agentRows, agentLanePaused));
                 layout->addWidget(m_queueList);
-                layout->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
+                if (terminalHead) layout->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
                 layout->addWidget(m_terminalQueueList);
             } else {
                 auto *side = new QHBoxLayout;
                 auto *left = new QVBoxLayout;
-                left->addLayout(laneHeader(true, agentRows, agentLanePaused));
+                if (agentHead) left->addLayout(laneHeader(true, agentRows, agentLanePaused));
                 left->addWidget(m_queueList);
                 auto *right = new QVBoxLayout;
-                right->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
+                if (terminalHead) right->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
                 right->addWidget(m_terminalQueueList);
                 side->addLayout(left, 1);
                 side->addLayout(right, 1);
@@ -2030,13 +2034,13 @@ void Pane::rebuildQueueStrip() {
             }
         } else if (agentRows > 0) {
             m_queueLanesStacked = false;
-            layout->addLayout(laneHeader(true, agentRows, agentLanePaused));
+            if (agentHead) layout->addLayout(laneHeader(true, agentRows, agentLanePaused));
             layout->addWidget(m_queueList);
         } else if (terminalRows > 0 || m_entriesPaused) {
             // Only a lane with rows (or a paused one, for its Resume) gets a header: a running
-            // shell with nothing waiting shows its stop button and no "Terminal · 0".
+            // shell with nothing waiting shows its stop button and no lane furniture at all.
             m_queueLanesStacked = false;
-            layout->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
+            if (terminalHead) layout->addLayout(laneHeader(false, terminalRows, m_entriesPaused));
             layout->addWidget(m_terminalQueueList);
         }
         placeQueueStrip();

@@ -1712,6 +1712,7 @@ int main(int argc, char **argv)
     if (app.arguments().contains(QStringLiteral("--h2kq-only"))) {
         relay::theme::applyTheme(app);
         cases::h2kqCases();
+        cases::h2kqQueueLabelCases();
         if (!failures) std::fprintf(stdout, "h2kq: all cases passed\n");
         return failures ? 1 : 0;
     }
@@ -1769,6 +1770,7 @@ int main(int argc, char **argv)
     cases::rewindRemovesOnlyTheBranchAndLinksItsCompleteText();
     cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
     cases::h2kqCases();
+    cases::h2kqQueueLabelCases();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 20 cases, all passed\n");

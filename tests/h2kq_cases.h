@@ -60,7 +60,8 @@ void h2kqCases()
         pane.resize(900, 650);
         xcxdPump(50);
         h2kqRun(pane, QStringLiteral("sleep 20"), "esc-label");
-        for (int i = 0; i < 100 && !h2kqBusyText(pane).contains(QStringLiteral("Esc stops")); ++i)
+        // The name resolves on the shell poll, a beat after the line itself appears.
+        for (int i = 0; i < 100 && !h2kqBusyText(pane).contains(QStringLiteral("sleep… · Esc stops")); ++i)
             xcxdPump(25);
         // The Relaying line names the program and its key (card #H2KQ): sleep's key is Esc.
         CHECK(h2kqBusyText(pane).contains(QStringLiteral("sleep")));
@@ -173,6 +174,33 @@ void h2kqCases()
         CHECK(action && action->text().startsWith(QStringLiteral("Take control")));
         h2kqKey(pane, Qt::Key_Escape, Qt::AltModifier);
         xcxdPump(50);
+    }
+}
+
+void h2kqQueueLabelCases()
+{
+    // ----- no "Agent · N" / "Terminal · N" labels (owner, 2026-09-24: it is obvious from the
+    // rows); a paused lane says just "paused" next to its Resume --------------------------------
+    {
+        QTemporaryDir homeDir;
+        StubContext ctx;
+        ctx.workspace = homeDir.path();
+        Pane pane(ctx.workspace, ctx.workspace, false, relay::defaultEngineCore(), &ctx);
+        pane.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+        pane.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
+        pane.initRestore(QJsonObject{{"queue", xcxdMixedQueue()}});
+        pane.show();
+        pane.resize(900, 650);
+        xcxdPump(100);
+        CHECK_EQ(pane.queuedPrompts(), 3);   // the rows are there, labeled only by themselves
+        for (QLabel *label : pane.findChildren<QLabel *>()) {
+            CHECK(!label->text().startsWith(QStringLiteral("Agent ·")));
+            CHECK(!label->text().startsWith(QStringLiteral("Terminal ·")));
+        }
+        CHECK(xcxdLaneButton(pane, true, QStringLiteral("Resume")) != nullptr);   // the paused lane keeps its Resume
+        auto *paused = pane.findChild<QLabel *>(QStringLiteral("agentLaneLabel"));
+        CHECK(paused != nullptr);
+        if (paused) CHECK_EQ(paused->text(), QStringLiteral("paused"));
     }
 }
 
