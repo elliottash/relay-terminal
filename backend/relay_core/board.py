@@ -500,6 +500,34 @@ def verified(card: "Card") -> bool:
     return not unverified_reasons(card)
 
 
+def human_review_priority(card: "Card") -> int:
+    """A small, actionable queue signal for the Review pane (#BX7B).
+
+    Zero means there is no person's step to take now. The row protocol sends only this
+    number, never the agent's verify plan; the Review pane reads the selected card for
+    the actual question. Stakes and uncertainty rank the queue, with a sign-off above
+    an equally ranked ordinary review.
+    """
+    if card.type != "work" or card.status not in (
+            "needs-verification", "needs-qa-human", "needs-review", "needs-qa", "waiting"):
+        return 0
+    try:
+        verify = verify_block(card)
+    except BoardError:
+        return 0
+    if not verify or verify.get("deferred"):
+        return 0
+    questions = human_qa_questions(card.body)
+    needs_answer = verify.get("human") == "required" and not any(done for _, done in questions)
+    needs_sign_off = verify.get("sign_off", "none") != "none" and not has_receipt(card.body)
+    if not (needs_answer or needs_sign_off):
+        return 0
+    stakes = {"nuisance": 1, "rework": 2, "money": 3, "reputation": 4, "harm": 5}
+    doubt = {"script": 1, "probe": 1, "metric": 2, "ai-text": 2, "ai-visual": 3,
+             "level": 3, "pairwise": 3, "person": 3, "world": 3}
+    return stakes.get(verify.get("stakes"), 2) * doubt.get(verify.get("primary"), 2) + (1 if needs_sign_off else 0)
+
+
 def verify_note(card: "Card") -> str:
     """The one row-level text a user sees of the `verify` block (owner steer 2026-09-23: the
     block itself is agent-facing, in `board_read` and the `board_card` event): `unverified

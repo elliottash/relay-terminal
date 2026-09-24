@@ -715,6 +715,34 @@ class VerifiedTests(TempBoardTest):
         write(self.root / "features" / "done" / "2026-09-23-a.md", card.to_text())
         self.assertEqual([p.code for p in self.board.check() if p.code == "not_verified"], [])
 
+    def test_review_queue_contains_only_an_actionable_person_step(self):
+        needs_answer = self.card("## Verdict\npass\n", human="required", criteria="read the result",
+                                 stakes="rework")
+        self.assertGreater(B.human_review_priority(needs_answer), 0)
+        needs_answer.body += "## Human QA\n1. Read the result?\n    Answer: yes\n"
+        self.assertEqual(B.human_review_priority(needs_answer), 0)
+        needs_answer.set("verify", {"artifact": "text", "primary": "person", "effort": "high",
+                                    "human": "none", "sign_off": "publish", "stakes": "reputation"})
+        self.assertGreater(B.human_review_priority(needs_answer), 0)
+        needs_answer.body += "## Execution Summary\nReceipt: owner approved publication\n"
+        self.assertEqual(B.human_review_priority(needs_answer), 0)
+        machine = self.card("## Verdict\npass\n", human="none")
+        self.assertEqual(B.human_review_priority(machine), 0)
+
+    def test_review_queue_waits_for_the_artifact_and_ranks_stakes_by_doubt(self):
+        card = self.card(human="required", criteria="read it", stakes="rework")
+        ordinary = B.human_review_priority(card)
+        card.set("status", "executing")
+        self.assertEqual(B.human_review_priority(card), 0)
+        card.set("status", "needs-verification")
+        card.set("verify", {"artifact": "text", "primary": "person", "effort": "high",
+                            "human": "required", "criteria": "read it", "stakes": "harm"})
+        self.assertGreater(B.human_review_priority(card), ordinary)
+        card.set("verify", {"artifact": "text", "primary": "person", "effort": "high",
+                            "human": "required", "criteria": "read it", "stakes": "harm",
+                            "deferred": "until the study runs"})
+        self.assertEqual(B.human_review_priority(card), 0)
+
 
 class PrivateTests(TempBoardTest):
     def test_private_card_under_the_private_root(self):

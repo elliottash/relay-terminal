@@ -2021,6 +2021,9 @@ class BoardTools:
                 "updated": self._updated_at(card),
                 "milestone": card.front.get("milestone"),
                 "topic": card.front.get("topic"),
+                # A Review pane needs to know only which cards have an actionable person step
+                # and their order. The full verify plan stays in board_card / board_read.
+                "review_priority": B.human_review_priority(card),
                 # Owner steer 2026-09-23: rows carry no verify summary — the block is
                 # agent-facing in `board_read` — only the deferred note the user sees (#1AA6),
                 # as the bare condition ("the pilot runs"), absent otherwise.
