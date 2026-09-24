@@ -1,7 +1,7 @@
 ---
 id: BGRN
 type: work
-status: executing
+status: needs-verification
 labels: [feature, panes, switchboard, notifications]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: m
 created: '2026-09-23'
 verify: {artifact: system, primary: person, also: [], human: none, criteria: 'With any agent active in a pane (native turn, guest CLI turn, or live subagents), the composer''s Run in background button and Ctrl+Alt+Enter move that pane to the background, draft untouched; idle + empty composer still says ''Type a task before running in background.''; an asking agent still says ''Answer the agent''s question before moving it to background.''', sign_off: none, effort: medium, stakes: rework}
 source: Owner in a Relay pane (520ccb90), 2026-09-22 20:11 to 2026-09-23; discussed with Codex, card written by Claude Code
-links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3, 676961d64fba9dc43f9337e174cce97d23856a1d, 5c57dde24ea1502eec0f9d9cb7ebf3a4044b1bfd], evidence: [docs/qa_evidence/2026-09-23-bgrn/, docs/qa_evidence/2026-09-23-bgrn-shortcut/], related: [RG0Z], github: null}
+links: {plans: [], commits: [854c097de2cf7d2903aa55738529185c63415f7e, 3ac63e27231f964b4dd66c2fbfc4ce2d114581d3, 676961d64fba9dc43f9337e174cce97d23856a1d, 5c57dde24ea1502eec0f9d9cb7ebf3a4044b1bfd], evidence: [docs/qa_evidence/2026-09-23-bgrn/, docs/qa_evidence/2026-09-23-bgrn-shortcut/, docs/qa_evidence/2026-09-24-bgrn-active-agent/], related: [RG0Z], github: null}
 ---
 # Run in background: hand a task to an agent, get the pane back, hear only when it needs you or is done
 

@@ -124,3 +124,6 @@ User re-sent the request to this pane after 3h15m of no progress and no snapshot
 
 <!-- relay:entry 20260924T043746Z-kq author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
 - ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260924T044411Z-1m author=agent kind=event model=glm-5.3 pane=804974a4 turn=f7f5845743eb494180db888dac56d352/972f3edfc87e43ecb5f791de6745c943 -->
+- ✦ agent moved this card · Executing → Needs verification · Active-agent increment landed in 9a513210: Run in background button and Ctrl+Alt+Enter move any active agent (native turn, guest CLI turn, live subagents) to the background as-is; guest panes need no configured agent and the draft is never submitted. Verify block: person, steps in the evidence README. · evidence docs/qa_evidence/2026-09-24-bgrn-active-agent/ · implemented_by glm/glm-5.3
