@@ -234,35 +234,23 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
         if (pane && pane->queuePaused())
             items << actionItem(agent, QStringLiteral("Resume queue"), QStringLiteral("Paused after a stop, failure or edit"), QStringLiteral("agent.resumeQueue"));
         {
-            // Sharing (#W5N2). Two rows, because they are two different things: hand out a way in,
-            // and look after the people who came in.
+            // Sharing (#W5N2, #SMDX). Two rows, because they are two different things: hand out
+            // a way in, and look after your devices and the people who came in. Pairing a phone,
+            // joining a session and opening another desktop's pane are the plug menu's and the
+            // palette's, not this menu's.
             relay::RemoteShare &share = relay::RemoteShare::instance();
             const bool shared = pane && share.isSharing(pane->sessionToken());
             const int guests = pane ? share.sharingModel().guestsOn(pane->sessionToken()) : 0;
             const int waiting = share.sharingModel().waiting();
-            // Pairing your own phone first: it is the common case, and it is the one that turns
-            // remote control on by itself (#FR1C).
-            items << actionItem(terminal, QStringLiteral("Pair a phone…"),
-                                relay::RemoteShare::instance().alwaysOn()
-                                    ? QStringLiteral("The code to type on it, and the QR · remote control is on")
-                                    : QStringLiteral("Turns remote control on, then shows the code to type on the phone"),
-                                QStringLiteral("remote.pair"));
             items << actionItem(terminal, QStringLiteral("Share this pane…"),
-                                shared ? QStringLiteral("Already shared · pair another phone, or invite someone")
-                                       : QStringLiteral("Pair your phone, or make a link for somebody else"),
+                                shared ? QStringLiteral("Already shared · invite someone else")
+                                       : QStringLiteral("Invite someone to this pane, or share more"),
                                 QStringLiteral("pane.share"));
-            if (share.sharingModel().anyShared())
-                items << actionItem(terminal, QStringLiteral("Sharing"),
-                                    waiting > 0 ? QStringLiteral("%1 waiting for you").arg(waiting)
-                                    : guests > 0 ? QStringLiteral("%1 here · invites, roles and what is waiting").arg(guests)
-                                                 : QStringLiteral("Who is here, live invites, and what is waiting for you"),
-                                    QStringLiteral("pane.sharing"));
-            items << actionItem(terminal, QStringLiteral("Open a shared pane…"),
-                                QStringLiteral("A pane your other desktop shares, here as one of your devices"),
-                                QStringLiteral("remote.openShared"));
-            items << actionItem(terminal, QStringLiteral("Join a shared session…"),
-                                QStringLiteral("The meeting code and PIN someone gave you · /join CODE"),
-                                QStringLiteral("remote.join"));
+            items << actionItem(terminal, QStringLiteral("Sharing"),
+                                waiting > 0 ? QStringLiteral("%1 waiting for you").arg(waiting)
+                                : guests > 0 ? QStringLiteral("%1 here · invites, roles and what is waiting").arg(guests)
+                                             : QStringLiteral("Your devices, who is here, invites and what is waiting"),
+                                QStringLiteral("pane.sharing"));
         }
         items << actionItem(terminal, QStringLiteral("Interrupt"), pane && pane->processBusy() ? QStringLiteral("Stop the running program · Esc in the prompt box") : QStringLiteral("Nothing is running"), QStringLiteral("terminal.interrupt"));
         // One toggle, one row (#QWAS): control.prompt is the same key's other direction.

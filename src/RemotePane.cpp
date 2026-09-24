@@ -2217,7 +2217,8 @@ RemotePaneDialog::RemotePaneDialog(Place place, QWidget *parent) : QDialog(paren
         auto *v = new QVBoxLayout(m_pairPage);
         auto *intro = plainLabel(QStringLiteral("remotePairIntro"));
         intro->setWordWrap(true);
-        intro->setText(QStringLiteral("On the desktop, open “Share this pane…” and copy its pairing link. "
+        intro->setText(QStringLiteral("On the desktop, open the Sharing pane (a pane's share button › Share more…, "
+                                      "or the plug menu › Pair a phone…), press Add a device… and copy its link. "
                                       "Paste it here: this Relay becomes one of your own devices on that desktop."));
         v->addWidget(intro);
         m_link = new QLineEdit;
@@ -2671,7 +2672,7 @@ JoinDialog::JoinDialog(const QString &code, Place place, QWidget *parent) : QDia
         big.setLetterSpacing(QFont::AbsoluteSpacing, 4);
         m_check->setFont(big);
         m_check->hide();
-        // Full width with the text centred (see the pairing dialog's code page).
+        // Full width with the text centred (as the Sharing pane's pairing card does).
         for (QLabel *label : {m_wait, m_check}) label->setAlignment(Qt::AlignHCenter);
         v->addStretch(1);
         v->addWidget(m_wait);

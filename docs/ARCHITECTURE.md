@@ -870,8 +870,9 @@ conversation info pane (`src/SessionInfo.cpp`), the conversations pane's preview
 (`src/SubagentTranscript.cpp`), the diff view (`src/DiffView.cpp`), the file explorer's path line
 and the file preview's text, rendered Markdown and info page (`src/FilePanes.cpp`), the Board
 card document and its cleanup panel (`src/BoardPane.cpp`), the tasks panel's detail
-(`src/RequestsPanel.cpp`), the sharing pane's request text (`src/SharingPane.cpp`) and the share
-dialog's address and invite link (`src/RemoteShare.cpp`). Tests: `tests/copyonselect_test.cpp`.
+(`src/RequestsPanel.cpp`), and the Sharing pane's request text, address line and invite link
+(`src/SharingPane.cpp`; the share window that used to hold the address and the link was folded
+into the pane, #SMDX). Tests: `tests/copyonselect_test.cpp`.
 
 Copying something that is not a selection says so the same way. The Board's `BoardView` has
 a toast of its own (`BoardView::toast`, `src/BoardPane.cpp`, #Y2F4) — the same small fading popup,
@@ -3667,7 +3668,7 @@ of the platform and of the engine itself.
 | `src/ScreenPrompt.*` | the screen-text classifier: is the foreground program waiting for input, and for what (section 9.1) |
 | `src/Aliases.*` | aliases (saved commands and prompts): the composer's `{{parameter}}` fields and Tab, re-reading the values out of an edited line, and whether a typed line names an alias |
 | `src/Voice.*` | voice transcription: capture tool and arguments, the hold key, the transcript's place in the composer, WAV repair |
-| `src/RemoteShare.*` | sharing a pane with a phone: the sidecar process, the pane's frames going out, the keys coming back, and the QR/approval dialog (section 19) |
+| `src/RemoteShare.*` | sharing a pane with a phone: the sidecar process, the pane's frames going out, the keys coming back, and `attach()`, which wires the Sharing pane's two pages to the sidecar (section 19) |
 | `remote/`, `rendezvous/`, `app/` | the remote protocol and its Noise handshake, the ciphertext-only relay, and the phone's web client (`docs/REMOTE-PROTOCOL.md`) |
 | `shell/integration.bash`, `shell/event.py` | Bash bridge |
 | `backend/worker.py` | worker protocol loop |
@@ -3685,10 +3686,16 @@ of the platform and of the engine itself.
 
 ## 19. Sharing a pane with a phone
 
-The share button sits in the pane's chrome row at the top right (owner, 2026-09-19: it no longer
+The share chip sits in the pane's chrome row at the top right (owner, 2026-09-19: it no longer
 fit beside the model picker and the microphone in the composer strip; `PaneChrome::buildShare`
-owns it and repaints it through `Pane::onShareChipChanged`), and the palette action is
-"Share this pane with a phone" (`pane.share`). Both call `Pane::toggleShare`.
+owns it and repaints it through `Pane::onShareChipChanged`). Since #SMDX (owner, 2026-09-24) it
+opens a two-row menu rather than a window: "Share this pane…" opens the Sharing pane on its People
+page with the invite form already on this pane, and "Share more…" opens the same page with the
+scope picker. The pane's context menu keeps "Share this pane…" and "Sharing". Pairing one of your
+own devices is a different entry point: "Pair a phone…" in the plug menu, the palette
+(`remote.pair`) and Options › Remote all open the Sharing pane on its Devices page with a pairing
+offer already started. "Join a shared session…" and "Open a shared pane…" — being the guest, not
+the host — stay in the plug menu and the palette.
 
 The protocol, the cryptography and the phone's web client live in a Python sidecar,
 `remote/gui_host.py`, started on demand and spoken to in line JSON exactly as the agent worker is
@@ -3733,28 +3740,60 @@ Two rules decide the shape:
   the pane repainting. Only a pane with a frame can be shared, which since the engine became the
   only terminal is every pane.
 - **Approving a device is a deliberate click**, and viewing and typing are separate grants. The
-  dialog shows a five-digit code derived from the Noise handshake on both ends, and *Refuse* holds
-  the focus, because allowing typing hands a phone the keyboard of a live shell.
+  approval card on the Sharing pane's Devices page shows a five-digit code derived from the Noise
+  handshake on both ends, and *Refuse* is first and holds the focus, because allowing typing hands
+  a phone the keyboard of a live shell. A device `ask` that arrives while no Sharing pane is open
+  opens one on Devices (`RemoteShare` emits `needsOwner` with an empty pane id).
 
-**Inviting another person, and the Sharing pane** (`#W5N2`, protocol section 10). Pairing your own
-phone is a moment and stays a dialog; being host to somebody else is not, so it is a pane. The
-share window gains "Invite someone to this pane" — role (Viewer or Editor), expiry, uses, the link
-as a read-only field with a Copy button and its QR, and one sentence saying what the role allows.
-Everything after that lives in `src/SharingPane.{h,cpp}` (library `relay-sharing`), a `ToolPane` of
-kind `Sharing` whose `paneType` is `sharing`:
+**Your own devices, other people, and the Sharing pane** (`#W5N2`, protocol section 10; the two
+pages, #SMDX, owner-approved 2026-09-24). Everything sharing-related lives in
+`src/SharingPane.{h,cpp}` (library `relay-sharing`), a `ToolPane` of kind `Sharing` whose
+`paneType` is `sharing`. The desktop's "Share this pane" window (`RemoteShareDialog`) is gone. It
+mixed three relationships — your own devices, other people, and joining somebody else — with two
+axes, *who* and *what scope*; pairing makes a device *you* and has no scope, so the top-level split
+is who, not what, and scope belongs to the invite. (Compared on the way: Google Docs' share sheet,
+people first with a general-access row; the Meet and Chrome screen-share pickers, tab / window /
+entire screen; VS Code Live Share's one sidebar; Apple's and 1Password's own devices as a settings
+list.) The pane has two pages under a tab bar:
+
+- **Devices** — the owner's own phones and other computers. The remote-control switch and its
+  status line, the address picker, one row per paired device (connected or not, its capability,
+  the password-entry toggle, Revoke), "Add a device…", and the approval card. "Add a device…"
+  starts a pairing offer: the QR, the typed four-letter/four-digit code, Copy link, and one caption
+  per way of using the link — a phone typing the code or scanning, another computer running Relay
+  pasting it into "Open a pane your other desktop shares…", any browser opening it. A pairing room
+  is spent only when "Add a device…" is pressed, never on opening the pane (#PRM2); leaving the
+  page or pressing Done revokes the typed code.
+- **People** — "Waiting for you" (knocks, control requests, guest prompts); "Shared now", which
+  lists only panes that have a participant or a live invite, headed by their scope (a pane, a
+  whole tab, or Everything for all tabs); and the invite form. The form's first control is a scope
+  picker — any pane, this tab ("this project"), everything — followed by role (Viewer or Editor),
+  expiry, uses, Make a link / Make a code, the link with its QR, Copy and email, and the meeting
+  code. Scope is a property of each invite; the old "Share the whole tab" and "Share all tabs"
+  checkboxes are gone, and the wire is unchanged (`tab` on `invite_create` and `code_create`, the
+  reserved scope `all-tabs`).
+
+The pane never lists quiet panes: with remote control on, every pane is already reachable from the
+owner's devices, so only what has a participant, a live invite or a request to answer is shown.
 
 - `relay::sharing::Model` holds no widgets. It reads the sidecar's section-10.5 lines — who is on
   each pane, which invites are live, what is waiting for the owner, who is driving — and expires a
   waiting request on the hub's own clock (2 min for a knock, 60 s for the keyboard, 10 min for a
-  prompt). `tests/sharingpane_test.cpp` drives it without a hub and without a display.
-- `SharingView` renders it and calls back; `RemoteShare` is the only place a line is ever sent.
+  prompt). `tests/sharingpane_test.cpp` drives it, and the view's two pages, without a hub and
+  without a display.
+- `SharingView` renders it and calls back; it never talks to the sidecar itself.
+  `RemoteShare::attach(view)` connects every sidecar signal to the view and sets every hook that
+  needs only the sidecar; the window sets the hooks that need panes — the scope catalogue,
+  publishing a pane or tab before an invite, the remote-control switch. `RemoteShare` is the only
+  place a line is ever sent.
 - Refuse is first and holds the focus on every question, the editor button is absent on a
   viewer-only invite (admitting may lower a role, never raise it), and a guest's prompt is shown
   whole and wrapped, because approving it is approving exactly that text. There is no "approve
   always" in v1, by the protocol's own argument (section 10.5).
 
-The pane opens from the share button once a pane is shared, from the palette (`pane.sharing`), and by
-itself when somebody knocks. **Opening it never takes the keyboard**: `RelayWindow::openSharingPane`
+The pane opens from the share chip's menu, from the palette (`pane.sharing`), from every pairing
+entry point (on Devices), and by itself when somebody knocks or a device asks to pair. **Opening it
+never takes the keyboard**: `RelayWindow::openSharingPane`
 puts the focused widget back, now and again after the layout has run, because the next keystroke
 would otherwise land on Admit. The bell carries the same news through `Pane::notifyFromWindow`,
 which is the ordinary notification path — the desktop only hears about it while Relay is not the

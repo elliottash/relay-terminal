@@ -405,7 +405,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("agent.agentsMenu")) openAgentsMenu();
         else if (id == QStringLiteral("voice.toggle")) pane->toggleVoice(true);
         else if (id == QStringLiteral("speech.readAloud")) pane->toggleReadAloud();
-        else if (id == QStringLiteral("pane.share")) pane->toggleShare();
+        else if (id == QStringLiteral("pane.share")) shareThisPane(pane);
         else if (id == QStringLiteral("pane.sharing")) openSharingPane(pane, true);
         else if (id == QStringLiteral("agent.modelKeys")) {
             pane->openKeysDialog();
@@ -963,6 +963,9 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         pane->onOpenInternals = [guard] { if (auto *w = windowOf(guard)) w->openInternalsPane(guard); };
         // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
         pane->onOpenSharing = [guard] { if (auto *w = windowOf(guard)) w->openSharingPane(guard, true); };
+        // Its two rows (#SMDX): the invite form on this pane, or with the scope picker open.
+        pane->onShareThisPane = [guard] { if (auto *w = windowOf(guard)) w->shareThisPane(guard); };
+        pane->onShareMore = [guard] { if (auto *w = windowOf(guard)) w->shareMore(guard); };
         pane->onOpenOptions = [guard](const QString &tab) {
             if (auto *w = windowOf(guard)) w->openSettingsPane(relay::SettingsPane::Mode::Options, tab);
         };

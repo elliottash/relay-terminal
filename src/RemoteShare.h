@@ -5,7 +5,8 @@
 // The protocol, the crypto and the web app live in a Python sidecar (`remote/gui_host.py`), the
 // same arrangement as the agent worker: Relay speaks line JSON to it and never links a crypto
 // library. What stays here is what only the GUI can do — the screen state of a live pane, the
-// keystrokes a phone sends back, and the dialog where a person compares two five-digit codes.
+// keystrokes a phone sends back, and the Sharing pane (src/SharingPane.h) where a person compares
+// two five-digit codes, invites somebody and answers them.
 //
 // One instance per process, like the notification centre. Several panes can be shared at once.
 //
@@ -16,7 +17,6 @@
 #include "SharingPane.h"
 
 #include <QByteArray>
-#include <QDialog>
 #include <QJsonArray>
 #include <QSet>
 #include <QJsonObject>
@@ -27,21 +27,14 @@
 
 #include <functional>
 
-class QCheckBox;
-class QComboBox;
-class QLabel;
-class QLineEdit;
-class QListWidget;
 class QProcess;
-class QPushButton;
-class QSpinBox;
 class QTimer;
 
 namespace relay {
 
 class TerminalView;
 
-using QrMatrix = QVector<QVector<int>>;
+using QrMatrix = sharing::QrMatrix;   // rows of 0/1, as the sidecar sends them
 
 class RemoteShare final : public QObject {
     Q_OBJECT
@@ -61,7 +54,7 @@ public:
     bool alwaysOn() const;
     void setAlwaysOn(bool on);
     // Options › Remote picked another address. Remembered either way; sent to a running sidecar
-    // only while the service is on, because a per-share address is the dialog's business.
+    // only while the service is on, because a per-share address is the Sharing pane's business.
     void setRemoteAddress(const QString &value);
     // Called once from main(): brings the sidecar up when the switch is on, and does nothing at
     // all when it is off — a desktop with no phone starts no python.
@@ -159,15 +152,16 @@ public:
     void requestPairing();
     // The pairing code (#FR1C): four letters and four digits the owner types on the phone, instead
     // of scanning a QR that opens Safari and pairs a browser tab no notification ever reaches.
-    // `pair_code` mints one; `pair_code_revoke` withdraws it, which the dialog does as it closes.
+    // `pair_code` mints one; `pair_code_revoke` withdraws it, which the Sharing pane does on
+    // leaving its Devices page.
     void requestPairCode();
     void revokePairCode(const QString &code);
     // The paired devices, as the sidecar last reported them (`devices`), and a request for the
     // list again. The sidecar reports the list when a device pairs, is revoked or has its
     // password switch moved, and once at `start` — with remote control on (#PH0N) that is at
-    // launch, long before any share window exists to hear it, so a window opened later read
+    // launch, long before any Sharing pane exists to hear it, so a pane opened later read
     // an empty list for a phone that was connected the whole time (found by the hosted drive,
-    // docs/qa_evidence/2026-09-21-ph0n-hosted-drive). The window now opens on the cached list.
+    // docs/qa_evidence/2026-09-21-ph0n-hosted-drive). attach() now replays the cached list.
     QJsonArray devices() const { return m_devices; }
     void requestDevices();
     // Which of this machine's addresses the pairing link points at. A phone on the same Wi-Fi
@@ -178,7 +172,7 @@ public:
     void answer(int askId, bool allow, const QString &capability);
     void revoke(const QString &deviceId);
     // Password entry is off for every device until the owner turns it on for that one
-    // (docs/REMOTE-PROTOCOL.md section 6.7); this is the switch the dialog drives.
+    // (docs/REMOTE-PROTOCOL.md section 6.7); this is the switch the Devices page drives.
     void setPasswordEntry(const QString &deviceId, bool allow);
 
     // ----- multiplayer, the owner's controls (docs/REMOTE-PROTOCOL.md section 10.5) ------------
@@ -210,7 +204,7 @@ public:
     // swallows the key that sent it.
     void takeControl(const QString &paneId);
     void answerPrompt(const QString &promptId, bool approve);
-    // `invite_email`: post the link the dialog is showing. Desktop-only, like the other invite
+    // `invite_email`: post the link the People page is showing. Desktop-only, like the other invite
     // names; the answer comes back as inviteSent().
     void emailInvite(const QString &url, const QString &to, const QString &role,
                      const QString &expiry, const QString &pane);
@@ -223,6 +217,18 @@ public:
     // the Sharing pane and the pane headers read the same rows.
     sharing::Model &sharingModel() { return m_sharing; }
     const sharing::Model &sharingModel() const { return m_sharing; }
+
+    // The Sharing pane (#SMDX): every signal that used to reach the share window is connected to
+    // this view, every hook of the view that needs only the sidecar is set, and what is already
+    // known — the service, the addresses, the devices, an `ask` still waiting for an answer — is
+    // replayed into it, because the pane is usually opened after those lines arrived. Bound to
+    // the view's lifetime. The window sets the remaining hooks (onScopes, onRemoteSwitch,
+    // onCreateInvite, onCreateCode, onClose, onTitleChanged) itself.
+    void attach(sharing::SharingView *view);
+    // The last `ask` nobody has answered yet, replayed by attach(); invalid when there is none.
+    sharing::DeviceAsk pendingAsk() const { return m_pendingAsk; }
+    // What the Devices page needs to know about the service, in one struct.
+    sharing::Service service() const;
 
     // The answer to one `voice` line, carrying back the id it arrived with so that two clips in
     // flight cannot be given each other's words. `error` is what the phone shows when `ok` is
@@ -258,12 +264,13 @@ signals:
     // An `invite` line: the link to hand out, its QR, and what it grants.
     void inviteReady(const QString &url, const relay::QrMatrix &qr, const QString &role,
                      int uses, int expires);
-    // A `code` line. The PIN is the secret half: it goes to the dialog and nowhere else.
-    void codeReady(const QString &code, const QString &pin, int expires, const QString &invite);
+    // A `code` line. The PIN is the secret half: it goes to the Sharing pane and nowhere else.
+    // The invite the sidecar minted behind the code is a `participants` row, not carried here.
+    void codeReady(const QString &code, const QString &pin, int expires);
     // A `code_state` line: "used", "burned" (too many wrong PINs) or "expired".
     void codeStateChanged(const QString &code, const QString &state, int failures);
     // A `pair_code` line (#FR1C). The PIN is the secret half, as an invite code's is: it goes to
-    // the pairing dialog and nowhere else.
+    // the Devices page and nowhere else.
     void pairCodeReady(const QString &code, const QString &pin, int expires);
     // A `pair_code_state` line: "used", "burned" (too many wrong PINs) or "expired".
     void pairCodeStateChanged(const QString &code, const QString &state, int failures);
@@ -271,7 +278,9 @@ signals:
     void sharingModelChanged();
     // Somebody is at the door, wants the keyboard, or has written a prompt. The window opens the
     // Sharing pane and posts a notification — and never takes the keyboard, because the next
-    // keystroke would otherwise land on a button that admits a stranger.
+    // keystroke would otherwise land on a button that admits a stranger. An empty `paneId` is a
+    // device asking to pair (`ask`, #SMDX): there is no shared pane to open beside, so the window
+    // opens the Sharing pane on its Devices page, where the code to compare is.
     void needsOwner(const QString &paneId, const QString &title, const QString &body);
     // One second passed: the waiting rows' countdowns move and a lapsed one goes.
     void secondPassed();
@@ -330,119 +339,8 @@ private:
     QJsonArray m_devices;
     remotesettings::State m_remoteState;
     sharing::Model m_sharing;
+    sharing::DeviceAsk m_pendingAsk;   // an `ask` with no answer yet (#SMDX)
     QTimer *m_second = nullptr;
-};
-
-// The window behind the share button: the QR code, the code to compare, and who is connected.
-class RemoteShareDialog final : public QDialog {
-    Q_OBJECT
-public:
-    explicit RemoteShareDialog(const QString &paneId, QWidget *parent = nullptr);
-    // Every closing path — the X, Escape, "Stop sharing" — comes through done(), which is where
-    // the pairing code is withdrawn: a code left live after the window went would pair a phone
-    // nobody is watching for.
-    void done(int result) override;
-    // The tab the pane is in, so "Share the whole tab" can be offered. `tab` is the window's id
-    // for the tab page; `panes` counts the terminals in it now, for the sentence beside the box.
-    void setTab(const QString &tab, int panes);
-
-private:
-    void refreshPairingService();
-    QString m_pairingBase;
-    void updateWholeTab();
-    void showPairing(const QString &url, const relay::QrMatrix &qr, int expires);
-    // The pairing code beside the QR (#FR1C): minted when this window opens, withdrawn when it
-    // closes, and drawn from relay::remotesettings::pairCodeRow so its four states are testable.
-    void askPairCode();
-    void showPairCode(const QString &code, const QString &pin, int expires);
-    void showPairCodeState(const QString &code, const QString &state, int failures);
-    void refreshPairCode();
-    void noPairCode();
-    void showInvite(const QString &url, const relay::QrMatrix &qr, const QString &role,
-                    int uses, int expires);
-    void createInvite();
-    void updateRoleNote();
-    void createCode();
-    void showCode(const QString &code, const QString &pin, int expires);
-    void showCodeState(const QString &code, const QString &state, int failures);
-    void codeTick();
-    void markCodeDead(bool dead);
-    void putCodeAway();
-    void showAsk(int id, const QString &name, const QString &platform, const QString &fingerprint,
-                 const QString &code, const QString &peer);
-    void showDevices(const QJsonArray &items);
-    void passwordLabel();
-    void showAddresses(const QJsonArray &addresses);
-    void answer(bool allow, const QString &capability = QString());
-    void fit();
-
-    QString m_paneId;
-    QString m_tab;
-    int m_tabPanes = 0;
-    QCheckBox *m_wholeTab = nullptr;
-    QCheckBox *m_allTabs = nullptr;
-    QLabel *m_inviteHeading = nullptr;
-    QLabel *m_status = nullptr;
-    QLabel *m_qr = nullptr;
-    QLabel *m_url = nullptr;
-    // The one line saying remote control is on and where to turn it off: pairing turns it on, and
-    // a switch that turned itself on must say so where it happened.
-    QLabel *m_alwaysOnLine = nullptr;
-    // Copying the pairing link, as the invite link is copied: on a Linux desktop a 140-character
-    // link has no other way of reaching a phone, and scanning is not always an option.
-    QPushButton *m_pairCopy = nullptr;
-    QString m_pairingLink;
-    // The pairing code column beside the QR.
-    QWidget *m_pairBox = nullptr;
-    QLabel *m_pairHeading = nullptr;
-    QLabel *m_pairValue = nullptr;
-    QLabel *m_pairClock = nullptr;
-    QLabel *m_pairNote = nullptr;
-    QPushButton *m_pairAgain = nullptr;
-    QString m_pairCode, m_pairPin, m_pairState;
-    int m_pairFailures = 0;
-    qint64 m_pairDeadline = 0;    // ms since the epoch; 0 once the code is no longer live
-    bool m_pairWaiting = false;   // a pair_code is out and nothing has answered it yet
-    QComboBox *m_address = nullptr;
-    QLabel *m_addressNote = nullptr;
-    QLabel *m_note = nullptr;
-    QWidget *m_askBox = nullptr;
-    QLabel *m_askText = nullptr;
-    QLabel *m_askCode = nullptr;
-    QPushButton *m_refuse = nullptr;
-    QListWidget *m_devices = nullptr;
-    QPushButton *m_passwords = nullptr;
-    QPushButton *m_stop = nullptr;
-    int m_askId = -1;
-    // "Invite someone to this pane": the second way in, under the pairing QR, because pairing
-    // your own phone is the common case and stays the first thing offered.
-    QComboBox *m_inviteRole = nullptr;
-    QComboBox *m_inviteExpiry = nullptr;
-    QSpinBox *m_inviteUses = nullptr;
-    QLabel *m_inviteNote = nullptr;
-    QLabel *m_inviteQr = nullptr;
-    QLineEdit *m_inviteUrl = nullptr;
-    QPushButton *m_inviteCopy = nullptr;
-    // Emailing the link is the same act as copying it: the link is already minted, this posts it.
-    QLineEdit *m_inviteTo = nullptr;
-    QString m_inviteRoleValue, m_inviteExpiryText;   // what the link that is on screen grants
-    QPushButton *m_inviteSend = nullptr;
-    QString m_inviteLink;
-    // "Make a code": a meeting code and a PIN to read out, beside "Make a link". Its own note,
-    // because m_inviteNote also carries the link's sentences and the public-address warning.
-    QPushButton *m_makeCode = nullptr;
-    QLabel *m_codeNote = nullptr;
-    QWidget *m_codeBox = nullptr;
-    QLabel *m_codeValue = nullptr;
-    QLabel *m_pinValue = nullptr;
-    QLabel *m_codeClock = nullptr;
-    QPushButton *m_codeCopy = nullptr;
-    QPushButton *m_codeAgain = nullptr;
-    QString m_code, m_pin, m_codeRole;
-    qint64 m_codeDeadline = 0;       // ms since the epoch; 0 once the code is no longer live
-    // ms since the epoch while a code_create is unanswered; -1 once the wait has been given up on
-    // but a late answer would still be shown; 0 when this window is not waiting for one.
-    qint64 m_codeAskedAt = 0;
 };
 
 } // namespace relay

@@ -878,9 +878,13 @@ public:
     // new-pane default to the new rank 1 of main and tells every pane, exactly as a switch made on
     // the page does. Unset, this pane alone re-reads the lists.
     std::function<void()> onProfileApplied;
-    // The window's id for the tab this pane is in, and how many terminals it holds, so the share
-    // dialog can offer "Share the whole tab". Unset (or "") offers only this pane.
+    // The window's id for the tab this pane is in, and how many terminals it holds: the id a
+    // whole-tab share is made under (the Sharing pane's scope picker builds its own list from the
+    // window, #SMDX). Unset (or "") means this pane shares on its own.
     std::function<QString(int *panes)> onShareTab;
+    // The share chip's two rows (#SMDX): the Sharing pane's People page with the invite form open
+    // on this pane, or with its scope picker open (a whole tab, everything).
+    std::function<void()> onShareThisPane, onShareMore;
     // Right-click menu entries the window owns: new pane, close pane, tasks (issue #X2F1).
     std::function<void(const QString &action)> onWindowAction;
     // Whether the tab holds a pane besides this one: the menu's "Equalize pane sizes"
@@ -7226,54 +7230,60 @@ public:
         const bool sharing = share.isSharing(m_token);
         const int guests = share.sharingModel().guestsOn(m_token);
         m_shareChip->setToolTip(!sharing
-            ? QStringLiteral("Share this pane with your phone, or invite someone to it")
+            ? QStringLiteral("Share this pane with someone, or more")
             : guests == 0
-                ? QStringLiteral("Shared — click for who is here, invites and what is waiting")
-                : QStringLiteral("Shared with %1 · click for who is here and what is waiting")
+                ? QStringLiteral("Shared — invite someone else, share more, or see what is waiting")
+                : QStringLiteral("Shared with %1 · invite someone else, or see who is here and what is waiting")
                       .arg(guests == 1 ? QStringLiteral("one other person")
                                        : QStringLiteral("%1 other people").arg(guests)));
         m_shareChip->style()->unpolish(m_shareChip);
         m_shareChip->style()->polish(m_shareChip);
     }
 
-    // The share button beside the folder. Nothing shared yet: pair a phone or make an invite, which is
-    // the dialog. Already shared: the ongoing question is who is here and what is waiting, which
-    // is the pane — and its first button opens the dialog again for one more link.
+    // The share button beside the folder opens a two-row menu (#SMDX): "Share this pane…" is the
+    // Sharing pane's People page with the invite form open on this pane, "Share more…" the same
+    // form with the scope picker open, for a whole tab or everything. Once the pane is shared, a
+    // third row opens the Sharing pane itself — the ongoing question is who is here and what is
+    // waiting — and when somebody is on it or waiting, a first row says so. Pairing a phone is
+    // deliberately not here: it is the plug menu's and Options › Remote's. Nothing is published
+    // by opening the menu; a pane is shared when a link or a code is made for it.
     void shareChipPressed() {
-        if (relay::RemoteShare::instance().isSharing(m_token) && onOpenSharing) {
-            onOpenSharing();
-            // pane.sharing has no key of its own on purpose; the palette is the fast path, so
-            // the hint teaches that rather than inventing one (WARP.md, "Shortcut hints").
-            hint(QStringLiteral("pane.sharing"),
-                 relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("help.shortcuts")),
-                                                QStringLiteral("then “Sharing”")));
-            return;
-        }
-        toggleShare();
-    }
-
-    void toggleShare() {
+        if (!m_shareChip) return;
         relay::RemoteShare &share = relay::RemoteShare::instance();
-        int tabPanes = 0;
-        const QString tab = onShareTab ? onShareTab(&tabPanes) : QString();
-        if (!share.isSharing(m_token)) {
-            QString error;
-            if (!startSharing(share.isTabShared(tab) ? tab : QString(), &error)) {
-                status(error);
-                return;
-            }
+        const bool sharing = share.isSharing(m_token);
+        const relay::sharing::ChipState state = share.sharingModel().chip(m_token, sharing);
+        auto *menu = new QMenu(m_shareChip);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        if (!state.text.isEmpty()) {
+            // "alice is typing", "2 guests · 1 waiting": what the chip says, in full, not a row
+            // to choose.
+            QAction *now = menu->addAction(state.text);
+            now->setEnabled(false);
+            menu->addSeparator();
         }
-        auto *dialog = new relay::RemoteShareDialog(m_token, window());
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-        dialog->setTab(tab, tabPanes);
-        // The dialog is the window's child and this pane is a splitter's, so at quit the pane dies
-        // first while the dialog — and this connection — is still alive: the next pane's share
-        // ending then reached a freed Pane through `this` (SIGSEGV under ~WindowManager, the
-        // hosted drive of 2026-09-21, with the share window left open). Guarded, not re-contexted:
-        // the connection should still go with the dialog, not outlive it on the pane.
         QPointer<Pane> self(this);
-        connect(&share, &relay::RemoteShare::sharingChanged, dialog, [self] { if (self) self->updateShareChip(); });
-        dialog->show();
+        QAction *thisPane = menu->addAction(QStringLiteral("Share this pane…"));
+        connect(thisPane, &QAction::triggered, this, [self] {
+            if (self && self->onShareThisPane) self->onShareThisPane();
+        });
+        QAction *more = menu->addAction(QStringLiteral("Share more…"));
+        connect(more, &QAction::triggered, this, [self] {
+            if (self && self->onShareMore) self->onShareMore();
+        });
+        if (sharing) {
+            menu->addSeparator();
+            QAction *open = menu->addAction(QStringLiteral("Sharing"));
+            connect(open, &QAction::triggered, this, [self] {
+                if (!self || !self->onOpenSharing) return;
+                self->onOpenSharing();
+                // pane.sharing has no key of its own on purpose; the palette is the fast path, so
+                // the hint teaches that rather than inventing one (WARP.md, "Shortcut hints").
+                self->hint(QStringLiteral("pane.sharing"),
+                           relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("help.shortcuts")),
+                                                          QStringLiteral("then “Sharing”")));
+            });
+        }
+        menu->popup(m_shareChip->mapToGlobal(QPoint(0, m_shareChip->height())));
     }
 
     // The window shares this pane because its tab is shared whole — a pane just split off, or one

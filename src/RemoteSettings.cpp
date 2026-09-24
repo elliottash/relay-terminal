@@ -11,7 +11,7 @@ namespace {
 
 const QLatin1String kHosted("relay-terminal.ai");
 const QLatin1String kTailnet("tailscale");
-// The share dialog's public-tunnel entry. It is never offered here: a quick tunnel has no name
+// The Sharing pane's public-tunnel entry. It is never offered here: a quick tunnel has no name
 // until it is running and stops answering when sharing stops, which is the one thing an always-on
 // address may not do.
 const QLatin1String kCloudflare("cloudflare");
@@ -245,8 +245,8 @@ SettingsSection section(const SectionHooks &hooks)
         row.id = QStringLiteral("remote.pair");
         row.label = QStringLiteral("Pair a phone");
         row.detail = QStringLiteral(
-            "The QR code and the five digits to compare. A paired phone sees every pane while "
-            "remote control is on.");
+            "Opens the Sharing pane's Devices page: the QR code, the code to type on the phone and "
+            "the five digits to compare. A paired phone sees every pane while remote control is on.");
         row.buttonText = QStringLiteral("Pair…");
         row.run = hooks.pairPhone;
         row.agentSafeButtons = {};      // pairing admits a device; never an agent's to press

@@ -229,7 +229,7 @@ Password entry (§6.7) is a **separate switch**, off by default, available only 
 **(security)** Capability is read from the live device record at **every** enforcement point — each
 inbound message, each fan-out and each replayed event — never cached in the session at `welcome`.
 
-Two things the pairing dialog has to say plainly, because the names understate them:
+Two things the Sharing pane's Devices page has to say plainly, because the names understate them:
 
 * **`view` is not "read only" in the everyday sense.** It can read transcripts and stored tool
   output, which is every command the agent ran and every file it read, plus the title and `cwd` of
@@ -708,7 +708,7 @@ per device (three per connect token, 32 per desktop, eight per address for rooms
 the host's address to everyone holding an invite link. The owner's own devices may go peer to peer.
 
 **The hosted address.** The desktop's sidecar (`remote/gui_host.py`) runs its own in-memory
-rendezvous, and the LAN, tailnet and cloudflare addresses in the share dialog are all routes to that
+rendezvous, and the LAN, tailnet and cloudflare addresses in the Sharing pane's address picker are all routes to that
 one server. The fourth entry, kind `hosted` and value `relay-terminal.ai`, is a *different*
 rendezvous: the public one at `RELAY_HOSTED_RENDEZVOUS` (default `https://join.relay-terminal.ai`),
 which serves the same routes and web app. It is offered when `GET /v1/health` answers within three
@@ -936,11 +936,12 @@ GUI's `pane` line carries it as `tab` for every pane shared under it, and an inv
   `MAX_PANES_PER_TAB` (32). Every rule above applies to a pane that joined later exactly as to the
   first — a later pane's password prompt is refused to a guest the same way.
 
-**The unit may also be all tabs** (card #A11T). The sharing dialog's **Share all tabs** option
-publishes every pane in every Relay window and uses the reserved dynamic-scope token `all-tabs` in
-the desktop-to-sidecar `tab` field. It names every currently published pane and grows whenever any
-later pane or tab is published, regardless of its ordinary tab id, up to 128 panes. Turning it off
-sends `scope_end {tab:"all-tabs"}`: only all-tabs invites and participants end, so a pane that is
+**The unit may also be all tabs** (card #A11T). Choosing **Everything** in the invite form's scope
+picker (the Sharing pane's People page; since #SMDX scope is a property of each invite, and the
+old "Share all tabs" checkbox is gone) publishes every pane in every Relay window and uses the
+reserved dynamic-scope token `all-tabs` in the desktop-to-sidecar `tab` field. It names every currently published pane and grows whenever any
+later pane or tab is published, regardless of its ordinary tab id, up to 128 panes. Ending that
+scope sends `scope_end {tab:"all-tabs"}`: only all-tabs invites and participants end, so a pane that is
 still published for a narrower whole-tab share is not withdrawn. Pane-only invites carry no `tab`
 and remain narrow. This guest option is separate from pairing: an owner's paired device is already
 scoped to the whole desktop by section 5.3.
@@ -1161,7 +1162,7 @@ for whole-tab scope or the reserved `all-tabs` token); `invite_revoke {id}`;
 `participants {items}` (each item carries `online` and the panes it is `driving`);
 `control_ask {pane, participant, name}` → `control_answer {pane, participant, grant}`;
 `control_take {pane}` (the owner's keystroke) and `control_revoke {pane}` (the same from the
-sharing panel); `prompt_ask {id, participant, name, pane, text, when, plan}` →
+Sharing pane's People page); `prompt_ask {id, participant, name, pane, text, when, plan}` →
 `prompt_answer {id, approve}`; `role_set {participant, role}`; `participant_remove {participant}`;
 `share_pause {pane?, on}`; `share_options {pane, prompts_immediate, present_only}`; `share_end`;
 `scope_end {tab}` ends one dynamic whole-tab or all-tabs scope without withdrawing panes another
@@ -1184,7 +1185,7 @@ as **`owner_asks {items}`** — the whole list, again whenever it changes, and o
 it is not empty — each item `{kind: "knock" | "prompt" | "control", id, pane, name, …}`: a knock
 carries the invite's `role`, the five-digit `code` and `platform`; a prompt its whole `text` (the
 owner approves the text, never a preview, 10.4); a control request names the participant in `id`.
-The desktop's own dialog is asked exactly as before and **whichever answer arrives first is
+The desktop's own Sharing pane ("Waiting for you", on People) is asked exactly as before and **whichever answer arrives first is
 applied**: the hub's `_await_knock` waits on the GUI and the devices together, and a late
 `prompt_answer` or `control_answer` finds its item gone (`_run_prompt`, `_apply_control_answer`).
 A late answer from a device is not an error: it is sent the list as it now stands. The sidecar
@@ -1368,14 +1369,14 @@ socket address, whatever its headers say.
 **Desktop GUI ↔ sidecar** (owner-only, in `wire.OWNER_ONLY` with the rest of §10.5):
 `{"t":"code_create","pane":"p1","role":"editor"}` → `{"t":"code","code":"BQRT","pin":"4829","expires":600,"invite":"<id>"}`,
 then `{"t":"code_state","code":"BQRT","state":"used"|"burned"|"expired","failures":N}` when the code
-ends. `{"t":"code_revoke","code":"BQRT"}` withdraws a code (the share window sends it when the role
+ends. `{"t":"code_revoke","code":"BQRT"}` withdraws a code (the invite form sends it when the role
 changes under a live code). One live code per pane: a new `code_create` burns the pane's previous
 one. The PIN is a
 secret: never logged. The QA hook `RELAY_REMOTE_CODE_FILE` names a file the GUI writes `BQRT 4829`
 to, beside `RELAY_REMOTE_INVITE_FILE`.
 
 A **pairing** code (§5.2) has two names of its own on the same line, because it is a different
-surface — the pairing dialog, not the sharing panel — and neither must redraw on the other's news:
+surface — the Sharing pane's Devices page, not its People page — and neither must redraw on the other's news:
 `{"t":"pair_code"}` → `{"t":"pair_code","code":"ABCD","pin":"4829","expires":600}` (no `invite`:
 there is none), then `{"t":"pair_code_state","code":"ABCD","state":"used"|"burned"|"expired","failures":N}`;
 `{"t":"pair_code_revoke","code":"ABCD"}` withdraws it, and its pairing room burns with it. Both
@@ -1436,7 +1437,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Guest web client (§10) | `app/guest.js`, `app/rrp.js`, `/join` | The invite link, the knock and its five digits, the shared pane with the same screen painter and scrollback, presence, the editor's ask-to-type and prompt box, pause, role changes and removal. A guest record stored apart from the paired-device one, so one browser can be an owner here and a guest there. `tests/test_remote_guest_browser.py` |
 | Python client | `remote/client.py` | For tests and scripts; also where the client-side pinning rule is tested |
 | Relay-to-Relay | `remote/viewer.py`, `src/RemotePane.{h,cpp}` | A laptop's Relay opens a pane the desktop shares, natively: "Open a shared pane…" pairs it as one of the owner's own devices (the same pairing a phone does), and the pane is drawn by the same model the phone's is — screen, scrollback, queue, thinking, model and conversation menus, control handoff. With `--guest` the viewer joins somebody else's share with their meeting code and PIN (§10.7): `/join CODE`, `/connect CODE`, the palette's "Join a shared session…" or the plug at the top right. A second viewer process holds guest sessions, so joining a colleague never disturbs the owner's own device session. `tests/test_remote_viewer.py`, `relay-remotepane-tests` |
-| Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR. `--tls`, `--tailscale` and `--public` are the three addresses, and the first two are the same code the share dialog uses |
+| Dev harness | `remote/cli.py` | `python3 -m remote.cli share` shares a real shell; `dev` runs the demo agent. Both print the pairing QR. `--tls`, `--tailscale` and `--public` are the three addresses, and the first two are the same code the Sharing pane's address picker uses |
 | Screen stream (P2) | `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `app/screen.js` | A real PTY parsed by Relay's own emulator, streamed as styled rows, painted as a cell grid on the phone |
 | Scrollback (§6.5) | `engine/core/VtCore.h` (`historyLines`), `engine/tools/ScreenJson.h`, `engine/tools/ScreenBridge.cpp`, `remote/terminal.py`, `remote/gui_host.py`, `src/RemoteShare.cpp`, `app/screen.js` | Paging by absolute row, from the bridge and from a GUI pane. Every frame carries `base`, so the client keeps the seam between its history and the live block closed while output arrives. Pages are fetched one ahead of the reader and de-duplicated by row; output arriving while somebody is scrolled back moves nothing and offers a way to live instead; at most 2000 rows are kept on the phone. History is painted by the run painter the live screen uses, because both ends of the wire go through one serializer |
 | Take-over (P3) | `remote/host.py`, `app/app.js` | `keys`, `paste`, `line`, `control_request`/`control_release`, an extra-keys row and a line box, refused at a password prompt |
@@ -1446,7 +1447,7 @@ against **real shells** — including Relay's own panes, from the share button i
 | Security review of P1–P4 | `tests/test_remote_security.py` | Push, password entry, voice and multiplayer reviewed adversarially (2026-09-18). Eight findings, all fixed; the attacks stay in the suite. The ninth, the per-device connect token of §8, was built on 2026-09-20 |
 | `transport_switch` (§2) | `remote/host.py`, `remote/client.py` | The handshake, tested. There is no second transport yet |
 | Local attach | `remote/attach.py` | The desktop's own terminal joins the same shell, so both ends drive it |
-| In the app | `src/RemoteShare.{h,cpp}`, `remote/gui_host.py` | The share button in the pane's chrome row, the QR and approval dialog, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19). The address picker above the QR offers the tailnet name first |
+| In the app | `src/RemoteShare.{h,cpp}`, `src/SharingPane.{h,cpp}`, `remote/gui_host.py` | The share chip in the pane's chrome row, the Sharing pane's Devices page (the remote-control switch, the address picker, the paired devices, the pairing offer's QR and code, the approval card) and People page (requests, what is shared now, the invite form), wired to the sidecar by `RemoteShare::attach(view)`, and a sidecar that carries one of Relay's own panes (`ARCHITECTURE.md` section 19; the two pages, #SMDX). The address picker offers the tailnet name first |
 | Always on (§8.1) | `remote/gui_host.py`, `remote/host.py` | `start` with `"always"` and an `"address"` brings the service up with no share asked for, and keeps it there: the hub's socket reconnects for ever with a jittered back-off and **registers again before each retry**, so a rendezvous restart is survived rather than ending the day's reachability, and it never moves to another address on its own. `remote_state` reports `on`, `address`, `base`, `online`, `devices` and one sentence of `reason` whenever any of them changes. `tests/test_remote_gui_host.py` (`AlwaysOnTests`, `AutoPublishTests`), `tests/test_remote_host.py` (`AlwaysOnLinkTests`). The desktop's half — the Options › Remote switch, the chrome indicator and "Disconnect all" — is card #PH0N's Phase 1.1 |
 | How the phone gets a secure context | `remote/tailnet.py`, `remote/devtls.py`, `remote/httpd.py` | `tailscale serve` with a real certificate, or a self-signed one. Both reach the same `httpd.Server`: it takes several listeners with one set of routes, so the CSP, `/pair` and `/join` behave the same at every origin |
 | Voice (§6.4) | `app/app.js`, `remote/gui_host.py`, `src/Pane.h` (`transcribeForRemote`) | A `MediaRecorder` clip from the phone, carried to the pane and transcribed by its own worker on the desktop's key; the text returns to the phone's prompt box, matched to the clip by id. Tested through a headless browser with Chrome's fake capture device; not yet tried with a real microphone on a real phone |
@@ -1466,8 +1467,8 @@ answers and prefers the first:
   at all, because a browser that has seen a certificate error will not register a service worker.
   It needs `sudo tailscale set --operator=$USER` once on the desktop, and **Serve** and **HTTPS
   Certificates** enabled for the tailnet in the Tailscale admin console. The helper detects all of
-  that and returns one readable sentence per failure; the CLI prints it and the share dialog shows
-  it under the address picker, because "there is no such option" and "you have not run one command
+  that and returns one readable sentence per failure; the CLI prints it and the Sharing pane's
+  Devices page shows it under the address picker, because "there is no such option" and "you have not run one command
   yet" look identical in an empty list.
 * **A self-signed certificate** (`remote/devtls.py`), which needs nothing and costs a warning.
 
@@ -1476,7 +1477,7 @@ CSP of section 3, the `/pair` and `/join` client-side routes and the WebSocket u
 code answering at whichever origin the QR names. The Noise session is end-to-end **above** TLS
 (section 4): the phone authenticates the desktop by the key it pinned from the QR, so which of
 these is in front changes nothing it verifies. `python3 -m remote.cli share --tailscale` and the
-share dialog's first address are the same `tailnet.publish()`, and both run `tailscale serve reset`
+Sharing pane's first address are the same `tailnet.publish()`, and both run `tailscale serve reset`
 when sharing stops or the address is changed.
 
 Section 10 is part built. What exists (2026-09-18): guest identity and the participant store
@@ -1499,13 +1500,18 @@ clocks, so the ten minutes and the sixty seconds are tested as numbers rather th
 
 **The desktop half of 10.5 is built** (2026-09-18, `src/SharingPane.{h,cpp}`, `src/RemoteShare.cpp`,
 `tests/sharingpane_test.cpp`, evidence in
-`docs/qa_evidence/2026-09-18-remote-multiplayer-desktop/`). The share window gains "Invite someone
-to this pane" — role, expiry, uses, the link and its QR — and everything that follows is a splitter
-pane rather than a dialog: per shared pane the participants with their key fingerprints and who is
-driving, the live invites with uses and expiry and a Revoke, and the knocks, control requests and
-guest prompts, each with the countdown of its own kind and Refuse first and holding the focus. The
-pane opens from the share button, from the palette (`pane.sharing`) and by itself when somebody
-knocks, and opening it never takes the keyboard, because the next keystroke would land on Admit.
+`docs/qa_evidence/2026-09-18-remote-multiplayer-desktop/`). It first shipped as an "Invite someone
+to this pane" form in the share window plus a splitter pane for everything after; since #SMDX
+(owner, 2026-09-24) the share window is gone and it is all the Sharing pane's **People** page: the
+invite form — a scope picker first (any pane, this tab, everything), then role, expiry, uses, Make
+a link / Make a code, the link with its QR, Copy and email, and the meeting code — "Shared now",
+listing per scope only the panes that have a participant or a live invite, with their participants
+and key fingerprints, who is driving, and the live invites with uses and expiry and a Revoke, and
+"Waiting for you": the knocks, control requests and guest prompts, each with the countdown of its
+own kind and Refuse first and holding the focus. The owner's own devices are the pane's other page,
+**Devices**. The pane opens from the share chip's menu ("Share this pane…", "Share more…"), from
+the palette (`pane.sharing`) and by itself when somebody knocks, and opening it never takes the
+keyboard, because the next keystroke would land on Admit.
 The owner's keystroke in a pane a guest is driving sends `control_take` from the same place the
 agent's hand-over already ends.
 
@@ -1549,7 +1555,7 @@ answer comes back by that id. A remote transcript never reaches the desktop's pr
 desktop's own is never sent to a device. A clip the GUI does not answer within 90 seconds is an
 error the phone shows, not a spinner that never stops.
 
-The hosted address (§8) is in the share dialog's picker: `relay-terminal.ai`, a different rendezvous
+The hosted address (§8) is in the Sharing pane's address picker: `relay-terminal.ai`, a different rendezvous
 the hub moves to and back from live. Two things follow from moving, and the entry's `where` and
 the note after a switch both say them. A switch **drops the guests and phones connected through the
 old address**: their channels were on the socket that closed, and they reconnect through the

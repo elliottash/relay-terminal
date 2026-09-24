@@ -150,8 +150,8 @@ const QSet<QString> &writingActions() {
         QStringLiteral("terminal.native"), QStringLiteral("pane.restartShell"),
         QStringLiteral("control.prompt"),
         // Sharing. The owner overruled the argument that publishing a pane to other people is not
-        // an agent's to start ("others are ok"): `pane.share` opens the share window with
-        // `dialog->show()` and `pane.sharing` opens a pane, so neither blocks — what either leads
+        // an agent's to start ("others are ok"): `pane.share` and `pane.sharing` both open the
+        // Sharing pane (#SMDX; the invite form, and the pane itself), so neither blocks — what either leads
         // to still needs a person to admit a device (#W5N2: no auto-admit), which is the floor the
         // refusal was protecting and which stands without this table.
         QStringLiteral("pane.share"), QStringLiteral("pane.sharing"),
@@ -297,7 +297,7 @@ QString lossNote(const QString &key) {
         {QStringLiteral("app.update"),
          QStringLiteral("Relay is updating and will restart, which ends every shell and agent in every window.")},
         {QStringLiteral("pane.share"),
-         QStringLiteral("The share window is open. Nobody joins until you admit them.")},
+         QStringLiteral("The Sharing pane is open on the invite form. Nobody joins until you admit them.")},
     };
     return lost.value(key);
 }

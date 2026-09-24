@@ -119,7 +119,7 @@ void Pane::buildUi() {
         m_shareChip->setIcon(stripIcon(QStringLiteral("share")));
         if (m_shareChip->icon().isNull()) m_shareChip->setText(QStringLiteral("↗"));
         m_shareChip->setIconSize(QSize(13, 13));
-        m_shareChip->setAccessibleName(QStringLiteral("Share this pane with a phone"));
+        m_shareChip->setAccessibleName(QStringLiteral("Share this pane, or more"));
         connect(m_shareChip, &QToolButton::clicked, this, [this] { shareChipPressed(); });
         routeRow->addWidget(m_shareChip);
         auto *backgroundSend = new QToolButton;

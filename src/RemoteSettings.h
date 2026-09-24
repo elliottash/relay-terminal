@@ -3,7 +3,7 @@
 // Remote control as a service the owner switches on once (card #PH0N, phase 1).
 //
 // Until now a pane reached a phone only while its share button was held down in this Relay
-// session: the sidecar started on the first share, the address was chosen inside the share dialog
+// session: the sidecar started on the first share, the address was chosen inside the share window
 // and forgotten at the next start, so a phone paired yesterday saw nothing after a desktop
 // restart. The switch is `remote/alwaysOn` and the address it uses is `remote/address`; both live
 // in QSettings, so they survive the restart that used to end the service.
@@ -34,7 +34,7 @@ QString addressKey();
 // What the picker sends back for the two addresses that are not a number on this machine. The
 // tailnet entry is the *word*, not the tailnet name: the name is this machine's and changes with
 // it, and "use the tailnet, whatever it is called today" is what the owner meant when picking it.
-// The sidecar resolves it at `start` (remote/gui_host.py), the same way the share dialog's
+// The sidecar resolves it at `start` (remote/gui_host.py), the same way the Sharing pane's
 // `address` line has always resolved the hosted one.
 QString hostedValue();      // "relay-terminal.ai"
 QString tailnetValue();     // "tailscale"
@@ -54,7 +54,7 @@ struct Choice {
 // What Options offers, given the sidecar's own `addresses` array (empty while it is not running).
 // The hosted entry and the tailnet entry are always there — they are the two the owner can pick
 // before anything has started — and this machine's own addresses join them from the live list,
-// which is the same list RemoteShareDialog::showAddresses draws. An unavailable live entry carries
+// which is the same list the Sharing pane's Devices page draws. An unavailable live entry carries
 // its one-sentence reason as the row's detail rather than being dropped, so "there is no such
 // option" and "you have not run one command yet" do not look identical. A remembered value that is
 // in neither list is kept as its own entry: a picker that silently moves the address the service
@@ -93,7 +93,7 @@ struct SectionHooks {
     State state;
     std::function<void(bool)> setAlwaysOn;
     std::function<void(const QString &)> setAddress;
-    std::function<void()> pairPhone;                // the share dialog, where pairing lives
+    std::function<void()> pairPhone;                // the Sharing pane's Devices page, where pairing lives
 };
 SettingsSection section(const SectionHooks &hooks);
 
@@ -150,7 +150,7 @@ int pairCodeWaitMs();
 QString pairCodeUnavailable();
 // Above the code, because it is an instruction rather than a caption.
 QString pairCodeHeading();
-// The line at the top of the pairing dialog: pairing turned remote control on, it stays on, and
+// The line at the top of the pairing card: pairing turned remote control on, it stays on, and
 // where to turn it off.
 QString pairAlwaysOnLine();
 

@@ -34,12 +34,22 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 #include <QWidget>
 
 #include <functional>
 
+class QCheckBox;
+class QComboBox;
+class QFrame;
 class QLabel;
+class QLineEdit;
+class QPixmap;
+class QPushButton;
 class QScrollArea;
+class QSpinBox;
+class QStackedWidget;
+class QTabBar;
 class QVBoxLayout;
 
 namespace relay::sharing {
@@ -89,7 +99,10 @@ struct Request {
 // its session token, which is what a guest never sees either).
 struct SharedPane {
     QString id, title;
-    bool operator==(const SharedPane &other) const { return id == other.id && title == other.title; }
+    QString tab;             // "" on its own, the tab id when shared as a whole tab, or "all-tabs"
+    bool operator==(const SharedPane &other) const {
+        return id == other.id && title == other.title && tab == other.tab;
+    }
     bool operator!=(const SharedPane &other) const { return !(*this == other); }
 };
 
@@ -98,6 +111,54 @@ struct SharedPane {
 struct Device {
     QString id, name, platform;
     bool online = false;     // holding a live channel right now
+    QString capability;      // "full" (watch and type) or "view", as the sidecar reports it
+    bool passwords = false;  // may answer a password prompt (section 6.7); off until turned on
+};
+
+// ---- what the view is handed and what it asks for (#SMDX) -------------------------------------
+// The share window (RemoteShareDialog) is gone: pairing your own devices, inviting people and
+// looking after them are the two pages of this pane. The view stays a view — it renders these
+// structs and calls the hooks below; RemoteShare::attach() wires the hooks that only need the
+// sidecar, and the window wires the ones that need a pane (scope catalogue, publishing a pane,
+// the remote-control switch). Nothing here includes RemoteShare.h.
+
+// A QR code as the sidecar sends it: rows of 0/1. RemoteShare.h aliases this name.
+using QrMatrix = QVector<QVector<int>>;
+
+// What one invite or meeting code is for. Pane: one pane. Tab: every pane in that tab now and
+// later (protocol 10.1; the wire's `tab`). All: every pane in every window (the reserved scope
+// "all-tabs", card #A11T). The window builds the list (SharingView::onScopes); the view shows it
+// as one picker with three groups and never invents a scope of its own.
+struct Scope {
+    enum class Kind { Pane, Tab, All };
+    Kind kind = Kind::Pane;
+    QString id;         // Pane: the pane's session token. Tab: the window's tab id. All: "all-tabs".
+    QString title;      // Pane: the pane's title. Tab: the tab's project or title. All: "Everything".
+    QString tab;        // Pane: the tab it sits in (its id). Tab: == id. All: "all-tabs".
+    QString tabTitle;   // Pane/Tab: what the tab is called, for grouping the picker.
+    int panes = 0;      // Tab/All: how many panes it covers right now.
+    bool current = false;   // the pane (or its tab) the Sharing pane was opened from
+    bool operator==(const Scope &o) const { return kind == o.kind && id == o.id; }
+};
+
+// The service as RemoteShare knows it, for the Devices page's gate on spending a pairing room
+// (#PRM2): nothing is minted until the sidecar is registered at the remembered address.
+struct Service {
+    bool running = false;    // the sidecar is up
+    bool alwaysOn = false;   // remote control is on (Options › Remote / the plug)
+    bool online = false;     // registered at `onlineBase`
+    QString base;            // RemoteShare::base(): where the sidecar is publishing now
+    QString onlineBase;      // remoteState().base
+    QString note;            // RemoteShare::note(): the one sentence about the current address
+    QString addressLabel;    // remotesettings::addressName(address) — "relay-terminal.ai", "your tailnet"
+};
+
+// One device asking to be paired (`ask`, section 5). Shown on the Devices page with Refuse first
+// and holding the focus; `id` goes back in onPairAnswer.
+struct DeviceAsk {
+    int id = -1;
+    QString name, platform, fingerprint, code, peer;
+    bool valid() const { return id >= 0; }
 };
 
 // Per shared pane, and per share: both off by default (section 10.5).
@@ -222,11 +283,69 @@ QString usesText(int uses);
 QString promptsImmediateSentence();
 QString presentOnlySentence();
 
+// The QR as a picture: black cells on white, scaled so the whole code is about `target` pixels
+// wide and never fractional. Here rather than in RemoteShare because both pages draw one (#SMDX).
+QPixmap qrPixmap(const QrMatrix &matrix, int target);
+
 // ---- the pane --------------------------------------------------------------------------------
 
 class SharingView final : public QWidget, public relay::PaneView {
 public:
     explicit SharingView(QWidget *parent = nullptr);
+    // A live pairing code is withdrawn with the pane (stopPairing).
+    ~SharingView() override;
+
+    // ---- the two pages (#SMDX) --------------------------------------------------------------
+    // Devices: remote control, its address, your paired phones and other computers, "Add a
+    // device…" (the QR, the typed code and Copy link, minted on press and withdrawn on leaving),
+    // and a device's approval card. People: what is waiting for you, what is shared with whom,
+    // and the invite form (scope picker, role, expiry, uses, link/QR/email, meeting code).
+    enum class Page { Devices, People };
+    void showPage(Page page);
+    Page page() const;
+    // People, with the invite form open on this scope. What "Share this pane…" on a pane's
+    // share chip lands on; an empty scope opens the form with the picker on its current pane.
+    void startInvite(const Scope &scope);
+    // Devices, with a pairing offer started ("Add a device…" pressed for the owner). What "Pair a
+    // phone…" everywhere lands on. Idempotent while an offer is live.
+    void startPairing();
+    // The offer is withdrawn (the typed code revoked) when the owner leaves the Devices page,
+    // presses Done, or the pane closes. Safe to call when nothing is live.
+    void stopPairing();
+
+    // ---- what comes in, wired by RemoteShare::attach() --------------------------------------
+    void setService(const Service &service);          // startedChanged / remoteStateChanged
+    void setAddresses(const QJsonArray &addresses);   // the sidecar's `addresses` line
+    void showPairing(const QString &url, const QrMatrix &qr, int expires);   // `pairing`
+    void showPairCode(const QString &code, const QString &pin, int expires); // `pair_code`
+    void showPairCodeState(const QString &code, const QString &state, int failures);
+    void showAsk(const DeviceAsk &ask);               // `ask`; an invalid ask clears the card
+    void showInvite(const QString &url, const QrMatrix &qr, const QString &role, int uses,
+                    int expires);                     // `invite`
+    void inviteSent(bool ok, const QString &message); // the email went, or did not
+    void showCode(const QString &code, const QString &pin, int expires);     // `code`
+    void showCodeState(const QString &code, const QString &state, int failures);
+    void serviceFailed(const QString &message);       // RemoteShare::failed
+
+    // ---- what the view asks for (#SMDX) ------------------------------------------------------
+    // Wired by RemoteShare::attach(): they need only the sidecar.
+    std::function<void()> onPairRequest;                        // requestPairing + requestDevices
+    std::function<void()> onPairCodeRequest;                    // requestPairCode
+    std::function<void(const QString &code)> onPairCodeRevoke;  // revokePairCode
+    std::function<void(int askId, bool allow, const QString &capability)> onPairAnswer;
+    std::function<void(const QString &address)> onAddressPick;  // useAddress
+    std::function<void(const QString &device)> onRevokeDevice;
+    std::function<void(const QString &device, bool allow)> onPasswordEntry;
+    std::function<void(const QString &code)> onRevokeCode;
+    std::function<void(const QString &url, const QString &to, const QString &role,
+                       const QString &expiry, const QString &what)> onEmailInvite;
+    // Wired by the window: they need panes or settings.
+    std::function<QList<Scope>()> onScopes;                     // the picker's contents, fresh
+    std::function<void(bool on)> onRemoteSwitch;                // Remote control on/off
+    // Make a link / a code for a scope. The window publishes what is not yet published (a pane
+    // with the switch off, a tab shared whole, all tabs) and then calls RemoteShare.
+    std::function<void(const Scope &scope, const QString &role, int expires, int uses)> onCreateInvite;
+    std::function<void(const Scope &scope, const QString &role)> onCreateCode;
 
     // Everything the view can ask for. RemoteShare fills these in; the view never knows there is
     // a sidecar. Each maps to exactly one line of section 10.5.
@@ -239,8 +358,9 @@ public:
     std::function<void(const QString &pane, bool on)> onPause;
     std::function<void(const QString &pane)> onEndShare;
     std::function<void(const QString &pane, bool promptsImmediate, bool presentOnly)> onOptions;
-    std::function<void(const QString &pane)> onInvite;      // open the share dialog on this pane
-    std::function<void()> onPairPhone;                      // the plug menu's "Pair a phone…"
+    // Kept for the window: an Invite… button on a shared-now row calls startInvite() itself, so
+    // nobody needs to wire this any more; it is invoked as well when set.
+    std::function<void(const QString &pane)> onInvite;
     std::function<void()> onClose;                          // Esc, or the pane chrome's ×
     std::function<void()> onTitleChanged;
 
@@ -265,31 +385,132 @@ protected:
 
 private:
     void build();
+    void buildDevicesPage();
+    void buildPeoplePage();
+    void buildInviteForm(QVBoxLayout *column);
+    // The People page's rows, rebuilt wholesale; the Devices page's texts and device rows; the
+    // two tabs' labels ("People · 2 waiting", "Devices · 1 asking").
+    void rebuildPeople();
+    void refreshDevices();
+    void refreshTabs();
+    // Takes every row out of a column, moving the keyboard to `fallback` first when it was on
+    // one of them, so hiding a row cannot hand the focus to the next button in the chain.
+    void clearColumn(QVBoxLayout *column, QWidget *fallback);
     QWidget *heading(const QString &text);
     QWidget *subheading(const QString &text);
-    // The top line: remote control, the address, which of your phones are connected, and the
-    // Pair a phone… button (#SHRP).
-    QWidget *remoteRow();
     QWidget *requestRow(const Request &request, bool editorAllowed);
     QWidget *participantRow(const Participant &person, const QString &pane);
     QWidget *inviteRow(const Invite &invite);
-    QWidget *shareControls(const QString &pane);
-    // One line for a pane nobody is visiting: its title and Invite….
-    QWidget *quietRow(const SharedPane &pane);
+    QWidget *shareControls(const QString &pane, const Scope &scope);
+    QWidget *deviceRow(const Device &device);
     QWidget *note(const QString &text);
+    // The scope a shared pane's block is headed by, and its heading ("Pane “build”",
+    // "Tab “thesis”", "Everything"). `scopes` is the window's catalogue, for the tab's name.
+    Scope scopeOf(const SharedPane &pane, const QList<Scope> &scopes) const;
+    QString scopeHeading(const Scope &scope) const;
+    // ---- pairing (#FR1C, #PRM2) ---------------------------------------------------------------
+    void refreshPairingService();
+    void askPairCode();
+    void refreshPairCode();
+    void noPairCode();
+    void clearPairing();
+    void answerAsk(bool allow, const QString &capability);
+    // ---- the invite form (section 10.2, #97EG) --------------------------------------------------
+    void fillScopePicker(const Scope &wanted);
+    Scope pickedScope() const;
+    void updateRoleNote();
+    void createInvite();
+    void createCode();
+    void markCodeDead(bool dead);
+    void codeTick();
+    void putCodeAway();
 
     Model *m_model = nullptr;
     QWidget *m_inset = nullptr;
+    QTabBar *m_tabs = nullptr;
+    QStackedWidget *m_pages = nullptr;
+    // The People page: its scroll area, the rows (rebuilt) and the invite form (kept).
     QScrollArea *m_scroll = nullptr;
     QWidget *m_body = nullptr;
     QVBoxLayout *m_column = nullptr;
-    QString m_pane;                       // the share shown first
+    QWidget *m_rows = nullptr;
+    QVBoxLayout *m_rowsColumn = nullptr;
+    QString m_pane;                       // the share shown first, and the picker's default
     // The countdown labels of the rows on screen, by request key, so a tick moves the numbers
     // without rebuilding the rows under the owner's fingers.
     QHash<QString, QLabel *> m_clocks;
     // The first Refuse button on screen: what focusView() hands the keyboard to, so the key that
     // opens the pane cannot land on Admit.
     QWidget *m_firstRefuse = nullptr;
+    // The invite form.
+    QFrame *m_inviteForm = nullptr;
+    QComboBox *m_scopePick = nullptr;
+    QList<Scope> m_scopes;                // what the picker's rows index into
+    bool m_fillingScopes = false;
+    QComboBox *m_inviteRole = nullptr;
+    QComboBox *m_inviteExpiry = nullptr;
+    QSpinBox *m_inviteUses = nullptr;
+    QPushButton *m_makeCode = nullptr;
+    QLabel *m_inviteNote = nullptr;
+    QWidget *m_linkRow = nullptr;
+    QLabel *m_inviteQr = nullptr;
+    QLineEdit *m_inviteUrl = nullptr;
+    QPushButton *m_inviteCopy = nullptr;
+    QLineEdit *m_inviteTo = nullptr;
+    QPushButton *m_inviteSend = nullptr;
+    Scope m_inviteScope;                  // what the link or code on screen was made for
+    QString m_inviteLink, m_inviteRoleValue, m_inviteExpiryText;
+    bool m_inviteAsked = false;           // a link was asked for and has not arrived
+    // The meeting code.
+    QLabel *m_codeNote = nullptr;
+    QWidget *m_codeBox = nullptr;
+    QLabel *m_codeValue = nullptr;
+    QLabel *m_pinValue = nullptr;
+    QLabel *m_codeClock = nullptr;
+    QPushButton *m_codeCopy = nullptr;
+    QPushButton *m_codeAgain = nullptr;
+    QString m_code, m_pin, m_codeRole;
+    qint64 m_codeDeadline = 0;            // ms since the epoch; 0 when no code is live
+    qint64 m_codeAskedAt = 0;             // ms; 0 = not asked, -1 = gave up but still listening
+    // The Devices page.
+    QScrollArea *m_devicesScroll = nullptr;
+    QWidget *m_devicesBody = nullptr;
+    QVBoxLayout *m_devicesColumn = nullptr;
+    QLabel *m_topLine = nullptr;
+    QCheckBox *m_remoteSwitch = nullptr;
+    QLabel *m_alwaysOnLine = nullptr;
+    QComboBox *m_address = nullptr;
+    QLabel *m_addressNote = nullptr;
+    QWidget *m_deviceRows = nullptr;
+    QVBoxLayout *m_deviceColumn = nullptr;
+    QPushButton *m_addDevice = nullptr;
+    Service m_service;
+    // The pairing card and its offer.
+    QFrame *m_pairCard = nullptr;
+    QLabel *m_pairStatus = nullptr;
+    QLabel *m_qr = nullptr;
+    QLabel *m_pairHeading = nullptr;
+    QLabel *m_pairValue = nullptr;
+    QLabel *m_pairClock = nullptr;
+    QLabel *m_pairNote = nullptr;
+    QPushButton *m_pairAgain = nullptr;
+    QLabel *m_pairUrl = nullptr;
+    QPushButton *m_pairCopy = nullptr;
+    QPushButton *m_pairDone = nullptr;
+    bool m_pairingLive = false;           // the card is up: an offer was asked for or is on screen
+    QString m_pairingBase;                // the base the live offer was minted at; never re-minted
+    QString m_pairingLink;
+    bool m_pairWaiting = false;           // pair_code asked for, nothing back yet
+    QString m_pairCode, m_pairPin, m_pairState;
+    int m_pairFailures = 0;
+    qint64 m_pairDeadline = 0;            // ms since the epoch; 0 when no code is live
+    // The approval card.
+    QFrame *m_askCard = nullptr;
+    QLabel *m_askText = nullptr;
+    QLabel *m_askCode = nullptr;
+    QPushButton *m_askRefuse = nullptr;
+    QLabel *m_askResult = nullptr;
+    int m_askId = -1;
 };
 
 }  // namespace relay::sharing

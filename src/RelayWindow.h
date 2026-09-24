@@ -382,10 +382,23 @@ public:
             relay::RemoteShare &share = relay::RemoteShare::instance();
             connect(&share, &relay::RemoteShare::needsOwner, this,
                     [this](const QString &paneId, const QString &title, const QString &body) {
-                        Pane *owner = paneWithToken(paneId);
+                        // An empty pane id is a device asking to be paired (#SMDX): it belongs to
+                        // no pane, so the active terminal pane (or the first) hosts the Sharing
+                        // pane, opened on Devices where the approval card is.
+                        const bool deviceAsk = paneId.isEmpty();
+                        Pane *owner = deviceAsk ? nullptr : paneWithToken(paneId);
+                        if (deviceAsk) {
+                            if (!answersDeviceAsks()) return;   // another window is the one to ring
+                            owner = dynamic_cast<Pane *>(m_activeLeaf.data());
+                            if (!owner) {
+                                const QList<Pane *> panes = allPanes();
+                                owner = panes.isEmpty() ? nullptr : panes.first();
+                            }
+                        }
                         if (!owner) return;          // another window is sharing that pane
                         owner->notifyFromWindow(title, body, relay::NotificationCenter::kindWarning);
-                        openSharingPane(owner, false);
+                        relay::sharing::SharingView *view = sharingViewFor(owner, false);
+                        if (view && deviceAsk) view->showPage(relay::sharing::SharingView::Page::Devices);
                     });
             connect(&share, &relay::RemoteShare::sharingModelChanged, this,
                     [this] { refreshSharingPanes(false); });
@@ -4156,96 +4169,26 @@ public:
         return nullptr;
     }
 
-    // `focus` is false when a knock opened this by itself: the pane appears and the bell rings,
-    // but the keyboard stays exactly where the owner left it (section 10.5, and the reason the
-    // pairing dialog puts Refuse on the default button).
-    ToolPane *openSharingPane(Pane *owner, bool focus) {
-        if (!owner) return nullptr;
-        QWidget *page = pageOf(owner);
-        if (!page) return nullptr;
-        // Whatever has the keyboard right now, if this pane is arriving on its own. Showing a new
-        // pane full of buttons does take the focus, and the next keystroke would then land on
-        // Admit; it is put back below, and again after the layout has run, because the splitter
-        // moves the focus a second time on the next turn of the event loop.
-        QPointer<QWidget> held(focus ? nullptr : QApplication::focusWidget());
-        ToolPane *tool = sharingPaneIn(page);
-        auto *view = tool ? dynamic_cast<relay::sharing::SharingView *>(tool->hosted()) : nullptr;
-        if (!tool) {
-            view = new relay::sharing::SharingView;
-            view->setModel(&relay::RemoteShare::instance().sharingModel());
-            tool = new ToolPane(ToolPane::Kind::Sharing, view, view, owner->cwd());
-            tool->setProperty("paneType", QStringLiteral("sharing"));
-            relay::theme::polishWindow(tool);
-            QPointer<ToolPane> guard(tool);
-            QPointer<Pane> ownerGuard(owner);
-            view->onTitleChanged = [guard] { if (auto *w = windowOf(guard)) w->updateTitles(); };
-            view->onClose = [guard, ownerGuard] {
-                auto *w = windowOf(guard);
-                if (!w) return;
-                w->closePane(guard, false);
-                if (ownerGuard && ownerGuard->window() == w) { w->setActiveLeaf(ownerGuard); focusLeaf(ownerGuard); }
-            };
-            relay::RemoteShare &share = relay::RemoteShare::instance();
-            view->onKnockAnswer = [&share](const QString &participant, bool admit, const QString &role) {
-                share.answerKnock(participant, admit, role);
-            };
-            view->onControlAnswer = [&share](const QString &pane, const QString &participant, bool grant) {
-                share.answerControl(pane, participant, grant);
-            };
-            view->onPromptAnswer = [&share](const QString &promptId, bool approve) {
-                share.answerPrompt(promptId, approve);
-            };
-            view->onRoleSet = [&share](const QString &participant, const QString &role) {
-                share.setRole(participant, role);
-            };
-            view->onRemove = [&share](const QString &participant) { share.removeParticipant(participant); };
-            view->onRevokeInvite = [&share](const QString &inviteId) { share.revokeInvite(inviteId); };
-            view->onPause = [&share](const QString &pane, bool on) { share.pauseShare(pane, on); };
-            view->onEndShare = [&share](const QString &pane) { share.endShare(pane); };
-            view->onOptions = [&share](const QString &pane, bool immediate, bool present) {
-                share.setShareOptions(pane, immediate, present);
-            };
-            // One more link for this share: the dialog, which is also where the QR is.
-            view->onInvite = [guard](const QString &pane) {
-                auto *w = windowOf(guard);
-                if (!w) return;
-                Pane *target = w->paneWithToken(pane);
-                if (target) target->toggleShare();
-            };
-            // The pane's top line (#SHRP): remote control, its address and which of the owner's
-            // phones are connected, read off the state RemoteShare already holds for the plug and
-            // fed to the shared model whenever either moves. Bound to the view, so it stops with it.
-            view->onPairPhone = [guard] { if (auto *w = windowOf(guard)) w->pairPhone(); };
-            auto feed = [view, &share] {
-                const relay::remotesettings::State &state = share.remoteState();
-                const QString where = state.address.isEmpty() ? relay::remotesettings::address()
-                                                              : state.address;
-                share.sharingModel().setRemote(state.on, relay::remotesettings::addressName(where),
-                                               state.online, state.devices, state.reason);
-                share.sharingModel().setDevices(share.devices());
-                view->refresh();
-            };
-            connect(&share, &relay::RemoteShare::remoteStateChanged, view, feed);
-            connect(&share, &relay::RemoteShare::devicesChanged, view, [feed](const QJsonArray &) { feed(); });
-            feed();
-            insertBeside(owner, tool, owner->width() >= 900 ? Qt::Horizontal : Qt::Vertical, false);
-        }
-        if (view) {
-            view->focusPane(owner->sessionToken());
-            view->refresh();
-            relay::RemoteShare::instance().requestDevices();   // the `online` flags, fresh (#SHRP)
-        }
-        if (focus) {
-            if (QWidget *shown = pageOf(tool)) m_tabs->setCurrentWidget(shown);
-            setActiveLeaf(tool);
-            focusLeaf(tool);
-        } else if (held) {
-            held->setFocus(Qt::OtherFocusReason);
-            QTimer::singleShot(0, this, [held] { if (held) held->setFocus(Qt::OtherFocusReason); });
-        }
-        updateTitles();
-        return tool;
-    }
+    // ---- the Sharing pane (#W5N2, #SMDX): bodies in src/RelayWindowSharing.cpp -----------------
+    // Open (or find) the Sharing pane beside `owner`. `focus` is false when a knock opened it by
+    // itself: the pane appears and the bell rings, but the keyboard stays where the owner left it.
+    ToolPane *openSharingPane(Pane *owner, bool focus);
+    // The same, as the view, for the callers that then ask it for a page or a form.
+    relay::sharing::SharingView *sharingViewFor(Pane *owner, bool focus);
+    // The pane a Sharing pane was last opened from, or null once that pane has closed.
+    Pane *sharingOwnerOf(ToolPane *tool) const;
+    // The share chip's two rows: the People page with the invite form on this pane, or with the
+    // scope picker open.
+    void shareThisPane(Pane *pane);
+    void shareMore(Pane *pane);
+    // What the invite form's scope picker offers: this window's panes, its tabs, everything.
+    QList<relay::sharing::Scope> sharingScopes(Pane *current);
+    // Publish what the scope needs, then ask the sidecar for a link or a meeting code.
+    void inviteToScope(const relay::sharing::Scope &scope, const QString &role, int expires, int uses);
+    void codeForScope(const relay::sharing::Scope &scope, const QString &role);
+    bool publishScope(const relay::sharing::Scope &scope, QString *paneId, QString *tab);
+    // Whether this window is the one that rings and opens Devices for a device's pairing ask.
+    bool answersDeviceAsks() const;
 
     // Relay-to-Relay (src/RemotePane.h): pair with the other desktop, pick one of its panes, and
     // it opens beside the active pane. Transient like the other hosted views: not saved.
@@ -6231,32 +6174,9 @@ private:
     }
 
     // "Pair a phone" (#FR1C): the plug menu, the palette (remote.pair) and Options › Remote all
-    // land here. A phone paired against a desktop that publishes nothing shows an empty list and
-    // no notification, so the switch goes on first — writing what the Options switch writes, and
-    // sending the same `start` with `always` — and then the pairing window opens.
-    void pairPhone() {
-        relay::RemoteShare &share = relay::RemoteShare::instance();
-        if (!share.alwaysOn()) {
-            relay::remotesettings::turnOnForPairing();
-            share.setAlwaysOn(true);          // brings the sidecar up and sends `start`
-            syncAlwaysOnShares();
-            refreshSettingsPanes();
-        }
-        // The pairing window belongs to a pane, because the same window also invites people to
-        // one. The active leaf is the natural owner; a tool pane (Options, the Switchboard) is
-        // not one, and "Pair a phone" from there is still meant to work.
-        Pane *pane = dynamic_cast<Pane *>(m_activeLeaf.data());
-        if (!pane) {
-            const QList<Pane *> panes = allPanes();
-            pane = panes.isEmpty() ? nullptr : panes.first();
-        }
-        if (!pane) {
-            notice(QStringLiteral("Open a terminal pane first — pairing happens in a pane's "
-                                  "sharing window."), 6000);
-            return;
-        }
-        pane->toggleShare();
-    }
+    // land here. The switch goes on first when it is off, then the Sharing pane opens on Devices
+    // with a pairing offer started. Body in src/RelayWindowSharing.cpp.
+    void pairPhone();
 
     // "Disconnect all" (#PH0N, "forgot it was on"). The phones go and the service goes with them:
     // the sidecar has no "keep running but drop the devices" line today, so this turns the switch
@@ -6284,9 +6204,9 @@ private:
             relay::RemoteShare::instance().setRemoteAddress(value);
             QTimer::singleShot(0, this, [this] { refreshSettingsPanes(); });
         };
-        // Pairing is the share dialog's, where the QR and the five digits to compare already live.
-        // The same door as the plug menu's "Pair a phone…" (#FR1C): the switch first when it is
-        // off, then the window with the code and the QR.
+        // Pairing is the Sharing pane's Devices page, where the QR, the typed code and the five
+        // digits to compare live (#SMDX). The same door as the plug menu's "Pair a phone…"
+        // (#FR1C): the switch first when it is off, then that page with an offer started.
         hooks.pairPhone = [this] { pairPhone(); };
         return relay::remotesettings::section(hooks);
     }

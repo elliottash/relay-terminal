@@ -376,17 +376,18 @@ private:
         // Read aloud (#MDA7). No default key: the conventional one, Edge's Ctrl+Shift+U, is IBus's
         // Unicode entry on Linux desktops and never reaches the app. /speak is the fast path.
         add("speech.readAloud", "agent", "Read aloud: the last agent reply in the system voice (again to stop)", {});
-        // Sharing a pane with a phone (#W5N2). No default shortcut: it is a deliberate act,
+        // Sharing a pane with someone (#W5N2, #SMDX). No default shortcut: it is a deliberate act,
         // and the strip button beside the microphone is the usual way in.
-        add("pane.share", "terminal", "Share this pane with a phone", {});
+        add("pane.share", "terminal", "Share this pane: invite someone to it", {});
         // "Pair a phone" (#FR1C): the one entry point. It turns remote control on when it is off
-        // and opens the pairing window, where the code to type on the phone is. No default key —
-        // pairing is a once-per-phone act, and the plug menu at the top right is the way in.
+        // and opens the Sharing pane's Devices page, where the code to type on the phone is. No
+        // default key — pairing is a once-per-phone act, and the plug menu at the top right is
+        // the way in.
         add("remote.pair", "terminal", "Pair a phone: turn remote control on and show the code to type on it", {});
-        // The Sharing pane (#W5N2): the ongoing "who is here, who is knocking, what is waiting
-        // for me" surface. No default key either — it opens by itself when someone knocks, and
-        // the share chip and the palette are the other two ways in.
-        add("pane.sharing", "terminal", "Sharing: who is on your shared panes, and what is waiting for you", {});
+        // The Sharing pane (#W5N2, #SMDX): your devices, and the ongoing "who is here, who is
+        // knocking, what is waiting for me" surface. No default key either — it opens by itself
+        // when someone knocks, and the share chip and the palette are the other two ways in.
+        add("pane.sharing", "terminal", "Sharing: your devices, who is here and what is waiting", {});
         // Relay-to-Relay: a pane another desktop shares, opened here as one of your own devices. No
         // default key, like pane.share: pairing is a deliberate act and the palette is the way in.
         add("remote.openShared", "terminal", "Open a shared pane: a pane your other desktop shares, here as one of your devices", {});

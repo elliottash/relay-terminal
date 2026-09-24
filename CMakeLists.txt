@@ -584,7 +584,9 @@ target_compile_options(relay-requests PRIVATE ${RELAY_WARNINGS})
 # the sidecar's line JSON and holds no widgets, so tests/sharingpane_test.cpp runs it without a hub.
 add_library(relay-sharing STATIC src/SharingPane.cpp src/SharingPane.h)
 target_include_directories(relay-sharing PUBLIC src)
-target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets)
+# relay-remotesettings for the pairing-code row, the address names and the status line the Devices
+# page draws (#SMDX): the sentences stay pinned by tests/remotesettings_test.cpp, said once.
+target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets relay-remotesettings)
 target_compile_options(relay-sharing PRIVATE ${RELAY_WARNINGS})
 
 # Remote control as a service (card #PH0N): which QSettings keys remember the switch and the
@@ -620,6 +622,8 @@ if(RELAY_BUILD_APP)
     # The larger Pane and RelayWindow methods now compile in separate source files (#243T).
     add_executable(relay src/main.cpp
         src/Pane.cpp src/PaneEvents.cpp src/PaneSession.cpp src/PaneUi.cpp src/PaneRuntime.cpp
+        # The Sharing pane's window side (#SMDX): opening it, the scope catalogue, publishing before a link.
+        src/RelayWindowSharing.cpp
         src/RelayWindow.cpp src/RelayWindowModels.cpp src/RelayWindowSettings.cpp src/RelayWindowCore.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
         # The seam a console makes its surface calls through (#AGNT).
@@ -874,7 +878,7 @@ if(BUILD_TESTING)
     add_executable(relay-sharing-tests tests/sharingpane_test.cpp)
     target_link_libraries(relay-sharing-tests PRIVATE relay-sharing ${RELAY_QT}::Test)
     add_test(NAME sharing COMMAND relay-sharing-tests)
-    set_tests_properties(sharing PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    set_tests_properties(sharing PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;RELAY_KEYRING=off")
     add_executable(relay-remotesettings-tests tests/remotesettings_test.cpp)
     target_link_libraries(relay-remotesettings-tests PRIVATE relay-remotesettings ${RELAY_QT}::Test)
     add_test(NAME remotesettings COMMAND relay-remotesettings-tests)
