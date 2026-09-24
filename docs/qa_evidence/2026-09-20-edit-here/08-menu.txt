@@ -1,0 +1,93 @@
+>
+
+x
+
++
+
+Q
+
+© project (2) - cpu 00% - mem 00%
+
+4
+
+aS
+
+2
+
+-
+
+ox
+
+© project
+
+*
+
+x
+
+t
+
+*
+
+a
+
+@®s
+
+~/project
+
+To run a command as administrator (user “root"), use “sudo <command>".
+
+Filter - | to list - Enter opens
+
+See “man sudo root" for details.
+
+Name
+
+-/project $
+
+BB note.txt
+
+IB readme.md
+
+Open internal
+
+Open external
+
+Open folder
+
+Navigate here
+
+Copy path
+
+Copy relative path
+
+New fil
+
+New folder...
+
+Rename...
+
+Delete...
+
+Shell commands or agent prompts.
+
+2
+
+for help
+
+7
+
+auto
+
+~/project
+
+<
+
+claude-opus-5.5
+
+5
+
+high
+
+5
+
+e

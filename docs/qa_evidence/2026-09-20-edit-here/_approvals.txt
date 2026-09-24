@@ -1,0 +1,55 @@
+>»
+
+x
+
++
+
+Q
+
+© project - cpu 00% - mem 00%
+
+4
+
+=m
+
+2
+
+-
+
+ox
+
+(oO project
+
+@®s
+
+*
+
+To run a command as administrator (user “root"), use “sudo <command>".
+
+See “man sudo root" for details.
+
+-/project $
+
+Bhell commands or agent prompts...
+
+?
+
+for help
+
+”
+
+auto
+
+5
+
+5
+
+~/project
+
+<
+
+claude-opus-5.5
+
+high
+
+%

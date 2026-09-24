@@ -1,0 +1,87 @@
+>»
+
+x
+
++
+
+© project (3) - cpu 00% - mem 00%
+
+Q
+
+0
+
+aS
+
+ox
+
+© project
+
+K
+
+*
+
+x
+
+t
+
+*
+
+a
+
+K
+
+nat
+
+save
+
+,
+
+@®s
+
+ject
+
+Word wrap
+
+To run a command as administrator (user “root"), use “sudo <com
+
+mand>".
+
+Filter - | to list - Enter opens
+
+Next time: Ctri+Enter - edit a file straight from the explorer
+
+See “man sudo root" for details.
+
+Name
+
+scratch linefirst line of the note
+
+-/project $
+
+BB note.txt
+
+IB readme.md
+
+Shell commands or agent prompts.
+
+2
+
+for help
+
+7
+
+auto
+
+~/project
+
+<
+
+claude-opus-5.5
+
+5
+
+high
+
+5
+
+e

@@ -1,0 +1,101 @@
+>
+
+x
+
+Q
+
+© project (3) - cpu 00% - mem 00%
+
+0
+
+4
+
+aS
+
+2
+
+-
+
+ox
+
+© project
+
+,
+
+x
+
+t
+
+*
+
+a
+
+K
+
+x
+
+save
+
+°
+
+,
+
+a
+
+@®s
+
+~/project
+
+ot
+
+Word wrap
+
+To run a command as administrator (user “root"), use “sud
+
+Saved + 21:34:46
+
+0 <command>"
+
+Filter - | to list - Enter opens
+
+See “man sudo root" for details.
+
+Name
+
+scratch Linesecond scratchfirst line of the note
+
+-/project $
+
+BB note.txt
+
+IB readme.md
+
+ny Save your changes to @ note.txt before closing?
+
+@ Discard
+
+X Cancel
+
+Shell commands or agent prompts.
+
+2
+
+for help
+
+7
+
+auto
+
+~/project
+
+<
+
+claude-opus-5.5
+
+5
+
+high
+
+5
+
+e
