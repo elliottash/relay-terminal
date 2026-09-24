@@ -234,6 +234,22 @@ class FailoverTests(unittest.TestCase):
         self.assertEqual(self.events[-1]['event'], 'done')
         self.assertEqual(self.stubs['kimi-k3'].calls, 1)
 
+    def test_each_exhausted_fallback_account_is_held_for_later_turns(self):
+        exhausted = ProviderError('usage exhausted', 'quota_exhausted', 9_999_999_999)
+        self.stubs[MAIN.model] = Refuser(exhausted)
+        self.stubs['kimi-k3'] = Refuser(exhausted)
+        self.stubs['gpt-6-mini'] = Answerer()
+        chain = [*KIMI, OPENAI_MINI]
+        agent = self.agent(roles=resolver({'kimi': 'k', 'openai': 'k'}), fallbacks=chain)
+        agent.ask('hello')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual((self.stubs[MAIN.model].calls, self.stubs['kimi-k3'].calls), (1, 1))
+        self.assertTrue(agent._quota_hold_active('kimi'))
+        agent.ask('another turn')
+        self.assertEqual(self.events[-1]['event'], 'done')
+        self.assertEqual((self.stubs[MAIN.model].calls, self.stubs['kimi-k3'].calls), (1, 1))
+        self.assertEqual(self.stubs['gpt-6-mini'].calls, 2)
+
     def test_quota_fallback_obeys_off_switch(self):
         self.stubs[MAIN.model] = Refuser(ProviderError('usage exhausted', 'quota_exhausted'))
         self.stubs['kimi-k3'] = Answerer()

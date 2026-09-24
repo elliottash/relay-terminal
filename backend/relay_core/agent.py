@@ -732,7 +732,7 @@ class Agent:
         # A quota refusal remains a routing hold for this pane until the named reset or a newer
         # allowed limits report. A partial guest answer is never replayed; the next turn draws
         # its replacement before asking the exhausted account again (#495G).
-        self._quota_blocked: dict | None = None
+        self._quota_blocked: dict[str, dict] = {}
         # Routed models this turn already gave up on (`_drop_routing`), as (preset id, hostname).
         # A failover started afterwards skips them: the planning or vision provider that just
         # refused is not a spare worth asking again.
@@ -3108,6 +3108,7 @@ class Agent:
                 raise
             except ProviderError as exc:
                 if exc.code in ("quota_exhausted", "provider_quota_exhausted"):
+                    self._mark_quota_hold(exc)
                     if self._next_plan_model(exc, record, step):
                         continue
                     if self._drop_routing(exc, record, step):
@@ -3225,15 +3226,25 @@ class Agent:
         from . import guest_harness_provider as ghp
         return ghp.config_preset(self.config)
 
-    def _quota_hold_active(self) -> bool:
-        hold = self._quota_blocked
-        if not hold or hold["preset"] != self._routing_preset():
+    def _mark_quota_hold(self, exc: ProviderError) -> None:
+        preset = self._routing_preset()
+        if not preset:
+            return
+        retry_after = getattr(exc, "retry_after_s", None)
+        release_at = exc.resets_at or (time.time() + retry_after
+                                       if isinstance(retry_after, (int, float))
+                                       and retry_after > 0 else None)
+        self._quota_blocked[preset] = {"resets_at": release_at, "marked": int(time.time())}
+
+    def _quota_hold_active(self, preset: str | None = None) -> bool:
+        preset = preset or self._routing_preset()
+        hold = self._quota_blocked.get(preset)
+        if not hold:
             return False
         if hold["resets_at"] and time.time() >= hold["resets_at"]:
-            self._quota_blocked = None
+            del self._quota_blocked[preset]
             return False
         from . import guest_harness_provider as ghp
-        preset = hold["preset"]
         if is_guest_preset(preset):
             limits = ghp.last_limits(ghp.preset_key(preset))
         else:
@@ -3243,7 +3254,7 @@ class Agent:
                 and limits.get("status") != "rejected"
                 and limits.get("windows")
                 and all(w.get("used_percent", 0) < 100 for w in limits.get("windows") or ())):
-            self._quota_blocked = None
+            del self._quota_blocked[preset]
             return False
         return True
 
@@ -3251,13 +3262,8 @@ class Agent:
         """Retry a quota refusal on another allowed account, including the same CLI service."""
         from . import guest_harness_provider as ghp
         current = self._routing_preset()
-        if self._failover is None and current:
-            retry_after = getattr(exc, "retry_after_s", None)
-            release_at = exc.resets_at or (time.time() + retry_after
-                                           if isinstance(retry_after, (int, float))
-                                           and retry_after > 0 else None)
-            self._quota_blocked = {"preset": current, "resets_at": release_at,
-                                   "marked": int(time.time())}
+        if current and not self._quota_hold_active(current):
+            self._mark_quota_hold(exc)
         if (not self.failover or self.roles is None or self.cancel_event.is_set()
                 or self._vision or self._planning):
             return False
@@ -3293,7 +3299,7 @@ class Agent:
             swap["next"] += 1
             target = self.roles.fallback_candidate(entry, tier, swap["tried"],
                                                    quota=True)
-            if target is None:
+            if target is None or self._quota_hold_active(target.preset_id):
                 continue
             if is_guest_preset(target.preset_id):
                 request = {"guest": {"model": target.config.model or None,
@@ -3392,6 +3398,8 @@ class Agent:
             while target is None and swap["chain"]:
                 target = self.roles.fallback_candidate(swap["chain"].pop(0), "high", swap["tried"],
                                                        swap["hosts"], role="planning", quota=quota)
+                if target is not None and quota and self._quota_hold_active(target.preset_id):
+                    target = None
                 if target is not None and is_guest_preset(target.preset_id):
                     guest = self._start_plan_guest(record["turn_id"], target)
                     if guest is None:
