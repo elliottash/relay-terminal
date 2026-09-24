@@ -569,6 +569,26 @@ class VerifyBlockTests(TempBoardTest):
         self.assertEqual(B.yaml_value({"signal": "run:unit", "evidence": ["https://x.test/a?b=1"]}),
                          "{signal: run:unit, evidence: [https://x.test/a?b=1]}")
 
+    def test_an_unquoted_comma_written_before_the_fix_still_reads(self):
+        # #KQNP's card was written by a worker still running pre-#MSJ0 code; every board read,
+        # a phone's card creation included, failed on it.
+        text = ("---\nid: K7Q2\ntype: work\nstatus: executing\nrank: 0m\n"
+                "verify: {artifact: code, criteria: shows '1 reset', and asks first., "
+                "sign_off: none}\n---\n# Old writer\n")
+        block = B.Card.parse(text).front["verify"]
+        self.assertEqual(block["criteria"], "shows '1 reset', and asks first.")
+        self.assertEqual(block["sign_off"], "none")
+        with self.assertRaises(B.BoardError):
+            B.parse_yaml_value("{a: [x], y}")
+
+    def test_one_unreadable_card_does_not_hide_the_rest(self):
+        good = B.new_card("work", "Fine", "ready", card_id="G00D", rank="0m")
+        write(self.root / "features" / "2026-09-24-good.md", good.to_text())
+        write(self.root / "features" / "2026-09-24-bad.md",
+              "---\nid: BAD1\nverify: {a: [x], y}\n---\n# Bad\n")
+        self.assertIn("G00D", [c.id for c in self.board.cards()])
+        self.assertIn("bad_card", {p.code for p in self.board.check()})
+
     def test_check_errors_on_an_invalid_block_and_warns_when_a_working_card_has_none(self):
         bad = B.new_card("work", "Bad block", "executing", card_id="K7Q2", rank="0m",
                          verify={"artifact": "code", "primary": "vibes", "effort": "low"})

@@ -673,13 +673,19 @@ def parse_yaml_value(text: str):
     if text.startswith("[") and text.endswith("]"):
         return [parse_yaml_value(p) for p in _split_flow(text[1:-1])]
     if text.startswith("{") and text.endswith("}"):
-        out = {}
+        # An entry with no `key: ` is the rest of the previous plain value, cut at an unquoted
+        # comma: writers from before #MSJ0 put `criteria: A, and B` unquoted, and one such card
+        # stopped every board read, card creation included.
+        entries: list[list[str]] = []
         for part in _split_flow(text[1:-1]):
             split = _split_key(part)
-            if split is None:
+            if split is not None:
+                entries.append([split[0], split[1]])
+            elif entries and not entries[-1][1].startswith(("[", "{", "'", '"')):
+                entries[-1][1] += ", " + part
+            else:
                 raise BoardError(f"bad mapping entry: {part!r}")
-            out[str(_parse_scalar(split[0]))] = parse_yaml_value(split[1])
-        return out
+        return {str(_parse_scalar(k)): parse_yaml_value(v) for k, v in entries}
     return _parse_scalar(text)
 
 
@@ -1444,7 +1450,15 @@ class Board:
         return parts[0] if parts else ""
 
     def cards(self, include_private: bool = True) -> list[Card]:
-        return [Card.load(p) for p in self.card_paths(include_private)]
+        """Every card that parses.  One unreadable file is `check()`'s `bad_card` error, not a
+        reason to refuse every read and write on the board."""
+        out = []
+        for path in self.card_paths(include_private):
+            try:
+                out.append(Card.load(path))
+            except (BoardError, UnicodeDecodeError):
+                continue
+        return out
 
     def card_by_id(self, card_id: str) -> Card | None:
         for card in self.cards():
