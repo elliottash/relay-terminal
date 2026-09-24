@@ -87,7 +87,46 @@ private slots:
     void boardDataStillReachesBothPanes();
     void theCardPagesFlagClicksThroughToBoardPriority();
     void hygieneChecksBeforeCleanup();
+    void emptyAgentTranscriptDoesNotReserveConversationHeight();
 };
+
+void BoardPaneTests::emptyAgentTranscriptDoesNotReserveConversationHeight()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-empty-transcript-test"));
+    QWidget *transcript = nullptr;
+    QWidget *console = nullptr;
+    view.onCreateConsole = [&](relay::agent::Context *, QWidget *parent) {
+        relay::agent::ConsoleHandle handle;
+        console = new QWidget(parent);
+        auto *column = new QVBoxLayout(console);
+        transcript = new QWidget(console);
+        column->addWidget(transcript, 1);
+        auto *queue = new QWidget(console);
+        queue->setObjectName(QStringLiteral("queueStrip"));
+        queue->hide();
+        column->addWidget(queue);
+        auto *composer = new QWidget(console);
+        composer->setFixedHeight(100);
+        column->addWidget(composer);
+        handle.widget = console;
+        handle.setTranscriptHiddenUntilUsed = [transcript](bool hide) {
+            transcript->setVisible(!hide);
+        };
+        return handle;
+    };
+    view.resize(995, 1200);
+    view.show();
+    view.handleEvent(opened({row(QStringLiteral("AB12"), QStringLiteral("inbox"))}));
+    QCoreApplication::processEvents();
+    QVERIFY(console);
+    QVERIFY(transcript->isHidden());
+    QCOMPARE(console->minimumHeight(), 0);
+    QVERIFY(console->height() < 200);
+
+    transcript->show(); // the first agent output opens the transcript
+    QTRY_VERIFY(console->minimumHeight() >= 200);
+    QVERIFY(transcript->isVisible());
+}
 
 void BoardPaneTests::longFindingsRemainReadableAndScrollable()
 {

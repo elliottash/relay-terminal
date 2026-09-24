@@ -3987,14 +3987,19 @@ public:
         resetTranscript();
         if (m_backend) { m_backend->clearScrollback(); m_backend->clear(); }
         m_restoredScrollback.clear();
-        queueTextReplay(m_bankedText.value(now), RestoredKind::Surface);   // nothing banked: nothing is replayed
+        const QStringList replay = m_bankedText.value(now);
+        m_transcriptUsed = !replay.isEmpty();
+        applyTranscriptVisibility();
+        queueTextReplay(replay, RestoredKind::Surface);   // nothing banked: nothing is replayed
         rebuildQueueStrip();                        // the strip is the new surface's too
     }
 
     void applyTranscriptVisibility() {
         if (!m_terminalHost) return;
         const bool show = !m_hideEmptyTranscript || m_transcriptUsed;
-        if (m_terminalHost->isVisibleTo(this) == show) return;
+        // isVisibleTo(this) is false while an embedding page is hidden, even when the
+        // terminal host itself has not been hidden. Set its own visibility explicitly.
+        if (m_terminalHost->isHidden() == !show) return;
         m_terminalHost->setVisible(show);
         placeQueueStrip();   // the strip's room is the pane's, and it has just changed
     }

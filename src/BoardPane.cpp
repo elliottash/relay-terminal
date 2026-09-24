@@ -5458,6 +5458,20 @@ void BoardView::ensureConsole()
         return;
     m_consoleHandle = handle;
     m_console = handle.widget;
+    if (handle.setTranscriptHiddenUntilUsed) {
+        // Pane's terminal host precedes its named queue strip in the console column.
+        // Watch that host so the minimum follows the first output, not an empty terminal.
+        if (auto *column = qobject_cast<QVBoxLayout *>(m_console->layout())) {
+            if (auto *queue = m_console->findChild<QWidget *>(QStringLiteral("queueStrip"))) {
+                const int index = column->indexOf(queue);
+                if (index > 0)
+                    m_listTranscriptHost = column->itemAt(index - 1)->widget();
+            }
+        }
+        if (m_listTranscriptHost)
+            m_listTranscriptHost->installEventFilter(this);
+        handle.setTranscriptHiddenUntilUsed(true);
+    }
     if (auto *column = qobject_cast<QVBoxLayout *>(m_chatArea->layout()))
         column->addWidget(m_console, 1);
     m_console->show();
@@ -5468,28 +5482,20 @@ void BoardView::ensureConsole()
     updateDetailLayout();
 }
 
-// See the header: a maximum alone is not a size. The column adds the console with no stretch, so
-// it takes the console's own size hint, and on the list page that is three rows — which is where
-// `placeQueueStrip` stops drawing the strip at all (`roomForBubble(0)` is false), so a second
-// prompt queues with nothing on screen to say so. Twenty lines is a conversation: the header,
-// the action row, the box and its chips take about half of it.
-//
-// **Both consoles, since card #CTRN.** The card page's console was left at its size hint because
-// a card turn was drawn in the thread view above it and the transcript was hidden until the tab's
-// *other* turns printed in it. The card's turn is drawn in it now — the thinking fold, the tool
-// rows — and the live drive found the card's console two lines tall, with the fold and the tool
-// rows scrolled out of a window that had room for neither. The rule is the same one, applied to
-// the page that is on screen.
+// A live turn needs the old 20-line floor for its transcript and queue strip. Before the first
+// byte, the hidden terminal host needs no floor; the composer supplies its own size hint.
 void BoardView::updateConsoleHeight()
 {
     const int line = QFontMetrics(font()).lineSpacing();
     const int cap = std::max(10 * line, height() * 2 / 5);
     const int floor = std::min(cap, 20 * line);
-    for (QWidget *console : {m_console, m_detail != nullptr ? m_detail->console() : nullptr}) {
+    for (const auto &[console, host] : {std::pair<QWidget *, QWidget *>{m_console, m_listTranscriptHost},
+                                        {m_detail != nullptr ? m_detail->console() : nullptr,
+                                         m_cardTranscriptHost}}) {
         if (console == nullptr)
             continue;
         console->setMaximumHeight(cap);
-        console->setMinimumHeight(floor);
+        console->setMinimumHeight(host && host->isHidden() ? 0 : floor);
     }
 }
 
@@ -5510,6 +5516,18 @@ void BoardView::ensureCardConsole()
     if (!handle)
         return;
     m_cardConsoleHandle = handle;   // the card page's half of `clearTranscript` (card #CTRN)
+    if (handle.setTranscriptHiddenUntilUsed) {
+        if (auto *column = qobject_cast<QVBoxLayout *>(handle.widget->layout())) {
+            if (auto *queue = handle.widget->findChild<QWidget *>(QStringLiteral("queueStrip"))) {
+                const int index = column->indexOf(queue);
+                if (index > 0)
+                    m_cardTranscriptHost = column->itemAt(index - 1)->widget();
+            }
+        }
+        if (m_cardTranscriptHost)
+            m_cardTranscriptHost->installEventFilter(this);
+        handle.setTranscriptHiddenUntilUsed(true);
+    }
     // The composer inside the console *is* the card's reply box from here on. There is no hook on
     // the console for a host-defined chord yet, so the host takes the editor's submit route —
     // The editor is still handed over: it *is* this page's reply box from here on (drafts,
@@ -9309,6 +9327,11 @@ void BoardView::autoScrollDuringDrag()
 
 bool BoardView::eventFilter(QObject *object, QEvent *event)
 {
+    if ((object == m_listTranscriptHost || object == m_cardTranscriptHost)
+        && (event->type() == QEvent::Show || event->type() == QEvent::Hide)) {
+        // Qt sends Hide before the host's visible state changes. Recheck after that event.
+        QTimer::singleShot(0, this, [this] { updateConsoleHeight(); });
+    }
     // The list pane's width, not the view's, decides whether the tools row wraps: with a card
     // open beside it, the list has only its half of the splitter.
     if (object == m_listPane && event->type() == QEvent::Resize) {

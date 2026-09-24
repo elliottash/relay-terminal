@@ -411,12 +411,7 @@ private:
     // for one (§30.7, and the owner's decision 5 on this card).
     void ensureConsole();
     void syncChatVisible();
-    // The console is sized to the pane it is in, the way Options and Sessions size theirs: at
-    // most ~40 % of the pane's height, and never so little that the transcript is a slot rather
-    // than a conversation. Without the floor the column takes the console's own size hint — a
-    // `Pane`'s, which is a terminal's — and the list page gave it three rows: the integration
-    // drive of card #AGNT read a whole answer, a thinking fold, a tool row and the §12 queue
-    // strip as missing, when what was missing was the room to draw them in.
+    // An unused transcript takes no space. Once it prints, reserve enough height for a turn.
     void updateConsoleHeight();
     // Put a request in the console's composer and focus it — a **draft**, never sent (owner,
     // 2026-09-19: "draft you confirm"). What the problems banner and every finding row do.
@@ -718,6 +713,8 @@ private:
     // The list page's console and what the window handed back with it. The context outlives the
     // console and the console outlives nothing: `~BoardView` takes the widgets down first.
     QWidget *m_console = nullptr;
+    QPointer<QWidget> m_listTranscriptHost;
+    QPointer<QWidget> m_cardTranscriptHost;
     relay::agent::ConsoleHandle m_consoleHandle;
     // The card page's console, which lives in `m_detail`. Kept here for the one call the page
     // makes on it that `CardDetail` has no reason to know about: `clearTranscript`, which hands
