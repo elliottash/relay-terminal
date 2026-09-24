@@ -31,3 +31,12 @@ Landed in `231b0918`. `sidecall.call` gained `on_delta` (it forwards the `delta`
 - Neighbours re-run green: `tests.test_compact_over_tokens`, `tests.test_agent_context`, `tests.test_provider`, `tests.test_tool_output_bounds`, `tests.test_sessions`, `tests.test_requests`, `tests.test_loopdetect`.
 - `scripts/relay-build --target relay` built; the landing's build gate (`land.py commit`) rebuilt the exact tree green.
 - `docs/qa_evidence/2026-09-24-compaction-progress/`: driver run, OCR of the chip in NOTES.md (20% → 38% → cleared).
+
+## Try it
+docs/qa_evidence/2026-09-24-tryit-31BM/stage.sh
+
+It opens Relay on a throwaway profile with a long conversation ready on a fake `local:big`, then type `/model local:small` and watch the chip at the bottom of the pane (the one that normally reads “N% left | big”) while the pane says “Compacting the conversation…” — it takes about 24 seconds.
+
+Did the chip tell you how far along the compaction was while you waited — was the climbing percent legible enough that you’d want it there every time? (about 1 minute)
+
+Expected: docs/qa_evidence/2026-09-24-tryit-31BM/expected.md (sealed until you answer)
