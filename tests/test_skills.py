@@ -303,6 +303,16 @@ class DefaultDirectoryTests(unittest.TestCase):
 class BundledSkillTests(unittest.TestCase):
     """The skills Relay ships itself: relay_core/skills_bundled/<name>/SKILL.md."""
 
+    def test_guest_account_setup_is_a_loadable_interview_skill(self):
+        # The Add account button submits /skill guest-account-setup. If the bundled skill is
+        # missing, that looks like a normal chat turn and the guided setup never starts.
+        index = skills.SkillIndex.load([skills.bundled_dir()])
+        self.assertIn('guest-account-setup', [row['name'] for row in index.commands()])
+        content = index.load_skill('guest-account-setup')['content']
+        self.assertIn('app_option_list', content)
+        self.assertIn('Ask one question per turn', content)
+        self.assertIn('Never ask for a password', content)
+
     def test_bundled_skills_are_indexed_and_readable(self):
         index = skills.SkillIndex.load([skills.bundled_dir()])
         self.assertEqual(index.skipped, [])

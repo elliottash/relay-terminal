@@ -366,13 +366,49 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                         form->addRow(QStringLiteral("name"), name);
                         form->addRow(QStringLiteral("config directory"), dir);
                         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                        auto *withHelper = buttons->addButton(QStringLiteral("Set up with helper agent"),
+                                                               QDialogButtonBox::ActionRole);
+                        connect(withHelper, &QPushButton::clicked, &dialog, [&dialog] { dialog.done(2); });
                         connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, name] {
                             if (!name->text().trimmed().isEmpty()) dialog.accept();
                         });
                         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
                         form->addRow(buttons);
                         dialog.resize(520, dialog.sizeHint().height());
-                        if (dialog.exec() != QDialog::Accepted) return;
+                        const int choice = dialog.exec();
+                        if (choice == 2) {
+                            // Open the one Models helper after this modal's row callback unwinds.
+                            // The /skill prefix attaches the bundled interview to the first turn;
+                            // no account is saved until the person chooses to use the manual form.
+                            QString prompt = QStringLiteral("/skill guest-account-setup Help me set up another %1 "
+                                "subscription in Relay. Inspect my current Providers setup, ask me one question "
+                                "at a time, then tell me what to do. Do not create an account or sign in yet.")
+                                .arg(cli == QStringLiteral("claude") ? QStringLiteral("Claude Code") : QStringLiteral("Codex"));
+                            if (!name->text().trimmed().isEmpty())
+                                prompt += QStringLiteral(" I had entered the account name: %1.").arg(name->text().trimmed());
+                            if (!dir->text().trimmed().isEmpty())
+                                prompt += QStringLiteral(" I had entered this config directory: %1.").arg(dir->text().trimmed());
+                            QTimer::singleShot(0, this, [this, prompt] {
+                                Pane *served = m_active ? m_active.data() : focusedConsole();
+                                openModelsPaneFor(served, served ? served->modelsTarget() : relay::ModelsPane::Target(),
+                                                  relay::ModelsPane::providersTab(), QString());
+                                auto *view = modelsViewOf(modelsPaneIn(m_tabs->currentWidget()));
+                                if (!view) return;
+                                view->focusHelper();
+                                if (auto *console = dynamic_cast<Pane *>(view->agentConsole().widget))
+                                    QTimer::singleShot(800, console, [this, console, prompt] {
+                                        const QString preset = console->currentPreset();
+                                        if (console->agentReady() && !preset.isEmpty()
+                                            && !preset.startsWith(QStringLiteral("guest:"))) console->askAgent(prompt);
+                                        else {
+                                            console->draftInComposer(prompt);
+                                            notice(QStringLiteral("Choose a non-guest model for the helper, then send the prepared setup request."));
+                                        }
+                                    });
+                            });
+                            return;
+                        }
+                        if (choice != QDialog::Accepted) return;
                         QJsonObject spec{{QStringLiteral("guest"), cli}, {QStringLiteral("label"), name->text().trimmed()}};
                         const QString path = QDir::fromNativeSeparators(dir->text().trimmed());
                         if (!path.isEmpty()) spec.insert(QStringLiteral("config_dir"), path);

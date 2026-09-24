@@ -226,7 +226,9 @@ BRIEFS = {
         "which class it follows, and an override per job. app_panes says which model each pane is "
         "on. The available, priorities and jobs lists have no tool of their own: explain which "
         "row to tick, move or override and which key does it, and let the person do it. Answer "
-        "from what the rows say now, not from what models you remember existing."),
+        "from what the rows say now, not from what models you remember existing. For Add account "
+        "guidance, use the guest-account-setup skill: inspect the provider rows, interview the "
+        "person one question at a time, and explain the steps for a separate CLI login."),
     "sessions": (
         "You are the helper agent in Relay's Sessions pane — every past conversation and "
         "terminal session Relay has indexed. app_sessions_search is that index: it takes the "
