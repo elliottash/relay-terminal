@@ -1,7 +1,7 @@
 ---
 id: 00G1
 type: work
-status: needs-verification
+status: executing
 labels: [feature, models, ui, design]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
@@ -9,8 +9,8 @@ session: 31883d9c-ec40-4d0e-a526-58a4648ecccd
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 source: Owner in a Relay guest session (Claude Code), 2026-09-23
-links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd, e9f709ef, 5e265e54, 9f3ce6e0, 8bf46bde, 3718b34e, 89e46943], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/, docs/qa_evidence/2026-09-23-00G1-redesign/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
-verify: {artifact: visual, primary: probe, also: [script, ai-visual], human: optional, criteria: "Open all five tabs in a narrow pane and confirm the controls are legible and edits persist.", sign_off: none, effort: medium}
+links: {plans: [], commits: [af112403cc9f14debea973f1396a276db41d0ccd, e9f709ef, 5e265e54, 9f3ce6e0, 8bf46bde, 3718b34e, 89e46943, 02331664735940255aa39d6bd7994e21e0c5596f], evidence: [docs/qa_evidence/2026-09-23-00G1-labels/, docs/qa_evidence/2026-09-23-00G1-redesign/, docs/qa_evidence/2026-09-23-00G1-copy/], related: [RND7, Y2B9, N4PW, AVR8, BXMS, 4BPE], github: null}
+verify: {artifact: visual, primary: probe, also: [script, ai-visual], human: optional, criteria: Open all five tabs in a narrow pane and confirm the controls are legible and edits persist., sign_off: none, effort: medium}
 ---
 # Redesign the five Models tabs and clarify their labels
 
@@ -22,6 +22,9 @@ they are just not intuitive, and they are actually slow as well, the checkboxes 
 yes,
 no i want the 5 tabs still
 but change the tab headers to make them more intuitive, especially available and priorities; jobs too
+
+when i am clicking in it, its alggy and things keep flipping back after i change them
+another issue i noticed is, it is still mentioing "this pane", but we changed that right? the model pane doesnt assign specific pane models
 
 ## Done means
 The Models pane still has exactly five tabs: Providers, Available, Priorities, Effort, and Jobs, with their current responsibilities and saved tab selection preserved.
@@ -73,6 +76,10 @@ The Models pane still has exactly five tabs: Providers, Available, Priorities, E
 ![Pick order actions in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/08-live-order.png)
 ![Effort selectors in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/09-live-effort.png)
 ![Agent jobs inline editor in the running UI](docs/qa_evidence/2026-09-23-00G1-redesign/11-live-jobs-selected.png)
+2026-09-23 copy correction (`02331664`): The Models header now calls these shared settings and directs per-pane active model changes to each pane’s model box. The helper context no longer describes an “opened from” pane, and its tooltip names models and routing. Agent jobs now says “each agent pane’s active model” for agent turns and calls “runs on” the latest worker report. No routing or storage behavior changed in this commit. The separate report of lag and controls reverting remains open on this card.
+
+![Shared-settings header and Enabled tab at 420 px](docs/qa_evidence/2026-09-23-00G1-copy/02-available.png)
+![Agent jobs wording at 420 px](docs/qa_evidence/2026-09-23-00G1-copy/05-jobs.png)
 
 ## Tests
 - `ctest -R modelpicker`
@@ -92,3 +99,4 @@ The Models pane still has exactly five tabs: Providers, Available, Priorities, E
 - notice · ctest:modelpicker — ctest -R modelpicker is slow: p95 2.59 s, p50 1.78 s
 - notice · ctest:modelspane — ctest -R modelspane is slow: p95 1.86 s, p50 1.60 s
 history: thread
+2026-09-23 copy correction: `RELAY_JOBS=1 scripts/relay-build --target relay-modelspane-tests relay-jobstab-tests` passed. `ctest --test-dir build -R '^(modelspane|jobstab)$' --output-on-failure` passed 2/2. `RELAY_N4PW_EVIDENCE=docs/qa_evidence/2026-09-23-00G1-copy xvfb-run -a build/relay-modelspane-tests everyTabKeepsItsMainControlsInANarrowPane` passed and captured the 420 px views. The exact landed tree built `relay-modelspane-tests` through `land.py`.
