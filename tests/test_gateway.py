@@ -730,7 +730,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(image.resolutions, ("1024x1024", "1536x1024", "1024x1536"))
         self.assertEqual(image.resolutions[0], "1024x1024")
         self.assertEqual(config.providers["openrouter"].image_cost_micros(image.upstreams[0].model),
-                         3000)
+                         6000)
         self.assertEqual([(r.effort, r.max_effort) for r in config.roles.values()],
                          [("medium", "medium"), ("low", "medium"), ("minimal", "medium"),
                           ("medium", "medium")])
