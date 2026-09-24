@@ -127,6 +127,12 @@ class BoardViewTests(unittest.TestCase):
         await browser.evaluate("document.getElementById('board-row').click()")
         await browser.wait_for(shown("screen-board") + " && document.querySelectorAll('.rb-row').length > 0")
 
+    # The board opens flat (#ESDF): "Stages" puts the sections back. The tests that are about the
+    # sections say so this way.
+    async def open_stages(self, browser):
+        await browser.evaluate("document.querySelector('.rb-view[data-view=\"stages\"]').click()")
+        await browser.wait_for("document.querySelectorAll('.rb-section').length > 0")
+
     async def open_card(self, browser, card=None):
         card = card or CARD
         await browser.evaluate(
@@ -268,6 +274,7 @@ class BoardViewTests(unittest.TestCase):
             try:
                 await self.start(browser)
                 await self.open_board(browser)
+                await self.open_stages(browser)
                 sections = json.loads(await browser.evaluate(
                     "JSON.stringify([...document.querySelectorAll('.rb-section')].map(e => "
                     "[e.dataset.section, e.querySelector('.rb-section-title').textContent,"
@@ -350,6 +357,54 @@ class BoardViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_recent_opens_as_one_list_newest_first_each_row_naming_its_stage(self):
+        # #ESDF: the board opens flat — one list of every shown card, newest first, a stage chip on
+        # every row — and "Stages" puts the sections back and keeps that choice.
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                # Flat: no section headers, no fold rows, every shown card in one list — newest
+                # first, ties by id — with the two orders offered and Recent on.
+                self.assertEqual(await browser.evaluate("document.querySelectorAll('.rb-section').length"), 0)
+                self.assertEqual(await browser.evaluate("document.querySelectorAll('.rb-fold').length"), 0)
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelector('.rb-view[data-view=\"recent\"]').classList.contains('rb-view-on')"),
+                    True)
+                by_id = sorted(BOARD["cards"], key=lambda r: str(r.get("id") or ""))
+                expected = [str(r["id"]) for r in sorted(by_id, key=lambda r: str(r.get("updated") or ""),
+                                                                reverse=True)]
+                ids = json.loads(await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rb-row')].map(e => e.dataset.cardId))"))
+                self.assertEqual(ids, expected)
+                # Every row names its stage: the newest card is a discussing one, and its chip
+                # says so in the desktop's own words.
+                chips = json.loads(await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rb-row')].map(e => e.querySelector('.rb-chip-status') ? e.querySelector('.rb-chip-status').textContent : ''))"))
+                self.assertEqual(len([c for c in chips if c]), len(expected))
+                self.assertEqual(chips[0], "Discussing")
+                # "Stages" brings the sections back exactly, and the choice is kept; "Recent"
+                # returns to the one list.
+                await self.open_stages(browser)
+                self.assertEqual(await browser.evaluate(
+                    "JSON.stringify([...document.querySelectorAll('.rb-section')].slice(0, 2).map(e => e.dataset.section))"),
+                    '["waiting-on-you","inbox"]')
+                self.assertEqual(await browser.evaluate("localStorage.getItem('relay-board-grouping')"),
+                                 '"sections"')
+                await browser.evaluate("document.querySelector('.rb-view[data-view=\"recent\"]').click()")
+                await browser.wait_for("document.querySelectorAll('.rb-section').length === 0")
+                self.assertEqual(await browser.evaluate("localStorage.getItem('relay-board-grouping')"),
+                                 '"flat"')
+                self.assertEqual(await browser.evaluate(
+                    "document.querySelectorAll('.rb-row').length"), len(expected))
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_search_asks_the_desktop_and_shows_what_it_answers(self):
         async def main():
             browser = Browser()
@@ -357,6 +412,7 @@ class BoardViewTests(unittest.TestCase):
             try:
                 await self.start(browser)
                 await self.open_board(browser)
+                await self.open_stages(browser)
                 await browser.evaluate(
                     "(() => { const s = document.querySelector('.rb-search'); s.value = 'sqlite';"
                     " s.dispatchEvent(new Event('input', {bubbles: true})); })()")
@@ -388,6 +444,7 @@ class BoardViewTests(unittest.TestCase):
             try:
                 await self.start(browser)
                 await self.open_board(browser)
+                await self.open_stages(browser)
                 moved = next(r for r in BOARD["cards"] if r["status"] == "inbox")
                 await browser.evaluate(
                     f"window.keptNode = document.querySelector('.rb-row[data-card-id=\"{moved['id']}\"]');"
@@ -1663,6 +1720,7 @@ class BoardViewTests(unittest.TestCase):
                     "JSON.stringify(['.rb-search', '.rb-reply-text'].map(q => parseFloat(getComputedStyle(document.querySelector(q)).fontSize)))"))
                 self.assertTrue(all(size >= 16 for size in sizes), sizes)
                 # The section header is the board's enamel label: mono, upper case.
+                await self.open_stages(browser)
                 self.assertIn("mono", await browser.evaluate(
                     "getComputedStyle(document.querySelector('.rb-section')).fontFamily.toLowerCase()"))
                 await self.shot(browser, "ipad-1180x820-board-and-card")

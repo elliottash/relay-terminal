@@ -286,6 +286,20 @@ export function mountBoard(options) {
   search.spellcheck = false;
   search.enterKeyHint = 'search';
   search.maxLength = QUERY_MAX;
+  // Recent or stages (#ESDF, owner 2026-09-21: "switchboard needs an easy way to show me recent
+  // cards without the section ordering"): one list of every shown card, newest first, each row
+  // naming its stage as a chip — or the board's section per stage. Flat is the default; the
+  // choice is kept the way the folded sections are.
+  const views = el('div', 'rb-views');
+  views.setAttribute('role', 'group');
+  views.setAttribute('aria-label', 'Card order');
+  const viewRecent = button('rb-view', 'Recent', 'One list of every card, newest first');
+  const viewStages = button('rb-view', 'Stages', 'A section per stage');
+  viewRecent.dataset.view = 'recent';
+  viewStages.dataset.view = 'stages';
+  viewRecent.addEventListener('click', () => setFlat(true));
+  viewStages.addEventListener('click', () => setFlat(false));
+  views.append(viewRecent, viewStages);
   const offline = el('div', 'rb-offline');
   offline.hidden = true;
   offline.setAttribute('role', 'status');
@@ -296,7 +310,7 @@ export function mountBoard(options) {
   const pull = el('div', 'rb-pull', 'Pull to refresh');
   pull.hidden = true;
   const list = el('div', 'rb-list');
-  listCol.append(tabsRow, search, offline, line, pull, list);
+  listCol.append(tabsRow, search, views, offline, line, pull, list);
 
   const cardCol = el('div', 'rb-card-col');
   const cardBar = el('div', 'rb-card-bar');
@@ -359,6 +373,29 @@ export function mountBoard(options) {
 
   function saveCollapsed() {
     try { localStorage.setItem('relay-board-collapsed', JSON.stringify([...collapsed])); } catch { /* fine */ }
+  }
+
+  // Flat is the default (#ESDF): the most recent cards are what the board is opened for. A phone
+  // that never chose — no storage, or a visit from before the choice existed — reads flat.
+  let flat = true;
+  try {
+    flat = str(JSON.parse(localStorage.getItem('relay-board-grouping') || 'null')) !== 'sections';
+  } catch { /* a browser without storage: flat */ }
+
+  function setFlat(on) {
+    if (flat === on) return;
+    flat = on;
+    // Stored as JSON, like the folded sections, so the read above is a parse of what this wrote.
+    try { localStorage.setItem('relay-board-grouping', JSON.stringify(flat ? 'flat' : 'sections')); } catch { /* fine */ }
+    paintViews();
+    paintList();
+  }
+
+  function paintViews() {
+    viewRecent.classList.toggle('rb-view-on', flat);
+    viewStages.classList.toggle('rb-view-on', !flat);
+    viewRecent.setAttribute('aria-pressed', flat ? 'true' : 'false');
+    viewStages.setAttribute('aria-pressed', !flat ? 'true' : 'false');
   }
 
   function placeDevice() {
@@ -625,6 +662,7 @@ export function mountBoard(options) {
   function paintList() {
     pruneBusy();
     paintInboxRow();
+    paintViews();
     onCount();
     if (!visible) return;
     const keepScroll = list.scrollTop;
@@ -643,6 +681,15 @@ export function mountBoard(options) {
     } else {
       const all = shownRows();
       const filtered = query.trim() !== '';
+      if (flat) {
+        // One list, newest first (#ESDF): a waiting card keeps its chip, a self-closed one is an
+        // ordinary row (folding belongs to a section), and every row names its stage.
+        const recent = all.slice().sort((a, b) => {
+          if (str(a.updated) !== str(b.updated)) return str(a.updated) > str(b.updated) ? -1 : 1;
+          return str(a.id) < str(b.id) ? -1 : 1;
+        });
+        recent.forEach((row) => take('recent', row, true));
+      } else {
       const sections = sectionsOf(config, all);
       const pinned = sortRows(all.filter(waitingOnOwner), false);
       if (pinned.length) {
@@ -683,6 +730,7 @@ export function mountBoard(options) {
           nodes.push(fold);
           if (openFold) tucked.forEach((row) => take(section.id, row, false));
         }
+      }
       }
       if (filtered && !nodes.length) nodes.push(el('div', 'rb-empty', `No card matches “${query.trim()}”.`));
       else if (!all.length && !filtered) nodes.push(el('div', 'rb-empty', 'No cards here yet. + files one.'));

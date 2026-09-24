@@ -106,6 +106,21 @@
   cursor: pointer;
 }
 .rb-tab.rb-tab-on { background: var(--rt-accent-soft); border-color: var(--rt-accent-border); color: var(--rt-text); }
+/* Recent or stages (#ESDF): the two orders the cards can be in. */
+.rb .rb-views { display: flex; gap: 6px; margin: 0 10px 6px; }
+.rb .rb-view {
+  flex: none;
+  min-height: var(--rb-tap);
+  padding: 0 14px;
+  background: var(--rt-surface);
+  border: 1px solid var(--rt-border);
+  border-radius: 999px;
+  color: var(--rt-muted);
+  font-size: var(--rt-secondary-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rb-view.rb-view-on { background: var(--rt-accent-soft); border-color: var(--rt-accent-border); color: var(--rt-text); }
 .rb .rb-search {
   flex: none;
   min-height: var(--rb-tap);
