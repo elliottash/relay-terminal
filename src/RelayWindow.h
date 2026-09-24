@@ -1649,8 +1649,10 @@ private:
     QJsonObject appCatalogFor(QWidget *page) { return appCommands().catalog(tabIdOf(page)); }
 
     // The catalog changed — a setting written anywhere, a key added, the Agent toggle flipped — so
-    // every worker of this window is sent the whole block again. Nothing is cached across a
-    // refresh on either side (§30.2), which is why this sends the block and not a delta.
+    // every worker of this window is sent the whole block again. It is still the whole block and
+    // not a delta (§30.2), but each worker now only receives it when its bytes differ from what it
+    // last got (#J0VY): the old resend-everything behaviour fed a presets → notify → resend →
+    // echo loop that put ~50k `app_catalog_updated` events on the GUI thread in three hours.
     void sendAppCatalog() {
         for (Pane *pane : allPanes()) if (pane) pane->sendAppCatalog();
         sendHelperCatalogs();   // the tab's helper worker runs the same tools (§30.7)
@@ -1660,9 +1662,16 @@ private:
     // like a pane's and has the same app tools (§30.7), so it is configured with the same catalog.
     void sendHelperCatalogs() {
         for (auto it = m_boardWorkers.cbegin(); it != m_boardWorkers.cend(); ++it)
-            if (relay::BoardWorker *worker = it.value().data())
+            if (relay::BoardWorker *worker = it.value().data()) {
+                const QJsonObject app = appCommands().catalog(helperTab(worker));
+                // #J0VY: the same brake as `Pane::sendAppCatalog()`, held as a property so it dies
+                // with the worker and a fresh helper always gets its first block.
+                QByteArray last = worker->property("relayLastAppCatalog").toByteArray();
+                if (!relay::AppCommands::catalogChanged(last, app)) continue;
+                worker->setProperty("relayLastAppCatalog", last);
                 worker->send(QJsonObject{{QStringLiteral("type"), QStringLiteral("app_catalog")},
-                                         {QStringLiteral("app"), appCommands().catalog(helperTab(worker))}});
+                                         {QStringLiteral("app"), app}});
+            }
     }
 
     // keybindings.json was reloaded, so every helper worker of this window is sent the catalogue

@@ -553,6 +553,10 @@ void Pane::connectWorker() {
                        QStringLiteral("Restart agent"), [this] { hideBanner(); startWorker(); });
         });
         connect(&m_worker, &QProcess::started, this, [this] {
+            // A fresh worker knows nothing (#J0VY): clear the gate so the first `app_catalog`
+            // after `configure` reaches it even when its bytes are unchanged. (`configure`
+            // embeds the catalog in its request too — this is belt and braces.)
+            m_lastAppCatalog.clear();
             for (const auto &line : std::as_const(m_workerPending)) m_worker.write(line);
             m_workerPending.clear();
         });

@@ -1139,6 +1139,13 @@ QString AppCommands::changeIdOfAction(const QString &actionId) {
     return actionId.startsWith(QStringLiteral("appundo:")) ? actionId.mid(8) : QString();
 }
 
+bool AppCommands::catalogChanged(QByteArray &lastSent, const QJsonObject &app) {
+    const QByteArray bytes = QJsonDocument(app).toJson(QJsonDocument::Compact);
+    if (!lastSent.isNull() && lastSent == bytes) return false;
+    lastSent = bytes;
+    return true;
+}
+
 // Who the change log names when the *person* is the one who acted: the default `who` of undo()
 // and what the notification's Undo button passes. An agent's own `app_undo` carries its pane
 // token or "helper" instead, which is what tells the two apart.

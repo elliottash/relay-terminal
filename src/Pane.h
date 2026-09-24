@@ -3626,7 +3626,10 @@ public:
     // sendKeybindings() exactly: the same reason (the catalog carries current values), the same
     // shape, and nothing is cached across a refresh on either side.
     void sendAppCatalog() {
-        if (m_configured && onAppCatalog) send(QJsonObject{{"type", "app_catalog"}, {"app", onAppCatalog()}});
+        if (!m_configured || !onAppCatalog) return;
+        const QJsonObject app = onAppCatalog();
+        if (!relay::AppCommands::catalogChanged(m_lastAppCatalog, app)) return;   // #J0VY
+        send(QJsonObject{{"type", "app_catalog"}, {"app", app}});
     }
 
     // "Navigate here" in the explorer's right-click menu: change this pane's shell into `path`.
@@ -15592,6 +15595,10 @@ private:
     QString m_title;
     bool m_titleUser = false;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;
+    // #J0VY: the last `app_catalog` blob this pane's worker received (cleared when a fresh worker
+    // starts), so a `presets` echo whose settings did not change sends nothing instead of
+    // restarting the broadcast loop that flooded the GUI thread.
+    QByteArray m_lastAppCatalog;
     bool m_promptReported = false;
     QString m_submitMode, m_model, m_turnText, m_fixCommand;
     int m_fixAttempt = 0;

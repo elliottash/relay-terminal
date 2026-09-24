@@ -1620,6 +1620,25 @@ private Q_SLOTS:
         QVERIFY(!result.value(QStringLiteral("ok")).toBool());
         QCOMPARE(result.value(QStringLiteral("error")).toString(), QStringLiteral("unknown_target"));
     }
+
+    // #J0VY: the `app_catalog` echo brake. A `presets` event whose settings did not change used
+    // to make the window resend the whole catalog to every worker; their echoes re-fired presets
+    // and the loop ran for hours. The gate: first send always goes, identical content sends
+    // nothing, a real change goes through, and a cleared cache (the worker went away) sends again.
+    void catalogChangedGatesIdenticalResends() {
+        const QJsonObject dark = {{QStringLiteral("values"),
+                                   QJsonObject{{QStringLiteral("theme"), QStringLiteral("dark")}}}};
+        const QJsonObject light = {{QStringLiteral("values"),
+                                    QJsonObject{{QStringLiteral("theme"), QStringLiteral("light")}}}};
+        QByteArray last;
+        QVERIFY(AppCommands::catalogChanged(last, dark));
+        QCOMPARE(last, QJsonDocument(dark).toJson(QJsonDocument::Compact));
+        QVERIFY(!AppCommands::catalogChanged(last, dark));
+        QVERIFY(AppCommands::catalogChanged(last, light));
+        QVERIFY(!AppCommands::catalogChanged(last, light));
+        last.clear();
+        QVERIFY(AppCommands::catalogChanged(last, light));
+    }
 };
 
 QTEST_MAIN(AppCommandsTests)

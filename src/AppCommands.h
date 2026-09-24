@@ -25,6 +25,7 @@
 #include <QDateTime>
 #include <QHash>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
@@ -272,6 +273,14 @@ public:
     // carries strings, so Undo survives the window that posted it being busy elsewhere.
     static QString undoActionId(const QString &changeId);
     static QString changeIdOfAction(const QString &actionId);
+
+    // The `app_catalog` echo brake (#J0VY): a `presets` event from any worker used to make the
+    // window resend the whole catalog to every worker, whose echoes re-fired presets in turn —
+    // ~50k `app_catalog_updated` events in three hours with ~37 panes, all handled on the GUI
+    // thread. This compares a catalog with the last blob *that worker* received: unchanged
+    // content sends nothing and leaves `lastSent` alone; changed content updates it and does.
+    // A worker starts with a null `lastSent`, so its first catalog always goes through.
+    static bool catalogChanged(QByteArray &lastSent, const QJsonObject &app);
     // An "Undo" press in the notification popup. Unknown ids are ignored, so a window that did not
     // make the change says nothing rather than guessing.
     bool undoFromNotification(const QString &actionId);
