@@ -45,6 +45,11 @@ Asked once per task, cheapest and strongest oracle first. The agent stops at the
 **Automatic or not, three layers** (#C3Q2): a global floor in Options (which stakes classes always need a person, which rungs may gate alone, default sampling); per-project overrides in `board.yaml`; and the server's own declared profile (#MSJ0) as the proposal. The user never fills in the ladder; they see the proposal and can say "always ask me" or "stop asking" at any layer.
 
 **Verified** then means: the primary mode passed with evidence, *and* the human step is answered when `verify.human` is `required`, *and* the sign-off receipt exists when one is required. A deferred card is not verified and says until when.
+### Status, 2026-09-23 (end of day)
+
+Landed on `main`: #WFRA (verify block, agent-facing; strip shown only for a review, sign-off or deferral, evidence `docs/qa_evidence/2026-09-23-WFRA-strip/`), #1AA6 (`verified()`, the done / needs-qa gates), #MSJ0 (skill `profile:` and the claim-time default from the loaded skill), #C3Q2 (`qa_policy`, the one Options row, `board.yaml qa:`). #95VZ (case ledger) in progress. All four are in `needs-verification` for a verifier outside the Anthropic lineage.
+
+**One decision made in passing, for the owner to confirm or reverse:** under `Verification: ask`, a card with `verify.human: optional` counts as "needs no person" for the ask gate (the verifier may not close it in `ask` mode either way; in `automatic` mode it closes). `required` stays the hard gate. If `optional` should also hold the card for the person in `automatic` mode, say so on #C3Q2.
 
 ## Decisions
 Owner's stated direction, 2026-09-23: “i dont like the terminology "Try It". that doesnt make sense for a human veridying the results of an ML analysis for example.” “i think we need a separate QA pane where human involvement will differ based on the goals of the card.” “i think i want to expand the verification concept . a card has a designation of whether human QA is needed. in that case, "verified" will require that.” The designation and pane behavior still need design.
