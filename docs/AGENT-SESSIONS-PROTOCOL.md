@@ -294,7 +294,7 @@ with the latter becomes a `blocked` subagent outcome, preserved in saved threads
 `agent_message`. Unmarked reports retain the previous done behavior for compatibility; incidental
 mentions of blockers are not classified. Provider errors remain failed, cancellation stopped.
 
-- Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?, todo_id?}`; `agent_message {id, text}`; `agent_wait {id?}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents.
+- Main-agent tool `agent {description, prompt, subagent_type, background: bool, model?, effort?, todo_id?}`; `agent_message {id, text}`; `agent_wait {id?}`; `agent_set_model {id | "all", model}`. Several `agent` calls in one response run concurrently (max 4). Subagents cannot spawn subagents. For Claude Code guests, `model: "opus"` selects Claude Code's Opus model rather than inheriting the current model.
 - **Which model a subagent runs on** (#0C0V step 5). The tool tells the delegating model to choose
   per task: `model: "flash"` for search, reading, summarising and checking, `"main"` for
   implementation, `"high"` for hard reasoning. Those words are roles (section 13): each resolves
@@ -4688,7 +4688,7 @@ show the result one instead.
 | `read` | `read_file` |
 | `list` | `list_directory` |
 | `edit` | `write_file`, `edit_file` |
-| `agent` | `agent`, `agent_message`, `agent_wait` |
+| `agent` | `agent`, `agent_message`, `agent_wait`, `agent_set_model` |
 | `plan` | `write_plan`, `update_todos` |
 | `skill` | `load_skill`, `read_skill_file` |
 | `board` | every `board_*` Board tool, including the cleanup-only three |
@@ -4755,7 +4755,7 @@ not the capped first line.
 | `{"type": "fold"}` | the default everywhere: the detail folds open in place, in the terminal |
 | `{"type": "file", "path": "x.py"}` | a `read_file`, and a `write_file` that created the file |
 | `{"type": "diff"}` | a write or an edit whose diff is more than 12 changed lines (the small ones fold in place instead) |
-| `{"type": "subagent", "id": "a1"}` | `agent`, `agent_message`, `agent_wait` with an id |
+| `{"type": "subagent", "id": "a1"}` | `agent`, `agent_message`, `agent_wait`, `agent_set_model` with an id |
 | `{"type": "card", "id": "K7Q2"}` | a `board_*` call about one card (the id carries no `#`) |
 | `{"type": "plan"}` | `write_plan` |
 | `{"type": "todos"}` | `update_todos` |
@@ -6421,6 +6421,9 @@ Card #GD8K adds `agent`, `agent_message`, `agent_wait`, and `update_todos`: Rela
 children, task links, progress events, transcripts and completion handoffs. These tools also work
 without a Board. Initial discovery supplies provisional delegation schemas before the
 worker binds its configured manager; execution always checks the bound agent's actual tools.
+Guest panes also offer `agent_set_model {id | "all", model}` to switch an existing child; a
+running child switches before its next model call, and a waiting or finished child switches now.
+On a Claude Code guest, `model: "opus"` starts or switches a child to Claude Code's Opus model.
 Guest launches honor the native foreground/background selection and `agent_wait` accepts the
 native 1–1800 second timeout. Stop interrupts a blocked wait. Native plan/read-only/card-scope gates apply.
 Bridge-enabled Codex launches and thread start/resume/fork set `features.multi_agent=false` and

@@ -79,6 +79,22 @@ class BridgeTests(unittest.TestCase):
         run.assert_called_once_with('media_catalog', {})
         self.assertIn('image', result)
 
+    def test_guest_can_switch_subagent_model(self):
+        from relay_core.agents_defs import load_catalog
+        from relay_core.subagents import SubagentFactory, SubagentManager
+        manager = SubagentManager(self.events.append)
+        self.addCleanup(manager.shutdown)
+        manager.configure(load_catalog(self.tmp.name, []),
+                          SubagentFactory(self.provider.config, self.tmp.name))
+        self.agent.subagents = manager
+        names = {spec['name'] for spec in exchange(self.cap, 'tools/list')['tools']}
+        self.assertIn('agent_set_model', names)
+        self.active()
+        result = self.call('agent_set_model', {'id': 'all', 'model': 'opus'}, key='switch')
+        self.assertEqual(result, {'ids': [], 'model': 'opus', 'changed': 0})
+        self.assertIn('Unknown subagent', self.call('agent_set_model',
+            {'id': 'missing', 'model': 'opus'}, key='missing')['error'])
+
     def test_guest_can_write_plan_and_exit_in_same_turn(self):
         self.active()
         self.agent.set_mode('plan')

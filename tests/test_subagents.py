@@ -415,7 +415,9 @@ class StopAndMessageTests(Base):
         self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
         self.spawn('M tool gate:g1')
         self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['id'] == 'a2' and e['status'] == 'running')
-        self.assertEqual(sorted(self.manager.set_model('all', 'glm-coding')), ['a1', 'a2'])
+        switched = self.manager.run_tool('agent_set_model', {'id': 'all', 'model': 'glm-coding'},
+                                         None, None, threading.Event())
+        self.assertEqual(switched, {'ids': ['a1', 'a2'], 'model': 'glm-coding', 'changed': 2})
         now = self.rec.wait(lambda e: e['event'] == 'subagent_model' and e['id'] == 'a1')
         later = self.rec.wait(lambda e: e['event'] == 'subagent_model' and e['id'] == 'a2')
         self.assertEqual((now['model'], now['applies']), ('glm-5.3', 'now'))
@@ -434,6 +436,8 @@ class StopAndMessageTests(Base):
             self.manager.set_model('a99', 'inherit')
         with self.assertRaises(ValueError):
             self.manager.set_model('a1', '')
+        with self.assertRaises(ValueError):
+            self.manager.run_tool('agent_set_model', {'id': 'a1'}, None, None, threading.Event())
 
 
 class HandoffTests(Base):
@@ -788,6 +792,31 @@ class ModelChoiceTests(unittest.TestCase):
         manager.spawn({'description': 'a', 'prompt': 'p', 'subagent_type': 'general'})
         manager.spawn({'description': 'b', 'prompt': 'p', 'subagent_type': 'general', 'model': 'flash'})
         self.assertEqual(seen, [None, 'flash'])
+
+    def test_opus_selects_claude_guest_model_instead_of_inheriting_fable(self):
+        guest = ProviderConfig('harness://claude', 'fable', '')
+        factory = SubagentFactory(guest, self.temp.name, preset_id='guest:claude')
+        config, preset = factory.resolve('opus', [])
+        self.assertEqual((config.base_url, config.model, preset),
+                         ('harness://claude', 'opus', None))
+        self.assertEqual(factory.resolve(None, [])[0].model, 'fable')
+        self.assertEqual(SubagentFactory(guest, self.temp.name, aliases={'opus': 'inherit'})
+                         .resolve('opus', [])[0].model, 'fable')
+
+        manager = SubagentManager(lambda event: None)
+        self.addCleanup(manager.shutdown)
+        manager.configure(load_catalog(self.temp.name, []), factory)
+        manager._start_thread = lambda sub, prompt: None
+        child = manager.spawn({'description': 'research', 'prompt': 'Review the source',
+                               'subagent_type': 'general', 'model': 'opus'})
+        self.assertEqual((child.model, child.agent.provider.config.model), ('opus', 'opus'))
+        changed = manager.run_tool('agent_set_model', {'id': child.id, 'model': 'inherit'},
+                                   None, None, threading.Event())
+        self.assertEqual(changed['ids'], [child.id])
+        self.assertEqual((child.model, child.agent.provider.config.model), ('fable', 'fable'))
+        manager.run_tool('agent_set_model', {'id': child.id, 'model': 'opus'},
+                         None, None, threading.Event())
+        self.assertEqual((child.model, child.agent.provider.config.model), ('opus', 'opus'))
 
 
 class _Idle:

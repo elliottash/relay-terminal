@@ -30,7 +30,7 @@ from relay_core.activity_tools import TOOL_NAMES as ACTIVITY_NAMES
 from relay_core.media import TOOL_NAMES as MEDIA_NAMES, TOOL_SPECS as MEDIA_SPECS
 
 BOARD_ALLOW = frozenset(BOARD_NAMES + CLEANUP_TOOL_NAMES + ('search_files',))
-DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'update_todos'))
+DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'agent_set_model', 'update_todos'))
 REMOTE_ALLOW = frozenset(("run_command", "read_file", "list_directory", "write_file", "edit_file"))
 EXEC_ALLOW = REMOTE_ALLOW | frozenset(("run_in_terminal", "command_output", "stop_command"))
 TERMINAL_CONTEXT_ALLOW = frozenset(("terminal_history", "terminal_read"))

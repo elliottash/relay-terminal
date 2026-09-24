@@ -4,8 +4,8 @@
 Protocol: docs/AGENT-SESSIONS-PROTOCOL.md section 8. Design: docs/AGENT-FEATURES-RESEARCH.md design C.
 
 Lifecycle and rules:
-* The main agent gets the tools ``agent``, ``agent_message`` and ``agent_wait``. Subagents never do
-  (depth 1), and never get ``set_keybinding``.
+* The main agent gets ``agent``, ``agent_message``, ``agent_wait`` and ``agent_set_model``.
+  Subagents never get delegation tools (depth 1) or ``set_keybinding``.
 * Each subagent has its own ``Agent`` (conversation, provider instance, cancel event) and a
   ``RestrictedExecutor`` rooted at the same workspace, limited to its definition's tools. It shares
   the pane's role resolver, so a subagent whose provider keeps failing continues on the next keyed
@@ -61,7 +61,7 @@ def validate_max_auto_turns(value) -> int:
 MAX_TASK_BYTES = 64 * 1024
 MAX_RESULT_CHARS = 32 * 1024
 SUMMARY_CHARS = 2000
-AGENT_TOOLS = ("agent", "agent_message", "agent_wait")
+AGENT_TOOLS = ("agent", "agent_message", "agent_wait", "agent_set_model")
 FORWARDED = {"delta", "tool_started", "tool_output", "tool_result", "status", "thinking_delta", "thinking_done",
              "turn_summary"}
 PROGRESS_INTERVAL = 1.0
@@ -254,6 +254,11 @@ class SubagentFactory:
             return resolved.config, resolved.preset_id, self._tier_of(resolved)
         base_config, base_preset = self.base()
         base = base_config, base_preset, self._named_tier(base_config, base_preset)
+        # Claude Code accepts `opus` as a CLI model alias. The generic compatibility alias
+        # means "inherit", which would silently leave a Fable child on Fable here.
+        from .guest_harness_provider import config_guest_id
+        if spec_.lower() == "opus" and "opus" not in self.user_aliases and config_guest_id(base_config) == "claude":
+            return dataclasses.replace(base_config, model="opus"), base_preset, None
         spec_ = self.aliases.get(spec_.lower(), spec_)
         if spec_ == "inherit" or spec_ == base_config.model:
             return base
@@ -503,7 +508,8 @@ def delegation_tool_specs(catalog=None, max_concurrent=MAX_CONCURRENT) -> list[d
               "subagent_type": {"type": "string", "description": "One of the listed types; default general"},
               "background": {"type": "boolean"},
               "model": {"type": "string", "description": "flash for search, reading, summarising, checking; "
-                        "main for implementation; high for hard reasoning. Omit for the default."},
+                        "main for implementation; high for hard reasoning; opus for Claude Code Opus. "
+                        "Omit for the default."},
               "effort": {"type": "string", "enum": list(EFFORTS)},
               "todo_id": {"type": "string", "description": "Optional: the todo (T<n>) this subagent works on. "
                           "Relay keeps that todo's status in step with it: in_progress now, completed or "
@@ -515,6 +521,11 @@ def delegation_tool_specs(catalog=None, max_concurrent=MAX_CONCURRENT) -> list[d
         spec("agent_wait", "Wait for a subagent (or, without id, all running background subagents) to finish "
              "and return their results.",
              {"id": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}}, []),
+        spec("agent_set_model", "Switch one subagent, or all subagents, to another model. A running agent "
+             "switches before its next model call; a waiting or finished agent switches immediately.",
+             {"id": {"type": "string", "description": "Subagent id, or 'all'."},
+              "model": {"type": "string", "description": "Model name or role; 'opus' selects Claude Code Opus."}},
+             ["id", "model"]),
     ]
 
 
@@ -613,6 +624,8 @@ class SubagentManager:
                     f"\n\n{str(args.get('prompt', ''))[:1000]}")
         if name == "agent_message":
             return f"MESSAGE AGENT {args.get('id')}\n\n{str(args.get('text', ''))[:1000]}"
+        if name == "agent_set_model":
+            return f"SET AGENT MODEL {args.get('id')}\n\n{str(args.get('model', ''))[:200]}"
         return f"WAIT FOR AGENT {args.get('id') or 'all background agents'}"
 
     def start_batch(self, calls: list[dict], budget: int) -> dict:
@@ -671,6 +684,11 @@ class SubagentManager:
             if set(args) - {"id", "timeout_seconds"}:
                 raise ValueError("Unknown tool or unexpected argument.")
             return self.wait(args.get("id"), args.get("timeout_seconds", 600), cancel)
+        if name == "agent_set_model":
+            if set(args) != {"id", "model"}:
+                raise ValueError("agent_set_model needs id and model, with no unexpected arguments.")
+            ids = self.set_model(args["id"], args["model"])
+            return {"ids": ids, "model": args["model"], "changed": len(ids)}
         raise ValueError("Unknown tool or unexpected argument.")
 
     # ----- lifecycle --------------------------------------------------------------------

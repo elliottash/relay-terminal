@@ -581,6 +581,7 @@ def validate_tool_scope(value) -> str:
 #: written until the owner answers, so the rule is enforced rather than asked for in the brief.
 READONLY_BLOCKED = frozenset({
     "write_file", "edit_file", "set_keybinding", "agent", "agent_message", "agent_wait",
+    "agent_set_model",
     "run_command", "run_in_terminal", "type_into_program", "write_plan", "exit_plan_mode"})
 
 READONLY_REFUSAL = (
