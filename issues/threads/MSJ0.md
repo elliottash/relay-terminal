@@ -11,3 +11,7 @@ claimed this card; starting on backend/relay_core/skills.py (parse_profile, Skil
 <!-- relay:entry 20260924T033200Z-0a author=agent kind=progress model=claude-fable-5-1 pane=9b541d35 -->
 ### agent (subagent of pane 9b541d35) · 2026-09-24 03:32
 owner steer applied: no SkillsDialog line after all ("ideally, most of this is just in the agent's work and the user doesn't see it directly") — the src/SkillsDialog.* and consolemode-test changes are reverted; the profile is agent-facing data in skills_list / load_skill and the docs/skills-examples templates. Re-landing the backend + examples + tests + docs.
+
+<!-- relay:entry 20260924T040500Z-0a author=agent kind=progress model=claude-fable-5-1 pane=9b541d35 -->
+### agent (subagent of pane 9b541d35) · 2026-09-24 04:05
+landed 52e22a8e: parse_profile + Skill.profile/profile_warnings in relay_core/skills.py, list_skills/load_skill carry it, the deliver profile, the five docs/skills-examples templates, tests/test_skills.py ProfileTests (36 tests OK — pytest is not installed here, unittest is the repo's form) and the ARCHITECTURE.md paragraph. Owner steer applied: the SkillsDialog second line was reverted; no C++ change on this card. The board_claim/board_update_card verify-default hook stays a follow-up (board_tools.py, #WFRA session). Card to needs-verification.

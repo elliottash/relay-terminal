@@ -1,15 +1,17 @@
 ---
 id: MSJ0
 type: work
-status: executing
+status: needs-verification
 assignee: agent
 labels: [feature, switchboard, skills, qa]
-component: [worker, gui]
+component: [worker]
 parent: 1QKM
 rank: zzzzzzzzzzzzzzzzzzzi
 created: '2026-09-23'
 source: owner, Relay conversation, 2026-09-23
-links: {plans: [], commits: [], evidence: [], related: [1QKM, BX7B], github: null}
+implemented_by: anthropic/claude-fable-5-1
+verify: {artifact: code, primary: script, also: [ai-text], human: optional, criteria: the six example profiles parse clean with no warnings, and an unknown key or bad value warns without dropping the skill, sign_off: none, effort: medium}
+links: {plans: [], commits: [52e22a8e04d5395fea06bf5608f533c5198219d5], evidence: [], related: [1QKM, BX7B, WFRA], github: null}
 ---
 # Skills declare a task profile in SKILL.md frontmatter; a card worked under a skill inherits its verify defaults and effort
 
