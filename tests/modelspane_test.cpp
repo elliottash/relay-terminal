@@ -368,7 +368,7 @@ private Q_SLOTS:
         ModelsPane pane(providerSections());
         pane.setTarget(targetFor(&served, QStringLiteral("main"), QStringLiteral("~/src/relay")));
         QVERIFY2(!pane.header()->text().contains(QStringLiteral("for: ")), qPrintable(pane.header()->text()));
-        QVERIFY(pane.header()->text().contains(QStringLiteral("every pane")));
+        QVERIFY(pane.header()->text().contains(QStringLiteral("Shared model settings")));
         QVERIFY(pane.header()->text().contains(QStringLiteral("model box")));
         QCOMPARE(pane.servedTitle(), QStringLiteral("~/src/relay"));
     }
@@ -812,9 +812,9 @@ private Q_SLOTS:
         QCOMPARE(spec.routing, QStringLiteral("agent"));
         QVERIFY(!spec.shell);
         QCOMPARE(pane.agentContext()->placeholder(), QStringLiteral("Ask the Models helper…"));
-        // And what is on screen: the tab, the pane it serves, the filter, the class in focus.
+            // And what is on screen: the tab, the filter, the class in focus.
         QVERIFY2(spec.screen.contains(QStringLiteral("Models › priorities")), qPrintable(spec.screen));
-        QVERIFY2(spec.screen.contains(QStringLiteral("Opened from: relay-terminal")), qPrintable(spec.screen));
+        QVERIFY2(!spec.screen.contains(QStringLiteral("Opened from:")), qPrintable(spec.screen));
         QVERIFY2(!spec.screen.contains(QStringLiteral("Serving")), qPrintable(spec.screen));
         QVERIFY2(spec.screen.contains(QStringLiteral("Filter: glm")), qPrintable(spec.screen));
         QVERIFY2(spec.screen.contains(QStringLiteral("Class in focus: ")), qPrintable(spec.screen));
@@ -835,7 +835,7 @@ private Q_SLOTS:
 
     void withNoTargetItSaysSoRatherThanPretending() {
         ModelsPane pane(providerSections());
-        QVERIFY(pane.header()->text().contains(QStringLiteral("every pane")));
+        QVERIFY(pane.header()->text().contains(QStringLiteral("Shared model settings")));
         pane.showTab(ModelsPane::prioritiesTab());
         pane.picker()->use();   // nothing to switch, and nothing crashes
         QVERIFY(pane.servedToken().isEmpty());

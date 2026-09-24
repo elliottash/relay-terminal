@@ -202,7 +202,7 @@ bool setOverride(const QString &role, const QString &key, const QString &effort,
 const QList<JobsTab::Job> &JobsTab::jobs() {
     static const QList<Job> table{
         {QStringLiteral("main"), QStringLiteral("agent turns"),
-         QStringLiteral("the conversation in this pane"), QStringLiteral("main"), false},
+         QStringLiteral("the conversation in each agent pane"), QStringLiteral("main"), false},
         {QStringLiteral("subagent"), QStringLiteral("subagents"),
          QStringLiteral("agents the main agent starts"), QStringLiteral("main"), true},
         {QStringLiteral("switchboard"), QStringLiteral("helper agent"),
@@ -241,7 +241,7 @@ const QList<JobsTab::Job> &JobsTab::jobs() {
          QStringLiteral("local"), true},
 
         {QStringLiteral("vision"), QStringLiteral("images"),
-         QStringLiteral("a prompt carrying an image, when this pane's model cannot read one"),
+         QStringLiteral("a prompt carrying an image, when the active model cannot read one"),
          QStringLiteral("fixed"), true},
         {QStringLiteral("route_assist"), QStringLiteral("command routing"),
          QStringLiteral("shell or agent for one line of input; its budget is under a second"),
@@ -426,11 +426,10 @@ void JobsTab::updateColumns() {
     m_list->header()->setSectionResizeMode(ColRuns, compact ? QHeaderView::Stretch : QHeaderView::Interactive);
     m_compactPanel->setVisible(compact);
     m_blurb->setText(compact
-        ? QStringLiteral("Each job follows its tier until given its own model or list. “runs on” is this pane's worker's current answer.")
+        ? QStringLiteral("Each job follows its tier until given its own model or list. “runs on” shows the latest worker report.")
         : QStringLiteral("Every job relay does has a model. A job follows the tier it is grouped under — change that "
                          "tier's list on priorities and every job under it moves — until you give the job a model of "
-                         "its own. Planning, subagents and helper can have ranked lists. “runs on” is what this "
-                         "pane's worker says it is using right now."));
+                         "its own. Planning, subagents and helper can have ranked lists. “runs on” shows the latest worker report."));
     if (compact) {
         const int room = m_list->viewport()->width();
         m_list->setColumnWidth(ColJob, qBound(130, room * 45 / 100, 200));
@@ -506,7 +505,7 @@ QString JobsTab::tierRunsOn(const QString &tier) const {
 
 QString JobsTab::overrideText(const QString &role) const {
     const Job *job = jobFor(role);
-    if (job && !job->settable) return QStringLiteral("this pane's model");
+    if (job && !job->settable) return QStringLiteral("each agent pane's active model");
     if (rolestore::rankedOverrideSet(role)) {
         const auto entries = rolestore::rankedOverride(role);
         if (!entries.isEmpty()) {
@@ -630,12 +629,12 @@ void JobsTab::rebuild() {
                             QStringLiteral("runs on: %1").arg(item->text(ColRuns)),
                             QStringLiteral("override: %1").arg(overrideText(job->role))};
             if (runs.isEmpty())
-                tip << QStringLiteral("Nothing is resolved yet: this pane's worker has not reported.");
+                tip << QStringLiteral("Nothing is resolved yet: no worker report has arrived.");
             if (!str(resolved, "note").isEmpty()) tip << str(resolved, "note");
             if (!str(resolved, "warning").isEmpty()) tip << str(resolved, "warning");
             if (!job->settable)
-                tip << QStringLiteral("Agent turns are this pane's own model by definition; pick it in the "
-                                      "model box or on priorities.");
+                tip << QStringLiteral("Agent turns use each agent pane's active model. Change it in that "
+                                      "pane's model box.");
             else if (rolestore::background(job->role))
                 tip << QStringLiteral("A side call into a conversation running somewhere else, so a guest "
                                       "harness (claude code, codex) cannot take it and is not offered here; "

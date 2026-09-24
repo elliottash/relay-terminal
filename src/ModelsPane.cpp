@@ -78,15 +78,12 @@ class ModelsContext final : public agent::Context {
 
   private:
     // What is being read right now, for the "On screen now:" line above the prompt (§33). A hint,
-    // not a dump: the tab, the pane it was opened from, the filter and the class or job the
+    // not a dump: the tab, the filter and the class or job the
     // highlight is on. The lists themselves are never pasted in.
     QString screen() const {
         QStringList lines;
         const QString tab = m_pane->currentTab();
         lines << QStringLiteral("Models › %1").arg(tab);
-        const QString served = m_pane->servedTitle().trimmed();
-        // Opened from, not served: this pane switches no pane's model (card #BXMS).
-        if (!served.isEmpty()) lines << QStringLiteral("Opened from: %1").arg(served);
         const QString filter = m_pane->filterText().trimmed();
         if (!filter.isEmpty()) lines << QStringLiteral("Filter: %1").arg(filter);
         if (tab == ModelsPane::prioritiesTab() || tab == ModelsPane::effortTab()) {
@@ -305,10 +302,9 @@ void ModelsPane::setTarget(const Target &target) {
 
 void ModelsPane::updateHeader() {
     // Settings for every pane, said once (card #BXMS): a pane's own model is its box's to pick.
-    m_header->setText(QStringLiteral("settings for every pane · a pane's own model is picked in its model box"));
-    m_header->setToolTip(QStringLiteral("These lists, levels and providers apply to every pane. This pane does not switch "
-                                        "any pane's model: use the model box in the pane's status line, "
-                                        "and “all models” there for the whole list."));
+    m_header->setText(QStringLiteral("Shared model settings · choose an individual pane's active model in its model box"));
+    m_header->setToolTip(QStringLiteral("Sources, enabled models, pick order, effort and job routing apply across Relay. "
+                                        "To change one pane's active model, use its model box."));
 }
 
 QString ModelsPane::currentTab() const {
@@ -602,8 +598,8 @@ void ModelsPane::updateHelperRow() {
         m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
                                            : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
         m_ask->setToolTip(m_askKeys.isEmpty()
-            ? QStringLiteral("Ask the helper agent about this pane.")
-            : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
+            ? QStringLiteral("Ask the Models helper about models and routing.")
+            : QStringLiteral("Ask the Models helper about models and routing (%1).").arg(m_askKeys));
     }
     if (m_helperHead && m_context) m_helperHead->setText(m_context->title());
 }

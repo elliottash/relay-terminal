@@ -295,8 +295,8 @@ private Q_SLOTS:
         // The two that follow no tier.
         QCOMPARE(tab.overrideText(QStringLiteral("vision")), QStringLiteral("automatic"));
         QCOMPARE(tab.overrideText(QStringLiteral("route_assist")), QStringLiteral("automatic"));
-        // Agent turns are the pane's own model by definition and cannot be overridden here.
-        QCOMPARE(tab.overrideText(QStringLiteral("main")), QStringLiteral("this pane's model"));
+        // Agent turns use each agent pane's active model and cannot be overridden here.
+        QCOMPARE(tab.overrideText(QStringLiteral("main")), QStringLiteral("each agent pane's active model"));
         QVERIFY(tab.selectRole(QStringLiteral("main")));
         QVERIFY(!tab.openOverride());
     }
