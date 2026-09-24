@@ -21,6 +21,8 @@
 #include "Pane.h"
 
 #include <QApplication>
+#include <QAbstractItemView>
+#include <QComboBox>
 #include <QPointer>
 #include <QTemporaryDir>
 #include <QJsonObject>
@@ -962,6 +964,61 @@ void enteringPlanSelectsHigh()
     leavingPlanBeforeConfigurationRestoresRole();
 }
 
+void effortMenuFollowsTheActiveRoleModel()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    const QJsonArray presets{
+        QJsonObject{{"id", "glm-coding"}, {"label", "z.ai"}, {"model", "glm-5.3"},
+                    {"has_stored_key", true}, {"efforts", QJsonArray{"low", "high", "max"}},
+                    {"models", QJsonArray{QJsonObject{{"id", "glm-5.3"},
+                                                      {"efforts", QJsonArray{"low", "high", "max"}}}}}},
+        QJsonObject{{"id", "guest:codex"}, {"label", "Codex"}, {"harness", true},
+                    {"efforts", QJsonArray{"low", "medium", "high", "xhigh", "max", "ultra"}},
+                    {"models", QJsonArray{QJsonObject{{"id", "gpt-6-astra"},
+                                                      {"efforts", QJsonArray{"low", "medium", "high", "xhigh", "max", "ultra"}}},
+                                            QJsonObject{{"id", "gpt-6-sol"},
+                                                        {"efforts", QJsonArray{"low", "medium", "high", "xhigh", "max", "ultra"}}}}}}
+    };
+    console.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "glm-5.3"}});
+    console.deliverWorkerEvent(QJsonObject{{"event", "presets"}, {"presets", presets}});
+    console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"preset", "glm-coding"},
+                                           {"model", "glm-5.3"}, {"effort", "max"}});
+    QComboBox *effort = nullptr;
+    for (auto *box : console.findChildren<QComboBox *>())
+        if (box->accessibleName() == QStringLiteral("Reasoning effort")) effort = box;
+    CHECK(effort != nullptr);
+    if (!effort) return;
+    auto levels = [&] {
+        QStringList result;
+        for (int i = 0; i < effort->count(); ++i) result << effort->itemData(i).toString();
+        return result;
+    };
+    CHECK_EQ(levels(), (QStringList{"low", "high", "max"}));
+    console.setAgentRole(QStringLiteral("high"), false,
+                         {QStringLiteral("guest:codex|gpt-6-astra"), QStringLiteral("max")});
+    console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"preset", "guest:codex"},
+                                           {"model", "gpt-6-astra"}, {"agent_role", "high"}, {"effort", "max"}});
+    CHECK_EQ(levels(), (QStringList{"low", "medium", "high", "xhigh", "max", "ultra"}));
+    if (const QString capture = qEnvironmentVariable("RELAY_EFFORT_CAPTURE"); !capture.isEmpty()) {
+        console.resize(950, 500);
+        console.show();
+        effort->showPopup();
+        QApplication::processEvents();
+        CHECK(effort->view()->grab().save(capture));
+        effort->hidePopup();
+    }
+    console.setAgentRole(QStringLiteral("high"), false,
+                         {QStringLiteral("guest:codex|gpt-6-sol"), QStringLiteral("max")});
+    console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"preset", "guest:codex"},
+                                           {"model", "gpt-6-sol"}, {"agent_role", "high"}, {"effort", "max"}});
+    CHECK_EQ(levels(), (QStringList{"low", "medium", "high", "xhigh", "max", "ultra"}));
+    console.deliverWorkerEvent(QJsonObject{{"event", "model_changed"}, {"preset", "glm-coding"},
+                                           {"model", "glm-5.3"}, {"agent_role", "main"}, {"effort", "max"}});
+    CHECK_EQ(levels(), (QStringList{"low", "high", "max"}));
+}
+
 void leavingPlanRestoresExactSelection()
 {
     for (const QString role : {QStringLiteral("main"), QStringLiteral("flash"),
@@ -1626,6 +1683,7 @@ int main(int argc, char **argv)
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
     cases::pendingQueueSurvivesPaneRestorePaused();
     cases::enteringPlanSelectsHigh();
+    cases::effortMenuFollowsTheActiveRoleModel();
     cases::clickingPlanLeavesModeAndPreservesDraft();
     cases::planWhileConfiguringSelectsHighBeforeMode();
     cases::answersBypassQueuedPrompts();

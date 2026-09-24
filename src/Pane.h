@@ -4181,11 +4181,18 @@ public:
     // it per model. `relay::models::effortLadder()` is an *order* only, for snapping a level from
     // one model onto another, and is the fallback for a provider that reports no list at all.
 
-    // The catalog row this pane runs on, or an empty Entry. Copied out, because building the
-    // catalog walks every preset row — OpenRouter's alone is hundreds — so the callers below take
-    // the row rather than each asking for a catalog of their own.
+    // The catalog row serving the selected role. Main keeps its own model while High/Flash can
+    // run on another provider; the effort box must follow that active model, not Main's row.
+    // Copied out because building the catalog walks every preset row.
     relay::models::Entry currentCatalogEntry() const {
         const relay::models::Catalog catalog = modelCatalog();
+        if (paneMode() != QStringLiteral("main")) {
+            const relay::modelrows::ModePick pick = m_modePick.value(paneMode());
+            if (const relay::models::Entry *entry = catalog.find(pick.key);
+                entry && entry->model == m_model) return *entry;
+            const QString key = catalog.resolveKey(rolePreset(m_agentRole), m_model);
+            if (const relay::models::Entry *entry = catalog.find(key)) return *entry;
+        }
         if (const relay::models::Entry *entry = catalog.find(currentEntryKey())) return *entry;
         return {};
     }
