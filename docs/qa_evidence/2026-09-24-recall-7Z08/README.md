@@ -32,6 +32,11 @@ existing worker's cancellation latency; this change does not defer editable text
 
 ## Verification
 
+- Landed `044d7b13812e26cd07a10199e89dbb982e6b3a54` on main: the exact committed tree
+  built `relay` and `relay-consolemode-tests`, then passed `--recall-only` and `queuecontract`.
+- Final shared-checkout run `20260924T224855Z-ef88`: consolemode passed (6.69 s),
+  queuecontract passed (3.49 s), including the open-question correction case.
+- Local `build/relay` built successfully as `2026-09-24.18H.05`; no user process was restarted.
 - `scripts/relay-build --target relay-consolemode-tests` — passed.
 - `build/relay-consolemode-tests --recall-only` under isolated XDG directories and Xvfb — passed.
 - Board test run `20260924T224244Z-b7c1`: `ctest:consolemode` passed (6.25 s),

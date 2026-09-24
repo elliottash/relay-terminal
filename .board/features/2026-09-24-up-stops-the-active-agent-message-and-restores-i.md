@@ -9,9 +9,9 @@ session: ad1a0484-9eab-4e96-b0d7-b17670fab17f
 rank: zzzzzzzzzzzzzzzzzzz
 created: '2026-09-24'
 verify: {artifact: code, primary: script, also: [probe], human: optional, criteria: Up and Esc restore the sent prompt in an empty composer while stopping its agent., sign_off: none, effort: medium}
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-recall-7Z08/], related: [QRC1, XCXD], github: null}
+links: {plans: [], commits: [044d7b13812e26cd07a10199e89dbb982e6b3a54], evidence: [docs/qa_evidence/2026-09-24-recall-7Z08/], related: [QRC1, XCXD, 5P0Q], github: null}
 ---
-# Up stops the active agent message and restores it for editing
+# Up and Esc stop the active agent message and restore it for editing
 
 ## Issue
 in claude. if you press enter and then realize you made a mistake and press up, it cancels and you can edit.  can we do soemthing like that?
@@ -35,6 +35,7 @@ Verify: immediate-before-start, running, finished, late response, repeat keys, e
 Implemented Up and Esc restoration into an empty composer with synchronous text recovery and asynchronous cancellation. Up retains queued-recall precedence; Esc preserves existing drafts. The full prompt survives dispatch/start races and can be edited and resubmitted before cancellation finishes. No fixed elapsed-time window: available while starting/running. Claude/Codex timing comparison and implementation evidence: docs/qa_evidence/2026-09-24-recall-7Z08/README.md.
 
 ![Up restores the sent multiline prompt while cancellation is pending](docs/qa_evidence/2026-09-24-recall-7Z08/01-restored-prompt.png)
+Landed 044d7b13 on main. The exact committed tree built Relay and consolemode tests and passed --recall-only plus queuecontract. Shared-checkout consolemode and queuecontract also passed after the open-question fix (run 20260924T224855Z-ef88). Local build/relay updated to build 2026-09-24.18H.05; running user sessions were not restarted. Existing clean-tree H2KQ test race is #5P0Q.
 
 ## Tests
 `ctest -R consolemode` — tests/consolemode_test.cpp
