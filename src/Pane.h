@@ -13526,17 +13526,17 @@ private:
             else resetProjectInit();
             return false;
         }
-        if (type == QStringLiteral("board")) {
-            m_cardIndex.setConfig(event.value(QStringLiteral("config")).toObject());
-            m_cardIndex.reset(event.value(QStringLiteral("cards")).toArray());
-            return true;
-        }
-        if (type == QStringLiteral("board_changed")) {
-            m_cardIndex.upsert(event.value(QStringLiteral("upserts")).toArray());
-            QStringList removed;
-            for (const QJsonValue &value : event.value(QStringLiteral("removed")).toArray())
-                removed << value.toString();
-            m_cardIndex.remove(removed);
+        // The three board-index events go through the IndexFeed. It patches in the
+        // `board_cards` batches a chunked snapshot sends after its `board` event (#7M6E) — the
+        // pane used to drop them, so every card past the first 400 rows of a large board never
+        // resolved and its `#id` stayed plain text for ever (#SCN9) — and it notices when a
+        // snapshot ends short of its announced total, so the pane can ask for the board again.
+        if (m_cardIndex.apply(type, event)) {
+            if (m_cardIndex.needsRefetch()) {
+                m_cardIndex.clearRefetch();
+                m_cardIndexAsked = false;  // requestCardIndex() would think it already asked
+                requestCardIndex();
+            }
             return true;
         }
         if (type == QStringLiteral("board_activity")) {
@@ -15728,7 +15728,7 @@ private:
     QListWidget *m_queueList = nullptr, *m_atList = nullptr;
     // Switchboard: the `#K7Q2` picker and the card rows behind it (protocol 17.2, 17.6).
     QListWidget *m_cardList = nullptr;
-    relay::board::Model m_cardIndex;
+    relay::board::IndexFeed m_cardIndex;
     bool m_cardIndexAsked = false;
     int m_cardDismissedAt = -1;
     int m_atDismissedAt = -1;

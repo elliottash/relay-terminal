@@ -1825,5 +1825,46 @@ QList<Card> Model::search(const QString &query, int limit) const
     return out;
 }
 
+bool IndexFeed::apply(const QString &type, const QJsonObject &event)
+{
+    if (type == QStringLiteral("board")) {
+        m_model.setConfig(event.value(QStringLiteral("config")).toObject());
+        m_model.reset(event.value(QStringLiteral("cards")).toArray());
+        // The announced total counts every batch of this snapshot, not only what rode the
+        // event (#7M6E); an answer that fits one message announces its own size and is
+        // complete the moment it lands.
+        m_announced = event.value(QStringLiteral("cards_total")).toInt(m_model.total());
+        m_refetched = false;
+        m_needsRefetch = false;
+        return true;
+    }
+    if (type == QStringLiteral("board_cards")) {
+        // The rest of a chunked `board_open` answer, or of a `board_changed` too big for one
+        // message: rows to patch in, exactly as an upsert is. A pane that stopped at the
+        // first batch lost every card here (#SCN9).
+        m_model.upsert(event.value(QStringLiteral("cards")).toArray());
+        if (m_announced > 0 && m_model.total() >= m_announced) {
+            // The snapshot is complete; nothing is owed any more.
+            m_announced = 0;
+        } else if (m_announced > 0 && !event.value(QStringLiteral("more")).toBool() && !m_refetched) {
+            // The last batch of a snapshot landed short of its announced total: a batch never
+            // arrived. Ask once more; if the board still cannot deliver its rows, keep what
+            // landed rather than loop.
+            m_refetched = true;
+            m_needsRefetch = true;
+        }
+        return true;
+    }
+    if (type == QStringLiteral("board_changed")) {
+        m_model.upsert(event.value(QStringLiteral("upserts")).toArray());
+        QStringList removed;
+        for (const QJsonValue &value : event.value(QStringLiteral("removed")).toArray())
+            removed << value.toString();
+        m_model.remove(removed);
+        return true;
+    }
+    return false;
+}
+
 }  // namespace board
 }  // namespace relay

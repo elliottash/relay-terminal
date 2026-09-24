@@ -42,6 +42,7 @@
 
 using relay::board::Card;
 using relay::board::Column;
+using relay::board::IndexFeed;
 using relay::board::Model;
 using relay::board::Row;
 using relay::board::Tab;
@@ -368,6 +369,8 @@ private slots:
     void theFilterHidesEmptySectionsAndUnfoldsTheRest();
     void searchRanksOpenCardsAndExactIdsFirst();
     void upsertAndRemoveKeepTheBoardInStep();
+    void chunkedSnapshotBatchesAllLandInTheIndex();
+    void aSnapshotThatLandsShortAsksForTheBoardOnce();
     void statusTitlesAreHumanReadable();
     void everySectionSaysWhatItIsFor();
     void theRowListIsHeadersThenCards();
@@ -808,6 +811,73 @@ void BoardModelTests::upsertAndRemoveKeepTheBoardInStep()
     QVERIFY(!model.card(QStringLiteral("K7Q2")));
     model.clear();
     QCOMPARE(model.total(), 0);
+}
+
+// A `board_open` answer arrives in batches (#7M6E): the first rides the `board` event and the
+// rest follow as `board_cards`. The pane's index feed has to patch every batch in — until
+// #SCN9 a terminal pane dropped the follow-ups, so each card past the first 400 rows of a
+// large board (this one: #PH0N, past row 400 of 658) never resolved and its `#id` stayed
+// plain text for ever.
+void BoardModelTests::chunkedSnapshotBatchesAllLandInTheIndex()
+{
+    IndexFeed feed;
+    QVERIFY(feed.apply(QStringLiteral("board"), QJsonObject{
+        {"config", config()},
+        {"cards", rows({row("Q5QJ", "inbox", "bugs")})},
+        {"cards_total", 3}, {"more", true}}));
+    QVERIFY(feed.card(QStringLiteral("Q5QJ")));
+    QCOMPARE(feed.total(), 1);
+
+    QVERIFY(feed.apply(QStringLiteral("board_cards"), QJsonObject{
+        {"cards", rows({row("SAW4", "discussing", "bugs"), row("H0P3", "inbox", "bugs")})},
+        {"more", true}}));
+    QVERIFY(feed.apply(QStringLiteral("board_cards"), QJsonObject{
+        {"cards", rows({row("PH0N", "done", "features")})}, {"more", false}}));
+
+    // A card that travelled only in the last batch resolves exactly like a first-batch one,
+    // and the snapshot is complete: nothing is owed, nothing re-asked.
+    QCOMPARE(feed.total(), 4);
+    QCOMPARE(feed.card(QStringLiteral("PH0N"))->title, QStringLiteral("PH0N card"));
+    QVERIFY(!feed.needsRefetch());
+}
+
+// A snapshot whose last batch lands short of the announced `cards_total` lost a batch
+// somewhere; the feed says so once, and a board that still cannot deliver its rows keeps what
+// landed rather than loop. `board_changed` keeps the index in step either way.
+void BoardModelTests::aSnapshotThatLandsShortAsksForTheBoardOnce()
+{
+    IndexFeed feed;
+    feed.apply(QStringLiteral("board"), QJsonObject{
+        {"cards", rows({row("Q5QJ", "inbox", "bugs")})},
+        {"cards_total", 3}, {"more", true}});
+    feed.apply(QStringLiteral("board_cards"), QJsonObject{
+        {"cards", rows({row("SAW4", "discussing", "bugs")})}, {"more", false}});
+    QCOMPARE(feed.total(), 2);
+    QVERIFY(feed.needsRefetch());          // the pane re-asks the board once
+    feed.clearRefetch();
+
+    // Still short, still one announcement per snapshot: no loop.
+    feed.apply(QStringLiteral("board_cards"), QJsonObject{{"cards", QJsonArray{}}, {"more", false}});
+    QVERIFY(!feed.needsRefetch());
+
+    // Changes keep arriving and keep patching: an upsert lands, a removal unresolves.
+    feed.apply(QStringLiteral("board_changed"), QJsonObject{
+        {"upserts", rows({row("PH0N", "done", "features")})}, {"removed", QJsonArray{}}});
+    QCOMPARE(feed.card(QStringLiteral("PH0N"))->status, QStringLiteral("done"));
+    feed.apply(QStringLiteral("board_changed"), QJsonObject{
+        {"upserts", QJsonArray{}}, {"removed", QJsonArray{QJsonValue(QStringLiteral("PH0N"))}}});
+    QVERIFY(!feed.card(QStringLiteral("PH0N")));
+
+    // The re-ask is answered by a fresh `board` event, which starts the bookkeeping over.
+    feed.apply(QStringLiteral("board"), QJsonObject{
+        {"cards", rows({row("Q5QJ", "inbox", "bugs"), row("SAW4", "discussing", "bugs"),
+                        row("PH0N", "done", "features")})},
+        {"cards_total", 3}, {"more", false}});
+    QCOMPARE(feed.total(), 3);
+    QVERIFY(!feed.needsRefetch());
+
+    // Events the feed does not own are refused, so the pane's handler can pass them on.
+    QVERIFY(!feed.apply(QStringLiteral("board_activity"), QJsonObject{}));
 }
 
 void BoardModelTests::statusTitlesAreHumanReadable()

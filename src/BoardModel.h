@@ -517,5 +517,47 @@ private:
     Grouping m_grouping = Grouping::Sections;
 };
 
+// The card index a *terminal* pane keeps for `#id` links and the `#` picker (protocol 17.2),
+// fed straight from the events a worker sends. A `board_open` answer arrives in batches
+// (#7M6E): the first rides the `board` event and the rest follow as `board_cards`, each one
+// rows to patch in exactly as an upsert is. The feed counts what landed against the snapshot's
+// announced `cards_total`, so a pane can tell an index still waiting for its next batch from
+// one whose batch never arrived — until #SCN9 a terminal pane dropped every `board_cards`, and
+// each card past the first 400 rows of a large board stayed unlinkable for ever. When the last
+// batch of a snapshot lands short, `needsRefetch()` turns on exactly once; the pane asks for
+// the board again, and a board that still cannot deliver keeps the rows it got rather than loop.
+class IndexFeed {
+public:
+    // One board event into the index. Returns true when `type` was one of the three the feed
+    // owns (board, board_cards, board_changed) and the event was consumed.
+    bool apply(const QString &type, const QJsonObject &event);
+
+    // True once when a snapshot finished short of its announced total. Clear it when the pane
+    // has re-asked; the next `board` event starts the bookkeeping over.
+    bool needsRefetch() const { return m_needsRefetch; }
+    void clearRefetch() { m_needsRefetch = false; }
+
+    // The rest is Model's interface, forwarded for the pane's call sites.
+    const Card *card(const QString &id) const { return m_model.card(id); }
+    int total() const { return m_model.total(); }
+    QList<Card> search(const QString &query, int limit = 20) const { return m_model.search(query, limit); }
+    void setConfig(const QJsonObject &config) { m_model.setConfig(config); }
+    // Reset also drops the snapshot bookkeeping: an empty reset is the project-init switch to
+    // another board's rows (#916B), and no batch of the old board is owed any more.
+    void reset(const QJsonArray &cards)
+    {
+        m_model.reset(cards);
+        m_announced = 0;
+        m_refetched = false;
+        m_needsRefetch = false;
+    }
+
+private:
+    Model m_model;
+    int m_announced = 0;       // cards_total of the snapshot in flight; 0 when none is
+    bool m_refetched = false;  // this snapshot already had its second chance
+    bool m_needsRefetch = false;
+};
+
 }  // namespace board
 }  // namespace relay
