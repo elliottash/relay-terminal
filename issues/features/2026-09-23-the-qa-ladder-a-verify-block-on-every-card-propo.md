@@ -31,3 +31,11 @@ agent should make this suggestion, and also the effort level, per task.
 - The Board policy (`board_policy.md`, so `POLICY.md` and the system prompt) and the `deliver` skill tell the agent to propose the block at step 4 beside `## Done means`, in the ladder order, and to state the effort; a card claimed without one gets a one-line reminder in the claim result.
 - The card page shows the block as one strip under the action row ("Verify: probe · also ai-visual, pairwise · person required: <criteria> · effort medium"), drawn from the same section machinery as the `## Try it` strip; a missing block shows "No verify plan yet".
 - Tests: `tests/test_board.py` (parse, validate, refuse, BOARD.md column), `tests/test_board_tools.py` (update via fields, claim reminder), a `boardsections_test.cpp` or `boardpane_test.cpp` case for the strip. Failure shows as: an invalid block accepted silently, or a card page with a block and no strip.
+
+## Execution Summary
+- GUI half (subagent wfra-gui): the Verify strip on the card page — `board::VerifyPlan`, `verifyStripText`, `verifyPlanDetail` in `src/BoardModel.*`, `showVerifyPlan` and the `boardVerifyStrip` label under the Try it strip in `src/BoardPane.cpp`; commit d1c9c9af, evidence bf950a9a (`docs/qa_evidence/2026-09-23-WFRA-strip/`).
+
+## Tests
+- `ctest --test-dir build -R '^board$'` — passed (theVerifyBlockReadsIntoOneStripLine, tests/boardmodel_test.cpp).
+- `ctest --test-dir build -R '^boardpane$'` — passed (theVerifyStripReadsTheCardsVerifyBlock, tests/boardpane_test.cpp).
+- `ctest --test-dir build -R '^boardsections$'` — passed (unchanged; the strip is not a section-editor case).
