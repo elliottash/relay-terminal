@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Pane.h"
 
+#include <utility>
+
 bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("queued") && event.value(QStringLiteral("when")).toString() == QStringLiteral("steer")) {
             const QString requestId = event.value(QStringLiteral("request_id")).toString();
@@ -556,6 +558,19 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
                 && event.value(QStringLiteral("id")).toString() == m_transcriptRequest) {
                 m_transcriptRequest.clear();
                 printSavedTranscript(event.value(QStringLiteral("items")).toArray());
+                return true;
+            }
+            // The fill for a saved text that no longer covers its conversation (#KDB4): the turns
+            // above the file's window print here, then the replay the request was holding runs.
+            if (!m_transcriptFillRequest.isEmpty()
+                && event.value(QStringLiteral("id")).toString() == m_transcriptFillRequest) {
+                m_transcriptFillRequest.clear();
+                m_transcriptFillSessionId.clear();
+                const QStringList saved = std::exchange(m_transcriptFillSavedLines, QStringList());
+                const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+                const int covered = relay::transcriptreplay::coveredFrom(saved, items);
+                if (covered > 0) printTranscriptFill(items, covered);
+                replayRestoredScrollback();
                 return true;
             }
             if (event.value(QStringLiteral("id")).toString() == QStringLiteral("find-count")) {

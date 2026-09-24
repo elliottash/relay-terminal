@@ -1329,6 +1329,11 @@ public:
     // the pair above, so a conversation opened twice does not stack them.
     static QString sessionTextOpenMark() { return QStringLiteral("— saved terminal text from this conversation —"); }
     static QString sessionTextCloseMark() { return QStringLiteral("— end of the conversation's saved text; this shell is new —"); }
+    // And a fourth pair, for the transcript fill a truncated window gets on restore (card #KDB4):
+    // the turns the saved text no longer covers, drawn from the worker's transcript above the
+    // saved text itself. Filtered on save like every pair above, so the fill does not stack.
+    static QString transcriptFillOpenMark() { return QStringLiteral("— transcript of the turns this conversation's saved text no longer covers —"); }
+    static QString transcriptFillCloseMark() { return QStringLiteral("— end of the transcript fill; the saved text is below —"); }
     // And a third pair, for a console putting one surface's transcript away and bringing another
     // one back (card #CTRN, `clearTranscript`). Neither pair above can be its: a console has no
     // shell, so "this shell is new" is a sentence about something it does not have, and the text
@@ -1337,7 +1342,8 @@ public:
     static QString surfaceTextCloseMark() { return QStringLiteral("— end of what was said here before —"); }
     static QStringList restoreMarks() {
         return {scrollbackOpenMark(), scrollbackLegacyOpenMark(), scrollbackCloseMark(), sessionTextOpenMark(),
-                sessionTextCloseMark(), surfaceTextOpenMark(), surfaceTextCloseMark()};
+                sessionTextCloseMark(), surfaceTextOpenMark(), surfaceTextCloseMark(),
+                transcriptFillOpenMark(), transcriptFillCloseMark()};
     }
     // Which pair of rules a queued replay is printed between.
     enum class RestoredKind { Scrollback, Conversation, Surface };
@@ -1352,7 +1358,8 @@ public:
                          return plain == scrollbackOpenMark() || plain == scrollbackLegacyOpenMark()
                                 || plain == scrollbackCloseMark() || plain == sessionTextOpenMark()
                                 || plain == sessionTextCloseMark() || plain == surfaceTextOpenMark()
-                                || plain == surfaceTextCloseMark();
+                                || plain == surfaceTextCloseMark() || plain == transcriptFillOpenMark()
+                                || plain == transcriptFillCloseMark();
                      }),
                      lines->end());
     }
@@ -1523,10 +1530,42 @@ public:
     // here rather than at start-up: a pane that opens one conversation after another replays each.
     // False when there is nothing saved, which is what sends the caller to the transcript.
     // Text with nothing of the conversation in it (sessiontext::hasContent) counts as none.
-    bool queueSessionTextReplay(const QString &path) {
+    bool queueSessionTextReplay(const QString &path, const QString &sessionId = QString()) {
         const QStringList lines = relay::sessiontext::read(path);
-        return relay::sessiontext::hasContent(lines, restoreMarks()) &&
-               queueTextReplay(lines, RestoredKind::Conversation, relay::sessiontext::readProse(path));
+        const bool queued = relay::sessiontext::hasContent(lines, restoreMarks()) &&
+                            queueTextReplay(lines, RestoredKind::Conversation, relay::sessiontext::readProse(path));
+        // The file is a window of the conversation's newest lines, not the conversation: one
+        // longer than kScrollbackMaxLines restores cut off at whatever line the clamp kept
+        // (#KDB4). The worker's transcript still has every turn, so it is asked for now and the
+        // turns the window no longer covers are printed above the replay.
+        if (queued && !sessionId.isEmpty()) requestTranscriptFill(sessionId, lines);
+        return queued;
+    }
+    // Ask for the conversation's transcript so the answer handler can fill in what the saved text
+    // lost. The replay itself is held while the request is outstanding (replayRestoredScrollback
+    // returns early), so the fill lands above it, not inside it; a worker that never answers is
+    // dropped by the timer and the replay prints without a fill.
+    void requestTranscriptFill(const QString &sessionId, const QStringList &savedLines) {
+        if (!m_transcriptFillRequest.isEmpty())   // a fill for a conversation this pane has left: drop it
+            m_transcriptFillRequest.clear();      // (its timer and answer both no-op on the cleared id)
+        m_transcriptFillSessionId = sessionId;
+        m_transcriptFillSavedLines = savedLines;
+        if (m_workerReady) sendTranscriptFillRequest();
+        // else `ready` sends it, the same handoff m_transcriptPending takes (#0TJ9).
+    }
+    void sendTranscriptFillRequest() {
+        if (m_transcriptFillSessionId.isEmpty() || !m_transcriptFillRequest.isEmpty()) return;
+        m_transcriptFillRequest = QStringLiteral("resume-fill-") + QString::number(++m_requestId);
+        const QString id = m_transcriptFillRequest;
+        QTimer::singleShot(5000, this, [this, id] {
+            if (m_transcriptFillRequest != id) return;
+            m_transcriptFillRequest.clear();
+            m_transcriptFillSessionId.clear();
+            m_transcriptFillSavedLines.clear();
+            replayRestoredScrollback();   // held since the request; nothing more will come for it
+        });
+        send({{"type", "conversation_get"}, {"id", id}, {"session_id", m_transcriptFillSessionId},
+              {"limit", relay::windowstate::kScrollbackMaxLines}});
     }
     bool queueTextReplay(const QStringList &lines, RestoredKind kind = RestoredKind::Conversation,
                          const QVector<relay::ProseBlock> &prose = {}) {
@@ -1654,6 +1693,29 @@ public:
         closeInline();
         status(QStringLiteral("No saved terminal text for this conversation · replayed %1 line(s) of its transcript.")
                    .arg(rows.size()));
+    }
+    // The turns a truncated saved text no longer covers (#KDB4): drawn by the same renderer, in
+    // the same inks, between rules of its own so it reads as the rendering it is — the saved text
+    // below it is still the conversation's own terminal output, and that pair of rules says so.
+    // Printed before the replay runs: replayRestoredScrollback is held while the fill request is
+    // outstanding, so the pane ends at the conversation's end, through the window, through the
+    // fill, down to the new shell.
+    void printTranscriptFill(const QJsonArray &items, int coveredFromTurn) {
+        const auto rows = relay::transcriptreplay::render(items, relay::windowstate::kScrollbackMaxLines,
+                                                          coveredFromTurn);
+        if (rows.isEmpty()) return;
+        using L = relay::transcriptreplay::Line;
+        ensureLineStart();
+        printInline(transcriptFillOpenMark() + '\n', Ink::Note);
+        for (const auto &row : rows)
+            printInline(row.text + '\n',
+                        row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
+        printInline(transcriptFillCloseMark() + '\n', Ink::Note);
+        closeInline();
+        status(QStringLiteral("The saved text covers from turn %1 · replayed %2 line(s) of the %3 earlier turn(s) above it.")
+                   .arg(coveredFromTurn)
+                   .arg(rows.size())
+                   .arg(coveredFromTurn));
     }
     void focusInput() {
         if (m_native) { focusTerminal(); return; }
@@ -4376,7 +4438,7 @@ public:
         const QString id = state.value(QStringLiteral("session_id")).toString();
         if (id.isEmpty()) return;
         if (!queueSessionTextReplay(relay::sessiontext::sessionPath(
-                state.value(QStringLiteral("session_dir")).toString(), id)))
+                state.value(QStringLiteral("session_dir")).toString(), id), id))
             m_transcriptPending = id;   // the worker is not up yet; asked at `ready`
     }
 
@@ -5882,6 +5944,9 @@ private:
             m_transcriptPending.clear();
             requestSavedTranscript(pending);
         }
+        // The same moment sends a fill the restore queued before the worker was up (#KDB4).
+        if (!m_transcriptFillSessionId.isEmpty() && m_transcriptFillRequest.isEmpty())
+            sendTranscriptFillRequest();
         refreshSessionControls();
         if (!m_initialState.isEmpty()) {
             const QJsonObject state = m_initialState;
@@ -8134,7 +8199,7 @@ public:
         // and what is queued for the replay belongs to the one being opened.
         const QString home = directory.isEmpty() ? m_sessionDir : directory;
         adoptSessionText(sessionId, home, QString(), QString());
-        if (!queueSessionTextReplay(relay::sessiontext::sessionPath(home, sessionId)))
+        if (!queueSessionTextReplay(relay::sessiontext::sessionPath(home, sessionId), sessionId))
             requestSavedTranscript(sessionId);
         if (directory.isEmpty() || directory == m_sessionDir) send({{"type", "resume"}, {"id", sessionId}});
         else send({{"type", "load_state"}, {"state", reference}});
@@ -8187,7 +8252,8 @@ public:
         // saved, and it reads out of the same index (`source: claude|codex`, protocol 26.7).
         if (!fork) {
             adoptSessionText(QString(), QString(), source, resume.sessionId);
-            if (!queueSessionTextReplay(relay::sessiontext::guestPath(source, resume.sessionId)))
+            if (!queueSessionTextReplay(relay::sessiontext::guestPath(source, resume.sessionId),
+                                        resume.sessionId))
                 requestSavedTranscript(resume.sessionId);
         }
         // Tier A (29.4): when the worker can run this guest headless, the row is resumed *on the
@@ -12098,6 +12164,10 @@ private:
     // theme — between two muted rules, because the shell under them is new and nothing was re-run.
     void replayRestoredScrollback() {
         if (m_restoredScrollback.isEmpty() || m_scrollbackReplayed || !m_backend) return;
+        // A fill is outstanding for the conversation this replay belongs to: hold the replay so
+        // the fill prints above it (#KDB4). The answer handler — or the 5s timeout — calls this
+        // again, and a prompt that arrives meanwhile does too.
+        if (!m_transcriptFillSessionId.isEmpty()) return;
         // A console has no shell and so never reaches a prompt: `inlineReady()` says why it is
         // always ready to be printed into, and without this a card's banked transcript (card
         // #CTRN, `clearTranscript`) waited for a prompt that never comes. A pane with a shell
@@ -16038,6 +16108,12 @@ private:
     // The `conversation_get` asked for to stand in for text that was never saved, and — for a
     // conversation opened in a new pane — the id to ask about once the worker is up.
     QString m_transcriptRequest, m_transcriptPending;
+    // The transcript fill (#KDB4): `m_transcriptFillSessionId` is the conversation whose saved
+    // text is waiting for one — set from the request until the answer (or the timeout) — and
+    // while it is set replayRestoredScrollback holds the replay, so the fill prints first. The
+    // saved lines are the matcher's input: they say which turn the file's window starts at.
+    QString m_transcriptFillSessionId, m_transcriptFillRequest;
+    QStringList m_transcriptFillSavedLines;
     // state.json as pollShell() last read it, so an unchanged file is not read again.
     bool m_stateSeen = false;
 #ifndef Q_OS_WIN

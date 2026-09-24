@@ -20,6 +20,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -37,6 +38,7 @@ enum class Line {
 struct Row {
     Line kind = Line::Note;
     QString text;
+    int turn = 0;   // the transcript turn the row belongs to (0 for the separator before none)
 };
 
 // A tool-call row is one line however long its arguments were: a wrapped ▸ row would look like a
@@ -57,8 +59,9 @@ inline QString oneLine(const QString &text, int width) {
 
 // The rows for one `conversation_get` answer, oldest first. `maxRows` is the same budget the saved
 // text is clamped to, and the newest rows are the ones kept: a resumed pane should end where the
-// conversation ended, exactly as the saved text does.
-inline QVector<Row> render(const QJsonArray &items, int maxRows) {
+// conversation ended, exactly as the saved text does. `beforeTurn` >= 0 drops every item of that
+// turn and later — the fill a truncated saved text needs is the turns *above* its window (#KDB4).
+inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn = -1) {
     QVector<Row> rows;
     int lastTurn = -1;
     for (const QJsonValue &value : items) {
@@ -68,11 +71,12 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows) {
         const QString text = item.value(QStringLiteral("text")).toString();
         if (text.trimmed().isEmpty()) continue;
         const int turn = item.value(QStringLiteral("turn")).toInt();
+        if (beforeTurn >= 0 && turn >= beforeTurn) continue;
         // One blank line between turns, the gap a live conversation leaves; none before the first.
-        if (lastTurn >= 0 && turn != lastTurn) rows.append({Line::Note, QString()});
+        if (lastTurn >= 0 && turn != lastTurn) rows.append({Line::Note, QString(), turn});
         lastTurn = turn;
         if (kind == QLatin1String("tool_call")) {
-            rows.append({Line::Call, QStringLiteral("▸ ") + oneLine(text, kCallWidth)});
+            rows.append({Line::Call, QStringLiteral("▸ ") + oneLine(text, kCallWidth), turn});
             continue;
         }
         const bool prompt = kind != QLatin1String("reply");
@@ -81,7 +85,7 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows) {
             // The ✦ marks the prompt, once, the way the live line does; its later lines are the
             // same ink but carry no second marker.
             rows.append({prompt ? Line::Prompt : Line::Reply,
-                         prompt && i == 0 ? QStringLiteral("✦ ") + lines.at(i) : lines.at(i)});
+                         prompt && i == 0 ? QStringLiteral("✦ ") + lines.at(i) : lines.at(i), turn});
         }
     }
     // Trailing and leading blanks are the separator, not content.
@@ -89,6 +93,83 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows) {
     if (maxRows > 0 && rows.size() > maxRows) rows = rows.mid(rows.size() - maxRows);
     while (!rows.isEmpty() && rows.constFirst().text.isEmpty()) rows.removeFirst();
     return rows;
+}
+
+// The saved text of a conversation is a window of its newest lines, not the conversation (the same
+// clamp every scrollback has), so a conversation longer than the window restores cut off (#KDB4).
+// This says where that window begins in the transcript's turns, so the fill can print the turns
+// above it. -1 when the window's relationship to the transcript is not known, and the caller
+// leaves the restore as it was.
+//
+// The precise signal is the first ✦ row the saved text still holds: a turn's prompt, matched
+// against the transcript's prompt items the way relay::sessiontext::turnStart matches one for a
+// rewind — the row is cut at the pane's width, so the prompt's first line has to start with the
+// row, not the other way round. Everything the file holds is that turn and later. The same prompt
+// text can open more than one turn ("Continue" opened two of the turns in the conversation this
+// was measured on); the *last* such turn is the one whose boundary the row is, because the first
+// would answer "turn A" for turn B's identical row and drop every turn between them from the fill
+// for good, where the last can only duplicate one.
+//
+// A window deep enough to lose even its turn's ✦ row — measured: the window opened at a turn's
+// recap, its `✦ Continue` six hundred lines further up — has no prompt row to match. Replies
+// carry it then: the pane prints an agent reply as wrapped prose rows, and a reply's opening,
+// with every space and wrap taken out, is a substring of the window read the same way — wrapping
+// breaks lines at spaces and mid-word both, and removing the whitespace of each side joins the
+// halves back however they were cut. A reply cannot name its turn, only date the window, so the
+// answer is the *newest* turn whose reply is found: the window is a contiguous tail, every turn
+// after the one it opens inside is wholly in it, and the newest found is at or after the true
+// boundary — the fill over-covers a turn the window already holds, a cosmetic repeat, and never
+// drops one.
+inline int coveredFrom(const QStringList &savedLines, const QJsonArray &items) {
+    struct Anchor { QString text; int turn; };
+    QVector<Anchor> anchors;   // prompts and replies, oldest first: the items arrive that way
+    static const QString marker = QStringLiteral("✦ ");
+    QStringList plain;         // the window, stripped of its ink once
+    QString joined;            // …and of its whitespace, for the wrap-proof containment
+    for (const QString &saved : savedLines) {
+        QString line = saved;
+        static const QRegularExpression osc8(
+            QStringLiteral("\\x1b\\]8;[^\\x1b\\x07]*(?:\\x07|\\x1b\\\\)"));
+        line.remove(osc8);
+        static const QRegularExpression sgr(QStringLiteral("\\x1b\\[[0-9;:]*m"));
+        line.remove(sgr);
+        plain.append(line);
+        for (const QChar &c : line)
+            if (!c.isSpace()) joined.append(c);
+    }
+    for (const QJsonValue &value : items) {
+        const QJsonObject item = value.toObject();
+        const QString kind = item.value(QStringLiteral("kind")).toString();
+        if (kind != QLatin1String("prompt") && kind != QLatin1String("reply")) continue;
+        const QString first = item.value(QStringLiteral("text")).toString()
+                                  .section(QLatin1Char('\n'), 0, 0).trimmed();
+        if (first.isEmpty()) continue;
+        anchors.append({kind == QLatin1String("prompt") ? marker + first : first,
+                        item.value(QStringLiteral("turn")).toInt()});
+    }
+    if (anchors.isEmpty() || joined.isEmpty()) return -1;
+    // Precise first: the topmost ✦ row that is a prompt's first line.
+    for (const QString &line : plain) {
+        if (!line.startsWith(marker)) continue;
+        const QString shown = line.mid(marker.size()).trimmed();
+        if (shown.isEmpty()) continue;
+        int matched = -1;
+        for (const Anchor &anchor : anchors)
+            if (anchor.text.startsWith(marker) && anchor.text.mid(marker.size()).startsWith(shown))
+                matched = anchor.turn;
+        if (matched >= 0) return matched;
+    }
+    // No prompt row survived: the newest turn a reply dates.
+    int newest = -1;
+    for (const Anchor &anchor : anchors) {
+        if (anchor.text.startsWith(marker)) continue;
+        QString squeezed;   // the reply's opening, wrapped the way the window would wrap it
+        for (const QChar &c : anchor.text)
+            if (!c.isSpace()) squeezed.append(c);
+        if (squeezed.size() < 24) continue;   // too short to be distinctive
+        if (joined.contains(squeezed)) newest = anchor.turn;
+    }
+    return newest;
 }
 
 }  // namespace relay::transcriptreplay

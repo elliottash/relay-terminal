@@ -2575,10 +2575,14 @@ class ConversationIndex:
                 sql += " AND turn=?"
                 args.append(turn)
             # Checkpoint prompts are written before the messages, so order by turn for the preview.
-            sql += " ORDER BY turn, seq LIMIT ?"
+            # The limit keeps the newest entries, not the oldest (#KDB4): a conversation longer
+            # than it is cut either way, but the pane it is restored into ends where the
+            # conversation ended, and the preview shows its latest turns rather than its first.
+            # The fetch is newest-first and reversed here so `entries` stays chronological.
+            sql += " ORDER BY turn DESC, seq DESC LIMIT ?"
             args.append(limit)
             entries = []
-            for entry in db.execute(sql, args).fetchall():
+            for entry in reversed(db.execute(sql, args).fetchall()):
                 item = {"turn": entry["turn"], "kind": entry["kind"], "time": entry["time"],
                         "text": entry["text"]}
                 if entry["status"] is not None:
@@ -2590,9 +2594,10 @@ class ConversationIndex:
                         item["line"] = line
                 entries.append(item)
             if terms and not isinstance(turn, int):
-                for entry in db.execute(
+                for entry in reversed(db.execute(
                         "SELECT turn, kind, time, text FROM entries WHERE session_id=?"
-                        " AND kind='terminal_text' ORDER BY seq LIMIT ?", (session_id, limit)).fetchall():
+                        " AND kind='terminal_text' ORDER BY seq DESC LIMIT ?",
+                        (session_id, limit)).fetchall()):
                     line, ranges = match_line(entry["text"], terms)
                     if not ranges:
                         continue

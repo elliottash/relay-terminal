@@ -105,6 +105,85 @@ private slots:
         QVERIFY(render(QJsonArray{entry(1, QStringLiteral("reply"), QStringLiteral("   "))}, 400).isEmpty());
         QVERIFY(render(QJsonArray{entry(1, QStringLiteral("tool_output"), QStringLiteral("x"))}, 400).isEmpty());
     }
+
+    // The fill a truncated saved text gets (#KDB4): `beforeTurn` drops that turn and every one
+    // after it, so what is left is exactly the turns the file's window no longer holds.
+    void beforeTurnDropsThatTurnAndLater() {
+        const QJsonArray items{entry(1, QStringLiteral("prompt"), QStringLiteral("one")),
+                               entry(1, QStringLiteral("reply"), QStringLiteral("first")),
+                               entry(2, QStringLiteral("prompt"), QStringLiteral("two")),
+                               entry(2, QStringLiteral("reply"), QStringLiteral("second")),
+                               entry(3, QStringLiteral("prompt"), QStringLiteral("three")),
+                               entry(3, QStringLiteral("reply"), QStringLiteral("third"))};
+        QCOMPARE(textsOf(render(items, 400, 2)),
+                 (QStringList{QStringLiteral("✦ one"), QStringLiteral("first")}));
+        QCOMPARE(render(items, 400, 0).size(), 0);   // nothing is before the first turn
+        QCOMPARE(render(items, 400, 1).size(), 0);
+    }
+
+    // The first ✦ row the saved text still holds names the turn its window starts at: the row is
+    // cut at the pane's width, so the prompt's first line has to start with the row, not the other
+    // way round, and the row may carry the ink and the OSC 8 link of the line it was saved with.
+    void coveredFromMatchesTheFirstPromptRow() {
+        const QJsonArray items{entry(0, QStringLiteral("prompt"), QStringLiteral("verify image generation")),
+                               entry(0, QStringLiteral("reply"), QStringLiteral("starting")),
+                               entry(1, QStringLiteral("prompt"), QStringLiteral("yes, help me update the gateway")),
+                               entry(1, QStringLiteral("reply"), QStringLiteral("a longer reply than the window")),
+                               entry(2, QStringLiteral("prompt"), QStringLiteral("Continue")),
+                               entry(2, QStringLiteral("reply"), QStringLiteral("done"))};
+        // The window starts mid-reply of turn 1, and its first whole prompt row is turn 2's.
+        const QStringList saved{QStringLiteral("the implementer. Next is the desktop again"),
+                                QStringLiteral("st a loc"),
+                                QStringLiteral("al gateway"),
+                                QStringLiteral("\x1b[38;5;15m✦ \x1b]8;;relay://pane/1\x1b\\Continue\x1b]8;;\x1b\\\x1b[0m"),
+                                QStringLiteral("done")};
+        QCOMPARE(coveredFrom(saved, items), 2);
+        // A row cut at the pane's width matches the full prompt line it came from.
+        const QStringList cut{QStringLiteral("✦ yes, help me update the ga")};
+        QCOMPARE(coveredFrom(cut, items), 1);
+        // No prompt row above the window's start: nothing to match, the restore stays as it was.
+        QCOMPARE(coveredFrom(QStringList{QStringLiteral("only a reply's tail")}, items), -1);
+        QCOMPARE(coveredFrom(saved, QJsonArray{}), -1);
+    }
+
+    // A window deep enough to have lost its turn's ✦ row — measured: the window opened at a
+    // turn's recap — is dated by the replies it still holds instead, and the newest turn dated
+    // is the answer: over-covering a turn the window already holds is a cosmetic repeat, where
+    // under-covering drops one for good. The containment is whitespace-free on both sides, so a
+    // reply wrapped mid-word at the pane's width is still found — that is the wrap the real
+    // window was measured through. A reply too short to be distinctive dates nothing.
+    void repliesDateTheWindowWhenNoPromptRowSurvives() {
+        const QJsonArray items{entry(1, QStringLiteral("prompt"), QStringLiteral("one")),
+                               entry(1, QStringLiteral("reply"),
+                                     QStringLiteral("The gateway config goes in /opt/relay/gateway.json")),
+                               entry(2, QStringLiteral("prompt"), QStringLiteral("Continue")),
+                               entry(2, QStringLiteral("reply"),
+                                     QStringLiteral("Deployed to the live gateway just now")),
+                               entry(3, QStringLiteral("prompt"), QStringLiteral("go on")),
+                               entry(3, QStringLiteral("reply"),
+                                     QStringLiteral("All three cards are filed with their evidence"))};
+        const QStringList saved{QStringLiteral("Recap · 13:01 → 17:50 · 4h 48m"),
+                                QStringLiteral("Next · Run the local gateway with the"),
+                                QStringLiteral("fake upstream to verify it"),
+                                QStringLiteral("Deployed to the live gatew"),
+                                QStringLiteral("ay just now"),
+                                QStringLiteral("▸ ran echo · 1 line")};
+        QCOMPARE(coveredFrom(saved, items), 2);
+        // A reply too short to be distinctive dates nothing.
+        const QJsonArray curt{entry(5, QStringLiteral("reply"), QStringLiteral("Done."))};
+        QCOMPARE(coveredFrom(saved, curt), -1);
+    }
+
+    // "Continue" opened two of the turns in the conversation this was measured on. The *last*
+    // matching turn is the answer: the first would claim turn A for turn B's identical row and
+    // drop every turn between them from the fill for good, where the last can only duplicate one.
+    void aRepeatedPromptAnswersItsLastTurn() {
+        const QJsonArray items{entry(1, QStringLiteral("prompt"), QStringLiteral("Continue")),
+                               entry(1, QStringLiteral("reply"), QStringLiteral("first pass")),
+                               entry(2, QStringLiteral("prompt"), QStringLiteral("Continue")),
+                               entry(2, QStringLiteral("reply"), QStringLiteral("second pass"))};
+        QCOMPARE(coveredFrom(QStringList{QStringLiteral("✦ Continue")}, items), 2);
+    }
 };
 
 QTEST_MAIN(TranscriptReplayTest)
