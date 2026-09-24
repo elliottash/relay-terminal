@@ -31,12 +31,17 @@ remove the phone icon for panes unless somebody is connected and viewing it
 **Risks:** A published pane may remain accessible while the icon is hidden, as requested. **Verify:** sharing model test, remote presence test and Relay build, plus visual capture if a live pairing is available.
 
 ## Tests
-- `ctest --test-dir build -R '^sharing$' --output-on-failure` — passed, including published, focused, blurred and offline states.
-- `python3 -m unittest tests.test_remote_gui_host.AlwaysOnTests.test_start_with_always_brings_the_service_up_at_the_hosted_rendezvous` — passed, including device pane focus and blur reports.
-- `scripts/relay-build --target relay` — passed.
+- `ctest -R sharing` — tests/sharingpane_test.cpp
+- `tests/test_remote_gui_host.py::AlwaysOnTests::test_start_with_always_brings_the_service_up_at_the_hosted_rendezvous`
+
+`scripts/relay-build --target relay` passed; focused output is in `docs/qa_evidence/2026-09-24-phone-icon-T279/`.
 
 ### Check
 Pass: the sharing model hides the chip without a live pane viewer and the sidecar reports focus and blur transitions.
 
+### Check 2026-09-24 19:38
+- passed · ctest:sharing — ctest -R sharing passed for this revision on spark-dcc9, 2026-09-24T23:38:29Z
+- passed · unittest:tests.test_remote_gui_host.AlwaysOnTests.test_start_with_always_brings_the_service_up_at_the_hosted_rendezvous — tests/test_remote_gui_host.py::AlwaysOnTests::test_start_with_always_brings_the_service_up_at_the_hosted_rendezvous passed for this revision on spark-dcc9, 2026-09-24T23:38:30Z
+history: thread
 ## Execution Summary
 The hub now reports each connected guest's and paired device's open panes. The sharing model uses that live per-pane presence to show the header phone icon and clear it on blur or disconnect. Viewer labels exclude offline guests. The desktop window build passed. Focused test logs: `docs/qa_evidence/2026-09-24-phone-icon-T279/`. A live visual capture still belongs to the independent verification stage.
