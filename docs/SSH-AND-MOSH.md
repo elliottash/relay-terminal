@@ -204,6 +204,11 @@ queued for the local shell. A question read off the remote screen ("Do you want 
 [Y/n]") takes the line directly, without the router. A full-screen remote program (vim, htop) keeps
 the Take control banner.
 
+For SSH, the first ready remote prompt also hands program input to the agent automatically when
+an agent is configured and the pane can show it the screen. The banner then offers Take over. A
+password prompt revokes that grant, and taking over is final for that login; later prompts do not
+hand it back. A per-program choice to take human control of `ssh` still wins.
+
 ### 5. Remote passwords
 
 A masked prompt read off the screen (`Password:`, `[sudo] password for`, `Enter passphrase`) while a

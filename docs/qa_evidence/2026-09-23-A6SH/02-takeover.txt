@@ -1,0 +1,15 @@
+2
+
+= work - cpu00%-mem00% x +
+
+elliott@spark-dcc9:/tmp/relay-ssh-default-tzila_a5/work$
+
+bash-5.2$
+
++ ssh handed to the agent - Ctrl+H takes it back
++ you took ssh back from the agent
+
+Q\4 RS Oo - OX
+(eae LLL 5?
+
+You're in control - Ctri+H for the prompt

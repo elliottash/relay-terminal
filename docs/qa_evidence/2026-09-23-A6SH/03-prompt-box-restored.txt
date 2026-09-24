@@ -1,0 +1,17 @@
+= work - cpu00%-mem00% x +
+
+Q\4 RS Oo - OX
+(eae LLL 5?
+
+elliott@spark-dcc9:/tmp/relay-ssh-default-tzila_a5/work$
+
+bash-5.2$
+
++ ssh handed to the agent - Ctrl+H takes it back
++ you took ssh back from the agent
+
+‘Agent in control - Ctrl+H to take control
+
+Shell commands or agent prompts... 2? for help [7) auto
+
+“SsHlocahostmomerstion |< ca)

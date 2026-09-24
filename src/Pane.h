@@ -14185,14 +14185,22 @@ private:
             m_login.atPrompt = m_login.promptTicks >= 2;
         }
         if (m_login.atPrompt && !before) {
+            bool firstPrompt = false;
             if (!m_login.greeted) {
                 m_login.greeted = true;
+                firstPrompt = true;
                 toast(QStringLiteral("Logged in to %1 · the prompt box types there · %2 for keys")
                           .arg(loginHost(), Keymap::instance().shortcutText(QStringLiteral("control.human"))));
             }
             if (!m_login.integration && !m_login.command.isEmpty()) finishLoginCommand(-1);
             maybeEnhanceLogin();
             flushInline();
+            // SSH is an agent-driven program from its first ready prompt. Wait until the
+            // authentication exchange is over, and grant only once per login: taking over or
+            // reaching a later password prompt must not regrant control on the next prompt.
+            if (firstPrompt && m_login.program == QStringLiteral("ssh")
+                && controlFor(m_login.program) != QStringLiteral("human"))
+                beginDelegation();
             QTimer::singleShot(0, this, [this] { pumpQueue(); refreshBusyLine(); });
             refreshProgramHint();
         }

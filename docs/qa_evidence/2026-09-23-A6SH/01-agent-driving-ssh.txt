@@ -1,0 +1,17 @@
+= work - cpu00%-mem00% x +
+
+elliott@spark-dcc9:/tmp/relay-ssh-default-tzila_a5/work$
+
+bash-5.2$
+
++ ssh handed to the agent - Ctrl+H takes it back
+
+OQ\4 eG 2 - 0x
+@®s
+| Agent driving ssh ssh isrunning | Take over (Ctri+H) ||
+
+Shell commands or agent prompts. 2 for help
+
+"SSH localhost:/home/elliott_ The agent is driving ssh - Ctri+H takes it back
+
+“fixture
