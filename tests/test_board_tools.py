@@ -174,6 +174,9 @@ class ListAndReadTests(BoardToolsTest):
         card_id = self.create()
         result = self.tools.run("board_read", {"id": card_id})
         self.assertEqual(result["hash"], B.file_hash(self.board.card_by_id(card_id).path))
+        # The hash is what board_update_card matches on, so it is exactly 64 lowercase hex
+        # characters, never a short digest or a stray character at either end (#E6XC).
+        self.assertRegex(result["hash"], r"^[0-9a-f]{64}$")
         self.assertIn("## Issue", result["body"])
         self.assertEqual(result["thread_total"], 1)
 
@@ -336,6 +339,14 @@ class UpdateTests(BoardToolsTest):
         self.assertIn("base_hash", self.tools.run("board_update_card", {"id": self.card_id})["error"])
         self.assertIn("base_hash", self.tools.run("board_update_card", {
             "id": self.card_id, "base_hash": "short", "fields": {"assignee": "a"}})["error"])
+        # A miscopied hash is told apart from a stale one in one round-trip: the error names
+        # the length it got and the ends it saw (#E6XC).
+        miscopied = self.hash[:-1]
+        error = self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": miscopied, "fields": {"assignee": "a"}})["error"]
+        self.assertIn("63 characters", error)
+        self.assertIn(f"{miscopied[:4]}…{miscopied[-4:]}", error)
+        self.assertIn("board_read", error)
 
     def test_the_record_fields_are_never_writable(self):
         for field, value in (("id", "AAAA"), ("type", "plan"), ("created", "2020-01-01"),

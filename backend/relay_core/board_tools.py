@@ -2414,7 +2414,14 @@ class BoardTools:
         card_id = normalize_id(args.get("id"))
         base_hash = args.get("base_hash")
         if not isinstance(base_hash, str) or len(base_hash) != 64:
-            raise BoardToolError("base_hash must be the 64-character `hash` returned by board_read.")
+            # Self-diagnosing on purpose (#E6XC): a miscopied hash reads as its length and ends,
+            # so a 63/65-character paste is told apart from a stale hash in one round-trip.
+            got = ""
+            if isinstance(base_hash, str) and base_hash:
+                got = (f" Got {len(base_hash)} characters ({base_hash[:4]}…{base_hash[-4:]}) —"
+                       " copy the `hash` from board_read's result whole, without dropping or"
+                       " adding a character at either end.")
+            raise BoardToolError("base_hash must be the 64-character `hash` returned by board_read." + got)
         card = self._card(card_id)
         before = card.path.read_bytes()
         # The QA policy floor (#C3Q2): what `verify` was when this write began, and the notes
