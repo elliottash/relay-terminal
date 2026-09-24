@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include <QAbstractItemView>
+#include <QBrush>
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
@@ -119,17 +120,6 @@ bool addableToTier(const Entry &entry, const QString &tier) {
     return true;
 }
 
-// The rule the long tail appears under once something is typed. `shown()` holds back an
-// open-ended provider's rows — OpenRouter's four hundred live ones — so naming the provider is
-// what says why they were not there a moment ago (design 5.5).
-QString tailRule(const QList<Entry> &tail) {
-    QStringList providers;
-    for (const Entry &entry : tail)
-        if (!entry.provider.isEmpty() && !providers.contains(entry.provider)) providers << entry.provider;
-    return providers.isEmpty() ? QStringLiteral("more models")
-                               : QStringLiteral("more from %1").arg(providers.join(QStringLiteral(", ")));
-}
-
 // A QTreeWidget that says when a drag finished, so the tier list can be rewritten from what the
 // rows now read. No signal of its own, so no Q_OBJECT and no moc for one callback.
 class DragList final : public QTreeWidget {
@@ -217,7 +207,7 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     auto *dragList = new DragList;
     m_list = dragList;
     m_list->setObjectName(QStringLiteral("modelList"));
-    m_list->setHeaderLabels({QString(), QString(), QStringLiteral("available"), QStringLiteral("in box"),
+    m_list->setHeaderLabels({QString(), QString(), QStringLiteral("enabled"), QStringLiteral("in box"),
                              QStringLiteral("model"), QStringLiteral("via"),
                              QStringLiteral("reasoning"), QStringLiteral("intelligence"), QStringLiteral("tok/s"),
                              QStringLiteral("left")});
@@ -280,6 +270,45 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     sideColumn->addWidget(m_levels);
     sideColumn->addStretch(1);
     m_listsLayout->addWidget(m_sidePanel, 0, 1);
+    m_orderHelp = new QLabel(QStringLiteral("Top to bottom: first choice, then fallbacks. Equal ranks draw randomly. "
+                                            "Alt+M shows checked rows through each class's cutoff."));
+    m_orderHelp->setObjectName(QStringLiteral("modelOrderHelp"));
+    m_orderHelp->setWordWrap(true);
+    layout->addWidget(m_orderHelp);
+    m_orderActions = new QWidget(this);
+    m_orderActions->setObjectName(QStringLiteral("modelOrderActions"));
+    auto *orderLayout = new QVBoxLayout(m_orderActions);
+    orderLayout->setContentsMargins(0, 0, 0, 0);
+    orderLayout->setSpacing(2);
+    m_orderSelection = new QLabel(QStringLiteral("Select a model to edit"), m_orderActions);
+    m_orderSelection->setObjectName(QStringLiteral("modelOrderSelection"));
+    m_orderSelection->setTextFormat(Qt::PlainText);
+    orderLayout->addWidget(m_orderSelection);
+    auto *actionRow = new QHBoxLayout;
+    actionRow->setContentsMargins(0, 0, 0, 0);
+    actionRow->setSpacing(4);
+    const auto action = [this, actionRow](const QString &label, const QString &name) {
+        auto *button = new QPushButton(label, m_orderActions);
+        button->setObjectName(name);
+        actionRow->addWidget(button);
+        return button;
+    };
+    m_orderUp = action(QStringLiteral("Move up"), QStringLiteral("modelOrderUp"));
+    m_orderDown = action(QStringLiteral("Move down"), QStringLiteral("modelOrderDown"));
+    m_orderTie = action(QStringLiteral("Tie with above"), QStringLiteral("modelOrderTie"));
+    m_orderRemove = action(QStringLiteral("Remove"), QStringLiteral("modelOrderRemove"));
+    m_orderAdd = action(QStringLiteral("Add to list"), QStringLiteral("modelOrderAdd"));
+    actionRow->addStretch(1);
+    orderLayout->addLayout(actionRow);
+    layout->addWidget(m_orderActions);
+    connect(m_orderUp, &QPushButton::clicked, this, [this] { moveSelected(-1); });
+    connect(m_orderDown, &QPushButton::clicked, this, [this] { moveSelected(1); });
+    connect(m_orderTie, &QPushButton::clicked, this, [this] {
+        QTreeWidgetItem *row = currentRow();
+        if (row && row->data(0, ListedRole).toBool()) toggleTie(rowTier(row), row->data(0, KeyRole).toString());
+    });
+    connect(m_orderRemove, &QPushButton::clicked, this, [this] { removeSelected(); });
+    connect(m_orderAdd, &QPushButton::clicked, this, [this] { addSelected(); });
     layout->addLayout(m_listsLayout, 1);
 
     m_limits = new QLabel;
@@ -369,22 +398,6 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     connect(m_list, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem *item, int column) {
         if (!item || item->data(0, SectionRole).toBool()) return;
         if (column == ColRank && item->data(0, AddRole).toBool()) { addSelected(); return; }
-        if (column == ColRank && item->data(0, ListedRole).toBool()) {
-            const QString tier = rowTier(item);
-            const QString key = item->data(0, KeyRole).toString();
-            bool ok = false;
-            const int chosen = QInputDialog::getInt(this, QStringLiteral("Model rank"),
-                QStringLiteral("Give models the same rank to draw randomly between them."),
-                item->text(ColRank).toInt(), 1, 1000, 1, &ok);
-            if (ok) {
-                pushUndo(tier);
-                curation::setTierRank(tier, key, chosen);
-                rebuild();
-                selectKey(key);
-                changed();
-            }
-            return;
-        }
         // "+ add model" is a button in a row's clothes: one click asks, as a button would.
         if (item->data(0, AddByIdRole).toBool()) {
             const QString preset = item->data(0, AddByIdPresetRole).toString();
@@ -395,7 +408,10 @@ ModelPicker::ModelPicker(const Context &context, QWidget *parent) : QWidget(pare
     });
     connect(m_list, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int column) {
         if (!item || item->data(0, SectionRole).toBool()) return;
-        if (effortPage()) { if (m_levels->isVisible()) m_levels->setFocus(); return; }
+        if (effortPage()) {
+            if (auto *choice = m_list->itemWidget(item, ColReasoning)) choice->setFocus();
+            return;
+        }
         // A tick is a control: two quick clicks on it are two toggles (or one that would not take,
         // on a row a list pins), never "use". The owner's pane went onto gemini flash lite that
         // way on 2026-09-21 while he was trying to un-tick it.
@@ -643,6 +659,8 @@ QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
     item->setFlags(Qt::ItemIsEnabled | (boxClassTier(tier) ? Qt::ItemIsUserCheckable : Qt::NoItemFlags));
     if (boxClassTier(tier) && !effortPage())
         item->setCheckState(ColBox, curation::boxShown(tier) ? Qt::Checked : Qt::Unchecked);
+    if (boxClassTier(tier) && !effortPage())
+        item->setText(ColBox, curation::boxShown(tier) ? QStringLiteral("On") : QStringLiteral("Off"));
     QFont font = item->font(ColModel);
     font.setBold(true);
     item->setFont(ColModel, font);
@@ -727,11 +745,13 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     // that never found the drag. The button that would leave the list is disabled, so a click
     // always does something. Deferred a turn: the click rebuilds the rows, which deletes the
     // very button whose signal is running.
+    if (!(m_hosted && sectionsPage())) {
     auto *moveBox = new QWidget;
     auto *moveLayout = new QHBoxLayout(moveBox);
     moveLayout->setContentsMargins(0, 0, 0, 0);
     moveLayout->setSpacing(0);
-    const int listSize = curation::tierList(tier).size();
+    const QList<curation::TierEntry> ranked = curation::tierList(tier);
+    const int listSize = ranked.size();
     const QString key = item.key;
     for (const auto &[delta, arrow, tip] : {std::tuple{-1, Qt::UpArrow, QStringLiteral("move up (alt+↑)")},
                                             std::tuple{1, Qt::DownArrow, QStringLiteral("move down (alt+↓)")}}) {
@@ -754,12 +774,54 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
         });
         moveLayout->addWidget(button);
     }
+    const int ownRank = item.rank > 0 ? item.rank : rank;
+    const int previousRank = rank > 1 ? (ranked.at(rank - 2).rank > 0 ? ranked.at(rank - 2).rank : rank - 1) : -1;
+    const int nextRank = rank < listSize ? (ranked.at(rank).rank > 0 ? ranked.at(rank).rank : rank + 1) : -1;
+    const bool tied = ownRank == previousRank || ownRank == nextRank;
+    auto *tie = new QToolButton(moveBox);
+    tie->setObjectName(QStringLiteral("modelTie"));
+    tie->setText(tied ? QStringLiteral("≠") : QStringLiteral("="));
+    tie->setAccessibleName(tied ? QStringLiteral("untie model") : QStringLiteral("tie with previous model"));
+    tie->setToolTip(tied ? QStringLiteral("Untie this model: give it its own priority (equal ranks draw randomly)")
+                         : QStringLiteral("Tie with the model above: equal ranks draw randomly"));
+    tie->setAutoRaise(true);
+    tie->setFixedSize(20, 18);
+    tie->setEnabled(tied || rank > 1);
+    QObject::connect(tie, &QToolButton::clicked, this, [this, tier, key] {
+        QTimer::singleShot(0, this, [this, tier, key] { toggleTie(tier, key); });
+    });
+    moveLayout->addWidget(tie);
+    auto *remove = new QToolButton(moveBox);
+    remove->setObjectName(QStringLiteral("modelRemove"));
+    remove->setText(QStringLiteral("×"));
+    remove->setAccessibleName(QStringLiteral("remove model from this list"));
+    remove->setToolTip(QStringLiteral("Remove from this priority list (Delete); Ctrl+Z undoes"));
+    remove->setAutoRaise(true);
+    remove->setFixedSize(20, 18);
+    QObject::connect(remove, &QToolButton::clicked, this, [this, tier, key] {
+        QTimer::singleShot(0, this, [this, tier, key] {
+            for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
+                QTreeWidgetItem *candidate = m_list->topLevelItem(i);
+                if (candidate->data(0, ListedRole).toBool() && rowTier(candidate) == tier
+                    && candidate->data(0, KeyRole).toString() == key) {
+                    m_list->setCurrentItem(candidate);
+                    removeSelected();
+                    return;
+                }
+            }
+        });
+    });
+    moveLayout->addWidget(remove);
     m_list->setItemWidget(row, ColMove, moveBox);
+    }
     // The cutoff, as a column of checkboxes: rank 1..cutoff checked, the rest not, and clicking
     // one moves the cutoff to it (design 5.3, `setBoxCutoffFromRow`).
-    if (boxClassTier(tier))
+    if (boxClassTier(tier)) {
         row->setCheckState(ColBox, curation::boxShown(tier) && rank <= curation::boxCutoff(tier)
                                        ? Qt::Checked : Qt::Unchecked);
+        row->setText(ColBox, curation::boxShown(tier) && rank <= curation::boxCutoff(tier)
+                                 ? QStringLiteral("In") : QStringLiteral("Out"));
+    }
     QString tip = !entry ? QStringLiteral("%1 is not in the catalog right now: its provider has no key, or it left the listing")
                                .arg(item.key)
                 : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(entry->provider)
@@ -773,6 +835,10 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
                    .arg(curation::boxCutoff(tier) + 1);
     row->setToolTip(0, tip);
     for (int c = 0; c < ColCount; ++c) row->setToolTip(c, tip);
+    if (boxClassTier(tier))
+        row->setToolTip(ColBox, row->checkState(ColBox) == Qt::Checked
+            ? QStringLiteral("Shown in Alt+M. Untick to move this class's cutoff above this row")
+            : QStringLiteral("Outside Alt+M. Tick to extend this class's cutoff through this row"));
     row->setTextAlignment(ColRank, Qt::AlignRight | Qt::AlignVCenter);
     for (int c = ColReasoning; c < ColCount; ++c) row->setTextAlignment(c, Qt::AlignRight | Qt::AlignVCenter);
     if (dead || outOfBox)
@@ -882,7 +948,8 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
         if (!query.isEmpty() && !(entry ? matches(*entry, query) : item.key.contains(query, Qt::CaseInsensitive))) continue;
         QTreeWidgetItem *row = addListRow(tier, rank, item, entry);
         row->setText(ColRank, QString::number(item.rank > 0 ? item.rank : rank));
-        row->setToolTip(ColRank, QStringLiteral("Click to set rank. Equal ranks draw at random; lower ranks run first."));
+        row->setToolTip(ColRank, QStringLiteral("Lower ranks run first; equal ranks draw randomly. Use = or ≠ beside the move arrows."));
+        if (effortPage()) decorateEffortRow(row, tier, item, entry);
         ++drawn;
     }
     if (effortPage()) {
@@ -916,6 +983,58 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
     for (const Group &group : grouped(m_context.catalog, rest, nowSeconds())) addGroupRow(group, true, tier);
 }
 
+void ModelPicker::decorateEffortRow(QTreeWidgetItem *row, const QString &tier,
+                                    const curation::TierEntry &item, const Entry *entry) {
+    if (!row) return;
+    row->setText(ColRank, QString());
+    if (!entry) {
+        row->setText(ColModel, row->text(ColModel) + QStringLiteral("\nmodel unavailable"));
+        row->setText(ColReasoning, QStringLiteral("—"));
+        row->setSizeHint(ColModel, QSize(0, 48));
+        return;
+    }
+    const bool fixed = entry->effortFixed || entry->efforts.isEmpty();
+    const QString support = fixed
+        ? (entry->effortFixedReason().isEmpty() ? QStringLiteral("no reasoning level")
+                                                : entry->effortFixedReason())
+        : QStringLiteral("supports: %1").arg(entry->efforts.join(QStringLiteral(" · ")));
+    row->setText(ColModel, row->text(ColModel) + QLatin1Char('\n') + support);
+    row->setToolTip(ColModel, row->toolTip(ColModel) + QLatin1Char('\n') + support);
+    row->setSizeHint(ColModel, QSize(0, fixed ? 48 : 66));
+    if (fixed) {
+        row->setText(ColReasoning, QStringLiteral("fixed"));
+        row->setToolTip(ColReasoning, support);
+        return;
+    }
+    auto *choice = new QComboBox(m_list);
+    choice->setObjectName(QStringLiteral("modelEffortChoice"));
+    choice->setAccessibleName(QStringLiteral("%1 reasoning level in %2").arg(entry->model, tier));
+    choice->addItem(QStringLiteral("default"), QString());
+    for (const QString &level : entry->efforts) choice->addItem(level, level);
+    int selected = choice->findData(item.effort);
+    if (selected < 0) {
+        choice->addItem(QStringLiteral("%1 (unsupported)").arg(item.effort), item.effort);
+        selected = choice->count() - 1;
+    }
+    choice->setCurrentIndex(selected);
+    choice->setToolTip(QStringLiteral("Stored level: %1. Supported: %2. Choose here to change this list entry.")
+        .arg(item.effort.isEmpty() ? QStringLiteral("default") : item.effort,
+             entry->efforts.join(QStringLiteral(", "))));
+    choice->installEventFilter(this);  // Ctrl+Z and Escape keep their page actions while focused here.
+    connect(choice, QOverload<int>::of(&QComboBox::activated), this, [this, row](int index) {
+        auto *selector = qobject_cast<QComboBox *>(m_list->itemWidget(row, ColReasoning));
+        if (!selector || index < 0) return;
+        m_list->setCurrentItem(row);
+        const QString level = selector->itemData(index).toString();
+        for (int i = 0; i < m_levels->count(); ++i)
+            if (m_levels->item(i)->data(Qt::UserRole).toString() == level) {
+                m_levels->setCurrentRow(i);  // the existing write path keeps undo and storage intact
+                return;
+            }
+    });
+    m_list->setItemWidget(row, ColReasoning, choice);
+}
+
 void ModelPicker::buildAll(const QString &query) {
     const Sort sort = sortFromId(m_sort->currentData().toString());
     // `curatable`, not `shown`: this tab is where step 2 is *edited*, so a model you un-ticked is
@@ -924,28 +1043,44 @@ void ModelPicker::buildAll(const QString &query) {
     const QList<Entry> listed = curatable(m_context.catalog);
     const QList<Entry> rows = ordered(listed, sort, m_context.catalog);
     const QList<Group> groups = grouped(m_context.catalog, rows, nowSeconds());
-    if (!query.isEmpty() || sort != Sort::Priority) {
+    if (!query.isEmpty()) {
+        // Keep search results under provider names too. A flat list makes the provider behind a
+        // folded row hard to scan, especially when a query matches several model families.
+        QHash<QString, QList<const Group *>> byProvider;
+        QStringList providers;
+        const auto addMatch = [&](const Group &group) {
+            const Entry entry = group.preferred(m_context.catalog, nowSeconds());
+            const QString provider = entry.provider.isEmpty() ? entry.preset : entry.provider;
+            if (!byProvider.contains(provider)) providers << provider;
+            byProvider[provider] << &group;
+        };
         for (const Group &group : groups) {
             bool hit = false;
-            for (const Entry &entry : group.entries) hit = hit || query.isEmpty() || matches(entry, query);
-            if (hit) addGroupRow(group, false);
+            for (const Entry &entry : group.entries) hit = hit || matches(entry, query);
+            if (hit) addMatch(group);
         }
-        // Typing reaches the one part of the catalog this tab holds back: an open-ended provider's
-        // long tail, which would otherwise be the whole list. Untyped it stays out of the way;
-        // typed it is right here, under its own rule, with the same availability tick — ticking
-        // one is "select specific models" for OpenRouter (owner, 2026-09-21).
-        if (!query.isEmpty()) {
-            QStringList have;
-            for (const Entry &entry : listed) have << entry.key;
-            QList<Entry> tail;
-            for (const Entry &entry : allUsable(m_context.catalog))
-                if (!have.contains(entry.key) && matches(entry, query)) tail << entry;
-            if (!tail.isEmpty()) {
-                addSection(tailRule(tail));
-                for (const Group &group : grouped(m_context.catalog, tail, nowSeconds())) addGroupRow(group, false);
-            }
+        QStringList have;
+        for (const Entry &entry : listed) have << entry.key;
+        QList<Entry> tail;
+        for (const Entry &entry : allUsable(m_context.catalog))
+            if (!have.contains(entry.key) && matches(entry, query)) tail << entry;
+        const QList<Group> tailGroups = grouped(m_context.catalog, tail, nowSeconds());
+        for (const Group &group : tailGroups) addMatch(group);
+        std::sort(providers.begin(), providers.end(), [](const QString &a, const QString &b) {
+            return QString::compare(a, b, Qt::CaseInsensitive) < 0;
+        });
+        for (const QString &provider : std::as_const(providers)) {
+            addSection(provider);
+            for (const Group *group : byProvider.value(provider)) addGroupRow(*group, false);
         }
-        if (m_list->topLevelItemCount() == 0) addSection(QStringLiteral("no model matches “%1”").arg(query));
+        if (providers.isEmpty()) addSection(QStringLiteral("no model matches “%1”").arg(query));
+        addAddByIdRow();
+        return;
+    }
+    if (sort != Sort::Priority) {
+        for (const Group &group : groups) {
+            addGroupRow(group, false);
+        }
         addAddByIdRow();
         return;
     }
@@ -1139,19 +1274,32 @@ void ModelPicker::refreshBoxChecks() {
     if (m_list == nullptr) return;
     const bool wasBuilding = m_building;
     m_building = true;   // our own setCheckState calls are not clicks
+    const QStringList available = curation::availableKeys();
+    const qint64 now = nowSeconds();
     for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
         QTreeWidgetItem *row = m_list->topLevelItem(i);
         const QString tier = rowTier(row);
         if (row->data(0, ClassHeadRole).toBool()) {
-            if (boxClassTier(tier))
+            if (boxClassTier(tier)) {
                 row->setCheckState(ColBox, curation::boxShown(tier) ? Qt::Checked : Qt::Unchecked);
+                row->setText(ColBox, curation::boxShown(tier) ? QStringLiteral("On") : QStringLiteral("Off"));
+            }
             continue;
         }
         if (!row->data(0, ListedRole).toBool()) continue;
         const int rank = listPosition(tier, row->data(0, KeyRole).toString());
-        row->setCheckState(ColBox, boxClassTier(tier) && curation::boxShown(tier)
-                                           && rank >= 1 && rank <= curation::boxCutoff(tier)
-                                       ? Qt::Checked : Qt::Unchecked);
+        const bool inBox = boxClassTier(tier) && curation::boxShown(tier)
+                           && rank >= 1 && rank <= curation::boxCutoff(tier);
+        row->setCheckState(ColBox, inBox ? Qt::Checked : Qt::Unchecked);
+        row->setText(ColBox, inBox ? QStringLiteral("In") : QStringLiteral("Out"));
+        row->setToolTip(ColBox, inBox ? QStringLiteral("Shown in Alt+M. Untick to move this class's cutoff above this row")
+                                      : QStringLiteral("Outside Alt+M. Tick to extend this class's cutoff through this row"));
+        const Entry *entry = m_context.catalog.find(row->data(0, KeyRole).toString());
+        const bool dead = !entry || !entry->usable || exhausted(m_context.catalog, entry->preset, now)
+                          || !curation::isAvailableKey(row->data(0, KeyRole).toString(), available);
+        const bool outOfBox = boxClassTier(tier) && curation::boxShown(tier) && !inBox;
+        for (int c = 0; c < ColCount; ++c)
+            row->setForeground(c, dead || outOfBox ? QBrush(palette().color(QPalette::Disabled, QPalette::Text)) : QBrush());
     }
     m_building = wasBuilding;
     syncClassSwitch();
@@ -1184,39 +1332,44 @@ void ModelPicker::setRowAvailable(const QString &groupKey, bool on) {
     // Every provider of the row, because a row is one model (rule 2). Which row is which is read
     // off the drawn rows rather than re-folded: `ViaRole` already holds exactly those keys.
     QStringList keys{groupKey};
-    for (int i = 0; i < m_list->topLevelItemCount(); ++i)
-        if (m_list->topLevelItem(i)->data(0, KeyRole).toString() == groupKey) {
-            const QStringList vias = m_list->topLevelItem(i)->data(0, ViaRole).toStringList();
-            if (!vias.isEmpty()) keys = vias;
-            break;
-        }
+    QTreeWidgetItem *clickedRow = currentRow();
+    if (clickedRow == nullptr || clickedRow->data(0, KeyRole).toString() != groupKey) {
+        clickedRow = nullptr;
+        for (int i = 0; i < m_list->topLevelItemCount(); ++i)
+            if (m_list->topLevelItem(i)->data(0, KeyRole).toString() == groupKey) {
+                clickedRow = m_list->topLevelItem(i);
+                break;
+            }
+    }
+    if (clickedRow) {
+        const QStringList vias = clickedRow->data(0, ViaRole).toStringList();
+        if (!vias.isEmpty()) keys = vias;
+    }
     for (const QString &key : std::as_const(keys)) curation::setAvailable(key, on, m_context.catalog);
-    refreshAvailability();
+    refreshAvailability(clickedRow);
+    // The host's modelsCurated() already batches the expensive cross-pane fan-out. Signal it for
+    // every persisted edit, including one just before this picker is replaced.
     changed();
 }
 
 // The tick and the greying again, in place. Nothing moves: an un-ticked row stays in this tab so
 // it can be ticked back (`curatable`), and rebuilding from inside the itemChanged that delivered
 // the click would delete the very item that is being clicked.
-void ModelPicker::refreshAvailability() {
-    if (m_list == nullptr || !availabilityTab()) return;
+void ModelPicker::refreshAvailability(QTreeWidgetItem *row) {
+    if (row == nullptr || !availabilityTab()) return;
     const curation::ReadScope reads;
     const bool wasBuilding = m_building;
     m_building = true;
-    for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *row = m_list->topLevelItem(i);
-        if (!row->data(0, AvailRole).toBool()) continue;
-        QStringList keys = row->data(0, ViaRole).toStringList();
-        if (keys.isEmpty()) keys << row->data(0, KeyRole).toString();
-        bool available = false;
-        QString listed;
-        for (const QString &key : std::as_const(keys)) {
-            const Entry *entry = m_context.catalog.find(key);
-            available = available || (entry != nullptr && curation::isAvailable(*entry));
-            if (curation::inTerminalList(key)) listed = key;
-        }
-        applyAvailability(row, available, listed);
+    QStringList keys = row->data(0, ViaRole).toStringList();
+    if (keys.isEmpty()) keys << row->data(0, KeyRole).toString();
+    bool available = false;
+    QString listed;
+    for (const QString &key : std::as_const(keys)) {
+        const Entry *entry = m_context.catalog.find(key);
+        available = available || (entry != nullptr && curation::isAvailable(*entry));
+        if (curation::inTerminalList(key)) listed = key;
     }
+    applyAvailability(row, available, listed);
     m_building = wasBuilding;
 }
 
@@ -1228,6 +1381,7 @@ void ModelPicker::refreshAvailability() {
 // says nothing about what this tab offers a terminal agent.
 void ModelPicker::applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason) {
     row->setCheckState(ColAvail, available ? Qt::Checked : Qt::Unchecked);
+    row->setText(ColAvail, available ? QStringLiteral("On") : QStringLiteral("Off"));
     const QString tip = !reason.isEmpty()
         ? (available ? QStringLiteral("Available: ranked in your priorities. Un-ticking greys it there and "
                                       "nothing runs it, but it keeps its place for when you tick it again")
@@ -1238,8 +1392,16 @@ void ModelPicker::applyAvailability(QTreeWidgetItem *row, bool available, const 
             : QStringLiteral("Not available: it is in no list, not in the box, and not in the box's filter. "
                              "Typing its name in this dialog still reaches it");
     row->setToolTip(ColAvail, tip);
-    if (!available)
-        for (int c = 0; c < ColCount; ++c) row->setForeground(c, palette().color(QPalette::Disabled, QPalette::Text));
+    bool spent = true;
+    for (const QString &key : row->data(0, ViaRole).toStringList()) {
+        const Entry *entry = m_context.catalog.find(key);
+        if (entry && entry->usable && !exhausted(m_context.catalog, entry->preset, nowSeconds())) {
+            spent = false;
+            break;
+        }
+    }
+    for (int c = 0; c < ColCount; ++c)
+        row->setForeground(c, available && !spent ? QBrush() : QBrush(palette().color(QPalette::Disabled, QPalette::Text)));
 }
 
 void ModelPicker::rebuild() {
@@ -1248,16 +1410,35 @@ void ModelPicker::rebuild() {
     const bool all = m_tier == kAll;
     m_building = true;
     m_list->clear();
+    m_list->headerItem()->setText(ColRank, all || effortPage() ? QString() : QStringLiteral("rank"));
+    m_list->headerItem()->setText(ColReasoning, effortPage() ? QStringLiteral("selected level")
+                                                        : QStringLiteral("reasoning"));
+    m_list->headerItem()->setText(ColMove, all || effortPage() ? QString() : QStringLiteral("edit"));
+    m_list->headerItem()->setText(ColBox, all || effortPage() ? QString() : QStringLiteral("Alt+M"));
     const QString query = m_filter->text().trimmed();
     m_sortLabel->setVisible(all);
     m_sort->setVisible(all);
+    m_orderHelp->setVisible(!all && !effortPage());
+    m_orderActions->setVisible(m_hosted && sectionsPage());
+    m_orderHelp->setText(QStringLiteral("Top to bottom: first choice, then fallbacks. Equal ranks draw randomly.")
+                         + (sectionsPage() || boxClassTier(m_tier)
+                                ? QStringLiteral(" Alt+M shows checked rows through each class's cutoff.") : QString()));
     m_favorite->setVisible(!effortPage());
     m_use->setVisible(!effortPage() && !m_hosted);
+    m_sidePanel->setVisible(!effortPage());
+    m_list->setWordWrap(effortPage());
+    m_list->setUniformRowHeights(!effortPage());
+    m_list->header()->setSectionResizeMode(ColRank, effortPage() ? QHeaderView::Fixed
+                                                                  : QHeaderView::ResizeToContents);
+    if (effortPage()) m_list->setColumnWidth(ColRank, 4);
+    m_list->header()->setSectionResizeMode(ColReasoning, effortPage() ? QHeaderView::Fixed
+                                                                       : QHeaderView::ResizeToContents);
+    if (effortPage()) m_list->setColumnWidth(ColReasoning, 126);
     syncClassSwitch();
     m_list->setColumnHidden(ColBox, effortPage() || !(sectionsPage() || boxClassTier(m_tier)));
     // The ▲▼ belong where an order is written down; the flat tab has none (same rule as the drag
     // below, card #RKP3).
-    m_list->setColumnHidden(ColMove, all || effortPage());
+    m_list->setColumnHidden(ColMove, all || effortPage() || (m_hosted && sectionsPage()));
     // Step 2 is edited in one place: the `all` tab. A tier tab is step 3 and the box column is
     // step 4, and three checkbox columns on one row would say nothing.
     m_list->setColumnHidden(ColAvail, !availabilityTab());
@@ -1268,8 +1449,8 @@ void ModelPicker::rebuild() {
     // that go (card #MDL1 t:a11; docs/qa_evidence/2026-09-21-models-pane/e-available.png is the
     // run that showed it). "left" stays on `all`: it is where an exhausted row says why it is
     // greyed there; the sectioned page folds the same reason into "via" instead (below).
-    m_list->setColumnHidden(ColIntelligence, m_hosted);
-    m_list->setColumnHidden(ColSpeed, m_hosted);
+    m_list->setColumnHidden(ColIntelligence, m_hosted || effortPage());
+    m_list->setColumnHidden(ColSpeed, m_hosted || effortPage());
     // "left" is folded into "via" on the sectioned page (addListRow, addGroupRow) rather than
     // drawn in its own column: the reason a row is greyed sits right beside the provider it's
     // wrong about, and a healthy row's plain percentage is not worth a column nobody compares
@@ -1326,8 +1507,8 @@ void ModelPicker::updateCompactLayout() {
         onRowChanged();
         updateFooter();
     }
-    m_list->setColumnHidden(ColVia, compact);
-    m_list->setColumnHidden(ColReasoning, compact || (m_hosted && !effortPage()));
+    m_list->setColumnHidden(ColVia, compact || effortPage());
+    m_list->setColumnHidden(ColReasoning, !effortPage() && (compact || m_hosted));
     if (compact) m_list->setColumnHidden(ColLeft, true);
     else m_list->setColumnHidden(ColLeft, sectionsPage());
 }
@@ -1388,6 +1569,45 @@ void ModelPicker::selectKey(const QString &key) {
         }
 }
 
+void ModelPicker::updateOrderActions() {
+    if (!m_orderActions) return;
+    QTreeWidgetItem *row = currentRow();
+    const bool listed = row && row->data(0, ListedRole).toBool();
+    const bool offered = row && row->data(0, AddRole).toBool();
+    for (QPushButton *button : {m_orderUp, m_orderDown, m_orderTie, m_orderRemove})
+        button->setVisible(listed);
+    m_orderAdd->setVisible(offered);
+    if (!row || (!listed && !offered)) {
+        m_orderSelection->setText(QStringLiteral("Select a model to edit"));
+        return;
+    }
+    const QString tier = rowTier(row);
+    const QString key = row->data(0, KeyRole).toString();
+    const Entry *entry = m_context.catalog.find(key);
+    const QString name = entry ? entry->name : key;
+    if (offered) {
+        m_orderSelection->setText(QStringLiteral("%1 · %2 · not ranked").arg(tier, name));
+        m_orderAdd->setText(QStringLiteral("Add to %1").arg(tier));
+        return;
+    }
+    const QList<curation::TierEntry> list = curation::tierList(tier);
+    int at = -1;
+    for (int i = 0; i < list.size(); ++i)
+        if (list.at(i).key == key) { at = i; break; }
+    const int rank = at >= 0 ? (list.at(at).rank > 0 ? list.at(at).rank : at + 1) : 0;
+    const int previous = at > 0 ? (list.at(at - 1).rank > 0 ? list.at(at - 1).rank : at) : -1;
+    const int next = at >= 0 && at + 1 < list.size()
+                         ? (list.at(at + 1).rank > 0 ? list.at(at + 1).rank : at + 2) : -1;
+    const bool tied = rank == previous || rank == next;
+    m_orderSelection->setText(QStringLiteral("%1 · %2 · rank %3%4")
+                                  .arg(tier, name).arg(rank)
+                                  .arg(tied ? QStringLiteral(" (random tie)") : QString()));
+    m_orderUp->setEnabled(at > 0);
+    m_orderDown->setEnabled(at >= 0 && at + 1 < list.size());
+    m_orderTie->setText(tied ? QStringLiteral("Untie") : QStringLiteral("Tie with above"));
+    m_orderTie->setEnabled(tied || at > 0);
+}
+
 void ModelPicker::onRowChanged() {
     QTreeWidgetItem *row = currentRow();
     const QString key = selectedKey();
@@ -1395,6 +1615,7 @@ void ModelPicker::onRowChanged() {
     m_use->setEnabled(entry != nullptr);
     m_favorite->setEnabled(entry != nullptr);
     m_favorite->setText(entry && curation::isFavorite(key) ? QStringLiteral("★ unfavorite") : QStringLiteral("☆ favorite"));
+    updateOrderActions();
     m_filling = true;
     m_vias->clear();
     const QStringList vias = row ? row->data(0, ViaRole).toStringList() : QStringList();
@@ -1527,6 +1748,11 @@ void ModelPicker::onLevelChanged() {
     curation::setTierEffort(tier, key, level);
     // The word the list now holds is the provider's own, so it is what the column prints.
     row->setText(ColReasoning, level.isEmpty() ? QStringLiteral("default") : level);
+    if (effortPage())
+        if (auto *choice = qobject_cast<QComboBox *>(m_list->itemWidget(row, ColReasoning))) {
+            const QSignalBlocker block(choice);
+            choice->setCurrentIndex(choice->findData(level));
+        }
     changed();
 }
 
@@ -1544,9 +1770,9 @@ void ModelPicker::updateFooter() {
         text = tabs + QStringLiteral("↑↓ row") + (picks ? QStringLiteral(" · enter uses it in the pane") : QString())
              + QStringLiteral(" · type to search every model, openrouter's long tail included · tab, then → : the providers of a folded row · "
                                      "“available” is what the lists, the alt+m box and its filter may offer — un-tick one "
-                                     "to take it out everywhere, tick a row under “more from…” to bring one in");
+                                     "to take it out everywhere, tick a searched provider row to bring one in");
     } else if (effortPage()) {
-        text = tabs + QStringLiteral("↑↓ ranked model · choose its reasoning level below · changes apply to this class's list");
+        text = tabs + QStringLiteral("Each row shows supported levels · choose its selected level on that row · ctrl+z undo");
     } else if (sectionsPage()) {
         // Everything this page can also do — reorder, add, remove, undo — used to be spelled out
         // here every time, which was the wall of text card #RKP3 was already trying to shorten.
@@ -1579,7 +1805,7 @@ void ModelPicker::updateFooter() {
     if (m_compact)
         text = m_tier == kAll
             ? QStringLiteral("search · tick available%1 · tab / shift+tab switch page").arg(picks ? QStringLiteral(" · enter use") : QString())
-            : effortPage() ? QStringLiteral("choose a ranked model, then its reasoning level · ctrl+z undo")
+            : effortPage() ? QStringLiteral("choose a level on each row · ctrl+z undo")
             : QStringLiteral("ctrl+enter add · del remove · alt+↑/↓ move · ctrl+z undo%1").arg(picks ? QStringLiteral(" · enter use") : QString());
     m_footer->setText(text);
     // Only available searches the whole catalog (#AVR8); a list page filters what it draws.
@@ -1628,6 +1854,38 @@ void ModelPicker::moveSelected(int delta) {
     QTreeWidgetItem *row = currentRow();
     if (!row || !row->data(0, ListedRole).toBool()) return;
     moveKey(rowTier(row), row->data(0, KeyRole).toString(), delta);
+}
+
+void ModelPicker::toggleTie(const QString &tier, const QString &key) {
+    QList<curation::TierEntry> list = curation::tierList(tier);
+    int at = -1;
+    for (int i = 0; i < list.size(); ++i)
+        if (list.at(i).key == key) { at = i; break; }
+    if (at < 0) return;
+    // Old entries may have no explicit rank. Materialize their positional rank before changing
+    // one group; setTierList continues to write the same |rank= storage as before.
+    for (int i = 0; i < list.size(); ++i)
+        if (list[i].rank <= 0) list[i].rank = i + 1;
+    const int rank = list.at(at).rank;
+    const bool tiedBefore = at > 0 && list.at(at - 1).rank == rank;
+    const bool tiedAfter = at + 1 < list.size() && list.at(at + 1).rank == rank;
+    if (!tiedBefore && !tiedAfter && at == 0) return;
+    pushUndo(tier);
+    if (tiedBefore || tiedAfter) {
+        // Split this row from either neighbour. Rows tied after it move past the new rank,
+        // preserving their tie with each other; later fallback groups keep their order.
+        for (int i = 0; i < list.size(); ++i) {
+            if (i == at) continue;
+            if ((i > at && list[i].rank == rank) || list[i].rank > rank) list[i].rank += 2;
+        }
+        list[at].rank = rank + 1;
+    } else {
+        list[at].rank = list.at(at - 1).rank;
+    }
+    curation::setTierList(tier, list);
+    rebuild();
+    selectKey(key);
+    changed();
 }
 
 void ModelPicker::removeSelected() {
@@ -1785,8 +2043,14 @@ void ModelPicker::keyPressEvent(QKeyEvent *event) {
 
 bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
     if (event->type() == QEvent::KeyPress
-        && (watched == m_filter || watched == m_list || watched == m_levels || watched == m_vias || watched == m_tabs)) {
+        && (watched == m_filter || watched == m_list || watched == m_levels || watched == m_vias
+            || watched == m_tabs || watched->objectName() == QStringLiteral("modelEffortChoice"))) {
         auto *key = static_cast<QKeyEvent *>(event);
+        if (watched->objectName() == QStringLiteral("modelEffortChoice")
+            && key->key() == Qt::Key_Z && (key->modifiers() & Qt::ControlModifier)) {
+            QTimer::singleShot(0, this, [this] { undo(); });  // rebuilding deletes this combo
+            return true;
+        }
         if (handleShortcut(key)) return true;
         if (watched == m_filter) {
             if (key->key() == Qt::Key_Up || key->key() == Qt::Key_Down || key->key() == Qt::Key_PageUp || key->key() == Qt::Key_PageDown) {
@@ -1809,7 +2073,10 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
         if (watched == m_list) {
             // The view swallows Enter (it emits activated), so the default button never sees it.
             if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
-                if (effortPage()) { if (m_levels->isVisible()) m_levels->setFocus(); }
+                if (effortPage()) {
+                    if (auto *row = currentRow())
+                        if (auto *choice = m_list->itemWidget(row, ColReasoning)) choice->setFocus();
+                }
                 else use();
                 return true;
             }
@@ -1818,6 +2085,11 @@ bool ModelPicker::eventFilter(QObject *watched, QEvent *event) {
                 return true;
             }
             if (key->key() == Qt::Key_Right) {                                   // → the providers, then the levels
+                if (effortPage()) {
+                    if (auto *row = currentRow())
+                        if (auto *choice = m_list->itemWidget(row, ColReasoning)) choice->setFocus();
+                    return true;
+                }
                 if (m_vias->isVisible() && m_vias->count()) { m_vias->setFocus(); return true; }
                 if (m_levels->isVisible() && m_levels->count()) { m_levels->setFocus(); return true; }
             }

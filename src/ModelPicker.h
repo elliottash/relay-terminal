@@ -223,6 +223,9 @@ public:
     // move across one, or, while a filter hides rows, nothing (and the limits line says why).
     void commitDragOrder();
     void moveKey(const QString &tier, const QString &key, int delta);
+    // A listed row's visible tie control: equal ranks draw randomly. Toggling it gives a tied
+    // row its own rank again without changing the order or the storage format.
+    void toggleTie(const QString &tier, const QString &key);
     int undoDepth() const { return m_undo.size(); }
 
 protected:
@@ -259,7 +262,7 @@ private:
     // The availability ticks and the greying again, in place: an un-tick changes no row's place in
     // the `all` tab (the row stays, to be ticked back), so rebuilding under the signal that
     // delivered the click would only delete the item mid-click.
-    void refreshAvailability();
+    void refreshAvailability(QTreeWidgetItem *row);
     void applyAvailability(QTreeWidgetItem *row, bool available, const QString &reason);
     bool availabilityTab() const;    // the `all` tab, the one place step 2 is edited
     bool boxClassTier(const QString &tier) const;   // one of the four classes the box can draw
@@ -267,7 +270,10 @@ private:
     void onRowChanged();
     void onViaChanged();
     void onLevelChanged();
+    void decorateEffortRow(QTreeWidgetItem *row, const QString &tier,
+                           const models::curation::TierEntry &item, const models::Entry *entry);
     void updateFooter();
+    void updateOrderActions();
     void updateCompactLayout();
     void selectFirstRow();
     void syncTabBar();
@@ -296,6 +302,14 @@ private:
     QLabel *m_levelsLabel = nullptr;
     QListWidget *m_levels = nullptr;   // the reasoning level, a separate pick beside the model
     QLabel *m_limits = nullptr;
+    QLabel *m_orderHelp = nullptr;
+    QWidget *m_orderActions = nullptr;
+    QLabel *m_orderSelection = nullptr;
+    QPushButton *m_orderUp = nullptr;
+    QPushButton *m_orderDown = nullptr;
+    QPushButton *m_orderTie = nullptr;
+    QPushButton *m_orderRemove = nullptr;
+    QPushButton *m_orderAdd = nullptr;
     QLabel *m_footer = nullptr;
     QPushButton *m_favorite = nullptr;
     QPushButton *m_use = nullptr;

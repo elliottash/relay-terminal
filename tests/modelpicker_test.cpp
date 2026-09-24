@@ -513,6 +513,71 @@ private Q_SLOTS:
         QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
     }
 
+    void effortRowsShowSupportedLevelsAndChangeStoredLevelDirectly() {
+        const QString glm = QStringLiteral("glm-coding|glm-5.3");
+        const QString opus = QStringLiteral("anthropic|claude-opus-5-5");
+        setList(QStringLiteral("main"), {{glm, QStringLiteral("low")}, {opus, QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::effortTier();
+        ModelPicker picker(ctx);
+        picker.setHosted(true);
+        picker.resize(420, 620);
+        picker.show();
+        QApplication::processEvents();
+        QCOMPARE(picker.tier(), ModelPicker::effortTier());
+        QVERIFY(picker.list()->isColumnHidden(ColVia));
+        QVERIFY(!picker.list()->isColumnHidden(ColReasoning));
+        QTreeWidgetItem *row = rowFor(picker.list(), glm, QStringLiteral("main"));
+        QVERIFY(row);
+        QVERIFY(row->text(ColModel).contains(QStringLiteral("supports: low · high · max")));
+        auto *choice = qobject_cast<QComboBox *>(picker.list()->itemWidget(row, ColReasoning));
+        QVERIFY(choice);
+        QCOMPARE(choice->currentData().toString(), QStringLiteral("low"));
+        QCOMPARE(choice->itemText(0), QStringLiteral("default"));
+        QCOMPARE(choice->count(), 4);
+        picker.list()->setFocus();
+        picker.list()->setCurrentItem(row);
+        QTest::keyClick(picker.list(), Qt::Key_Return);
+        QVERIFY(choice->hasFocus());
+        int told = 0;
+        picker.onListsChanged = [&told] { ++told; };
+        const int max = choice->findData(QStringLiteral("max"));
+        QVERIFY(max >= 0);
+        choice->setCurrentIndex(max);
+        Q_EMIT choice->activated(max);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        QCOMPARE(told, 1);
+        choice->setCurrentIndex(0);
+        Q_EMIT choice->activated(0);
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QString());
+        QCOMPARE(told, 2);
+        QTest::keyClick(choice, Qt::Key_Z, Qt::ControlModifier);
+        QApplication::processEvents();
+        QCOMPARE(curation::tierList(QStringLiteral("main")).first().effort, QStringLiteral("max"));
+        row = rowFor(picker.list(), glm, QStringLiteral("main"));
+        choice = qobject_cast<QComboBox *>(picker.list()->itemWidget(row, ColReasoning));
+        QVERIFY(choice);
+        QCOMPARE(choice->currentData().toString(), QStringLiteral("max"));
+        QTreeWidgetItem *fixed = rowFor(picker.list(), opus, QStringLiteral("main"));
+        QVERIFY(fixed);
+        QVERIFY(fixed->text(ColModel).contains(QStringLiteral("no reasoning level")));
+        QCOMPARE(fixed->text(ColReasoning), QStringLiteral("fixed"));
+        QVERIFY(!picker.list()->itemWidget(fixed, ColReasoning));
+        QCOMPARE(curation::tierList(QStringLiteral("main")).size(), 2);
+
+        const QString codex = QStringLiteral("guest:codex|gpt-6-sol");
+        setList(QStringLiteral("high"), {{codex, QStringLiteral("xhigh")}});
+        ctx.catalog = catalogFrom(codexPresets());
+        ModelPicker codexPicker(ctx);
+        QTreeWidgetItem *codexRow = rowFor(codexPicker.list(), codex, QStringLiteral("high"));
+        QVERIFY(codexRow);
+        QVERIFY(codexRow->text(ColModel).contains(QStringLiteral("ultra")));
+        auto *codexChoice = qobject_cast<QComboBox *>(codexPicker.list()->itemWidget(codexRow, ColReasoning));
+        QVERIFY(codexChoice);
+        QCOMPARE(codexChoice->count(), 7);  // default plus this model's six levels
+        QCOMPARE(codexChoice->currentData().toString(), QStringLiteral("xhigh"));
+    }
+
     void aDragRewritesTheListInTheOrderTheRowsNowRead() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("anthropic|claude-opus-5-5"), QStringLiteral("x")},
@@ -545,7 +610,8 @@ private Q_SLOTS:
             return box ? box->findChildren<QToolButton *>() : QList<QToolButton *>{};
         };
         const QList<QToolButton *> first = buttons(QStringLiteral("glm-coding|glm-5.3"));
-        QCOMPARE(first.size(), 2);
+        // ▲▼, the tie =, the ×: the arrows are still the first two (#00G1 added the tie and remove).
+        QCOMPARE(first.size(), 4);
         QVERIFY(!first.at(0)->isEnabled());    // rank 1 has no up
         QVERIFY(first.at(1)->isEnabled());
         const QList<QToolButton *> last = buttons(QStringLiteral("guest:claude|opus"));
@@ -836,6 +902,85 @@ private Q_SLOTS:
         classHeader(picker.list(), QStringLiteral("main"))->setCheckState(ColBox, Qt::Checked);
         QVERIFY(curation::boxShown(QStringLiteral("main")));
         QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->checkState(ColBox), Qt::Checked);
+    }
+
+    void pickOrderShowsTieRemoveAndFallbackActionsWithoutARankDialog() {
+        const QString first = QStringLiteral("glm-coding|glm-5.3");
+        const QString second = QStringLiteral("anthropic|claude-opus-5-5");
+        const QString third = QStringLiteral("guest:claude|opus");
+        setList(QStringLiteral("main"), {{first, QString()}, {second, QString()}, {third, QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        QCOMPARE(picker.tier(), QStringLiteral("classes"));
+        QTreeWidgetItem *row = rowFor(picker.list(), second);
+        QVERIFY(row);
+        auto *actions = picker.list()->itemWidget(row, ColMove);
+        QVERIFY(actions);
+        auto *tie = actions->findChild<QToolButton *>(QStringLiteral("modelTie"));
+        auto *remove = actions->findChild<QToolButton *>(QStringLiteral("modelRemove"));
+        QVERIFY(tie && remove);
+        QCOMPARE(tie->text(), QStringLiteral("="));
+        QVERIFY(tie->toolTip().contains(QStringLiteral("randomly")));
+        Q_EMIT picker.list()->itemClicked(row, ColRank); // rank is a label, not a modal editor
+        QCOMPARE(curation::tierList(QStringLiteral("main")).at(1).rank, 2);
+        tie->click();
+        QTRY_COMPARE(curation::tierList(QStringLiteral("main")).at(1).rank,
+                     curation::tierList(QStringLiteral("main")).at(0).rank);
+        {
+            ModelPicker reopened(ctx);
+            QTreeWidgetItem *stored = rowFor(reopened.list(), second);
+            QVERIFY(stored);
+            QCOMPARE(stored->text(ColRank), rowFor(reopened.list(), first)->text(ColRank));
+            auto *storedTie = reopened.list()->itemWidget(stored, ColMove)
+                                  ->findChild<QToolButton *>(QStringLiteral("modelTie"));
+            QVERIFY(storedTie);
+            QCOMPARE(storedTie->text(), QStringLiteral("≠"));
+        }
+        row = rowFor(picker.list(), second);
+        QVERIFY(row);
+        tie = picker.list()->itemWidget(row, ColMove)->findChild<QToolButton *>(QStringLiteral("modelTie"));
+        QCOMPARE(tie->text(), QStringLiteral("≠"));
+        tie->click();
+        QTRY_VERIFY(curation::tierList(QStringLiteral("main")).at(1).rank
+                    > curation::tierList(QStringLiteral("main")).at(0).rank);
+        {
+            ModelPicker reopened(ctx);
+            QTreeWidgetItem *stored = rowFor(reopened.list(), second);
+            QVERIFY(stored);
+            QVERIFY(stored->text(ColRank).toInt() > rowFor(reopened.list(), first)->text(ColRank).toInt());
+        }
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{first, second, third}));
+        row = rowFor(picker.list(), third);
+        QVERIFY(row);
+        remove = picker.list()->itemWidget(row, ColMove)->findChild<QToolButton *>(QStringLiteral("modelRemove"));
+        remove->click();
+        QTRY_COMPARE(listKeys(QStringLiteral("main")), (QStringList{first, second}));
+        picker.undo();
+        QCOMPARE(listKeys(QStringLiteral("main")), (QStringList{first, second, third}));
+    }
+
+    void pickOrderExplainsFallbacksAndLabelsTheBoxCutoff() {
+        setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
+                                         {QStringLiteral("anthropic|claude-opus-5-5"), QString()},
+                                         {QStringLiteral("guest:claude|opus"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        auto *help = picker.findChild<QLabel *>(QStringLiteral("modelOrderHelp"));
+        QVERIFY(help);
+        QVERIFY(help->text().contains(QStringLiteral("fallbacks")));
+        QVERIFY(help->text().contains(QStringLiteral("randomly")));
+        QVERIFY(help->text().contains(QStringLiteral("Alt+M")));
+        QCOMPARE(picker.list()->headerItem()->text(ColBox), QStringLiteral("Alt+M"));
+        QCOMPARE(classHeader(picker.list(), QStringLiteral("main"))->text(ColBox), QStringLiteral("On"));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("glm-coding|glm-5.3"))->text(ColBox), QStringLiteral("In"));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->text(ColBox), QStringLiteral("Out"));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->foreground(ColModel).color(),
+                 picker.palette().color(QPalette::Disabled, QPalette::Text));
+        picker.setBoxCutoffFromRow(QStringLiteral("main"), 3, true);
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->text(ColBox), QStringLiteral("In"));
+        QCOMPARE(rowFor(picker.list(), QStringLiteral("guest:claude|opus"))->foreground(ColModel).style(), Qt::NoBrush);
     }
 
     // A drag inside one section rewrites that section; a drag past a header lands in the section
@@ -1336,7 +1481,7 @@ private Q_SLOTS:
 
     // `shown()` holds an open-ended provider's rows back — OpenRouter's live listing would
     // otherwise be most of every list — and typing is what reaches them now that Options › Models
-    // has no per-provider id box. They come under their own rule, and Enter uses one.
+    // has no per-provider id box. They appear under their provider, and Enter uses one.
     void theAllTabKeepsTheLongTailBehindTyping() {
         ModelPicker::Context ctx = tailContext();
         ModelPicker picker(ctx);
@@ -1345,7 +1490,7 @@ private Q_SLOTS:
         QVERIFY(untyped.contains(QStringLiteral("glm-coding|glm-5.3")));
         picker.filter()->setText(QStringLiteral("muse-spark"));
         const QStringList rows = keys(picker.list());
-        QVERIFY2(rows.contains(QStringLiteral("[more from openrouter]")), qPrintable(rows.join(QLatin1Char(' '))));
+        QVERIFY2(rows.contains(QStringLiteral("[openrouter]")), qPrintable(rows.join(QLatin1Char(' '))));
         QVERIFY(rows.contains(QStringLiteral("openrouter|meta/muse-spark-1.3")));
         picker.selectKey(QStringLiteral("openrouter|meta/muse-spark-1.3"));
         picker.use();
@@ -1457,10 +1602,49 @@ private Q_SLOTS:
         QCOMPARE(again.list()->currentItem()->checkState(ColAvail), Qt::Unchecked);
         again.list()->currentItem()->setCheckState(ColAvail, Qt::Checked);
         QVERIFY(curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(again.list()->currentItem()->text(ColAvail), QStringLiteral("On"));
+        QCOMPARE(again.list()->currentItem()->foreground(ColModel).style(), Qt::NoBrush);
+    }
+
+    void quickAvailabilityTogglesPersistTheirFinalStateAndNotifyEachEdit() {
+        ModelPicker::Context ctx = context();
+        ctx.tier = QStringLiteral("all");
+        ModelPicker picker(ctx);
+        int notifications = 0;
+        picker.onListsChanged = [&notifications] { ++notifications; };
+        const QString flash = QStringLiteral("glm-coding|glm-5.3-flash");
+        picker.selectKey(flash);
+        QTreeWidgetItem *row = picker.list()->currentItem();
+        QVERIFY(row);
+        row->setCheckState(ColAvail, Qt::Unchecked);
+        QCOMPARE(row->text(ColAvail), QStringLiteral("Off"));
+        QVERIFY(!curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(notifications, 1);
+        row->setCheckState(ColAvail, Qt::Checked);
+        QCOMPARE(row->text(ColAvail), QStringLiteral("On"));
+        QVERIFY(curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(notifications, 2);
+        row->setCheckState(ColAvail, Qt::Unchecked);
+        QCOMPARE(row->text(ColAvail), QStringLiteral("Off"));
+        QVERIFY(!curation::isAvailable(*ctx.catalog.find(flash)));
+        QCOMPARE(notifications, 3);
+        ModelPicker reopened(ctx);
+        reopened.selectKey(flash);
+        QCOMPARE(reopened.list()->currentItem()->checkState(ColAvail), Qt::Unchecked);
+    }
+
+    void availabilitySearchKeepsProviderSections() {
+        ModelPicker picker(tailContext());
+        picker.filter()->setText(QStringLiteral("muse-spark"));
+        const QStringList rows = keys(picker.list());
+        QVERIFY(rows.contains(QStringLiteral("[openrouter]")));
+        QVERIFY(rows.contains(QStringLiteral("openrouter|meta/muse-spark-1.3")));
+        picker.filter()->setText(QStringLiteral("glm"));
+        QVERIFY(keys(picker.list()).contains(QStringLiteral("[z.ai (glm)]")));
     }
 
     // The other half of the owner's rule: "for openrouter, you have to select specific models".
-    // A tail row appears under "more from openrouter" when typed, un-ticked; ticking it is what
+    // A tail row appears under "openrouter" when typed, un-ticked; ticking it is what
     // selects it, and it is a listed model from then on with no typing at all.
     void tickingATailRowUnderMoreFromOpenrouterSelectsIt() {
         ModelPicker picker(tailContext());
