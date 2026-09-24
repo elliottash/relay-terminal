@@ -663,8 +663,7 @@ class Agent:
         self.terminal_context = terminal_context.Service()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills,
                                      policy=security.policy_from(security_options or {}))
-        self.media = media.MediaTools(self.executor.workspace, self.cancel_event,
-                                      emit=self._provider_emit)
+        self.media = media.MediaTools(self.executor.workspace, self.cancel_event)
         # Card #K2FV: the approval checklist. A configure that says nothing about approvals gets
         # allow-all — the cautious set before the first-launch choice is the GUI's default to send
         # (approvals_chosen: false), not a property of a bare Agent (the tests' and the subagents').
@@ -2370,14 +2369,7 @@ class Agent:
             raise ValueError("Prompt must contain 1–131072 bytes of text.")
         # `cd` in the terminal moves the agent's default working directory with it.
         validated = validate_context(context) or {}
-        # #XCXD: the queue holds what the pane selected when the prompt was submitted;
-        # resolve an explicitly refresh-eligible automatic snapshot against the authorized
-        # live mirror now, at actual turn start, so a prompt queued ahead of a finishing
-        # command reports its result and exit status instead of the state it queued with.
-        # Legacy and pinned snapshots pass through verbatim, and set_snapshot still gates
-        # every grant below.
-        self.terminal_context.set_snapshot(
-            self.terminal_context.resolve_turn_snapshot(validated.get("terminal_context")))
+        self.terminal_context.set_snapshot(validated.get("terminal_context"))
         validated["terminal_context"] = self.terminal_context.snapshot()
         context = validated
         self.executor.set_default_cwd(validated.get("terminal_cwd"))
