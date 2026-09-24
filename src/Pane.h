@@ -890,6 +890,10 @@ public:
     // 2026-09-17). Same pair as PaneChrome's grip, so both handles take one path through the window.
     std::function<void(const QPoint &global)> onHeaderDragMove;
     std::function<void(const QPoint &global, bool drop)> onHeaderDragEnd;
+    // Middle click on the header closes this pane. The window owns closing (pane.close on the
+    // pane it makes active first), so this is the chrome × button's exchange from the header.
+    // Unset — a pane with no window behind it — does nothing.
+    std::function<void()> onHeaderClose;
 
     QString cwd() const { return m_cwd; }
     QString sessionToken() const { return m_token; }
@@ -5191,6 +5195,13 @@ private:
         switch (type) {
         case QEvent::MouseButtonPress: {
             auto *mouse = static_cast<QMouseEvent *>(event);
+            // A middle click closes the pane — the tab bar's gesture, offered on a header too.
+            // Only watched here: it acts on the release, and never while renaming, when middle
+            // click is the paste into the title being edited.
+            if (mouse->button() == Qt::MiddleButton) {
+                m_headerMiddlePressed = onHeader(object) && !(m_titleEdit && m_titleEdit->isVisible());
+                return false;
+            }
             if (mouse->button() != Qt::LeftButton || !onHeader(object)) return false;
             if (m_titleEdit && m_titleEdit->isVisible()) return false;   // renaming: the mouse is the caret's
             // One press arrives here more than once: the label under the mouse ignores it, and Qt
@@ -5216,9 +5227,19 @@ private:
             return true;
         }
         case QEvent::MouseButtonRelease: {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            // The release of a middle click pressed on the header closes the pane — still over
+            // the header, or not at all, exactly where the tab bar's middle click releases.
+            if (mouse->button() == Qt::MiddleButton) {
+                const bool close = m_headerMiddlePressed && m_headerWidget
+                                   && m_headerWidget->rect().contains(m_headerWidget->mapFromGlobal(mouse->globalPos()));
+                m_headerMiddlePressed = false;
+                if (!close) return false;
+                if (onHeaderClose) onHeaderClose();
+                return true;
+            }
             if (!m_headerPressed) return false;
             m_headerPressed = false;
-            auto *mouse = static_cast<QMouseEvent *>(event);
             if (m_headerDragging) { endHeaderDrag(mouse->globalPos(), true); return true; }
             // A click, not a drag. The folder line is the one part of the header that acts on one:
             // it opens the explorer, and closes it again when that is already this folder (#D60R).
@@ -15552,6 +15573,7 @@ private:
     QPoint m_headerPressAt;
     QPointer<QWidget> m_headerPressOn;
     bool m_headerPressed = false, m_headerDragging = false;
+    bool m_headerMiddlePressed = false;
     QString m_title;
     bool m_titleUser = false;
     bool m_native = false, m_workerReady = false, m_shellReady = false, m_loading = false;

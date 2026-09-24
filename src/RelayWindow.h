@@ -7090,6 +7090,18 @@ private:
                     if (auto *pane = dynamic_cast<Pane *>(leaf)) {
                         pane->onHeaderDragMove = [guard](const QPoint &global) { if (auto *w = windowOf(guard)) w->dragPaneMove(guard, global); };
                         pane->onHeaderDragEnd = [guard](const QPoint &global, bool drop) { if (auto *w = windowOf(guard)) w->dragPaneEnd(guard, global, drop); };
+                        // Middle click on the header (owner, 2026-09-24): the chrome × button's
+                        // exchange — activate this pane, then pane.close — including the key hint.
+                        pane->onHeaderClose = [guard] {
+                            auto *w = windowOf(guard);
+                            if (!w) return;
+                            w->setActiveLeaf(guard);
+                            w->runAction(QStringLiteral("pane.close"));
+                            const QString keys = Keymap::instance().shortcutText(QStringLiteral("pane.close"));
+                            if (!keys.isEmpty())
+                                w->hint(QStringLiteral("chrome.pane.close"),
+                                        relay::ShortcutHints::nextTime(keys, Keymap::instance().description(QStringLiteral("pane.close")).toLower()));
+                        };
                     }
                     leaf->installEventFilter(this);
                 }
