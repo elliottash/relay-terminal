@@ -23,3 +23,9 @@ HEAD, unrelated — no uncommitted diff outside this card's addition); `PYTHONPA
 python3 -m unittest tests.test_conv_index.ProtocolTests.test_scope_project_uses_the_requested_workspace
 tests.test_conv_index.IndexTests.test_scope_and_filters` OK; boardworkspace-tests failures
 (6) pre-existing at HEAD, anchors absent from HEAD's headers as well.
+
+<!-- relay:entry 20260924T131804Z-f2 author=relay kind=landed -->
+### Relay · 2026-09-24 13:18
+landed 74ec27ceab7b36a41bac55d430602134d9eb2091 on main (card #7QSK, needs-verification). The
+verify tree built clean; two unrelated RelayWindow.h hunks from session e728 (#E728) were left
+uncommitted in the working tree, untouched.

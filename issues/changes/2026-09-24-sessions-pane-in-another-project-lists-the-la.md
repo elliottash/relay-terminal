@@ -7,7 +7,7 @@ assignee: relay
 rank: m
 created: '2026-09-24'
 source: 'user in Relay, 2026-09-24'
-links: {plans: [], commits: [], evidence: [], related: ['JN7X', G4VB], github: null}
+links: {plans: [], commits: ['74ec27ceab7b36a41bac55d430602134d9eb2091'], evidence: [7QSK thread], related: ['JN7X', G4VB], github: null}
 ---
 # Sessions pane in another project lists the launching project's sessions
 
