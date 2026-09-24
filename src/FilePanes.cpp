@@ -504,7 +504,19 @@ void FileExplorer::runMenuAction(const QString &id, const QString &path) {
         if (QFileInfo(target).isDir()) setRoot(target);
         else if (onOpenInPreview) onOpenInPreview(target);
     } else if (id == QLatin1String("openExternal")) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(target));
+        // The slow path (the menu) teaches the fast one (Shift+Enter, card #SEJ2). The explorer has
+        // no toast, so the hint goes in its notice line and clears itself unless replaced meanwhile.
+        if (relay::ShortcutHints::instance().shouldShow(QStringLiteral("files.openExternalFromMenu"))) {
+            const QString hint = relay::ShortcutHints::nextTime(QStringLiteral("Shift+Enter"),
+                                                                QStringLiteral("open with the desktop's app"));
+            m_notice->setText(hint);
+            m_notice->show();
+            QTimer::singleShot(8000, m_notice, [label = m_notice, hint] {
+                if (label->text() == hint) label->hide();
+            });
+        }
+        if (onOpenExternal) onOpenExternal(target);
+        else QDesktopServices::openUrl(QUrl::fromLocalFile(target));
     } else if (id == QLatin1String("navigate")) {
         const QString directory = QFileInfo(target).isDir() ? target : QFileInfo(target).absolutePath();
         if (onNavigateHere) onNavigateHere(directory);

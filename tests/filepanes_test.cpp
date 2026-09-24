@@ -10,6 +10,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPlainTextEdit>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -240,6 +241,37 @@ private slots:
         QTest::keyClick(explorer.view(), Qt::Key_Return, Qt::ShiftModifier);
         QCOMPARE(QFileInfo(external).fileName(), QStringLiteral("note.txt"));
         QVERIFY(opened.isEmpty());
+    }
+
+    // The menu's "Open external" is the slow path: it goes the same way Shift+Enter does and
+    // says "Next time: Shift+Enter" in the explorer's notice line (#SEJ2, WARP.md "Shortcut hints").
+    void openExternalFromTheMenuTeachesShiftEnter() {
+        QSettings settings;
+        settings.remove(QStringLiteral("hints"));
+        QTemporaryDir temp;
+        writeFile(temp.filePath(QStringLiteral("note.txt")), "hello");
+        FileExplorer explorer(temp.path());
+        QString external;
+        explorer.onOpenExternal = [&external](const QString &path) { external = path; };
+        explorer.show();
+        QTRY_COMPARE(explorer.visiblePaths().size(), 1);
+        QTRY_VERIFY(explorer.view()->currentIndex().isValid());
+        auto *notice = explorer.findChild<QLabel *>(QStringLiteral("filePreviewNotice"));
+        QVERIFY(notice && !notice->isVisibleTo(&explorer));
+        const QRect row = explorer.view()->visualRect(explorer.view()->currentIndex());
+        emit explorer.view()->customContextMenuRequested(row.center());
+        QMenu *menu = explorer.findChild<QMenu *>();
+        QVERIFY(menu);
+        QAction *open = nullptr;
+        for (QAction *action : menu->actions())
+            if (action->text() == QStringLiteral("Open external")) open = action;
+        QVERIFY(open);
+        open->trigger();
+        menu->close();
+        QCOMPARE(QFileInfo(external).fileName(), QStringLiteral("note.txt"));
+        QVERIFY(notice->isVisibleTo(&explorer));
+        QVERIFY(notice->text().contains(QStringLiteral("Next time")));
+        QVERIFY(notice->text().contains(QStringLiteral("Shift+Enter")));
     }
 
     // A folder only ever navigates, whichever modifier is held (#SEJ2).
