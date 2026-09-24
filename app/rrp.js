@@ -134,19 +134,108 @@ async function dbGet(key) {
 async function dbPut(key, value) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE, 'readwrite').objectStore(STORE).put(value, key);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error('storage write was cancelled.'));
+    tx.onerror = () => reject(tx.error);
+    tx.objectStore(STORE).put(value, key);
   });
 }
 
 async function dbDelete(key) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(key);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error('storage deletion was cancelled.'));
+    tx.onerror = () => reject(tx.error);
+    tx.objectStore(STORE).delete(key);
   });
+}
+
+// Check the operation the next connection actually needs. WebKit has returned usable IDB keys
+// whose prototype fails `instanceof CryptoKey`; some releases instead read non-extractable X25519
+// keys back as null. A constructor check cannot distinguish those cases.
+async function sameX25519Key(saved, original, publicRaw) {
+  if (!saved) return false;
+  try {
+    const publicKey = await importPublic(publicRaw);
+    const shared = (privateKey) => crypto.subtle.deriveBits(
+      { name: 'X25519', public: publicKey }, privateKey, 256);
+    const [a, b] = await Promise.all([shared(saved), shared(original)]);
+    return equalBytes(new Uint8Array(a), new Uint8Array(b));
+  } catch {
+    return false;
+  }
+}
+
+// Test storage before sending `pair_prove`, since that consumes the pairing offer. Usually the
+// generated key stays non-extractable in IDB. Safari releases that lose it use an AES-GCM key
+// (also non-extractable and tested after an IDB roundtrip) to seal the X25519 key instead. Only
+// ciphertext is persisted; loadDevice imports the opened X25519 key as non-extractable.
+async function deviceKeyForPairing() {
+  let pair = await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
+  let devicePublic = await exportPublic(pair.publicKey);
+  let direct = false;
+  try {
+    await dbPut('pair-key-check', pair.privateKey);
+    direct = await sameX25519Key(await dbGet('pair-key-check'), pair.privateKey, devicePublic);
+  } catch {
+    // A browser that refuses this key may still store an AES-GCM key and encrypted bytes.
+  } finally {
+    await dbDelete('pair-key-check');
+  }
+  if (direct) return { pair, devicePublic, sealedPrivate: null };
+
+  pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+  devicePublic = await exportPublic(pair.publicKey);
+  const sealingKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  let keptKey;
+  try {
+    await dbPut('pair-seal-check', sealingKey);
+    keptKey = await dbGet('pair-seal-check');
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const sample = crypto.getRandomValues(new Uint8Array(32));
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, keptKey, sample);
+    const opened = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, keptKey, encrypted);
+    if (!equalBytes(new Uint8Array(opened), sample)) throw new Error('seal check failed.');
+  } catch {
+    throw new StorageUnavailable('this browser could not keep a pairing key. Update iOS or '
+      + 'use another browser, then pair again.');
+  } finally {
+    await dbDelete('pair-seal-check');
+  }
+  // Check import and key identity before a one-time pairing offer is consumed.
+  const sealedPrivate = await sealPrivate(pair.privateKey, keptKey, devicePublic);
+  const opened = await openPrivate(sealedPrivate, devicePublic);
+  if (!await sameX25519Key(opened, pair.privateKey, devicePublic)) {
+    throw new StorageUnavailable('this browser could not restore its pairing key.');
+  }
+  return { pair, devicePublic, sealedPrivate };
+}
+
+async function sealPrivate(privateKey, sealingKey, devicePublic) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const raw = await crypto.subtle.exportKey('pkcs8', privateKey);
+  try {
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, additionalData: devicePublic }, sealingKey, raw);
+    return { key: sealingKey, iv, ciphertext };
+  } finally {
+    new Uint8Array(raw).fill(0);
+  }
+}
+
+async function openPrivate(sealed, devicePublic) {
+  const raw = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: sealed.iv, additionalData: devicePublic },
+    sealed.key, sealed.ciphertext);
+  try {
+    return await crypto.subtle.importKey('pkcs8', raw, { name: 'X25519' }, false, ['deriveBits']);
+  } finally {
+    new Uint8Array(raw).fill(0);
+  }
 }
 
 // A paired-device record and a guest record (section 10.2) sit side by side under different keys,
@@ -162,7 +251,11 @@ const isGuestRecord = (record) =>
 
 export async function loadDevice() {
   const record = await dbGet('paired');
-  return isDeviceRecord(record) ? record : null;
+  if (!isDeviceRecord(record)) return null;
+  if (record.sealedPrivate) {
+    record.devicePrivate = await openPrivate(record.sealedPrivate, record.devicePublic);
+  }
+  return record;
 }
 
 export async function loadGuest() {
@@ -214,7 +307,14 @@ function writeHint(record) {
 
 export async function saveDevice(record) {
   if (!isDeviceRecord(record)) throw new Error('that is not a device record.');
-  await dbPut('paired', record);
+  // Never clone the extractable fallback key into IndexedDB: Safari cannot read it back, and the
+  // sealed representation is the only one this route needs.
+  if (record.sealedPrivate) {
+    const { devicePrivate, ...stored } = record;
+    await dbPut('paired', stored);
+  } else {
+    await dbPut('paired', record);
+  }
   writeHint(record);
 }
 
@@ -284,8 +384,7 @@ export class Rrp extends EventTarget {
   }
 
   async pair(link, { name, platform }) {
-    const pair = await crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits']);
-    const devicePublic = await exportPublic(pair.publicKey);
+    const { pair, devicePublic, sealedPrivate } = await deviceKeyForPairing();
     await this.#open(`${this.socketBase}/v1/connect?room=${encodeURIComponent(link.room)}`);
     await this.#handshake(pair.privateKey, devicePublic, link.desktopPublic, true);
 
@@ -306,21 +405,22 @@ export class Rrp extends EventTarget {
       connectToken: typeof reply.connect_token === 'string' ? reply.connect_token : '',
       pairedAt: Date.now(),
     };
+    if (sealedPrivate) record.sealedPrivate = sealedPrivate;
     await saveDevice(record);
-    // Read it straight back (#SAW4). The private key is a non-extractable CryptoKey kept by
-    // structured clone, and a browser that stores it but hands back something unusable would
-    // otherwise surface only later, as a phone that "forgot" its pairing on the next start.
+    // Read it back after the write commits. Verify an X25519 operation with this exact key:
+    // a valid CryptoKey can fail `instanceof` after WebKit's IndexedDB structured clone.
     const kept = await loadDevice();
-    if (!kept || !(kept.devicePrivate instanceof CryptoKey) || kept.deviceId !== record.deviceId) {
+    if (!kept || kept.deviceId !== record.deviceId
+        || !await sameX25519Key(kept.devicePrivate, pair.privateKey, devicePublic)) {
       throw new Error('This browser could not keep the pairing key, so the pairing would not '
         + 'survive a restart. Update iOS or use another browser, then pair again.');
     }
-    this.record = record;
+    this.record = kept;
     // A pairing channel is for pairing. Drop it and come back as a paired device, so there is one
     // path into a working session and it is the one every later connection uses.
     this.close();
     this.session = null;
-    return record;
+    return kept;
   }
 
   // -- multiplayer: knocking with an invite link (section 10.2) ---------------------------------

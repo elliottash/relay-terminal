@@ -31,6 +31,30 @@ STALL = """
 })();
 """
 
+# WebKit can read an otherwise usable CryptoKey through IndexedDB with a prototype that makes
+# `key instanceof CryptoKey` false. The native WebCrypto operation must decide whether it works.
+BROKEN_CRYPTOKEY_CONSTRUCTOR = """
+Object.defineProperty(window, 'CryptoKey', { value: class WrongCryptoKey {} });
+"""
+
+# A different WebKit regression reads a stored non-extractable X25519 key as null. Mask only the
+# pre-pairing X25519 probe's result, leaving AES-GCM and the final device record in real IDB.
+LOST_X25519_READBACK = """
+(() => {
+  const get = IDBObjectStore.prototype.get;
+  IDBObjectStore.prototype.get = function(key) {
+    const request = get.call(this, key);
+    if (key === 'pair-key-check') {
+      Object.defineProperty(request, 'result', { get() { return null; } });
+    }
+    return request;
+  };
+})();
+"""
+
+LOST_ALL_KEY_READBACK = LOST_X25519_READBACK.replace(
+    "key === 'pair-key-check'", "key === 'pair-key-check' || key === 'pair-seal-check'")
+
 
 @unittest.skipUnless(find_chrome(), "Chrome is not installed")
 class StorageTests(unittest.TestCase):
@@ -105,6 +129,84 @@ class StorageTests(unittest.TestCase):
                     note = await browser.evaluate(
                         "document.getElementById('welcome-note').textContent")
                     self.assertNotIn("was paired", note)
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_usable_key_with_broken_cryptokey_prototype_pairs_and_reconnects(self):
+        async def main():
+            async with Harness() as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.call('Page.addScriptToEvaluateOnNewDocument',
+                                       {'source': BROKEN_CRYPTOKEY_CONSTRUCTOR})
+                    root = await self._paired(harness, browser)
+                    self.assertFalse(await browser.evaluate("""(async () => {
+                      const { loadDevice } = await import('/rrp.js');
+                      return (await loadDevice()).devicePrivate instanceof CryptoKey;
+                    })()"""))
+                    await browser.navigate(root)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    self.assertEqual(len(harness.requests), 1)
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_lost_x25519_readback_uses_sealed_key_and_reconnects(self):
+        async def main():
+            async with Harness() as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.call('Page.addScriptToEvaluateOnNewDocument',
+                                       {'source': LOST_X25519_READBACK})
+                    root = await self._paired(harness, browser)
+                    stored = await browser.evaluate("""new Promise((resolve, reject) => {
+                      const open = indexedDB.open('relay-remote', 1);
+                      open.onerror = () => reject(open.error);
+                      open.onsuccess = () => {
+                        const get = open.result.transaction('device').objectStore('device').get('paired');
+                        get.onerror = () => reject(get.error);
+                        get.onsuccess = () => {
+                          const row = get.result;
+                          resolve({ sealed: !!row.sealedPrivate,
+                            noPlainKey: !('devicePrivate' in row),
+                            sealNonextractable: row.sealedPrivate.key.extractable === false });
+                        };
+                      };
+                    })""")
+                    self.assertEqual(stored, {'sealed': True, 'noPlainKey': True,
+                                              'sealNonextractable': True})
+                    await browser.navigate(root)
+                    await browser.wait_for(shown('screen-inbox'), timeout=40)
+                    self.assertTrue(await browser.evaluate("""(async () => {
+                      const { loadDevice } = await import('/rrp.js');
+                      return (await loadDevice()).devicePrivate.extractable === false;
+                    })()"""))
+                    self.assertEqual(len(harness.requests), 1)
+                finally:
+                    await browser.stop()
+        asyncio.run(asyncio.wait_for(main(), 180))
+
+    def test_unusable_key_storage_refuses_before_consuming_pairing_offer(self):
+        async def main():
+            async with Harness() as harness:
+                browser = Browser()
+                await browser.start()
+                try:
+                    await browser.call('Page.addScriptToEvaluateOnNewDocument',
+                                       {'source': LOST_ALL_KEY_READBACK})
+                    url, _ = await harness.host.open_pairing()
+                    await browser.navigate(url)
+                    # Null-safe: `wait_for` propagates an evaluation error instead of retrying it,
+                    # and the pair screen renders after the navigation resolves.
+                    note = await browser.wait_for(
+                        "(document.getElementById('pair-state')?.textContent || '')"
+                        ".includes('could not keep a pairing key')", timeout=40)
+                    self.assertTrue(note)
+                    self.assertEqual(len(harness.requests), 0,
+                                     'an unusable key must not consume the one-time offer')
                 finally:
                     await browser.stop()
         asyncio.run(asyncio.wait_for(main(), 180))

@@ -123,6 +123,15 @@ libsodium ships BLAKE2b; SHA-256 is in every toolbox.)
 | Client static X25519 | Non-extractable `CryptoKey` in IndexedDB (web), Keystore or Keychain (native) | Until the device is revoked or expires |
 | Session keys | Memory only | One connection |
 
+Before a web client uses a one-time pairing offer, it stores and reads back a non-extractable
+X25519 key and proves it can derive the same secret. A usable key is accepted even if WebKit's
+IndexedDB clone gives it a broken JavaScript prototype. Safari versions that instead read the
+X25519 key back as null use a fallback: encrypt an extractable X25519 key with a non-extractable
+AES-GCM `CryptoKey` that has itself passed a storage roundtrip, then store only that AES key and
+the encrypted private key. Loading imports X25519 as non-extractable. Same-origin script with
+access to both stored values can decrypt the fallback, so direct X25519 storage is preferred.
+Neither route accepts a readback until the IndexedDB write transaction has committed (#PGBZ).
+
 **(security)** The identity key is **not** read through `backend/relay_core/keystore.py`. That module
 honours a `RELAY_<ID>_API_KEY` environment variable ahead of the keyring, which is right for an API
 key you may want to inject for one run and wrong for an identity that every paired phone has pinned:
