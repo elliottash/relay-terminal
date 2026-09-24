@@ -9,7 +9,7 @@ session: 57059618-4892-4fb3-aadb-fea2903b7860
 rank: zzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 verify: {artifact: visual, primary: script, also: [person], human: optional, criteria: The phone icon appears only on a pane actively viewed from another connected device or guest., sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-phone-icon-T279/], related: [], github: null}
+links: {plans: [], commits: [67cdb7096da5488611f4104d97566ab984cafa30], evidence: [docs/qa_evidence/2026-09-24-phone-icon-T279/], related: [], github: null}
 ---
 # Show pane phone icon only while someone is viewing
 
