@@ -636,9 +636,12 @@ void relayingStatusSitsOutsideEveryPromptFrame()
     if (!editor || !lineWidget) return;
     auto *composer = qobject_cast<QFrame *>(editor->parentWidget());
     CHECK(composer != nullptr);
-    CHECK(lineWidget->parentWidget() == &console);
+    // Card #H2KQ: the line shares a row with its Take over / Take control button now; the row
+    // is the pane's direct child, still above the composer and outside its frame.
+    auto *busyRow = lineWidget->parentWidget();
+    CHECK(busyRow != nullptr && busyRow->parentWidget() == &console);
     CHECK(!composer->isAncestorOf(lineWidget));
-    CHECK(console.layout()->indexOf(lineWidget) < console.layout()->indexOf(composer));
+    CHECK(console.layout()->indexOf(busyRow) < console.layout()->indexOf(composer));
 
     const QString normalPlaceholder = editor->placeholderText();
     console.deliverWorkerEvent(QJsonObject{{"event", "subagent_started"}, {"id", "a1"},
@@ -662,7 +665,7 @@ void relayingStatusSitsOutsideEveryPromptFrame()
     if (!terminalEditor || !terminalLine) return;
     auto *terminalComposer = qobject_cast<QFrame *>(terminalEditor->parentWidget());
     CHECK(terminalComposer != nullptr);
-    CHECK(terminalLine->parentWidget() == &terminal);
+    CHECK(terminalLine->parentWidget() != nullptr && terminalLine->parentWidget()->parentWidget() == &terminal);
     CHECK(!terminalComposer->isAncestorOf(terminalLine));
 
     // Outside the frame means it no longer inherits native-mode hiding. The explicit suppression
@@ -1669,6 +1672,7 @@ void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
 #include "xcxd_ui_cases.h"
 #include "xcxd_review_cases.h"
 #include "xcxd_context_cases.h"
+#include "h2kq_cases.h"
 
 int main(int argc, char **argv)
 {
@@ -1695,6 +1699,12 @@ int main(int argc, char **argv)
         cases::xcxdUiCases();
         cases::xcxdContextCases();
         if (!failures) std::fprintf(stdout, "queuecontract: all cases passed\n");
+        return failures ? 1 : 0;
+    }
+    if (app.arguments().contains(QStringLiteral("--h2kq-only"))) {
+        relay::theme::applyTheme(app);
+        cases::h2kqCases();
+        if (!failures) std::fprintf(stdout, "h2kq: all cases passed\n");
         return failures ? 1 : 0;
     }
     if (app.arguments().contains(QStringLiteral("--memory-only"))) {
@@ -1749,6 +1759,7 @@ int main(int argc, char **argv)
     cases::proseQuestionHoldsTheQueueForItsReply();
     cases::rewindRemovesOnlyTheBranchAndLinksItsCompleteText();
     cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
+    cases::h2kqCases();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 20 cases, all passed\n");

@@ -1779,13 +1779,13 @@ void Pane::rebuildQueueStrip() {
         };
         if (shellRunning) {
             auto *stop = new QToolButton;
-            const QString shellKey = agentRunning
+            const QString shellKey = (agentRunning || m_altScreen)
                 ? liveKey("terminal.interrupt", QStringLiteral("Alt+Esc"))
-                : QStringLiteral("Esc");   // the shell alone: Esc is its key, binding or no binding
+                : QStringLiteral("Esc");   // a shell command alone: Esc is its key, binding or no binding
             stop->setText(QStringLiteral("Stop shell (%1)").arg(shellKey));
             stop->setFocusPolicy(Qt::NoFocus);
             stop->setToolTip(QStringLiteral("Interrupt the running command · Alt+Esc does it from the keyboard"));
-            connect(stop, &QToolButton::clicked, this, [this] { interruptShell(); });
+            connect(stop, &QToolButton::clicked, this, [this] { forceInterruptShell(); });
             header->addWidget(stop);
         }
         layout->addLayout(header);
@@ -2131,6 +2131,7 @@ void Pane::pollShell() {
             // and remote sessions; a program blocked reading the terminal gets the focus instead.
             m_waitTicks = 0; m_echoTicks = 0; m_remoteHandled = false; m_remoteProgram = false; endLogin(); m_secretDeclined = false;
             m_programPoll.start();
+            maybeAutoDelegate();   // card #H2KQ: the agent always drives
             QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
         } else if (stage == QStringLiteral("loaded") && m_loading && m_backend &&
                    event.value(QStringLiteral("input_sha256")).toString() == m_pendingHash) {

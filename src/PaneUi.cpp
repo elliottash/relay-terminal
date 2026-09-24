@@ -392,7 +392,25 @@ void Pane::buildUi() {
         m_guestBar->hide();
         // Status is chrome around the input, not input (#R3YN): it sits immediately above the
         // rounded composer frame, shared by terminal panes and shell-less helper consoles alike.
-        layout->addWidget(m_busyLine);
+        // Card #H2KQ: Take over / Take control sits beside the Relaying line (the top-right
+        // program bubble is retired). The row collapses to nothing when both are hidden.
+        auto *busyRow = new QWidget;
+        busyRow->setObjectName(QStringLiteral("busyRow"));
+        auto *busyRowLayout = new QHBoxLayout(busyRow);
+        busyRowLayout->setContentsMargins(0, 0, 0, 0);
+        busyRowLayout->setSpacing(8);
+        busyRowLayout->addWidget(m_busyLine, 1);
+        m_busyAction = new QToolButton;
+        m_busyAction->setObjectName(QStringLiteral("busyAction"));
+        m_busyAction->setCursor(Qt::PointingHandCursor);
+        m_busyAction->setFocusPolicy(Qt::NoFocus);
+        m_busyAction->setVisible(false);
+        connect(m_busyAction, &QToolButton::clicked, this, [this] {
+            if (m_busyActionTakeOver) takeOverFromAgent();
+            else takeControl();
+        });
+        busyRowLayout->addWidget(m_busyAction, 0, Qt::AlignVCenter);
+        layout->addWidget(busyRow);
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer
         setupJobsUi(layout);        // commands the agent left running, beneath that

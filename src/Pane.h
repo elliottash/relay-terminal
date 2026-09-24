@@ -1673,6 +1673,24 @@ public:
         m_loading = false; m_promptReported = false; clearFix();
         sendShellInput(QString(QChar(3)));
     }
+    // Card #H2KQ: Alt+Esc closes a program. The first press is Ctrl+C; a program that catches it
+    // (vim treats it as cancel) gets SIGTERM on the next press a beat later. Plain Esc only ever
+    // sends Ctrl+C, and only to a command running in the shell — a full-screen program keeps Esc.
+    void forceInterruptShell() {
+        if (!m_backend || !processBusy()) return;
+        const QString who = foregroundProgramName().isEmpty() ? QStringLiteral("the program")
+                                                              : foregroundProgramName();
+        if (m_shellInterruptAt.isValid() && m_shellInterruptAt.elapsed() > 600) {
+            const int pgid = foregroundPid() > 0 ? foregroundPid() : int(foregroundGroup(shellPid()));
+            if (pgid > 0 && pgid != shellPid()) ::kill(pid_t(-pgid), SIGTERM);
+            toast(tr("Ctrl+C did not end %1 · sent SIGTERM").arg(who));
+        } else {
+            interruptShell();
+            toast(m_altScreen ? tr("Interrupted %1 · Alt+Esc again closes it").arg(who)
+                              : tr("Interrupted %1").arg(who));
+        }
+        m_shellInterruptAt.restart();
+    }
     void newChat() {
         if (m_agentBusy) { status(QStringLiteral("Stop the current agent turn first.")); return; }
         // The conversation that is ending keeps what it printed (#0TJ9). Here rather than at the
@@ -2533,6 +2551,21 @@ public:
     }
 
     // The user takes the program back: the agent stops typing and the keyboard is theirs.
+    // Card #H2KQ: the agent always drives. A program that starts while an agent is configured is
+    // handed to it without a click, and quietly: no toast, no transcript note, and no note when
+    // the program exits. Take over (the button beside the Relaying line, or Ctrl+#) revokes it;
+    // a password prompt ends it as before (that note stays — it is about secrets, not noise).
+    void maybeAutoDelegate() {
+        if (m_delegated || !m_configured || m_native || m_secretMode) return;
+        if (!processBusy() || !canShowAgentTheScreen() || m_screenPrompt.masked) return;
+        m_delegated = true;
+        m_delegationAuto = true;
+        m_delegatedProgram = foregroundProgramName();
+        m_delegationEnd.clear();
+        m_agentWrites = 0;
+        sendProgramState(); updateTakeControl(); refreshProgramHint(); changed();
+    }
+
     void takeOverFromAgent() {
         endDelegation(QStringLiteral("take_over"));
         takeControl();
@@ -2607,6 +2640,7 @@ private:
             return false;
         }
         m_delegated = true;
+        m_delegationAuto = false;   // an explicit hand-off, so its begin and end say so
         m_delegatedProgram = foregroundProgramName();
         m_delegationEnd.clear();
         m_agentWrites = 0;
@@ -2627,13 +2661,20 @@ private:
         m_delegationEnd = reason;   // the worker tells the agent why, in its own words
         const QString who = m_delegatedProgram.isEmpty() ? QStringLiteral("the program") : m_delegatedProgram;
         m_delegatedProgram.clear();
-        ensureLineStart();
-        printInline(reason == QStringLiteral("program_exited")
+        // Card #H2KQ: an auto-delegation was never announced, so it ends quietly too — including
+        // the "take_over" an auto-human program's native switch would otherwise print. A password
+        // still says so: that note is about secrets, not noise.
+        const bool quietExit = m_delegationAuto && reason != QStringLiteral("password");
+        if (!quietExit) {
+            ensureLineStart();
+            printInline(reason == QStringLiteral("program_exited")
                         ? QStringLiteral("✦ %1 exited · the agent no longer drives this pane\n").arg(who)
                     : reason == QStringLiteral("password")
                         ? QStringLiteral("✦ %1 is asking for a password · the agent stopped typing\n").arg(who)
                         : QStringLiteral("✦ you took %1 back from the agent\n").arg(who),
                     Ink::Note);
+        }
+        m_delegationAuto = false;
         sendProgramState(); updateTakeControl(); refreshProgramHint(); changed();
     }
 
@@ -10678,10 +10719,15 @@ private:
         if (processBusy()) {
             const QString program = foregroundProgramName();
             const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
+            // Card #H2KQ: the stop key sits next to the name. A full-screen program keeps Esc,
+            // so its key is Alt+Esc; a shell command's is Esc (no agent is running here).
+            const QString bound = Keymap::instance().shortcutText(QStringLiteral("terminal.interrupt"));
+            const QString key = m_altScreen ? (bound.isEmpty() ? QStringLiteral("Alt+Esc") : bound)
+                                            : QStringLiteral("Esc");
             m_busyLine->setBusy(relay::panestatus::State::Running,
-                                QStringLiteral("Relaying · %1…").arg(who),
-                                QStringLiteral("%1 owns this terminal; prompts queue until it exits.")
-                                    .arg(program.isEmpty() ? QStringLiteral("This program") : program));
+                                QStringLiteral("Relaying · %1… · %2 stops").arg(who, key),
+                                QStringLiteral("%1 owns this terminal; prompts queue until it exits. %2 closes it.")
+                                    .arg(program.isEmpty() ? QStringLiteral("This program") : program, key));
             return;
         }
         m_busyLine->clearBusy();
@@ -13136,8 +13182,7 @@ private:
         // spill a stop from one resource onto another.
         if (mods == Qt::AltModifier && k == Qt::Key_Escape && processBusy() && m_backend) {
             if (key->isAutoRepeat()) return true;
-            interruptShell();
-            toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
+            forceInterruptShell();   // card #H2KQ: closes a program, not only a shell command
             return true;
         }
         // Esc stops a running program when the shell is the only resource running (the agent's
@@ -13145,7 +13190,8 @@ private:
         if (mods == Qt::NoModifier && k == Qt::Key_Escape && !m_agentBusy
             && !(m_atList && m_atList->isVisible()) && !(m_cardList && m_cardList->isVisible())
             && !readingAloudShown()
-            && processBusy() && m_backend) {
+            && processBusy() && m_backend && !m_altScreen) {
+            // Card #H2KQ: a full-screen program (vim) keeps Esc for itself — Alt+Esc closes it.
             if (key->isAutoRepeat()) return true;
             interruptShell();
             toast(QStringLiteral("Interrupted %1").arg(foregroundProgramName().isEmpty() ? QStringLiteral("the program") : foregroundProgramName()));
@@ -14415,6 +14461,10 @@ private:
     // Called from the backend's onAltScreenChanged.
     void onPrimaryScreen(bool primary) {
         m_altScreen = !primary;
+        // The stop key beside the Relaying line and on the strip depends on this (card #H2KQ:
+        // Esc for a shell command, Alt+Esc for a full-screen program).
+        refreshBusyLine();
+        QTimer::singleShot(0, this, [this] { rebuildQueueStrip(); });
         // A login lives on the alternate screen whenever the host runs mosh, tmux or screen, so it
         // says nothing there about a full-screen program: what the cursor's row holds decides
         // (updateLoginPrompt), and the login keeps taking lines (card #S5SH).
@@ -15483,8 +15533,24 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             updateDelegateButton(who);
             m_programBar->adjustSize();
         }
-        m_programBar->setVisible(show);
+        // Card #H2KQ: the top-right bubble is retired (owner: "the bubble at the top right needs
+        // to go"). What it said is on the Relaying line already, and its one action is the button
+        // beside that line. The widget stays built but never shows.
+        m_programBar->setVisible(false);
         placeTakeControl();
+        if (m_busyAction) {
+            const bool takeOverNow = m_delegated && processBusy() && !m_native;
+            const bool takeControlNow = !takeOverNow && show && offerControl && !m_login.active;
+            m_busyActionTakeOver = takeOverNow;
+            m_busyAction->setVisible(takeOverNow || takeControlNow);
+            const QString keys = Keymap::instance().shortcutText(QStringLiteral("control.human"));
+            m_busyAction->setText(takeOverNow
+                ? (keys.isEmpty() ? QStringLiteral("Take over") : QStringLiteral("Take over (%1)").arg(keys))
+                : (keys.isEmpty() ? QStringLiteral("Take control") : QStringLiteral("Take control (%1)").arg(keys)));
+            m_busyAction->setToolTip(takeOverNow
+                ? QStringLiteral("Stop the agent typing into %1 and take the keyboard").arg(who)
+                : QStringLiteral("Hide the prompt box and type into %1").arg(who));
+        }
     }
 
     // "Let the agent drive" / "Take over", and an honest explanation when this pane's engine
@@ -16384,6 +16450,9 @@ private:
     QElapsedTimer m_turnElapsed;
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
     PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G, #R3YN)
+    QToolButton *m_busyAction = nullptr;  // Take over / Take control beside that line (card #H2KQ; the top-right bubble is retired)
+    bool m_busyActionTakeOver = false;    // what the button does right now: true takes the program back from the agent
+    QElapsedTimer m_shellInterruptAt;     // last stop-key press on the shell; a program still live past it gets SIGTERM (card #H2KQ)
     // "Relaying · waiting for 2 subagents, 1 job . . ." above the prompt (#V7QD, #KP4M, #R3YN): the call_ids
     // of the main agent's running agent_wait and command_output (empty when there is none), the dot
     // phase, and the timer that grows them.
@@ -16401,7 +16470,8 @@ private:
     QString m_opaqueProgram;
     // Screen-text input detection (card YR21) and agent-driven programs (card C1HH).
     relay::screen::Detection m_screenPrompt;
-    bool m_delegated = false;          // the user handed the foreground program to the agent
+    bool m_delegated = false;          // the foreground program is the agent's to drive (auto since card #H2KQ)
+    bool m_delegationAuto = false;     // …and it began by itself, so it begins and ends without transcript notes
     QString m_delegatedProgram;
     QString m_guest;                   // claude / codex in the foreground, "" otherwise (issue GT7X)
     QString m_guestWanted;             // picked in the model box, not yet in the foreground (26.9)

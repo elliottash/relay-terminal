@@ -783,7 +783,7 @@ key is bound to it), running an alias from the palette (→ `/name`, and for a c
 terminal mode), asking for a skill by name in a prompt that says "skill" (→ `/name`), renaming a pane or a tab by double click (→ `/rename`, `/rename-tab`),
 starting a card edit in the Board with the Edit button, a click on the title or a
 double-click in the text (→ `e`), a card's Discuss, Plan, Run and Verify buttons (→ Enter, `p`, `r`, `v`; `board.verify` is #T71W's, on a card in a QA lane), a click on the ⧉ beside a card's `#ID` in the Board (→ `y`; #FT77),
-the program banner's "Let the agent drive" / "Take over" buttons (→ `program.delegate`, `control.human`), a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
+the Take over / Take control button beside the Relaying line (→ `control.human`), `program.delegate`, a click on a running-agents row or its folded line (→ `agent.subagentPane`, Alt+A, or ↓ then Enter), a click on a task row of the strip under the prompt and the Tasks chip menu's task rows (→ ↓ then →, `tasks.strip.open.mouse`), the subagent pane's "← main agent" (→ `agent.subagentPane`), a turn that printed tool-call
 lines (→ click a ▸ line to unfold it, `Ctrl+Shift+Return` for the nearest) and a diff pane opening
 (→ n and p step through the hunks), the share button on a pane that is already shared (→ the palette, then "Sharing", because
 `pane.sharing` deliberately has no key of its own), answering an ask (`ask_user`) by typing an
@@ -1413,7 +1413,7 @@ native mode.
 | Program exits (`ready`) | Automatic human control ends; the composer returns; masked input and the button are cleared |
 | Ctrl+H from the composer, or the button | Human control: composer hidden, keys go to the terminal. Started from a full-screen or remote program, the prompt box comes back when the program exits |
 | Ctrl+H or Ctrl+Shift+H again (`control.human` is a toggle, #QWAS; Ctrl+Shift+H works from the terminal too) | Composer back. While a program runs, submissions go to the agent |
-| Ctrl+Shift+J (`program.delegate`), the banner button, the palette | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
+| Ctrl+Shift+J (`program.delegate`), the palette | Hands the running program to the agent (section 9.2). With text in the prompt box it sends that request too. Pressed again, or Ctrl+H, takes it back |
 | F12 (`terminal.native`) | Toggles native input, unchanged, for people who want the old behaviour |
 | A guest holds the pane's keyboard (`#W5N2`, protocol 10.3) | One driver per pane, and it is the same token: "the agent is driving" and "alice is driving" are one state. The owner's physical keystroke always takes it back, without asking — `Pane::takeBackFromGuest()` sends `control_take` and is called from exactly the two places `endDelegation()` is, `setNative()` and the key filter, which never swallows the key that did it |
 
@@ -1504,12 +1504,15 @@ question.
 
 ### 9.2 Handing a program to the agent, and taking it back
 
-The agent can type into the program in the **visible** pane, and only after the user hands it
-over. `Ctrl+Shift+J` (`program.delegate`), the banner's "Let the agent drive" button and the
-palette action turn it on; with text in the prompt box the same key also sends that text to the
-agent. The pane then prints `✦ <program> handed to the agent · Ctrl+H takes it back`, the banner
-becomes "Agent driving apt · 3 keystroke(s) · apt is asking: …" with a "Take over" button, and
-every prompt submitted for that program carries `context.program_control` (protocol section 21),
+The agent can type into the program in the **visible** pane. Since card #H2KQ the agent always
+drives: a program that starts while an agent is configured is handed to it automatically and
+quietly (no transcript note, no toast) — the owner's standing decision, replacing the per-turn
+consent of card #C1HH. Taking it back is the "Take over" button beside the Relaying line (or
+`control.human`), and `Ctrl+Shift+J` (`program.delegate`) with text in the prompt box still hands
+over *and* sends that text to the agent. The top-right program bubble of #C1HH is retired: what
+it said is on the Relaying line. A hand-over done explicitly (the key, the palette) prints
+`✦ <program> handed to the agent · Ctrl+H takes it back`; an automatic one prints nothing. Every
+prompt submitted for that program carries `context.program_control` (protocol section 21),
 including the screen.
 
 Every write is a round trip: the worker's `type_into_program` emits `program_input`, the pane
@@ -1518,9 +1521,10 @@ checks `relay::input::agentTypeRefusal` *again* at that instant, performs it
 screen the keystroke produced. The pane prints `✦ typed: y   · <the agent's intent line>` for
 every one, so nothing the agent types is invisible.
 
-It ends — for good, not paused — when the user takes control (Ctrl+H, the button, F12), when a
-password prompt appears, or when the program exits; each reason is sent to the worker so the
-agent is told the true one. The agent never types into a masked prompt: the worker refuses before
+It ends — for good, not paused — when the user takes control (Ctrl+H, the Take over button,
+F12), when a password prompt appears, or when the program exits; each reason is sent to the
+worker so the agent is told the true one. An automatic hand-over ends silently when the program
+simply exits; a password or a take-over still prints its note. The agent never types into a masked prompt: the worker refuses before
 the pane is even asked, and the pane refuses again. Panes whose engine cannot read the screen
 cannot delegate at all and say so.
 
