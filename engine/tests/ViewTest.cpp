@@ -2579,13 +2579,28 @@ private slots:
             {QStringLiteral("columns"), 2}, {QStringLiteral("delimiter"), QStringLiteral(",")}
         }).toJson(QJsonDocument::Compact));
         manifest.close();
-        const QString uri = inlinemedia::mediaUri({manifestPath, 0, 1, 40});
+        // relay-show reserves the header, a rule and both rows (#15G5): the table is drawn there.
         t.backend->writeToDisplay("\x1b[2J\x1b[Hbefore\r\n");
-        t.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + uri + QStringLiteral("\x1b\\") +
-                                   QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\\r\nafter\r\n")).toUtf8());
+        for (int row = 0; row < 4; ++row)
+            t.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + inlinemedia::mediaUri({manifestPath, row, 4, 40}) +
+                                       QStringLiteral("\x1b\\") + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\\r\n")).toUtf8());
+        t.backend->writeToDisplay("after\r\n");
         QVERIFY(t.waitScreen(QStringLiteral("after")));
-        const QPoint onRow = t.cellPoint(1, 2);
         const QImage picture = t.grab();
+        // Ink on the header row and on the last data row: the rows are drawn, not one chip line.
+        const auto inked = [&](int row) {
+            const QColor fg = t.view->colorScheme().foreground;
+            int count = 0;
+            for (int y = 2 + row * t.view->cellHeight(); y < 2 + (row + 1) * t.view->cellHeight(); ++y)
+                for (int x = 2; x < 2 + 12 * t.view->cellWidth(); ++x) {
+                    const QColor c = picture.pixelColor(x, y);
+                    count += std::abs(c.red() - fg.red()) + std::abs(c.green() - fg.green()) + std::abs(c.blue() - fg.blue()) < 90;
+                }
+            return count;
+        };
+        QVERIFY(inked(1) > 0);
+        QVERIFY(inked(4) > 0);
+        const QPoint onRow = t.cellPoint(4, 2);   // a data row, not the header: all of it opens
         QVERIFY(picture.pixelColor(onRow) != t.view->colorScheme().background);
         QTest::mouseMove(t.view, onRow);
         QTRY_COMPARE(t.view->cursor().shape(), Qt::PointingHandCursor);
@@ -2599,6 +2614,35 @@ private slots:
         table->sortItems(1, Qt::AscendingOrder);
         QCOMPARE(table->item(0, 1)->text(), QStringLiteral("2"));
         QCOMPARE(table->item(1, 1)->text(), QStringLiteral("10"));
+    }
+
+    // Rendered math is read, not opened (#15G5): no hand over it.
+    void mathRowIsNotClickable()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QTemporaryDir dir;
+        const QString png = dir.filePath(QStringLiteral("math.png"));
+        QImage formula(40, 20, QImage::Format_ARGB32);
+        formula.fill(Qt::black);
+        QVERIFY(formula.save(png));
+        const QString manifestPath = dir.filePath(QStringLiteral("math.json"));
+        QFile manifest(manifestPath);
+        QVERIFY(manifest.open(QIODevice::WriteOnly));
+        manifest.write(QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+            {QStringLiteral("kind"), QStringLiteral("math")}, {QStringLiteral("latex"), QStringLiteral("x^2")},
+            {QStringLiteral("preview"), png}}).toJson(QJsonDocument::Compact));
+        manifest.close();
+        t.backend->writeToDisplay("\x1b[2J\x1b[Hbefore\r\n");
+        for (int row = 0; row < 2; ++row)
+            t.backend->writeToDisplay((QStringLiteral("\x1b]8;;") + inlinemedia::mediaUri({manifestPath, row, 2, 40}) +
+                                       QStringLiteral("\x1b\\") + QChar(0x2800) + QStringLiteral("\x1b]8;;\x1b\\\r\n")).toUtf8());
+        t.backend->writeToDisplay("after\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("after")));
+        QTest::mouseMove(t.view, t.cellPoint(1, 3));
+        QTest::qWait(50);
+        QVERIFY(t.view->cursor().shape() != Qt::PointingHandCursor);
+        QVERIFY(t.view->toolTip().isEmpty());
     }
 
     void mediaRowSurvivesSavedTextAndReplay()

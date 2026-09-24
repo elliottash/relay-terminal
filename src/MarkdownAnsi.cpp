@@ -551,7 +551,7 @@ bool MarkdownAnsi::inlineStep(QString &out, int &i) {
             }
             const QString math = mathMediaEscape(text.mid(i + markers, end - i - markers),
                                                  m_imageColumns > 0 ? m_imageColumns : 60,
-                                                 markers == 2 ? 5 : 3);
+                                                 markers == 2 ? 4 : 2);   // no caption row (#15G5)
             if (!math.isEmpty()) {
                 out += kReset + QLatin1Char('\n') + math;
                 m_afterImage = true;

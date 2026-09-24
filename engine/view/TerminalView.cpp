@@ -50,6 +50,7 @@
 #endif
 
 #include <algorithm>
+#include <numeric>
 
 namespace relay {
 
@@ -2609,6 +2610,8 @@ void TerminalView::mediaOnRows(int first, int last, std::vector<MediaPlacement> 
     }
 }
 
+static QVector<QStringList> readDelimited(const QString &path, QChar delimiter, int maxRows, qint64 maxBytes);
+
 TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
 {
     auto found = m_mediaInfo.constFind(manifest);
@@ -2653,6 +2656,8 @@ TerminalView::MediaInfo TerminalView::mediaInfo(const QString &manifest)
             info.columns = std::clamp(obj.value(QStringLiteral("columns")).toInt(), 0, 100);
             info.delimiter = obj.value(QStringLiteral("delimiter")).toString() == QStringLiteral("\t")
                 ? QLatin1Char('\t') : QLatin1Char(',');
+            if (kind == QStringLiteral("table") && info.valid)   // header + the rows a preview can show
+                info.head = readDelimited(info.path, info.delimiter, 1 + kTablePreviewRows, 1 << 20);
             const QJsonArray wave = obj.value(QStringLiteral("waveform")).toArray();
             for (int i = 0; i < std::min(128, wave.size()); ++i)
                 info.waveform.append(std::clamp<qreal>(wave.at(i).toDouble(), 0, 1));
@@ -2810,16 +2815,12 @@ void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
             p.drawText(box.adjusted(0, 0, -6, 0), Qt::AlignRight | Qt::AlignVCenter,
                        clock(at) + QLatin1Char('/') + clock(info.durationMs));
         } else if (info.kind == QStringLiteral("table")) {
-            p.setPen(m_scheme.foreground);
-            p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignVCenter,
-                       tr("▦  %1  ·  %2 rows × %3 columns  ·  open sortable table")
-                           .arg(info.name.isEmpty() ? QFileInfo(info.path).fileName() : info.name)
-                           .arg(info.rows).arg(info.columns));
+            paintTablePreview(p, box, info, media.ref.rows);
         } else {
             const QSize natural = m_images.naturalSize(info.preview);
             if (natural.isValid()) {
                 const QRect content = info.kind == QStringLiteral("math")
-                    ? box.adjusted(6, m_ch + 2, -6, -2) : box;
+                    ? box.adjusted(6, 2, -6, -2) : box;
                 const QSize size = natural.scaled(content.size(), Qt::KeepAspectRatio);
                 const QRect imageRect(content.topLeft(), size);
                 ImageCache::State state;
@@ -2834,16 +2835,77 @@ void TerminalView::paintMedia(QPainter &p, int firstRow, int lastRow)
                     p.drawImage(imageRect, preview);
                 }
             }
-            p.fillRect(QRect(box.left(), box.top(), box.width(), m_ch),
-                       QColor(0, 0, 0, 150));
-            p.setPen(Qt::white);
-            const QString label = info.kind == QStringLiteral("chart") ? tr("Chart · open live page") :
-                info.kind == QStringLiteral("video") ? tr("▶ Video · open player") :
-                info.kind == QStringLiteral("pdf") ? tr("PDF · open document") :
-                info.kind == QStringLiteral("math") ? tr("Math") : tr("SVG · open image");
-            p.drawText(box.adjusted(6, 0, -4, -(box.height() - m_ch)), Qt::AlignVCenter, label);
+            // No caption strip (#15G5): the preview is the thing to click, the pointer turns into
+            // a hand over it and its tooltip names what opens.
         }
         p.restore();
+    }
+}
+
+// A CSV/TSV shown with relay-show (#15G5): its header and first rows drawn as a table in the rows
+// relay-show reserved, the whole box one click target that opens the sortable window. Columns
+// share the box's width and a cell that does not fit ends in "…"; a table with more rows than
+// were reserved ends on a faint "… N more rows" line.
+void TerminalView::paintTablePreview(QPainter &p, const QRect &box, const MediaInfo &info, int lines)
+{
+    const QColor faint = faintInk(m_scheme.foreground, m_scheme.background);
+    if (info.head.isEmpty()) {
+        p.setPen(faint);
+        p.drawText(box.adjusted(6, 0, -6, 0), Qt::AlignLeft | Qt::AlignTop,
+                   info.name.isEmpty() ? QFileInfo(info.path).fileName() : info.name);
+        return;
+    }
+    const int dataRows = std::max(0, info.rows - 1);
+    int shown = std::min<int>(info.head.size() - 1, std::max(0, lines - 2));
+    if (shown < dataRows)   // the last line says how many more there are
+        shown = std::min(shown, std::max(0, lines - 3));
+    int columns = 0;
+    for (const QStringList &row : info.head)
+        columns = std::max(columns, int(row.size()));
+    if (columns == 0)
+        return;
+    QVector<int> widths(columns, 1);
+    for (int r = 0; r <= shown && r < info.head.size(); ++r)
+        for (int c = 0; c < info.head.at(r).size(); ++c)
+            widths[c] = std::max(widths[c], int(info.head.at(r).at(c).size()));
+    const int available = std::max(columns, (box.width() - 2 * m_cw) / std::max(1, m_cw) - 3 * (columns - 1));
+    for (int total = std::accumulate(widths.begin(), widths.end(), 0); total > available; --total)
+        --*std::max_element(widths.begin(), widths.end());   // the widest column gives way first
+    const auto fitted = [](const QString &text, int width) {
+        return text.size() <= width ? text : text.left(std::max(0, width - 1)) + QStringLiteral("…");
+    };
+    QFont bold = p.font();
+    bold.setBold(true);
+    const QFont normal = p.font();
+    const int left = box.left() + m_cw;
+    const auto drawRow = [&](const QStringList &row, int line) {
+        int x = left;
+        for (int c = 0; c < columns; ++c) {
+            if (c > 0) {
+                p.setPen(faint);
+                p.drawText(QRect(x, box.top() + line * m_ch, 3 * m_cw, m_ch), Qt::AlignVCenter, QStringLiteral(" │ "));
+                x += 3 * m_cw;
+            }
+            p.setPen(m_scheme.foreground);
+            p.drawText(QRect(x, box.top() + line * m_ch, widths.at(c) * m_cw, m_ch), Qt::AlignVCenter,
+                       fitted(row.value(c), widths.at(c)));
+            x += widths.at(c) * m_cw;
+        }
+    };
+    p.setFont(bold);
+    drawRow(info.head.first(), 0);
+    p.setFont(normal);
+    QStringList dashes;
+    for (int w : widths) dashes << QString(w, QChar(0x2500));
+    p.setPen(faint);
+    p.drawText(QRect(left, box.top() + m_ch, box.width(), m_ch), Qt::AlignVCenter,
+               dashes.join(QStringLiteral("─┼─")));
+    for (int r = 1; r <= shown; ++r)
+        drawRow(info.head.at(r), r + 1);
+    if (shown < dataRows) {
+        p.setPen(faint);
+        p.drawText(QRect(left, box.top() + (shown + 2) * m_ch, box.width(), m_ch), Qt::AlignVCenter,
+                   tr("… %n more rows", nullptr, dataRows - shown));
     }
 }
 
@@ -2855,6 +2917,9 @@ bool TerminalView::mediaAt(const QPoint &pos, MediaPlacement *media)
     std::vector<MediaPlacement> here;
     mediaOnRows(cell.row, cell.row, &here);
     for (const MediaPlacement &candidate : here) {
+        // Rendered math is text to read, not an object to open (#15G5): no hand, no click.
+        if (mediaInfo(candidate.ref.manifest).kind == QStringLiteral("math"))
+            continue;
         if (mediaRect(candidate).contains(pos)) {
             *media = candidate;
             return true;
@@ -2982,17 +3047,20 @@ void TerminalView::playAudio(const MediaInfo &info, qint64 fromMs)
     update();
 }
 
-void TerminalView::openTable(const MediaInfo &info)
+// A delimited file's rows, at most `maxRows` of them, read from its first `maxBytes`. When the
+// read stops inside the file, the row it was part way through is dropped, not shown cut.
+static QVector<QStringList> readDelimited(const QString &path, QChar delimiter, int maxRows, qint64 maxBytes)
 {
-    QFile file(info.path);
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly) || file.size() > (qint64(16) << 20))
-        return;
-    const QString text = QString::fromUtf8(file.readAll());
+        return {};
+    const bool whole = file.size() <= maxBytes;
+    const QString text = QString::fromUtf8(file.read(maxBytes));
     QVector<QStringList> rows;
     QStringList row;
     QString cell;
     bool quoted = false;
-    for (int i = 0; i < text.size() && rows.size() < 5001; ++i) {
+    for (int i = 0; i < text.size() && rows.size() < maxRows; ++i) {
         const QChar ch = text.at(i);
         if (ch == QLatin1Char('"')) {
             if (quoted && i + 1 < text.size() && text.at(i + 1) == QLatin1Char('"')) {
@@ -3001,7 +3069,7 @@ void TerminalView::openTable(const MediaInfo &info)
             } else {
                 quoted = !quoted;
             }
-        } else if (ch == info.delimiter && !quoted) {
+        } else if (ch == delimiter && !quoted) {
             row << cell;
             cell.clear();
         } else if ((ch == QLatin1Char('\n') || ch == QLatin1Char('\r')) && !quoted) {
@@ -3015,10 +3083,16 @@ void TerminalView::openTable(const MediaInfo &info)
             cell += ch;
         }
     }
-    if (!cell.isEmpty() || !row.isEmpty()) {
+    if (whole && rows.size() < maxRows && (!cell.isEmpty() || !row.isEmpty())) {
         row << cell;
         rows << row;
     }
+    return rows;
+}
+
+void TerminalView::openTable(const MediaInfo &info)
+{
+    const QVector<QStringList> rows = readDelimited(info.path, info.delimiter, 5001, qint64(16) << 20);
     if (rows.isEmpty())
         return;
     auto *dialog = new QDialog(this);
@@ -3078,8 +3152,8 @@ void TerminalView::activateMedia(const MediaPlacement &media, const QPoint &pos)
         openTable(info);
     } else if (info.kind == QStringLiteral("chart")) {
         QDesktopServices::openUrl(QUrl(info.url));
-    } else if (info.kind == QStringLiteral("math") && QFileInfo(info.preview).isFile()) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(info.preview));
+    } else if (info.kind == QStringLiteral("math")) {
+        return;
     } else if (QFileInfo(info.path).isFile()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(info.path));
     }

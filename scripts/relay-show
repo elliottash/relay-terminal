@@ -22,6 +22,7 @@ import wave
 MAX_INPUT = 64 * 1024 * 1024
 MAX_TABLE_ROWS = 5000
 MAX_TABLE_COLUMNS = 100
+TABLE_PREVIEW_ROWS = 15   # data rows drawn inline; TerminalView::kTablePreviewRows
 KINDS = {"image", "svg", "pdf", "audio", "video", "chart", "table"}
 
 
@@ -146,6 +147,7 @@ def duration_and_waveform(path):
 
 
 def table_shape(path, delimiter):
+    """Rows, columns, and the columns wide the inline preview's header and first rows want."""
     with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as source:
         reader = csv.reader(source, delimiter=delimiter)
         rows = []
@@ -155,7 +157,12 @@ def table_shape(path, delimiter):
             rows.append(row)
             if len(rows) > MAX_TABLE_ROWS:
                 raise ValueError("table has too many rows")
-    return len(rows), max((len(row) for row in rows), default=0)
+    columns = max((len(row) for row in rows), default=0)
+    widths = [0] * columns
+    for row in rows[:1 + TABLE_PREVIEW_ROWS]:
+        for n, cell in enumerate(row):
+            widths[n] = max(widths[n], len(cell))
+    return len(rows), columns, sum(widths) + 3 * max(0, columns - 1) + 2
 
 
 def emit_image(path):
@@ -166,14 +173,14 @@ def emit_image(path):
     sys.stdout.buffer.write(control + b";" + base64.b64encode(payload) + b"\x1b\\\n")
 
 
-def emit_media(data):
+def emit_media(data, rows=None, cols=60):
     encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     key = hashlib.sha256(encoded).hexdigest()
     manifest = cache_dir() / (key + ".json")
     if not manifest.exists():
         manifest.write_bytes(encoded)
-    rows = 12 if data["kind"] in ("svg", "pdf", "video", "chart") else 1
-    cols = 60
+    if rows is None:
+        rows = 12 if data["kind"] in ("svg", "pdf", "video", "chart") else 1
     for row in range(rows):
         uri = "relay-media:" + str(row) + "/" + str(rows) + "/" + str(cols) + "/" + quote(str(manifest), safe="")
         sys.stdout.buffer.write(("\x1b]8;;" + uri + "\x1b\\⠀\x1b]8;;\x1b\\\r\n").encode("utf-8"))
@@ -244,9 +251,15 @@ def main(argv=None):
             parser.error("table needs a file")
         data["delimiter"] = "\t" if path.suffix.lower() == ".tsv" else ","
         try:
-            data["rows"], data["columns"] = table_shape(path, data["delimiter"])
+            data["rows"], data["columns"], width = table_shape(path, data["delimiter"])
+            # The header, a rule, the first rows, and "… N more rows" when there are more (#15G5).
+            shown = min(max(0, data["rows"] - 1), TABLE_PREVIEW_ROWS)
+            table_rows = 2 + shown + (1 if data["rows"] - 1 > shown else 0)
+            table_cols = min(120, max(20, width))
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
+        emit_media(data, table_rows, table_cols)
+        return 0
     emit_media(data)
     return 0
 

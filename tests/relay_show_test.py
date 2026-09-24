@@ -32,7 +32,8 @@ class RelayShowTest(unittest.TestCase):
         row, rows, cols, encoded = output[len(prefix):end].decode().split("/", 3)
         self.assertEqual(row, "0")
         self.assertGreaterEqual(int(rows), 1)
-        self.assertEqual(cols, "60")
+        self.last_shape = (int(rows), int(cols))
+        self.assertIn(int(cols), range(20, 121))
         path = Path(unquote(encoded))
         self.assertTrue(path.is_file())
         self.assertIn("⠀".encode("utf-8") + b"\x1b]8;;\x1b\\", output)
@@ -60,7 +61,18 @@ class RelayShowTest(unittest.TestCase):
         self.assertEqual((item["kind"], item["rows"], item["columns"]), ("table", 3, 2))
         self.assertEqual(item["name"], "numbers.csv")
         self.assertEqual(Path(item["path"]).read_bytes(), b"name,value\na,2\nb,10\n")
-        self.assertEqual(result.stdout.count(b"\x1b]8;;relay-media:"), 1)
+        # Header, rule and both rows drawn inline, as wide as they are (#15G5).
+        self.assertEqual(self.last_shape, (4, 20))
+        self.assertEqual(result.stdout.count(b"\x1b]8;;relay-media:"), 4)
+
+    def test_long_csv_reserves_preview_and_more_line(self):
+        data = b"name,value\n" + b"".join(b"row%d,%d\n" % (n, n) for n in range(40))
+        result = self.run_show("-", "--name", "long.csv", data=data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.manifest(result.stdout)
+        self.assertEqual(item["rows"], 41)
+        self.assertEqual(self.last_shape[0], 2 + 15 + 1)   # header, rule, 15 rows, "… 25 more rows"
+        self.assertEqual(result.stdout.count(b"relay-media:"), 18)
 
     def test_wave_audio_has_duration(self):
         sound = self.root / "tone.wav"

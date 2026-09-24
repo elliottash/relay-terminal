@@ -455,6 +455,7 @@ private:
         int rows = 0;
         int columns = 0;
         QChar delimiter = QLatin1Char(',');
+        QVector<QStringList> head;   // a table's first rows, header first, for its inline preview
         bool valid = false;
     };
     bool mediaRefOf(uint32_t link, int frameRow, int col, inlinemedia::MediaRef *ref);
@@ -465,6 +466,8 @@ private:
     bool mediaAt(const QPoint &pos, MediaPlacement *media);
     void activateMedia(const MediaPlacement &media, const QPoint &pos);
     void openTable(const MediaInfo &info);
+    void paintTablePreview(QPainter &p, const QRect &box, const MediaInfo &info, int lines);
+    static constexpr int kTablePreviewRows = 15;   // data rows relay-show reserves at most
     void playAudio(const MediaInfo &info, qint64 fromMs);
     void stopAudio(bool preservePosition = false);
     qint64 audioPositionMs() const;
