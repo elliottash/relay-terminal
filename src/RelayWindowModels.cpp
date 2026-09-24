@@ -277,6 +277,8 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                                                      : QStringLiteral("on this machine, runs with your own login");
             } else if (source == QStringLiteral("env")) {
                 status = QStringLiteral("key from RELAY_%1_API_KEY").arg(id.toUpper().replace(QLatin1Char('-'), QLatin1Char('_')));
+            } else if (source == QStringLiteral("local")) {
+                status = QStringLiteral("no key needed (local endpoint)");   // #BYG1
             } else if (hasKey) {
                 status = QStringLiteral("key stored in the keyring");
             } else {

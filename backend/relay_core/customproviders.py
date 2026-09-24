@@ -305,7 +305,9 @@ def key_source(provider_id: str) -> str:
 def row(entry: CustomProvider) -> dict:
     """One ``presets`` event row: the entry plus where its key comes from."""
     source = key_source(entry.id)
-    return {**entry.to_dict(), "has_stored_key": bool(source) and source != "local", "key_source": source}
+    # A loopback endpoint sends no key at all (#BYG1), so report its key requirement as
+    # satisfied: has_stored_key is what ModelCatalog::usableRow and the Options page read.
+    return {**entry.to_dict(), "has_stored_key": bool(source), "key_source": source}
 
 
 def rows() -> list[dict]:

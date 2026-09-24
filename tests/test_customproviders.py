@@ -349,7 +349,8 @@ class LoopbackTests(Case):
         with mock.patch.object(C, "fetch_models", lambda url, key, **kw: (asked.append(key), None)[1]):
             events = self.save(self.LOCAL)
         row = events[0]["provider"]
-        self.assertEqual((row["has_stored_key"], row["key_source"]), (False, "local"))
+        # A keyless loopback endpoint reads as usable (#BYG1).
+        self.assertEqual((row["has_stored_key"], row["key_source"]), (True, "local"))
         self.assertEqual(asked, [""])                          # the probe carried no key either
         config = S.provider_config({"preset": "custom:local-proxy", "use_stored_key": True})
         self.assertEqual((config.api_key, config.local, config.base_url), ("", True, "http://127.0.0.1:4000/v1"))
