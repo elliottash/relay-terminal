@@ -59,3 +59,9 @@ mentioned in #E0Y0 · 2026-09-25 · agent
 <!-- relay:entry 20260925T224500Z-r2 author=y2ba-move kind=progress -->
 ### y2ba-move · 2026-09-25 22:45
 Step 2 remainder landed: `CardDetail` (and `PriorityFlagButton`, `drawPriorityFlag`, the shared action-depth guard) moved verbatim out of `src/BoardPane.cpp` into new `src/CardPane.h`; the page's std::function callback surface is the plan's `CardController`, BoardView the host that implements it. No `CardPane.cpp`: the class is fully inline, an empty TU would be noise. Full build clean; `ctest -R 'boardsolo|boardpane|windowstate'` 3/3 after the move. The live evidence in `docs/qa_evidence/2026-09-25-card-panes/` (16/16) predates this code-motion-only refactor. Also landed #E0Y0's label editor via --take-foreign (dd02b23a, owner approved; its pane was idle ~1h) — it sat inside CardDetail and blocked the cut.
+
+<!-- relay:entry 20260925T224500Z-r3 author=agent kind=event model=k3 pane=fc1a77ed turn=46dc7f7d90f746138bbd7773c040726f/06f47ac8e1234e868ad8ca43b00adc74 -->
+- ✦ agent moved this card · Running → Needs verification · All three tasks landed: A0 solo card panes (0e198884), Kind::Card (459c2e59), hint+tests (d850939f), docs + 16/16 live pass (103e2f60), and the step-2 remainder — CardDetail now in src/CardPane.h (9a13cfe2). boardsolo/boardpane/windowstate pass after the move. Live evidence predates the code-motion refactor; tests re-passed after it. · evidence docs/qa_evidence/2026-09-25-card-panes/ · implemented_by kimi/k3
+
+<!-- relay:entry 20260925T224500Z-r4 author=agent kind=event mention=HKY4 model=k3 pane=6aaee940 turn=068046613259444ba9b13f19ad048b93/74501cccec2f4288befba1efc58c0835 -->
+mentioned in #HKY4 · 2026-09-25 · agent
