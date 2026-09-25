@@ -54,14 +54,16 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                                 QStringLiteral("agent.localAgent"), local);
         }
         const QString mode = pane ? pane->mode() : QStringLiteral("auto");
-        const QString modeName = mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto");
+        const QString modeName = mode == QStringLiteral("program") ? QStringLiteral("Program")
+            : mode == QStringLiteral("shell") ? QStringLiteral("Terminal") : mode == QStringLiteral("agent") ? QStringLiteral("Agent") : QStringLiteral("Auto");
         items << submenu(QStringLiteral("menu:mode"), agent, QStringLiteral("Input mode"), modeName, [this, mode] {
             return QList<PaletteItem>{
                 actionItem(QStringLiteral("Input mode"), QStringLiteral("Auto"), QStringLiteral("Commands to the terminal, everything else to the agent"), QStringLiteral("input.modeAuto"), mode == QStringLiteral("auto")),
-                actionItem(QStringLiteral("Input mode"), QStringLiteral("Terminal"), QStringLiteral("Always the terminal; the agent fixes failures"), QStringLiteral("input.modeTerminal"), mode == QStringLiteral("shell")),
-                actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent"))};
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Terminal"), QStringLiteral("Commands go to the terminal; typos stay in the prompt box"), QStringLiteral("input.modeTerminal"), mode == QStringLiteral("shell")),
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Agent"), QStringLiteral("Always the agent"), QStringLiteral("input.modeAgent"), mode == QStringLiteral("agent")),
+                actionItem(QStringLiteral("Input mode"), QStringLiteral("Program"), QStringLiteral("Type into the running program"), QStringLiteral("input.modeProgram"), mode == QStringLiteral("program"))};
         });
-        items << actionItem(agent, QStringLiteral("Toggle terminal / agent input"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
+        items << actionItem(agent, QStringLiteral("Cycle input mode"), QStringLiteral("From the prompt box"), QStringLiteral("input.toggle"));
         items << actionItem(agent, QStringLiteral("Clear the prompt box"), QStringLiteral("One undo step: Ctrl+Z brings it back"), QStringLiteral("prompt.clear"));
         {
             // Voice transcription: the same action the microphone chip runs.

@@ -454,6 +454,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("input.modeAuto")) pane->setMode(QStringLiteral("auto"));
         else if (id == QStringLiteral("input.modeTerminal")) pane->setMode(QStringLiteral("shell"));
         else if (id == QStringLiteral("input.modeAgent")) pane->setMode(QStringLiteral("agent"));
+        else if (id == QStringLiteral("input.modeProgram")) pane->setMode(QStringLiteral("program"));
         // The Model and Reasoning-effort submenus' children, `model:<id>` and `effort:<level>`.
         // Their palette rows run a closure over `m_active` (rootItems()), which is the focused
         // pane and nothing else; these two branches are how the same two setters are reached with

@@ -12,7 +12,7 @@ namespace relay {
 // colour is set by the pane from the same decision, so the destination is visible while typing.
 class InputHighlighter : public QSyntaxHighlighter {
 public:
-    enum class Destination { Auto, Shell, Agent };
+    enum class Destination { Auto, Shell, Agent, Program };
 
     explicit InputHighlighter(QTextDocument *document);
 

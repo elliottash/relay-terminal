@@ -155,6 +155,12 @@ void Pane::buildUi() {
                 const QString value = QString::fromLatin1(pair.first);
                 menu->addAction(QString::fromLatin1(pair.second), this, [this, value] { setMode(value); focusInput(); });
             }
+            auto *programMode = menu->addAction(QStringLiteral("program"), this, [this] {
+                setMode(QStringLiteral("program")); focusInput();
+            });
+            connect(menu, &QMenu::aboutToShow, this, [this, programMode] {
+                programMode->setEnabled(!m_native && !m_altScreen && processBusy());
+            });
             m_modeChip->setMenu(menu);
         }
         setupTaskUpdates();
@@ -413,6 +419,16 @@ void Pane::buildUi() {
             else takeControl();
         });
         busyRowLayout->addWidget(m_busyAction, 0, Qt::AlignVCenter);
+        m_programInputAction = new QToolButton;
+        m_programInputAction->setObjectName(QStringLiteral("programInputAction"));
+        m_programInputAction->setCursor(Qt::PointingHandCursor);
+        m_programInputAction->setFocusPolicy(Qt::NoFocus);
+        m_programInputAction->hide();
+        connect(m_programInputAction, &QToolButton::clicked, this, [this] {
+            setMode(QStringLiteral("program"));
+            focusInput();
+        });
+        busyRowLayout->addWidget(m_programInputAction, 0, Qt::AlignVCenter);
         layout->addWidget(busyRow);
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer

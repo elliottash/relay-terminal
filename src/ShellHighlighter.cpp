@@ -82,6 +82,7 @@ QColor InputHighlighter::colorFor(Destination destination) {
     switch (destination) {
     case Destination::Shell: return kCommand();
     case Destination::Agent: return kAgent();
+    case Destination::Program: return kPath();
     case Destination::Auto: break;
     }
     return relay::theme::Text;
@@ -111,6 +112,7 @@ void InputHighlighter::highlightBlock(const QString &text) {
     switch (m_destination) {
     case Destination::Shell: highlightShell(text); break;
     case Destination::Agent: highlightAgent(text); break;
+    case Destination::Program: setFormat(0, text.size(), charFormat(kPath())); break;
     case Destination::Auto: setFormat(0, text.size(), charFormat(relay::theme::Text)); break;
     }
 }

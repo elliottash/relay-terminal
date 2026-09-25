@@ -6036,7 +6036,7 @@ private:
             QJsonObject leaf{{"cwd", pane->cwd()}, {"workspace", pane->workspace()},
                              {"agent_role", pane->agentRole()},
                              {"agent_mode", pane->agentMode()},
-                             {"input_mode", pane->mode()},
+                             {"input_mode", pane->mode() == QStringLiteral("program") ? QStringLiteral("auto") : pane->mode()},
                              {"effort", pane->effort()}};
             // An empty core means "whatever the process default is"; storing it would pin the empty
             // string and defeat --engine-core on the next start.

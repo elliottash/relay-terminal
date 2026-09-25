@@ -33,6 +33,7 @@
 #include "ContextMeter.h"
 #include "AgentContext.h"   // relay::agent::Context: what the agent on this surface is about
 #include "Completion.h"
+#include "ProgramCompletion.h"
 #include "FileIndex.h"
 #include "ShellHighlighter.h"
 #include "Hints.h"
@@ -937,6 +938,12 @@ public:
     QString engineCore() const { return m_engineCore; }
     QString mode() const { return m_modeValue; }
     void setMode(const QString &mode) {
+        if (mode != QStringLiteral("auto") && mode != QStringLiteral("shell")
+            && mode != QStringLiteral("agent") && mode != QStringLiteral("program")) return;
+        if (mode == QStringLiteral("program")) {
+            if (!processBusy() || m_altScreen || m_native || m_secretMode) return;
+            if (m_modeValue != mode) m_preProgramMode = m_modeValue;
+        } else if (m_modeValue == QStringLiteral("program")) m_preProgramMode.clear();
         m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); refreshDestinationColor(); changed();
     }
     bool isNative() const { return m_native; }
@@ -2652,13 +2659,16 @@ public:
             toast(QStringLiteral("Input: Agent · the password prompt is still waiting"));
             return;
         }
-        // Three-way, in this order (owner, 2026-09-17): auto → terminal → agent → auto.
+        const bool programAvailable = !m_secretMode &&
+            (relay::input::lineEditorWaiting(inputState()) || relay::input::lineRequested(inputState()));
         const QString next = m_modeValue == QStringLiteral("auto")  ? QStringLiteral("shell")
                            : m_modeValue == QStringLiteral("shell") ? QStringLiteral("agent")
+                           : m_modeValue == QStringLiteral("agent") && programAvailable ? QStringLiteral("program")
                                                                     : QStringLiteral("auto");
         setMode(next);
         toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent · ! runs one line in the terminal")
               : next == QStringLiteral("shell") ? QStringLiteral("Input: Terminal · * sends one line to the agent")
+              : next == QStringLiteral("program") ? QStringLiteral("Input: Program · typing into %1").arg(foregroundProgramName())
                                                 : QStringLiteral("Input: Auto"));
     }
 
@@ -10051,7 +10061,7 @@ public:
             row(QStringLiteral("/"), QStringLiteral("slash commands"));
             row(QStringLiteral("@"), QStringLiteral("attach files and folders"));
             row(QStringLiteral("#"), QStringLiteral("reference a Board card"));
-            row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("switch terminal / agent"));
+            row(keys.shortcutText(QStringLiteral("input.toggle")), QStringLiteral("cycle auto / terminal / agent / program"));
             row(keys.shortcutText(QStringLiteral("board.open")), QStringLiteral("Board: cards and threads"));
             // The explorer is one of the keys people reach for most and it was only in the full
             // list (owner, 2026-09-17). One key opens and closes it, which the wording has to say.
@@ -10408,7 +10418,7 @@ private:
     // that program's stdin when the terminal is in canonical (line) mode and a process of the
     // command is blocked reading it. Anything else keeps the existing behaviour — run it now,
     // or queue it until the terminal is free. Never remembered (relay::input::retainable).
-    bool sendLineToProgram(const QString &mode) {
+    bool sendLineToProgram(const QString &mode, const QString *routedText = nullptr) {
         if (m_native || !m_backend || m_secretMode) return false;
         // A question on the screen of a login ("Do you want to continue? [Y/n]" from a remote
         // apt): the local terminal is raw, so only the screen says a line is wanted (#S5SH).
@@ -10417,13 +10427,20 @@ private:
             return true;
         }
         if (relay::input::targetFor(inputState(), mode) != relay::input::LineTarget::Program) return false;
-        const QString text = m_editor->toPlainText();
-        if (text.contains('\n')) return false;   // a multi-line draft is not an answer to a prompt
+        const QString text = routedText ? *routedText : m_editor->toPlainText();
         const QString program = foregroundProgramName();
-        m_editor->clear();
+        const QString name = program.toLower();
+        const bool repl = name.startsWith(QStringLiteral("python")) || name == QStringLiteral("ipython")
+            || name == QStringLiteral("node") || name == QStringLiteral("psql") || name == QStringLiteral("sqlite3")
+            || name == QStringLiteral("stata");
+        if (text.contains('\n') && !repl) return false;
+        if (!routedText || m_editor->toPlainText() == text) m_editor->clear();
         hideAtPopup();
         clearAiGhost();
-        sendShellInput(text + '\n');
+        // The guest composer uses this same bracketed-paste writer. Do not clear the program's
+        // own line with Ctrl+U: it may have already printed or accepted input of its own.
+        m_backend->sendText(text, true);
+        m_backend->sendInput(QByteArrayLiteral("\r"));
         m_waitTicks = 0;
         endWaiting(false);
         status(relay::input::sentToProgram(program));
@@ -11142,7 +11159,8 @@ private:
         if (m_modeChip) {
             const bool decided = destination != relay::InputHighlighter::Destination::Auto;
             m_modeChip->setProperty("dest", decided ? (destination == relay::InputHighlighter::Destination::Shell
-                                                       ? QStringLiteral("shell") : QStringLiteral("agent"))
+                                                       ? QStringLiteral("shell") : destination == relay::InputHighlighter::Destination::Program
+                                                       ? QStringLiteral("program") : QStringLiteral("agent"))
                                                     : QString());
             m_modeChip->style()->unpolish(m_modeChip); m_modeChip->style()->polish(m_modeChip);
         }
@@ -11151,6 +11169,7 @@ private:
     // The fixed modes decide on their own; auto waits for the router's verdict on this text.
     void refreshDestinationColor(const QString &verdict = QString()) {
         using Destination = relay::InputHighlighter::Destination;
+        if (m_modeValue == QStringLiteral("program")) { applyDestinationColor(Destination::Program); return; }
         if (m_modeValue == QStringLiteral("shell")) { applyDestinationColor(Destination::Shell); return; }
         if (m_modeValue == QStringLiteral("agent")) { applyDestinationColor(Destination::Agent); return; }
         if (m_editor && m_editor->toPlainText().trimmed().isEmpty()) { applyDestinationColor(Destination::Auto); return; }
@@ -14940,8 +14959,9 @@ fi
         if (cursor.hasSelection()) return false;
         if (m_login.active) { completeRemote(); return true; }
         const QString line = cursor.block().text();
-        const relay::Completion completion =
-            relay::completeAt(line, cursor.positionInBlock(), m_cwd, knownCommandNames());
+        const relay::Completion completion = m_modeValue == QStringLiteral("program")
+            ? relay::completeProgram(foregroundProgramName(), line, cursor.positionInBlock())
+            : relay::completeAt(line, cursor.positionInBlock(), m_cwd, knownCommandNames());
         if (completion.inserts.isEmpty()) return true;   // nothing matches: swallow the Tab
         const QString typed = line.mid(completion.start, completion.length);
         if (completion.inserts.size() == 1) {
@@ -15875,7 +15895,7 @@ private:
                 text = relay::screen::waitingLine(program, m_screenPrompt);
                 state = QStringLiteral("needs-you");
             } else if (m_waiting) {
-                text = QStringLiteral("%1 is waiting for input · Enter sends your line to it").arg(who);
+                text = QStringLiteral("%1 is waiting for input · Type into it from here in PROGRAM mode").arg(who);
                 state = QStringLiteral("needs-you");
             } else if (!m_opaqueProgram.isEmpty()) {
                 text = QStringLiteral("%1 is running · prompts queue until it exits · %2 to type into it")
@@ -16182,6 +16202,13 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
     // Shown while a full-screen program (alternate screen) or a remote session owns the terminal
     // and the prompt box still has the keyboard.
     void updateTakeControl() {
+        if (m_modeValue == QStringLiteral("program") && !processBusy()) {
+            const QString previous = m_preProgramMode.isEmpty() ? QStringLiteral("auto") : m_preProgramMode;
+            setMode(previous);
+            toast(QStringLiteral("Input: %1 · program exited").arg(previous == QStringLiteral("shell")
+                      ? QStringLiteral("Terminal") : previous == QStringLiteral("agent")
+                      ? QStringLiteral("Agent") : QStringLiteral("Auto")));
+        }
         if (!m_programBar) return;
         const relay::input::State state = inputState(false);
         const QString program = foregroundProgramName();
@@ -16228,6 +16255,14 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             m_busyAction->setToolTip(takeOverNow
                 ? QStringLiteral("Stop the agent typing into %1 and take the keyboard").arg(who)
                 : QStringLiteral("Hide the prompt box and type into %1").arg(who));
+        }
+        if (m_programInputAction) {
+            const bool offerProgram = !m_native && !m_secretMode && !m_altScreen
+                && !m_delegated && processBusy()
+                && (relay::input::lineEditorWaiting(inputState()) || relay::input::lineRequested(inputState()));
+            m_programInputAction->setVisible(offerProgram && m_modeValue != QStringLiteral("program"));
+            m_programInputAction->setText(QStringLiteral("Type into it from here"));
+            m_programInputAction->setToolTip(QStringLiteral("Send prompt-box lines directly to %1").arg(who));
         }
     }
 
@@ -16742,6 +16777,7 @@ private:
     bool m_hideEmptyTranscript = false, m_transcriptUsed = false;
     RichEditor *m_editor = nullptr;
     QString m_modeValue = defaultInputMode();
+    QString m_preProgramMode;
     QLabel *m_routeLabel = nullptr, *m_cwdLabel = nullptr, *m_help = nullptr;
     QString m_cwdText;   // the directory line in full; the label shows as much of it as fits
     // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
@@ -17171,6 +17207,7 @@ private:
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
     PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G, #R3YN)
     QToolButton *m_busyAction = nullptr;  // Take over / Take control beside that line (card #H2KQ; the top-right bubble is retired)
+    QToolButton *m_programInputAction = nullptr;
     bool m_busyActionTakeOver = false;    // what the button does right now: true takes the program back from the agent
     QElapsedTimer m_shellInterruptAt;     // last stop-key press on the shell; a program still live past it gets SIGTERM (card #H2KQ)
     // "Relaying · waiting for 2 subagents, 1 job . . ." above the prompt (#V7QD, #KP4M, #R3YN): the call_ids

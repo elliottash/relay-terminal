@@ -470,7 +470,8 @@ private:
         add("input.modeAuto", "agent", "Input mode: auto", {});
         add("input.modeTerminal", "agent", "Input mode: terminal", {});
         add("input.modeAgent", "agent", "Input mode: agent", {});
-        add("input.toggle", "agent", "Cycle input: auto → terminal → agent (from the prompt box)",
+        add("input.modeProgram", "agent", "Input mode: program (while a program is running)", {});
+        add("input.toggle", "agent", "Cycle input: auto → terminal → agent → program when available (from the prompt box)",
             {QStringLiteral("Ctrl+I"), QStringLiteral("Ctrl+Shift+I")});
         add("agent.planToggle", "agent", "Toggle plan mode (from the prompt box)", {QStringLiteral("Shift+Tab")});
         add("agent.effortUp", "agent", "Raise reasoning effort (from the prompt box)", {QStringLiteral("Alt+.")});

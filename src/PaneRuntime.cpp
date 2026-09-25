@@ -1194,6 +1194,9 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
         } else m_previewId = id;
         QJsonObject route{{"type", "route"}, {"id", id}, {"text", m_editor->toPlainText()}, {"mode", mode},
                           {"known_commands", m_knownCommands}, {"path", m_shellPath}, {"cwd", m_cwd}};
+        const QStringList foreground = foregroundArgv();
+        if (!foreground.isEmpty())
+            route.insert(QStringLiteral("foreground_program"), QJsonArray::fromStringList(foreground));
         // At a login the local PATH and aliases describe the wrong machine: the router only
         // decides between a line for the remote shell and a request for the agent (#S5SH).
         if (loginTakesLines()) route.insert(QStringLiteral("remote"), QJsonObject{{"host", loginHost()}});
@@ -1206,6 +1209,17 @@ void Pane::dispatch(const QJsonObject &decision, const QString &mode) {
         const QString route = decision.value(QStringLiteral("route")).toString();
         const QString text = decision.value(QStringLiteral("text")).toString();
         if (route == QStringLiteral("empty")) { m_enterSteerBuffered = 0; return; }
+        if (route == QStringLiteral("incomplete")) {
+            m_enterSteerBuffered = 0;
+            status(QStringLiteral("Incomplete input · keep typing"));
+            return;
+        }
+        if (route == QStringLiteral("program")) {
+            m_enterSteerBuffered = 0;
+            const QString line = m_submittedDraft.isEmpty() ? text : m_submittedDraft;
+            sendLineToProgram(QStringLiteral("program"), &line);
+            return;
+        }
         // Card #XCXD: the Enters pressed while this route was in flight replay now, exactly as
         // counted — second press steers the prompt into the running turn, third interrupts — and
         // only when the verdict really routed the text to the agent. A shell or guest verdict
@@ -1262,8 +1276,27 @@ void Pane::dispatch(const QJsonObject &decision, const QString &mode) {
                     closeInline();
                     return;
                 }
+                if (!valid) {
+                    const QString command = text.trimmed().section(QLatin1Char(' '), 0, 0);
+                    const QStringList commands = knownCommandNames();
+                    QString suggestion = relay::slash::closest(command, commands, 1).value(0);
+                    // A transposed pair is the common short typo (`gti` for `git`), while the
+                    // slash ranker allows only one edit for names this short.
+                    if (suggestion.isEmpty()) {
+                        for (int i = 0; i + 1 < command.size(); ++i) {
+                            QString swapped = command;
+                            const QChar first = swapped.at(i);
+                            swapped[i] = swapped.at(i + 1);
+                            swapped[i + 1] = first;
+                            if (commands.contains(swapped)) { suggestion = swapped; break; }
+                        }
+                    }
+                    ensureLineStart();
+                    printInline(relay::input::invalidTerminalLine(problem, suggestion), Ink::Error);
+                    closeInline();
+                    return;
+                }
                 m_editor->remember(text); m_editor->clear();
-                if (!valid) { startFix(text, problem.isEmpty() ? QStringLiteral("not a valid command") : problem, 1); return; }
                 submitTerminal(text, !handoff, readsLikeRequest, handoff);
                 return;
             }
@@ -1418,7 +1451,8 @@ void Pane::refreshPickers() {
         if (!m_modelBox) return;
         const QSignalBlocker modelBlock(m_modelBox);
         if (m_modeChip) {
-            m_modeChip->setText(m_modeValue == QStringLiteral("shell") ? QStringLiteral("terminal")
+            m_modeChip->setText(m_modeValue == QStringLiteral("program") ? QStringLiteral("PROGRAM · %1").arg(foregroundProgramName())
+                                : m_modeValue == QStringLiteral("shell") ? QStringLiteral("terminal")
                                 : m_modeValue == QStringLiteral("agent") ? QStringLiteral("agent")
                                                                          : QStringLiteral("auto"));
             m_modeChip->setToolTip(QStringLiteral("Where this line goes (%1 cycles). %2")

@@ -80,6 +80,15 @@ private slots:
         keymap.setProgramKeys(QStringLiteral("none"));
         QVERIFY(!keymap.actsInsidePrograms(&altEsc));
     }
+    // Program mode (#S976) is reached from the chip, the cycle and the busy row; no key of its own.
+    void programModeActionIsAvailableAndUnbound() {
+        const auto &actions = Keymap::instance().actions();
+        bool found = false;
+        for (const ActionDef &action : actions)
+            if (action.id == QStringLiteral("input.modeProgram")) found = true;
+        QVERIFY(found);
+        QVERIFY(Keymap::instance().keysFor(QStringLiteral("input.modeProgram")).isEmpty());
+    }
     // The owner's pairing rule (#QWAS): no letter has one Relay action on Ctrl and another on
     // Ctrl+Shift, and the everyday editing keys stay the editor's.
     void ctrlAndCtrlShiftNeverDiffer() {
