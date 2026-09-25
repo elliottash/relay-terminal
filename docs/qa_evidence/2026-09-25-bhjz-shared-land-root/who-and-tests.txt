@@ -1,0 +1,14 @@
+Before #BHJZ, with this TMPDIR, who printed: no land sessions under /home/elliott/.cache/relay/scratch/4386a69e-3006-48f5-bb9c-6e7338a8c7df/tmp/claude-1000/land
+
+$ TMPDIR=/home/elliott/.cache/relay/scratch/4386a69e-3006-48f5-bb9c-6e7338a8c7df/tmp python3 scripts/land.py who > out; head -1 out; grep -A2 '^bhjz ' out
+land sessions under /tmp/claude-1000/land:
+bhjz — idle 1m, contact: none given
+    scripts/land.py  snapshot 1m old
+    tests/test_land.py  snapshot 1m old
+
+(bhjz was begun from a shell with no TMPDIR; the Relay-style TMPDIR above now sees it)
+
+$ python3 -m unittest tests.test_land
+Ran 74 tests in 12.959s
+
+OK

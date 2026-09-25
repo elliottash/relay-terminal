@@ -81,9 +81,26 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_ROOT = os.path.join(tempfile.gettempdir(),
-                            "claude-%d" % os.getuid() if hasattr(os, "getuid") else "claude",
-                            "land")
+_USER_DIR = "claude-%d" % os.getuid() if hasattr(os, "getuid") else "claude"
+
+
+def system_tmp():
+    """The machine's temp dir, whatever TMPDIR says. Card #BHJZ: Relay points every session's
+    TMPDIR at its own scratch dir (#DVV2), so a root under tempfile.gettempdir() gave each
+    session a private registry — `who` saw nobody else and no claim was ever contested. The
+    land root has to be the one place every session of this user agrees on."""
+    if os.name == "posix":
+        return "/tmp"
+    for name in ("TEMP", "TMP"):
+        if os.environ.get(name):
+            return os.environ[name]
+    return tempfile.gettempdir()
+
+
+DEFAULT_ROOT = os.path.join(system_tmp(), _USER_DIR, "land")
+# Where a session that started before #BHJZ may still hold its snapshots: the root under its
+# own TMPDIR. `commit` and `abandon` look there when the shared root has no such session.
+LEGACY_ROOT = os.path.join(tempfile.gettempdir(), _USER_DIR, "land")
 DEFAULT_BRANCH = "main"
 DEFAULT_STALE_MINUTES = 15
 # A session that has not run a land.py command for this long is not editing anything any
@@ -1858,6 +1875,7 @@ def cmd_who(args, log):
     if not sessions:
         log("no land sessions under %s" % root)
         return 0
+    log("land sessions under %s:" % root)
     for name, entry in sorted(sessions.items()):
         idle = session_idle_minutes(entry)
         state = "STALE, idle %s (ignored for contest detection)" % human_age(idle) \
@@ -2192,8 +2210,27 @@ def build_parser():
     return parser
 
 
+def adopt_legacy_root(args):
+    """A session begun under a per-TMPDIR root (before #BHJZ) keeps its snapshots there;
+    finish it from that root rather than refusing every path as edited without `begin`."""
+    if (args.command not in ("commit", "abandon") or args.root != DEFAULT_ROOT
+            or os.path.normpath(LEGACY_ROOT) == os.path.normpath(DEFAULT_ROOT)):
+        return
+    session = getattr(args, "session", None)
+    if not session or "/" in session or session.startswith("."):
+        return
+    if meta_file(DEFAULT_ROOT, session).exists() \
+            or not meta_file(LEGACY_ROOT, session).exists():
+        return
+    sys.stderr.write("land.py: session %s was begun under the old per-TMPDIR root %s; using it "
+                     "for this %s. New sessions use the shared root %s (#BHJZ).\n"
+                     % (session, LEGACY_ROOT, args.command, DEFAULT_ROOT))
+    args.root = LEGACY_ROOT
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    adopt_legacy_root(args)
 
     def log(message):
         print(message)

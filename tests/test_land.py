@@ -739,6 +739,44 @@ class Who(LandCase):
         self.assertIn("no land sessions", self.land("who").stdout)
 
 
+class SharedRoot(LandCase):
+    """Card #BHJZ: the default root is one place for every session, whatever its TMPDIR."""
+
+    def bare_land(self, *args, tmpdir, expect=0):
+        env = clean_env(TMPDIR=str(tmpdir))
+        env.pop("RELAY_LAND_ROOT", None)
+        proc = subprocess.run([sys.executable, str(LAND), *args], cwd=str(self.repo), env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(proc.returncode, expect, proc.stdout + proc.stderr)
+        return proc
+
+    def default_root(self, tmpdir):
+        out = " ".join(self.bare_land("--help", tmpdir=tmpdir).stdout.split())
+        return out.split("(default ", 1)[1].split(")", 1)[0]
+
+    def test_default_root_ignores_tmpdir(self):
+        a = Path(self.temp.name) / "pane-a-tmp"
+        b = Path(self.temp.name) / "pane-b-tmp"
+        a.mkdir()
+        b.mkdir()
+        root_a, root_b = self.default_root(a), self.default_root(b)
+        self.assertEqual(root_a, root_b)
+        self.assertNotIn(str(a), root_a)
+        self.assertNotIn(self.temp.name, root_a)
+
+    def test_session_begun_under_old_tmpdir_root_can_still_commit(self):
+        tmpdir = Path(self.temp.name) / "pane-tmp"
+        legacy = tmpdir / ("claude-%d" % os.getuid()) / "land"
+        session = "bhjz-legacy-%d" % os.getpid()
+        subprocess.run([sys.executable, str(LAND), "--root", str(legacy), "begin", session,
+                        "f.txt"], cwd=str(self.repo), env=clean_env(), check=True,
+                       stdout=subprocess.PIPE)
+        edit_line(self.repo / "f.txt", 3, "three, changed")
+        proc = self.bare_land("commit", session, "-m", "legacy", tmpdir=tmpdir)
+        self.assertIn("old per-TMPDIR root", proc.stderr)
+        self.assertIn("three, changed", git(self.repo, "show", "main:f.txt").stdout)
+
+
 class Repair(LandCase):
     def landed_pair(self):
         """Land a bad change to line 2, then a good one to line 8, from two sessions."""
