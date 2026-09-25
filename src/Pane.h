@@ -1057,6 +1057,7 @@ public:
         const QString program = line.isEmpty() ? QString() : QFileInfo(line.section(' ', 0, 0)).fileName();
         return remoteSessionProgram(program) || relay::panestatus::isRemoteProgram(program) ? line : QString();
     }
+    QString remoteCwd() const { return m_login.active ? m_login.cwd : QString(); }
     // The guest agent (Claude Code / Codex) running in this pane's foreground, or empty.
     // Classified from the command line on every program poll (issue GT7X, protocol 26).
     QString guest() const { return m_guest; }
