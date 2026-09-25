@@ -202,6 +202,13 @@ def _mine(path: Path) -> bool:
         return False
 
 
+def land_state_root() -> Path:
+    """land.py's default root (#HRF6): Relay's own state, outside the temp dir. Kept in step
+    with DEFAULT_ROOT in scripts/land.py — land.py gc owns it, the sweep only reports it."""
+    base = os.environ.get("XDG_STATE_HOME")
+    return (Path(base) if base else Path.home() / ".local" / "state") / "relay" / "land"
+
+
 def candidates(roots: list[Path], include_loose: bool = True) -> list[tuple[Path, str]]:
     out: list[tuple[Path, str]] = []
     seen: set[str] = set()
@@ -241,6 +248,13 @@ def candidates(roots: list[Path], include_loose: bool = True) -> list[tuple[Path
         cache = compiler_cache_dir()
         if cache.is_dir() and not cache.is_symlink() and str(cache) not in seen:
             out.append((cache, "compiler-cache"))
+    # Card #HRF6: land.py's root is Relay's own state outside the temp dir, with its own gc;
+    # managed, so the sweep reports its bytes but never deletes it. (If RELAY_LAND_ROOT points
+    # land.py elsewhere, this default path simply is not there and is skipped.)
+    land = land_state_root()
+    if (not os.environ.get("RELAY_SCRATCH_ROOTS") and land.is_dir() and not land.is_symlink()
+            and _mine(land) and str(land) not in seen):
+        out.append((land, "managed"))
     return out
 
 

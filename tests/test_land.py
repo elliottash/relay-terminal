@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -757,41 +758,108 @@ class Who(LandCase):
 
 
 class SharedRoot(LandCase):
-    """Card #BHJZ: the default root is one place for every session, whatever its TMPDIR."""
+    """Cards #BHJZ and #HRF6: the default root is one shared, Relay-owned place per user,
+    whatever TMPDIR says — and sessions begun under the claude-named roots are adopted."""
 
-    def bare_land(self, *args, tmpdir, expect=0):
-        env = clean_env(TMPDIR=str(tmpdir))
-        env.pop("RELAY_LAND_ROOT", None)
-        proc = subprocess.run([sys.executable, str(LAND), *args], cwd=str(self.repo), env=env,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    def state_env(self, tmpdir=None):
+        env = clean_env(XDG_STATE_HOME=str(Path(self.temp.name) / "state"),
+                        RELAY_LAND_SYSTEM_TMP=str(Path(self.temp.name) / "systmp"))
+        if tmpdir is not None:
+            env["TMPDIR"] = str(tmpdir)
+        return env
+
+    def bare_land(self, *args, tmpdir=None, expect=0):
+        proc = subprocess.run([sys.executable, str(LAND), *args], cwd=str(self.repo),
+                              env=self.state_env(tmpdir), stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True)
         self.assertEqual(proc.returncode, expect, proc.stdout + proc.stderr)
         return proc
 
-    def default_root(self, tmpdir):
-        out = " ".join(self.bare_land("--help", tmpdir=tmpdir).stdout.split())
+    def default_root(self, tmpdir=None, xdg=True):
+        """The default the --help text names for --root. COLUMNS=4096 keeps argparse from
+        wrapping the path mid-line (and the real ~/.local/state root is never touched: --help
+        only prints)."""
+        env = self.state_env(tmpdir)
+        if not xdg:
+            env.pop("XDG_STATE_HOME", None)
+        env["COLUMNS"] = "4096"
+        proc = subprocess.run([sys.executable, str(LAND), "--help"], cwd=str(self.repo),
+                              env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out = " ".join(proc.stdout.split())
         return out.split("(default ", 1)[1].split(")", 1)[0]
 
-    def test_default_root_ignores_tmpdir(self):
+    def test_default_root_is_relay_owned_state(self):
         a = Path(self.temp.name) / "pane-a-tmp"
         b = Path(self.temp.name) / "pane-b-tmp"
         a.mkdir()
         b.mkdir()
-        root_a, root_b = self.default_root(a), self.default_root(b)
-        self.assertEqual(root_a, root_b)
-        self.assertNotIn(str(a), root_a)
-        self.assertNotIn(self.temp.name, root_a)
+        expected = str(Path(self.temp.name) / "state" / "relay" / "land")
+        self.assertEqual(self.default_root(a), expected)
+        self.assertEqual(self.default_root(b), expected)    # TMPDIR changes nothing (#BHJZ)
+        self.assertNotIn("claude", expected)                # and no claude name in it (#HRF6)
 
-    def test_session_begun_under_old_tmpdir_root_can_still_commit(self):
-        tmpdir = Path(self.temp.name) / "pane-tmp"
-        legacy = tmpdir / ("claude-%d" % os.getuid()) / "land"
-        session = "bhjz-legacy-%d" % os.getpid()
+    def test_default_root_without_xdg_override(self):
+        root = self.default_root(xdg=False)
+        home = Path(os.environ.get("HOME") or Path.home())
+        self.assertEqual(root, str(home / ".local" / "state" / "relay" / "land"))
+        self.assertNotIn("claude", root)
+
+    def test_sessions_adopted_from_the_old_shared_root(self):
+        legacy = (Path(self.temp.name) / "systmp" / ("claude-%d" % os.getuid())) / "land"
+        session = "hrf6-adopt-%d" % os.getpid()
         subprocess.run([sys.executable, str(LAND), "--root", str(legacy), "begin", session,
                         "f.txt"], cwd=str(self.repo), env=clean_env(), check=True,
                        stdout=subprocess.PIPE)
-        edit_line(self.repo / "f.txt", 3, "three, changed")
-        proc = self.bare_land("commit", session, "-m", "legacy", tmpdir=tmpdir)
-        self.assertIn("old per-TMPDIR root", proc.stderr)
-        self.assertIn("three, changed", git(self.repo, "show", "main:f.txt").stdout)
+        edit_line(self.repo / "f.txt", 3, "three, adopted")
+        proc = self.bare_land("who")
+        self.assertIn("adopted 1 session from the old land root", proc.stdout)
+        self.assertIn(session, proc.stdout)
+        self.assertIn("f.txt", proc.stdout)             # the registry entry moved with it
+        self.assertFalse((legacy / session).exists())   # moved, not copied
+        self.bare_land("commit", session, "-m", "adopted session")
+        self.assertIn("three, adopted", git(self.repo, "show", "main:f.txt").stdout)
+        self.assertFalse(legacy.exists())               # bookkeeping reclaimed with it
+
+    def test_adoption_does_not_clobber_a_newer_begin(self):
+        legacy = (Path(self.temp.name) / "systmp" / ("claude-%d" % os.getuid())) / "land"
+        session = "hrf6-newer-%d" % os.getpid()
+        self.bare_land("begin", session, "f.txt")
+        subprocess.run([sys.executable, str(LAND), "--root", str(legacy), "begin", session,
+                        "f.txt"], cwd=str(self.repo), env=clean_env(), check=True,
+                       stdout=subprocess.PIPE)
+        proc = self.bare_land("who")
+        self.assertIn(session, proc.stdout)
+        self.assertTrue((legacy / session).is_dir())    # the newer begin under the new root wins
+        self.bare_land("commit", session, "-m", "newer begin wins")
+
+    def test_session_begun_under_a_per_tmpdir_root_is_adopted(self):
+        tmpdir = Path(self.temp.name) / "pane-tmp"
+        legacy = tmpdir / ("claude-%d" % os.getuid()) / "land"
+        session = "hrf6-tmpdir-%d" % os.getpid()
+        subprocess.run([sys.executable, str(LAND), "--root", str(legacy), "begin", session,
+                        "f.txt"], cwd=str(self.repo), env=clean_env(), check=True,
+                       stdout=subprocess.PIPE)
+        edit_line(self.repo / "f.txt", 3, "three, via a per-tmpdir root")
+        proc = self.bare_land("commit", session, "-m", "adopted from a per-tmpdir root",
+                              tmpdir=tmpdir)
+        self.assertIn("adopted 1 session from the old land root", proc.stdout)
+        self.assertIn("three, via a per-tmpdir root", git(self.repo, "show", "main:f.txt").stdout)
+        self.assertFalse(legacy.exists())
+
+    def test_old_verify_slots_reclaimed_once_idle(self):
+        legacy = (Path(self.temp.name) / "systmp" / ("claude-%d" % os.getuid())) / "land"
+        slots = legacy / "verify-slots"
+        idle = slots / "repo-00000000-0"
+        fresh = slots / "repo-00000000-1"
+        write(idle / "build" / "relay.o", "x")
+        write(fresh / "build" / "relay.o", "x")
+        stale = time.time() - 4 * 60 * 60
+        for path in (idle, idle / "build", idle / "build" / "relay.o"):
+            os.utime(str(path), (stale, stale))
+        proc = self.bare_land("who")
+        self.assertIn("reclaimed", proc.stdout)
+        self.assertFalse(idle.exists())                 # idle builds go, the disk bound moves
+        self.assertTrue(fresh.exists())                 # a live verify's build never does
 
 
 class Repair(LandCase):

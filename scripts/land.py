@@ -87,22 +87,41 @@ _USER_DIR = "claude-%d" % os.getuid() if hasattr(os, "getuid") else "claude"
 
 
 def system_tmp():
-    """The machine's temp dir, whatever TMPDIR says. Card #BHJZ: Relay points every session's
-    TMPDIR at its own scratch dir (#DVV2), so a root under tempfile.gettempdir() gave each
-    session a private registry — `who` saw nobody else and no claim was ever contested. The
-    land root has to be the one place every session of this user agrees on."""
+    """The machine's real temp dir, whatever TMPDIR says (RELAY_LAND_SYSTEM_TMP overrides it,
+    for tests). Relay points every session's TMPDIR at its own scratch dir (#DVV2), so
+    tempfile.gettempdir() is a different directory for every session."""
+    override = os.environ.get("RELAY_LAND_SYSTEM_TMP")
+    if override:
+        return override
     if os.name == "posix":
         return "/tmp"
-    for name in ("TEMP", "TMP"):
-        if os.environ.get(name):
-            return os.environ[name]
-    return tempfile.gettempdir()
+    return os.environ.get("TEMP") or os.environ.get("TMP") or tempfile.gettempdir()
 
 
-DEFAULT_ROOT = os.path.join(system_tmp(), _USER_DIR, "land")
-# Where a session that started before #BHJZ may still hold its snapshots: the root under its
-# own TMPDIR. `commit` and `abandon` look there when the shared root has no such session.
-LEGACY_ROOT = os.path.join(tempfile.gettempdir(), _USER_DIR, "land")
+# Card #HRF6: the land root is Relay's own state — one place per user, outside the temp dir,
+# under a relay-named path. Before #BHJZ it followed each session's TMPDIR (private to one
+# pane); #BHJZ made it shared but kept the claude-<uid> name land.py was born with.
+DEFAULT_ROOT = os.path.join(
+    os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
+    "relay", "land")
+
+
+def legacy_roots():
+    """Where sessions begun before #HRF6 hold their snapshots: the /tmp/claude-<uid>/land root
+    #BHJZ made shared, then the per-TMPDIR roots from before that. The first land.py command
+    after the move adopts what it finds into DEFAULT_ROOT; what cannot move is still reached
+    by the per-session fallback in main()."""
+    roots = [os.path.join(system_tmp(), _USER_DIR, "land"),
+             os.path.join(tempfile.gettempdir(), _USER_DIR, "land")]
+    out, seen = [], {os.path.normpath(DEFAULT_ROOT)}
+    for root in roots:
+        norm = os.path.normpath(root)
+        if norm not in seen:
+            seen.add(norm)
+            out.append(root)
+    return out
+
+
 DEFAULT_BRANCH = "main"
 DEFAULT_STALE_MINUTES = 15
 # A session that has not run a land.py command for this long is not editing anything any
@@ -2277,27 +2296,119 @@ def build_parser():
     return parser
 
 
+def reclaim_legacy_root(legacy, log):
+    """After adoption a legacy root holds only verify build slots nothing can use again —
+    every build now goes to DEFAULT_ROOT's slots. Reclaim builds nobody has written for
+    LEGACY_VERIFY_MINUTES (an in-flight verify writes continuously, so a live build is never
+    touched), then drop the root once only bookkeeping files are left."""
+    legacy = Path(legacy)
+    if not legacy.is_dir():
+        return
+    if any(p.is_dir() for p in legacy.iterdir()
+           if p.name != "verify-slots" and not p.name.startswith(".")):
+        return                      # sessions that could not be moved still live here
+    slots = legacy / "verify-slots"
+    cutoff = _dt.datetime.now().timestamp() - LEGACY_VERIFY_MINUTES * 60
+    if slots.is_dir():
+        freed = 0
+        for build in sorted(slots.iterdir()):
+            try:
+                if newest_mtime(build) >= cutoff:
+                    continue        # a verify from before the move may still be running
+                freed += tree_bytes(build)
+                if build.is_dir():
+                    shutil.rmtree(str(build), ignore_errors=True)
+                else:
+                    build.unlink()
+            except OSError:
+                pass
+        if freed:
+            log("reclaimed %s of idle verify builds from the old land root %s (#HRF6)"
+                % (human_bytes(freed), legacy))
+    for stray in list(legacy.iterdir()):
+        try:
+            if stray.is_file():
+                stray.unlink()
+        except OSError:
+            pass
+    for empty in (slots, legacy):
+        try:
+            empty.rmdir()
+        except OSError:
+            pass
+
+
+def adopt_legacy_sessions(args, log):
+    """#HRF6: move sessions begun under a claude-named root into the Relay-owned root,
+    snapshots, markers and all, so `who` and contest detection see them again. Best effort:
+    a session that cannot move (a cross-device root, a racing adoption) stays where it is
+    and is still reached by adopt_legacy_root below."""
+    root = Path(args.root)
+    for legacy in legacy_roots():
+        legacy = Path(legacy)
+        if not legacy.is_dir():
+            continue
+        registry = read_registry(legacy).get("sessions", {})
+        moved, entries = [], {}
+        for directory in sorted(p for p in legacy.iterdir() if p.is_dir()):
+            if directory.name == "verify-slots" or directory.name.startswith("."):
+                continue
+            if (root / directory.name).exists():
+                continue            # a newer begin under the new root wins
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                os.rename(str(directory), str(root / directory.name))
+            except OSError:
+                continue
+            moved.append(directory.name)
+            if isinstance(registry.get(directory.name), dict):
+                entries[directory.name] = registry[directory.name]
+        if moved:
+            try:
+                if entries:
+                    def add(data, entries=entries):
+                        for name, entry in entries.items():
+                            data["sessions"].setdefault(name, entry)
+                    edit_registry(root, add)
+                def drop(data, moved=moved):
+                    for name in moved:
+                        data["sessions"].pop(name, None)
+                edit_registry(legacy, drop)
+            except OSError as exc:
+                log("adopt: moved %d session(s) out of %s but could not rewrite its registry "
+                    "(%s); each session's next `begin` re-registers it" % (len(moved), legacy, exc))
+            log("adopted %d session%s from the old land root %s into %s (#HRF6)"
+                % (len(moved), "" if len(moved) == 1 else "s", legacy, root))
+        reclaim_legacy_root(legacy, log)
+
+
 def adopt_legacy_root(args):
-    """A session begun under a per-TMPDIR root (before #BHJZ) keeps its snapshots there;
-    finish it from that root rather than refusing every path as edited without `begin`."""
-    if (args.command not in ("commit", "abandon") or args.root != DEFAULT_ROOT
-            or os.path.normpath(LEGACY_ROOT) == os.path.normpath(DEFAULT_ROOT)):
+    """A session that could not be moved out of a legacy root (cross-device, or a racing
+    adoption) still holds its snapshots there: finish it from that root rather than refusing
+    every path as edited without `begin`."""
+    if args.command not in ("commit", "abandon") or args.root != DEFAULT_ROOT:
         return
     session = getattr(args, "session", None)
     if not session or "/" in session or session.startswith("."):
         return
-    if meta_file(DEFAULT_ROOT, session).exists() \
-            or not meta_file(LEGACY_ROOT, session).exists():
+    if meta_file(DEFAULT_ROOT, session).exists():
         return
-    sys.stderr.write("land.py: session %s was begun under the old per-TMPDIR root %s; using it "
-                     "for this %s. New sessions use the shared root %s (#BHJZ).\n"
-                     % (session, LEGACY_ROOT, args.command, DEFAULT_ROOT))
-    args.root = LEGACY_ROOT
+    for legacy in legacy_roots():
+        if meta_file(legacy, session).exists():
+            sys.stderr.write("land.py: session %s still lives under the old land root %s; "
+                             "using it for this %s (#HRF6). New sessions use %s.\n"
+                             % (session, legacy, args.command, DEFAULT_ROOT))
+            args.root = legacy
+            return
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    adopt_legacy_root(args)
+
+    def log(message):
+        print(message)
+    if os.path.abspath(args.root) == os.path.abspath(DEFAULT_ROOT):
+        adopt_legacy_sessions(args, log)
 
     def log(message):
         print(message)

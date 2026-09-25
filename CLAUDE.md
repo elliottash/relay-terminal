@@ -60,7 +60,11 @@ python3 scripts/land.py begin <me> <the paths you are about to change>
 python3 scripts/land.py commit <me> -m "message"      # or -m path/to/message.txt
 ```
 
-`<me>` is any short name you pick for your session. `begin` snapshots those files as they are right
+`<me>` is any short name you pick for your session. Snapshots, the claims registry and the verify
+build slots live under one shared root, `$XDG_STATE_HOME/relay/land` (`~/.local/state/relay/land`;
+`--root`/`RELAY_LAND_ROOT` overrides it). Sessions begun under the pre-#HRF6 claude-named roots
+(`/tmp/claude-<uid>/land`, or a per-`TMPDIR` root from before #BHJZ) are adopted into it
+automatically by the first land.py command that runs. `begin` snapshots those files as they are right
 now — including files another session has already half-edited, and files that do not exist yet.
 `commit` then takes, for each path, base = that snapshot, ours = the file at the current tip of
 `refs/heads/main`, theirs = your working copy, and three-way merges them into *the tip plus your
@@ -143,7 +147,7 @@ for 12 hours is stale: `who` and `doctor` say so, and it stops contesting anythi
 
 `begin --base <rev>`, or `--from-head`, snapshots that revision's version of each path instead of
 the working copy — for a file you had already edited before claiming it. **This is the supported
-replacement for hand-editing files under `/tmp/claude-1000/land/<me>/snap/`.** Its hunks are then
+replacement for hand-editing files under `~/.local/state/relay/land/<me>/snap/`.** Its hunks are then
 diff(`<rev>:path`, working copy), which includes anything another session left in that file, so
 such a path always goes through the confirm review, never in one step.
 
@@ -156,7 +160,7 @@ tree; the tree that went onto the branch did not compile at all.
 
 So when the paths being landed include C++ or build files (`src/`, `engine/`, `tests/*.cpp`,
 `CMakeLists.txt`, `*.cmake`), `commit` materialises the **exact** tree it is about to put on `main`
-into a build slot, `/tmp/claude-1000/land/verify-slots/<repo>-<n>/src`, builds it in `.../build`,
+into a build slot, `~/.local/state/relay/land/verify-slots/<repo>-<n>/src`, builds it in `.../build`,
 and performs the compare-and-swap only if that exits 0. Otherwise it prints the first compiler
 errors, lands nothing and exits 5. Only files whose blob changed are rewritten, so a slot stays
 incremental whoever used it last. There are `RELAY_LAND_VERIFY_SLOTS` slots (default 2) shared by
