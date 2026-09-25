@@ -7,6 +7,8 @@
 #include "RemoteFiles.h"
 #include "Theme.h"
 #include <QBuffer>
+#include <QCryptographicHash>
+#include <QPointer>
 #include <QStandardItemModel>
 #include <QTextBlock>
 #include <QTextCursor>
@@ -944,7 +946,68 @@ struct FilePreview::Private {
     QWidget *conflictBar = nullptr;
     QLabel *conflictText = nullptr;
     QToolButton *conflictMerge = nullptr, *conflictMine = nullptr, *conflictDisk = nullptr;
+
+    // ----- a file on a host (#F8R7, task cb) ---------------------------------------------------
+    // What the one RemoteFile is doing, so its answer goes to the right place: a fetch to show a
+    // file, a stat poll, a fetch to reconcile a change the poll saw, a fetch after a save the host
+    // refused, or a save.
+    enum class RemoteOp { None, Open, Check, Refresh, SaveCheck, Save };
+    RemoteOp remoteOp = RemoteOp::None;
+    QTimer *remotePoll = nullptr;
+    QString remoteSaving;              // the text a save to the host is writing
+    bool remoteGone = false;           // the host says the file is gone: the next save puts it back
+    // A patch to a clean buffer on a host is answered when its save lands (protocol §35).
+    std::function<void(const QJsonObject &)> patchReply;
+    QJsonObject patchResult;
+    // Answer that patch now: saved, or not and why.
+    void answerPatch(bool saved, const QString &error = QString(), const QString &sha = QString()) {
+        auto reply = std::exchange(patchReply, nullptr);
+        if (!reply) return;
+        QJsonObject result = patchResult;
+        result.insert(QStringLiteral("saved"), saved);
+        if (!sha.isEmpty()) result.insert(QStringLiteral("sha256"), sha);
+        if (!error.isEmpty()) result.insert(QStringLiteral("save_error"), error);
+        reply(result);
+    }
+
+    // ----- agent edits to the buffer (#F8R7, task v5) -----------------------------------------
+    struct AgentStep {
+        QString before, after;         // the buffer either side of the step
+        int undoSteps = 0;             // the document's undo depth right after it
+    };
+    QVector<FilePreview::AgentChange> agentChanges;
+    QVector<AgentStep> agentSteps;     // one per change, same order
+    QWidget *agentBar = nullptr;
+    QLabel *agentText = nullptr;
+    QToolButton *agentUndo = nullptr, *agentList = nullptr, *agentDismiss = nullptr;
+    QTimer *agentFade = nullptr;       // takes the changed lines' highlight off again
 };
+
+namespace {
+// ----- which files are open, for the agents' workers (#F8R7, protocol §35) ----------------------
+QList<FilePreview *> &livePreviewList() {
+    static QList<FilePreview *> list;
+    return list;
+}
+struct BufferListener {
+    QPointer<QObject> context;
+    std::function<void()> changed;
+};
+QVector<BufferListener> &bufferListeners() {
+    static QVector<BufferListener> listeners;
+    return listeners;
+}
+bool buffersNotifyPending = false;
+
+QString sha256Hex(const QByteArray &bytes) {
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+}
+
+// "disk" for a local file, the host's name for a remote one: where the other version lives.
+QString sourceOf(const FilePreview *preview) {
+    return preview->isRemote() ? preview->remoteHost() : QStringLiteral("disk");
+}
+}  // namespace
 
 FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     setObjectName(QStringLiteral("filePreview"));
@@ -1038,6 +1101,63 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     }
     d->conflictBar->hide();
     layout->addWidget(d->conflictBar);
+
+    // What an agent changed in this buffer (#F8R7, task v5): the newest change named, Undo for
+    // it, and the list of every change since the file was opened. It stays until dismissed; the
+    // changed lines themselves are highlighted for a few seconds.
+    d->agentBar = new QWidget;
+    d->agentBar->setObjectName(QStringLiteral("filePreviewAgent"));
+    {
+        auto *bar = new QHBoxLayout(d->agentBar);
+        bar->setContentsMargins(0, 0, 0, 0);
+        bar->setSpacing(4);
+        d->agentText = new QLabel;
+        d->agentText->setObjectName(QStringLiteral("filePreviewAgentText"));
+        d->agentText->setTextFormat(Qt::PlainText);
+        d->agentText->setWordWrap(true);
+        d->agentUndo = headerButton(QStringLiteral("Undo"), QStringLiteral("Take the agent's latest change back out"));
+        d->agentUndo->setObjectName(QStringLiteral("filePreviewAgentUndo"));
+        d->agentList = headerButton(QStringLiteral("Changes"), QStringLiteral("Every change an agent made to this file here"));
+        d->agentList->setObjectName(QStringLiteral("filePreviewAgentChanges"));
+        d->agentList->setPopupMode(QToolButton::InstantPopup);
+        auto *menu = new QMenu(d->agentList);
+        d->agentList->setMenu(menu);
+        connect(menu, &QMenu::aboutToShow, this, [this, menu] {
+            menu->clear();
+            for (qsizetype k = d->agentChanges.size() - 1; k >= 0; --k) {
+                const AgentChange &change = d->agentChanges[k];
+                QStringList parts{QLocale().toString(change.at.time(), QLocale::ShortFormat), change.intent,
+                                  change.firstLine == change.lastLine ? QStringLiteral("line %1").arg(change.firstLine)
+                                                                      : QStringLiteral("lines %1–%2").arg(change.firstLine).arg(change.lastLine)};
+                if (!change.model.isEmpty()) parts << change.model;
+                if (change.applied == QStringLiteral("merged")) parts << QStringLiteral("merged");
+                if (!change.saved) parts << QStringLiteral("unsaved");
+                const int line = change.firstLine;
+                menu->addAction(parts.join(QStringLiteral(" · ")), this, [this, line] { goToLine(line); });
+            }
+        });
+        d->agentDismiss = headerButton(QStringLiteral("×"), QStringLiteral("Hide"));
+        d->agentDismiss->setObjectName(QStringLiteral("filePreviewAgentDismiss"));
+        bar->addWidget(d->agentText, 1);
+        bar->addWidget(d->agentUndo);
+        bar->addWidget(d->agentList);
+        bar->addWidget(d->agentDismiss);
+        connect(d->agentUndo, &QToolButton::clicked, this, [this] { undoAgentChange(); });
+        connect(d->agentDismiss, &QToolButton::clicked, this, [this] { d->agentBar->hide(); });
+    }
+    d->agentBar->hide();
+    layout->addWidget(d->agentBar);
+    d->agentFade = new QTimer(this);
+    d->agentFade->setSingleShot(true);
+    d->agentFade->setInterval(4000);
+    connect(d->agentFade, &QTimer::timeout, this, [this] { m_textView->setExtraSelections({}); });
+
+    // A file on a host has no watcher: while it is on screen the pane asks the host for its stat
+    // every few seconds, and fetches it only when that moved (#F8R7, task cb).
+    d->remotePoll = new QTimer(this);
+    d->remotePoll->setInterval(5000);
+    connect(d->remotePoll, &QTimer::timeout, this, [this] { if (isVisible()) checkRemote(); });
+    livePreviewList().append(this);
 
     // The watcher watches the file and its folder: renaming a temporary over the file (how most
     // editors, git and QSaveFile write) takes the old inode and its watch with it, and only the
@@ -1174,6 +1294,7 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     connect(m_textView->document(), &QTextDocument::modificationChanged, this, [this](bool) {
         updateTitleText();
         if (onTitleChanged) onTitleChanged(title());   // the ● reaches the tab as well as the header
+        notifyOpenBuffers();                           // `dirty` is in the agents' list (#F8R7)
     });
     connect(m_mode, &QToolButton::clicked, this, [this] {
         if (m_kind == Kind::Markdown) {
@@ -1205,9 +1326,15 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
 }
 
 FilePreview::~FilePreview() {
+    livePreviewList().removeAll(this);
+    d->answerPatch(false, QStringLiteral("The pane was closed before the save to the host finished."));
+    notifyOpenBuffers();
     // Both are children and would outlive `d` by a moment; neither may call back into it.
     delete d->watcher;
     delete d->settle;
+    delete d->remotePoll;
+    delete d->agentFade;
+    if (m_remote) m_remote->cancel();
     delete d;
 }
 
@@ -1276,6 +1403,16 @@ bool FilePreview::open(const QString &path) {
     m_pendingLine = 0;
     if (m_remote) m_remote->cancel();
     if (m_reconnect) m_reconnect->stop();
+    d->remotePoll->stop();
+    d->remoteOp = Private::RemoteOp::None;
+    d->remoteGone = false;
+    d->answerPatch(false, QStringLiteral("Another file was opened in the pane before the save finished."));
+    // The agent's changes were to the text that was here; a different file starts a new list.
+    if (info.absoluteFilePath() != m_path) {
+        d->agentChanges.clear();
+        d->agentSteps.clear();
+        d->agentBar->hide();
+    }
     if (auto *button = findChild<QPushButton *>(QStringLiteral("filePreviewOpenExternal"))) button->show();
     const QString absolute = info.absoluteFilePath();
     const bool samePath = absolute == m_path;
@@ -1311,6 +1448,7 @@ bool FilePreview::open(const QString &path) {
     }
     if (samePath && m_kind == Kind::Text) m_textView->verticalScrollBar()->setValue(scroll);
     watchLocal();
+    notifyOpenBuffers();
 
     updateTitleText();
     m_title->setToolTip(absolute);
@@ -1336,6 +1474,11 @@ bool FilePreview::openRemote(const QString &url) {
                                 QMessageBox::Cancel | QMessageBox::Discard, QMessageBox::Cancel) != QMessageBox::Discard)
         return false;
 
+    if (url != m_path) {
+        d->agentChanges.clear();
+        d->agentSteps.clear();
+        d->agentBar->hide();
+    }
     m_path = url;
     m_remoteHost = ref.host;
     m_remotePath = ref.path;
@@ -1345,6 +1488,10 @@ bool FilePreview::openRemote(const QString &url) {
     hideConflict();
     d->deleted = false;
     d->base = relay::merge::Snapshot();
+    d->remotePoll->stop();
+    d->remoteGone = false;
+    d->answerPatch(false, QStringLiteral("The file was reloaded before the save finished."));
+    notifyOpenBuffers();
     watchLocal();   // a remote path: stops watching whatever local file was here
     m_pendingLine = 0;
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
@@ -1370,12 +1517,55 @@ bool FilePreview::openRemote(const QString &url) {
 
     if (!m_remote) {
         m_remote = new relay::remote::RemoteFile(this);
-        m_remote->onFetched = [this](const QByteArray &content, const relay::remote::FileStat &) { showRemoteContent(content); };
+        m_remote->onFetched = [this](const QByteArray &content, const relay::remote::FileStat &) {
+            // A fetch to reconcile with is not a fetch to show: the buffer is only ever merged into
+            // (#F8R7, task cb).
+            const Private::RemoteOp op = std::exchange(d->remoteOp, Private::RemoteOp::None);
+            if (op == Private::RemoteOp::Refresh || op == Private::RemoteOp::SaveCheck) {
+                remoteRefreshed(content, op == Private::RemoteOp::SaveCheck);
+                return;
+            }
+            showRemoteContent(content);
+        };
         m_remote->onFailed = [this](const QString &message, relay::remote::Conflict conflict, const relay::remote::FileStat &) {
             remoteFailed(message, int(conflict));
         };
-        m_remote->onSaved = [this](const relay::remote::FileStat &) {
-            m_textView->document()->setModified(false);
+        m_remote->onChecked = [this](const relay::remote::FileStat &now, const QString &error) {
+            d->remoteOp = Private::RemoteOp::None;
+            // A poll that could not reach the host says nothing; the next save will say why.
+            if (!error.isEmpty()) { watchForReconnect(); return; }
+            if (!now.ok) {
+                if (!d->remoteGone) {
+                    d->remoteGone = true;
+                    setNotice(QStringLiteral("%1 is gone from %2 · your text is still here, and %3 writes it back.")
+                                  .arg(QFileInfo(m_remotePath).fileName(), m_remoteHost,
+                                       QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+                }
+                return;
+            }
+            const bool back = std::exchange(d->remoteGone, false);
+            if (back) setNotice(QString());
+            if (!back && now == m_remote->fetched()) return;
+            d->remoteOp = Private::RemoteOp::Refresh;
+            m_remote->fetch(m_remotePath);
+        };
+        m_remote->onSaved = [this](const relay::remote::FileStat &stat) {
+            d->remoteOp = Private::RemoteOp::None;
+            d->remoteGone = false;
+            // What was written is the new base (#F8R7). Typing that went on during the save is
+            // still unsaved, so the buffer is clean only if it is still exactly what was sent.
+            relay::merge::Snapshot saved;
+            saved.bytes = d->remoteSaving.toUtf8();
+            saved.text = d->remoteSaving;
+            saved.revision = relay::merge::revisionOf(saved.bytes);
+            saved.revision.mtimeMs = stat.mtime > 0 ? stat.mtime * 1000 : -1;
+            setBase(saved);
+            if (m_textView->toPlainText() == d->remoteSaving) m_textView->document()->setModified(false);
+            if (d->patchReply) {
+                if (!d->agentChanges.isEmpty()) d->agentChanges.last().saved = true;
+                showAgentBar();
+                d->answerPatch(true, QString(), sha256Hex(saved.bytes));
+            }
             QString said = QStringLiteral("Saved to %1 · %2").arg(m_remoteHost, QLocale().toString(QTime::currentTime(), QLocale::ShortFormat));
             if (m_teachSaveShortcut) {
                 m_teachSaveShortcut = false;
@@ -1391,6 +1581,7 @@ bool FilePreview::openRemote(const QString &url) {
         };
     }
     m_remote->setHost(ref.host, relay::remote::loginControlPath(ref.host));
+    d->remoteOp = Private::RemoteOp::Open;
     m_remote->fetch(ref.path);
     return true;
 }
@@ -1442,6 +1633,18 @@ void FilePreview::showRemoteText(const QByteArray &content, bool markdown) {
     const QString text = QString::fromUtf8(content);
     m_textView->setPlainText(text);
     m_textView->document()->setModified(false);
+    // The base, as a local file's is (#F8R7): these bytes and the host's stat, the text in the
+    // form the buffer holds it. Every later change on the host is reconciled against it.
+    {
+        relay::merge::Snapshot base;
+        base.bytes = content;
+        base.text = m_textView->toPlainText();
+        base.revision = relay::merge::revisionOf(content);
+        const relay::remote::FileStat stat = m_remote ? m_remote->fetched() : relay::remote::FileStat();
+        base.revision.mtimeMs = stat.mtime > 0 ? stat.mtime * 1000 : -1;
+        setBase(base);
+    }
+    d->remotePoll->start();
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     delete d->highlighter;
     d->highlighter = nullptr;
@@ -1531,29 +1734,29 @@ void FilePreview::showRemoteInfo(const QString &mime, const QString &message) {
 }
 
 void FilePreview::remoteFailed(const QString &message, int conflict) {
-    if (conflict == int(relay::remote::Conflict::Changed) || conflict == int(relay::remote::Conflict::Vanished)) {
-        // The host's copy moved on between the fetch and the save, and nothing was written. The
-        // choice is the user's: their text over the top, or the host's file back in the pane.
-        QMessageBox box(QMessageBox::Warning, QStringLiteral("Save"), message, QMessageBox::NoButton, this);
-        box.setInformativeText(QStringLiteral("Your edits are still in the pane either way."));
-        QPushButton *overwrite = box.addButton(QStringLiteral("Overwrite anyway"), QMessageBox::DestructiveRole);
-        QPushButton *reload = box.addButton(QStringLiteral("Reload from %1").arg(m_remoteHost), QMessageBox::ResetRole);
-        box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(QMessageBox::Cancel);
-        box.exec();
-        if (box.clickedButton() == overwrite && m_remote) {
-            setNotice(QStringLiteral("Saving to %1…").arg(m_remoteHost));
-            m_remote->save(m_textView->toPlainText().toUtf8(), true);
-        } else if (box.clickedButton() == reload) {
-            m_textView->document()->setModified(false);   // the user asked for the host's copy
-            openRemote(m_path);
-        } else {
-            setNotice(message);
-        }
+    const Private::RemoteOp op = std::exchange(d->remoteOp, Private::RemoteOp::None);
+    // An agent's patch whose save this was: the text is in the buffer either way (#F8R7).
+    d->answerPatch(false, message);
+    if (conflict == int(relay::remote::Conflict::Changed)) {
+        // The host's copy moved on between the fetch and the save, and nothing was written. Fetch
+        // what is there now and put the same choice a local save puts (#F8R7, task cb): Merge,
+        // Overwrite or Reload, on the bar — the buffer is not touched until one is picked.
+        setNotice(message);
+        d->remoteOp = Private::RemoteOp::SaveCheck;
+        m_remote->fetch(m_remotePath);
         return;
     }
-    if (m_editable) {
-        // A save that could not happen: the buffer stays exactly as it is, and the pane says why.
+    if (conflict == int(relay::remote::Conflict::Vanished)) {
+        // Gone from the host: only the buffer is left, and the next save writes it back.
+        d->remoteGone = true;
+        setNotice(QStringLiteral("%1 is gone from %2 · your text is still here, and %3 writes it back.")
+                      .arg(QFileInfo(m_remotePath).fileName(), m_remoteHost,
+                           QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
+        return;
+    }
+    if (m_editable || op == Private::RemoteOp::Refresh || op == Private::RemoteOp::SaveCheck || op == Private::RemoteOp::Save) {
+        // A save, or a look at the host, that could not happen: the buffer stays exactly as it
+        // is, and the pane says why.
         setNotice(message);
         watchForReconnect();
         return;
@@ -1658,7 +1861,18 @@ bool FilePreview::save() {
         return writeBuffer();
     }
     if (!m_remote) return false;
-    if (m_remote->busy()) { setNotice(QStringLiteral("Still saving to %1…").arg(m_remoteHost)); return false; }
+    if (d->conflict != ConflictMode::None) {
+        showConflict(ConflictMode::Save);
+        return false;
+    }
+    if (m_remote->busy() && d->remoteOp == Private::RemoteOp::Save) {
+        setNotice(QStringLiteral("Still saving to %1…").arg(m_remoteHost));
+        return false;
+    }
+    if (m_remote->busy() && d->remoteOp == Private::RemoteOp::SaveCheck) {
+        setNotice(QStringLiteral("Still checking what changed on %1…").arg(m_remoteHost));
+        return false;
+    }
     if (!m_remote->live()) {
         setNotice(QStringLiteral("The connection to %1 has ended · your edits are safe in this pane. Log in to %1 again "
                                  "in the terminal pane and press %2, or copy the text out.")
@@ -1666,9 +1880,69 @@ bool FilePreview::save() {
         watchForReconnect();
         return false;
     }
-    setNotice(QStringLiteral("Saving to %1…").arg(m_remoteHost));
-    m_remote->save(m_textView->toPlainText().toUtf8());
+    saveRemote();
     return true;
+}
+
+void FilePreview::saveRemote(bool force) {
+    if (!m_remote) return;
+    // A stat poll or a refresh in flight gives way: the save compares the host with the base
+    // itself, on the host (#F8R7).
+    if (m_remote->busy() && (d->remoteOp == Private::RemoteOp::Check || d->remoteOp == Private::RemoteOp::Refresh))
+        m_remote->cancel();
+    setNotice(QStringLiteral("Saving to %1…").arg(m_remoteHost));
+    d->remoteSaving = m_textView->toPlainText();
+    d->remoteOp = Private::RemoteOp::Save;
+    // A file the host no longer has is written back: there is nothing there to lose.
+    m_remote->save(d->remoteSaving.toUtf8(), force || d->remoteGone);
+}
+
+bool FilePreview::writeOut() {
+    if (!isRemote()) return writeBuffer();
+    if (!m_remote || !m_remote->live()) {
+        setNotice(QStringLiteral("The connection to %1 has ended · your edits are safe in this pane.").arg(m_remoteHost));
+        watchForReconnect();
+        return false;
+    }
+    saveRemote();
+    return true;
+}
+
+void FilePreview::checkRemote() {
+    if (!isRemote() || !m_remote || (m_kind != Kind::Text && m_kind != Kind::Markdown)) return;
+    if (m_remote->busy() || !m_remote->live()) return;
+    d->remoteOp = Private::RemoteOp::Check;
+    m_remote->check();
+}
+
+void FilePreview::remoteRefreshed(const QByteArray &content, bool forSave) {
+    // The host's bytes, after a poll saw its stat move or a save was refused because it had
+    // (#F8R7, task cb): the same decisions a local file's watcher makes.
+    relay::merge::Snapshot host;
+    host.bytes = content;
+    host.text = relay::merge::editorText(QString::fromUtf8(content));
+    host.revision = relay::merge::revisionOf(content);
+    const relay::remote::FileStat stat = m_remote->fetched();
+    host.revision.mtimeMs = stat.mtime > 0 ? stat.mtime * 1000 : -1;
+    if (relay::remote::looksBinary(content)) host.text += QChar(0);   // not mergeable, whatever it says
+    if (forSave) {
+        if (host.text == m_textView->toPlainText()) {
+            setBase(host);
+            m_textView->document()->setModified(false);
+            setNotice(QStringLiteral("%1 on %2 already has this text.").arg(QFileInfo(m_remotePath).fileName(), m_remoteHost));
+            return;
+        }
+        d->disk = host;
+        showConflict(ConflictMode::Save);
+        return;
+    }
+    if (host.revision.sameContent(d->base.revision)) {
+        d->base.revision = host.revision;   // touched, not changed
+        if (d->conflict == ConflictMode::Changed) hideConflict();
+        return;
+    }
+    if (d->conflict != ConflictMode::None && host.revision.sameContent(d->disk.revision)) return;
+    reconcileWith(host);
 }
 
 bool FilePreview::writeBuffer() {
@@ -1764,7 +2038,8 @@ void FilePreview::rewatch() {
 }
 
 void FilePreview::checkDisk() {
-    if (isRemote() || m_path.isEmpty() || m_kind == Kind::None) return;
+    if (isRemote()) { checkRemote(); return; }
+    if (m_path.isEmpty() || m_kind == Kind::None) return;
     d->settle->stop();
     const bool fileEvent = std::exchange(d->fileEvent, false);
     rewatch();
@@ -1806,7 +2081,8 @@ void FilePreview::checkDisk() {
 
 void FilePreview::reconcileWith(const relay::merge::Snapshot &disk) {
     using relay::merge::Outcome;
-    const QString name = QFileInfo(m_path).fileName();
+    const QString name = QFileInfo(isRemote() ? m_remotePath : m_path).fileName();
+    const QString where = sourceOf(this);
     QTextDocument *document = m_textView->document();
     if (!mergeable(disk)) {
         // Grew past the cap or turned binary: a clean preview shows it as open() would; an edited
@@ -1834,7 +2110,7 @@ void FilePreview::reconcileWith(const relay::merge::Snapshot &disk) {
         setBase(disk);
         document->setModified(false);
         hideConflict();
-        setNotice(QStringLiteral("%1 on disk now has exactly your text.").arg(name));
+        setNotice(QStringLiteral("%1 on %2 now has exactly your text.").arg(name, where));
         return;
     case Outcome::TakeDisk:
         replaceBuffer(r.text);
@@ -1846,7 +2122,7 @@ void FilePreview::reconcileWith(const relay::merge::Snapshot &disk) {
         replaceBuffer(r.text);
         setBase(disk);
         hideConflict();
-        setNotice(QStringLiteral("%1 changed on disk · merged into your unsaved edits (Ctrl+Z takes the merge back out).").arg(name));
+        setNotice(QStringLiteral("%1 changed on %2 · merged into your unsaved edits (Ctrl+Z takes the merge back out).").arg(name, where));
         return;
     case Outcome::Conflict:
         d->disk = disk;
@@ -1882,30 +2158,33 @@ void FilePreview::replaceBuffer(const QString &text) {
 }
 
 void FilePreview::setBase(const relay::merge::Snapshot &snapshot) {
+    const bool moved = !snapshot.revision.sameContent(d->base.revision);
     d->base = snapshot;
     d->seen = snapshot.revision;
+    if (moved) notifyOpenBuffers();   // `sha256` is in the agents' list (#F8R7)
 }
 
 void FilePreview::showConflict(ConflictMode mode, int overlaps) {
     d->conflict = mode;
-    const QString name = QFileInfo(m_path).fileName();
+    const QString name = QFileInfo(isRemote() ? m_remotePath : m_path).fileName();
+    const QString where = sourceOf(this);
     if (mode == ConflictMode::Changed) {
         d->conflictText->setText(
-            overlaps > 0 ? QStringLiteral("%1 changed on disk where you have unsaved edits (%2 overlapping %3). "
+            overlaps > 0 ? QStringLiteral("%1 changed on %4 where you have unsaved edits (%2 overlapping %3). "
                                           "Your text is untouched.")
-                               .arg(name).arg(overlaps).arg(overlaps == 1 ? QStringLiteral("change") : QStringLiteral("changes"))
-                         : QStringLiteral("%1 changed on disk and cannot be merged with your unsaved edits here. "
-                                          "Your text is untouched.").arg(name));
+                               .arg(name).arg(overlaps).arg(overlaps == 1 ? QStringLiteral("change") : QStringLiteral("changes"), where)
+                         : QStringLiteral("%1 changed on %2 and cannot be merged with your unsaved edits here. "
+                                          "Your text is untouched.").arg(name, where));
         d->conflictMerge->setText(QStringLiteral("Show merge"));
         d->conflictMerge->setToolTip(QStringLiteral("Put your text, the disk's and the version you loaded into the buffer "
                                                     "between conflict markers (one undo step)"));
         d->conflictMine->setText(QStringLiteral("Keep mine"));
         d->conflictMine->setToolTip(QStringLiteral("Keep your text; saving then writes it over the disk's version"));
-        d->conflictDisk->setText(QStringLiteral("Take disk"));
-        d->conflictDisk->setToolTip(QStringLiteral("Replace your text with the disk's version (one undo step)"));
+        d->conflictDisk->setText(isRemote() ? QStringLiteral("Take %1's").arg(where) : QStringLiteral("Take disk"));
+        d->conflictDisk->setToolTip(QStringLiteral("Replace your text with the %1's version (one undo step)").arg(where));
     } else {
-        d->conflictText->setText(QStringLiteral("%1 changed on disk since you loaded it, so saving now would overwrite "
-                                                "that change.").arg(name));
+        d->conflictText->setText(QStringLiteral("%1 changed on %2 since you loaded it, so saving now would overwrite "
+                                                "that change.").arg(name, where));
         d->conflictMerge->setText(QStringLiteral("Merge"));
         d->conflictMerge->setToolTip(QStringLiteral("Merge the disk's changes into your text first, then save again"));
         d->conflictMine->setText(QStringLiteral("Overwrite"));
@@ -1936,12 +2215,14 @@ bool FilePreview::resolveConflict(Resolution how) {
     if (d->conflict == ConflictMode::None) return false;
     const ConflictMode mode = d->conflict;
     QTextDocument *document = m_textView->document();
-    const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+    // A host's file is not read again here: the choice is about the version the host sent, and a
+    // save that follows is checked against that version's stat by the host itself (#F8R7).
+    const relay::merge::Snapshot disk = isRemote() ? d->disk : relay::merge::readLocalFile(m_path, kMaxTextBytes);
     if (!disk.revision.exists) {
         // Gone since the bar went up: only the buffer is left, and saving writes it back.
         d->deleted = true;
         showDeleted();
-        return how == Resolution::KeepMine && mode == ConflictMode::Save ? writeBuffer() : true;
+        return how == Resolution::KeepMine && mode == ConflictMode::Save ? writeOut() : true;
     }
     if (!disk.revision.sameContent(d->disk.revision)) {
         // The disk moved again while the bar was up, so the choice was about text that is no
@@ -1956,7 +2237,7 @@ bool FilePreview::resolveConflict(Resolution how) {
         return false;
     }
     hideConflict();
-    const QString name = QFileInfo(m_path).fileName();
+    const QString name = QFileInfo(isRemote() ? m_remotePath : m_path).fileName();
     switch (how) {
     case Resolution::TakeDisk:
         if (!mergeable(disk)) {
@@ -1967,11 +2248,11 @@ bool FilePreview::resolveConflict(Resolution how) {
         replaceBuffer(disk.text);
         setBase(disk);
         document->setModified(false);
-        setNotice(QStringLiteral("Took %1 from disk · Ctrl+Z brings your text back.").arg(name));
+        setNotice(QStringLiteral("Took %1 from %2 · Ctrl+Z brings your text back.").arg(name, sourceOf(this)));
         return true;
     case Resolution::KeepMine:
         setBase(disk);
-        if (mode == ConflictMode::Save) return writeBuffer();
+        if (mode == ConflictMode::Save) return writeOut();
         setNotice(QStringLiteral("Keeping your text · %1 writes it over the disk's version.")
                       .arg(QKeySequence(QKeySequence::Save).toString(QKeySequence::NativeText)));
         return true;
@@ -2012,6 +2293,359 @@ bool FilePreview::resolveConflict(Resolution how) {
     }
     }
     return false;
+}
+
+// ----- agent edits to the open buffer (#F8R7, task v5; protocol §35) ------------------------------
+//
+// An agent's worker is told which files are open in its pane's window (`open_buffers`), and its
+// write_file / edit_file on one of them arrives here as a `buffer_request` instead of going to the
+// disk. What was the agent's text worked out against? Its `base_sha256` says: the buffer as it is
+// now (the agent read the unsaved buffer), the base this pane loaded or last saved, or — when the
+// watcher has not caught up yet — the disk. The first is applied exactly; the other two are
+// three-way merged with the buffer, so the user's unsaved edits elsewhere in the file stay. An
+// overlap is refused with the lines as they are in the buffer, and so is a base nobody here knows,
+// unless an edit_file's old_string still names exactly one place in the buffer.
+
+bool FilePreview::patchable() const {
+    if (m_kind != Kind::Text && m_kind != Kind::Markdown) return false;
+    if (!d->base.revision.exists || d->base.truncated || d->base.text.contains(QChar(0))) return false;
+    // A file whose line endings (CR LF, a lone CR) or spaces the editor would not keep as they
+    // are is left to the disk write and the watcher, which already handles it.
+    return QString::fromUtf8(d->base.bytes) == d->base.text;
+}
+
+QJsonObject FilePreview::openBufferEntry() const {
+    if (!patchable()) return {};
+    // A host's file by host and path as the agent's `host` tool names it — not the
+    // percent-encoded URL the pane keeps.
+    const QString path = isRemote() ? QStringLiteral("ssh://") + m_remoteHost + m_remotePath : m_path;
+    return QJsonObject{{QStringLiteral("path"), path},
+                       {QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex())},
+                       {QStringLiteral("dirty"), m_textView->document()->isModified()}};
+}
+
+QVector<FilePreview::AgentChange> FilePreview::agentChanges() const {
+    return d->agentChanges;
+}
+
+void FilePreview::answerBufferRequest(const QJsonObject &request, const std::function<void(const QJsonObject &)> &reply) {
+    using relay::merge::Outcome;
+    QJsonObject out{{QStringLiteral("type"), QStringLiteral("buffer_result")},
+                    {QStringLiteral("id"), request.value(QStringLiteral("id"))},
+                    {QStringLiteral("path"), request.value(QStringLiteral("path"))}};
+    const auto refuse = [&](const QString &error, const QString &message) {
+        out.insert(QStringLiteral("ok"), false);
+        out.insert(QStringLiteral("error"), error);
+        if (!message.isEmpty()) out.insert(QStringLiteral("message"), message);
+        reply(out);
+    };
+    const QString op = request.value(QStringLiteral("op")).toString();
+    const QString name = QFileInfo(isRemote() ? m_remotePath : m_path).fileName();
+    // A local pane catches up with the disk first, so "the base" below is the disk's text unless
+    // the user has unsaved edits the change could not be merged into.
+    if (!isRemote() && op == QStringLiteral("patch")) checkDisk();
+    if (!patchable()) return refuse(QStringLiteral("not_open"), QString());
+    QTextDocument *document = m_textView->document();
+    const QString buffer = m_textView->toPlainText();
+    if (op == QStringLiteral("read")) {
+        out.insert(QStringLiteral("ok"), true);
+        out.insert(QStringLiteral("text"), buffer);
+        out.insert(QStringLiteral("dirty"), document->isModified());
+        out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
+        return reply(out);
+    }
+    if (op != QStringLiteral("patch")) return refuse(QStringLiteral("unsupported"), QStringLiteral("Unknown buffer_request op."));
+
+    const QJsonValue contentValue = request.value(QStringLiteral("content"));
+    const QString content = contentValue.toString();
+    if (!contentValue.isString() || relay::merge::editorText(content) != content || content.contains(QChar(0)))
+        return refuse(QStringLiteral("not_representable"),
+                      QStringLiteral("The new text has line endings or characters the editor would change, so it goes to the disk instead."));
+
+    const QString baseHex = request.value(QStringLiteral("base_sha256")).toString();
+    const relay::merge::Labels labels{QStringLiteral("editor"), QStringLiteral("base"), QStringLiteral("agent")};
+    QString target, applied;
+    bool conflicted = false;
+    relay::merge::MergeResult overlap;
+    const auto against = [&](const QString &base) {
+        const relay::merge::Reconciliation r = relay::merge::reconcile(base, buffer, content, labels);
+        switch (r.outcome) {
+        case Outcome::Unchanged:   // the agent's text is the base: nothing to do
+        case Outcome::Converged:   // the buffer already says it
+            target = buffer;
+            applied = QStringLiteral("unchanged");
+            break;
+        case Outcome::TakeDisk:
+            target = content;
+            applied = QStringLiteral("exact");
+            break;
+        case Outcome::Merged:
+            target = r.text;
+            applied = QStringLiteral("merged");
+            break;
+        case Outcome::Conflict:
+            conflicted = true;
+            overlap = r.merge;
+            break;
+        }
+    };
+    if (!baseHex.isEmpty() && baseHex == sha256Hex(buffer.toUtf8())) {
+        target = content;
+        applied = content == buffer ? QStringLiteral("unchanged") : QStringLiteral("exact");
+    } else if (!baseHex.isEmpty() && baseHex == QString::fromLatin1(d->base.revision.hash.toHex())) {
+        against(d->base.text);
+    } else if (!baseHex.isEmpty() && !isRemote()) {
+        const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+        if (disk.revision.exists && !disk.truncated && QString::fromLatin1(disk.revision.hash.toHex()) == baseHex)
+            against(disk.text);
+    }
+    // Overlapping, or worked out against text that is no longer anywhere: an edit_file whose
+    // old_string still names exactly one place in the buffer is still exactly what it says.
+    if ((conflicted || applied.isEmpty()) && request.value(QStringLiteral("tool")).toString() == QStringLiteral("edit_file")) {
+        const QString from = relay::merge::editorText(request.value(QStringLiteral("old_string")).toString());
+        const QString to = relay::merge::editorText(request.value(QStringLiteral("new_string")).toString());
+        const bool all = request.value(QStringLiteral("replace_all")).toBool();
+        const qsizetype found = from.isEmpty() ? 0 : buffer.count(from);
+        if (found == 1 || (all && found > 1)) {
+            target = buffer;
+            if (all) target.replace(from, to);
+            else target.replace(buffer.indexOf(from), from.size(), to);
+            applied = QStringLiteral("merged");
+            conflicted = false;
+        }
+    }
+    if (conflicted) {
+        QJsonArray regions;
+        for (const relay::merge::Conflict &c : overlap.conflicts) {
+            QJsonObject region{{QStringLiteral("buffer"), c.ours}, {QStringLiteral("base"), c.base},
+                               {QStringLiteral("agent"), c.theirs}};
+            const qsizetype at = c.ours.isEmpty() ? -1 : buffer.indexOf(c.ours);
+            if (at >= 0) region.insert(QStringLiteral("line"), int(buffer.left(at).count(QLatin1Char('\n'))) + 1);
+            regions.append(region);
+        }
+        out.insert(QStringLiteral("conflicts"), regions);
+        return refuse(QStringLiteral("conflict"),
+                      QStringLiteral("%1 is open in Relay and the user has unsaved edits on the same lines (%2 %3), so "
+                                     "nothing was changed.")
+                          .arg(name).arg(regions.size()).arg(regions.size() == 1 ? QStringLiteral("place") : QStringLiteral("places")));
+    }
+    if (applied.isEmpty())
+        return refuse(QStringLiteral("stale"),
+                      QStringLiteral("%1 changed in the editor since this was worked out, so nothing was changed. Read it "
+                                     "again and redo the edit against what is there now.").arg(name));
+
+    out.insert(QStringLiteral("ok"), true);
+    out.insert(QStringLiteral("applied"), applied);
+    if (applied == QStringLiteral("unchanged")) {
+        out.insert(QStringLiteral("saved"), !document->isModified());
+        out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
+        return reply(out);
+    }
+    const bool wasClean = !document->isModified();
+    replaceBuffer(target);
+    noteAgentChange(buffer, target, request, applied, false);
+    out.insert(QStringLiteral("buffer_sha256"), sha256Hex(target.toUtf8()));
+    if (!wasClean) {
+        // The user's unsaved edits are theirs to save: the agent's change joins them.
+        out.insert(QStringLiteral("saved"), false);
+        out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
+        return reply(out);
+    }
+    // A clean buffer was the disk's text, so it is saved again at once: the disk, the agent's
+    // next read and every command it runs then agree with what is on screen.
+    if (!isRemote()) {
+        const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+        bool saved = false;
+        if (disk.revision.exists && !disk.revision.sameContent(d->base.revision)) {
+            out.insert(QStringLiteral("save_error"), QStringLiteral("%1 changed on disk at the same moment; the change is in the "
+                                                                    "editor, unsaved.").arg(name));
+            checkDisk();
+        } else {
+            saved = writeBuffer();
+            if (!saved) out.insert(QStringLiteral("save_error"), m_notice);
+        }
+        if (saved) d->agentChanges.last().saved = true;
+        showAgentBar();
+        out.insert(QStringLiteral("saved"), saved);
+        out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
+        return reply(out);
+    }
+    if (!m_remote || !m_remote->live() || (m_remote->busy() && d->remoteOp != Private::RemoteOp::Check
+                                           && d->remoteOp != Private::RemoteOp::Refresh)) {
+        out.insert(QStringLiteral("saved"), false);
+        out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
+        out.insert(QStringLiteral("save_error"), m_remote && m_remote->live()
+                                                     ? QStringLiteral("Relay is busy with %1; the change is in the editor, unsaved.").arg(m_remoteHost)
+                                                     : QStringLiteral("The connection to %1 has ended; the change is in the editor, unsaved.").arg(m_remoteHost));
+        return reply(out);
+    }
+    d->answerPatch(false, QStringLiteral("A newer change replaced this save."));
+    d->patchResult = out;
+    d->patchReply = reply;
+    saveRemote();
+}
+
+void FilePreview::noteAgentChange(const QString &before, const QString &after, const QJsonObject &request,
+                                  const QString &applied, bool saved) {
+    QTextDocument *document = m_textView->document();
+    const QVector<relay::merge::TextEdit> edits = relay::merge::editsBetween(before, after);
+    AgentChange change;
+    change.intent = request.value(QStringLiteral("intent")).toString();
+    if (change.intent.isEmpty()) change.intent = QStringLiteral("Edit");
+    change.turnId = request.value(QStringLiteral("turn_id")).toString();
+    change.model = request.value(QStringLiteral("model")).toString();
+    change.at = QDateTime::currentDateTime();
+    change.applied = applied;
+    change.saved = saved;
+    // Where the change landed, in the buffer as it is now: positions in `after` are the edits'
+    // positions shifted by what the edits before them added or removed.
+    QList<QTextEdit::ExtraSelection> marks;
+    qsizetype shift = 0;
+    int first = -1, last = -1;
+    for (const relay::merge::TextEdit &edit : edits) {
+        const qsizetype start = edit.position + shift;
+        const qsizetype end = start + edit.inserted.size();
+        shift += edit.inserted.size() - edit.removed;
+        QTextCursor cursor(document);
+        cursor.setPosition(int(start));
+        const int fromLine = cursor.blockNumber();
+        // The last character inserted, or the place a pure deletion closed up.
+        cursor.setPosition(int(end > start ? end - 1 : start), QTextCursor::KeepAnchor);
+        const int toLine = cursor.blockNumber();
+        first = first < 0 ? fromLine : std::min(first, fromLine);
+        last = std::max(last, toLine);
+        QTextEdit::ExtraSelection mark;
+        mark.cursor = cursor;
+        QColor tint = palette().color(QPalette::Highlight);
+        tint.setAlpha(60);
+        mark.format.setBackground(tint);
+        mark.format.setProperty(QTextFormat::FullWidthSelection, true);
+        marks.append(mark);
+    }
+    change.firstLine = std::max(first, 0) + 1;
+    change.lastLine = std::max(last, first) + 1;
+    d->agentChanges.append(change);
+    d->agentSteps.append({before, after, document->availableUndoSteps()});
+    // Keep the list to a screenful: the oldest go first.
+    while (d->agentChanges.size() > 50) {
+        d->agentChanges.removeFirst();
+        d->agentSteps.removeFirst();
+    }
+    m_textView->setExtraSelections(marks);
+    d->agentFade->start();
+    showAgentBar();
+}
+
+void FilePreview::showAgentBar() {
+    if (d->agentChanges.isEmpty()) {
+        d->agentBar->hide();
+        return;
+    }
+    const AgentChange &change = d->agentChanges.last();
+    QString text = QStringLiteral("Agent: %1 · %2").arg(change.intent,
+        change.firstLine == change.lastLine ? QStringLiteral("line %1").arg(change.firstLine)
+                                            : QStringLiteral("lines %1–%2").arg(change.firstLine).arg(change.lastLine));
+    if (change.applied == QStringLiteral("merged")) text += QStringLiteral(" · merged with your edits");
+    if (!change.saved) text += QStringLiteral(" · unsaved");
+    d->agentText->setText(text);
+    QStringList tip;
+    if (!change.model.isEmpty()) tip << QStringLiteral("Model: %1").arg(change.model);
+    if (!change.turnId.isEmpty()) tip << QStringLiteral("Turn: %1").arg(change.turnId);
+    tip << QLocale().toString(change.at, QLocale::ShortFormat);
+    d->agentText->setToolTip(tip.join(QLatin1Char('\n')));
+    d->agentList->setText(d->agentChanges.size() == 1 ? QStringLiteral("Changes") : QStringLiteral("Changes (%1)").arg(d->agentChanges.size()));
+    d->agentUndo->setEnabled(true);
+    d->agentBar->show();
+}
+
+bool FilePreview::undoAgentChange() {
+    using relay::merge::Outcome;
+    if (d->agentChanges.isEmpty()) return false;
+    QTextDocument *document = m_textView->document();
+    const Private::AgentStep step = d->agentSteps.last();
+    const bool wasSaved = d->agentChanges.last().saved;
+    const bool clean = !document->isModified();
+    const QString now = m_textView->toPlainText();
+    if (document->availableUndoSteps() == step.undoSteps && now == step.after) {
+        document->undo();   // nothing since: the step itself, cursor and all
+    } else {
+        // Typed since: take the agent's change back out around what was typed, or say why not.
+        const relay::merge::Reconciliation r = relay::merge::reconcile(step.after, now, step.before);
+        if (r.outcome == Outcome::Conflict) {
+            setNotice(QStringLiteral("The agent's change cannot be undone on its own: you have edited the same lines since. "
+                                     "Ctrl+Z steps back through both."));
+            return false;
+        }
+        if (r.outcome == Outcome::Merged || r.outcome == Outcome::TakeDisk) replaceBuffer(r.text);
+    }
+    d->agentChanges.removeLast();
+    d->agentSteps.removeLast();
+    m_textView->setExtraSelections({});
+    // The change had gone to disk with nothing else unsaved: its undo goes to disk the same way.
+    bool written = true;
+    if (wasSaved && clean) {
+        if (isRemote()) written = writeOut();
+        else {
+            const relay::merge::Snapshot disk = relay::merge::readLocalFile(m_path, kMaxTextBytes);
+            written = !disk.revision.exists || disk.revision.sameContent(d->base.revision) ? writeBuffer() : false;
+        }
+    }
+    showAgentBar();
+    if (written) setNotice(QStringLiteral("Undid the agent's change."));
+    return true;
+}
+
+// ----- which files are open, for the agents' workers ----------------------------------------------
+
+void FilePreview::notifyOpenBuffers() {
+    if (buffersNotifyPending || !QCoreApplication::instance()) return;
+    buffersNotifyPending = true;
+    // Coalesced: an open is a base, a title and a modification change in one go, and the workers
+    // want the list once.
+    QTimer::singleShot(100, QCoreApplication::instance(), [] {
+        buffersNotifyPending = false;
+        QVector<BufferListener> &listeners = bufferListeners();
+        listeners.erase(std::remove_if(listeners.begin(), listeners.end(),
+                                       [](const BufferListener &l) { return l.context.isNull(); }),
+                        listeners.end());
+        const QVector<BufferListener> now = listeners;   // a listener may add another
+        for (const BufferListener &listener : now)
+            if (listener.context && listener.changed) listener.changed();
+    });
+}
+
+QList<FilePreview *> FilePreview::livePreviews() {
+    return livePreviewList();
+}
+
+QJsonArray FilePreview::openBuffers(const QWidget *window) {
+    QJsonArray files;
+    for (FilePreview *preview : livePreviewList()) {
+        if (window && preview->window() != window) continue;
+        const QJsonObject entry = preview->openBufferEntry();
+        if (!entry.isEmpty()) files.append(entry);
+    }
+    return files;
+}
+
+void FilePreview::answerBufferRequestIn(const QWidget *window, const QJsonObject &request,
+                                        const std::function<void(const QJsonObject &)> &reply) {
+    const QString path = request.value(QStringLiteral("path")).toString();
+    for (FilePreview *preview : livePreviewList()) {
+        if (window && preview->window() != window) continue;
+        if (preview->openBufferEntry().value(QStringLiteral("path")).toString() != path || path.isEmpty()) continue;
+        preview->answerBufferRequest(request, reply);
+        return;
+    }
+    reply(QJsonObject{{QStringLiteral("type"), QStringLiteral("buffer_result")},
+                      {QStringLiteral("id"), request.value(QStringLiteral("id"))},
+                      {QStringLiteral("path"), path},
+                      {QStringLiteral("ok"), false},
+                      {QStringLiteral("error"), QStringLiteral("not_open")}});
+}
+
+void FilePreview::onOpenBuffersChanged(QObject *context, std::function<void()> changed) {
+    bufferListeners().append({QPointer<QObject>(context), std::move(changed)});
 }
 
 QString FilePreview::readCapped(const QString &path, qint64 size) {

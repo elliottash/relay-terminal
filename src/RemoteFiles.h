@@ -108,6 +108,9 @@ QString fetchScript(const QString &path, qint64 maxBytes = kMaxFileBytes);
 // `expected` empty saves whatever is there (the user answered "overwrite anyway"); otherwise the
 // host compares it to the file's own stat and refuses with ChangedStatus before writing a byte.
 QString saveScript(const QString &path, const FileStat &expected);
+// Just the stat line, for a pane watching a file it has open (#F8R7): exits MissingStatus when the
+// file is gone, and reads none of it.
+QString statScript(const QString &path);
 QString probeScript(const QStringList &paths);
 // One folder: `<type>|<size>|<mtime>|<name>` a line, dot files included, symlinks followed.
 QString listScript(const QString &path);
@@ -189,8 +192,14 @@ public:
     const FileStat &fetched() const { return m_fetched; }
 
     // The bytes, whatever they are: an image and a PDF are binary and are meant to be. Refusing
-    // binary is the *text editor's* rule, not the transport's (`looksBinary`).
+    // binary is the *text editor's* rule, not the transport's (`looksBinary`). Fetching the same
+    // path again keeps `fetched()` until the new stat arrives, so a refetch that fails leaves the
+    // next save guarded by the revision the pane last had, never by nothing (#F8R7).
     void fetch(const QString &path);
+    // The host's stat of the fetched path and nothing else (#F8R7): how an open file notices a
+    // change on the host without reading it. Answers onChecked, never onFailed, and leaves
+    // `fetched()` alone.
+    void check();
     // `force` is the user's "overwrite anyway" after a Changed refusal.
     void save(const QByteArray &content, bool force = false);
     void cancel();
@@ -200,6 +209,9 @@ public:
     // `conflict` is the host's stat when the file changed under us (the caller then offers
     // Overwrite / Reload); `message` is a sentence in every case.
     std::function<void(const QString &message, Conflict conflict, const FileStat &nowOnHost)> onFailed;
+    // check()'s answer: the stat (ok=false with an empty error when the file is gone), or why the
+    // host could not be asked.
+    std::function<void(const FileStat &now, const QString &error)> onChecked;
 
 private:
     void run(const QString &script, const QByteArray &input, bool saving, bool force);
@@ -210,7 +222,7 @@ private:
     FileStat m_fetched;
     QProcess *m_process = nullptr;
     QTimer *m_timeout = nullptr;
-    bool m_saving = false, m_forced = false;
+    bool m_saving = false, m_forced = false, m_checking = false;
     QByteArray m_pending;   // the bytes a save is writing, kept until it lands
 };
 
