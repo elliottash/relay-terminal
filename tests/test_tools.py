@@ -554,3 +554,120 @@ class LandAuthorshipTests(unittest.TestCase):
         self.assertEqual(4 * 1024 * 1024 + 1, (authors / f"{self.TOKEN}.1.jsonl").stat().st_size)
         journal, entries = self.journal_read()
         self.assertEqual(1, len(entries))
+
+
+# ----- land_try: build and test the tip plus this session's hunks (card #76QW) ---------------------
+class LandTryTests(unittest.TestCase):
+    """The land_try tool against a fake scripts/land.py in a temp workspace root: the argv it
+    builds (session defaulted from the pane token, flags and paths forwarded), the contract
+    lines parsed into fields, exit 5/6 reported as ok=false with the output tail, and the
+    refusals when there is no session to name or no scripts/land.py to run."""
+
+    TOKEN = "qw76-tok"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.repo = self.base / "repo"                 # the workspace root, with land.py in it
+        (self.repo / "scripts").mkdir(parents=True)
+        self.calls = self.base / "calls.jsonl"         # what the fake scripts/land.py saw
+        self.events = []
+        self.tools = ToolExecutor(str(self.repo), self.events.append, threading.Event())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def fake_land(self, exit_code=0, extra=0, tip_line="tip 0653463cfa42"):
+        """A scripts/land.py that records its argv and cwd, prints the contract lines (plus
+        `extra` noise lines, as compiler errors or a ctest tail would), and exits exit_code."""
+        (self.repo / "scripts" / "land.py").write_text(
+            "import json, os, sys\n"
+            "with open(os.environ['FAKE_CALLS'], 'a', encoding='utf-8') as fh:\n"
+            "    fh.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+            f"print({tip_line!r})\n"
+            "print('M +12 -0 backend/relay_core/tools.py')\n"
+            "slot = os.environ['FAKE_ROOT'] + '/verify-slots/qw76-tool-0'\n"
+            "print('src ' + slot + '/src')\n"
+            "print('build ' + slot + '/build')\n"
+            "print('binary ' + slot + '/build/relay')\n"
+            f"for i in range({extra}):\n"
+            "    print('error line %d' % i)\n"
+            f"sys.exit({exit_code})\n")
+
+    def try_it(self, arguments, exit_code=0, extra=0, tip_line="tip 0653463cfa42"):
+        """One land_try through prepare and execute, as if this pane (token TOKEN) called it."""
+        self.fake_land(exit_code=exit_code, extra=extra, tip_line=tip_line)
+        env = {"RELAY_SESSION_TOKEN": self.TOKEN, "FAKE_CALLS": str(self.calls),
+               "FAKE_ROOT": str(self.repo)}
+        with patch.dict(os.environ, env):
+            return self.tools.execute(self.tools.prepare("land_try", arguments))
+
+    def calls_read(self):
+        return [json.loads(line) for line in self.calls.read_text(encoding="utf-8").splitlines()]
+
+    def test_land_try_is_offered(self):
+        names = [tool["function"]["name"] for tool in self.tools.tools()]
+        self.assertIn("land_try", names)
+
+    def test_land_try_argv_and_parsed_fields_on_a_green_run(self):
+        result = self.try_it({"tests": "test_tools", "target": "LandTryTests",
+                              "paths": ["backend/relay_core/tools.py", "tests/test_tools.py"],
+                              "commit": "0653463cfa42"})
+        call = self.calls_read()[0]
+        self.assertEqual(["try", self.TOKEN, "--tests", "test_tools", "--target", "LandTryTests",
+                          "--commit", "0653463cfa42", "--paths",
+                          "backend/relay_core/tools.py", "tests/test_tools.py"], call["argv"])
+        self.assertEqual(str(self.repo.resolve()), call["cwd"], "must run in the workspace root")
+        self.assertTrue(result["ok"])
+        self.assertEqual(0, result["exit_code"])
+        self.assertEqual("0653463cfa42", result["tip"])
+        self.assertTrue(result["src"].endswith("/verify-slots/qw76-tool-0/src"))
+        self.assertTrue(result["build"].endswith("/verify-slots/qw76-tool-0/build"))
+        self.assertTrue(result["binary"].endswith("/verify-slots/qw76-tool-0/build/relay"))
+        self.assertIn("M +12 -0 backend/relay_core/tools.py", result["output"])
+
+    def test_land_try_session_defaults_to_the_panes_token(self):
+        self.try_it({})
+        self.assertEqual(["try", self.TOKEN], self.calls_read()[0]["argv"])
+
+    def test_land_try_an_explicit_session_beats_the_token(self):
+        self.try_it({"session": "other-session"})
+        self.assertEqual(["try", "other-session"], self.calls_read()[0]["argv"])
+
+    def test_land_try_a_commit_line_names_the_tip_field_too(self):
+        result = self.try_it({}, tip_line="commit deadbeef99")
+        self.assertEqual("deadbeef99", result["tip"])
+
+    def test_land_try_build_failure_is_ok_false_with_the_output_tail(self):
+        result = self.try_it({}, exit_code=5, extra=200)   # compiler errors on stdout (contract)
+        self.assertFalse(result["ok"])
+        self.assertEqual(5, result["exit_code"])
+        lines = result["output"].splitlines()
+        self.assertEqual(120, len(lines), "the result carries the last ~120 lines")
+        self.assertEqual("error line 80", lines[0])
+        self.assertEqual("error line 199", lines[-1])
+        self.assertEqual("0653463cfa42", result["tip"], "fields parse even when the tail has none")
+
+    def test_land_try_test_failure_is_ok_false(self):
+        result = self.try_it({}, exit_code=6, extra=3)     # a ctest tail on stdout (contract)
+        self.assertFalse(result["ok"])
+        self.assertEqual(6, result["exit_code"])
+        self.assertEqual(8, len(result["output"].splitlines()))
+        self.assertIn("error line 2", result["output"].splitlines()[-1])
+
+    def test_land_try_no_land_script_is_refused_before_anything_runs(self):
+        # The workspace has scripts/ but no land.py: prepare refuses before any job can run.
+        self.assertFalse((self.repo / "scripts" / "land.py").exists())
+        with patch.dict(os.environ, {"RELAY_SESSION_TOKEN": self.TOKEN}):
+            with self.assertRaises(ValueError) as raised:
+                self.tools.prepare("land_try", {})
+        self.assertIn("scripts/land.py", str(raised.exception))
+        self.assertFalse(self.calls.exists())
+
+    def test_land_try_no_session_and_no_pane_token_is_refused(self):
+        env = {key: value for key, value in os.environ.items() if key != "RELAY_SESSION_TOKEN"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(ValueError) as raised:
+                self.tools.prepare("land_try", {})
+        self.assertIn("session", str(raised.exception))
+        self.assertFalse(self.calls.exists())

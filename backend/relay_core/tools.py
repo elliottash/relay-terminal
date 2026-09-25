@@ -70,6 +70,9 @@ LARGE_FILE_REFUSAL = "File exceeds the 8 MiB limit of Relay's file tools."
 # clamped, never refused: refusing cost a turn and printed an error for a harmless mistake.
 DEFAULT_WAIT = 30
 MAX_WAIT = 1800
+# Card #76QW: land_try's result carries the tail of the verify slot's output, not the whole log;
+# the fields beside it (tip, src, build, binary) carry what matters from the top.
+LAND_TRY_LINES = 120
 SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE)", re.I)
 # Card #WNKN: the two RELAY_ names that are pane identity, not secrets, so command_env() keeps
 # them where it strips every other RELAY_* — a command Relay starts can say which pane ran it.
@@ -383,6 +386,16 @@ TOOLS = [
                          "description": "keep only: move the tree to this path in the project first."},
           "drop": {"type": "boolean", "description": "keep only: delete it explicitly instead of promoting."}},
          ["ref"]),
+    # Card #76QW: the land flow's build-and-test as a tool, so a session never judges its change
+    # in the shared working tree or build/. Runs scripts/land.py try through the JobTable like a
+    # run_command; the description stays one breath because the tools JSON has a budget (18 KB).
+    spec("land_try",
+         "Build and test exactly what `land.py commit` would land — the tip plus this session's "
+         "claimed hunks — in a private verify slot, never the shared working tree or build/; use it "
+         "after `scripts/land.py begin`, instead of scripts/relay-build, and nothing is committed. "
+         "session defaults to the pane's RELAY_SESSION_TOKEN.",
+         {"session": {"type": "string"}, "tests": {"type": "string"}, "target": {"type": "string"},
+          "paths": {"type": "array", "items": {"type": "string"}}, "commit": {"type": "string"}}, []),
 ]
 
 # `host` (card #S5SH): offered only while the user's terminal is logged into a host over ssh (the
@@ -766,6 +779,37 @@ class ToolExecutor:
                 prepared.update({"from_line": lines[0], "to_line": lines[1]})
                 shown += f"\nLines: {lines[0]}-{lines[1] or 'end'}"
             return Prepared(name, prepared, shown)
+        if name == "land_try":
+            # Card #76QW: run scripts/land.py try for this pane's session. Normalised here so
+            # prepare and execute build the same argv, and the two refusals (no session, no land
+            # script) reach the model as a tool error before anything runs.
+            if set(args) - {"session", "tests", "target", "paths", "commit"}:
+                raise ValueError("Unknown tool or unexpected argument.")
+            for key in ("session", "tests", "target", "commit"):
+                if key in args:
+                    self._text(args, key, maximum=4096)
+                    if not args[key].strip():
+                        del args[key]                  # an empty flag means "not given"
+            if args.get("paths") is not None:
+                paths = args["paths"]
+                if (not isinstance(paths, list) or not paths
+                        or any(not isinstance(p, str) or not p.strip() for p in paths)):
+                    raise ValueError("paths must be a list of paths this session claims.")
+                args["paths"] = [p.strip() for p in paths]
+            # The pane's own land session (card #WNKN) is the obvious one to build and test.
+            session = (args.get("session") or os.environ.get("RELAY_SESSION_TOKEN") or "").strip()
+            if not session:
+                raise ValueError("land_try needs a session: pass session, or run in a pane whose "
+                                 "RELAY_SESSION_TOKEN names its land session.")
+            args["session"] = session
+            root = self.workspace.root
+            if not (root / LAND_SCRIPT).is_file():
+                raise ValueError(f"land_try needs {LAND_SCRIPT.as_posix()} in the workspace root "
+                                 f"({root}); this workspace has none.")
+            shown = " ".join(shlex.quote(part) for part in self._land_try_argv(args))
+            return Prepared(name, args,
+                            f"LAND TRY\n\nWorking directory: {root}\n"
+                            f"Waits: {DEFAULT_WAIT}s, then continues as a job\n\n{shown}", root)
         allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background", "host", "memory_max"},
                    "read_file": {"path", "host", "from_line", "to_line"}, "list_directory": {"path", "host"},
                    "write_file": {"path", "content", "host"},
@@ -1181,6 +1225,8 @@ class ToolExecutor:
             cwd = self.workspace.resolve(args.get("cwd", "."))
             return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False),
                              memory_max=memory_max)
+        if name == "land_try":
+            return self._land_try(args)
         if name == "command_output":
             job = self.jobs.get(args["job_id"])
             if "from_line" in args:
@@ -1285,6 +1331,43 @@ class ToolExecutor:
                             done.stderr.decode("utf-8", "replace").strip()[:200])
         except Exception as error:
             log.warning("land.py begin --auto for %s failed: %s", rel, error)
+
+    @staticmethod
+    def _land_try_argv(args: dict) -> list[str]:
+        """The land.py try command line prepare's preview showed and execute runs, one source of
+        truth for both. --paths goes last because it takes more than one value."""
+        argv = [sys.executable or "python3", LAND_SCRIPT.as_posix(), "try", args["session"]]
+        for flag, key in (("--tests", "tests"), ("--target", "target"), ("--commit", "commit")):
+            if args.get(key):
+                argv += [flag, args[key]]
+        if args.get("paths"):
+            argv += ["--paths", *args["paths"]]
+        return argv
+
+    def _land_try(self, args: dict) -> ToolResult:
+        """Card #76QW: build and test the tip plus this session's claimed hunks by running
+        scripts/land.py try in the workspace root, through the JobTable like a run_command
+        (so a long build is a job with command_output, not a bare subprocess.run), then parse
+        its contract lines — tip/commit <sha>, src <dir>, build <dir>, binary <path> — out of
+        the output. Nothing lands: land.py try never touches the shared working tree."""
+        argv = self._land_try_argv(args)
+        result = self._run(" ".join(shlex.quote(part) for part in argv),
+                           self.workspace.root, DEFAULT_WAIT, argv=argv)
+        if "exit_code" not in result:      # still running, stopped or killed: run_command's shape
+            return result                  # already says so, and command_output can follow up
+        fields = {"tip": "", "src": "", "build": "", "binary": ""}
+        for line in result.get("output", "").splitlines():
+            key, sep, value = line.partition(" ")
+            if not sep:
+                continue
+            field = {"commit": "tip"}.get(key, key)
+            if field in fields and not fields[field] and value.strip():
+                fields[field] = value.strip()
+        result["ok"] = result["exit_code"] == 0
+        result.update(fields)
+        result["output"] = "\n".join(result.get("output", "").splitlines()[-LAND_TRY_LINES:])
+        result.model = None                # the model copy was for the whole log; ours is the tail
+        return result
 
     def _land_journal(self, path: Path, existed: bool, old: bytes, data: bytes) -> None:
         """Card #WNKN: append the write that just landed to <land root>/authors/<token>.jsonl
