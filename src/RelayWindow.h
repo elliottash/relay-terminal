@@ -5880,6 +5880,21 @@ private:
 
     Pane *createPane(const QJsonObject &spec);
 
+    // ----- where Alt+click material goes (card #7BYT) --------------------------------------------
+    //
+    // The owner's rule, 2026-09-25: "it works in the current pane or linked pane where there is a
+    // prompt box. after that, the most recently opened pane." Pane may not name RelayWindow, so
+    // the pane asks through its onPromptTargetPane callback and this answers with that order.
+    Pane *promptTargetPane(Pane *from);
+    // A pane was created (or restored through createPane): it is the most recently opened one
+    // until the next is. QPointer, so a closed pane drops out without a teardown hook.
+    void notePaneOpened(Pane *pane) {
+        if (!pane) return;
+        m_paneOpenOrder.removeAll(QPointer<Pane>(pane));
+        m_paneOpenOrder.prepend(QPointer<Pane>(pane));
+    }
+    QList<QPointer<Pane>> m_paneOpenOrder;
+
     // ----- the window makes agent consoles (#AGNT step 5) --------------------------------------
     //
     // A console is a `Pane` with a non-terminal context: no shell, no pty, no poll timers, the
@@ -5986,6 +6001,14 @@ private:
         // answers fresh on every configure.
         const QString here = m_manager->workspace();
         auto *console = new Pane(here, here, m_manager->cleanShell(), relay::defaultEngineCore(), wrapper.get());
+        // Alt+click in a console targets through the window like any pane (#7BYT) — its own
+        // composer first, then the linked and most recently opened panes. It is not a leaf, so
+        // it never enters m_paneOpenOrder itself.
+        QPointer<Pane> consoleGuard(console);
+        console->onPromptTargetPane = [consoleGuard](Pane *from) -> Pane * {
+            auto *w = windowOf(from ? from : consoleGuard.data());
+            return w ? w->promptTargetPane(from ? from : consoleGuard.data()) : nullptr;
+        };
         wrapper->setConsole(console);
         if (parent) console->setParent(parent);
         console->setObjectName(QStringLiteral("agentConsole"));

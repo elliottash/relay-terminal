@@ -845,12 +845,20 @@ void Pane::startTerminal(bool cleanShell) {
             Q_UNUSED(column);
             // The engine links paths that exist here; inside a login the output is the remote
             // machine's, and the same path here is a different file (card #S5SH). URLs still open.
+            // Alt+click is the exception (#7BYT): "add to the prompt box" applies to remote paths
+            // too, and the mention resolves against the login's cwd, so it stays remote material.
             const QUrl url(target);
-            if (m_login.active && (url.scheme().isEmpty() || url.isLocalFile())) {
+            if (m_login.active && !modifiers.testFlag(Qt::AltModifier)
+                    && (url.scheme().isEmpty() || url.isLocalFile())) {
                 openRemoteOutputPath(target, line);
                 return;
             }
             openOutputTarget(target, line, true, modifiers);
+        };
+        // Alt+drag's finished selection (#7BYT): straight into the prompt box, fenced when it
+        // spans lines. The focus stays here, so more material can be collected in a row.
+        m_backend->onSelectionActivated = [this](const QString &text) {
+            addSelectionToContext(text);
         };
         // Which paths in the output are real, and where a relative one is relative to (#S5SH):
         // this machine, until the pane is logged into another one — then the host's own answer,

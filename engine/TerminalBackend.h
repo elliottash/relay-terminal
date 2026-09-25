@@ -472,6 +472,8 @@ public:
     // Mouse modifiers survive the view/backend boundary so the host can distinguish its
     // ordinary in-app open from actions such as Shift-click's external open.
     std::function<void(const QString &target, int line, int column, Qt::KeyboardModifiers modifiers)> onLinkActivated;
+    // An Alt+drag finished with selected text (card #7BYT): the host adds it to its prompt box.
+    std::function<void(const QString &text)> onSelectionActivated;
     std::function<void(const QString &title)> onTitleChanged;
     std::function<void(const QString &path)> onCwdChanged;
     // The same OSC 7 with its host part ("" for file:///path). A shell on another machine (ssh)

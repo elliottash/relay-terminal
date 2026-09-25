@@ -1688,9 +1688,10 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
         Link link;
         int s = 0, en = 0;
         const bool onLink = foldUri.isEmpty() && !onImage && !onMedia && linkAt(pos, &link, &s, &en);
-        // Ctrl/Shift/Alt+click follows the link at once (card #YZTK; Alt joins for #KKYC, where
-        // the pane routes it as "navigate this pane's shell there"). A click anywhere else falls
-        // through to selection below — Alt away from a link still starts a rectangular selection.
+        // Ctrl/Shift/Alt+click follows the link at once (card #YZTK). Alt+click adds the link to
+        // the host's prompt box and Ctrl+click navigates there (card #7BYT). A click anywhere
+        // else falls through to selection below — Ctrl+Alt away from a link starts a rectangle;
+        // Alt alone selects, and the release hands the text to the host.
         if (onLink && (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier))) {
             emit linkActivated(link.target, link.line, link.column, e->modifiers());
             return;
@@ -1713,7 +1714,9 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
         const SelectionUnit unit = m_clickCount == 3 ? SelectionUnit::Line
             : m_clickCount == 2                      ? SelectionUnit::Word
                                                      : SelectionUnit::Cell;
-        const bool rect = e->modifiers() & Qt::AltModifier;
+        // Alt+drag selects so the host's prompt box can take the text; the rectangle keeps a
+        // chord of its own now that Alt means "add to context" (card #7BYT).
+        const bool rect = (e->modifiers() & Qt::AltModifier) && (e->modifiers() & Qt::ControlModifier);
         m_visualGesture = foldsVisible() && !rect;
         if (m_visualGesture) {
             beginVisualSelection(pos, unit);
@@ -1832,6 +1835,13 @@ void TerminalView::mouseReleaseEvent(QMouseEvent *e)
         const QString text = selectedText();
         if (copyOnSelectWorthCopying(text))
             QApplication::clipboard()->setText(text, QClipboard::Selection);
+    }
+    // Alt+drag hands the finished selection to the host (card #7BYT). The rectangle is
+    // Ctrl+Alt and is deliberately left alone: it selects, it does not add.
+    if ((e->modifiers() & Qt::AltModifier) && !(e->modifiers() & Qt::ControlModifier)) {
+        const QString text = selectedText();
+        if (!text.isEmpty())
+            emit selectionActivated(text);
     }
 }
 

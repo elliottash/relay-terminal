@@ -238,6 +238,31 @@ QJsonObject RelayWindow::workspaceGroupJson(QWidget *page) const {
     return holder->group.toJson();
 }
 
+// Where Alt+click material goes (card #7BYT): the pane it came from when its prompt box can take
+// it, then the pane this one is linked to — the workspace group's Console member — then the most
+// recently opened pane that qualifies. The owner's rule, 2026-09-25: "it works in the current
+// pane or linked pane where there is a prompt box. after that, the most recently opened pane."
+// Null means nothing in this window can take it, and the pane says so in its status line.
+Pane *RelayWindow::promptTargetPane(Pane *from) {
+    if (from && from->acceptsPromptContext())
+        return from;
+    if (from && pageOf(from)) {
+        if (WorkspaceHolder *holder = holderOf(pageOf(from))) {
+            if (QWidget *leaf = leafFor(leavesIn(pageOf(from)), holder->group, ws::Role::Console)) {
+                if (auto *console = dynamic_cast<Pane *>(leaf);
+                        console && console != from && console->acceptsPromptContext())
+                    return console;
+            }
+        }
+    }
+    for (const QPointer<Pane> &entry : m_paneOpenOrder) {
+        Pane *pane = entry.data();
+        if (pane && pane != from && pane->acceptsPromptContext())
+            return pane;
+    }
+    return nullptr;
+}
+
 void RelayWindow::restoreWorkspaceGroup(QWidget *page, const QJsonObject &json) {
     if (!page || json.isEmpty()) return;
     QString error;

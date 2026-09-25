@@ -61,6 +61,10 @@ VTermBackend::VTermBackend(const QString &coreName, QWidget *parent)
         if (onLinkActivated)
             onLinkActivated(target, line, column, modifiers);
     });
+    connect(m_view, &TerminalView::selectionActivated, this, [this](const QString &text) {
+        if (onSelectionActivated)
+            onSelectionActivated(text);
+    });
     connect(m_view, &TerminalView::bellRang, this, [this] {
         if (onBell)
             onBell();

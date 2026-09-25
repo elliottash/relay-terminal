@@ -143,46 +143,49 @@ private Q_SLOTS:
         QVERIFY(!ids.contains(QStringLiteral("navigateHere")));
     }
 
-    // The file side of the same scheme (#KKYC): a click menu of its own, teaching the same
-    // chords a folder's menu teaches.
+    // The file side of the same scheme (#7BYT): a click menu of its own, teaching the same
+    // chords a folder's menu teaches. "Edit" lives only here now that Ctrl+click navigates.
     void fileClickMenuNamesTheChords() {
-        const auto items = relay::fileClickMenu(true, true);
+        const auto items = relay::fileClickMenu(true, true, true);
         QCOMPARE(menuIds(items), (QStringList{QStringLiteral("open"), QStringLiteral("edit"),
-                                              QStringLiteral("navigate"), QStringLiteral("external"),
-                                              QStringLiteral("copypath")}));
+                                              QStringLiteral("navigate"), QStringLiteral("prompt"),
+                                              QStringLiteral("external"), QStringLiteral("copypath")}));
         QVERIFY(items.at(0).label.endsWith(QStringLiteral("\tClick")));
         QVERIFY(items.at(1).label == QStringLiteral("Edit"));
-        QVERIFY(items.at(2).label.endsWith(QStringLiteral("\tAlt+click")));
-        QVERIFY(items.at(3).label.endsWith(QStringLiteral("\tShift+click")));
-        QVERIFY(!enabledOf(relay::fileClickMenu(false, true), QStringLiteral("edit")));
-        QVERIFY(!enabledOf(relay::fileClickMenu(true, false), QStringLiteral("navigate")));
+        QVERIFY(items.at(2).label.endsWith(QStringLiteral("\tCtrl+click")));
+        QVERIFY(items.at(3).label.endsWith(QStringLiteral("\tAlt+click")));
+        QVERIFY(items.at(4).label.endsWith(QStringLiteral("\tShift+click")));
+        QVERIFY(!enabledOf(relay::fileClickMenu(false, true, true), QStringLiteral("edit")));
+        QVERIFY(!enabledOf(relay::fileClickMenu(true, false, true), QStringLiteral("navigate")));
+        QVERIFY(!enabledOf(relay::fileClickMenu(true, true, false), QStringLiteral("prompt")));
     }
 
-    // The owner's scheme for a folder link (#KKYC): a plain click opens the explorer, Ctrl asks
-    // with the menu, Alt navigates and Shift opens externally. A keyboard Ctrl+Enter has nowhere
-    // to put a menu, so it opens the explorer too.
-    void folderClickFollowsTheModifiers() {
-        using relay::FolderClick;
-        QCOMPARE(relay::folderClickAction(false, false, false, true), FolderClick::Explorer);
-        QCOMPARE(relay::folderClickAction(true, false, false, true), FolderClick::Menu);
-        QCOMPARE(relay::folderClickAction(false, true, false, true), FolderClick::Navigate);
-        QCOMPARE(relay::folderClickAction(false, false, true, true), FolderClick::External);
-        QCOMPARE(relay::folderClickAction(true, true, false, true), FolderClick::Menu);
-        QCOMPARE(relay::folderClickAction(false, false, false, false), FolderClick::Explorer);
-        QCOMPARE(relay::folderClickAction(true, false, false, false), FolderClick::Explorer);
-        QCOMPARE(relay::folderClickAction(false, true, false, false), FolderClick::Navigate);
-        QCOMPARE(relay::folderClickAction(false, false, true, false), FolderClick::External);
+    // The owner's scheme for a link (cards #KKYC and #7BYT): a plain click opens, Ctrl+click
+    // navigates, Alt+click adds to the prompt box and Shift+click opens externally. The keyboard
+    // walk means the same by its Enter/Ctrl+Enter/Alt+Enter/Shift+Enter.
+    void clickActionFollowsTheModifiers() {
+        using relay::ClickAction;
+        QCOMPARE(relay::clickActionForModifiers(Qt::NoModifier), ClickAction::Open);
+        QCOMPARE(relay::clickActionForModifiers(Qt::ControlModifier), ClickAction::Navigate);
+        QCOMPARE(relay::clickActionForModifiers(Qt::AltModifier), ClickAction::AddToPrompt);
+        QCOMPARE(relay::clickActionForModifiers(Qt::ShiftModifier), ClickAction::External);
+        QCOMPARE(relay::clickActionForModifiers(Qt::ControlModifier | Qt::AltModifier), ClickAction::AddToPrompt);
+        QCOMPARE(relay::clickActionForModifiers(Qt::ControlModifier | Qt::ShiftModifier), ClickAction::Navigate);
     }
 
     void folderClickMenuNamesBothChoicesAndTheirChords() {
-        const auto items = relay::folderClickMenu(true);
+        const auto items = relay::folderClickMenu(true, true);
         QCOMPARE(menuIds(items), (QStringList{QStringLiteral("explorer"), QStringLiteral("navigate"),
-                                              QStringLiteral("external"), QStringLiteral("copypath")}));
+                                              QStringLiteral("prompt"), QStringLiteral("external"),
+                                              QStringLiteral("copypath")}));
         QVERIFY(items.at(0).label.endsWith(QStringLiteral("\tClick")));
-        QVERIFY(items.at(1).label.endsWith(QStringLiteral("\tAlt+click")));
-        QVERIFY(items.at(2).label.endsWith(QStringLiteral("\tShift+click")));
+        QVERIFY(items.at(1).label.endsWith(QStringLiteral("\tCtrl+click")));
+        QVERIFY(items.at(2).label.endsWith(QStringLiteral("\tAlt+click")));
+        QVERIFY(items.at(3).label.endsWith(QStringLiteral("\tShift+click")));
         QVERIFY(enabledOf(items, QStringLiteral("navigate")));
-        QVERIFY(!enabledOf(relay::folderClickMenu(false), QStringLiteral("navigate")));
+        QVERIFY(enabledOf(items, QStringLiteral("prompt")));
+        QVERIFY(!enabledOf(relay::folderClickMenu(false, false), QStringLiteral("navigate")));
+        QVERIFY(!enabledOf(relay::folderClickMenu(true, false), QStringLiteral("prompt")));
     }
 
     // A pane in an ssh or mosh session offers a split that logs in to the same host (#S5SH).

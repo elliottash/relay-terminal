@@ -260,6 +260,9 @@ public:
 signals:
     // OSC 8 URI, URL text, or an existing absolute path (line/column -1 if absent).
     void linkActivated(const QString &target, int line, int column, Qt::KeyboardModifiers modifiers);
+    // An Alt+drag finished with a non-empty selection (card #7BYT): the host adds it to its
+    // prompt box. Plain and Shift drags only select; Ctrl+Alt+drag is the rectangle.
+    void selectionActivated(const QString &text);
     void scrollPositionChanged(int viewportTop, int historyRows, int rows);
     void gridSizeChanged(int rows, int columns);
     // A new frame() is available. Emitted after the view has taken it, before it repaints.

@@ -20,31 +20,33 @@ QString resolveEngineCore(const QString &commandLine, const QString &environment
 QString defaultEngineCore() { return s_defaultCore; }
 void setDefaultEngineCore(const QString &core) { s_defaultCore = core; }
 
-FolderClick folderClickAction(bool control, bool alt, bool shift, bool fromMouse)
+ClickAction clickActionForModifiers(Qt::KeyboardModifiers modifiers)
 {
-    if (control && fromMouse) return FolderClick::Menu;
-    if (alt) return FolderClick::Navigate;
-    if (shift) return FolderClick::External;
-    return FolderClick::Explorer;
+    if (modifiers & Qt::AltModifier) return ClickAction::AddToPrompt;
+    if (modifiers & Qt::ControlModifier) return ClickAction::Navigate;
+    if (modifiers & Qt::ShiftModifier) return ClickAction::External;
+    return ClickAction::Open;
 }
 
-QList<TerminalMenuItem> folderClickMenu(bool canNavigate)
+QList<TerminalMenuItem> folderClickMenu(bool canNavigate, bool canPrompt)
 {
     return {
         {QStringLiteral("explorer"), QStringLiteral("Open in explorer\tClick"), true},
-        {QStringLiteral("navigate"), QStringLiteral("Navigate here\tAlt+click"), canNavigate},
+        {QStringLiteral("navigate"), QStringLiteral("Navigate here\tCtrl+click"), canNavigate},
+        {QStringLiteral("prompt"), QStringLiteral("Add to prompt\tAlt+click"), canPrompt},
         {QStringLiteral("external"), QStringLiteral("Open in file manager\tShift+click"), true},
         {QStringLiteral("-"), QString(), true},
         {QStringLiteral("copypath"), QStringLiteral("Copy path"), true},
     };
 }
 
-QList<TerminalMenuItem> fileClickMenu(bool canEdit, bool canNavigate)
+QList<TerminalMenuItem> fileClickMenu(bool canEdit, bool canNavigate, bool canPrompt)
 {
     return {
         {QStringLiteral("open"), QStringLiteral("Open\tClick"), true},
         {QStringLiteral("edit"), QStringLiteral("Edit"), canEdit},
-        {QStringLiteral("navigate"), QStringLiteral("Navigate to its folder\tAlt+click"), canNavigate},
+        {QStringLiteral("navigate"), QStringLiteral("Navigate to its folder\tCtrl+click"), canNavigate},
+        {QStringLiteral("prompt"), QStringLiteral("Add to prompt\tAlt+click"), canPrompt},
         {QStringLiteral("external"), QStringLiteral("Open with the default app\tShift+click"), true},
         {QStringLiteral("-"), QString(), true},
         {QStringLiteral("copypath"), QStringLiteral("Copy path"), true},
@@ -93,7 +95,7 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
                     ? QStringLiteral("Open %1").arg(reference)
                     : QStringLiteral("Open %1 “%2”").arg(reference, state.cardTitle));
             add("copyCard", QStringLiteral("Copy %1").arg(reference));
-            add("cardToPrompt", QStringLiteral("%1 → prompt").arg(reference));
+            add("cardToPrompt", QStringLiteral("Add to prompt\tAlt+click"));
         }
     }
 

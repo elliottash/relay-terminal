@@ -409,8 +409,8 @@ private slots:
         QCOMPARE(links[0][3].value<Qt::KeyboardModifiers>(), Qt::ShiftModifier);
     }
 
-    // Alt+click follows a link too (#KKYC: the pane routes it as "navigate this pane's shell
-    // there"); away from a link it still starts a rectangular selection.
+    // Alt+click follows a link too (card #7BYT: the pane adds it to the prompt box); away from a
+    // link Alt selects for the host and Ctrl+Alt starts a rectangular selection.
     void altClickCarriesItsModifier()
     {
         QFETCH_GLOBAL(QString, core);
@@ -424,6 +424,34 @@ private slots:
         QCOMPARE(links.size(), 1);
         QCOMPARE(links[0][0].toString(), QStringLiteral("https://relay.test/x"));
         QCOMPARE(links[0][3].value<Qt::KeyboardModifiers>(), Qt::AltModifier);
+    }
+
+    // Alt+drag ends with the finished selection handed to the host for its prompt box (#7BYT);
+    // the rectangle moved to Ctrl+Alt and deliberately hands nothing over.
+    void altDragHandsTheSelectionToTheHost()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->writeToDisplay("grab EXAMPLE ok\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("EXAMPLE")));
+        QTest::qWait(60);
+        QSignalSpy selected(t.view, &TerminalView::selectionActivated);
+        const QPoint a = t.cellPoint(0, 5), b = t.cellPoint(0, 11);
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::AltModifier, a);
+        QMouseEvent move(QEvent::MouseMove, b, Qt::NoButton, Qt::LeftButton, Qt::AltModifier);
+        QApplication::sendEvent(t.view, &move);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::AltModifier, b);
+        QCOMPARE(selected.size(), 1);
+        QCOMPARE(selected[0][0].toString(), QStringLiteral("EXAMPLE"));
+        // Ctrl+Alt is the rectangle now: it selects, it does not add.
+        selected.clear();
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, a);
+        QMouseEvent rectMove(QEvent::MouseMove, b, Qt::NoButton, Qt::LeftButton,
+                             Qt::ControlModifier | Qt::AltModifier);
+        QApplication::sendEvent(t.view, &rectMove);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, b);
+        QCOMPARE(selected.size(), 0);
+        QCOMPARE(t.backend->selectedText(), QStringLiteral("EXAMPLE"));
     }
 
     void wrappedUrlClick()

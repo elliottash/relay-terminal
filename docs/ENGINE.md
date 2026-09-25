@@ -421,7 +421,7 @@ GUI scenario (`engine/scripts/gui/scenarios.sh`).
 | Viewport stays on content while output continues | ✅ | ✅ | ✅ | CoreTest::scrollbackAndViewport |
 | Unlimited / disk-backed history | ❌ (byte budget in memory) | ❌ | ✅ | |
 | Search in scrollback (highlight all, next/previous, find bar) | ✅ | ✅ | ✅ | CoreTest::searchScrollback, screenshot 09 |
-| Selection: drag, word, line, rectangle (Alt), auto-scroll, PRIMARY | ✅ | ✅ | ✅ | ViewTest::mouseSelectionAndCopy, CoreTest::selectionText |
+| Selection: drag, word, line, rectangle (Ctrl+Alt), auto-scroll, PRIMARY; Alt+drag hands the finished text to the host (#7BYT) | ✅ | ✅ | ✅ | ViewTest::mouseSelectionAndCopy, altDragHandsTheSelectionToTheHost, CoreTest::selectionText |
 | Copy/paste shortcuts, middle-click, bracketed paste, paste sanitizing | ✅ | ✅ | ✅ | CoreTest::pasteAndFocus |
 | Mouse reporting (X10/normal/button/any, SGR, SGR-pixels), alternate scroll | ✅ | 🟡 (no SGR-pixels) | ✅ | CoreTest::mouseReporting |
 | Keyboard: xterm encoding, app cursor/keypad, modifiers | ✅ | ✅ | ✅ | CoreTest::keyEncoding, screenshot 08 |

@@ -841,8 +841,18 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         // Saved window layout: model/effort/mode and the conversation to reattach.
         pane->initRestore(spec);
         QPointer<Pane> guard(pane);
+        // This pane is the most recently opened one until the next is (card #7BYT): the last
+        // stop on the Alt+click target order, after the pane itself and its linked pane.
+        notePaneOpened(pane);
         // Callbacks find the pane's current window, so panes and tabs can move between windows.
         pane->onStatus = [guard](const QString &text) { if (guard) guard->toast(text, 5000); };
+        // Alt+click material asks the window where it goes (#7BYT), because Pane may not name
+        // RelayWindow and the order ("this pane, the linked one, the most recently opened one")
+        // needs the window's pane list to answer.
+        pane->onPromptTargetPane = [guard](Pane *from) -> Pane * {
+            auto *w = windowOf(from ? from : guard.data());
+            return w ? w->promptTargetPane(from ? from : guard.data()) : nullptr;
+        };
         pane->onStateChanged = [guard] {
             auto *w = windowOf(guard);
             if (!w) return;

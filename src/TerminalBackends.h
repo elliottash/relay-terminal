@@ -68,26 +68,29 @@ struct TerminalMenuState {
 // starts or ends with a separator and never has two in a row.
 QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state);
 
-// ----- a click on a folder in the output (card #KKYC) --------------------------------------------
+// ----- chords for a click on anything link-like in the output (cards #KKYC and #7BYT) --------------
 //
-// The owner's scheme (2026-09-25): a plain click opens the explorer, Ctrl+click and a right-click
-// open the context menu, Alt+click navigates the pane's shell there and Shift+click opens the
-// system file manager. A keyboard-walked link has no pointer to put a menu at, so its Ctrl+Enter
-// falls back to the explorer. Ctrl wins over Alt, Alt over Shift.
-enum class FolderClick { Menu, Explorer, Navigate, External };
-FolderClick folderClickAction(bool control, bool alt, bool shift, bool fromMouse);
+// The owner's scheme (2026-09-25, retasked the same day): a plain click opens, Ctrl+click
+// navigates the pane's shell there (folders: `cd` into it; files: `cd` to the folder holding
+// it), Alt+click adds the link to the agent prompt box and Shift+click opens the system file
+// manager / default app. A right-click opens the click menu; it has no modifier case here.
+// The keyboard walk passes the same modifiers with the same meanings. Alt wins over Ctrl, Ctrl
+// over Shift.
+enum class ClickAction { Open, Navigate, AddToPrompt, External };
+ClickAction clickActionForModifiers(Qt::KeyboardModifiers modifiers);
 
-// The menu Ctrl+click (or a right-click) on a folder opens: "explorer", "navigate" (greyed when
-// the pane has no shell to move), "external" and "copypath". Each action label carries its direct
-// chord after a tab, which QMenu draws in its shortcut column, so the menu teaches the modifiers.
-QList<TerminalMenuItem> folderClickMenu(bool canNavigate);
+// The menu a right-click on a folder opens: "explorer", "navigate" (greyed when the pane has no
+// shell to move), "prompt" (greyed when no pane's prompt box can take it), "external" and
+// "copypath". Each action label carries its direct chord after a tab, which QMenu draws in its
+// shortcut column, so the menu teaches the modifiers.
+QList<TerminalMenuItem> folderClickMenu(bool canNavigate, bool canPrompt);
 
-// ----- a click on a file in the output, the same modifiers as a folder's (#KKYC) ------------------
+// ----- a click on a file in the output, the same modifiers as a folder's (#KKYC, #7BYT) -------------
 //
-// A plain click opens it in Relay, Ctrl+click (or a right-click) opens this menu, Alt+click `cd`s
-// the pane's shell to the folder holding it and Shift+click opens it with the default app.
-// "edit" is the editor Ctrl+Enter still opens during a link walk; it is greyed out when the
-// window has none, and "navigate" when the pane has no shell to move.
-QList<TerminalMenuItem> fileClickMenu(bool canEdit, bool canNavigate);
+// A plain click opens it in Relay, Ctrl+click `cd`s the pane's shell to the folder holding it,
+// Alt+click adds `@path` to the prompt box and Shift+click opens it with the default app.
+// A right-click opens this menu; "edit" is greyed out when the window has no editor, "navigate"
+// when the pane has no shell to move, "prompt" when no pane's prompt box can take the mention.
+QList<TerminalMenuItem> fileClickMenu(bool canEdit, bool canNavigate, bool canPrompt);
 
 } // namespace relay

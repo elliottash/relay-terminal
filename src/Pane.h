@@ -1805,12 +1805,75 @@ public:
                        .arg(QKeySequence(QKeySequence::Undo).toString(QKeySequence::NativeText)));
     }
     // Switchboard: put `#K7Q2 ` (or any text) at the composer's cursor and focus it. Used by the
-    // pane's `t` key and by "work on #K7Q2" from a card.
-    void insertInComposer(const QString &text) {
+    // pane's `t` key and by "work on #K7Q2" from a card. Alt+click material passes focus=false so
+    // the focus stays on the pane it came from and more can be collected in a row (#7BYT).
+    void insertInComposer(const QString &text, bool focus = true) {
         if (text.isEmpty()) return;
-        if (m_secretMode || m_native) { focusInput(); return; }
+        if (m_secretMode || m_native) { if (focus) focusInput(); return; }
         m_editor->insertPlainText(text);
-        focusInput();
+        if (focus) focusInput();
+    }
+    // Whether this pane's prompt box can take Alt+click material right now (#7BYT): not a native
+    // or bare pane, not answering a password, not held by a full-screen program and not routed to
+    // a busy program's stdin. A shell-mode pane qualifies — insertIntoPromptTarget() flips it to
+    // agent mode on insert, the way Ctrl+I does.
+    bool acceptsPromptContext() const {
+        return !m_native && !m_secretMode && !m_altScreen && m_modeValue != QStringLiteral("program");
+    }
+    // The window installs this: the pane whose prompt box Alt+click material goes to (this pane
+    // when it accepts, else a linked one, else the most recently opened one — the owner's rule,
+    // #7BYT). Pane may not name RelayWindow, so the order lives there.
+    std::function<Pane *(Pane *from)> onPromptTargetPane;
+    bool hasPromptTarget() {
+        if (acceptsPromptContext()) return true;
+        return onPromptTargetPane && onPromptTargetPane(this);
+    }
+    // Alt+click on any output link (#7BYT): files and folders become the `@path` mention the
+    // picker inserts (attachmentsFor() turns that text into a file attachment), a card becomes
+    // `#ID`, and anything else is inserted as the reference itself, for the agent's tools.
+    void addLinkToContext(const QString &target, int line) {
+        const QString mention = contextMentionFor(target, line);
+        if (mention.isEmpty()) { status(QStringLiteral("Nothing in this link to add to the prompt.")); return; }
+        insertIntoPromptTarget(mention);
+    }
+    // The text Alt+drag selected (#7BYT): several lines arrive as a fenced block, one line as-is.
+    void addSelectionToContext(const QString &text) {
+        if (text.isEmpty()) return;
+        QString snippet = text;
+        if (snippet.contains(QLatin1Char('\n')) && !snippet.startsWith(QLatin1Char('`'))) {
+            snippet.chop(1);
+            snippet = QStringLiteral("```\n%1\n```\n").arg(snippet);
+        } else if (!snippet.endsWith(QLatin1Char(' ')) && !snippet.endsWith(QLatin1Char('\n'))) {
+            snippet += QLatin1Char(' ');
+        }
+        insertIntoPromptTarget(snippet);
+    }
+    // The mention text for a link target, or empty when there is nothing usable in it.
+    QString contextMentionFor(const QString &target, int line) {
+        if (!relay::links::cardIdOf(target).isEmpty())
+            return QStringLiteral("#%1 ").arg(relay::links::cardIdOf(target));
+        if (target.contains(QStringLiteral("://")) || target.startsWith(QStringLiteral("mailto:"))
+                || !QUrl(target).scheme().isEmpty())
+            return target + QLatin1Char(' ');
+        if (QDir::isAbsolutePath(target) && (m_login.active || QFileInfo::exists(target))) {
+            QString mention = QLatin1Char('@') + composerPath(target);
+            if (line > 0) mention += QStringLiteral(":%1").arg(line);
+            return mention + QLatin1Char(' ');
+        }
+        return target.isEmpty() ? QString() : target + QLatin1Char(' ');
+    }
+    // Put text into the prompt box onPromptTargetPane() picks, without stealing this pane's
+    // focus, and say where it went. A shell-mode target is flipped to agent mode first, the way
+    // Ctrl+I does (#6T6R): an `@path` mention is agent material, not a shell command.
+    void insertIntoPromptTarget(const QString &text) {
+        Pane *to = acceptsPromptContext() ? this : (onPromptTargetPane ? onPromptTargetPane(this) : nullptr);
+        if (!to) { status(QStringLiteral("No prompt box to add this to.")); return; }
+        if (to != this && (to->m_modeValue == QStringLiteral("shell") || to->m_modeValue == QStringLiteral("auto")))
+            to->setMode(QStringLiteral("agent"));
+        to->insertInComposer(text, false);
+        const QString snippet = text.length() > 60 ? text.left(57) + QStringLiteral("…") : text;
+        status(to == this ? QStringLiteral("Added to this prompt: ") + snippet.trimmed()
+                          : QStringLiteral("Added to another pane's prompt: ") + snippet.trimmed());
     }
     // The prompt box is masked and answers a password prompt (see checkPasswordPrompt()).
     bool secretMode() const { return m_secretMode; }
@@ -3866,35 +3929,33 @@ public:
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
     void openOutputTarget(const QString &target, int line, bool fromMouse,
                           Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-        // A local folder (card #KKYC): a plain click opens the explorer, Ctrl+click and a
-        // right-click open the click menu, Alt moves this pane's shell there and Shift hands it
-        // to the system file manager. A keyboard walk has no pointer to put a menu at, so its
-        // Ctrl+Enter opens the explorer too.
+        // Alt+click adds the link to the prompt box instead of opening anything (#7BYT): every
+        // kind of link goes through the same door — files and folders as the `@path` mention the
+        // `@` picker inserts, cards as `#ID`, anything else as its own reference text.
+        if (modifiers.testFlag(Qt::AltModifier)) {
+            addLinkToContext(target, line);
+            return;
+        }
+        // A local folder (cards #KKYC and #7BYT): a plain click opens the explorer, Ctrl+click
+        // moves this pane's shell there and Shift hands it to the system file manager. The menu
+        // is a right-click's; the keyboard walk means the same thing by its Ctrl+Enter.
         if (QDir::isAbsolutePath(target) && QFileInfo(target).isDir()) {
-            switch (relay::folderClickAction(modifiers.testFlag(Qt::ControlModifier),
-                                             modifiers.testFlag(Qt::AltModifier),
-                                             modifiers.testFlag(Qt::ShiftModifier), fromMouse)) {
-            case relay::FolderClick::Menu: showFolderClickMenu(target, QCursor::pos()); return;
-            case relay::FolderClick::Navigate: navigateToOutputFolder(target); return;
-            case relay::FolderClick::External: openPathExternally(target); return;
-            case relay::FolderClick::Explorer: modifiers = Qt::NoModifier; break;   // the path below
+            switch (relay::clickActionForModifiers(modifiers)) {
+            case relay::ClickAction::Navigate: navigateToOutputFolder(target); return;
+            case relay::ClickAction::External: openPathExternally(target); return;
+            case relay::ClickAction::AddToPrompt: addLinkToContext(target, line); return;   // unreachable: Alt left above
+            case relay::ClickAction::Open: modifiers = Qt::NoModifier; break;   // the path below
             }
         }
         // File actions use the actual path, even when ordinary opening resolves a Markdown file
         // to a Switchboard card. Remote paths never arrive here with Shift (the login branch at
         // the backend callback keeps handling those on their own machine).
         if (target.isEmpty()) return;
-        // The file side of the same scheme (#KKYC): Ctrl+click asks with the file's own menu; a
-        // keyboard walk keeps Ctrl+Enter as the direct edit action, before card/context routing.
+        // The file side of the same scheme (#7BYT): Ctrl+click navigates this pane's shell to the
+        // folder holding the file, exactly like a folder's Ctrl+click does for itself. The menu
+        // is a right-click's, and "Edit" lives in it.
         if (modifiers.testFlag(Qt::ControlModifier) && QDir::isAbsolutePath(target)
                 && QFileInfo(target).isFile()) {
-            if (fromMouse) { showFileClickMenu(target, line, QCursor::pos()); return; }
-            if (onEditPath) { onEditPath(target, std::max(0, line)); return; }
-        }
-        // Alt+click navigates this pane's shell to the folder holding the file — the same
-        // "navigate there" a folder's Alt+click does for itself.
-        if (modifiers.testFlag(Qt::AltModifier) && QDir::isAbsolutePath(target)
-                && QFileInfo::exists(target)) {
             navigateToOutputFolder(QFileInfo(target).absolutePath());
             return;
         }
@@ -4015,30 +4076,31 @@ public:
                                                 QStringLiteral("navigate output links with the arrow keys")));
         if (onOpenPath) onOpenPath(target, line > 0 ? line : 0);
     }
-    // Ctrl+click or a right-click on a folder link (card #KKYC). The labels teach the chords the
+    // A right-click on a folder link (cards #KKYC and #7BYT). The labels teach the chords the
     // modifiers already do, so the menu is both the choice and the lesson.
     void showFolderClickMenu(const QString &folder, const QPoint &global) {
         auto *menu = new QMenu(this);
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        for (const relay::TerminalMenuItem &item : relay::folderClickMenu(hasShell())) {
+        for (const relay::TerminalMenuItem &item : relay::folderClickMenu(hasShell(), hasPromptTarget())) {
             QAction *action = menu->addAction(item.label);
             action->setEnabled(item.enabled);
             const QString id = item.id;
             connect(action, &QAction::triggered, this, [this, id, folder] {
                 if (id == QStringLiteral("explorer")) { if (onOpenPath) onOpenPath(folder, 0); }
                 else if (id == QStringLiteral("navigate")) navigateToOutputFolder(folder);
+                else if (id == QStringLiteral("prompt")) addLinkToContext(folder, 0);
                 else if (id == QStringLiteral("external")) openPathExternally(folder);
                 else if (id == QStringLiteral("copypath")) copyPathToClipboard(folder);
             });
         }
         menu->popup(global);
     }
-    // The file counterpart, on the same modifiers (#KKYC): Ctrl+click or a right-click opens it,
-    // so every clickable path in the output has the same four chords.
+    // The file counterpart, on the same modifiers (#7BYT): a right-click opens it, so every
+    // clickable path in the output has the same four chords.
     void showFileClickMenu(const QString &file, int line, const QPoint &global) {
         auto *menu = new QMenu(this);
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        for (const relay::TerminalMenuItem &item : relay::fileClickMenu(bool(onEditPath), hasShell())) {
+        for (const relay::TerminalMenuItem &item : relay::fileClickMenu(bool(onEditPath), hasShell(), hasPromptTarget())) {
             QAction *action = menu->addAction(item.label);
             action->setEnabled(item.enabled);
             const QString id = item.id;
@@ -4046,6 +4108,7 @@ public:
                 if (id == QStringLiteral("open")) openOutputTarget(file, line, false);
                 else if (id == QStringLiteral("edit")) { if (onEditPath) onEditPath(file, std::max(0, line)); }
                 else if (id == QStringLiteral("navigate")) navigateToOutputFolder(QFileInfo(file).absolutePath());
+                else if (id == QStringLiteral("prompt")) addLinkToContext(file, line);
                 else if (id == QStringLiteral("external")) openPathExternally(file);
                 else if (id == QStringLiteral("copypath")) copyPathToClipboard(file);
             });
@@ -4090,9 +4153,9 @@ public:
                             : link.target;
         const bool local = QDir::isAbsolutePath(link.target);
         const QString keys = local
-            ? (link.directory ? QStringLiteral("Enter opens the explorer, Alt+Enter navigates here, Shift+Enter opens in the file manager")
-                              : QStringLiteral("Enter opens in Relay, Ctrl+Enter edits, Alt+Enter navigates to its folder, Shift+Enter opens externally"))
-            : QStringLiteral("Enter opens");
+            ? (link.directory ? QStringLiteral("Enter opens the explorer, Ctrl+Enter navigates here, Alt+Enter adds to the prompt, Shift+Enter opens in the file manager")
+                              : QStringLiteral("Enter opens in Relay, Ctrl+Enter navigates to its folder, Alt+Enter adds to the prompt, Shift+Enter opens externally"))
+            : QStringLiteral("Enter opens, Alt+Enter adds to the prompt");
         // The selected target is state, not a queued toast: every arrow must replace it
         // immediately, and it stays visible until the walk ends.
         if (!m_walkStatus) {
@@ -4117,14 +4180,11 @@ public:
         const relay::TerminalBackend::Link link = m_walkLink;
         endOutputLinkWalk();
         // File actions use the actual path, even when ordinary opening resolves a
-        // Markdown file to a Switchboard card. URLs and card targets keep their routing.
+        // Markdown file to a Switchboard card. URLs and card targets keep their routing; the
+        // chords mean the same as a mouse's (#7BYT).
         if (QDir::isAbsolutePath(link.target)) {
             const QFileInfo file(link.target);
             if (!file.exists()) { status(QStringLiteral("No such file or folder: ") + link.target); return; }
-            if (modifiers.testFlag(Qt::ControlModifier) && file.isFile()) {
-                if (onEditPath) onEditPath(link.target, std::max(0, link.line));
-                return;
-            }
         }
         openOutputTarget(link.target, link.line, false, modifiers);
     }
@@ -4313,7 +4373,7 @@ public:
             status(QStringLiteral("Copied #") + card);
             return;
         }
-        if (id == QStringLiteral("cardToPrompt")) { insertInComposer(QStringLiteral("#") + card + ' '); return; }
+        if (id == QStringLiteral("cardToPrompt")) { addLinkToContext(relay::links::cardTarget(card), -1); return; }
         if (!m_backend) return;
         if (id == QStringLiteral("copy")) { if (!copySelection()) status(QStringLiteral("Nothing is selected.")); return; }
         if (id == QStringLiteral("paste")) { m_backend->paste(); return; }
@@ -15550,16 +15610,25 @@ private:
         auto matches = token.globalMatch(text);
         while (matches.hasNext() && attachments.size() < 10) {
             const auto match = matches.next();
-            const QString path = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+            QString path = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+            // An Alt+click on a `path:line` link inserts `@path:line` (#7BYT): the line belongs
+            // to the attachment, not to the path, or the file would stop resolving.
+            int line = 0;
+            static const QRegularExpression withLine(QStringLiteral("^(.+):(\\d+)(?::\\d+)?$"));
+            const auto split = withLine.match(path);
+            if (split.hasMatch()) {
+                path = split.captured(1);
+                line = split.captured(2).toInt();
+            }
             if (m_login.active) {
-                if (!seen.contains(path)) attachments.append(QJsonObject{{"path", path}, {"host", loginHost()}});
+                if (!seen.contains(path)) attachments.append(QJsonObject{{"path", path}, {"host", loginHost()}, {"line", line}});
                 seen.insert(path);
                 continue;
             }
             const QString absolute = resolveComposerPath(path);
             if (absolute.isEmpty() || !QFileInfo(absolute).isFile() || seen.contains(absolute)) continue;
             seen.insert(absolute);
-            attachments.append(QJsonObject{{"path", absolute}});
+            attachments.append(QJsonObject{{"path", absolute}, {"line", line}});
         }
         return attachments;
     }
