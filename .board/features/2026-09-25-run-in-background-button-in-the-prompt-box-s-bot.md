@@ -1,7 +1,7 @@
 ---
 id: 4CXY
 type: work
-status: executing
+status: needs-verification
 labels: [feature, voice]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [ai-visual], human: none, criteria: 'consolecorner passes: the button floats with no layout seat, shares the chips row at the one-line rest height without overlap, sits exactly at the input area''s bottom-right corner once the box grows, stays within the corner column''s footprint so text never runs underneath, and returns to the chips row when cleared. Screenshots in the evidence path show the themed rest and grown states.', sign_off: none, effort: low}
 source: pane 1, 2026-09-25
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-4cxy-background-button-corner/], related: [], github: null}
 ---
 # Run-in-background button in the prompt box's bottom-right corner, text wrapping around it
 
