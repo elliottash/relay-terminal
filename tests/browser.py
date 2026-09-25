@@ -63,6 +63,65 @@ def _chrome_tmpdir() -> str | None:
     return None
 
 
+# Card #XY13: a test killed outright runs no stop(), so its private TMPDIR and its profile stay
+# behind — in a Relay pane the TMPDIR is under /dev/shm (the pane's own is too long for Chrome's
+# socket), which nothing else ever cleans. Each private dir records the test process that owns it
+# (pid and start time, so a recycled pid is not mistaken for it) and the profile beside it; the
+# next Browser.start() removes the ones whose owner is gone. Only dirs carrying this record are
+# touched, and a recorded profile only when it still looks like a Chrome profile.
+_OWNER_RECORD = "relay-browser-owner"
+
+
+def _starttime(pid: int) -> str | None:
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    fields = stat[stat.rfind(")") + 2:].split()
+    return fields[19] if len(fields) > 19 else None
+
+
+def _mark_leftover_owner(tmpdir: str, profile: str) -> None:
+    started = _starttime(os.getpid())
+    if started is None:
+        return   # no /proc: nothing can be proven dead later, so record nothing
+    with contextlib.suppress(OSError):
+        Path(tmpdir, _OWNER_RECORD).write_text(
+            f"pid {os.getpid()}\nstarttime {started}\nprofile {profile}\n")
+
+
+def _reap_leftovers(parents: tuple[str, ...] | None = None) -> list[str]:
+    """Remove private Chrome TMPDIRs (and their profiles) whose owning test process is dead."""
+    removed: list[str] = []
+    me = os.getuid()
+    for parent in dict.fromkeys(parents or (tempfile.gettempdir(), "/dev/shm", "/tmp")):
+        try:
+            entries = list(os.scandir(parent))
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.name.startswith("chrome-"):
+                continue
+            try:
+                if entry.is_symlink() or not entry.is_dir() or entry.stat().st_uid != me:
+                    continue
+                record = dict(line.split(" ", 1) for line in
+                              Path(entry.path, _OWNER_RECORD).read_text().splitlines() if " " in line)
+            except (OSError, ValueError):
+                continue
+            pid, started = record.get("pid", ""), record.get("starttime")
+            if not pid.isdigit() or not started or _starttime(int(pid)) == started:
+                continue   # unreadable, or its test is still running
+            profile = record.get("profile", "")
+            if profile and os.path.isdir(profile) and not os.path.islink(profile) \
+                    and os.stat(profile).st_uid == me \
+                    and any(os.path.exists(os.path.join(profile, n)) for n in ("Local State", "Default")):
+                shutil.rmtree(profile, ignore_errors=True)
+            shutil.rmtree(entry.path, ignore_errors=True)
+            removed.append(entry.path)
+    return removed
+
+
 def find_chrome() -> str | None:
     for name in CHROME_NAMES:
         path = shutil.which(name)
@@ -110,7 +169,10 @@ class Browser:
                           "--use-fake-ui-for-media-stream"]
         arguments.append("about:blank")
         # Chrome's own temp files go in a dir stop() removes; the profile stays where it is.
+        _reap_leftovers()
         self.tmpdir = _chrome_tmpdir()
+        if self.tmpdir:
+            _mark_leftover_owner(self.tmpdir, self.profile.name)
         env = {**os.environ, "TMPDIR": self.tmpdir} if self.tmpdir else None
         # Its own process group, so stop() can end the zygote and GPU children too: one that
         # outlives the browser writes its cache back into a profile stop() already removed.

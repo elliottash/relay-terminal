@@ -723,10 +723,12 @@ def scratch_sweep_note(entries) -> str | None:
     return ("These unledgered entries in the temp dir or directly under your home directory "
             "appeared during your turn:\n"
             f"{listed}{more}\n"
-            "Relay owns agent scratch (#DVV2): ledger each one (a directory you made: "
-            "scratch_dir, or relay-scratch adopt), move it into the project, or delete it. "
+            "Relay owns agent scratch (#DVV2): for each one you made, ledger it (scratch_dir, "
+            "or relay-scratch adopt), move it into the project, or delete it. "
             "An application's own state rather than scratch (a tool's home or install dir) is "
-            "recorded once with relay-scratch own <path>. Nothing is deleted for you.")
+            "recorded once with relay-scratch own <path>. Other sessions and programs write "
+            "here too: leave alone, and do not delete, anything you did not create; mention "
+            "it instead. Nothing is deleted for you.")
 
 
 

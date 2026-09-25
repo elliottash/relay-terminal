@@ -120,3 +120,52 @@ def _alive(pid: int) -> bool:
             return handle.read().rsplit(")", 1)[1].split()[0] != "Z"
     except OSError:
         return False
+
+
+class LeftoverReapTests(unittest.TestCase):
+    """Card #XY13: what a killed test left behind goes at the next start, and nothing else does."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(dir="/tmp")
+        self.addCleanup(shutil.rmtree, self.base, True)
+
+    def leftover(self, name: str, pid: int, starttime: str | None, chrome_profile: bool = True):
+        tmpdir = os.path.join(self.base, name)
+        profile = os.path.join(self.base, "profile-" + name)
+        os.makedirs(os.path.join(tmpdir, "com.google.Chrome.abc123"))
+        os.makedirs(profile)
+        if chrome_profile:
+            open(os.path.join(profile, "Local State"), "w").close()
+        with open(os.path.join(tmpdir, browser._OWNER_RECORD), "w") as handle:
+            handle.write(f"pid {pid}\n" + (f"starttime {starttime}\n" if starttime else "")
+                         + f"profile {profile}\n")
+        return tmpdir, profile
+
+    def test_only_a_dead_owners_dirs_are_removed(self):
+        gone = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                              capture_output=True, text=True).stdout.strip()
+        mine = browser._starttime(os.getpid())
+        dead, dead_profile = self.leftover("chrome-dead0001", int(gone), "1")
+        reused, reused_profile = self.leftover("chrome-reuse001", os.getpid(), "not-" + mine)
+        live, live_profile = self.leftover("chrome-live0001", os.getpid(), mine)
+        odd, odd_profile = self.leftover("chrome-odd00001", int(gone), "1", chrome_profile=False)
+        unrecorded = os.path.join(self.base, "chrome-norecord")
+        os.makedirs(unrecorded)
+        other = os.path.join(self.base, "not-chrome")
+        os.makedirs(other)
+        removed = browser._reap_leftovers((self.base,))
+        self.assertEqual(sorted(removed), sorted([dead, reused, odd]))
+        for path in (dead, dead_profile, reused, reused_profile, odd):
+            self.assertFalse(os.path.exists(path), path)
+        for path in (live, live_profile, unrecorded, other):
+            self.assertTrue(os.path.exists(path), path)   # a live owner, no record, not ours
+        self.assertTrue(os.path.exists(odd_profile))      # a "profile" that is not Chrome's stays
+
+    def test_start_records_the_owner(self):
+        tmpdir = os.path.join(self.base, "chrome-mark0001")
+        os.makedirs(tmpdir)
+        browser._mark_leftover_owner(tmpdir, "/some/profile")
+        text = open(os.path.join(tmpdir, browser._OWNER_RECORD)).read()
+        self.assertIn(f"pid {os.getpid()}\n", text)
+        self.assertIn("profile /some/profile\n", text)
+        self.assertEqual(browser._reap_leftovers((self.base,)), [])   # its owner is alive

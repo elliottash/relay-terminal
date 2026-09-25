@@ -492,6 +492,8 @@ class SweepTests(Sandbox):
         self.assertIn("relay-scratch adopt", note)
         self.assertIn("relay-scratch own", note)       # card #WZ3K
         self.assertIn("Nothing is deleted", note)
+        # Not every entry is this agent's: another session's live file must not be deleted.
+        self.assertIn("do not delete, anything you did not create", note)
         self.assertIsNone(agent.scratch_sweep_note([]))
 
     def test_sweep_is_bound_to_once_per_turn(self):
