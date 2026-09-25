@@ -2,7 +2,7 @@
 
 *Research for Relay's global project board. All claims verified against primary documentation (fetched and checked 2026). Citations are inline.*
 
-Elliott's situation — ~90 research projects scattered across git repos and Dropbox folders — is the exact scaling problem this class of tool hits. Each system below answers five questions differently: **where the registry of projects lives** (one file, one folder per project, or discovered by scanning), **how cross-project aggregation is computed** (scan at read time, committed index, or cache/db), **how priority and effort/budgets are represented**, **how a global item links to a per-project item**, and **what breaks across repos and machines**.
+Projects scattered across repositories and document folders are the scaling problem this class of tool addresses. Each system below answers five questions differently: **where the registry of projects lives** (one file, one folder per project, or discovered by scanning), **how cross-project aggregation is computed** (scan at read time, committed index, or cache/db), **how priority and effort/budgets are represented**, **how a global item links to a per-project item**, and **what breaks across repos and machines**.
 
 ## 1. Taskwarrior + Timewarrior
 
@@ -28,7 +28,7 @@ Elliott's situation — ~90 research projects scattered across git repos and Dro
 
 **Linking:** links are paths or `id:`/`org-id` URIs; a global item can link to `file:~/repos/paper1/board/x.md` or an org-id. Robust within Emacs, opaque to other tools.
 
-**Multi-machine:** files synced via Dropbox/git; org's own answer to phone sync (MobileOrg) historically produced conflicts, and the manual's effort/clock totals silently depend on every machine having the same `org-agenda-files`. **org-roam** ([site](https://www.orgroam.com/)) shows the trap side: it uses one `org-roam-directory` with per-file IDs and explicitly warns that it "won't automatically resolve symbolic links" to the directory — Elliott's Dropbox-symlinked `~/project-notes/` pattern would break ID resolution.
+**Multi-machine:** files synced via Dropbox/git; org's own answer to phone sync (MobileOrg) historically produced conflicts, and the manual's effort/clock totals silently depend on every machine having the same `org-agenda-files`. **org-roam** ([site](https://www.orgroam.com/)) shows the trap side: it uses one `org-roam-directory` with per-file IDs and explicitly warns that it "won't automatically resolve symbolic links" to the directory — A symlinked project folder can break ID resolution.
 
 ## 3. Obsidian (Dataview, Bases, Kanban, Projects plugins)
 
@@ -66,9 +66,9 @@ The minimal end: one line per task, `(A)` priority, `+project` and `@context` wo
 
 **jira-cli** ([README](https://github.com/ankitpokhrel/jira-cli)) is single-project-per-config: you switch projects by switching whole config files via `--config` or `JIRA_CONFIG_FILE` — no aggregation. **`gh`** does cross-repo aggregation properly, but *at the server*: `gh search issues --owner <owner>` searches every repo of an owner in one query (e.g. `gh search issues --owner github --archived=false`), and can filter on `--project <owner/number>` ([manual](https://cli.github.com/manual/gh_search_issues)). No local registry exists — the platform's index is the registry. That read-time-server-search model is what a Relay global board gets for free within one machine's repos, and cannot get across machines without a hub.
 
-## 9. Folder-as-registry systems: Johnny.Decimal, PARA, project-notes-style
+## 9. Folder-as-registry systems: Johnny.Decimal and PARA
 
-**Johnny.Decimal** ([intro](https://johnnydecimal.com/10-19-concepts/11-core/11.01-introduction/)) makes the folder tree *be* the registry: max 10 areas × 100 categories, unique `AC.NN` IDs on every folder, and "you create an index to link everything together." The registry is one file/folder-tree per machine; aggregation is human lookup. **PARA** ([Forte Labs](https://fortelabs.com/blog/para/)) is four top-level folders (Projects/Areas/Resources/Archives), one folder per active project, "organize by actionability": the global view is literally `ls Projects/`, and completion = moving the folder to Archives. Both are Elliott's `~/project-notes/` pattern done with discipline; both rot when the index isn't maintained or folders are renamed without updating IDs.
+**Johnny.Decimal** ([intro](https://johnnydecimal.com/10-19-concepts/11-core/11.01-introduction/)) makes the folder tree *be* the registry: max 10 areas × 100 categories, unique `AC.NN` IDs on every folder, and "you create an index to link everything together." The registry is one file/folder-tree per machine; aggregation is human lookup. **PARA** ([Forte Labs](https://fortelabs.com/blog/para/)) is four top-level folders (Projects/Areas/Resources/Archives), one folder per active project, "organize by actionability": the global view is literally `ls Projects/`, and completion = moving the folder to Archives. Both rely on disciplined maintenance; indexes can rot when folders move without updating IDs.
 
 ## 10. Dendron, Foam (workspace-above-notes systems)
 
@@ -105,7 +105,7 @@ The minimal end: one line per task, `(A)` priority, `+project` and `@context` wo
 6. **Content-hash IDs for cross-repo reference.** Beads' `bd-a1b2` and git-bug's object hashes survive repos, renames, and machines; sequence numbers (git-issue, dstask prefixes) only resolve locally ([Beads README](https://github.com/gastownhall/beads)).
 7. **Sync over namespaced refs on existing git remotes** (Beads `refs/dolt/data`; git-bug push/pull): the global board's aggregation data can live on a small hub repo's git remote without any new server or Dropbox ([sync-concepts](https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md)).
 8. **An export/interchange format beside the truth.** Beads keeps `.beads/issues.jsonl` for viewers and states plainly it is not the source of truth — Relay could emit a read-only JSON/MD rollup for scripts and co-authors without ever letting it become a second truth.
-9. **Route items for repos you can't write to into a central DB** (Beads `--contributor` + `BEADS_DIR` → e.g. `~/.beads-planning`): exactly Elliott's case where co-authors own some repos — global items about foreign repos live in the hub, linked by repo path + ID.
+9. **Route items for repos you can't write to into a central DB** (Beads `--contributor` + `BEADS_DIR` → e.g. `~/.beads-planning`): useful when collaborators own some repositories — global items about foreign repos live in the hub, linked by repo path + ID.
 10. **One repo for all tasks when repos are cheap** (dstask): alternatively to hub-over-repos, a single `~/.switchboard` git repo whose `+project` tags map to repos, synced with merge commits — simplest multi-machine story of anything surveyed.
 11. **Workspace "contexts" that scope every report** (Taskwarrior `context` affects `projects`/`summary`): a global board command like `relay board --context editing` should filter the whole aggregation, not single views ([context](https://taskwarrior.org/docs/context/)).
 12. **The saved-query-as-board file** (Obsidian Bases `.base`, Dataview `TABLE … FROM`): global views (e.g. "every card in any repo with `priority >= 2` and no activity in 14 days") stored as query files, so the board is definition, not data ([Bases](https://help.obsidian.md/bases)).
@@ -114,10 +114,10 @@ The minimal end: one line per task, `(A)` priority, `+project` and `@context` wo
 
 - **Index drift.** Any committed/generated index (Johnny.Decimal's index, Dendron's workspace registries, a Relay-cached rollup) silently diverges from the cards. Every system that avoids rot does read-time computation; the ones that commit indexes require discipline that never survives 90 projects.
 - **Two sources of truth.** Beads had to write into its docs that the JSONL export is "not the source of truth"; the Projects plugin reading Dataview-created data created two schemas for the same notes. A Relay global board that copies card data out of `.board/` files will rot within weeks.
-- **Dead and unresolvable links.** Wikilink-based systems (Obsidian, Foam, Logseq) accumulate orphans on renames; org-roam explicitly does not resolve symlinked directories — a direct hazard for Elliott's Dropbox-symlinked `~/project-notes/` ([org-roam](https://www.orgroam.com/)).
+- **Dead and unresolvable links.** Wikilink-based systems (Obsidian, Foam, Logseq) accumulate orphans on renames; org-roam explicitly does not resolve symlinked directories — a direct hazard for symlinked project folders ([org-roam](https://www.orgroam.com/)).
 - **File-sync conflicts.** todo.txt/org/Dropbox setups corrupt on concurrent edits; the tools that solved it built real merge (dstask's merge commits, Beads' Dolt push/pull, taskwarrior's sync protocol). Kanban card files with append-only threads merge cleanly; *index* files do not.
 - **App-owned databases.** Logseq's DB version ships a data-loss warning in beta ([README](https://github.com/logseq/logseq)); Taskwarrior moved data formats under versioned migration. Relay should keep plain Markdown as truth and treat any DB as a rebuildable cache.
 - **Plugin rot.** The Obsidian Projects plugin was discontinued by its sole maintainer in May 2025 ([README](https://github.com/marcusolsson/obsidian-projects)); Dendron's development slowed. A global board's core must not depend on single-maintainer plugins.
-- **Uncontrolled vocabularies.** todo.txt `+project` typos fork projects; folder registries (PARA, JD, project-notes) rot when folders move without renumbering/relinking. A global registry needs one canonical project name, validated against the scanned repos.
+- **Uncontrolled vocabularies.** todo.txt `+project` typos fork projects; folder registries (PARA and Johnny.Decimal) rot when folders move without renumbering/relinking. A global registry needs one canonical project name, validated against the scanned repos.
 - **Sequence IDs don't travel.** git-issue and dstask IDs are repo-local; cross-repo references need a repo prefix (`owner/repo#123`) or a content hash.
 - **Scan cost at scale.** Dataview documents vault-wide query expense; org agendas slow with hundreds of files. Relay should scan lazily per root and cache within the session.

@@ -2,7 +2,7 @@
 
 *Research pass for the Relay global project board. All URLs were fetched and read on 2026-09-24 (a few Asana/Notion/Shortcut pages via archive.org snapshots of their official help centers; live URLs cited). No commits; this file only.*
 
-Every tool below started with a per-project board (Relay's `.board/` equivalent) and later grew a second object — the "portfolio layer" — answering Elliott's questions: which of ~90 projects are most critical, how much time each gets, what is cross-project. The successful designs converge on **a thin wrapper object with its own status/health/progress, priority, and dates — never a second copy of the cards.**
+Every tool below started with a per-project board (Relay's `.board/` equivalent) and later grew a second object — the "portfolio layer" — answering portfolio questions: which projects are most critical, how much time each gets, and what spans projects. The successful designs converge on **a thin wrapper object with its own status/health/progress, priority, and dates — never a second copy of the cards.**
 
 ---
 
@@ -64,7 +64,7 @@ Every tool below started with a per-project board (Relay's `.board/` equivalent)
 
 **(4) Storage/export.** **Any view exports as .tsv** ([exporting project data](https://docs.github.com/en/issues/planning-and-tracking-with-projects/managing-your-project/exporting-your-projects-data)); full access via GraphQL `ProjectsV2` API ([using the API](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects)).
 
-**Pain points.** Export is per-view TSV only (no full-project dump), so reporting tools re-scrape; no object above projects, so org-level roadmaps get modeled as giant projects — the exact anti-pattern Elliott wants to avoid.
+**Pain points.** Export is per-view TSV only (no full-project dump), so reporting tools re-scrape; no object above projects, so org-level roadmaps get modeled as giant projects — a common portfolio anti-pattern.
 
 ## Trello — Workspace Table/Calendar views, Butler, Enterprise reporting
 
@@ -76,7 +76,7 @@ Every tool below started with a per-project board (Relay's `.board/` equivalent)
 
 **(4) Storage/export.** REST API per board/card, JSON export per board; no board collection export.
 
-**Pain points.** The rollup views are paywalled and read-only; the community's standard workaround is Butler mirrors + a "master board," which drifts. Elliott's Trello "Work" board is exactly this failure mode: one flat board of cards standing in for projects.
+**Pain points.** The rollup views are paywalled and read-only; the community's standard workaround is Butler mirrors + a "master board," which drifts. A flat action board can be mistaken for a project portfolio.
 
 ## Height (defunct)
 
@@ -178,12 +178,12 @@ Airtable's rollup: one **base** = project(s); a **portfolio base** relates to pr
 1. **The layer above is a thin *wrapper* with its own status, not a copy of cards** (Linear Initiatives, Shortcut Objectives). A global project card holds: lifecycle status, health, priority, target date, and references — never the project's cards.
 2. **Separate the three orthogonal signals** (Linear projects, Asana portfolios): *status* (planning/executing/…, matching the existing column set), *health* (on-track/at-risk/off-track — human-set, deliberately subjective), *progress %* (computed). Never collapse them into one field.
 3. **Compute progress from the board, but allow manual override** (Linear project progress; Shortcut tactical objectives). For Relay: `progress: auto | manual`, auto = fraction of done cards, overridable in front matter.
-4. **Dated, append-only project updates with a mandatory health pick** (Linear project updates, Asana status updates). Each update = a front-matter-stamped entry in the card's thread; the *latest* update is what the global board displays. This is exactly Elliott's "Last Meeting" column, upgraded.
+4. **Dated, append-only project updates with a mandatory health pick** (Linear project updates, Asana status updates). Each update = a front-matter-stamped entry in the card's thread; the *latest* update is what the global board displays. This makes the age of a project update visible.
 5. **Portfolio priority is its own integer field, independent of card priority** (Linear's 2024 project priority). Reuse the −1..+3 scale, but scope it: card priority ≠ project criticality ≠ Lineup rank.
 6. **An explicit ranked "what matters now" list of ~5–10 projects** (Basecamp The Lineup) — a single `lineup.md` with ordered slugs beats per-project priority sorting when everything is "priority 2."
 7. **Global board = read-only rollup over the same files, one writable overlay** (GitHub Projects: rows reference repo issues; only custom fields are project-owned). The global `.board/` stores *links* (`repo: path`) plus overlay fields (criticality, time budget, delay-until), and never forks card content.
 8. **If duplication is ever needed, mirror named fields, not the card** (Trello Butler card mirroring, monday Connect+Mirror columns). Define the sync contract narrowly: status, due, priority — with the per-project board always authoritative.
-9. **Time budgets as hours-per-week per project, with over/under indicators** (Asana Workload, ClickUp Workload, Jira capacity plans' hours/days/%). Concretely: `budget: 6h/week` in the global card front matter, summed into a workload table — this replaces the Google Sheet's "active (1/0.5/0)" with real units.
+9. **Time budgets as hours-per-week per project, with over/under indicators** (Asana Workload, ClickUp Workload, Jira capacity plans' hours/days/%). Concretely: `budget: 6h/week` in the global card front matter, summed into a workload table — this gives a workload plan explicit units.
 10. **Plan vs. actual dates** (Linear target/actual completion, monday planned vs spent effort): `target_date`, `delay_until`, `last_contact` as explicit fields — direct transcription of the Sheet's "Delay Until" / "Last Meeting."
 11. **A sandbox/staged-commit mode for portfolio edits** (Jira Plans: changes stay in the plan until saved): the global board is a git branch — propose re-planning, diff it, merge it. Git *is* the sandbox Jira had to build.
 12. **Publish a generated, human-readable rollup artifact** (GitHub per-view .tsv export; Airtable "interface-only" published views; Notion page export): `make board` emits `BOARD.md`/`board.csv` from the card files — the portfolio layer's deliverable is a derived file, so the source of truth stays the per-project `.board/`.
