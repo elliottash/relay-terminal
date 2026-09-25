@@ -3349,7 +3349,8 @@ Hunks left out are neither committed nor touched: they stay in the working tree 
 commit picks them up. A bare path with --by <pane-id|#ID> selects by authorship -- the same
 matcher that names FOREIGN hunks, over the journals under <root>/authors -- instead of by
 position, so another session's concurrent edit elsewhere in the file cannot shift your
-numbers; a numbered selection keeps its positional meaning. Either selection flag prints a new digest. The digest covers the tip and
+numbers; a numbered selection keeps its positional meaning. Either selection flag prints a
+new digest. The digest covers the tip and
 the exact bytes of every path, so a working-tree edit, a different selection or main moving
 makes it stop matching, and you are asked again.
 
