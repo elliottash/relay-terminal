@@ -40,3 +40,20 @@ One thing for the owner, flagged in Risks: #6W0Z's measurements show all three i
 
 <!-- relay:entry 20260924T043324Z-34 author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260925T050113Z-p1 author=claude-code kind=note -->
+### Claude Code · 2026-09-25 05:01
+Re-checked against `8163b4ed`: all three hot paths are still in `engine/view/TerminalView.cpp` (`linkAt` 2120, `paintRow`/`colorsFor` 809/837, `TerminalAccessible::allText` 234). Nothing has fixed them since the plan of 2026-09-24. I replaced `## Plan` because it had gone stale:
+
+- Line numbers are updated.
+- The "O(line²) appends" claim is corrected. `QString +=` grows amortised, so the build is O(L) with one temporary per cell.
+- Two per-hover-cell costs the old plan missed are added:
+  - `linkAt` still calls the uncached `currentDirectory()` (2312, 2176): a readlink plus the core mutex. #6W0Z moved only `restLinkColumns` to `frameDirectory()`.
+  - It calls `withCore → hyperlinkAt` (2222), another mutex acquisition on every hover cell.
+- `links::scan` probes every candidate on the line, not only the one under the pointer.
+- The a11y cost is O(viewport) per character query, via `characterRect`/`offsetAtPoint` `split`.
+- The test command is corrected. There is no `ViewTest` ctest; it is `relay-engine-tests`, with `RELAY_ENGINE_TEST=ViewTest` to run one object.
+- `folds.sh` (screenshots checked by eye) is replaced with an env-gated golden-grab test whose before and after images are compared with `cmp`.
+- A tests-first commit is added: a probe-count test plus env-gated `QBENCHMARK` slots, so before/after numbers come from the same test source.
+
+Also proposed a `verify` block (script primary, pairwise also, human optional, effort low). `## Done means` is unchanged. Its item 2 still names `folds.sh`; the plan's golden-grab test is the stricter check of the same claim. There are two owner questions under Risks: whether to keep items 2–3, and whether to keep the golden and bench slots in ViewTest permanently. Status is unchanged (planned).

@@ -6,6 +6,7 @@ labels: [bug]
 rank: zzz
 created: '2026-09-17'
 source: Relay pane, cleanup audit 2026-09-17
+verify: {artifact: code, primary: script, also: [pairwise], human: optional, criteria: 'relay-engine-tests passes incl. the new hover probe-count test; before/after golden grabs are byte-identical; a person may hover a wrapped path and run a search to confirm nothing looks different', sign_off: none, effort: low}
 links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
 # TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText
@@ -32,36 +33,58 @@ The three redundant recomputations in `engine/view/TerminalView.cpp` are gone an
 Failure would show as staleness, not slowness: a hover underline or link target left over after scrolling or new output, wrong cell colours while a search is active, or screen-reader text that lags the screen — any of those means the cache invalidation is wrong.
 
 ## Plan
-**Goal** — Remove the audit's three redundant recomputations in `engine/view/TerminalView.cpp` (per-hover-cell `linkAt` rebuild, double `colorsFor`, per-query a11y `allText`) with zero visible behaviour change. Note from #6W0Z's measurements (thread, 2026-09-20): all three are below noise today, so this is a cleanup of the asymptotics (long wrapped lines, many search highlights), not a promised speedup. The bar is identical behaviour with the redundant work provably gone.
+**Goal:** remove the redundant per-event work in `engine/view/TerminalView.cpp` with no visible change. That work is the per-hover-cell `linkAt` rebuild and scan (with its core-mutex and `readlink` round trips), `colorsFor` computed twice per painted cell, and the accessibility `allText()` rebuilt and re-split on every query. #PF4K/#6W0Z measured all three as small today (thread, 2026-09-20: 0.141 ms and 4–5 syscalls per hovered cell; `colorsFor` about 3.4 % of GUI samples). So this fixes how the cost grows with long wrapped lines, many search matches and screen readers; it does not promise a speedup. The bar is identical behaviour, with the removed work proved by counters.
 
-**Findings** (verified by reading the code, 2026-09-24; line numbers current):
+**Findings** (re-checked 2026-09-25 against `8163b4ed`; all three are still present; line numbers are today's):
 
-- `LogicalRow` / `logicalRowAt()` — TerminalView.cpp:2049–2075. Joins continuation rows with `out->text += text` per cell (2073): O(line²) QString appends.
-- `linkAt()` — 2119. Calls `logicalRowAt` (2295–96) then `links::scan(logical.text, currentDirectory(), …, m_linkProbe ? m_linkProbe : links::systemProbe(), m_cardLookup, …)` (2311–12) on **every hover-cell change** via `updateHover` (1890–1913). The per-*painted-row* sibling `restLinkColumns` (3088–3143) is #6W0Z's territory (its cwd half already landed in b8e91fe3); do not rework it beyond sharing the `logicalRowAt` improvement.
-- `paintRow()` — 808. The `colorsFor` lambda (836) linearly scans `line.highlights` (865) and is called at 886 (background pass), 934 (text pass, with a second highlight loop at 924) and 1024 (fold prefix, col 0).
-- `TerminalAccessible::allText()` — 233, loops `view()->m_frame.lines` (236); called from the `text`/`characterCount`/line helpers at 177–217, each rebuilding and re-splitting. Only reachable when `QAccessible::isActive()` (change events gated at 718).
-- Invalidation anchor: `ViewportFrame` (engine/core/CellTypes.h:156–179) has per-row `dirty` and `full` but **no version counter**; frames arrive in `pullFrame` at TerminalView.cpp:629, and hover invalidation already keys on `m_frame.full`/`m_frame.dirty[row]` at 643–647.
-- Test hooks that already exist: `setLinkProbe` (2021; header 156) lets a test count probe calls; ViewTest.cpp covers hover underline across wrapped rows (971), rest colour (1016), folds, rewrap.
+- **Hover → `linkAt`.** `updateHover` (1891) returns early only when the cell is unchanged (1899). Otherwise it calls `linkAt(c, …, &segments)` (1914; `linkAt` body at 2120). Every new hover cell on an emulator row pays for:
+  - a `withCore` call → `core.hyperlinkAt` (2222). This takes the core mutex, which the pty thread holds while it feeds output.
+  - `logicalRowAt` (2057–2077). It builds a temporary `QString` per cell via `cellText` (2071), appends it (2074), and does a `cellOf.push_back` per UTF-16 unit. That is O(L) with a heap temporary per cell, not the O(L²) the audit said, because `QString +=` grows amortised.
+  - a linear search of `cellOf` for the hovered cell (2299–2304), O(L).
+  - `links::scan(logical.text, currentDirectory(), …)` (2312). `currentDirectory()` is the uncached path (readlink of `/proc/<pid>/cwd` plus the core mutex), not the per-frame `frameDirectory()` (1973) that #6W0Z gave `restLinkColumns`. `scan` probes every candidate on the logical line, not only the one under the pointer, so an `ls` row with 30 names costs about 30 `stat`s per hovered cell.
+  - Fold rows take a separate branch that runs its own `links::scan(text, currentDirectory(), …)` (2176).
+  - For a line of L characters, hovering across it costs about L × (1 mutex + 1 readlink + O(L) build + candidates × stat). Nothing on that line has changed in between.
+- **`paintRow`** (809). The lambda `colorsFor` (837–877) does 2 × `resolve`, a linear walk of `line.highlights` (865) and `faintInk`. It runs in the background pass (887), again in the text pass (935), and a third time at the fold chevron (`colorsFor(0)`, 1025). The text pass also walks `line.highlights` a third time through `highlighted(col)` (924–928) on rest-link cells. Cost per row: about 2·cols·(H + 2 resolves), plus cols·H on link cells, where H is the number of highlights on that row (non-zero only while a search is active; the #PF4K case had 15,695 matches).
+- **`TerminalAccessible`** (≈160–240). `allText()` (234) joins every `m_frame.lines[].text()` into a new string on each call. `text(Value)` (178), `text(start,end)` (200) and `characterCount` (201) each call it, and `characterRect` (205) and `offsetAtPoint` (218) also `split('\n')` the result. A screen reader walking characters therefore costs O(viewport) **per character**. This only happens when a screen reader is attached: change events are gated by `QAccessible::isActive()` at 719.
+- **What a cache can key on.** `ViewportFrame` (engine/core/CellTypes.h:157–178) has `dirty`/`full`/`scrolledBy` but no version number. Every write to `m_frame` happens inside `pullFrame`'s `withCore` block: `updateFrame` (630) and `syncFoldViewport` (3634–3697), and that one sets `*changed`. `pullFrame` returns at `if (!changed)` (641). Hover already resets on `full`/`dirty`/`m_visualTopMoved` (644–657).
+- **Things that already exist and help.** `frameDirectory()` (1973) is reset in `pullFrame` (615) and `linkProbeUpdated` (2029). `setLinkProbe` (2022; header 156) lets a test count probe calls. `m_restLinks` (h:577) is the text-keyed per-row cache that `restLinkColumns` (3165) uses; it keeps spans only, not `links::Found`. Engine tests are **one** executable, `relay-engine-tests`. `RELAY_ENGINE_TEST=ViewTest` runs only the `ViewTest` object (engine/tests/main.cpp:23), and existing grab hooks use env vars (`RELAY_HOVER_EVIDENCE`, ViewTest.cpp:1008).
+- **Adjacent code, out of scope.** 3739 is a second `hyperlinkAt` under `withCore`, in the keyboard link walk; it is not on a hot path. GhosttyCore is untouched, because no `VtCore` interface changes.
 
-**Steps**
+**Steps.** All of this is in one file plus its header and tests, so one agent works through it in order, with no parallel subagents. Steps 3, 4 and 5 are independent once step 2 has landed.
 
-1. **Frame version.** Add `quint64 m_frameVersion` to TerminalView, bumped in `pullFrame` (~629) only when `updateFrame` reports a real change. This is the cache key for steps 2–4. (If the pull can be a no-change frame, bumping unconditionally would make the caches never hit — check the `changed` flag already returned at 629.)
-2. **linkAt cache + one-pass build.** Member cache `{int row; quint64 version; LogicalRow logical; std::vector<links::Found> found;}`; `linkAt` reuses it when row + version match, otherwise rebuilds. Clear it in `setCardLookup` (2014) and `setLinkProbe` (2021). cwd needs no key of its own — it is resolved per frame since b8e91fe3, so a `cd` arrives with a new frame. In `logicalRowAt`, replace the per-cell `+=` with one `reserve()` (sum the continuation rows' lengths first) and a single append pass.
-3. **paintRow: colours once per cell.** Fill a `QVarLengthArray<CellColors>` for the row's cols in one pass at the top of `paintRow` (one walk of `line.highlights`), and index it from both the background (886) and text (934) passes; keep the fold-prefix `colorsFor(0)` use (1024) working.
-4. **allText cache.** Cache the joined viewport string (and whatever the split helpers at 204/217 need) keyed by `m_frameVersion`; rebuild only when the version differs. Keep the `QAccessible::isActive()` early-out exactly as is.
-5. **Tests** (engine/tests/ViewTest.cpp): a counting-`setLinkProbe` test — hovering across N cells of one wrapped path probes once per frame, and once again after new output arrives; the existing hover/fold/rest-colour tests double as the coloursFor regression net, run them all. If the a11y cache can't be driven without a screen reader, factor the join+split so the cache key is unit-testable directly; do not fake `QAccessible::isActive()`.
+1. **Tests and measurement first, landed as their own commit before any change.** This gives before and after the same test source. In `engine/tests/ViewTest.cpp`:
+   - (a) `hoverSweepProbesOncePerFrame`: print one wrapped line that holds several path candidates. Install a counting `setLinkProbe`, send mouse moves across N cells and record the probe count. Today it is about N × candidates. After step 3 it must be ≤ candidates, and it must rise again after new output is fed.
+   - (b) `paintGrabGolden`: with `RELAY_PAINT_GOLDEN=<dir>` set, save `grab()` PNGs of fixed scenes to that directory. The scenes cover: a search with many highlights including the current one, a selection, reverse video, a wide character, rest-coloured links, a banded role row, and a fold chevron. With the variable unset, the test only checks that painting succeeds.
+   - (c) `benchHoverSweep` and `benchPaintHighlights`: `QBENCHMARK` slots that `QSKIP` unless `RELAY_VIEW_BENCH=1`. They sweep the pointer across a 2,000-character wrapped line, and repaint a page with about 200 highlights per row.
+   - Record the probe count, the PNGs and the bench numbers from this commit under `docs/qa_evidence/<date>-9MYY/before/`.
+2. **Frame version.** Add `quint64 m_frameVersion` to `engine/view/TerminalView.h`, and increment it in `pullFrame` just after `if (!changed) return;` (641). It must never be bumped unconditionally, or every cache would miss.
+3. **Hover `linkAt`** (TerminalView.cpp):
+   - (a) At 2312 and 2176, use `frameDirectory()` instead of `currentDirectory()`, which is the same rule #6W0Z applied.
+   - (b) Add a one-entry member cache `{quint64 version; int firstRow; links::Mode mode; LogicalRow logical; std::vector<int> idxOfCell /*row-major, -1 when none*/; std::vector<links::Found> found;}`. On a hit, the hovered index is a table lookup instead of the loop at 2299. Recompute `segments`, `startCol` and `endCol` on every call, because they depend on `screenRowOfReal` and visual top, not on the text.
+   - (c) Clear the cache in `setCardLookup` (2013), `setLinkProbe` (2022) and `linkProbeUpdated` (2029), and whenever `m_frameVersion` changes.
+   - (d) For `hyperlinkAt` (2222): when the cell's `link` id is 0, skip the `withCore` call. When it is non-zero, answer from a per-frame id→URI memo, cleared in `pullFrame` alongside `m_frameProse`. An id's URI never changes; `proseLink` (2363) already relies on this.
+   - (e) In `logicalRowAt`, `reserve()` `text` and `cellOf` from the summed row widths, and append the `ch` of single-code-point cells directly without building a temporary `QString`. `restLinkColumns` gets this for free.
+4. **`paintRow`: colours once per cell.** Before the background pass, fill a `QVarLengthArray<CellColors, 256>` plus a `highlighted` bit per column. Instead of a scan per column, walk `line.highlights` once, painting its ranges onto a per-column index. Later highlights must still win, as the current loop does, so the current match is not overwritten. Read that array at 887, 935 and 1025 and in the `highlighted(col)` check at 926. Keep `colorsFor`'s body as the single function that fills the array, so its rules are not duplicated.
+5. **`allText` cache.** Give `TerminalAccessible` a `mutable` cache `{quint64 version; QString text; QVector<int> lineStart;}` keyed on `view()->m_frameVersion` (the class is already a friend, h:289). `text`/`characterCount` return the cached string. `characterRect`/`offsetAtPoint` use a binary search on `lineStart` instead of `split`, and `cursorPosition` (188) uses `lineStart` too. Leave the `isActive()` gate at 719 as it is. For the test, split out the join/offset computation as a free function over a `ViewportFrame` and test it directly. Do not fake `QAccessible::isActive()`.
+6. **After the change:** run 1(a)–(c) again into `docs/qa_evidence/<date>-9MYY/after/`, then compare the PNGs byte for byte (`cmp`) and the numbers.
 
-**Orchestration** — none. One file, one agent, no subagents.
+**Risks** (failures here show up as stale output, not as slowness):
 
-**Risks**
-
-- Stale cache shows as a stale underline, link target, colours or a11y text — invalidation must be the frame version, never a content comparison. The version must bump only on real change (step 1).
-- Sharing the linkAt cache with `restLinkColumns` would need per-row (dirty-flag) invalidation instead of per-frame; only do it if it stays simple, otherwise keep two caches.
-- GhosttyCore is untouched (no `VtCore` interface change), so the "can't build GhosttyCore here" constraint from #6W0Z does not apply.
-- No measured perf win is promised — if the owner would rather not spend churn on items 2–3 (below noise), say so and the card shrinks to step 2. Default: do all three; each is small.
+- If the version stops bumping on some path that mutates `m_frame`, the underline, link target or a11y text goes stale. Today every mutation is inside `pullFrame`'s `withCore`, including fold viewport shifts. Test 1(a) must cover output, scroll, resize and opening a fold.
+- A file created while the screen is idle stays unlinked on hover until the next frame. That matches what rest colouring already does. `linkProbeUpdated` still clears it when the host vouches for a path.
+- The `cd` case is the same trade #6W0Z already accepted: the prompt that follows a `cd` is itself a new frame.
+- Step 4 must keep "last highlight wins" and the selection → highlight → faint order exactly. The golden PNGs are what enforce this.
+- A per-frame URI memo relies on the core never reusing a link id for a different URI within one frame. Confirm this in `LibVtermCore`/`GhosttyCore` `hyperlinkUri` before doing 3(d). If it cannot be confirmed, drop 3(d) and keep only the id == 0 shortcut.
+- **Owner question 1:** items 2–3 (paint, a11y) measured below noise. Do all three (my recommendation: each is small, and the a11y fix removes quadratic behaviour for screen-reader users), or cut this card to step 3?
+- **Owner question 2:** is it acceptable to land step 1's golden-grab and benchmark slots permanently in ViewTest (env-gated, skipped by default)? My recommendation is yes: they are how the next paint change proves itself.
 
 **Verify**
 
-- Build via `scripts/relay-build`, then `ctest --test-dir build -R ViewTest` (existing link/hover/fold tests unchanged + the new counting tests).
-- `engine/scripts/gui/folds.sh` pixel-identical against the pre-change build (the bar #6W0Z used).
-- Manual smoke: hover a wrapped path — underline spans every row and clears on leave; `cd` then `ls` still colours paths; a search with many matches paints the same colours as before.
+- Build with `scripts/relay-build --target relay-engine-tests`, then run `ctest --test-dir build -R relay-engine-tests` (the whole engine suite, about 2 minutes). For the fast loop, run `RELAY_ENGINE_TEST=ViewTest build/engine/relay-engine-tests`. Because the change touches a header, also run `scripts/relay-build` (`relay`), since `land.py`'s build gate compiles it.
+- Test 1(a) passes. Its probe count drops from about N × candidates to ≤ candidates per frame, which is the Done-means counter.
+- `cmp` finds every before/after golden PNG identical.
+- `RELAY_VIEW_BENCH=1 RELAY_ENGINE_TEST=ViewTest build/engine/relay-engine-tests benchHoverSweep benchPaintHighlights` before and after, with the numbers recorded in the evidence folder.
+- Manual smoke on a real pane:
+  - Hover a wrapped path: the underline spans every row and clears on leave.
+  - `cd` then `ls`: paths still colour and open.
+  - Search with many matches: same colours as before.
