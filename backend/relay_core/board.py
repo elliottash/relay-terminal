@@ -28,7 +28,7 @@ import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
@@ -229,7 +229,13 @@ WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemente
                # exists, and a move to a status column is what clears it.
                "section",
                # The QA ladder's proposal for this card (#WFRA): see `validate_verify`.
-               "verify")
+               "verify",
+               # Card metadata (#MJ76), every key optional and absent when unset: `owner` is
+               # the person accountable (`assignee` stays the agent working the card);
+               # `resolution` is the close reason on a done/dropped card, with `duplicate_of`
+               # naming the card a duplicate closed for; `due` and `snooze` are the dates —
+               # see `validate_due` / `validate_date`.
+               "owner", "resolution", "duplicate_of", "due", "snooze")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author",
                  "origin", "suggested", "rejected", "reason")
@@ -246,8 +252,10 @@ ALLOWED_FIELDS = {
 }
 #: Emission order; anything else follows, sorted, so a new key is never dropped.
 FIELD_ORDER = ("id", "type", "status", "section", "name", "description", "kind", "topic", "scope",
-               "private", "labels", "component", "milestone", "workstream", "assignee",
+               "private", "labels", "component", "milestone", "due", "snooze", "workstream",
+               "assignee", "owner",
                "implemented_by", "verified_by", "session", "waiting_on", "parent", "blocked_by",
+               "resolution", "duplicate_of",
                "aliases",
                "paths", "pinned", "reviewed", "author", "supersedes",
                "label_count", "label_output", "codebook", "shell", "priority", "rank", "created",
@@ -285,6 +293,231 @@ CARD_SECTIONS = (
 
 ITEM_STATUSES = ("open", "in-progress", "blocked", "deferred", "done", "dropped")
 CLOSED_ITEM_STATUSES = ("done", "dropped")
+
+def _link_ids(value) -> list[str]:
+    """A front-matter id or id list (`blocked_by`, `links.related`) as clean upper-case ids.
+    Read-path tolerant: a scalar counts as one entry and nothing raises — the writers validate."""
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple)) else [value]
+    return [str(v).strip().lstrip("#").upper() for v in items if str(v or "").strip()]
+
+
+# --------------------------------------------- card metadata: close reason and dates (#MJ76)
+#: The close reason of a done/dropped card (GitHub `state_reason`, Jira resolution).  Written
+#: by `board_move_card` (`done` when the card lands in the done column, `not-planned` on a
+#: drop), cleared when the card reopens; absent on open cards.
+RESOLUTIONS = ("done", "not-planned", "duplicate", "obsolete", "cannot-reproduce")
+#: Who a `due` date binds (the global-board research's shape): `mine` is a commitment of this
+#: board's owner, `external` a date somebody else set (a conference deadline, a launch).
+DUE_WHOSE = ("mine", "external")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def validate_date(value, field: str = "date") -> str:
+    """An ISO `YYYY-MM-DD` date as text, or `BoardError`.  Everything else (datetimes, bare
+    years, other orders) is refused so every date on a board compares as text."""
+    if not isinstance(value, str) or not _DATE_RE.match(value):
+        raise BoardError(f"{field} must be an ISO date YYYY-MM-DD, not {value!r}")
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise BoardError(f"{field} {value!r} is not a real date") from None
+    return value
+
+
+def validate_due(value) -> dict:
+    """A `due` value normalized to `{"date": ..., "whose": ...}`: a bare date means `mine`,
+    a mapping takes `date` and an optional `whose` (one of `DUE_WHOSE`)."""
+    if isinstance(value, str):
+        return {"date": validate_date(value, "due"), "whose": "mine"}
+    if not isinstance(value, Mapping):
+        raise BoardError(f"due must be an ISO date YYYY-MM-DD or a {{date, whose}} mapping, not {value!r}")
+    date_text = validate_date(value.get("date"), "due.date")
+    whose = value.get("whose", "mine")
+    if whose not in DUE_WHOSE:
+        raise BoardError(f"due.whose must be one of {'|'.join(DUE_WHOSE)}, not {whose!r}")
+    return {"date": date_text, "whose": whose}
+
+
+def validate_resolution(value) -> str:
+    """A close reason, one of `RESOLUTIONS`, or `BoardError`."""
+    if value not in RESOLUTIONS:
+        raise BoardError(f"resolution must be one of {'|'.join(RESOLUTIONS)}, not {value!r}")
+    return value
+
+
+def date_flags(card: "Card", today: date | None = None, milestones: Mapping | None = None) -> dict:
+    """The date state of a card, computed at read time and never written (#MJ76):
+    `effective_due` (the card's own `due.date`, else its dated milestone), `overdue` (that date
+    is in the past and the card is open), `due_soon` (within 7 days), `snoozed` (a `snooze`
+    date in the future).  A bad date on an existing card computes nothing rather than failing
+    the read; the writers validate through `validate_due` / `validate_date`."""
+    today = today or date.today()
+    out = {"effective_due": None, "overdue": False, "due_soon": False, "snoozed": False}
+    due = card.front.get("due")
+    try:
+        if due is not None:
+            out["effective_due"] = validate_due(due)["date"]
+    except BoardError:
+        pass
+    if out["effective_due"] is None:
+        milestone = str(card.front.get("milestone") or "").strip()
+        if milestone and milestones and milestone in milestones:
+            try:
+                out["effective_due"] = validate_date(milestones[milestone], "milestones")
+            except BoardError:
+                pass
+    if out["effective_due"] is not None and card.status not in ("done", "dropped"):
+        out["overdue"] = out["effective_due"] < today.isoformat()
+        out["due_soon"] = not out["overdue"] and out["effective_due"] <= (today + timedelta(days=7)).isoformat()
+    snooze = card.front.get("snooze")
+    if isinstance(snooze, str) and _DATE_RE.match(snooze):
+        out["snoozed"] = snooze > today.isoformat()
+    return out
+
+
+def links_index(cards: Iterable["Card"]) -> dict:
+    """The reverse of every card-to-card link, computed in one pass and never written (#MJ76):
+    `children[id]` (cards whose `parent` is id), `blocks[id]` (cards blocked_by id),
+    `duplicated_by[id]`, `related_from[id]` (cards whose `links.related` names id).  Each list
+    holds `{id, title, status}` rows in id order.  Dangling targets are simply absent."""
+    index = {"children": {}, "blocks": {}, "duplicated_by": {}, "related_from": {}}
+
+    def _add(kind: str, target: str, card: "Card") -> None:
+        index[kind].setdefault(target, []).append(
+            {"id": card.id, "title": card.title, "status": card.status,
+             "done": card.status in ("done", "dropped")})
+
+    for card in cards:
+        parent = str(card.front.get("parent") or "").strip().lstrip("#").upper()
+        if parent and parent != card.id:
+            _add("children", parent, card)
+        for other in _link_ids(card.front.get("blocked_by")):
+            if other != card.id:
+                _add("blocks", other, card)
+        dup = str(card.front.get("duplicate_of") or "").strip().lstrip("#").upper()
+        if dup and dup != card.id:
+            _add("duplicated_by", dup, card)
+        for other in _link_ids((card.front.get("links") or {}).get("related")):
+            if other != card.id:
+                _add("related_from", other, card)
+    for kind in index.values():
+        for rows in kind.values():
+            rows.sort(key=lambda row: row["id"])
+    return index
+
+
+def link_cycle(card_id: str, edges: Mapping, max_hops: int = 50) -> list | None:
+    """The cycle through `card_id` in `edges` (a map of card id → list of linked ids, e.g.
+    `parent` + `blocked_by` targets), as the list of ids from `card_id` round to it, or None.
+    A depth-first walk over every edge, bounded by `max_hops` of depth and a visited set so a
+    pathological board cannot hang a write."""
+    visited: set[str] = set()
+    path: list[str] = [card_id]
+
+    def walk(node: str, depth: int) -> list | None:
+        if depth >= max_hops:
+            return None
+        for target in edges.get(node, []):
+            if not isinstance(target, str) or not target:
+                continue
+            if target == card_id:
+                return list(path)
+            if target in visited:
+                continue
+            visited.add(target)
+            path.append(target)
+            found = walk(target, depth + 1)
+            if found:
+                return found
+            path.pop()
+        return None
+
+    return walk(card_id, 0)
+
+
+def normalize_commits(repo: Path, hashes: Iterable[str], drop_unresolved: bool = False) -> list:
+    """A card's commit sequence (#MJ76): resolve each hash against `repo` (`git rev-parse`),
+    de-duplicate by prefix (a full and a short hash of the same commit count once), sort by
+    committer date ascending so the newest — the QA revision under test — is last, and write
+    12-char short hashes.  Unresolvable entries are kept as written unless `drop_unresolved`
+    (a writer that has git re-sorting the list) is set."""
+    entries: dict[str, tuple[int, str]] = {}  # full sha -> (committer timestamp, short)
+    order: list[str] = []
+    for raw in hashes or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        try:
+            out = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{text}^{{commit}}"],
+                                 cwd=repo, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            out = None
+        if out is not None and out.returncode == 0:
+            full = out.stdout.strip()
+            if full not in entries:
+                stamp = subprocess.run(["git", "show", "-s", "--format=%ct", full],
+                                       cwd=repo, capture_output=True, text=True, timeout=10)
+                try:
+                    ts = int(stamp.stdout.strip())
+                except (ValueError, AttributeError):
+                    ts = 0
+                entries[full] = (ts, full[:12])
+                order.append(full)
+        elif not drop_unresolved:
+            entries[text] = (0, text)
+            order.append(text)
+    order.sort(key=lambda sha: entries[sha][0])
+    return [entries[sha][1] for sha in order]
+
+
+def commit_details(repo: Path, hashes: Iterable[str], limit: int = 20) -> list:
+    """One row per commit in a card's sequence for `board_read` and the card page (#MJ76):
+    `{hash, date, subject, author, signature}` from `git log -1`.  Hashes git cannot resolve
+    are skipped; at most `limit` rows."""
+    rows: list[dict] = []
+    for raw in list(hashes or [])[:limit]:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        try:
+            out = subprocess.run(
+                ["git", "log", "-1", "--format=%H%x00%cs%x00%s%x00%an%x00%(trailers:key=Implemented-By,valueonly)",
+                 text], cwd=repo, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if out.returncode != 0 or not out.stdout.strip():
+            continue
+        parts = out.stdout.rstrip("\n").split("\x00")
+        if len(parts) < 4:
+            continue
+        rows.append({"hash": parts[0][:12], "date": parts[1], "subject": parts[2],
+                     "author": parts[3], "signature": parts[4].strip() if len(parts) > 4 else ""})
+    return rows
+
+
+def find_cycle_after(card_id: str, proposed: Mapping, cards: Iterable["Card"],
+                     max_hops: int = 50) -> list | None:
+    """Would writing `proposed` (`{"parent": id|None, "blocked_by": [...]}`) on `card_id` close
+    a parent/blocked_by cycle?  Builds the board's edge map with the proposal applied and
+    returns the cycle as a list of ids, or None (`link_cycle`)."""
+    edges: dict[str, list[str]] = {}
+    for card in cards:
+        targets: list[str] = []
+        parent = str(card.front.get("parent") or "").strip().lstrip("#").upper()
+        if parent:
+            targets.append(parent)
+        targets.extend(_link_ids(card.front.get("blocked_by")))
+        edges[card.id] = targets
+    targets = []
+    parent = str(proposed.get("parent") or "").strip().lstrip("#").upper()
+    if parent:
+        targets.append(parent)
+    targets.extend(_link_ids(proposed.get("blocked_by")))
+    edges[card_id] = targets
+    return link_cycle(card_id, edges, max_hops)
+
 
 # ------------------------------------------------------------- the verify block (#WFRA)
 #: The QA ladder (design card #BX7B), proposed once per work card by the agent beside
@@ -1431,6 +1664,21 @@ class Board:
             return dict(DEFAULT_CONFIG)
         return parse_yaml(self.config_path.read_text(encoding="utf-8"))
 
+    def milestones(self) -> dict:
+        """Optional dated milestones from the board config (#MJ76): `{name: YYYY-MM-DD}`.
+        A card in a dated milestone with no `due` of its own inherits a soft due date
+        (`date_flags`).  Entries that are not a name → ISO date pair are skipped, so an old
+        config keeps loading."""
+        raw = self.config().get("milestones")
+        out: dict[str, str] = {}
+        if isinstance(raw, Mapping):
+            for name, value in raw.items():
+                try:
+                    out[str(name)] = validate_date(value, f"milestones.{name}")
+                except BoardError:
+                    continue
+        return out
+
     def tabs(self) -> list[dict]:
         return [t for t in self.config().get("tabs") or [] if isinstance(t, dict)]
 
@@ -1546,6 +1794,7 @@ class Board:
         problems: list[Problem] = []
         by_id: dict[str, list[str]] = {}
         seen_ids: set[str] = set()
+        cards: list[Card] = []
         for path in self.card_paths():
             rel = relative_name(path, self.root)
             try:
@@ -1553,6 +1802,7 @@ class Board:
             except (BoardError, UnicodeDecodeError) as exc:
                 problems.append(Problem("bad_card", rel, str(exc)))
                 continue
+            cards.append(card)
             problems.extend(self.check_card(card, rel, fix))
             if card.id:
                 by_id.setdefault(card.id, []).append(rel)
@@ -1564,7 +1814,7 @@ class Board:
             for path in sorted(directory.glob("*.md")):
                 problems.extend(self.check_thread_name(path, seen_ids))
                 problems.extend(self.check_thread(path, None, fix))
-        problems.extend(self.check_whole_board(by_id))
+        problems.extend(self.check_whole_board(by_id, cards))
         return sorted(problems, key=lambda p: (p.path, p.code))
 
     def check_card(self, card: Card, rel: str, fix: bool = False) -> list[Problem]:
@@ -1615,15 +1865,53 @@ class Board:
                                         "warning", fixable=True))
         return problems
 
-    def check_whole_board(self, by_id: dict[str, list[str]]) -> list[Problem]:
+    def check_whole_board(self, by_id: dict[str, list[str]],
+                          cards: Sequence[Card] = ()) -> list[Problem]:
         """What only the whole board can see: one id on two cards, and private files git tracks.
-        `by_id` maps each card id to the paths (relative to the board root) that carry it."""
+        `by_id` maps each card id to the paths (relative to the board root) that carry it.
+        `cards` (the already-loaded cards, when the caller has them) also gets the card-link
+        warnings of `check_links`."""
         problems: list[Problem] = []
         for card_id, paths in sorted(by_id.items()):
             if len(paths) > 1:
                 problems.append(Problem("duplicate_id", paths[0],
                                         f"id {card_id} is used by {len(paths)} cards: {', '.join(paths)}"))
         problems.extend(self._check_private())
+        problems.extend(self.check_links(cards))
+        return problems
+
+    def check_links(self, cards: Sequence[Card]) -> list[Problem]:
+        """Warnings — never errors, so an old board keeps loading — for card links that point
+        nowhere or close a parent/blocked_by cycle (#MJ76).  `board_update_card` /
+        `board_create_card` refuse these on write; `check` only reports them."""
+        problems: list[Problem] = []
+        known = {card.id for card in cards}
+        edges: dict[str, list[str]] = {}
+        for card in cards:
+            rel = card.path.name
+            links = [("parent", [str(card.front.get("parent") or "")]),
+                     ("blocked_by", card.front.get("blocked_by")),
+                     ("duplicate_of", [str(card.front.get("duplicate_of") or "")])]
+            targets: list[str] = []
+            for what, raw in links:
+                for other in _link_ids(raw):
+                    if not other:
+                        continue
+                    if what != "duplicate_of":
+                        targets.append(other)
+                    if other not in known:
+                        problems.append(Problem("dangling_link", rel,
+                                                f"{what} names {other}, which is not a card on this board",
+                                                "warning"))
+            edges[card.id] = targets
+        reported: set[str] = set()
+        for card in cards:
+            cycle = link_cycle(card.id, edges)
+            if cycle and card.id not in reported:
+                reported.update(cycle)
+                problems.append(Problem("link_cycle", card.path.name,
+                                        f"parent/blocked_by links close a cycle: {' → '.join(cycle)}",
+                                        "warning"))
         return problems
 
     def _check_card(self, card: Card, rel: str, fix: bool) -> list[Problem]:

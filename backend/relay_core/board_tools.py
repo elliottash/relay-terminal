@@ -113,6 +113,10 @@ UNDO_SECONDS = 30
 #: owner's decision.
 #: `session` joins them (#R9G7): the pane token that holds the card is the tool's to write, from
 #: the pane's own `configure`, so a model can neither invent one nor take a card by typing it.
+#: Card metadata keys `_meta_value` normalizes (#MJ76): the linked ids, and the values.
+META_LINK_FIELDS = ("parent", "blocked_by", "duplicate_of", "links")
+META_VALUE_FIELDS = ("owner", "resolution", "due", "snooze")
+
 IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private",
                               "section", "session"})
 
@@ -248,6 +252,10 @@ TOOL_SPECS = [
                                     "('voice', 'remote', 'switchboard', ...)."},
           "source": {"type": "string", "description": "Where the request came from, e.g. 'pane 2, 2026-09-17'."},
           "related": {"type": "array", "items": {"type": "string"}, "description": "Ids of related cards."},
+          "parent": {"type": "string", "description": "Id of the larger card this one is part of; "
+                                                     "the parent lists it as a child with progress."},
+          "blocked_by": {"type": "array", "items": {"type": "string"},
+                         "description": "Ids of cards that have to finish first."},
           "not_duplicate_of": {"type": "array", "items": {"type": "string"},
                                "description": "Ids the duplicate check flagged that you have checked and rejected."}},
          ["tab", "status", "title", "summary"]),
@@ -260,6 +268,13 @@ TOOL_SPECS = [
          "`verify`, the QA ladder's block for the card (an object: artifact, primary, also, "
          "deferred, human, criteria, sample, sign_off, effort, stakes, blast; refused naming a "
          "bad key or value). "
+         "Card metadata, all optional (#MJ76): `owner`, the person accountable (assignee is the "
+         "agent); `due`, an ISO date or {date, whose: mine|external}; `snooze`, an ISO date the "
+         "card stays hidden until; `parent`, the id of the card this is part of; `blocked_by`, "
+         "ids that must finish first; `duplicate_of` with `resolution` (done|not-planned|"
+         "duplicate|obsolete|cannot-reproduce). Linked ids must be cards on this board and "
+         "parent/blocked_by may not form a cycle. `links.commits` is kept in commit order, "
+         "oldest first. "
          # Policy rule 9 until v5 (#GMCF): a rewrite of the user's own text happens through this
          # tool and nowhere else, so the permission and the "say you did it" are stated here.
          "Rewriting text the user wrote (a request, a title, an intake note) is allowed when they "
@@ -306,7 +321,9 @@ TOOL_SPECS = [
          "card's `verify` block gates the same way (#1AA6): `human: required` needs an answered "
          "question (offer needs-qa-human), `sign_off` needs a line beginning `Receipt:` in "
          "`## Verdict` or `## Execution Summary`, and `deferred` holds the card out of `done` "
-         "and the QA lanes until it is cleared through fields.verify.",
+         "and the QA lanes until it is cleared through fields.verify. A move to done or dropped "
+         "records the close reason `resolution` (done by default into done, not-planned into "
+         "dropped); a duplicate passes duplicate_of; reopening clears it.",
          {"id": _ID_ARG,
           "status": {"type": "string", "description": "Target status; the file moves into the matching state folder."},
           "section": {"type": "string", "description": "Park the card in this manual section (a column "
@@ -320,7 +337,11 @@ TOOL_SPECS = [
           "implemented_by": {"type": "string",
                              "description": "Only when Relay cannot know it (a guest CLI through "
                                             "the bridge): the model that implemented the change. "
-                                            "Relay's own stamp wins."}},
+                                            "Relay's own stamp wins."},
+          "resolution": {"type": "string", "enum": list(B.RESOLUTIONS),
+                         "description": "Why a card closes, on a move to done or dropped."},
+          "duplicate_of": {"type": "string",
+                           "description": "The card this one duplicates (implies resolution duplicate)."}},
          ["id", "reason"]),
     spec("board_import_items",
          "Create Board cards from tracking the project already has — a TODO.md, a backlog/ "
@@ -2022,15 +2043,37 @@ class BoardTools:
             return None
         return datetime.fromtimestamp(newest, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def _row(self, card: B.Card, thread_counts: dict[str, int]) -> dict:
+    def _row(self, card: B.Card, thread_counts: dict[str, int],
+             links: dict | None = None, milestones: dict | None = None) -> dict:
         # The full row of protocol 19.2. `created`, the task counts and `milestone` were promised
         # there but never sent, so the pane's age and `☑ done/total` badges had nothing to draw
         # (found while rebuilding the pane as rows, 2026-09-18).
         tasks = card.tasks()
+        # Card metadata (#MJ76): `owner`, close reason, dates and the computed date state
+        # (`date_flags`) plus the hierarchy counts from the reverse-link index. Both are
+        # computed once per listing and passed in; a caller that omits them pays for its own
+        # pass (board_read reads one card).
+        try:
+            due = B.validate_due(card.front.get("due")) if card.front.get("due") is not None else None
+        except B.BoardError:
+            due = None
+        flags = B.date_flags(card, milestones=milestones)
+        links = links if links is not None else B.links_index([card])
+        children = links.get("children", {}).get(card.id or "", [])
         return {"id": card.id, "title": card.title, "type": card.type, "status": card.status,
                 "section": card.front.get("section"),
                 "tab": self._tab_of(card), "labels": list(card.front.get("labels") or []),
                 "assignee": card.front.get("assignee"), "waiting_on": card.front.get("waiting_on"),
+                "owner": card.front.get("owner"),
+                "resolution": card.front.get("resolution"),
+                "due": due, "snooze": card.front.get("snooze"),
+                "effective_due": flags["effective_due"], "overdue": flags["overdue"],
+                "due_soon": flags["due_soon"], "snoozed": flags["snoozed"],
+                "parent": card.front.get("parent"),
+                "blocked_by": list(card.front.get("blocked_by") or [])
+                if isinstance(card.front.get("blocked_by"), list) else card.front.get("blocked_by"),
+                "children_total": len(children),
+                "children_done": sum(1 for c in children if c["done"]),
                 "rank": card.rank, "private": card.private, "priority": card.priority,
                 "path": str(card.path.relative_to(self.board.repo)) if card.path else None,
                 "thread_entries": thread_counts.get(card.id or "", 0),
@@ -2103,8 +2146,13 @@ class BoardTools:
             if entry is None:
                 raise BoardToolError(f"unknown tab {args['tab']!r}.")
         counts = self._thread_counts()
+        # One pass for the whole listing (#MJ76): the reverse-link index children counts come
+        # from, and the dated milestones that give a card without its own `due` a soft one.
+        all_cards = self.board.cards()
+        links = B.links_index(all_cards)
+        milestones = self.board.milestones()
         rows = []
-        for card in self.board.cards():
+        for card in all_cards:
             if card.id is None:
                 continue
             if want_type is not None and card.type != want_type:
@@ -2121,7 +2169,7 @@ class BoardTools:
                 continue
             rows.append(card)
         rows.sort(key=lambda c: (B._status_order(c), c.rank or "zzzz", str(c.path)))
-        out = [self._row(c, counts) for c in rows[:limit]]
+        out = [self._row(c, counts, links, milestones) for c in rows[:limit]]
         return {"cards": out, "total": len(rows), "truncated": len(rows) > limit,
                 "tabs": [t for t in self._tab_map()], "autonomy": self.autonomy}
 
@@ -2153,6 +2201,17 @@ class BoardTools:
                 front["verify"] = B.validate_verify(front["verify"])
             except B.BoardError as exc:
                 verify_error = str(exc)
+        # Card metadata (#MJ76): the hierarchy — children with progress, and every reverse
+        # link, computed from the whole board — and the commit sequence's detail rows for
+        # the card page (front.links.commits stays the stored short-hash list).
+        links = B.links_index(self.board.cards())
+        children = links["children"].get(card.id or "", [])
+        reverse = {"child_of": str(card.front.get("parent") or "").lstrip("#").upper() or None,
+                   "blocks": links["blocks"].get(card.id or "", []),
+                   "duplicated_by": links["duplicated_by"].get(card.id or "", []),
+                   "related_from": links["related_from"].get(card.id or "", [])}
+        commits = B.commit_details(self.board.repo,
+                                  (card.front.get("links") or {}).get("commits") or [])
         return {**({"qa": qa} if qa else {}),
                 **({"verify_error": verify_error} if verify_error else {}),
                 "id": card.id, "hash": B.file_hash(card.path), "type": card.type,
@@ -2171,6 +2230,7 @@ class BoardTools:
                            "done": t.done, "depth": t.depth, "card": t.card,
                            "blocked_by": list(t.blocked_by)}
                           for t in card.tasks()],
+                "children": children, "reverse": reverse, "commits": commits,
                 # The QA policy floor this board works under (#C3Q2), agent-facing.
                 "qa_policy": QP.effective_line(self.qa_policy),
                 "thread_total": len(entries),
@@ -2321,7 +2381,7 @@ class BoardTools:
 
     def _create(self, args: dict) -> dict:
         allowed = {"tab", "status", "section", "title", "request", "summary", "type", "labels",
-                   "source", "related", "not_duplicate_of"}
+                   "source", "related", "not_duplicate_of", "parent", "blocked_by"}
         if set(args) - allowed:
             raise BoardToolError(f"board_create_card takes {', '.join(sorted(allowed))}.")
         card_type = args.get("type") or "work"
@@ -2346,6 +2406,17 @@ class BoardTools:
             self._require_manual_section(section)
 
         cards = self.board.cards()
+        # The hierarchy (#MJ76): a new card may be born a child of, or blocked by, existing
+        # cards.  Nothing points at it yet, so existence is the only check a cycle needs.
+        known = {c.id for c in cards if c.id}
+        parent = normalize_id(args["parent"], "parent") if args.get("parent") else None
+        blocked_by = list(dict.fromkeys(normalize_id(b, "blocked_by")
+                                        for b in _string_list(args.get("blocked_by"), "blocked_by")))
+        for what, other in [("parent", parent)] + [("blocked_by", b) for b in blocked_by] \
+                + [("related", r) for r in related]:
+            if other and other not in known:
+                raise BoardToolError(f"{what} names #{other}, which is not a card on this board.",
+                                     code="board_refused", field=what)
         excused = {normalize_id(r, "not_duplicate_of") for r in _string_list(args.get("not_duplicate_of"), "not_duplicate_of")}
         duplicates = (self.duplicates(title, request or summary, cards, excused)
                       if self.duplicate_check else [])
@@ -2367,6 +2438,10 @@ class BoardTools:
             card.set("links", links)
         if section:
             card.set("section", section)
+        if parent:
+            card.set("parent", parent)
+        if blocked_by:
+            card.set("blocked_by", blocked_by)
         try:
             path = B.write_new_card(self.board, card, category)
         except B.BoardError as exc:
@@ -2438,6 +2513,81 @@ class BoardTools:
         except B.BoardError as exc:
             return None, None, f"verify not defaulted from skill {sid}: {exc}"
 
+    # ---- card metadata (#MJ76): one place that normalizes and refuses the new keys
+    def _meta_value(self, card: B.Card, key: str, value):
+        """`value` for front-matter `key` normalized for the file, or `board_refused` saying
+        why: dates are ISO, `due` becomes `{date, whose}`, `resolution` is one of
+        `B.RESOLUTIONS`, `owner` one line, and every linked id a card on this board other than
+        this one.  `links` has its `related` ids checked and its `commits` put in commit order."""
+        def refuse(message: str) -> BoardToolError:
+            return BoardToolError(message, code="board_refused", field=key)
+        try:
+            if key == "due":
+                return B.validate_due(value)
+            if key == "snooze":
+                return B.validate_date(value, "snooze")
+            if key == "resolution":
+                return B.validate_resolution(value)
+        except B.BoardError as exc:
+            raise refuse(f"{exc}.") from exc
+        if key == "owner":
+            return _one_line(value, "owner", 80)
+        if key in ("parent", "duplicate_of"):
+            return self._linked_id(card, key, value)
+        if key == "blocked_by":
+            ids = [self._linked_id(card, key, v) for v in _string_list(value, key)]
+            return list(dict.fromkeys(ids)) or None
+        if key == "links":
+            if not isinstance(value, dict):
+                raise refuse("links must be an object: {plans, commits, evidence, related, github}.")
+            value = dict(value)
+            if value.get("related") is not None:
+                value["related"] = list(dict.fromkeys(
+                    self._linked_id(card, "links.related", v)
+                    for v in _string_list(value.get("related"), "links.related")))
+            if value.get("commits"):
+                value["commits"] = B.normalize_commits(
+                    self.board.repo, _string_list(value.get("commits"), "links.commits"))
+            return value
+        return value
+
+    def _linked_id(self, card: B.Card, what: str, value) -> str:
+        """One linked id, checked.  An id the card already carries under the same key is kept
+        without the existence check, so re-sending a card's whole `links` (to append a commit)
+        is never refused for a link that went stale before this write."""
+        other = normalize_id(value, what)
+        if other == card.id:
+            raise BoardToolError(f"{what} cannot name the card itself (#{other}).",
+                                 code="board_refused", field=what.split(".")[0])
+        key, _, sub = what.partition(".")
+        held = ((card.front.get("links") or {}).get(sub) if sub else card.front.get(key))
+        if other in B._link_ids(held):
+            return other
+        if other not in {c.id for c in self.board.cards()}:
+            raise BoardToolError(f"{what} names #{other}, which is not a card on this board.",
+                                 code="board_refused", field=what.split(".")[0])
+        return other
+
+    def _check_meta(self, card: B.Card, written: set) -> None:
+        """The checks that span keys, after a write set them: `resolution: duplicate` needs a
+        `duplicate_of`, and `parent` / `blocked_by` must not close a cycle."""
+        if card.front.get("resolution") == "duplicate" and not card.front.get("duplicate_of") \
+                and written & {"resolution", "duplicate_of"}:
+            raise BoardToolError("resolution: duplicate needs duplicate_of naming the card it "
+                                 "duplicates.", code="board_refused", field="duplicate_of")
+        if card.front.get("duplicate_of") and card.front.get("resolution") not in (None, "duplicate") \
+                and written & {"resolution", "duplicate_of"}:
+            raise BoardToolError("duplicate_of goes with resolution: duplicate; drop one or set "
+                                 "the other.", code="board_refused", field="duplicate_of")
+        if written & {"parent", "blocked_by"}:
+            cycle = B.find_cycle_after(card.id or "", {"parent": card.front.get("parent"),
+                                                       "blocked_by": card.front.get("blocked_by")},
+                                       self.board.cards())
+            if cycle:
+                raise BoardToolError("parent/blocked_by would close a cycle: "
+                                     + " → ".join(f"#{c}" for c in cycle + [cycle[0]]) + ".",
+                                     code="board_refused", field="parent")
+
     def _update(self, args: dict) -> dict:
         allowed = {"id", "base_hash", "fields", "title", "append_section", "replace_section",
                    "replace_agent_section", "tasks"}
@@ -2505,6 +2655,8 @@ class BoardTools:
                     # Floored before it is stored (#C3Q2), so the change line names the block
                     # that stands; the notes say what the floor did.
                     value, qa_notes = self._qa_floor(card, value)
+                if value is not None and key in META_LINK_FIELDS + META_VALUE_FIELDS:
+                    value = self._meta_value(card, key, value)
                 old = card.front.get(key)
                 if value is None:
                     card.drop(key)
@@ -2518,6 +2670,9 @@ class BoardTools:
                     # it: the event this update leaves carries the actor, model and pane.
                     changes.append(f"verify.deferred cleared by {self.context.actor} "
                                    f"(was {_short(old.get('deferred'))})")
+
+        if fields:
+            self._check_meta(card, set(fields))
 
         if args.get("title") is not None:
             new_title = _one_line(args.get("title"), "title", MAX_TITLE)
@@ -2604,7 +2759,7 @@ class BoardTools:
 
     def _move(self, args: dict) -> dict:
         allowed = {"id", "status", "section", "tab", "before", "after", "reason", "evidence",
-                   "implemented_by"}
+                   "implemented_by", "resolution", "duplicate_of"}
         if set(args) - allowed:
             raise BoardToolError(f"board_move_card takes {', '.join(sorted(allowed))}.")
         card_id = normalize_id(args.get("id"))
@@ -2745,6 +2900,8 @@ class BoardTools:
         elif section_arg is not None:
             card.set("section", section_arg)
 
+        closing = self._close_reason(card, old_status, status, args)
+
         card.set("status", status)
         # Auto-release (#R9G7, owner 2026-09-20): a card that lands in `done` or `dropped` drops
         # its claim in the same write. This is the one place a status change goes through — the
@@ -2777,6 +2934,8 @@ class BoardTools:
             parts.append("reordered")
         if released:
             parts.append(f"session {released[:8]} released")
+        if closing:
+            parts.append(closing)
         summary = ", ".join(parts) or "unchanged"
         line = f"- ✦ {self.context.actor} moved this card · {summary} · {reason}"
         if args.get("evidence"):
@@ -2806,6 +2965,51 @@ class BoardTools:
                 "write_id": write_id, "summary": summary,
                 **({"case": case["id"]} if case else {}),
                 **({"qa_policy": qa_note} if qa_note else {})}
+
+    def _close_reason(self, card: B.Card, old_status: str, status: str, args: dict) -> str:
+        """Set or clear the close reason for a move (#MJ76), returning the words the thread
+        line gets ("" when nothing changed).  Into `done` it defaults to `resolution: done`,
+        into `dropped` to `not-planned`; `duplicate` needs `duplicate_of` naming another card.
+        Reopening a closed card clears both keys.  A work card only."""
+        resolution, duplicate_of = args.get("resolution"), args.get("duplicate_of")
+        closed = ("done", "dropped")
+        if card.type != "work":
+            if resolution or duplicate_of:
+                raise BoardToolError("resolution and duplicate_of are for work cards.",
+                                     code="board_refused", field="resolution")
+            return ""
+        if status not in closed:
+            if resolution or duplicate_of:
+                raise BoardToolError("resolution and duplicate_of go with a move to done or "
+                                     "dropped.", code="board_refused", field="resolution")
+            if old_status in closed and (card.front.get("resolution") or card.front.get("duplicate_of")):
+                card.drop("resolution")
+                card.drop("duplicate_of")
+                return "resolution cleared"
+            return ""
+        if status == old_status and not (resolution or duplicate_of):
+            return ""
+        if duplicate_of and not resolution:
+            resolution = "duplicate"
+        if not resolution:
+            resolution = "done" if status == "done" else "not-planned"
+        try:
+            resolution = B.validate_resolution(resolution)
+        except B.BoardError as exc:
+            raise BoardToolError(f"{exc}.", code="board_refused", field="resolution") from exc
+        if resolution == "duplicate":
+            if not duplicate_of:
+                raise BoardToolError("resolution: duplicate needs duplicate_of naming the card it "
+                                     "duplicates.", code="board_refused", field="duplicate_of")
+            duplicate_of = self._linked_id(card, "duplicate_of", duplicate_of)
+            card.set("duplicate_of", duplicate_of)
+        else:
+            card.drop("duplicate_of")
+        card.set("resolution", resolution)
+        if resolution == "duplicate":
+            return f"{status}: duplicate of #{duplicate_of}"
+        default = "done" if status == "done" else "not-planned"
+        return "" if resolution == default else f"{status}: {resolution.replace('-', ' ')}"
 
     def set_priority(self, card_id: str, priority) -> dict:
         """The pane's flag click (protocol 19.3 ``board_priority``, card #VKFV).
