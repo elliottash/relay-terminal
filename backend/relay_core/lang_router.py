@@ -699,10 +699,34 @@ def detect_repl(argv: str | Sequence[str] | None) -> str | None:
             if module in {"ptpython", "bpython", "code"}:
                 return "python"
             return "python" if "-i" in args[:args.index("-m")] else None
+        # An entry-point script run by its interpreter: that is what the process table shows for
+        # `ipython` or `jupyter console` installed in a venv (the shebang names the venv's
+        # python), so the pty of a Python console pane reads `python3 …/jupyter-console
+        # --existing k.json` (#83YV).
+        script = _script_of(args)
+        if script is not None and (IPYTHON_BINARY.match(_basename(args[script]))
+                                   or _basename(args[script]).lower() in {"jupyter", "jupyter-console"}):
+            return detect_repl(args[script:])
         return "python" if _interactive(args, ipython=False) else None
     if STATA_BINARY.match(name):
         # Batch mode (`stata -b do x.do`, `-e`) runs and exits; everything else is interactive.
         return None if any(a in {"-b", "-e", "/b", "/e"} for a in args) else "stata"
+    return None
+
+
+def _script_of(args: Sequence[str]) -> int | None:
+    """The index of the script an interpreter's argv runs, or None (`-c`, `-m`, stdin, none)."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in {"-c", "-m", "-"}:
+            return None
+        if a in {"-X", "-W", "-Q"}:           # options that take the next word
+            i += 2
+            continue
+        if not a.startswith("-"):
+            return i
+        i += 1
     return None
 
 

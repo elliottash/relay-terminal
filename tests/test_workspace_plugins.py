@@ -481,8 +481,9 @@ class WorkerTests(unittest.TestCase):
             by_id = {e.get("id"): e for e in events if e.get("id")}
             self.assertNotIn("language", by_id["r0"], "no workspace: the Bash decision, unchanged")
             self.assertEqual(by_id["a"]["event"], "workspace_state")
+            # The kernel's language is `ipython` where the worker's Python has ipykernel.
             self.assertEqual((by_id["r1"]["route"], by_id["r1"]["language"], by_id["r1"]["target"]),
-                             ("program", "python", "kernel"))
+                             ("program", "ipython" if py_kernel.jupyter_available() else "python", "kernel"))
             self.assertEqual((by_id["r2"]["route"], by_id["r2"]["target"]), ("program", "repl"))
             self.assertEqual(by_id["k"]["status"], "ok")
             record = next(e["record"] for e in events if e.get("event") == "kernel_record")

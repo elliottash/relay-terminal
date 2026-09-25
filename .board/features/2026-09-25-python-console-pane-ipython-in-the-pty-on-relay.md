@@ -1,7 +1,8 @@
 ---
 id: 83YV
 type: work
-status: planned
+status: executing
+assignee: claude-code
 labels: [feature, python, plugins, panes]
 rank: zzzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-25'
@@ -36,7 +37,7 @@ Slice 6 of #P2W8 (decision U2). **Wave 2: waits for the hold on #C0Q8/#33G0's `w
 
 - [ ] Pane program spec and header chip <!-- t:4t blocked_by=#6FDD -->
 - [ ] GUI activation and jupyter console --existing on the kernel (after the hold lifts) <!-- t:8m blocked_by=4t -->
-- [ ] IPython startup with OSC 133 prompt marks <!-- t:wz blocked_by=4t -->
+- [x] IPython startup with OSC 133 prompt marks <!-- t:wz blocked_by=4t -->
 - [ ] Routing and completion through #S976 and #6FDD <!-- t:dq blocked_by=#S976,8m -->
 - [ ] Live evidence: shared namespace, interrupt, restart <!-- t:7c blocked_by=8m,wz,dq -->
 - [ ] Stata console where Stata is installed <!-- t:ja blocked_by=7c -->

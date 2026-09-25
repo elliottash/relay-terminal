@@ -132,6 +132,18 @@ def _relay_variables(namespace):
     return out
 '''
 
+# `exit()` typed in a Python console pane attached to this kernel runs *in the kernel*, and
+# ipykernel's ask_exit sets exit_now — the kernel stops — unless `exit(keep_kernel=True)`. The
+# kernel is the agent's too, so leaving a console must never take it down (#83YV): ask_exit only
+# sends the payload that tells the console to leave, keeping the kernel.
+KEEP_KERNEL_SOURCE = r'''
+def _relay_keep_kernel():
+    shell = get_ipython()
+    shell.ask_exit = lambda: shell.payload_manager.write_payload({"source": "ask_exit", "keepkernel": True})
+_relay_keep_kernel()
+del _relay_keep_kernel
+'''
+
 # ----- The child server (stdlib only; any Python 3.8+ the workspace chooses) ---------------------
 CHILD_SOURCE = r'''
 import ast, asyncio, builtins, inspect, json, linecache, os, signal, sys, traceback, types
@@ -643,6 +655,9 @@ class JupyterBackend:
         # channels are stopped by whichever thread is not using them.
         self._executing = False
         self._killed = False
+        # restart() reuses this manager, so a kill still running on a deadline's timer thread
+        # must finish before it — its last step stops the channels, which would be the new ones.
+        self._lifecycle = threading.Lock()
 
     def start(self) -> None:
         from jupyter_client.manager import KernelManager
@@ -654,21 +669,50 @@ class JupyterBackend:
             kwargs["env"] = dict(self.env)
         try:
             self.km.start_kernel(**kwargs)
-            self.kc = self.km.client()
-            self.kc.start_channels()
-            self.kc.wait_for_ready(timeout=self.startup_timeout)
+            self._connect()
         except Exception as exc:
-            self.kill()
+            self.kill(final=True)
             raise KernelError(f"the Jupyter kernel {self.kernel_name!r} did not start: {exc}") from exc
-        reply = self._run_silent(INTROSPECT_SOURCE + "\nimport sys as _relay_sys\n",
+        self._introspect()
+
+    def _connect(self) -> None:
+        self.kc = self.km.client()
+        self.kc.start_channels()
+        self.kc.wait_for_ready(timeout=self.startup_timeout)
+
+    def _introspect(self) -> None:
+        reply = self._run_silent(INTROSPECT_SOURCE + "\nimport sys as _relay_sys\n" + KEEP_KERNEL_SOURCE,
                                  {"version": "_relay_sys.version.split()[0]",
                                   "executable": "_relay_sys.executable"})
+        # The connection file is how a `jupyter console --existing` in a Python console pane
+        # attaches to this same kernel (#83YV); restart() keeps it, and the ports it names.
         self.info = {"kernel": self.kernel_name,
-                     "python": _plain(reply.get("version")), "executable": _plain(reply.get("executable"))}
+                     "python": _plain(reply.get("version")), "executable": _plain(reply.get("executable")),
+                     "connection_file": self.km.connection_file}
+
+    def restart(self) -> None:
+        """A fresh kernel on the same connection file and ports, so every other client attached
+        to it — a Python console pane's jupyter console — follows it instead of being orphaned.
+        Works on a kernel that died, too: the manager still has its launch arguments."""
+        with self._lifecycle:
+            self._stop_channels()
+            self._killed = False
+            try:
+                self.km.restart_kernel(now=True)
+                self._connect()
+                failed = None
+            except Exception as exc:
+                failed = exc
+        if failed is not None:
+            self.kill()
+            raise KernelError(f"the Jupyter kernel {self.kernel_name!r} did not restart: {failed}") from failed
+        self._introspect()
 
     @property
     def alive(self) -> bool:
-        return self.km is not None and self.km.is_alive()
+        # A kill in flight (a deadline's timer thread) or stopped channels count as dead even
+        # while the process lingers: the session restarts it rather than executing on nothing.
+        return self.km is not None and not self._killed and self.kc is not None and self.km.is_alive()
 
     def _shell_reply(self, msg_id: str, timeout: float | None) -> dict:
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -799,15 +843,18 @@ class JupyterBackend:
             except Exception:
                 pass
 
-    def kill(self) -> None:
-        self._killed = True
-        if self.km is not None:
-            try:
-                self.km.shutdown_kernel(now=True)
-            except Exception:
-                pass
-        if not self._executing:
-            self._stop_channels()
+    def kill(self, final: bool = False) -> None:
+        """Kill the kernel now. Unless `final`, the manager keeps its zmq context and connection
+        file (`restart=True`), so restart() can bring a kernel back on the same ports."""
+        with self._lifecycle:
+            self._killed = True
+            if self.km is not None:
+                try:
+                    self.km.shutdown_kernel(now=True, restart=not final)
+                except Exception:
+                    pass
+            if not self._executing:
+                self._stop_channels()
 
     def shutdown(self) -> None:
         if self.km is not None and self.alive and self.kc is not None:
@@ -817,7 +864,7 @@ class JupyterBackend:
                 return
             except Exception:
                 pass
-        self.kill()
+        self.kill(final=True)
 
 
 def _plain(expression: dict | str | None) -> str | None:
@@ -924,13 +971,20 @@ class KernelSession:
         if self._backend is not None and self._backend.alive:
             return
         died = self._backend is not None and self._started
-        if self._backend is not None:
-            self._backend.kill()
-        self._backend = self._make_backend()
-        self._backend.start()
+        if died and self._reusable():
+            self._backend.restart()
+        else:
+            if self._backend is not None:
+                self._backend.kill()
+            self._backend = self._make_backend()
+            self._backend.start()
         if died:
             self._append(self._restart_record("system", None, "the kernel process exited", None))
         self._started = True
+
+    def _reusable(self) -> bool:
+        """A started backend that restarts in place (Jupyter: same connection file and ports)."""
+        return self._backend is not None and self._started and callable(getattr(self._backend, "restart", None))
 
     # -- ordering ----------------------------------------------------------------------------------
     @contextmanager
@@ -1061,11 +1115,15 @@ class KernelSession:
                     lost = [item["name"] for item in self._backend.variables()]
                 except Exception:
                     lost = None
-                self._backend.shutdown()
-            elif self._backend is not None:
-                self._backend.kill()
-            self._backend = self._make_backend()
-            self._backend.start()
+            if self._reusable():
+                self._backend.restart()
+            else:
+                if self._backend is not None and self._backend.alive:
+                    self._backend.shutdown()
+                elif self._backend is not None:
+                    self._backend.kill()
+                self._backend = self._make_backend()
+                self._backend.start()
             self._started = True
             return copy.deepcopy(self._append(self._restart_record(origin, intent, "requested", lost)))
 

@@ -346,6 +346,12 @@ class DetectReplTest(unittest.TestCase):
         (["jupyter", "console", "--kernel", "stata"], "stata"),
         (["jupyter", "console", "--kernel=ir"], None),
         (["jupyter", "notebook"], None),
+        # An entry-point script under its venv's interpreter, as the process table shows it (#83YV).
+        (["/venv/bin/python3", "/venv/bin/jupyter-console", "--existing", "k.json"], "ipython"),
+        (["python3", "/venv/bin/jupyter", "console", "--existing", "k.json"], "ipython"),
+        (["python3", "/venv/bin/jupyter", "notebook"], None),
+        (["python3", "-X", "dev", "/venv/bin/ipython"], "ipython"),
+        (["python3", "/venv/bin/ipython", "run.py"], None),
         (["ptpython"], "python"),
         (["bpython"], "python"),
         ("uv run ipython", "ipython"),

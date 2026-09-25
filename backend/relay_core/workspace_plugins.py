@@ -133,6 +133,66 @@ PY_SPECS = [
 ]
 
 
+def _has_module(name: str) -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def console_command(console, package_root, connection_file: str | None, which=shutil.which,
+                    has_module=_has_module, python: str | None = None) -> dict:
+    """What a Python console pane runs in its pty (#83YV): `{argv, program, label, shared,
+    connection_file, startup, note}`.
+
+    With a kernel connection file and jupyter_console reachable, it is the manifest's
+    `console.program` (`jupyter console --existing {connection_file}`) with the startup file as its
+    `--config`: the pty is one more client of the workspace kernel, so what the person types and
+    what the agent's py_run_cell runs share one namespace (`shared`). `jupyter` on PATH is used
+    when it has the console subcommand; otherwise this worker's own Python runs
+    `-m jupyter_console`. Without either — or without a connection file, when the kernel runs on
+    the stdlib server — the fallback is plain `ipython` with the startup file, then `python3`:
+    a REPL of its own (`shared: false`), which the agent reaches by typing into the pty."""
+    import sys
+    python = python or sys.executable
+    startup = None
+    if console is not None and console.startup and package_root is not None:
+        path = Path(package_root) / console.startup
+        startup = str(path) if path.is_file() else None
+    program = list(console.program) if console is not None else []
+    if connection_file and program:
+        argv = [connection_file if word == "{connection_file}" else word for word in program]
+        head = None
+        if argv[:2] == ["jupyter", "console"]:
+            if which("jupyter") and which("jupyter-console"):
+                head = [which("jupyter"), "console"]
+            elif has_module("jupyter_console"):
+                head = [python, "-m", "jupyter_console"]
+            rest = argv[2:]
+        elif which(argv[0]):
+            head, rest = [which(argv[0])], argv[1:]
+        if head is not None:
+            if startup and head[-1] in ("console", "jupyter_console"):
+                rest = rest + ["--config=" + startup]
+            return {"argv": head + rest, "program": "jupyter-console", "label": "Python · ipython",
+                    "shared": True, "connection_file": connection_file, "startup": startup, "note": ""}
+    why = ("the kernel runs on the stdlib server (install ipykernel and jupyter_client for a shared one)"
+           if not connection_file else "jupyter_console is not installed (pip install jupyter-console)")
+    ipython = which("ipython") or which("ipython3")
+    if ipython:
+        argv = [ipython] + (["--InteractiveShellApp.exec_files=" + startup] if startup else [])
+        return {"argv": argv, "program": "ipython", "label": "Python · ipython", "shared": False,
+                "connection_file": connection_file, "startup": startup,
+                "note": f"This IPython has its own namespace: {why}. The agent's py_* tools run in the "
+                        "workspace kernel, not here."}
+    plain = which("python3") or which("python") or python
+    return {"argv": [plain], "program": "python", "label": "Python · python", "shared": False,
+            "connection_file": connection_file, "startup": None,
+            "note": f"This Python has its own namespace: {why}, and IPython is not installed "
+                    "(pip install ipython)."}
+
+
 class KernelRuntime:
     """One `KernelSession` for one workspace. Human lines run on a FIFO thread of their own, so a
     burst of `kernel_run` messages keeps its order without blocking the worker's loop."""
@@ -146,6 +206,9 @@ class KernelRuntime:
         from . import py_kernel
         self.workspace_id = workspace_id
         self.emit = emit
+        self.plugin_id = getattr(manifest, "id", None)
+        self.console = getattr(manifest, "console", None)
+        self.package_root = getattr(manifest, "root", None)
         env = runtime_env(manifest.runner.env if manifest.runner else ())
         if session_factory is not None:
             self.session = session_factory(cwd=workspace_dir, env=env, on_output=self._output,
@@ -215,6 +278,19 @@ class KernelRuntime:
     def submit_variables(self, request_id=None) -> None:
         self._jobs.put(("variables", "", request_id))
 
+    def submit_console(self, request_id=None) -> None:
+        """Start the kernel now and answer `workspace_console` with the program a Python console
+        pane runs in its pty (#83YV). On the FIFO thread: a kernel takes seconds to start, and
+        the worker's loop must not wait for it."""
+        self._jobs.put(("console", "", request_id))
+
+    def console_answer(self) -> dict:
+        self.session.start()
+        info = self.info()
+        return {"workspace_id": self.workspace_id, "plugin_id": self.plugin_id,
+                **console_command(self.console, self.package_root, info.get("connection_file")),
+                "runtime": {"kind": self.kind, **info}}
+
     def _serve(self) -> None:
         while True:
             job = self._jobs.get()
@@ -227,6 +303,8 @@ class KernelRuntime:
                     self.emit({"event": "kernel_ran", "id": request_id, "workspace_id": self.workspace_id,
                                "seq": record.get("seq"), "status": record.get("status")})
                     self.refresh_names()
+                elif kind == "console":
+                    self.emit({"event": "workspace_console", "id": request_id, **self.console_answer()})
                 elif kind == "restart":
                     record = self.session.restart(origin="human")
                     self.names = frozenset()
@@ -645,8 +723,19 @@ class WorkspaceManager:
         if kind == "workspace_activate":
             if not folder:
                 raise ValueError("Configure a workspace, or name one, before activating a task plugin.")
+            console = request.get("console", False)
+            if not isinstance(console, bool):
+                raise ValueError("console must be true or false.")
+            if console and getattr(self.runtimes.get(request.get("plugin_id")), "kind", None) != "kernel":
+                # Refused before activating, so a refusal changes nothing.
+                raise ValueError("console: true needs a kernel plugin (relay.python).")
             result = self.activate(folder, request.get("plugin_id"), workspace_id, request.get("path"))
+            if console:
+                runtime = self.kernel(workspace_id)
+                result["console"] = {"state": "starting"}
             self.emit({"event": "workspace_state", "id": request_id, **result})
+            if console:
+                runtime.submit_console(request_id)
         elif kind == "workspace_deactivate":
             self.emit({"event": "workspace_state", "id": request_id, **self.deactivate(workspace_id)})
         elif kind == "workspace_state":
