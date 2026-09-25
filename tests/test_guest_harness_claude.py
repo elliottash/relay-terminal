@@ -951,6 +951,34 @@ class SetModelTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--session-id") + 1], start.session_id)
         self.assertEqual(argv[argv.index("--append-system-prompt") + 1], "Relay guest context")
 
+    def test_a_restart_before_the_first_turn_of_a_resumed_session_resumes_it(self):
+        """The pane that found #PMZZ: `start(resume=…)` is followed by a model or effort change
+        before any turn has run, so no `init` has come and `_resumable` used to be false — but
+        the session it resumed has a transcript, and `--session-id` on an existing session is
+        refused ("Session ID … is already in use"), which killed the guest outright."""
+        first = FakeClaude(_handshake("h1") + _unsupported("set_model"))
+        second = FakeClaude(_handshake("h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd(), resume="abc-123")
+        self.assertEqual(harness.set_model("opus"), "opus")
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--resume") + 1], "abc-123")
+        self.assertNotIn("--session-id", argv)
+
+    def test_set_model_on_a_closed_harness_restarts_it_on_the_session(self):
+        """A pane whose guest died mid-relaunch (#PMZZ) used to get `the guest is not running.`
+        from every model pick after that; now the pick starts it again on the session it had."""
+        first = FakeClaude(_handshake("h1"))
+        second = FakeClaude(_handshake("h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd(), resume="abc-123")
+        harness.close()
+        self.assertEqual(harness.set_model("opus"), "opus")
+        self.assertEqual(len(spawner.calls), 2)
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--model") + 1], "opus")
+        self.assertEqual(argv[argv.index("--resume") + 1], "abc-123")
+
 
 class SetEffortTest(unittest.TestCase):
     """The effort is a command-line flag and 2.1.278 has no control request for it (probed
@@ -1031,6 +1059,55 @@ class SetEffortTest(unittest.TestCase):
         self.assertEqual(len(spawner.calls), 2)
         argv = spawner.calls[1][0]
         self.assertEqual(argv[argv.index("--effort") + 1], "max")
+
+    def test_an_effort_change_on_a_resumed_session_before_its_first_turn_resumes_it(self):
+        """The exact sequence of #PMZZ (pane 22f05421, 2026-09-25 19:15): a model pick resumes
+        the session and the effort that rides the same pick relaunches before any turn has run.
+        The relaunch must `--resume`: the session exists, and `--session-id` on it is refused
+        with "Session ID … is already in use", which left the pane erroring for good."""
+        first = FakeClaude(_handshake("h1"))
+        second = FakeClaude(_handshake("h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd(), resume="922fd7e8")
+        self.assertEqual(harness.set_effort("medium"), "medium")
+        self.assertEqual(len(spawner.calls), 2)
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--effort") + 1], "medium")
+        self.assertEqual(argv[argv.index("--resume") + 1], "922fd7e8")
+        self.assertNotIn("--session-id", argv)
+
+    def test_set_effort_on_a_closed_harness_rides_the_next_start(self):
+        """With the guest gone, the effort is recorded for the start `send()` does; refusing it
+        (#PMZZ) left the pane unable to change anything about a dead guest."""
+        first = FakeClaude(script(init_message(), result_message()))
+        second = FakeClaude(script(init_message(), result_message(), request_id="h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd(), effort="low")
+        harness.send("first", emit=Collector(), cancel=threading.Event())
+        harness.close()
+        self.assertEqual(harness.set_effort("xhigh"), "xhigh")
+        self.assertEqual(len(spawner.calls), 1)          # nothing restarted yet
+        harness.send("second", emit=Collector(), cancel=threading.Event())
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--effort") + 1], "xhigh")
+        self.assertEqual(argv[argv.index("--resume") + 1], "s-1")
+
+    def test_a_send_on_a_closed_harness_brings_it_back_on_its_session(self):
+        """The stuck pane of #PMZZ: after the guest died, every prompt answered `the guest is
+        not running.` until the model was picked again. A send now restarts it where it was."""
+        first = FakeClaude(script(init_message(), result_message()))
+        second = FakeClaude(script(init_message(), result_message(), request_id="h2"))
+        spawner, harness = self._harness(first, second)
+        harness.start(cwd=os.getcwd())
+        self.assertEqual(harness.send("first", emit=Collector(), cancel=threading.Event()).text,
+                         "done")
+        harness.close()
+        self.assertEqual(harness.send("second", emit=Collector(),
+                                      cancel=threading.Event()).text, "done")
+        self.assertEqual(len(spawner.calls), 2)
+        argv = spawner.calls[1][0]
+        self.assertEqual(argv[argv.index("--resume") + 1], "s-1")
+        self.assertNotIn("--session-id", argv)
 
 
 class ModelsTest(unittest.TestCase):

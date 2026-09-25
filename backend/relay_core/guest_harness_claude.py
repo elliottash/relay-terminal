@@ -307,10 +307,11 @@ class ClaudeHarness:
         self._model = ""
         self._effort = ""
         self._effort_pending = False
-        # Whether the CLI has opened this session yet (its first `system`/`init` came). Until it
-        # has, there is no transcript on disk and `--resume` would be refused, so a relaunch
-        # starts fresh under the same id instead. Never cleared by `close()`: the session is on
-        # disk from then on, whatever this object does.
+        # Whether the CLI has opened this session yet: its first `system`/`init` came, or
+        # `start()` resumed a transcript that already exists. Until it has, there is no
+        # transcript on disk and `--resume` would be refused, so a relaunch starts fresh
+        # under the same id instead. Never cleared by `close()`: the session is on disk from
+        # then on, whatever this object does.
         self._resumable = False
         self._tools: list[str] = []
         self._cli_version = ""                        # from `system`/`init`, for the resets read
@@ -390,6 +391,12 @@ class ClaudeHarness:
         # so the pane has a session id to file the transcript under before the first turn.
         new_id = "" if resume else str(uuid.uuid4())
         self._session_id = "" if (resume and fork) else (resume or new_id)
+        # A resumed session has a transcript by definition — claude exits at start on a
+        # `--resume` it cannot read — so a relaunch before the first turn (a model or effort
+        # change) must resume it too: `--session-id` on a session that exists is refused with
+        # "Session ID … is already in use" and kills the pane's guest (#PMZZ). A fork's id is
+        # minted by the CLI and not written until its first turn, so it stays as it was.
+        self._resumable = bool(resume) and not fork
         argv = self._argv(model=model, session_id=new_id or None, resume=resume, fork=fork,
                           permissions=permissions, effort=effort)
         self._launch(argv)
@@ -624,7 +631,14 @@ class ClaudeHarness:
             # one starts: it is a command-line flag, so applying it is a restart (`set_effort`).
             self._apply_effort()
             if self._proc is None:
-                raise HarnessError("the guest is not running.")
+                # A guest closed out from under the pane — a relaunch that failed, a process
+                # that died between turns — is started again on the session it had, rather
+                # than erroring every turn from then on (#PMZZ).
+                if not self._session_id or not self._cwd:
+                    raise HarnessError("the guest is not running.")
+                self._relaunch(model=self._model or None, effort=self._effort or None)
+                with self._state_lock:
+                    self._effort_pending = False   # the command line carries the effort now
             self._interrupted = False
             self._sending = True
             try:
@@ -942,7 +956,12 @@ class ClaudeHarness:
         if not model:
             raise HarnessError("a model name is needed.")
         if self._proc is None:
-            raise HarnessError("the guest is not running.")
+            # Nothing to ask; start the guest again on the new model rather than erroring the
+            # pane (#PMZZ). `_restart` names a session it cannot resume yet.
+            self._restart(model)
+            with self._state_lock:
+                self._model = model
+            return model
         try:
             self._control({"subtype": "set_model", "model": model})
         except HarnessError as exc:
@@ -1002,7 +1021,13 @@ class ClaudeHarness:
         """
         level = self._level(validate_effort(effort))
         if self._proc is None:
-            raise HarnessError("the guest is not running.")
+            # Nothing to restart; the effort rides the start the next `send()` does on the
+            # session it had, rather than erroring the pane (#PMZZ).
+            if not self._session_id or not self._cwd:
+                raise HarnessError("the guest is not running.")
+            with self._state_lock:
+                self._effort = level
+            return level
         with self._state_lock:
             if level == self._effort:
                 return level
