@@ -166,11 +166,11 @@ OnboardingResult chooseInstructions(QWidget *parent, const QList<InstructionFile
     list->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     layout->addWidget(list, 1);
     if (!existing) {
-        auto *none = new QLabel(QStringLiteral("No instruction files were found (CLAUDE.md, AGENTS.md, WARP.md, GEMINI.md, Cursor or Copilot rules)."));
+        auto *none = new QLabel(QStringLiteral("No instruction files were found (CLAUDE.md, AGENTS.md, RELAY.md, GEMINI.md, Cursor or Copilot rules)."));
         none->setWordWrap(true);
         layout->addWidget(none);
     }
-    auto *project = new QCheckBox(QStringLiteral("Also include instruction files found in each project automatically (AGENTS.md, CLAUDE.md, WARP.md, …)"));
+    auto *project = new QCheckBox(QStringLiteral("Also include instruction files found in each project automatically (AGENTS.md, CLAUDE.md, RELAY.md, …)"));
     project->setChecked(projectAuto);
     layout->addWidget(project);
     auto *synthesize = new QCheckBox(QStringLiteral("Create a global relay.md from the selected files (%1)").arg(tilde(relayMdPath)));

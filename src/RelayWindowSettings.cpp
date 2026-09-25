@@ -426,7 +426,7 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             });
         }
         agent.rows << buttonRow(QStringLiteral("agent.instructions"), QStringLiteral("Instructions"),
-                                QStringLiteral("CLAUDE.md, AGENTS.md, WARP.md and other instruction files"),
+                                QStringLiteral("CLAUDE.md, AGENTS.md, RELAY.md and other instruction files"),
                                 QStringLiteral("Choose…"), [this] { runAction(QStringLiteral("agent.instructions")); });
         agent.rows << buttonRow(QStringLiteral("option:skills"), QStringLiteral("Skills"),
                                 QStringLiteral("List, exclude, refine, import from a repository · /skills"),
@@ -1030,7 +1030,7 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
                                   QStringLiteral("After an agent turn. Sends a summary of the conversation."), true);
         privacy.rows << toggleRow(QStringLiteral("instructions/project_auto"),
                                   QStringLiteral("Load project instruction files automatically"),
-                                  QStringLiteral("CLAUDE.md, AGENTS.md and WARP.md found in the workspace"), true);
+                                  QStringLiteral("CLAUDE.md, AGENTS.md and RELAY.md found in the workspace"), true);
         {
             // Review B1 (protocol 26.7): the Sessions list reads Claude Code's and Codex's own
             // transcripts into Relay's index so they can be listed, searched and resumed. The

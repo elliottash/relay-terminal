@@ -22,7 +22,7 @@ published by Anthropic. *Unverified* marks claims not confirmed at a primary sou
 | Display | `Ctrl+T` toggles the checklist in the status area, "up to five tasks at a time"; expanded state restored on resume (CC:interactive-mode) | Chip bottom right, popup list; one chip combines plan and todo list |
 | Persistence and sharing | "Tasks persist across context compactions"; `CLAUDE_CODE_TASK_LIST_ID=x` shares a list in `~/.claude/tasks/` across sessions (CC:interactive-mode). Agent teams: lead creates, teammates self-claim "the next unassigned, unblocked task"; claims use file locking; dependents unblock automatically; `TaskCreated`/`TaskCompleted` hooks can veto; "Task status can lag" (CC:agent-teams) | Per conversation; not editable by the user (*unverified*, undocumented) |
 | Plans | Plan mode; plan re-read from disk after compaction (CC:context-window) | `/plan` writes a versioned document in Warp Drive's Plans folder; "Any update made by the agent creates a new version"; export as Markdown or check into the repo (W:agents/capabilities/planning/) |
-| Memory | CLAUDE.md hierarchy + `CLAUDE.local.md` (gitignored). Auto memory in `~/.claude/projects/<project>/memory/`: `MEMORY.md` index (first 200 lines or 25KB loaded) + one topic file per memory, types user/feedback/project/reference, machine-local, `/memory` to browse; near-limit writes trigger "shorten it" reminders (CC:memory). One fact per file with `name`/`description`/`type` front matter; "treat them as past snapshots to verify"; a shared `team/` store pruned conservatively; "Never write secrets or credentials into a memory" (3P) | Rules: Global (Warp Drive) + `AGENTS.md`/`WARP.md`; applied rules listed under References (W:agent-platform/capabilities/rules/). Suggested rules appear as chips after a response, behind a setting. Agent Memory (preview): facts extracted at conversation end, personal/agent/team stores on Warp servers (W:agents/agent-memory/) |
+| Memory | CLAUDE.md hierarchy + `CLAUDE.local.md` (gitignored). Auto memory in `~/.claude/projects/<project>/memory/`: `MEMORY.md` index (first 200 lines or 25KB loaded) + one topic file per memory, types user/feedback/project/reference, machine-local, `/memory` to browse; near-limit writes trigger "shorten it" reminders (CC:memory). One fact per file with `name`/`description`/`type` front matter; "treat them as past snapshots to verify"; a shared `team/` store pruned conservatively; "Never write secrets or credentials into a memory" (3P) | Rules: Global (Warp Drive) + `AGENTS.md`/`RELAY.md`; applied rules listed under References (W:agent-platform/capabilities/rules/). Suggested rules appear as chips after a response, behind a setting. Agent Memory (preview): facts extracted at conversation end, personal/agent/team stores on Warp servers (W:agents/agent-memory/) |
 
 Others, only where they add an idea: Codex `update_plan` requires ending with every step completed or explicitly
 cancelled/deferred, and opencode `todowrite` replaces the whole list and loses it at compaction (both in
@@ -208,7 +208,7 @@ Expanded (at most 6 rows, then "+3 more"):
   card; `w` "work on it" sends it to the anchor pane (Execute with seeding); `m` on a card row demotes (`Shift+M`).
 - **Plans** render as the `## Plan` section; the thread's plan events offer "Compare with previous" and "Restore".
 
-### 3.3 Shortcut hints (WARP.md rule, live Keymap text)
+### 3.3 Shortcut hints (RELAY.md rule, live Keymap text)
 
 | Slow path | Hint |
 |---|---|
@@ -226,13 +226,13 @@ Expanded (at most 6 rows, then "+3 more"):
 
 | Artifact | Holds | Author | Loaded |
 |---|---|---|---|
-| `WARP.md` / `AGENTS.md` | rules the owner decided | owner (the agent edits only when asked) | always, full (32 KiB cap) |
+| `RELAY.md` / `AGENTS.md` | rules the owner decided | owner (the agent edits only when asked) | always, full (32 KiB cap) |
 | **Memory** | durable facts and lessons learned while working ("tests need Xvfb", "OpenRouter lists no reasoning for GLM") | agent or owner | index always, bodies on demand |
 | Cards, plans, items | work: requests, decisions about one card, steps | both | when attached |
 | Todos, ledger | this session's progress | agent / worker | this session |
 
 Policy text (adapted from 3P "tasks vs memory" and "plan vs memory"): do not save progress (todos), approaches (the
-card's plan), requests (cards), anything derivable from code or git, anything already in `WARP.md`, one-off debugging
+card's plan), requests (cards), anything derivable from code or git, anything already in `RELAY.md`, one-off debugging
 results, secrets, or personal data about third parties.
 
 ### 4.2 Storage and scopes
@@ -283,11 +283,11 @@ new text.
   high-entropy tokens) and on **exact matches of keys in Relay's keystore**, which Relay can check and other tools
   cannot. `relay-board check` (usable as a pre-commit hook) scans cards and memory too.
 - **Junk**: body ≤ 1,200 chars, description ≤ 150; fuzzy duplicate check returns `possible_duplicates` unless
-  `not_duplicate_of`; `already_in_instructions` when WARP.md/AGENTS.md says the same; limits of 3 writes per turn and
+  `not_duplicate_of`; `already_in_instructions` when RELAY.md/AGENTS.md says the same; limits of 3 writes per turn and
   15 shared creates per day; a **budget** of 60 active memories or 12 KB of index per scope, beyond which writes return
   `memory_full` with the least-used entries, and the agent must merge or archive first.
-- **Conflicts with instructions**: a write that contradicts `WARP.md` returns `conflicts_with_instructions` with the
-  quote. The agent either drops it or saves with `contradicts: WARP.md`, which shows a banner "Update WARP.md?". Only
+- **Conflicts with instructions**: a write that contradicts `RELAY.md` returns `conflicts_with_instructions` with the
+  quote. The agent either drops it or saves with `contradicts: RELAY.md`, which shows a banner "Update RELAY.md?". Only
   the owner applies that (question 9).
 - **No hard delete by agents**: `archive` moves to `memory/archive/`. The owner's **Purge** deletes and warns that git
   history keeps shared content.
@@ -318,7 +318,7 @@ global, and a newer `supersedes` wins.
   shows name, description, unreviewed dot, `paths` chip and last used. The detail pane reuses `CardDetailView`: header
   fields, body (`e` edits with `PlanEditor`, Ctrl+S, hash-checked), and **History** from `LOG.md` with Revert.
 - Keys (Memory tab): `n` new · `e` edit · `v` toggle shared/private (moves the file, logged) · `a` archive · `k` keep
-  (mark reviewed) · `/` filter (`type:`, `scope:`, `unreviewed`, text) · `w` propose the memory as a WARP.md rule (diff
+  (mark reviewed) · `/` filter (`type:`, `scope:`, `unreviewed`, text) · `w` propose the memory as a RELAY.md rule (diff
   preview) · `t` insert `@memory:name` into the composer.
 - Card detail shows "Memories from this card" (memories whose `source` cites it).
 - Composer: `/remember <text>` saves directly (owner-authored, private unless `--shared`); `/memory` opens the tab.
@@ -358,7 +358,7 @@ ledger `ref`; GUI `TaskStrip`, `ChecklistView`, `TasksTab`, `MemoryTab`, Keymap 
 | M1 | memory format, 3 tools, loading/caps, `LOG.md`, undo, secret scan, policy, `.private/` root; Memory tab | M |
 | T2 | Tasks tab, promote/demote, parent/child mirroring, dependencies + cycle check, `agent {todo}` | M |
 | T3 | `relay-card` merge driver (front matter + tasks by id), `relay-board resolve` | M |
-| M2 | WARP.md conflict/promotion, `/remember`, imports from Claude Code memory, global scope, Tidy proposals | S–M |
+| M2 | RELAY.md conflict/promotion, `/remember`, imports from Claude Code memory, global scope, Tidy proposals | S–M |
 
 Order: T0 → T1 → M1 → T2 → T3 → M2. T3 must land before subagent worktrees (Design C P2) or real collaborators.
 
@@ -378,7 +378,7 @@ Order: T0 → T1 → M1 → T2 → T3 → M2. T3 must land before subagent workt
   4. ask to split a large item: promotion with verbatim text;
   5. two panes on one card: no double claim;
   6. memory precision/recall on a labelled corpus of 40 turns (should-save facts vs progress notes, derivable facts,
-     secrets, WARP.md duplicates); gold set as a `needs-labels` card;
+     secrets, RELAY.md duplicates); gold set as a `needs-labels` card;
   7. recall: a convention saved in session 1 is followed in session 5 after two compactions;
   8. a 30-session growth simulation: active count stays under budget, zero secrets written.
 - **GUI QA under Xvfb**: strip counts match `todos` events; Space on an item writes the marker and the thread event;
@@ -401,7 +401,7 @@ Order: T0 → T1 → M1 → T2 → T3 → M2. T3 must land before subagent workt
 7. **Memory autonomy here**: `auto` for private and shared with an unreviewed dot (recommended), or `suggest` for
    shared?
 8. **Default scope** of agent-learned owner preferences: private (recommended) or shared?
-9. **WARP.md**: memory can only *propose* a WARP.md change for your click (recommended), or may the agent apply it in
+9. **RELAY.md**: memory can only *propose* a RELAY.md change for your click (recommended), or may the agent apply it in
    `auto`, logged like card rewrites (decision 12.3)?
 10. **Memory identity**: slug names (recommended, readable in `@memory:name`) or 4-character card-style ids?
 11. **Imports**: offer to import Claude Code auto memory and `CLAUDE.local.md` into private memory (recommended, with
@@ -424,7 +424,7 @@ Recommendations accepted for questions 1, 2, 3, 4, 7, 10 and 11. Changes:
   also hold **team characteristics** memories (e.g. one collaborator is an economist, another a computer scientist, who
   knows databases), each public (in git) or private.
 - **9. Instruction files:** Relay uses `RELAY.md` by default and may edit it, as well as `AGENTS.md`, `CLAUDE.md`,
-  `WARP.md` and similar, as agents do. Edits to instruction files are surfaced as highlighted tool-call notifications.
+  `RELAY.md` and similar, as agents do. Edits to instruction files are surfaced as highlighted tool-call notifications.
 - **One object model: plans and memories are card types (supersedes 2.4, the memory storage in section 3, and the
   "plans on cards" part of Board decision 12.4).** Every Board object is a card with a `type`; each type
   has its own view and statuses and shares ids, threads (history), privacy, links, search, the `#` picker, Reorganize,

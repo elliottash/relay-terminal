@@ -2572,7 +2572,7 @@ public:
     std::function<void(const QString &id)> onCopyId;
     // A meta label copies its label: filter term (#S53Z).
     std::function<void(const QString &tag)> onCopyTag;
-    // A click on the ⧉ beside the ref is the slow path: `y` is its key (#FT77, the WARP.md hint
+    // A click on the ⧉ beside the ref is the slow path: `y` is its key (#FT77, the RELAY.md hint
     // rule).
     std::function<void()> onCopyIdHint;
     // A `#ID` in the card's own words or the thread names another card on this board: zoom to

@@ -90,7 +90,7 @@ constexpr int kScreenLimit = 2000;
 struct Action {
     // The action's own name, stable across rebuilds: it becomes the button's `objectName` — which
     // tests and src/Theme.cpp rules key off — and the id of the shortcut hint the mouse path
-    // teaches ("board.action." + key, WARP.md's standing rule). Never shown to the owner.
+    // teaches ("board.action." + key, RELAY.md's standing rule). Never shown to the owner.
     QString key;
     // One letter, or empty for a keyless action. The row does not invent one, and it does not
     // answer a letter two actions claim: see `withUniqueLetters`.

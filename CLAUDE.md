@@ -1,6 +1,6 @@
 # Relay — instructions for Claude sessions
 
-The project's working rules live in `WARP.md` (issues, tests, protocol, shortcut hints) and the
+The project's working rules live in `RELAY.md` (issues, tests, protocol, shortcut hints) and the
 docs it points at. Read that first. What follows is specific to how sessions work in this repo.
 
 Before building Relay or producing an installer/package, read `docs/BUILDING.md`. It is the
@@ -228,7 +228,9 @@ verify slot compiled is mostly cache hits for the next one's.
 
 `RELAY_JOBS` (default 8) is the parallelism, clamped to what the memory limit the
 build runs under allows (about one 2 GiB compile job per 2 GiB, so a default build
-fits an agent pane's 8 GiB MemoryMax instead of being OOM-killed, card #04EC), and
+fits an agent pane's cap instead of being OOM-killed, card #04EC — that cap is
+RAM/2 since #ZPWT, 61 GiB on a 122G machine, and only an explicitly lowered
+`agent_memory_max` makes it bite), and
 `scripts/build.sh` goes through the wrapper too.
 `tests/test_relay_build.py` reproduces the incident in throwaway CMake projects: plain
 `cmake --build` misses the mid-compile edit, the wrapper rebuilds it.

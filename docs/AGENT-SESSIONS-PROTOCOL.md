@@ -31,7 +31,7 @@ after `configured`, before the queued first `ask` (#MDP1).
 | `compact_over_tokens` | int 8000–10000000, or `null`/`0` | size-based compaction (below; #0C0V): compact between turns when the last request's prompt passed this many tokens; `null`/`0`/absent = off (the default); the GUI's value when turned on is 256000. Echoed in `configured` |
 | `session_dir` | abs path | where sessions and checkpoints are stored (default `~/.local/share/relay/sessions/<workspace-hash>/`) |
 | `plans_dir` | abs path | default `<workspace>/.relay/plans` |
-| `instructions` | `{"files": [abs paths], "project_auto": true}` | instruction files to load; `project_auto` also loads project files found in the workspace (AGENTS.md, CLAUDE.md, WARP.md, ... per the scan table) |
+| `instructions` | `{"files": [abs paths], "project_auto": true}` | instruction files to load; `project_auto` also loads project files found in the workspace (AGENTS.md, CLAUDE.md, RELAY.md, ... per the scan table) |
 | `agents` | `{"dirs": [abs paths] or omitted}` | agent definition directories; omitted = all known locations (section 7) |
 | `context` | object | **what this agent is about** (section 33, card #AGNT): the surface's name, the role, the brief, where the conversation is kept, the named tool scope. Absent means a terminal pane, which is what every `configure` before section 33 meant. |
 
@@ -6105,7 +6105,7 @@ The two command lines:
 
 **The bypass flags.** Owner, 2026-09-19: "the claude / codex agent needs to be --yolo /
 --dangerously-skip-permissions to allow moving around the file system, like relay / warp does".
-It is the same rule Relay's own agent runs under (WARP.md: no per-action tool approvals), applied
+It is the same rule Relay's own agent runs under (RELAY.md: no per-action tool approvals), applied
 to a guest Relay started. The consequence is written here rather than discovered later: a picked
 guest never fires `PermissionRequest`, so the question bar of 26.4 does not appear for it. That bar
 remains for a claude the user started themselves whose own settings ask.

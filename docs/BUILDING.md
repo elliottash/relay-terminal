@@ -1,7 +1,7 @@
 # Building Relay
 
 This is the canonical build map for people and repository agents. `AGENTS.md`, `CLAUDE.md` and
-`WARP.md` all point here so Codex, Claude and Relay use the same commands. The native workflows are
+`RELAY.md` all point here so Codex, Claude and Relay use the same commands. The native workflows are
 the executable specification when this document and a command ever disagree:
 
 - Linux and the combined release: `.github/workflows/ci.yml` and `.github/workflows/release.yml`

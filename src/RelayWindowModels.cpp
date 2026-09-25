@@ -113,7 +113,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             // sentence about tools running without asking moves to wherever the first key is
             // entered if it is not already said there"). This is where a key is entered, so this
             // is where they are said. Not a checkbox: Relay has no per-action tool approvals by
-            // ruling (WARP.md), so a tick that only said "yes, run tools" would gate nothing and
+            // ruling (RELAY.md), so a tick that only said "yes, run tools" would gate nothing and
             // make the person agree to something they cannot decline and keep an agent.
             const QString key = QInputDialog::getText(this, QStringLiteral("API key"),
                 QStringLiteral("Key for %1.\n"

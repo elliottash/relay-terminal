@@ -7,7 +7,7 @@
 # This script only ever writes files into an existing docroot. It touches no
 # nginx, tunnel, or DNS configuration — that server hosts a dozen unrelated
 # sites through one nginx instance, where a listener mistake takes all of them
-# down. See ~/admin/web-sites/WARP.md before changing anything server-side.
+# down. See ~/admin/web-sites/RELAY.md before changing anything server-side.
 #
 # Usage:
 #   ./deploy.sh -n    show what would upload, then stop

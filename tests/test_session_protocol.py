@@ -225,6 +225,19 @@ class InstructionTests(unittest.TestCase):
         self.assertIn('Existing agent rules', loaded.section)
         self.assertNotIn('Warp project rules', loaded.section)
 
+    def test_relay_md_preferred_to_warp(self):
+        # #2M26: RELAY.md is the file Relay writes for itself; a leftover WARP.md from before
+        # the rename is still read when it is the only one, but never when both exist.
+        self.write(self.ws / 'RELAY.md', 'relay rules')
+        self.write(self.ws / 'WARP.md', 'warp rules')
+        loaded = instructions.load({'project_auto': True}, self.ws)
+        self.assertIn(str(self.ws / 'RELAY.md'), loaded.loaded)
+        self.assertNotIn('warp rules', loaded.section)
+        (self.ws / 'RELAY.md').unlink()
+        loaded = instructions.load({'project_auto': True}, self.ws)
+        self.assertIn(str(self.ws / 'WARP.md'), loaded.loaded)
+        self.assertIn('warp rules', loaded.section)
+
     def test_agents_preferred_to_warp_and_cap_configurable(self):
         self.write(self.ws / 'AGENTS.md', 'agents file')
         self.write(self.ws / 'WARP.md', 'warp file ' + 'w' * 5000)

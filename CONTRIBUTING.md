@@ -26,7 +26,7 @@ work is visible. Commits that only add or triage cards use `issue: <short title>
 
 ## Building and testing
 
-`WARP.md` is the working guide: how to build (`scripts/relay-build`), how the tests run (`ctest`,
+`RELAY.md` is the working guide: how to build (`scripts/relay-build`), how the tests run (`ctest`,
 and `pytest` under `RELAY_KEYRING=off`), and the protocol documents a change must keep in step.
 Read it before you send anything.
 

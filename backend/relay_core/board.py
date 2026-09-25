@@ -2754,7 +2754,7 @@ DELIVER_SKILL = "deliver"
 POINTER_START = "<!-- relay:switchboard-policy start -->"
 POINTER_END = "<!-- relay:switchboard-policy end -->"
 #: Where the pointer goes: the two instruction files the guest CLIs read.  `AGENTS.md` is created
-#: when it is missing (`_new_agents_text`); `CLAUDE.md` is only ever appended to.  **WARP.md is
+#: when it is missing (`_new_agents_text`); `CLAUDE.md` is only ever appended to.  **RELAY.md is
 #: never touched.**  Relay's project instruction file can import either target; its own agent
 #: already has the Board policy in its system prompt and the tools to go with it.
 POINTER_TARGETS = ("CLAUDE.md", "AGENTS.md")
@@ -3154,7 +3154,7 @@ def pointer_files(board: "Board") -> list[tuple[str, str]]:
     `CLAUDE.md` and `AGENTS.md` get the block when they exist, and `AGENTS.md` is created when it
     does not -- a project with only a `CLAUDE.md` gets one too, because the owner's decision is
     that both files point at the policy (#R9G7).  Nothing outside the markers is changed, and
-    `WARP.md` is never written (`POINTER_TARGETS`).
+    `RELAY.md` is never written (`POINTER_TARGETS`).
     """
     block = pointer_text(board)
     out: list[tuple[str, str]] = []

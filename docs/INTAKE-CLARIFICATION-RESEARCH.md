@@ -103,7 +103,7 @@ wakes without user input, like Claude Code `/goal` check-ins, CCL 2.1.246) so a 
 |---|---|---|---|---|
 | Claude Code | `~/.claude/CLAUDE.md`, `~/.claude/rules/**/*.md`; managed `/etc/claude-code/CLAUDE.md` | `CLAUDE.md` or `.claude/CLAUDE.md` in cwd and every parent; `CLAUDE.local.md`; `.claude/rules/**/*.md` (`paths:` frontmatter = conditional); subdir CLAUDE.md on demand | Markdown, `@import` (4 hops) | All concatenated root→cwd, nearer read last. **Does not read AGENTS.md** (recommends `@AGENTS.md` import) (CC:memory) |
 | Codex | `~/.codex/AGENTS.override.md` or `AGENTS.md` | per dir root→cwd: `AGENTS.override.md` > `AGENTS.md` > `project_doc_fallback_filenames` | Markdown | Concatenated, 32 KiB cap, untrusted projects skipped (CX:core/src/agents_md.rs) |
-| Warp | Global Rules in Warp Drive (cloud, no file) | `AGENTS.md` or `WARP.md` (all caps; **WARP.md wins** in same dir) at repo root + cwd; subdirs best effort | Markdown | subdir > root > global. `/init` can link `CLAUDE.md`, `.cursorrules`, `AGENT.md`, `GEMINI.md`, `.clinerules`, `.windsurfrules`, `.github/copilot-instructions.md` (W:agents/capabilities/rules) |
+| Warp | Global Rules in Warp Drive (cloud, no file) | `AGENTS.md` or `RELAY.md` (all caps; **RELAY.md wins** in same dir) at repo root + cwd; subdirs best effort | Markdown | subdir > root > global. `/init` can link `CLAUDE.md`, `.cursorrules`, `AGENT.md`, `GEMINI.md`, `.clinerules`, `.windsurfrules`, `.github/copilot-instructions.md` (W:agents/capabilities/rules) |
 | opencode | `~/.config/opencode/AGENTS.md`, else `~/.claude/CLAUDE.md` | first of `AGENTS.md`/`CLAUDE.md` walking up; `instructions` globs/URLs in `opencode.json` | Markdown | first match per category (https://opencode.ai/docs/rules/) |
 | Gemini CLI | `~/.gemini/GEMINI.md` | `GEMINI.md` in workspace dirs and ancestors; JIT in dirs tools touch | Markdown, `@file.md` | all concatenated; names via `context.fileName` e.g. `["AGENTS.md","GEMINI.md"]` (https://geminicli.com/docs/cli/gemini-md/) |
 | Cursor | User Rules in settings UI (no file); Team Rules dashboard | `.cursor/rules/**/*.mdc` (`description`, `globs`, `alwaysApply`); `AGENTS.md` root+nested; legacy `.cursorrules` | MDC / Markdown | Team → Project → User (https://cursor.com/docs/context/rules) |
@@ -117,7 +117,7 @@ wakes without user input, like Claude Code `/goal` check-ins, CCL 2.1.246) so a 
 | Kiro | `~/.kiro/steering/*.md` (+ `AGENTS.md` there) | `.kiro/steering/*.md`; `AGENTS.md` root and subdirs | `inclusion: always\|fileMatch (fileMatchPattern)\|manual\|auto` | workspace wins (https://kiro.dev/docs/steering/) |
 
 **Relay scan order proposal** (first run shows what was found, user ticks which to load): project, from git root to workspace:
-`AGENTS.md` > `CLAUDE.md` (+`CLAUDE.local.md`, `.claude/rules/*.md` without `paths:`) > `WARP.md` > `GEMINI.md` >
+`AGENTS.md` > `CLAUDE.md` (+`CLAUDE.local.md`, `.claude/rules/*.md` without `paths:`) > `RELAY.md` > `GEMINI.md` >
 `.github/copilot-instructions.md` > `.cursor/rules/*.mdc` with `alwaysApply: true` > `.cursorrules` > `.windsurfrules`/`.windsurf/rules`
 (`always_on`) > `.clinerules` > `.rules` > `.junie/guidelines.md` > `.kiro/steering` (`always`). Global: `~/.config/relay/AGENTS.md`,
 `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.config/opencode/AGENTS.md`, `~/.config/zed/AGENTS.md`.

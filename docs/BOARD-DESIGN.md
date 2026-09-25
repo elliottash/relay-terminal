@@ -198,7 +198,7 @@ taking an active filter off first (#K9X6); `l` labels; `a` assign; `c` reply; `t
 anchor composer and focus it; `y` copy `#ID`; `o` open the file in a preview pane; `Del` delete the open or
 selected card (#CYM9: the owner's confirmed delete — the card file and its thread go, Undo for 30 s);
 Ctrl+PgUp/PgDn switch tabs; `?` keys.
-**Hints** (WARP.md rule, live Keymap text): palette/button → Ctrl+Shift+S; mouse drag → `m`; clicking `+` → `n`;
+**Hints** (RELAY.md rule, live Keymap text): palette/button → Ctrl+Shift+S; mouse drag → `m`; clicking `+` → `n`;
 "Send to terminal" button → `t`; typed `/board` → the open shortcut; clicking into the filter → `Esc`.
 
 ### 4.5 As built (UX pass, 2026-09-17)
@@ -441,7 +441,7 @@ owner's files. The pane never starts one of those from a click.
   with the typed message put back in the reply box rather than sent away to bounce; a
   `board_busy` from the worker says which is running — "A cleanup is running on this board." or
   "The agent is answering on #K7Q2." — in the notice, or on the card when it was that card's ask.
-- **No key and no palette entry**, so the WARP.md hint rule has nothing to register: a cleanup is a
+- **No key and no palette entry**, so the RELAY.md hint rule has nothing to register: a cleanup is a
   rare, minutes-long, board-wide write, and a shortcut for it would be a way to start one by
   accident. If one is ever added, the hint goes with it.
 
@@ -538,7 +538,7 @@ buttons under a card's reply box, after **Comment**: **Discuss** (the accent but
   "✦ agent  Discuss · glm-5". Entries from before carry no mode and read as they did.
 - **Keys** (card view): `e` edit, `d` or Tab to the reply box, Enter discuss, `p` / Ctrl+Enter plan,
   `f` refine (4.15), `r` run, Ctrl+Shift+Enter comment only. On the list, `p`, `f` and `r` open the selected card and
-  do the same. A click on a button shows its key once (WARP.md hint rule; hint ids `board.plan`,
+  do the same. A click on a button shows its key once (RELAY.md hint rule; hint ids `board.plan`,
   `board.execute`, `board.verify`, and `board.edit` for the pencil. `board.discuss` went with the
   Discuss button in 4.12: Enter *is* the fast path, so there is no slow path left to teach).
 - **Before this**, the card's ask ran on a worker with every pane tool, so "ask the agent" could run

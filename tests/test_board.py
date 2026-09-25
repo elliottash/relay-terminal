@@ -1647,10 +1647,13 @@ class PolicyFileTests(unittest.TestCase):
         # WARP.md remains a compatible instruction source, but Board scaffolding writes its
         # pointer only to AGENTS.md and CLAUDE.md; Relay's agent has the policy in its prompt.
         (self.dir / "WARP.md").write_text("# Warp\n")
+        (self.dir / "RELAY.md").write_text("# Relay\n")
         (self.dir / "CLAUDE.md").write_text("# Project\n")
         files = B.scaffold(self.board())
         self.assertNotIn("WARP.md", files)
+        self.assertNotIn("RELAY.md", files)
         self.assertEqual((self.dir / "WARP.md").read_text(), "# Warp\n")
+        self.assertEqual((self.dir / "RELAY.md").read_text(), "# Relay\n")
 
     def test_a_second_scaffold_changes_nothing(self):
         (self.dir / "CLAUDE.md").write_text("# Project\n")

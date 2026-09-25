@@ -292,7 +292,7 @@ private slots:
     }
 
     // The menu's "Open external" is the slow path: it goes the same way Shift+Enter does and
-    // says "Next time: Shift+Enter" in the explorer's notice line (#SEJ2, WARP.md "Shortcut hints").
+    // says "Next time: Shift+Enter" in the explorer's notice line (#SEJ2, RELAY.md "Shortcut hints").
     void openExternalFromTheMenuTeachesShiftEnter() {
         QSettings settings;
         settings.remove(QStringLiteral("hints"));
@@ -442,7 +442,7 @@ private slots:
 
     // Card #SEJ2: the ✎ button turns a read-only local preview into an editor, and Ctrl+S
     // writes the file back to its own path. Clicking ✎ is the slow path, so it teaches the
-    // chord (WARP.md, "Shortcut hints").
+    // chord (RELAY.md, "Shortcut hints").
     void aLocalTextFileEditsAndSaves() {
         QSettings settings;
         settings.remove(QStringLiteral("hints"));
@@ -880,7 +880,7 @@ private slots:
         QVERIFY(!preview.highlighting());
     }
 
-    // WARP.md's standing rule: the slow path teaches the fast one. Clicking Save says "Next time:
+    // RELAY.md's standing rule: the slow path teaches the fast one. Clicking Save says "Next time:
     // Ctrl+S" — through the same registry every other hint goes through, so it stops after a few
     // showings and never stacks on top of another hint.
     void theSaveButtonTeachesTheShortcut() {

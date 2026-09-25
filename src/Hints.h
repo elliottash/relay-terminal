@@ -5,7 +5,7 @@
 // cooldown; counts persist in QSettings under hints/. A global setting turns hints off.
 //
 // Adding a feature with a shortcut? Add a hint id and call Pane::hint()/RelayWindow::hint() from
-// its slow path. See docs/ARCHITECTURE.md "Shortcut hints" and WARP.md.
+// its slow path. See docs/ARCHITECTURE.md "Shortcut hints" and RELAY.md.
 #include <QString>
 #include <QStringList>
 

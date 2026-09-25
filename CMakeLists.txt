@@ -470,7 +470,7 @@ add_library(relay-remotesession STATIC src/RemoteSession.cpp src/RemoteSession.h
 target_include_directories(relay-remotesession PUBLIC src)
 target_link_libraries(relay-remotesession PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Network)
 target_compile_options(relay-remotesession PRIVATE ${RELAY_WARNINGS})
-# The shortcut-hint registry (WARP.md, "Shortcut hints"): how often a hint has been shown, when it
+# The shortcut-hint registry (RELAY.md, "Shortcut hints"): how often a hint has been shown, when it
 # may be shown again, and the "Next time: …" wording. Plain QtCore over QSettings — a library
 # rather than a file in the app, so a pane widget can teach its own shortcut too (#S5SH).
 add_library(relay-hints STATIC src/Hints.cpp src/Hints.h)

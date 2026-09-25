@@ -386,7 +386,7 @@ void theComposerSaysWhatTheContextSays()
     }
 
     // A click on an action button teaches its letter once, and pressing the letter teaches
-    // nothing — WARP.md's standing rule, on the id `relay::agent::Action::key` names
+    // nothing — RELAY.md's standing rule, on the id `relay::agent::Action::key` names
     // ("board.action." + key). Before this the row was the one fast path in the console with no
     // hint at all: the letters were in the board's key legend and nowhere the mouse could find
     // them. A keyless action has nothing to teach and stays quiet.

@@ -368,7 +368,7 @@ closes and puts focus back where it was, so nothing there needs the mouse.
   level — its opt-in "Verbose" level does add your prompt text to the file.
 - **Instruction files.** A project can put Relay's instructions in `.relay/relay.md` and use
   `@AGENTS.md` or similar imports there to reuse existing instructions. On first launch Relay
-  lists other tools' files (CLAUDE.md, AGENTS.md, WARP.md, …) to include, and can combine them
+  lists other tools' files (CLAUDE.md, AGENTS.md, RELAY.md, …) to include, and can combine them
   into global `~/.config/relay/relay.md`. Change the selection in Options › Agent › Instructions….
 - **AI suggestions (off by default).** Options › Privacy: a suggested next command after a
   command finishes (→ or Tab accepts) and a suggested next prompt after an agent turn (Tab).

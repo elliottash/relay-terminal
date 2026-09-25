@@ -1601,7 +1601,7 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     // Editing a remote file follows the editable pane this project already has (PlanEditor): the
     // Save button, Ctrl+S, and a ● in front of the title while there are unsaved edits.
     connect(m_save, &QToolButton::clicked, this, [this] {
-        // The slow path teaches the fast one (WARP.md, "Shortcut hints"). The registry keeps the
+        // The slow path teaches the fast one (RELAY.md, "Shortcut hints"). The registry keeps the
         // count and the cooldown, so it is shown a few times and then never again.
         m_teachSaveShortcut = relay::ShortcutHints::instance().shouldShow(QStringLiteral("files.remoteSave"));
         save();

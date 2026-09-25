@@ -3552,7 +3552,7 @@ void BoardModelTests::aQaLaneCardOffersVerifyOnTheRecommendedRunner()
     QVERIFY2(sent.at(0).value("text").toString().startsWith(
                  QStringLiteral("Verifying (pane-ses) · handed to a new terminal pane on Codex · first in the ranking")),
              qPrintable(sent.at(0).value("text").toString()));
-    // A click is the slow path, so it says its key once (WARP.md hint rule).
+    // A click is the slow path, so it says its key once (RELAY.md hint rule).
     QCOMPARE(hintId, QStringLiteral("board.verify"));
     QCOMPARE(hintKeys, QStringLiteral("v"));
 

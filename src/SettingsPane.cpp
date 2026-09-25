@@ -1466,7 +1466,7 @@ void SettingsPane::setHelperWorkspace(const QString &workspace) {
 }
 
 // The row wears its own shortcut — the key is in the button's own text, "Helper Agent (Alt+Q)" —
-// and a *click* on it is still the slow path WARP.md's standing rule is about, so it teaches the
+// and a *click* on it is still the slow path RELAY.md's standing rule is about, so it teaches the
 // key once through `onHelperHint`. The pane has no window to show a toast in, which is why the
 // hint is the window's to draw; the id it earned is the one the window wired.
 void SettingsPane::setHelperShortcut(const QString &hintId, const QString &keys) {
@@ -1522,7 +1522,7 @@ void SettingsPane::buildHelperRow(QVBoxLayout *into) {
     // Agent (Alt+Q)"). The key rides in the button's own text rather than on a muted label beside
     // it: two widgets for one offer read as a label with a stray key after it, and the key is part
     // of what the button is. It is also the shortcut hint — the slow path teaches itself here,
-    // with no notice to show (WARP.md's standing rule).
+    // with no notice to show (RELAY.md's standing rule).
     m_ask->setIcon(askIcon(theme::TextMuted));
     m_ask->setIconSize(QSize(14, 14));
     m_ask->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);

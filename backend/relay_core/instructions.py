@@ -33,6 +33,7 @@ PROJECT_CONVENTIONS = [
     ("Claude Code", ".claude/CLAUDE.md"),
     ("Claude Code", "CLAUDE.local.md"),
     ("Claude Code", ".claude/rules/*.md"),
+    ("Relay", "RELAY.md"),
     ("Warp", "WARP.md"),
     ("Gemini CLI", "GEMINI.md"),
     ("GitHub Copilot", ".github/copilot-instructions.md"),
@@ -73,8 +74,10 @@ GLOBAL_CONVENTIONS = [
 
 # project_auto: first hit per directory. A Relay file can @-import existing tool instructions.
 # aider's CONVENTIONS.md is explicit-only in aider, so not auto.
+# RELAY.md (#2M26) sits ahead of WARP.md, its pre-rename name, so a project holding both
+# loads the Relay one; WARP.md stays recognized for projects that still have it.
 PROJECT_ORDER = [".relay/relay.md", "AGENTS.override.md", "AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md",
-                 "WARP.md", "GEMINI.md",
+                 "RELAY.md", "WARP.md", "GEMINI.md",
                  ".github/copilot-instructions.md", ".cursor/rules/*.mdc", ".cursorrules", ".windsurfrules",
                  ".windsurf/rules/*.md", ".clinerules", ".rules", ".junie/AGENTS.md", ".junie/guidelines.md",
                  ".kiro/steering/*.md", ".continue/rules/*.md"]

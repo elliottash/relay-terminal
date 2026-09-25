@@ -157,7 +157,7 @@ def task_text(signal: "S.Signal", *, project: str, board_folder: str = "",
         + "`, which files it as a bug card for a person. Then report what you tried and what you "
         "believe is wrong.",
         "",
-        "House rules for this checkout (they are the owner's, in CLAUDE.md and WARP.md — read "
+        "House rules for this checkout (they are the owner's, in CLAUDE.md and RELAY.md — read "
         "both before you write anything):",
         "- Commit only through `python3 scripts/land.py begin <name> <paths>` and "
         "`python3 scripts/land.py commit <name> -m \"…\"`. Never `git add`, `git commit`, "

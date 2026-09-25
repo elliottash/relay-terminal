@@ -65,7 +65,7 @@ rules, generated from `board_policy.md` and the bundled `deliver` skill with an 
 how to file, claim, comment on and move a card by editing files; and a marked block is appended to
 the project's `CLAUDE.md` and `AGENTS.md` pointing at it, with `AGENTS.md` created when the project
 has none (it starts with an `@CLAUDE.md` import so it cannot shadow the project's own instructions,
-and `WARP.md` is never touched). Both are generated, so a stale copy is rewritten and nothing
+and `RELAY.md` is never touched). Both are generated, so a stale copy is rewritten and nothing
 outside the markers is changed; the files appear in the `board_created` event's `files` list like
 the rest. The format doc has the detail (`BOARD-FORMAT.md` §4.1), and
 `scripts/relay-board.py policy` regenerates them for a board that predates them. This is the one

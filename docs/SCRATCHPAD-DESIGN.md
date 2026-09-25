@@ -123,7 +123,7 @@ Private blocks (`<!-- relay:private -->` … `<!-- /relay:private -->`) are neve
 - **Buttons.** A Scratchpad button (a notepad glyph) in the tab-bar button row that the "new tab / new pane buttons"
   intake item adds. A palette action `scratch.open` ("Scratchpad", aliases: notes, intake, discuss, checklist, todo).
 - **Shortcut.** `Ctrl+Shift+J` ("jot") in the Relay preset, mapped in each preset in `docs/KEYBINDING-PRESETS.md`.
-  Add a shortcut-hint registry entry for the button and palette paths (standing rule in `WARP.md`).
+  Add a shortcut-hint registry entry for the button and palette paths (standing rule in `RELAY.md`).
 - **Slash command.** `/scratch` opens the pad; `/scratch <text>` appends to the Inbox without opening it (fast
   capture); `/scratch review`, `/scratch import`, `/scratch new <name>`; `/scratch 1 yes, 2 …` answers (section 3.5).
 - **Pane.** A `ScratchpadPane` tool pane opens beside the anchor terminal. It wraps `relay::PlanEditor`

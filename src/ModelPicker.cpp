@@ -777,7 +777,7 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
             QObject::connect(button, &QToolButton::clicked, this, [this, tier, key, delta] {
                 QTimer::singleShot(0, this, [this, tier, key, delta] {
                     moveKey(tier, key, delta);
-                    // The standing hint rule (WARP.md): the buttons are the slow path, alt+↑↓ the
+                    // The standing hint rule (RELAY.md): the buttons are the slow path, alt+↑↓ the
                     // fast one. The limits line carries it — the picker has no toast queue — and
                     // alt+↑↓ is a picker key, not a Keymap action, so the text is a literal.
                     if (ShortcutHints::instance().shouldShow(QStringLiteral("models.move.buttons")))

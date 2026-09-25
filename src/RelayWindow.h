@@ -1186,7 +1186,7 @@ private:
             auto *w = windowOf(guard);
             return w ? w->createAgentConsole(context, parent) : relay::agent::ConsoleHandle();
         };
-        // The live key, never a written one (WARP.md's standing rule): the collapsed row says it.
+        // The live key, never a written one (RELAY.md's standing rule): the collapsed row says it.
         view->setHelperShortcut(hintId, Keymap::instance().shortcutText(QStringLiteral("helper.ask")));
         // And the slow path teaches it once. The row's own text carries the key too, but a button
         // that was clicked is exactly the case the standing rule is about, and the host cannot
@@ -6333,7 +6333,7 @@ private:
             return false;
         }
         notice(QStringLiteral("Theme: %1.").arg(relay::theme::active().name), 4000);
-        // WARP.md's standing rule: the button duplicates a faster path, so it teaches it.
+        // RELAY.md's standing rule: the button duplicates a faster path, so it teaches it.
         hint(QStringLiteral("theme.random"), QStringLiteral("Next time: /theme random in any prompt box"));
         return true;
     }
@@ -7009,7 +7009,7 @@ private:
         m_beneathPane = pane;
         m_beneathAnchor = anchor;
         // The teaching line goes through the hint registry like every other shortcut hint
-        // (WARP.md, "Shortcut hints"), under its own id: it stops after the registry's limit and
+        // (RELAY.md, "Shortcut hints"), under its own id: it stops after the registry's limit and
         // the "Shortcut hints" setting turns it off. The window is armed either way, so a user
         // who has learned the chord keeps it without being told about it every single move.
         // It names the two seconds rather than saying "now", because a hint queues behind any

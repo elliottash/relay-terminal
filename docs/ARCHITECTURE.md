@@ -795,7 +795,7 @@ folds it away, `thinking.fold`), closing a focused Board by its button or the pa
 (→ `board.toggle` again, which closes it when it already has the focus, `board.close`; card #4XR8),
 and rotating idle tips 4 s after a finished agent turn with an
 empty prompt box. **Every new feature with a shortcut should add a hint on its slow path** (rule
-in `WARP.md`); tests in `tests/hints_test.cpp`.
+in `RELAY.md`); tests in `tests/hints_test.cpp`.
 
 Palette items also match hidden alias words (`paletteAliases()`, keyed by label/key/section
 substrings, half weight), e.g. "undo" → Rewind, "reasoning" → effort, "detach" → move actions.

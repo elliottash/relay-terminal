@@ -1622,7 +1622,7 @@ void SessionManager::setHelperWorkspace(const QString &workspace) {
 }
 
 // The row wears its own shortcut — the key is in the button's own text — and a *click* on it is
-// still the slow path WARP.md's standing rule is about, so it teaches the key once through
+// still the slow path RELAY.md's standing rule is about, so it teaches the key once through
 // `onHelperHint`. The pane has no window to show a toast in, which is why the hint is the
 // window's to draw; the id it earned is the one the window wired.
 void SessionManager::setHelperShortcut(const QString &hintId, const QString &keys) {

@@ -2530,7 +2530,7 @@ public:
         return target;
     }
     // A mouse pick that lands on the ranked Main (rank 1), or steps from it to rank 2, is what
-    // /swap types in one word (card #DC4J; WARP.md, "Shortcut hints"). Called with the target key
+    // /swap types in one word (card #DC4J; RELAY.md, "Shortcut hints"). Called with the target key
     // before selectEntry moves the pane, so currentEntryKey() is still the old model — which is
     // also what makes it the place to record where /swap would come back to (card #MDL1).
     void hintSwapForPick(const QString &key) {
@@ -4664,7 +4664,7 @@ public:
             button->setEnabled(action.enabled);
             button->setFocusPolicy(Qt::NoFocus);
             button->setCursor(Qt::PointingHandCursor);
-            // The mouse path teaches the letter once (WARP.md's standing rule, and the id
+            // The mouse path teaches the letter once (RELAY.md's standing rule, and the id
             // `Action::key` documents): a click on Check says "Next time: k · check". The letter
             // path teaches nothing — somebody who typed it knows it — and a keyless action has
             // nothing to teach, so it is the click that carries the hint and only when there is
@@ -5383,7 +5383,7 @@ private:
         }
         const QStringList answer = reading.kind == relay::ask::Reading::Skip ? QStringList() : reading.labels;
         // The slow path for this ask is typing an option out in full when its number would do
-        // (WARP.md's standing rule). Only when the words are exactly an option: a real answer in
+        // (RELAY.md's standing rule). Only when the words are exactly an option: a real answer in
         // the user's own words is the tool working as intended, not something to correct.
         for (int i = 0; i < questionOptions(question).size(); ++i)
             if (questionOptions(question).at(i).toObject().value(QStringLiteral("label")).toString()
@@ -5411,7 +5411,7 @@ private:
             changed();
             return true;
         }
-        // The slow path (WARP.md's standing rule), on the same hint as a question's: the
+        // The slow path (RELAY.md's standing rule), on the same hint as a question's: the
         // decision typed out in full when its number would do.
         if (approvalDecisions().at(index).compare(text, Qt::CaseInsensitive) == 0)
             hint(QStringLiteral("question.number"),
@@ -8929,7 +8929,7 @@ private:
             "# Relay instructions\n"
             "\n"
             "Notes for the agent in every Relay pane on this machine. Edit freely; Relay never\n"
-            "rewrites this file. A project's own CLAUDE.md, AGENTS.md or WARP.md is read as well.\n"
+            "rewrites this file. A project's own CLAUDE.md, AGENTS.md or RELAY.md is read as well.\n"
             "\n"
             "## How I like to work\n"
             "\n"
@@ -9063,7 +9063,7 @@ private:
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
             {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
             {QStringLiteral("skill"), QStringLiteral("<name> [input]"), QStringLiteral("Run a skill (same as /name; this form wins over a built-in of the same name)")},
-            {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, WARP.md…)")},
+            {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, RELAY.md…)")},
             {QStringLiteral("rename"), QStringLiteral("[name]"), QStringLiteral("Name this pane (no name: edit it in the header; empty: back to automatic)")},
             {QStringLiteral("rename-tab"), QStringLiteral("[name]"), QStringLiteral("Name this tab (no name: edit it in the tab)")},
             {QStringLiteral("export"), QString(), QStringLiteral("Save the conversation as Markdown")},
@@ -14646,7 +14646,7 @@ private:
         if (m_editor->ghost().size()) m_editor->setGhost(QString());
     }
 
-    // "Next time: <the board.open key>" after the slow path (WARP.md's standing rule). A pane whose tab
+    // "Next time: <the board.open key>" after the slow path (RELAY.md's standing rule). A pane whose tab
     // is attached to nothing has no Switchboard to open, so it teaches no shortcut for one.
     void boardShortcutHint(const QString &id) {
         if (!hasBoard()) return;

@@ -614,9 +614,9 @@ appends it to `CLAUDE.md` and to `AGENTS.md` when they exist, and **creates `AGE
 project has none — including a project that has only a `CLAUDE.md`, because both files are meant to
 point at the policy. A created `AGENTS.md` starts with an `@CLAUDE.md` import (and `@CLAUDE.local.md`
 when there is one): `relay_core.instructions` loads the *first* hit per directory in `PROJECT_ORDER`
-(`WARP.md`, `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, …), so a bare new `AGENTS.md` would
+(`RELAY.md`, `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md`, …), so a bare new `AGENTS.md` would
 shadow the project's own `CLAUDE.md`, and the import is what keeps that text in every prompt.
-`WARP.md` is never written: it is first in that order, so it is what Relay's own agent reads — and
+`RELAY.md` is never written: it is first in that order, so it is what Relay's own agent reads — and
 that agent has the policy in its system prompt already.
 
 Nothing outside the markers is read, moved or rewritten, a block that is already current is not

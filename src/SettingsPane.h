@@ -317,7 +317,7 @@ public:
     // board-less helper is what a tab with no project attached gets.
     void setHelperWorkspace(const QString &workspace);
     // The key that opens the console, in the window's live Keymap wording, for the collapsed row's
-    // text (WARP.md's standing rule: the live Keymap text, never a written-down key). `hintId` is
+    // text (RELAY.md's standing rule: the live Keymap text, never a written-down key). `hintId` is
     // the hint a *click* on that row earns; the pane cannot show a toast, so it calls `onHelperHint`
     // and the window does. The key path teaches nothing — somebody who pressed it knows it.
     void setHelperShortcut(const QString &hintId, const QString &keys);

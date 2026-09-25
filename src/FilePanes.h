@@ -438,7 +438,7 @@ public:
     // follows it itself (issue S1JP): the host opens a pane for it and this one keeps its file.
     // Without a host, the link is handed to the desktop instead.
     std::function<void(const QString &)> onOpenLink;
-    // "Next time: Ctrl+S" after the Save button is clicked (WARP.md, "Shortcut hints"). The pane
+    // "Next time: Ctrl+S" after the Save button is clicked (RELAY.md, "Shortcut hints"). The pane
     // has no toast of its own, so the hint goes in its notice line; the registry decides whether
     // it may be shown at all.
 

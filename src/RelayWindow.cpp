@@ -448,7 +448,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                         m_active->setComposerText(
                             QStringLiteral("Tell pane %1 (%2) that ").arg(handle, title));
                         m_active->focusComposer();
-                        // Keyless: the fast path is saying it to the agent, not a key (WARP.md hints).
+                        // Keyless: the fast path is saying it to the agent, not a key (RELAY.md hints).
                         hint(QStringLiteral("pane.send.palette"),
                              QStringLiteral("Next time: just ask your agent to \"tell %1 that …\"").arg(handle));
                     };
@@ -678,11 +678,13 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                                    "control.program.agent control.program.human terminal.find "
                                    "terminal.promptPrevious terminal.promptNext links.step terminal.clear").split(' ')},
             {panes, QStringLiteral("tab.new window.new pane.splitRight pane.splitDown pane.splitLeft pane.splitUp "
-                                   "tab.next tab.previous pane.equalize pane.moveLeft pane.moveRight pane.moveUp pane.moveDown "
-                                   "pane.moveToNewTab pane.moveToBackground pane.runInBackground tab.moveToNewWindow pane.close closed.restore closed.list").split(' ')},
+                                   "pane.splitLocal tab.next tab.previous pane.equalize pane.moveLeft pane.moveRight "
+                                   "pane.moveUp pane.moveDown pane.moveToNewTab pane.moveToBackground pane.runInBackground "
+                                   "tab.moveToNewWindow pane.close pane.closeEndRemote closed.restore closed.list").split(' ')},
             {QStringLiteral("Files and projects"), QStringLiteral("files.explorer files.open board.open tests.open "
+                                   "workspace.layoutColumns workspace.layoutEditorOverConsole "
                                    "project.pick project.init project.detach").split(' ')},
-            {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.connectPersistent ssh.splitSameHost remote.pair "
+            {QStringLiteral("Remote and sharing"), QStringLiteral("ssh.connect ssh.remoteSessions ssh.splitSameHost remote.pair "
                                    "pane.share pane.sharing remote.openShared remote.join").split(' ')},
             {QStringLiteral("Appearance"), QStringLiteral("pane.focusMode pane.autoDim pane.dimToggle pane.brighten "
                                    "pane.darken theme.folder theme.reload").split(' ')},
