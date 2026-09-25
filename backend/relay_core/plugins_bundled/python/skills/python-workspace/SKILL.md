@@ -1,18 +1,20 @@
 ---
 name: python-workspace
-description: How to work in a Relay Python analysis workspace — run code with python_run_cell in the shared kernel, inspect variables and DataFrames with the python_ tools, and never start a throwaway interpreter in the shell.
+description: How to work in a Relay Python analysis workspace — run code with py_run_cell in the shared kernel, inspect variables with the py_ tools, and never start a throwaway interpreter in the shell.
 short: Working in a Relay Python analysis workspace (shared kernel, variables, DataFrames).
 ---
 # Python analysis workspace
 
 The composer and you share one Python kernel: a variable the user defined is visible to your
-`python_run_cell`, and yours to them.
+`py_run_cell`, and yours to them. The `py` tools arrive with `load_tools` (group `py`).
 
-- Run Python through `python_run_cell`. Do not run `python -c` or a script in the shell for
-  analysis: it would not see the kernel's state, and its output would not appear in the console.
-- Look before you compute: `python_get_variables` lists the namespace, and
-  `python_describe_dataframe` / `python_page_dataframe` show a frame without printing all of it.
-- Keep cells short and say what each one is for; long-running work can be stopped with
-  `python_interrupt`. Ask before `python_restart`, which discards the user's state.
-- Save figures the user will want to keep with `python_save_figure` into the workspace.
+- Run Python through `py_run_cell`, with an `intent` sentence the user sees beside the cell. Do
+  not run `python -c` or a script in the shell for analysis: it would not see the kernel's state,
+  and its output would not appear in the console.
+- Look before you compute: `py_variables` lists the namespace with types, shapes and previews,
+  and `py_history` shows the cells already run — the user's and yours — with their output.
+- Keep cells short; print `df.head()` or `df.describe()` rather than a whole frame. Long-running
+  work can be stopped with `py_interrupt`. Ask before `py_restart`, which discards the user's state.
+- `py_export` returns the session as a runnable `# %%` script when the user wants to keep it.
+- Save figures the user will want to keep with `plt.savefig("figure.png")` into the workspace.
 - State the estimator, sample and standard-error choice with every regression you report.

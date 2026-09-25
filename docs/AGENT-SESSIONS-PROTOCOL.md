@@ -8889,3 +8889,164 @@ A completed job returns `path`, provider, model and costs. A failed job returns 
 No media bytes, signed URLs or key material are put into conversation events. Files are confined
 to the workspace; the tool result offers the path for opening in the system viewer. Cancellation
 of a turn does not refund an already submitted provider job; a later `media_job` can recover it.
+
+## 35. Files open in the editor: agent writes go through the buffer (v4.7, 2026-09-23, card #F8R7)
+
+A file open in a preview pane is one buffer shared by the user and the agent. The worker's
+`read_file`, `write_file` and `edit_file` on such a file go through the editor instead of behind
+its back. Everything is additive: a GUI that never sends `open_buffers` gets the disk behaviour it
+always got. Code: `backend/relay_core/open_buffers.py`, `ToolExecutor._through_buffer` in
+`backend/relay_core/tools.py`, `FilePreview::answerBufferRequest` in `src/FilePanes.cpp`; test:
+`tests/test_open_buffers.py`.
+
+| Direction | Message | Fields |
+|---|---|---|
+| GUI → worker | `open_buffers` | `files: [{path, sha256, dirty}]` — every patchable text file open in the pane's window, replacing the last list (at most 500). `path` is absolute, or `ssh://host/abs/path`; `sha256` the revision the buffer was loaded, merged or saved against; `dirty` says it has unsaved edits. |
+| worker → GUI | `buffer_request` (event) | `id`, `op` (`read` or `patch`), `path` (as listed). A patch adds `tool`, `content` (the whole new text), `base_sha256` (the text it was worked out against), `intent`, `turn_id`, `model`, and for `edit_file` `old_string`, `new_string`, `replace_all`. |
+| GUI → worker | `buffer_result` | `id`, `ok`. A read: `text`, `dirty`, `sha256`. A patch: `applied` (`exact`, `merged`, `unchanged`), `saved`, `sha256`, `buffer_sha256`, optional `save_error`. A refusal: `error` (`not_open`, `not_representable`, `unsupported`, `stale`, `conflict`), `message`, and for `conflict` `conflicts: [{buffer, base, agent, line?}]`. |
+
+**Reads.** A dirty buffer is what the user sees, so `read_file` returns its text with
+`open_buffer: "unsaved"` and a note that commands see the disk; a clean one reads the disk with
+no round trip. An edit is worked out against the same text, and its diff says so.
+
+**Writes.** The editor applies the patch exactly when `base_sha256` is the buffer's text,
+three-way merges it (src/TextMerge.h) when it is the loaded base or the disk and the user's
+unsaved edits are elsewhere, and refuses with `conflict` when they overlap — the refusal the model
+reads lists each region as it is in the editor. Each change is one named undo step with the
+turn and model, listed on the pane's agent bar. A clean buffer is saved at once (for an ssh file,
+answered when the save to the host has landed or failed); a dirty one keeps the change unsaved
+beside the user's edits. `not_open` and the other "cannot hold it" answers, or no answer within
+3 s (40 s for an ssh patch), leave the ordinary disk write — except when the write was worked out
+against unsaved text, which only the editor can apply: then nothing is written and the tool says
+so. Stop ends the wait. Subagents share the pane's list.
+
+## 36. Task-plugin workspaces: routing, runtimes and tools (v4.8, 2026-09-23, card #C0Q8)
+
+A pane can switch its tab into a task-plugin workspace (`docs/TASK-PLUGINS.md`): a TeX document,
+a Python kernel, a Stata console. This section is the wire for it. Everything is additive and
+opt-in: a GUI that sends none of these messages and no `workspace_id`/`foreground_program` on
+`route` gets byte-for-byte the decisions and tools it always got. Code:
+`backend/relay_core/workspace_plugins.py`; tests: `tests/test_workspace_plugins.py`.
+
+**Workspace ids.** Every message below takes an optional `workspace_id` (printable, at most 128
+characters; default `"pane"`). `"pane"` is the worker's own pane, and it is the workspace whose
+tools this worker's agent is offered. Other ids exist so one worker can hold several workspaces
+(a tab's panes, tests); each id owns its own runtime and nothing is shared between two ids.
+
+### 36.1 Activation
+
+| Request `type` | Fields | Response `event` |
+|---|---|---|
+| `workspace_activate` | `plugin_id`, optional `workspace` (directory; default the configured workspace), `path` (the file that selected it — the `.tex` for `relay.tex`), `workspace_id` | `workspace_state {change: "activated"}` |
+| `workspace_deactivate` | `workspace_id` | `workspace_state {change: "deactivated"}` |
+| `workspace_state` | `workspace_id` | `workspace_state {change: "state"}` (`state: null` when nothing is active) |
+| `workspace_candidates` | optional `workspace`, `path`, `foreground_program` | `workspace_candidates {candidates: [{plugin_id, origin, reason, enabled, enable_reason, missing}]}` |
+
+`workspace_state {id, workspace_id, change, state, tools, runtime}`: `state` is
+`PluginRegistry.activate`'s `ActivationState` (router, runner, tools, skills, panes, preview,
+dependencies, notes); `tools` is `{group, offered: [names], unavailable: [names]}` — `offered` is
+what the agent can load, `unavailable` the names the manifest declares that this Relay has no
+code for (the Stata group until #MEPR decision 2); `runtime` is `{kind: "kernel"|"tex", …}`
+(the kernel's backend and cell count, or the TeX main file, root and engine) or null.
+
+Activation refuses (an `error` event, nothing changed) a plugin that is not enabled or whose
+required program is missing, and a TeX workspace with no main file. It creates the runtime but
+starts no process: a kernel starts at its first cell, a TeX build at the first request.
+Activating the plugin that is already active with the same folder and path keeps its runtime —
+the kernel's variables survive. Activating another plugin, or deactivating, closes the old
+runtime (the kernel process is shut down, the builder's thread and running latexmk stopped).
+Worker shutdown closes every workspace's runtime. Deactivation restores the Bash router and the
+console alone; the terminal is never touched.
+
+### 36.2 `route {..., workspace_id?, foreground_program?}`
+
+`foreground_program` is the pane's foreground program as a command line or an argv list (at most
+256 words of 4,096 characters). When it is a Python, IPython or Stata REPL
+(`lang_router.detect_repl`: `python3`, `ipython`, `uv run ipython`, `stata-mp`, not
+`python3 app.py`), or when the workspace has a `python`/`stata` plugin active, step 5 of the Bash
+router (`bash -n` and the PATH lookup) is replaced by the language's check; steps 1–4 (control
+characters, `/shell` and `/agent`, the natural-language pattern, lone replies) are the same code.
+A foreground REPL wins over the workspace, because it owns the pty. Otherwise the Bash router
+decides exactly as before.
+
+A language decision is a `route` event with the usual fields plus:
+
+| Field | Meaning |
+|---|---|
+| `route`, `destination` | `program`, `agent`, `shell`, `incomplete` (a block that needs more lines — keep it, send nothing) or `empty` |
+| `language` | `python`, `ipython` (a kernel on ipykernel, or an IPython REPL), `stata` |
+| `target` | where a `program` line goes: `kernel` (send `kernel_run`) or `repl` (type it into the pty); `terminal` for `shell`; otherwise the route |
+| `forced` | a chip, a typed `!`/`*` or `/shell`/`/agent` chose it, not the text |
+| `text` | what to deliver: the prefix removed, a doubled `!!`/`**` collapsed to the program's own character, a pasted Python block dedented |
+| `workspace_id`, `plugin_id` | the workspace that decided (`plugin_id` absent for a REPL alone) |
+| `repl` | true when the foreground REPL decided |
+
+`needs_assist` is always false (the language check is local), `valid` is false only for `agent`,
+and `agent_signal` is true for an `agent` decision the text made. In a kernel workspace the
+kernel's variable names are known to the router, so a lone `done` that names a variable is code.
+A TeX workspace routes like Bash; its decision carries `language: "tex"`, `destination`,
+`target`, `workspace_id` and `plugin_id` so the chip can say TEX. Without a workspace no field is
+added. The mode chip reads `language` to show PY / STATA / TEX before submit; the pty delivery of
+a `repl` target is the GUI's (#33G0 stage 0).
+
+The GUI supplies `foreground_program` from the pane's foreground process command line when one
+exists. Its explicit `program` input mode bypasses routing and writes the composer line to that
+program's pty using bracketed paste followed by Return; the line is not saved as shell history or
+sent to the agent. In Auto, a `route: "program"` verdict types into the REPL, while
+`route: "incomplete"` keeps the draft for another line. Without either verdict, the GUI follows
+the ordinary shell/agent route. Explicit Program mode is available only with a foreground program
+outside the alternate screen and returns to its previous mode when that program exits.
+
+### 36.3 The kernel, from the composer
+
+| Request `type` | Fields | Events |
+|---|---|---|
+| `kernel_run` | `code`, `workspace_id` | `kernel_record` for the cell, then `kernel_ran {id, workspace_id, seq, status}`, then `kernel_variables` |
+| `kernel_interrupt` | `workspace_id` | `kernel_interrupted {id, workspace_id, interrupted}` |
+| `kernel_restart` | `workspace_id` | `kernel_record` (kind `restart`, the lost names), `kernel_ran {status: "restarted"}` |
+| `kernel_variables` | `workspace_id` | `kernel_variables {id, workspace_id, variables: [{name, type, summary, shape?, length?}]}` |
+
+`kernel_run` returns at once; lines run on the workspace's own queue in the order they arrived,
+and the human's and the agent's cells are ordered by the one session they share. Every record the
+session appends — the human's, the agent's (`origin: "agent"`, with its `intent`), a restart, the
+state-lost record after a crash (`origin: "system"`) — goes out as
+`kernel_record {workspace_id, record}` in sequence order (`py_kernel.KernelSession` for the
+record's fields); output streams as `kernel_output {workspace_id, seq, stream, text}` while a cell
+runs. A kernel message for a workspace with no kernel is an `error`. Text typed at an `input()`
+prompt is never recorded (the GUI has no input handler yet, so `input()` raises `EOFError`).
+
+The kernel's environment is Relay's minimal set (`PATH`, `HOME`, locale, temp and XDG
+directories) plus the manifest's `runner.env` names; nothing else of the worker's environment —
+provider keys above all — reaches it. It runs on ipykernel when this Relay's Python has
+`jupyter_client` and a `python3` kernel spec, otherwise on the stdlib server under the user's
+`python3` from PATH: ipykernel is an upgrade, never a requirement.
+
+TeX builds report as `tex_status {workspace_id, status}` (`tex_build.BuildStatus`: state,
+`seq` — drop older ones —, the published generation, the running build, the last failure and
+its diagnostics) on every change.
+
+### 36.4 The workspace's tools
+
+The plugin's tool group is a deferred group like `app`, `own_session` and `tests` (#GMCF 9): its
+names and its one-line purpose are in the prompt's `load_tools` line, `load_tools {group}` fetches
+the schemas, and they are appended to the end of the tool list in load order. It exists only
+while the pane's own workspace (`"pane"`) has the plugin active: `load_tools`' `enum` gains the
+group, the prompt line names it, and on deactivation both go and a loaded group is forgotten.
+Where Relay defers none of its own groups (a console, the Local tier, the short profile) the
+manifest's rule still holds — v1 plugin groups are always lazy — so `load_tools` and the loaded
+schemas are appended after the list. Activation therefore re-prefills once; it is rare and
+deliberate. A tool of another workspace's plugin is refused with a sentence naming it; running
+code or a build (`py_run_cell`, `py_restart`, `py_interrupt`, `tex_build` with `action: build`)
+is refused on a read-only turn and on a card's Discuss or Plan turn, like `run_command`.
+
+| Group | Tools |
+|---|---|
+| `py` (`relay.python`) | `py_run_cell {code, intent, timeout_seconds?}` (default 300 s, Stop interrupts the cell), `py_interrupt`, `py_restart {intent?}`, `py_variables`, `py_history {since_seq?, limit?}`, `py_export {format: script\|json}` |
+| `tex` (`relay.tex`) | `tex_build {action: build\|status, wait_seconds?}` (state, generation id and revision, source revision, `current`, failure, error/warning counts), `tex_diagnostics {severity?, limit?}`, `tex_forward_search {file, line, column?}`, `tex_inverse_search {page, x, y}`, `tex_dependencies` |
+
+A tool result clips each stream at 20,000 characters (the history keeps it all). **Guests**
+(Claude Code, Codex) get the same group through `relay_board` while the pane's workspace has it
+active, gated by the same object and the same refusals; the proxy now advertises
+`tools.listChanged` and sends `notifications/tools/list_changed` when the offered names change
+(it polls the bridge's read-only `tools/version` every 2 s), and `py_run_cell` and `tex_build`
+get the long-call transport deadline.

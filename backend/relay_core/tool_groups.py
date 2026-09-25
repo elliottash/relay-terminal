@@ -53,6 +53,20 @@ LOAD_TOOLS_SPEC = {"type": "function", "function": {
         "required": ["group"], "additionalProperties": False}}}
 
 
+def load_tools_spec(plugin=None) -> dict:
+    """`load_tools` offering an active task plugin's group too (#C0Q8 t:9a, protocol 35.4).
+
+    With no plugin group this is `LOAD_TOOLS_SPEC` itself, byte for byte, so a pane that never
+    activates a workspace sends exactly what it always did. `plugin` is {group: (names, what, …)}."""
+    if not plugin:
+        return LOAD_TOOLS_SPEC
+    spec = {"type": "function", "function": dict(LOAD_TOOLS_SPEC["function"])}
+    params = LOAD_TOOLS_SPEC["function"]["parameters"]
+    spec["function"]["parameters"] = {**params, "properties": {"group": {
+        **params["properties"]["group"], "enum": sorted(GROUPS) + sorted(plugin)}}}
+    return spec
+
+
 class LoadedGroups(set):
     """The groups `load_tools` fetched in this conversation, iterated in the order they were loaded.
 
@@ -99,7 +113,7 @@ def deferred_names(groups) -> tuple[str, ...]:
     return tuple(name for group in groups for name in GROUPS[group][0])
 
 
-def prompt_line(groups) -> str:
+def prompt_line(groups, plugin=None) -> str:
     """The one-line rule: the names that exist, and how to get their schemas.
 
     One line and not a paragraph on purpose — it is on every request of every turn, which is what
@@ -107,9 +121,12 @@ def prompt_line(groups) -> str:
     the group's own sentence is what the model needs to decide whether to ask for the schema.
     """
     ordered = [g for g in GROUPS if g in set(groups)]
-    if not ordered:
+    plugin = plugin or {}
+    if not ordered and not plugin:
         return ""
     parts = [f"{group} ({', '.join(GROUPS[group][0])}) to {GROUPS[group][1]}" for group in ordered]
+    # A task plugin's group (#C0Q8): after Relay's own, and only while its workspace is active.
+    parts += [f"{group} ({', '.join(plugin[group][0])}) to {plugin[group][1]}" for group in sorted(plugin)]
     return ("More tools you can load with load_tools when a request needs them, by group: "
             + "; ".join(parts) + ".")
 
@@ -121,18 +138,21 @@ def refusal(name: str, group: str) -> str:
             f"{name}.")
 
 
-def validate(arguments) -> str:
+def validate(arguments, allowed=None) -> str:
+    """The group `load_tools` asked for. `allowed` is every group this agent may load (Relay's own
+    and an active plugin's); the default is Relay's own, as before."""
+    allowed = GROUPS if allowed is None else allowed
     if not isinstance(arguments, dict) or set(arguments) - {"group"}:
         raise ValueError(f"{LOAD_TOOLS} takes one argument, group.")
     group = arguments.get("group")
-    if group not in GROUPS:
-        raise ValueError(f"group must be one of {', '.join(sorted(GROUPS))}.")
+    if group not in allowed:
+        raise ValueError(f"group must be one of {', '.join(sorted(allowed))}.")
     return group
 
 
-def result(group: str, already: bool) -> dict:
+def result(group: str, already: bool, names=None) -> dict:
     """What the tool returns: the names now callable, and where their schemas are."""
-    names = list(GROUPS[group][0])
+    names = list(GROUPS[group][0] if names is None else names)
     return {"loaded": group, "tools": names, "already_loaded": already,
             "note": ("Their schemas are in the tool list of the next request — call one of them "
                      "then, not in this response." if not already else

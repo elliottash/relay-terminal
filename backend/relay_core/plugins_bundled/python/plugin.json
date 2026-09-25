@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "relay.python",
   "version": "0.1.0",
   "name": "Python analysis",
@@ -10,7 +10,8 @@
   },
   "router": {
     "language": "python",
-    "prefixes": ["%"]
+    "prefixes": ["%"],
+    "prose_fallback": "agent"
   },
   "runner": {
     "kind": "kernel",
@@ -19,15 +20,14 @@
     "env": ["PYTHONPATH", "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "MPLBACKEND"]
   },
   "tools": {
-    "group": "python",
+    "group": "py",
     "items": [
-      {"name": "python_run_cell", "description": "Run code in the workspace's kernel, the same one the user's composer uses."},
-      {"name": "python_interrupt", "description": "Interrupt the running cell."},
-      {"name": "python_restart", "description": "Restart the kernel, clearing its namespace."},
-      {"name": "python_get_variables", "description": "List the kernel's variables with type, shape and a short preview."},
-      {"name": "python_describe_dataframe", "description": "Summarise a DataFrame: columns, dtypes, missing values and basic statistics."},
-      {"name": "python_page_dataframe", "description": "Return rows of a DataFrame by offset and count."},
-      {"name": "python_save_figure", "description": "Save the current figure to a file in the workspace."}
+      {"name": "py_run_cell", "description": "Run code in the workspace's kernel, the same one the user's composer uses; say why in intent."},
+      {"name": "py_interrupt", "description": "Interrupt the running cell."},
+      {"name": "py_restart", "description": "Restart the kernel, clearing its namespace."},
+      {"name": "py_variables", "description": "List the kernel's variables with type, shape and a short preview."},
+      {"name": "py_history", "description": "The session's cells in order, human and agent, with output and errors."},
+      {"name": "py_export", "description": "The session as a runnable # %% script or as JSON."}
     ]
   },
   "skills": ["skills/python-workspace"],
@@ -37,7 +37,11 @@
     "default_layout": "2:1"
   },
   "requires": [
-    {"program": "python3", "alternatives": ["python"], "version_arg": "--version", "install_hint": "install Python 3 with the ipykernel package (pip install ipykernel)"},
+    {"program": "python3", "alternatives": ["python"], "version_arg": "--version", "install_hint": "install Python 3; ipykernel and jupyter_client are optional (pip install ipykernel jupyter_client) and add IPython syntax"},
+    {"program": "jupyter", "optional": true, "install_hint": "pip install jupyter-console"},
     {"program": "ipython", "alternatives": ["ipython3"], "optional": true, "install_hint": "pip install ipython"}
-  ]
+  ],
+  "console": {"program": ["jupyter", "console", "--existing", "{connection_file}"], "startup": "ipython_startup.py", "prompt_marks": "osc133"},
+  "completion": {"kind": "static", "table": "completion.json"},
+  "commands": [{"name": "restart", "description": "Restart the Python kernel.", "action": {"kind": "tool", "tool": "py_restart"}}, {"name": "vars", "description": "List Python variables.", "action": {"kind": "tool", "tool": "py_variables"}}, {"name": "export", "description": "Export the Python session.", "action": {"kind": "tool", "tool": "py_export"}}]
 }
