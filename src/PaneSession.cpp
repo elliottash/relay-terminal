@@ -552,6 +552,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             return true;
         }
         if (type == QStringLiteral("state_loaded")) {
+            const bool restoring = !m_restoreRequest.isEmpty();
             m_sessionId = event.value(QStringLiteral("session_id")).toString(m_sessionId);
             if (!m_restoreRequest.isEmpty()) {
                 m_restoreRequest.clear();
@@ -570,6 +571,10 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             m_restoreGuestSession = event.value(QStringLiteral("guest_session")).toString();
             if (m_restoreGuestSession.isEmpty()) m_restoreGuestKey.clear();
             syncSessionText();   // the conversation this pane's text belongs to, from here on (#0TJ9)
+            // The saved pane text was replayed before the worker loaded this session. The normal
+            // adoption boundary would put all of it before the conversation and overwrite its
+            // sidecar with only the new "Session loaded" recap at the next save.
+            if (restoring) m_sessionTextMark = 0;
             // A fork's id exists only now: the text its parent stashed is written under it and
             // replayed here, so the fork opens showing what it was forked from (#0TJ9).
             if (m_forkLoadPending) adoptForkText();
@@ -623,7 +628,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
                 const QStringList saved = std::exchange(m_transcriptFillSavedLines, QStringList());
                 const QJsonArray items = event.value(QStringLiteral("items")).toArray();
                 const int covered = relay::transcriptreplay::coveredFrom(saved, items);
-                if (covered > 0) printTranscriptFill(items, covered);
+                if (covered != 0) printTranscriptFill(items, covered);
                 replayRestoredScrollback();
                 return true;
             }

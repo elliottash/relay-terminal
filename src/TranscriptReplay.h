@@ -98,8 +98,8 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn 
 // The saved text of a conversation is a window of its newest lines, not the conversation (the same
 // clamp every scrollback has), so a conversation longer than the window restores cut off (#KDB4).
 // This says where that window begins in the transcript's turns, so the fill can print the turns
-// above it. -1 when the window's relationship to the transcript is not known, and the caller
-// leaves the restore as it was.
+// above it. -1 when the window's relationship to the transcript is not known: the caller prints
+// the whole transcript so a recap-only saved file cannot hide the conversation.
 //
 // The precise signal is the first ✦ row the saved text still holds: a turn's prompt, matched
 // against the transcript's prompt items the way relay::sessiontext::turnStart matches one for a

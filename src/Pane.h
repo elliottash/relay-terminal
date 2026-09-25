@@ -1373,6 +1373,13 @@ public:
             m_editor->useHistoryFile(promptHistoryPath());
             updateComposerDraftKey();
         }
+        // The pane file may contain only a recap after an interrupted save. Ask the transcript
+        // which turns it actually covers before replaying it; an absent file uses the same
+        // transcript fallback as opening a conversation in a new pane.
+        if (!m_restoreSession.isEmpty()) {
+            if (m_restoredScrollback.isEmpty()) m_transcriptPending = m_restoreSession;
+            else requestTranscriptFill(m_restoreSession, m_restoredScrollback);
+        }
         changed();
     }
 
@@ -1796,10 +1803,14 @@ public:
                         row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
         printInline(transcriptFillCloseMark() + '\n', Ink::Note);
         closeInline();
-        status(QStringLiteral("The saved text covers from turn %1 · replayed %2 line(s) of the %3 earlier turn(s) above it.")
-                   .arg(coveredFromTurn)
-                   .arg(rows.size())
-                   .arg(coveredFromTurn));
+        if (coveredFromTurn < 0)
+            status(QStringLiteral("The saved text had no matching turn · replayed %1 line(s) of the transcript.")
+                       .arg(rows.size()));
+        else
+            status(QStringLiteral("The saved text covers from turn %1 · replayed %2 line(s) of the %3 earlier turn(s) above it.")
+                       .arg(coveredFromTurn)
+                       .arg(rows.size())
+                       .arg(coveredFromTurn));
     }
     void focusInput() {
         if (m_native) { focusTerminal(); return; }

@@ -141,9 +141,24 @@ private slots:
         // A row cut at the pane's width matches the full prompt line it came from.
         const QStringList cut{QStringLiteral("✦ yes, help me update the ga")};
         QCOMPARE(coveredFrom(cut, items), 1);
-        // No prompt row above the window's start: nothing to match, the restore stays as it was.
+        // No prompt or reply anchor: the caller must draw the whole transcript, as a restored
+        // pane with only a recap would otherwise show none of its earlier turns.
         QCOMPARE(coveredFrom(QStringList{QStringLiteral("only a reply's tail")}, items), -1);
         QCOMPARE(coveredFrom(saved, QJsonArray{}), -1);
+    }
+
+    void recapOnlySavedTextNeedsTheWholeTranscript() {
+        const QJsonArray items{entry(0, QStringLiteral("prompt"), QStringLiteral("fix the board error")),
+                               entry(0, QStringLiteral("reply"), QStringLiteral("I found the invalid links field")),
+                               entry(1, QStringLiteral("prompt"), QStringLiteral("continue")),
+                               entry(1, QStringLiteral("reply"), QStringLiteral("The fix is committed"))};
+        const QStringList saved{QStringLiteral("Session loaded: Fixing card links · 2 turns"),
+                                QStringLiteral("Next · restart Relay")};
+        const int covered = coveredFrom(saved, items);
+        QCOMPARE(covered, -1);
+        const auto rows = render(items, 400, covered);
+        QVERIFY(textsOf(rows).contains(QStringLiteral("✦ fix the board error")));
+        QVERIFY(textsOf(rows).contains(QStringLiteral("✦ continue")));
     }
 
     // A window deep enough to have lost its turn's ✦ row — measured: the window opened at a
