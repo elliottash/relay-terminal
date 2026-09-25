@@ -1,0 +1,3 @@
+[voice] section of the sandbox relay.conf:
+[voice]
+device=alsa_input.usb-046d_HD_Pro_Webcam_C920_B38639BF-02.analog-stereo

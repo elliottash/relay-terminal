@@ -1,0 +1,19 @@
+[instructions]
+onboarded=true
+
+[models]
+provider_order=relay-pro, openrouter, guest:claude, guest:codex
+tier\flash="guest:claude|sonnet|low|rank=1"
+tier\high="guest:claude|fable|high|rank=1"
+tier\lite="relay-free|relay-lite|low|rank=1"
+tier\local=@Invalid()
+tier\main="guest:claude|opus|high|rank=1"
+
+[security]
+approvals_chosen=true
+
+[url_handler]
+announced=true
+
+[voice]
+device=alsa_input.usb-046d_HD_Pro_Webcam_C920_B38639BF-02.analog-stereo
