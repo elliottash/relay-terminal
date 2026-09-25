@@ -199,23 +199,14 @@ void aMiddleClickOnTheHeaderClosesThePane()
     CHECK_EQ(closes, 0);
 }
 
-    // The ↗ run-in-background button waits in the prompt box's bottom-right corner once the box
-    // is tall enough to have one, and text wraps before the corner column rather than running
-    // underneath it (card #4CXY). At rest the box is one line tall and its bottom-right corner
-    // is the chips row itself, so the button keeps the seat beside the mode chip it always had
-    // and the idle box gains no height for the button's sake.
-void theBackgroundButtonTakesThePromptBoxCorner()
+    // The drawn box is QFrame#composer, and the theme sheet styles it by that name: the
+    // surface fill, the rounded border, and the copper accent border when a relay is active
+    // in the pane (#6JS0). The name is load-bearing in two more places - theme::polishWindow
+    // and RelayWindow::repolishLeaf both find the box as the editor's parent frame - so the
+    // box stays the editor's direct parent and stays named composer. It was briefly renamed
+    // promptBox with an input-area widget between the two, and the box went black.
+void theComposerKeepsItsThemeName()
 {
-    // The pane sits at a fixed geometry inside a layout-less window here, so nothing above it
-    // re-lays-out on its own when the editor grows or shrinks; the live window does this pass
-    // on every LayoutRequest. Qt skips activate() on a layout that looks clean, so invalidate
-    // first: growth works without it, shrink does not.
-    auto settle = [](Pane *p) {
-        QApplication::processEvents();
-        p->layout()->invalidate();
-        p->layout()->activate();
-        QApplication::processEvents();
-    };
     QWidget window;
     window.resize(900, 600);
     auto *pane = new Pane(home->path(), home->path(), true);
@@ -223,60 +214,21 @@ void theBackgroundButtonTakesThePromptBoxCorner()
     pane->setGeometry(0, 0, 900, 600);
     window.show();
     QApplication::processEvents();
-    auto *button = pane->findChild<QToolButton *>(QStringLiteral("runInBackgroundButton"));
-    auto *area = pane->findChild<QWidget *>(QStringLiteral("promptInputArea"));
-    auto *modeChip = area ? area->findChild<QToolButton *>(QStringLiteral("stripChip")) : nullptr;   // the corner's one
     auto *editor = pane->findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
-    CHECK(button != nullptr);
-    CHECK(area != nullptr);
-    CHECK(modeChip != nullptr);
     CHECK(editor != nullptr);
-    if (!button || !area || !modeChip || !editor) return;
-    // The button and the chips are all children of the input area (the corner column is a
-    // layout), so their geometries compare directly.
-    CHECK_EQ(button->parentWidget(), area);
-    CHECK_EQ(area->layout()->indexOf(button), -1);   // floating: no layout seat to grow the box
-    // At rest the button sits beside the mode chip, on the chips row, and never overlaps it.
-    CHECK(!button->geometry().intersects(modeChip->geometry()));
-    CHECK(button->geometry().bottom() <= modeChip->geometry().bottom());
-    const QString evidence = qEnvironmentVariable("RELAY_CORNER_EVIDENCE");
-    auto *composer = pane->findChild<QFrame *>(QStringLiteral("promptBox"));
-    const auto capture = [&](const char *stage) {
-        if (evidence.isEmpty() || !composer) return;
+    if (!editor) return;
+    auto *composer = qobject_cast<QFrame *>(editor->parentWidget());
+    CHECK(composer != nullptr);
+    if (!composer) return;
+    CHECK_EQ(composer->objectName(), QStringLiteral("composer"));
+    CHECK(qApp->styleSheet().contains(QStringLiteral("QFrame#composer")));
+    // Copper, on demand: the accent border shows when a relay is active in the pane.
+    composer->setProperty("relayActive", true);
+    QApplication::processEvents();
+    const QString evidence = qEnvironmentVariable("RELAY_COMPOSER_EVIDENCE");
+    if (!evidence.isEmpty())
         pane->grab(QRect(composer->mapTo(pane, QPoint(0, 0)), composer->size()))
-            .save(evidence + QLatin1Char('/') + stage + QStringLiteral(".png"));
-    };
-    capture("rest");
-    const int restHeight = area->height();
-    // Enough text to wrap past a second line: the box grows and the button takes the corner,
-    // flush with the area's bottom-right, under the chips.
-    editor->setPlainText(QStringLiteral("one two three four five six seven eight nine ten "
-                                        "eleven twelve thirteen fourteen fifteen sixteen "
-                                        "seventeen eighteen nineteen twenty twenty-one"));
-    settle(pane);
-    CHECK(area->height() > restHeight);
-    CHECK_EQ(button->geometry().bottomRight(), area->rect().bottomRight());
-    CHECK(!button->geometry().intersects(modeChip->geometry()));
-    // Text wraps around it rather than running underneath: the editor ends before the corner
-    // column, and the button lives inside that column's footprint under the mode chip.
-    CHECK(editor->geometry().right() < button->geometry().left());
-    CHECK(button->geometry().left() >= modeChip->geometry().left());
-    capture("grown");
-    // The box is capped at two thirds of the pane; within the cap the button keeps riding the
-    // bottom as the box grows with the text.
-    const int grownHeight = area->height();
-    editor->setPlainText(editor->toPlainText() + QStringLiteral("\nsecond paragraph line one "
-                                                                "two three four five six seven "
-                                                                "eight nine ten eleven twelve"));
-    settle(pane);
-    if (area->height() > grownHeight)
-        CHECK_EQ(button->geometry().bottomRight(), area->rect().bottomRight());
-    // Clearing the box brings it back to the one-line corner it shares with the chips.
-    editor->clear();
-    settle(pane);
-    CHECK_EQ(area->height(), restHeight);
-    CHECK(!button->geometry().intersects(modeChip->geometry()));
-    CHECK(button->geometry().bottom() <= modeChip->geometry().bottom());
+            .save(evidence + QStringLiteral("/composer-copper.png"));
 }
 
     // The row above the box is the context's, left to right, each button wearing its letter, and
@@ -831,8 +783,7 @@ void relayingStatusSitsOutsideEveryPromptFrame()
     CHECK(editor != nullptr);
     CHECK(lineWidget != nullptr);
     if (!editor || !lineWidget) return;
-    // The box itself, by name since card #4CXY put an input-area widget between it and the editor.
-    auto *composer = console.findChild<QFrame *>(QStringLiteral("promptBox"));
+    auto *composer = qobject_cast<QFrame *>(editor->parentWidget());
     CHECK(composer != nullptr);
     // Card #H2KQ: the line shares a row with its Take over / Take control button now; the row
     // is the pane's direct child, still above the composer and outside its frame.
@@ -861,7 +812,7 @@ void relayingStatusSitsOutsideEveryPromptFrame()
     CHECK(terminalEditor != nullptr);
     CHECK(terminalLine != nullptr);
     if (!terminalEditor || !terminalLine) return;
-    auto *terminalComposer = terminal.findChild<QFrame *>(QStringLiteral("promptBox"));
+    auto *terminalComposer = qobject_cast<QFrame *>(terminalEditor->parentWidget());
     CHECK(terminalComposer != nullptr);
     CHECK(terminalLine->parentWidget() != nullptr && terminalLine->parentWidget()->parentWidget() == &terminal);
     CHECK(!terminalComposer->isAncestorOf(terminalLine));
@@ -1921,13 +1872,13 @@ int main(int argc, char **argv)
         if (!failures) std::fprintf(stdout, "234z: all cases passed\n");
         return failures ? 1 : 0;
     }
-    if (app.arguments().contains(QStringLiteral("--corner-only"))) {
-        // Themed, because the ↗ button's chip face (min-height, padding) is what leaves it room
-        // to sit under the chips row; bare Fusion metrics are taller and the case would test a
-        // button the app never shows.
+    if (app.arguments().contains(QStringLiteral("--composer-only"))) {
+        // Themed, because the box's face — surface fill, rounded border, copper accent when a
+        // relay is active — comes from the theme sheet; the case exists to keep that wiring
+        // intact (#6JS0).
         relay::theme::applyTheme(app);
-        cases::theBackgroundButtonTakesThePromptBoxCorner();
-        if (!failures) std::fprintf(stdout, "corner: all cases passed\n");
+        cases::theComposerKeepsItsThemeName();
+        if (!failures) std::fprintf(stdout, "composer: all cases passed\n");
         return failures ? 1 : 0;
     }
     if (app.arguments().contains(QStringLiteral("--memory-only"))) {

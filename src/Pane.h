@@ -5613,10 +5613,6 @@ private:
     }
 
     void buildUi();
-    // The ↗ run-in-background button's seat in the prompt box (card #4CXY): the box's
-    // bottom-right corner when the box is tall enough to have one, else the seat beside the
-    // mode chip it occupied before. Not a layout child — see the comment where it is created.
-    void placeBackgroundSend();
 
     // ----- agent sessions UI: helpers ----------------------------------------------------------
     static QIcon stripIcon(const QString &name) {
@@ -17026,12 +17022,6 @@ private:
     // prompt-box-only input: masked prompt box at a password prompt, and the take-control button
     QLineEdit *m_secretEdit = nullptr;
     QLabel *m_secretChip = nullptr;
-    // The prompt box's input area (editor + corner column in one widget, card #4CXY) and the
-    // ↗ run-in-background button floating over it rather than sitting in a layout row: the
-    // box is one line tall at rest, and a layout seat under the chips would add the button's
-    // height to every pane's idle box. placeBackgroundSend() keeps it in the box's corner.
-    QWidget *m_promptArea = nullptr;
-    QToolButton *m_backgroundSend = nullptr;
     QPushButton *m_takeControl = nullptr;
     QString m_secretProgram;
     bool m_secretMode = false, m_secretDeclined = false;

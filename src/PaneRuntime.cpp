@@ -250,14 +250,6 @@ bool Pane::eventFilter(QObject *object, QEvent *event) {
             // Keys never reach the terminal outside native mode, so typing there can no longer
             // take Readline's line away from the composer; nothing to do here.
         }
-        // The floating ↗ run-in-background button (card #4CXY) re-seats when the geometry that
-        // places it moves: the input area resizes as the prompt box auto-grows with its text
-        // and as the pane does, and the mode chip moves when the `!` / `*` / password chips
-        // or a mode retitle re-lay the corner row. placeBackgroundSend is idempotent.
-        if ((object == m_promptArea && event->type() == QEvent::Resize)
-            || (object == m_modeChip
-                && (event->type() == QEvent::Move || event->type() == QEvent::Resize)))
-            placeBackgroundSend();
         return QWidget::eventFilter(object, event);
     }
 
