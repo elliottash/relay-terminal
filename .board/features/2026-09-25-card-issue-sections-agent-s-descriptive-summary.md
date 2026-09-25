@@ -1,7 +1,7 @@
 ---
 id: EMWF
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: text, primary: script, also: [], human: none, criteria: New cards carry summary + attributed session-linked quote; legacy bodies unchanged; policy text updated, sign_off: none, effort: medium}
 source: Relay pane session, 2026-09-25
-links: {plans: [], commits: [], evidence: [], related: [WZ3K], github: null}
+links: {plans: [], commits: [543c6119], evidence: [docs/qa_evidence/2026-09-25-emwf-issue-quote/], related: [WZ3K], github: null}
 ---
 # Card Issue sections: agent's descriptive summary, with the user's request kept as an attributed quote linked to its session
 
@@ -34,11 +34,34 @@ Scope edges (all keep today's plain Issue, none quote a person): split cards (bo
 
 ## Tasks
 
-- [ ] board.py: new_card summary + quoted-request builder with session link <!-- t:z7 -->
-- [ ] board_tools.py: create spec (summary required, request optional quote) + context wiring <!-- t:pc -->
-- [ ] Policy text: board_policy.md rule 2, policy_text appendix, deliver skill <!-- t:ch -->
-- [ ] Tests: body formats, policy assertions; update pinned-body tests <!-- t:sc -->
-- [ ] Land via scripts/land.py; regenerate this board's POLICY.md <!-- t:0e -->
+- [x] board.py: new_card summary + quoted-request builder with session link <!-- t:z7 -->
+- [x] board_tools.py: create spec (summary required, request optional quote) + context wiring <!-- t:pc -->
+- [x] Policy text: board_policy.md rule 2, policy_text appendix, deliver skill <!-- t:ch -->
+- [x] Tests: body formats, policy assertions; update pinned-body tests <!-- t:sc -->
+- [x] Land via scripts/land.py; regenerate this board's POLICY.md <!-- t:0e -->
 
 ## Decisions
 - 2026-09-25 — "lets just plan here, dont implement": the plan is the deliverable for now; implementation waits for the owner's go.
+
+## Execution Summary
+Landed in 543c6119 (17 files; board.py, board_tools.py, board_policy.md, deliver SKILL.md, both test files, the regenerated .board/POLICY.md, this card, two new bug cards and the evidence).
+
+- `board.py`: `issue_quote()` writes the request as a `>` block ending `> — {user} · [session:{id}](relay://session/{id}) · {date}`; `new_card` takes `summary`/`quote_user`/`quote_session`. Summary+request → summary then quote; request only → legacy plain Issue; summary only → summary alone.
+- `board_tools.py`: create spec requires `summary`, `request` optional ("the user's own words, verbatim … omit when the card quotes no one"); `_create` passes `getpass.getuser()` and `self.context.session_id`; duplicate similarity uses `request or summary`; `_maybe_text` added for optional text args.
+- Policy: rule 2 is now Summarize-then-quote; appendix example shows the quote block; deliver skill step 2 updated. The policy block was 3208 bytes at HEAD — already over its 3 KiB budget — so the same pass re-tightened rules 1, 3, 5, 7, 8, 11 and the memory note (meaning and pinned phrases kept) to 2977 bytes; `test_the_board_policy_block_stays_tiered` is green again.
+- Decisions applied: attribution shows the OS username (elliott); the link label carries the full session id so it stays greppable.
+- Note for the verifier: live sessions still serving the old schema (this one included) keep requiring `request`; the new `summary`-required schema reaches sessions started after the landed worker code. #M58P (dropped) was filed through the real tools as the live check.
+
+Unrelated, filed: #K54A (prompt 497 bytes over budget, red at HEAD) and #G19V (guest bridge parity, red at HEAD).
+
+## Tests
+`PYTHONPATH=backend python3 -m unittest tests.test_board_tools tests.test_board tests.test_system_prompt tests.test_board_protocol tests.test_guest_board_bridge` — 708 tests; every test covering this change passes, including the four new CreateTests cases and the four new IssueSectionTests cases, the legacy-body test, both policy-phrase pins, the tiered-size test and the POLICY.md freshness test. Two pre-existing failures remain, reproduced identically on a clean copy of git HEAD's backend and filed as #K54A and #G19V. Log: docs/qa_evidence/2026-09-25-emwf-issue-quote/test-run.txt.
+
+## Try it
+Open: `docs/qa_evidence/2026-09-25-tryit-EMWF/stage.sh`
+
+It prints three seeded card Issues side by side: one filed the old way (your words pasted in as the whole Issue, like #WZ3K), one the new way (summary, then your words as a quote attributed `— elliott · session:<id> · 2026-09-25`), and one quoting nobody (summary alone). The session link resolves on real cards; in this fixture it is a stand-in id.
+
+One judgement (~1 minute): do the two new sections give you what you asked for — a real summary first, and your words unmistakably yours, with who said them and where — or is anything still missing, wrong or noisy?
+
+Expected: docs/qa_evidence/2026-09-25-tryit-EMWF/expected.md (sealed until you answer)

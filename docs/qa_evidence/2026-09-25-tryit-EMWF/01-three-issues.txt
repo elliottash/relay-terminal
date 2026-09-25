@@ -1,0 +1,22 @@
+
+=== the three Issue sections ===
+
+--- NEW WAY, no quote: a fault the agent noticed  (J8BP) ---
+## Issue
+The model dropdown forgets a renamed provider until restart; a fault noticed while working on something else, quoting nobody.
+
+
+--- NEW WAY: voice transcription mode  (YH1Y) ---
+## Issue
+Voice-to-text in the composer: a microphone icon that dictates into the input box, matching how Warp does it.
+
+> add voice transcribe mode (microphone icon). like warp
+> — elliott · [session:0f3ac2de91b4e8a6c0d5f17392ab4e76](relay://session/0f3ac2de91b4e8a6c0d5f17392ab4e76) · 2026-09-25
+
+
+--- OLD WAY: scratch watcher flags the guest harness home  (RQK8) ---
+## Issue
+delegate a subagent to file the scratch watcher issue
+
+
+Board fixture: /home/elliott/.cache/relay/scratch/tryit/emwf-issue-quote/issues/board.yaml
