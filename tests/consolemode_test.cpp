@@ -39,6 +39,13 @@
 #include <QSettings>
 
 #include <cstdio>
+#include <cstdlib>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <QThread>
+#include <QVector>
 
 namespace {
 int failures = 0;
@@ -106,6 +113,86 @@ public:
 };
 
 }  // namespace
+
+// Card #DSKT: the harness owns the processes its shell cases start, and finds none of them by
+// name. Each shell case holds a harness::ProcessGuard for its pane: at case end — a failed CHECK
+// still reaches scope end — the guard SIGKILLs the pane's foreground process group and the
+// shell's own group and registers the pids. The exit scan (an atexit hook, so main()'s many
+// return paths all pass through it) fails the run if a tracked pid is still alive after its
+// guard's SIGKILL. A console-mode run leaves nothing behind.
+namespace harness {
+
+QVector<int> g_pids;   // shell pids and foreground pids this run started
+
+void track(int pid)
+{
+    if (pid > 0 && !g_pids.contains(pid))
+        g_pids.append(pid);
+}
+
+void killGroup(int pgid)
+{
+    if (pgid > 0)
+        ::kill(pid_t(-pgid), SIGKILL);
+}
+
+// Case scope: kills what the pane's shell started, whatever the checks above it said. Declare it
+// after the Pane so it destructs first.
+struct ProcessGuard {
+    explicit ProcessGuard(Pane &p) : pane(p) { track(p.shellPid()); }
+    ~ProcessGuard()
+    {
+        track(pane.shellPid());
+        track(pane.foregroundProcessId());
+        const int foreground = pane.foregroundProcessGroup();
+        const int shell = pane.shellPid();
+        const int shellGroup = shell > 0 ? int(::getpgid(pid_t(shell))) : 0;
+        killGroup(foreground);
+        if (shellGroup != foreground)
+            killGroup(shellGroup);
+    }
+    Pane &pane;
+};
+
+bool alive(int pid)
+{
+    int status = 0;
+    ::waitpid(pid_t(pid), &status, WNOHANG);   // reap it if it is our zombie child: zombies answer kill()
+    return ::kill(pid_t(pid), 0) == 0;
+}
+
+// Runs after main returns (and after its stack — the QApplication and every case's Pane — is
+// gone). A tracked pid that still answers after the guards' SIGKILL plus this deadline is an
+// orphan: say so and fail the run. A clean run exits with main()'s own code.
+void scanAtExit()
+{
+    std::fflush(nullptr);
+    for (int i = 0; i < 100; ++i) {
+        bool any = false;
+        for (const int pid : g_pids)
+            any = alive(pid) || any;
+        if (!any)
+            return;
+        QThread::msleep(25);
+    }
+    int orphans = 0;
+    for (const int pid : g_pids) {
+        if (alive(pid)) {
+            ++orphans;
+            std::fprintf(stderr, "FAIL orphaned pid %d is still alive after the harness SIGKILL\n", pid);
+        }
+    }
+    std::fflush(nullptr);
+    if (orphans)
+        _exit(1);
+}
+
+[[maybe_unused]] const bool registered = [] {
+    std::atexit(scanAtExit);
+    return true;
+}();
+
+}   // namespace harness
 
 // Every pane wants somewhere to put a runtime directory and a scrollback; none of these cases
 // needs a provider, and none of them starts a turn.

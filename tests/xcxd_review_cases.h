@@ -6,6 +6,7 @@ struct XcxdReviewPane {
     StubContext context;
     QList<QJsonObject> sent;
     Pane pane;
+    harness::ProcessGuard guard{pane};   // #DSKT: after pane, so it kills the shell's groups first
     XcxdReviewPane() : pane(home->path(), home->path(), true, relay::defaultEngineCore(), &context) {
         pane.onWorkerLine = [this](const QJsonObject &message) { sent.append(message); };
         pane.deliverWorkerEvent({{"event", "ready"}});
