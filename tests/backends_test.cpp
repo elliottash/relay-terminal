@@ -149,10 +149,14 @@ private Q_SLOTS:
     void menuOffersANewPaneOnTheSameHostOnlyInARemotePane() {
         relay::TerminalMenuState state = relayEngineState();
         QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("splitSameHost")));
+        QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("splitLocal")));
+        QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("closeEndRemote")));
         state.remoteHost = QStringLiteral("filly");
         const auto items = relay::terminalContextMenu(state);
         const QStringList ids = menuIds(items);
         QCOMPARE(ids.indexOf(QStringLiteral("splitSameHost")), ids.indexOf(QStringLiteral("splitDown")) + 1);
+        QCOMPARE(ids.indexOf(QStringLiteral("splitLocal")), ids.indexOf(QStringLiteral("splitSameHost")) + 1);
+        QVERIFY(ids.indexOf(QStringLiteral("closeEndRemote")) > ids.indexOf(QStringLiteral("close")));
         for (const relay::TerminalMenuItem &item : items)
             if (item.id == QStringLiteral("splitSameHost")) QCOMPARE(item.label, QStringLiteral("New pane on filly"));
     }

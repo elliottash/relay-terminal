@@ -86,12 +86,19 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     add("splitRight", QStringLiteral("New pane to the right"));
     add("splitDown", QStringLiteral("New pane below"));
     // The same ssh command line again, beside this one; with connection sharing, no second login.
-    if (!state.remoteHost.isEmpty())
+    // That is where a split from a remote pane lands by default now (#XQ8F), so this one names the
+    // host and the one below names the machine.
+    if (!state.remoteHost.isEmpty()) {
         add("splitSameHost", QStringLiteral("New pane on %1").arg(state.remoteHost));
+        add("splitLocal", QStringLiteral("New local pane"));
+    }
     // pane.equalize: every splitter in the tab back to equal shares; greyed while this pane is
     // alone in its tab, because equalizing then has nothing to share the space with.
     add("equalize", QStringLiteral("Equalize pane sizes"), state.canEqualize);
     add("close", QStringLiteral("Close pane"), state.canClosePane);
+    // Closing a pane on a host leaves its session running there (#XQ8F); this ends it too.
+    if (!state.remoteHost.isEmpty())
+        add("closeEndRemote", QStringLiteral("Close and end the remote session"), state.canClosePane);
 
     while (!items.isEmpty() && items.last().isSeparator())
         items.removeLast();

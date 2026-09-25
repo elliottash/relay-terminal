@@ -356,6 +356,41 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
                                      QStringLiteral("Hosts, comma separated: always plain ssh there"));
         terminal.rows << hostListRow(QStringLiteral("ssh/hosts_always"), QStringLiteral("Always enhance on"),
                                      QStringLiteral("Hosts, comma separated: enhanced without asking in Ask mode"));
+        // Persistence (#XQ8F): the wrapper that enhances an ssh also holds it in a session on the
+        // host, when the pane shell's environment asks (src/PaneRuntime.cpp reads these keys at
+        // pane start, so both rows apply to new panes).
+        {
+            relay::SettingRow row = toggleRow(QStringLiteral("ssh/persist"), QStringLiteral("Persistent sessions"),
+                                              QStringLiteral("An ssh you type lands in a session on the host that "
+                                                             "outlives the connection and this pane; applies to new panes"),
+                                              true);
+            row.aliases = QStringLiteral("persistent tmux mosh session holder reattach");
+            terminal.rows << row;
+        }
+        {
+            const QString current = QSettings().value(QStringLiteral("ssh/link"), QStringLiteral("ssh")).toString();
+            // The choice may still be saved when mosh is missing here: the wrapper falls back to ssh.
+            QStringList labels{QStringLiteral("ssh — reconnects itself"),
+                               QStringLiteral("mosh — roams and survives sleep (needs mosh on both sides)")};
+            if (!relay::ssh::hasLocalMosh()) labels[1] += QStringLiteral(" · not installed here");
+            relay::SettingRow row = choiceRow(QStringLiteral("option:ssh_link"), QStringLiteral("Link"),
+                                              QStringLiteral("What an ssh you type travels over; applies to new panes"),
+                                              {QStringLiteral("ssh"), QStringLiteral("mosh")}, labels,
+                                              current, QStringLiteral("ssh"), [](const QString &value) {
+                QSettings().setValue(QStringLiteral("ssh/link"), value);
+            });
+            row.aliases = QStringLiteral("mosh roaming sleep");
+            terminal.rows << row;
+        }
+        {
+            relay::SettingRow info;
+            info.kind = relay::SettingRow::Info;
+            info.id = QStringLiteral("info:ssh_persist");
+            info.label = QStringLiteral("Persistent sessions use a bare tmux (or screen) on the host on Relay's own socket; "
+                                        "nothing is installed and your own tmux is untouched. Closing a pane leaves its "
+                                        "session running; Close and end the remote session (pane menu) ends it.");
+            terminal.rows << info;
+        }
         sections << terminal;
 
         relay::SettingsSection agent;

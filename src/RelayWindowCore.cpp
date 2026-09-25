@@ -234,22 +234,26 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("windows.fresh")) startFreshWindowSet();
         else if (id == QStringLiteral("tab.new")) {
             if (addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1)) startNewTabTheme(m_tabs->currentWidget());
-            markForSshHint(m_active, QString());   // an ssh typed here soon teaches Connect to host
+            markForSshHint(m_active);   // an ssh typed here soon teaches Connect to host
         }
         else if (id == QStringLiteral("ssh.connect")) openSshMenu();
-        else if (id == QStringLiteral("ssh.connectPersistent")) openSshMenu(true);
-        else if (id == QStringLiteral("ssh.splitSameHost")) splitSameHost();
+        else if (id == QStringLiteral("ssh.remoteSessions")) openRemoteSessions();
+        else if (id == QStringLiteral("ssh.splitSameHost")) splitOnHost(relay::panes::Direction::Right, true, true);
         else if (id == QStringLiteral("tab.next")) cycleTab(1);
         else if (id == QStringLiteral("tab.previous")) cycleTab(-1);
         // One key, one new pane on the right, then ← ↑ ↓ within two seconds to place it (#78BN).
-        else if (id == QStringLiteral("pane.splitRight")) splitToward(relay::panes::Direction::Right, true);
-        else if (id == QStringLiteral("pane.splitDown")) { splitToward(relay::panes::Direction::Down); hintPlacement(QStringLiteral("↓")); }
-        else if (id == QStringLiteral("pane.splitLeft")) { splitToward(relay::panes::Direction::Left); hintPlacement(QStringLiteral("←")); }
-        else if (id == QStringLiteral("pane.splitUp")) { splitToward(relay::panes::Direction::Up); hintPlacement(QStringLiteral("↑")); }
+        // Every split goes through splitOnHost, which lands it on the host when the focused pane
+        // is on one (#XQ8F) and splits here otherwise, so only the placement differs by direction.
+        else if (id == QStringLiteral("pane.splitRight")) splitOnHost(relay::panes::Direction::Right, true);
+        else if (id == QStringLiteral("pane.splitDown")) { splitOnHost(relay::panes::Direction::Down); hintPlacement(QStringLiteral("↓")); }
+        else if (id == QStringLiteral("pane.splitLeft")) { splitOnHost(relay::panes::Direction::Left); hintPlacement(QStringLiteral("←")); }
+        else if (id == QStringLiteral("pane.splitUp")) { splitOnHost(relay::panes::Direction::Up); hintPlacement(QStringLiteral("↑")); }
+        // The split that stays on this machine when the focused pane is on a host (#XQ8F).
+        else if (id == QStringLiteral("pane.splitLocal")) splitToward(relay::panes::Direction::Right, true);
         // The pane chrome's one ⊞ button (#803C): a pane on the right at once, and no arrow window —
         // the pointer is in hand, so the pane is placed by dragging its header.
         else if (id == QStringLiteral("pane.newByMouse")) {
-            splitToward(relay::panes::Direction::Right);
+            splitOnHost(relay::panes::Direction::Right);
             notice(QStringLiteral("New pane · drag its header to place it"), 4000);
             hint(QStringLiteral("pane.new.mouse"),
                  relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("pane.splitRight")), QStringLiteral("new pane")));
@@ -259,6 +263,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("pane.focusUp")) navigate(relay::panes::Direction::Up);
         else if (id == QStringLiteral("pane.focusDown")) navigate(relay::panes::Direction::Down);
         else if (id == QStringLiteral("pane.close")) closeActive();
+        else if (id == QStringLiteral("pane.closeEndRemote")) closeEndRemote();
         else if (id == QStringLiteral("pane.brighten") || id == QStringLiteral("pane.darken"))
             adjustPaneDimming(m_activeLeaf, id == QStringLiteral("pane.brighten") ? -5 : 5);
         else if (id == QStringLiteral("pane.dimToggle")) {
@@ -937,9 +942,11 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
             if (action == QStringLiteral("splitRight")) w->runAction(QStringLiteral("pane.splitRight"));
             else if (action == QStringLiteral("splitDown")) w->runAction(QStringLiteral("pane.splitDown"));
             else if (action == QStringLiteral("splitSameHost")) w->runAction(QStringLiteral("ssh.splitSameHost"));
+            else if (action == QStringLiteral("splitLocal")) w->runAction(QStringLiteral("pane.splitLocal"));
             else if (action == QStringLiteral("equalize")) w->runAction(QStringLiteral("pane.equalize"));
             else if (action == QStringLiteral("runBackground")) w->runAction(QStringLiteral("pane.runInBackground"));
             else if (action == QStringLiteral("close")) w->closePane(guard, true);
+            else if (action == QStringLiteral("closeEndRemote")) w->runAction(QStringLiteral("pane.closeEndRemote"));
         };
         // Grey the menu's "Equalize pane sizes" while this pane is alone in its tab: any other
         // leaf counts (an explorer beside it splits the tab just the same).
@@ -1491,7 +1498,7 @@ void RelayWindow::refreshPaneStatus() {
                 chrome->setSubagents(facts.liveSubagents);
                 // Shared with how many people, and who is driving when it is not the owner.
                 chrome->setSharing(chip.text, chip.tooltip, chip.guestDriving);
-                if (!remoteLine.isEmpty()) sshSessionSeen(pane, remoteLine);
+                if (!remoteLine.isEmpty()) sshSessionSeen(pane);
                 states << state;
                 usage << pane->usageSample();
                 const QString sessionId = pane->sessionId();

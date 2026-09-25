@@ -1075,17 +1075,7 @@ private:
     // §30.3): until it could, a pane-scoped action asked for by the agent in tab 2 landed on
     // whatever pane happened to have the focus, which is why group 3's model, effort, input-mode
     // and plan-mode keys could not be turned on.
-    void runAction(const QString &id, Pane *target = nullptr) {
-        Pane *pane = m_active;
-        // A split from a pane in an ssh session: the same host reached by hand in the new pane
-        // teaches Split on the same host (#S5SH). It reads `m_active` and not `target` on purpose:
-        // the split itself anchors on the focused leaf (see runActionNow), so the host to teach is
-        // the focused pane's.
-        const QString sshHost = id.startsWith(QStringLiteral("pane.split")) && pane
-            ? relay::panestatus::remoteHost(pane->remoteCommandLine()) : QString();
-        runActionNow(id, target);
-        if (!sshHost.isEmpty() && m_active != pane) markForSshHint(m_active, sshHost);
-    }
+    void runAction(const QString &id, Pane *target = nullptr) { runActionNow(id, target); }
 
     void runActionNow(const QString &id, Pane *target = nullptr);
 
@@ -2668,18 +2658,18 @@ private:
     // queue, as for a command typed while the terminal is busy). The list is the recently used
     // hosts, then every concrete Host of ~/.ssh/config and its Includes, read afresh each time.
 
-    PaletteItem sshHostItem(const QString &target, const QString &detail, bool persistent = false) {
+    PaletteItem sshHostItem(const QString &target, const QString &detail) {
         PaletteItem item;
         item.key = QStringLiteral("ssh:") + target;
         item.section = QStringLiteral("SSH");
         item.label = target;
         item.detail = detail;
         item.aliases = QStringLiteral("ssh ") + detail;
-        item.run = [this, target, persistent] { connectToHost(target, persistent); };
+        item.run = [this, target] { connectToHost(target); };
         return item;
     }
 
-    QList<PaletteItem> sshMenuItems(bool persistent = false) {
+    QList<PaletteItem> sshMenuItems() {
         QList<PaletteItem> items;
         QHash<QString, QString> details;
         const QList<relay::ssh::Host> hosts = relay::ssh::userHosts();
@@ -2687,11 +2677,11 @@ private:
         QSet<QString> listed;
         for (const QString &target : relay::ssh::recentHosts()) {
             const QString detail = details.value(target);
-            items << sshHostItem(target, detail.isEmpty() ? QStringLiteral("recent") : QStringLiteral("recent · ") + detail, persistent);
+            items << sshHostItem(target, detail.isEmpty() ? QStringLiteral("recent") : QStringLiteral("recent · ") + detail);
             listed.insert(target);
         }
         for (const relay::ssh::Host &host : hosts)
-            if (!listed.contains(host.alias)) items << sshHostItem(host.alias, host.detail(), persistent);
+            if (!listed.contains(host.alias)) items << sshHostItem(host.alias, host.detail());
         if (items.isEmpty()) {
             PaletteItem none;
             none.key = QStringLiteral("ssh:none");
@@ -2712,17 +2702,14 @@ private:
         return {item};
     }
 
-    void openSshMenu(bool persistent = false) {
+    void openSshMenu() {
         QDialog dialog(this);
         dialog.setObjectName(QStringLiteral("sshHostPicker"));
-        dialog.setWindowTitle(persistent ? QStringLiteral("Connect to SSH (persistent)")
-                                        : QStringLiteral("Connect to SSH"));
+        dialog.setWindowTitle(QStringLiteral("Connect to SSH"));
         dialog.resize(600, 420);
         auto *layout = new QVBoxLayout(&dialog);
         auto *filter = new QLineEdit(&dialog);
-        filter->setPlaceholderText(persistent
-                                       ? QStringLiteral("Search saved hosts or enter user@host; work survives disconnects")
-                                       : QStringLiteral("Search saved hosts or enter user@host"));
+        filter->setPlaceholderText(QStringLiteral("Search saved hosts or enter user@host"));
         layout->addWidget(filter);
         auto *list = new QListWidget(&dialog);
         layout->addWidget(list, 1);
@@ -2733,7 +2720,7 @@ private:
         auto *connectButton = buttons->button(QDialogButtonBox::Ok);
         connectButton->setText(QStringLiteral("Connect"));
         layout->addWidget(buttons);
-        const auto hosts = sshMenuItems(persistent);
+        const auto hosts = sshMenuItems();
         auto refresh = [=](const QString &query) {
             list->clear();
             bool exact = false;
@@ -2766,71 +2753,246 @@ private:
         refresh(QString());
         filter->setFocus();
         if (dialog.exec() == QDialog::Accepted && list->currentItem())
-            connectToHost(list->currentItem()->data(Qt::UserRole).toString(), persistent);
+            connectToHost(list->currentItem()->data(Qt::UserRole).toString());
     }
 
-    void connectToHost(const QString &target, bool persistent = false) {
+    void connectToHost(const QString &target) {
         if (target.trimmed().isEmpty()) return;
         if (!addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1) || !m_active) return;
         startNewTabTheme(m_tabs->currentWidget());
-        m_active->queueCommand(persistent
-                                   ? relay::ssh::persistentCommand(target, relay::ssh::hasLocalMosh())
-                                   : relay::ssh::connectCommand(target));
+        // A plain `ssh <target>` is persistent now: the pane shell's wrapper holds it in a session
+        // on the host (#XQ8F), so there is nothing special for the tab to run.
+        m_active->queueCommand(relay::ssh::connectCommand(target));
         relay::ssh::rememberHost(target);
     }
 
-    // The focused pane's ssh or mosh command line, read from the process's own argv so quoting
-    // survives, run again in a new pane to the right.
-    void splitSameHost() {
+    // The line a split queues into the new pane so it opens where the source pane is on the host:
+    // The wrapper reads RELAY_SSH_CWD as an env prefix on the command the pane runs.
+    static QString hostSplitCommand(const QString &cwd, const QString &command) {
+        if (!cwd.isEmpty())
+            return QStringLiteral("RELAY_SSH_CWD=") + relay::ssh::shellQuote(cwd) + QLatin1Char(' ') + command;
+        return command;
+    }
+
+    // Every split lands on the host when the focused pane is on one (#XQ8F): the new pane runs the
+    // same ssh or mosh command line, read from the process's own argv so quoting survives, and the
+    // shared connection opens it without a second login. A local pane gets the ordinary local
+    // split, silently (the defaults must not scold), while `explain` — the explicit
+    // ssh.splitSameHost — says why nothing happened instead of splitting here.
+    void splitOnHost(relay::panes::Direction direction, bool offerPlacement = false, bool explain = false) {
         Pane *source = m_active;
-        if (!source || source->remoteCommandLine().isEmpty()) {
-            notice(QStringLiteral("This pane is not in an ssh or mosh session."));
-            return;
-        }
         QString host;
-        const QString command = relay::ssh::rerunCommand(relay::ssh::processArgv(source->foregroundPid()), &host);
+        const QStringList argv = source ? relay::ssh::processArgv(source->foregroundPid()) : QStringList();
+        const QString command = source ? relay::ssh::rerunCommand(argv, &host) : QString();
         if (command.isEmpty()) {
-            notice(QStringLiteral("Relay splits onto the same host only for an ssh or mosh login; this pane runs %1.")
-                       .arg(source->remoteCommandLine().section(QLatin1Char(' '), 0, 0)));
+            if (explain) {
+                if (source && !source->remoteCommandLine().isEmpty())
+                    notice(QStringLiteral("Relay splits onto the same host only for an ssh or mosh login; this pane runs %1.")
+                               .arg(source->remoteCommandLine().section(QLatin1Char(' '), 0, 0)));
+                else
+                    notice(QStringLiteral("This pane is not in an ssh or mosh session."));
+                return;
+            }
+            splitToward(direction, offerPlacement);
             return;
         }
         if (m_activeLeaf != source) setActiveLeaf(source);
-        splitToward(relay::panes::Direction::Right, true);
-        if (m_active && m_active != source) m_active->queueCommand(command);
+        splitToward(direction, offerPlacement);
+        // OSC 7 tracks the live remote cwd, including a `cd` after this session began.
+        const QString cwd = source->remoteCwd().isEmpty() ? relay::ssh::holderCwd(argv) : source->remoteCwd();
+        if (m_active && m_active != source) m_active->queueCommand(hostSplitCommand(cwd, command));
         if (!host.isEmpty()) relay::ssh::rememberHost(host);
     }
 
-    // Shortcut hints for the slow way to the same place: a new tab (host empty) or a split from a
-    // pane on `host`, followed by an ssh typed by hand. refreshPaneStatus() sees the session start.
-    static constexpr qint64 kSshNewTabHintMs = 12000, kSshSplitHintMs = 60000;
-    static void markForSshHint(Pane *pane, const QString &host) {
-        if (!pane) return;
-        pane->setProperty("relaySshHintAt", QDateTime::currentMSecsSinceEpoch());
-        pane->setProperty("relaySshHintHost", host);
+    // The live login behind a pane: the host its own command line names, and the shared
+    // connection to it. Pane keeps its resolved login context private (loginContext()), but it
+    // announces every live login to relay::remote (announceLoginFiles, for the remote file panes),
+    // and the registry checks the control socket still answers — which is what "reachable" means
+    // here. The hostname the pane resolved is not published, so ssh resolves the alias once more;
+    // with the socket in hand that is no network round trip.
+    struct HostLogin {
+        QString host, controlPath;
+        bool reachable = false;
+    };
+    static HostLogin hostLoginOf(const Pane *pane) {
+        HostLogin login;
+        if (!pane) return login;
+        QString host;
+        relay::ssh::rerunCommand(relay::ssh::processArgv(pane->foregroundPid()), &host);
+        if (host.isEmpty()) host = relay::panestatus::remoteHost(pane->remoteCommandLine());
+        if (host.isEmpty()) return login;
+        login.host = host;
+        login.controlPath = relay::remote::loginControlPath(host);
+        login.reachable = !login.controlPath.isEmpty();
+        return login;
     }
 
-    void sshSessionSeen(Pane *pane, const QString &remoteLine) {
+    // The argv that runs one command on `login`'s host over the shared connection, the same shape
+    // the keepalive and the remote file panes use (docs/SSH-AND-MOSH.md §7): no master of its own,
+    // no ProxyCommand from ~/.ssh/config, no password prompt to hang on.
+    static QStringList hostControlArgs(const HostLogin &login, const QString &command) {
+        return {QStringLiteral("-S"), login.controlPath,
+                QStringLiteral("-o"), QStringLiteral("ControlMaster=no"),
+                QStringLiteral("-o"), QStringLiteral("ProxyCommand=none"),
+                QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+                login.host, command};
+    }
+
+    // pane.closeEndRemote. Closing a pane leaves its holder session running on the host by design
+    // (#XQ8F); close only after the host confirms the kill, so a failed command cannot silently
+    // leave a session running while telling the person it ended.
+    void closeEndRemote() {
+        Pane *pane = m_active;
+        if (!pane) return;
+        const QString session = relay::ssh::holderSession(relay::ssh::processArgv(pane->foregroundPid()));
+        const HostLogin login = hostLoginOf(pane);
+        if (session.isEmpty()) {
+            notice(QStringLiteral("This pane's session is not a persistent one; closing it as usual."));
+            closePane(pane, true);
+            return;
+        }
+        if (!login.reachable) {
+            notice(QStringLiteral("Cannot reach %1 over the shared connection; %2 is still running there.")
+                       .arg(login.host, session));
+            return;
+        }
+        auto *process = new QProcess(this);
+        process->setProgram(QStringLiteral("ssh"));
+        process->setArguments(hostControlArgs(login, relay::ssh::killSessionCommand(session)));
+        QTimer::singleShot(10000, process, [process] { process->kill(); });
+        QPointer<Pane> guard(pane);
+        connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                [this, process, guard, session](int code, QProcess::ExitStatus status) {
+                    if (code == 0 && status == QProcess::NormalExit) {
+                        if (guard) closePane(guard, true);
+                    } else {
+                        notice(QStringLiteral("Could not end %1 on the host; its pane remains open.").arg(session));
+                    }
+                    process->deleteLater();
+                });
+        relay::log::info(QStringLiteral("closeEndRemote host=%1 session=%2").arg(login.host, session));
+        process->start();
+    }
+
+    // ssh.remoteSessions. The holder sessions on this pane's host, listed over the shared
+    // connection: Enter (or a double-click) attaches to one in a new tab, End terminates it.
+    void openRemoteSessions() {
+        Pane *pane = m_active;
+        if (!pane) return;
+        const HostLogin login = hostLoginOf(pane);
+        const QString host = login.host;
+        if (!login.reachable) {
+            notice(host.isEmpty() ? QStringLiteral("This pane is not on a host over a shared connection.")
+                                  : QStringLiteral("Cannot reach %1 over the shared connection, so its sessions "
+                                                   "cannot be listed.").arg(host));
+            return;
+        }
+
+        QDialog dialog(this);
+        dialog.setObjectName(QStringLiteral("remoteSessionPicker"));
+        dialog.setWindowTitle(QStringLiteral("Remote sessions on %1").arg(host));
+        dialog.resize(600, 380);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *list = new QListWidget(&dialog);
+        layout->addWidget(list, 1);
+        auto *empty = new QLabel(QStringLiteral("Reading the sessions on %1…").arg(host), &dialog);
+        empty->setWordWrap(true);
+        layout->addWidget(empty);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+        auto *endButton = buttons->addButton(QStringLiteral("End session"), QDialogButtonBox::ActionRole);
+        endButton->setEnabled(false);
+        layout->addWidget(buttons);
+
+        const auto fill = [&](const QList<relay::ssh::RemoteSession> &sessions) {
+            list->clear();
+            for (const relay::ssh::RemoteSession &session : sessions) {
+                const QString started = session.created
+                    ? QDateTime::fromSecsSinceEpoch(session.created).toString(QStringLiteral("HH:mm, d MMM")) : QString();
+                const QString state = session.attached ? QStringLiteral("attached") : QStringLiteral("detached");
+                auto *row = new QListWidgetItem(
+                    started.isEmpty() ? QStringLiteral("%1 · %2").arg(session.name, state)
+                                      : QStringLiteral("%1 · started %2 · %3").arg(session.name, started, state),
+                    list);
+                row->setData(Qt::UserRole, session.name);
+            }
+            empty->setText(sessions.isEmpty() ? QStringLiteral("No persistent sessions on %1.").arg(host) : QString());
+            empty->setVisible(sessions.isEmpty());
+            endButton->setEnabled(list->currentItem() != nullptr);
+        };
+        const auto readSessions = [&](const auto &then) {
+            auto *process = new QProcess(this);
+            process->setProgram(QStringLiteral("ssh"));
+            process->setArguments(hostControlArgs(login, relay::ssh::listSessionsCommand()));
+            QTimer::singleShot(10000, process, [process] { process->kill(); });
+            connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process, &QObject::deleteLater);
+            connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), &dialog,
+                    [process, then](int code, QProcess::ExitStatus) {
+                        then(code == 0 ? relay::ssh::parseSessionList(process->readAllStandardOutput())
+                                       : QList<relay::ssh::RemoteSession>());
+                    });
+            process->start();
+        };
+        const auto endSelected = [&] {
+            QListWidgetItem *row = list->currentItem();
+            if (!row) return;
+            const QString session = row->data(Qt::UserRole).toString();
+            auto *process = new QProcess(this);
+            process->setProgram(QStringLiteral("ssh"));
+            process->setArguments(hostControlArgs(login, relay::ssh::killSessionCommand(session)));
+            QTimer::singleShot(10000, process, [process] { process->kill(); });
+            connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process, &QObject::deleteLater);
+            connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), &dialog,
+                    [&readSessions, &fill] { readSessions(fill); });  // the next decision is from a fresh list
+            relay::log::info(QStringLiteral("remoteSessions end host=%1 session=%2").arg(host, session));
+            process->start();
+        };
+        const auto reattach = [&] {
+            QListWidgetItem *row = list->currentItem();
+            if (!row) return;
+            const QString session = row->data(Qt::UserRole).toString();
+            if (addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1) && m_active) {
+                startNewTabTheme(m_tabs->currentWidget());
+                m_active->queueCommand(relay::ssh::reattachCommand(host, session));
+            }
+            dialog.accept();
+        };
+        connect(list, &QListWidget::itemActivated, &dialog, [&](QListWidgetItem *) { reattach(); });
+        connect(list, &QListWidget::itemSelectionChanged, &dialog,
+                [&] { endButton->setEnabled(list->currentItem() != nullptr); });
+        connect(endButton, &QPushButton::clicked, &dialog, endSelected);
+        auto *del = new QAction(&dialog);
+        del->setShortcut(QKeySequence(Qt::Key_Delete));
+        connect(del, &QAction::triggered, &dialog, endSelected);
+        dialog.addAction(del);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        readSessions(fill);
+        list->setFocus();
+        dialog.exec();
+    }
+
+    // Shortcut hint for the slow way to a new tab on a host: a new tab, then an ssh typed by
+    // hand. refreshPaneStatus() sees the session start. The split twin is retired (#XQ8F): a split
+    // lands on the host by itself now, so there is no slow way left to teach.
+    static constexpr qint64 kSshNewTabHintMs = 12000;
+    static void markForSshHint(Pane *pane) {
+        if (!pane) return;
+        pane->setProperty("relaySshHintAt", QDateTime::currentMSecsSinceEpoch());
+        pane->setProperty("relaySshHintHost", QVariant());
+    }
+
+    void sshSessionSeen(Pane *pane) {
         const qint64 at = pane->property("relaySshHintAt").toLongLong();
         if (!at) return;
-        const QString host = pane->property("relaySshHintHost").toString();
         pane->setProperty("relaySshHintAt", QVariant());
         pane->setProperty("relaySshHintHost", QVariant());
         const qint64 age = QDateTime::currentMSecsSinceEpoch() - at;
-        if (host.isEmpty()) {
-            // Connect has no default key: then the faster path is the Actions list itself, which
-            // also offers the hosts of ~/.ssh/config and the ones used lately (card #S5SH).
-            if (age > kSshNewTabHintMs) return;
-            const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.connect"));
-            hint(QStringLiteral("ssh.connect.typed"),
-                 keys.isEmpty() ? QStringLiteral("Next time: Actions › Connect to SSH… lists your saved and recent hosts")
-                                : relay::ShortcutHints::nextTime(keys, QStringLiteral("connect to a host in a new tab")));
-            return;
-        }
-        if (age > kSshSplitHintMs || relay::panestatus::remoteHost(remoteLine) != host) return;
-        const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.splitSameHost"));
-        hint(QStringLiteral("ssh.split.typed"),
-             keys.isEmpty() ? QStringLiteral("Next time: Split on the same host (Actions, or right-click › New pane on %1)").arg(host)
-                            : relay::ShortcutHints::nextTime(keys, QStringLiteral("split on the same host")));
+        if (age > kSshNewTabHintMs) return;
+        // Connect has no default key: then the faster path is the Actions list itself, which also
+        // offers the hosts of ~/.ssh/config and the ones used lately (card #S5SH).
+        const QString keys = Keymap::instance().shortcutText(QStringLiteral("ssh.connect"));
+        hint(QStringLiteral("ssh.connect.typed"),
+             keys.isEmpty() ? QStringLiteral("Next time: Actions › Connect to SSH… lists your saved and recent hosts")
+                            : relay::ShortcutHints::nextTime(keys, QStringLiteral("connect to a host in a new tab")));
     }
 
     // Sessions & Projects' children (#SPSG): each opens the one pane on that tab.
@@ -5807,6 +5969,22 @@ private:
             // node, including "restore last closed": a reopened pane finds the text of the pane it
             // came from, and the ids in the saved layout are what keeps the store pruned.
             leaf.insert(QStringLiteral("scrollback"), pane->scrollbackId());
+            // A pane on a host comes back on that host (#XQ8F). The login is rebuilt from the
+            // process's own argv, and when the wrapper holds it in a session the line is the
+            // reattach form — the restored pane attaches to the session it had, with its programs
+            // still running, instead of logging in fresh. `Pane` runs it at the first prompt
+            // (src/PaneRuntime.cpp); the `queue` below stays the person's own typing, not this.
+            {
+                QString loginHost;
+                const QStringList argv = relay::ssh::processArgv(pane->foregroundPid());
+                const QString login = relay::ssh::rerunCommand(argv, &loginHost);
+                const QString holder = relay::ssh::holderSession(argv);
+                if (!login.isEmpty())
+                    leaf.insert(QStringLiteral("remote_login"),
+                                holder.isEmpty() ? login
+                                    : QStringLiteral("RELAY_SSH_SESSION=") + relay::ssh::shellQuote(holder)
+                                          + QLatin1Char(' ') + login);
+            }
             if (const QJsonArray queue = pane->queueForRestore(); !queue.isEmpty())
                 leaf.insert(QStringLiteral("queue"), queue);
             return {{"pane", leaf}};
