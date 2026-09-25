@@ -585,6 +585,10 @@ private:
     void saveCardEdit(const QJsonObject &patch, const QString &baseHash);
     void executeCard(const QString &note, bool background = true);
     void verifyCard(const QString &note);
+    // Resume card (#FYEY): what ExecuteCard does when a pane opens, but `task` — the card's
+    // orphan listing and the landing steps — is the pane's first prompt, and the claim names
+    // Resume. No pane to open writes nothing.
+    void resumeCard(const QString &task, const QString &note);
     void send(QJsonObject message);
     QString nextRequestId();
     // `canOverride` puts the Check gate's "Override…" on the notice (#7BM4): it is there only

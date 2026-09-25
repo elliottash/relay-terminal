@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+#include "AppPaths.h"   // dataRoot, relayPython: where the `land.py` to ask about orphans lives
 #include "BoardPane.h"
 #include "ModelCatalog.h"   // nameOf: a comment's `model=` is an id; the page prints the name
 #include "PaneStatus.h"   // listHue: the hue this pane's band wears, which its rows select in (#MXMG)
@@ -24,6 +25,8 @@
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -35,6 +38,8 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPainterPath>
+#include <QPointer>
+#include <QProcess>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QResizeEvent>
@@ -2570,6 +2575,10 @@ public:
     // Verify (#T71W): hand the card to a terminal pane on the *recommended verifier*, which is a
     // different provider family from the one that implemented it. `note` is the reply box again.
     std::function<void(const QString &note)> onVerify;
+    // Resume card (#FYEY): what Execute does, but the pane's first prompt is the card's orphan
+    // listing (`land.py orphans`) and the landing steps, so the salvage reads `## Done means`
+    // before landing anything. `note` is the reply box again.
+    std::function<void(const QString &task, const QString &note)> onResume;
     // A `relay-pane:` anchor in the thread names a pane by session token (#HKAP). The card's
     // own claim chip is the same anchor through the same handler (#R9G7).
     std::function<void(const QString &token)> onFocusPane;
@@ -3833,7 +3842,172 @@ public:
             };
             actions << tryIt;
         }
+
+        // Resume card (#FYEY), only when `land.py orphans` listed this card — refreshOrphans
+        // asked when the page opened. A session working this card died holding uncommitted
+        // hunks; the action is what Run does, with the orphan listing and the landing steps as
+        // the pane's first prompt, so the new agent reads `## Done means` before it lands or
+        // abandons anything.
+        if (!m_orphans.isEmpty()) {
+            relay::agent::Action resume;
+            resume.key = QStringLiteral("boardResume");
+            resume.leaves = true;   // it hands the card to a pane, like Run does
+            resume.label = QStringLiteral("Resume card");
+            resume.enabled = !m_busy;
+            resume.tooltip = QStringLiteral(
+                "A session working this card ended with uncommitted hunks; open a pane whose "
+                "first prompt lists them, to land or abandon them");
+            resume.run = [self] {
+                const ActionGuard guard;
+                if (self->onModeHint)
+                    self->onModeHint(QStringLiteral("execute"));
+                self->resume();
+            };
+            actions << resume;
+        }
         return actions;
+    }
+
+    // Resume card (#FYEY). `land.py orphans --json` lists, per card, the land sessions that
+    // died — their pane closed or went stale — still holding uncommitted hunks. The page asks
+    // for it once when it opens (and again on demand, through refreshOrphans); if this card is
+    // listed, the action row carries Resume card: what Run does, with the orphan listing and
+    // the landing steps as the pane's first prompt. A script that is missing, fails, or names
+    // another card means no action.
+    struct OrphanClaim
+    {
+        QString path;
+        int hunks = 0;
+        int snapshotAgeMinutes = 0;
+    };
+    struct OrphanSession
+    {
+        QString session;
+        QString owner;
+        QList<OrphanClaim> claims;
+    };
+
+    // Ask the data root's `land.py orphans --json` once, asynchronously. Another ask in flight
+    // is dropped; a failure — nonzero exit, crash, unreadable JSON — leaves the list empty, and
+    // an empty list is a hidden action, never a broken one.
+    void refreshOrphans()
+    {
+        m_orphans.clear();
+        if (m_orphansProc) {
+            m_orphansProc->disconnect(this);
+            m_orphansProc->kill();
+            m_orphansProc->deleteLater();
+            m_orphansProc = nullptr;
+        }
+        const QString script = landScript();
+        if (m_id.isEmpty() || script.isEmpty()) {
+            if (onActionsChanged)
+                onActionsChanged();
+            return;
+        }
+        auto *proc = new QProcess(this);
+        m_orphansProc = proc;
+        connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, proc](int, QProcess::ExitStatus) {
+            if (m_orphansProc == proc)
+                m_orphansProc = nullptr;
+            proc->deleteLater();
+            if (proc->exitStatus() == QProcess::NormalExit && proc->exitCode() == 0)
+                m_orphans = parseOrphans(proc->readAllStandardOutput(), cardId());
+            if (onActionsChanged)
+                onActionsChanged();
+        });
+        proc->start(relayPython(), {script, QStringLiteral("orphans"), QStringLiteral("--json")});
+    }
+
+    // The orphan listing as the resumed pane's first prompt (#FYEY): one line per dead
+    // session's claim — session, path, hunks, snapshot age — then the landing steps the plan's
+    // wording gives.
+    QString resumeTask() const
+    {
+        QStringList lines;
+        lines << QStringLiteral(
+            "These are this card's uncommitted hunks from a session that ended; read `## Done "
+            "means`, then `land.py who` and `land.py commit <session>` to land them or `land.py "
+            "abandon <session>` to drop them.");
+        for (const OrphanSession &session : m_orphans) {
+            for (const OrphanClaim &claim : session.claims) {
+                QString line = QStringLiteral("- session %1: %2 — %3 hunk(s), snapshot %4 min old")
+                                   .arg(session.session, claim.path)
+                                   .arg(claim.hunks)
+                                   .arg(claim.snapshotAgeMinutes);
+                if (!session.owner.isEmpty())
+                    line += QStringLiteral(" (owner %1)").arg(session.owner);
+                lines << line;
+            }
+        }
+        return lines.join(QLatin1Char('\n'));
+    }
+
+    void resume()
+    {
+        if (paneExecuting()) {         // the card is in a live pane's hands; reveal it (#48S3)
+            if (onFocusPane)
+                onFocusPane(m_sessionToken);
+            return;
+        }
+        if (m_id.isEmpty() || m_editing || !onResume)
+            return;
+        if (m_busy) {
+            showError(QStringLiteral("The agent is still answering on #%1. Stop it, or wait for "
+                                     "it, before resuming the card's orphans.")
+                          .arg(m_id));
+            return;
+        }
+        const QString note = takeReply();
+        m_error->hide();
+        onResume(resumeTask(), note);
+    }
+
+    // The data root's `scripts/land.py`, or empty when there is none to ask (no action, quietly).
+    static QString landScript()
+    {
+        try {
+            const QString script = dataRoot() + QStringLiteral("/scripts/land.py");
+            return QFileInfo::exists(script) ? script : QString();
+        } catch (const std::exception &) {
+            return {};
+        }
+    }
+
+    // The sessions of the one card this page is showing, out of the `orphans --json` answer.
+    static QList<OrphanSession> parseOrphans(const QByteArray &json, const QString &id)
+    {
+        QList<OrphanSession> out;
+        const QJsonDocument doc = QJsonDocument::fromJson(json);
+        if (!doc.isObject())
+            return out;
+        const QJsonArray cards = doc.object().value(QStringLiteral("cards")).toArray();
+        for (const QJsonValue &cardValue : cards) {
+            const QJsonObject card = cardValue.toObject();
+            if (card.value(QStringLiteral("card")).toString() != QStringLiteral("#") + id)
+                continue;
+            const QJsonArray sessions = card.value(QStringLiteral("sessions")).toArray();
+            for (const QJsonValue &sessionValue : sessions) {
+                const QJsonObject sessionObject = sessionValue.toObject();
+                OrphanSession session;
+                session.session = sessionObject.value(QStringLiteral("session")).toString();
+                session.owner = sessionObject.value(QStringLiteral("owner")).toString();
+                const QJsonArray claims = sessionObject.value(QStringLiteral("claims")).toArray();
+                for (const QJsonValue &claimValue : claims) {
+                    const QJsonObject claimObject = claimValue.toObject();
+                    OrphanClaim claim;
+                    claim.path = claimObject.value(QStringLiteral("path")).toString();
+                    claim.hunks = claimObject.value(QStringLiteral("hunks")).toInt();
+                    claim.snapshotAgeMinutes =
+                        claimObject.value(QStringLiteral("snapshot_age_minutes")).toInt();
+                    session.claims << claim;
+                }
+                if (!session.claims.isEmpty())
+                    out << session;
+            }
+        }
+        return out;
     }
 
     // Whether a Try it turn is in flight on this card: the view says so from the `tryit` events,
@@ -4813,6 +4987,11 @@ private:
     QPushButton *m_tryOpen = nullptr;
     QLineEdit *m_tryAnswer = nullptr;
     bool m_tryRunning = false;        // a Try it turn is in flight on this card
+    // Resume card (#FYEY): what `land.py orphans --json` last answered for this card, and the
+    // ask in flight, if any. Empty means the card is not listed — or nothing was asked, or the
+    // ask failed — so the action row hides Resume card.
+    QList<OrphanSession> m_orphans;
+    QPointer<QProcess> m_orphansProc;
     // The Verify strip (#WFRA): the card's `verify:` block as one line under the Try it strip.
     QLabel *m_verifyPlanLine = nullptr;
     // Find in the open card (#9NBZ): the strip over the document, hidden until `openFind`.
@@ -5620,6 +5799,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     };
     m_detail->onExecute = [this](const QString &note, bool background) { executeCard(note, background); };
     m_detail->onVerify = [this](const QString &note) { verifyCard(note); };
+    m_detail->onResume = [this](const QString &task, const QString &note) { resumeCard(task, note); };
     // The Tests strip's Check and its three actions (#7BM4, protocol 31.1): the card builds the
     // request, the view stamps it with a request id and puts it on the board worker's stdin.
     m_detail->onTestsRequest = [this](const QJsonObject &message) { send(message); };
@@ -8502,6 +8682,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         m_detail->show(event);
         refreshContexts();   // switch the console's draft key to the card just opened
         watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
+        // Resume card (#FYEY): ask `land.py orphans` when a card page opens — and again when a
+        // different card opens here — so the action row knows this card's dead sessions while
+        // the page is up.
+        if (wasShowing != showing || !detailOpen())
+            m_detail->refreshOrphans();
         // Turns run per card (19.16), so the card you open may already be working: give it back
         // its strip. What it has said so far is in that card's own console and was never lost —
         // one conversation per card, and the console for this card is the one below.
@@ -10219,6 +10404,30 @@ void BoardView::executeCard(const QString &note, bool background)
           {QStringLiteral("kind"), QStringLiteral("progress")},
           {QStringLiteral("text"), entry + (note.isEmpty() ? QString()
                                                            : QStringLiteral("\n\n") + note)}});
+}
+
+// Resume card (#FYEY): what Run does — the card goes to a terminal pane — but the pane's first
+// prompt is the orphan listing `land.py orphans` gave for this card plus the landing steps,
+// because the salvage reads the card's `## Done means` before it lands or abandons anything.
+// The claim is Execute's pane claim with its own wording. No pane to open writes nothing: the
+// orphan hunks stay exactly where they are and the card stays unclaimed.
+void BoardView::resumeCard(const QString &task, const QString &note)
+{
+    const QString card = m_detail->cardId();
+    if (card.isEmpty())
+        return;
+    if (!onExecuteCard) {
+        m_detail->showError(QStringLiteral("This window cannot open a terminal pane for the card."));
+        return;
+    }
+    const QString paneToken = onExecuteCard(card, task, true);
+    if (paneToken.isEmpty())
+        return;
+    const QString id = nextRequestId();
+    m_pendingNotes.insert(id, QStringLiteral("Claimed #%1 · Resume").arg(card));
+    send({{QStringLiteral("type"), QStringLiteral("board_claim")}, {QStringLiteral("id"), id},
+          {QStringLiteral("card"), card}, {QStringLiteral("pane_token"), paneToken},
+          {QStringLiteral("text"), note}});
 }
 
 // Verify (#T71W): the card goes to a terminal pane on the verifier the worker recommends — a

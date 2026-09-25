@@ -1325,6 +1325,16 @@ if(BUILD_TESTING)
     target_link_libraries(relay-boardexecute-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardexecute COMMAND relay-boardexecute-tests)
     set_tests_properties(boardexecute PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # The Resume card action (#FYEY): a card `land.py orphans --json` lists gets the action, and
+    # the pane it opens is prefilled with the orphan listing and the landing steps; a card the
+    # listing does not name — or a listing run that fails, or no land.py — gets no action. Its
+    # own executable, the way boardexecute_test.cpp is.
+    add_executable(relay-boardresume-tests tests/boardresume_test.cpp)
+    target_link_libraries(relay-boardresume-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardresume COMMAND relay-boardresume-tests)
+    set_tests_properties(boardresume PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     # The project model: candidate projects, the board folder, the key the backend's workspace
     # digest has to agree with, and the registry file. No widgets, so no offscreen platform.
     add_executable(relay-projects-tests tests/projects_test.cpp)
