@@ -293,7 +293,9 @@ def report(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOU
                       idle_hours=max(0.0, (now - newest) / 3600) if newest else 0.0,
                       ledger_id=row.id)
         entry.in_use = _used(str(path), used) or _used(str(path), [here])
-        if not _mine(path):
+        if not path.exists() and not path.is_symlink():
+            entry.why_kept = "gone from disk"
+        elif not _mine(path):
             entry.why_kept = "not owned by this user"
         elif entry.in_use:
             entry.why_kept = "a live process uses it"
@@ -301,8 +303,6 @@ def report(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOU
             entry.why_kept = "keep: promote or drop explicitly"
         elif row.cls == "install":
             entry.why_kept = "install: the user removes it"
-        elif not path.exists():
-            entry.why_kept = "gone from disk"
         elif row.state == "released":
             entry.removable = True  # already ended; the in-use check above is the only guard
         else:
