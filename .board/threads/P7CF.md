@@ -32,3 +32,14 @@ Research current AI-heavy development verification practices, measure this Board
 
 <!-- relay:entry 20260925T002449Z-vf author=agent kind=event model=gpt-6-sol pane=3e309d9d turn=fc8daae437874e24b11a016cd98ce58c/18198267bb14475c9a59e60a1a807e5d -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["C3Q2", "EE11"], "githu… → {"plans": [], "commits": ["39b82175e4dc3f20795cbeb2c8106a9d33bd595d"], "evidence…
+
+<!-- relay:entry 20260925T021153Z-az author=agent kind=note model=claude-opus-5-5 pane=983a6a3c turn=92776ab6493d4adca6ab798cb400383d/7c4f7706508043cd9f8c4a3c66fb298f -->
+Example requested by the owner (2026-09-25): #0FBB, a UI change verified from a screenshot and then refused a close.
+
+- The implementing agent staged Relay under Xvfb, drove it, and captured the header (`#K7Q2 (2)` before the title, no `[n]` badge) and the click-open list of claims (docs/qa_evidence/2026-09-25-0FBB/01-header-chip.png, 02-chip-menu.png). It read those images itself in the same turn.
+- The owner replied in chat: "that screenshot verifies it for me".
+- The agent recorded that as a `decision` comment and a `## Verdict`, then called `board_move_card` to `done`. The Board refused: `requires: user_close` ("Verification: ask me before closing any card"). The card is still in needs-verification, waiting for a click the owner had already given in words.
+
+It shows two separate gaps this card names:
+1. **Owner-authorized chat close.** An explicit "this verifies it" about a named card, after its evidence was shown, should be allowed to close it, with the quote, revision and actor recorded. Under `ask` today it cannot.
+2. **Agent-visual verification.** For a nameable visual claim ("the code sits before the title", "a count in parens", "the badge is gone"), the screenshot is the evidence, and a model reading it can check each `Done means` line. The `ai-visual` rung is currently always demoted to `also` (`ai_may_gate_after: never`). A verifier outside the author's lineage reading the images could have gated this card. Subjective judgements such as "looks good" would still go to a person.
