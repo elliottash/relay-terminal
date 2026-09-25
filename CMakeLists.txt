@@ -300,6 +300,11 @@ target_include_directories(relay-completion PUBLIC src)
 target_link_libraries(relay-completion PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-completion PRIVATE ${RELAY_WARNINGS})
 
+add_library(relay-programcompletion STATIC src/ProgramCompletion.cpp src/ProgramCompletion.h)
+target_include_directories(relay-programcompletion PUBLIC src)
+target_link_libraries(relay-programcompletion PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-programcompletion PRIVATE ${RELAY_WARNINGS})
+
 # The `@` file picker's index: the git listing behind it, run asynchronously so typing `@` in a
 # large repository never blocks the window. Plain QtCore, driven from a test without a pane.
 add_library(relay-fileindex STATIC src/FileIndex.cpp src/FileIndex.h)
@@ -896,6 +901,9 @@ if(BUILD_TESTING)
     add_executable(relay-completion-tests tests/completion_test.cpp)
     target_link_libraries(relay-completion-tests PRIVATE relay-completion ${RELAY_QT}::Test)
     add_test(NAME completion COMMAND relay-completion-tests)
+    add_executable(relay-programcompletion-tests tests/programcompletion_test.cpp)
+    target_link_libraries(relay-programcompletion-tests PRIVATE relay-programcompletion ${RELAY_QT}::Test)
+    add_test(NAME programcompletion COMMAND relay-programcompletion-tests)
     add_executable(relay-fileindex-tests tests/fileindex_test.cpp)
     target_link_libraries(relay-fileindex-tests PRIVATE relay-fileindex ${RELAY_QT}::Test)
     add_test(NAME fileindex COMMAND relay-fileindex-tests)
@@ -1010,7 +1018,7 @@ if(BUILD_TESTING)
             relay-modelspane relay-filterpopup relay-actionpalette
             relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor
             relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations
-            relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate
+            relay-projectpicker relay-completion relay-programcompletion relay-fileindex relay-backends relay-windowstate
             relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav
             relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus
             relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig
@@ -1140,7 +1148,7 @@ if(BUILD_TESTING)
     target_link_libraries(relay-pulsepaint-tests PRIVATE relay-closedlist relay-localmodels
         relay-projects relay-hints relay-modelsettings relay-settings relay-outputlinks relay-markdown
         relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents
-        relay-requests relay-conversations relay-completion relay-fileindex relay-backends
+        relay-requests relay-conversations relay-completion relay-programcompletion relay-fileindex relay-backends
         relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes
         relay-queuenav relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus relay-paneusage
         relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen
