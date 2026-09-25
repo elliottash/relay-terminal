@@ -1754,16 +1754,43 @@ public:
         m_loading = false; m_promptReported = false; clearFix();
         sendShellInput(QString(QChar(3)));
     }
+    // The process group the terminal has in the foreground — the group a stop must signal. The
+    // kernel's tpgid is the truth; the backend's foreground pid is a member of the group, not
+    // always its leader (bash -c "sleep 30" has sleep in front), so it is the fallback. #234Z:
+    // the session-exit press must kill the client's whole group or nothing happens at all.
+    int foregroundProcessGroup() const {
+        const long group = shellPid() > 0 ? foregroundGroup(shellPid()) : -1;
+        if (group > 0 && group != shellPid()) return int(group);
+        const int fallback = foregroundPid();
+        return fallback > 0 && fallback != shellPid() ? fallback : 0;
+    }
+
     // Card #H2KQ: Alt+Esc closes a program. The first press is Ctrl+C; a program that catches it
     // (vim treats it as cancel) gets SIGTERM on the next press a beat later. Plain Esc only ever
     // sends Ctrl+C, and only to a command running in the shell — a full-screen program keeps Esc.
+    // Card #234Z: a remote session client is closed differently. ssh and mosh forward a Ctrl+C to
+    // the far side, so a first press would never end them; Alt+Esc leaves the session outright —
+    // SIGTERM to the client's process group here, the local shell comes back, and a mosh server
+    // stays up on the far side for the next attach, which is what mosh is designed to allow.
     void forceInterruptShell() {
         if (!m_backend || !processBusy()) return;
         const QString who = foregroundProgramName().isEmpty() ? QStringLiteral("the program")
                                                               : foregroundProgramName();
+        if (const QString remote = remoteCommandLine(); !remote.isEmpty()) {
+            const int pgid = foregroundProcessGroup();
+            if (pgid > 0) ::kill(pid_t(-pgid), SIGTERM);
+            pauseCommandQueueForStop();   // a stop in #XCXD's sense: waiting commands survive it
+            m_loading = false; m_promptReported = false; clearFix();
+            m_shellInterruptAt.restart();
+            const QString name = who == QStringLiteral("mosh-client") ? QStringLiteral("mosh") : who;
+            const QString host = relay::panestatus::remoteHost(remote);
+            toast(host.isEmpty() ? tr("Exited %1").arg(name)
+                                 : tr("Exited %1 · %2").arg(name, host));
+            return;
+        }
         if (m_shellInterruptAt.isValid() && m_shellInterruptAt.elapsed() > 600) {
-            const int pgid = foregroundPid() > 0 ? foregroundPid() : int(foregroundGroup(shellPid()));
-            if (pgid > 0 && pgid != shellPid()) ::kill(pid_t(-pgid), SIGTERM);
+            const int pgid = foregroundProcessGroup();
+            if (pgid > 0) ::kill(pid_t(-pgid), SIGTERM);
             toast(tr("Ctrl+C did not end %1 · sent SIGTERM").arg(who));
         } else {
             interruptShell();
@@ -10952,8 +10979,15 @@ private:
         if (m_login.active) {
             if (m_login.atPrompt && m_login.command.isEmpty()) { m_busyLine->clearBusy(); return; }
             const QString who = m_login.command.isEmpty() ? QStringLiteral("remote program") : m_login.command.section('\n', 0, 0);
-            m_busyLine->setBusy(relay::panestatus::State::Running, QStringLiteral("Relaying · %1…").arg(who),
-                               QStringLiteral("Running on %1").arg(loginHost()));
+            // #234Z: a session is the one program Esc cannot be seen to stop — a Ctrl+C only
+            // reaches the far side — so the line names the key that leaves it (#H2KQ's rule:
+            // the key sits next to the name).
+            const QString exitKey = Keymap::instance().shortcutText(QStringLiteral("terminal.interrupt"));
+            m_busyLine->setBusy(relay::panestatus::State::Running,
+                               QStringLiteral("Relaying · %1… · %2 exits").arg(who,
+                                                                              exitKey.isEmpty() ? QStringLiteral("Alt+Esc") : exitKey),
+                               QStringLiteral("Running on %1 · %2 leaves the session.").arg(loginHost(),
+                                                                                           exitKey.isEmpty() ? QStringLiteral("Alt+Esc") : exitKey));
             return;
         }
         if (processBusy()) {

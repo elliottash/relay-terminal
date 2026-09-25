@@ -400,7 +400,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("agent.interrupt")) pane->interruptAgentWithPrompt();
         else if (id == QStringLiteral("agent.clearQueue")) pane->clearAgentQueue();
         else if (id == QStringLiteral("agent.resumeQueue")) pane->resumeAgentQueue();
-        else if (id == QStringLiteral("terminal.interrupt")) pane->interruptShell();
+        else if (id == QStringLiteral("terminal.interrupt")) pane->forceInterruptShell();   // #234Z: exits a remote session
         else if (id == QStringLiteral("agent.newChat")) pane->newChat();
         else if (id == QStringLiteral("agent.stop")) pane->stopAgent();
         else if (id == QStringLiteral("agent.stopAllSubagents")) pane->stopAllSubagents();   // subagents UI

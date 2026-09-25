@@ -1739,6 +1739,7 @@ void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
 #include "xcxd_review_cases.h"
 #include "xcxd_context_cases.h"
 #include "h2kq_cases.h"
+#include "234z_cases.h"
 #include "recall_prompt_cases.h"
 
 int main(int argc, char **argv)
@@ -1780,6 +1781,12 @@ int main(int argc, char **argv)
         cases::h2kqCases();
         cases::h2kqQueueLabelCases();
         if (!failures) std::fprintf(stdout, "h2kq: all cases passed\n");
+        return failures ? 1 : 0;
+    }
+    if (app.arguments().contains(QStringLiteral("--234z-only"))) {
+        relay::theme::applyTheme(app);
+        cases::z234zCases();
+        if (!failures) std::fprintf(stdout, "234z: all cases passed\n");
         return failures ? 1 : 0;
     }
     if (app.arguments().contains(QStringLiteral("--memory-only"))) {
@@ -1839,8 +1846,9 @@ int main(int argc, char **argv)
     cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
     cases::h2kqCases();
     cases::h2kqQueueLabelCases();
+    cases::z234zCases();
 
     if (failures == 0)
-    std::fprintf(stdout, "consolemode: 20 cases, all passed\n");
+    std::fprintf(stdout, "consolemode: 21 cases, all passed\n");
     return failures == 0 ? 0 : 1;
 }

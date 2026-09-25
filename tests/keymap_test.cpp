@@ -65,6 +65,21 @@ private slots:
         QCOMPARE(keymap.match(&shiftAltDown), QStringLiteral("pane.focusDown"));
         QVERIFY(keymap.actsInsidePrograms(&shiftAltDown));
     }
+    // Alt+Esc is Relay's stop key "anytime" (its action says so, card #234Z): a remote session
+    // client such as ssh or mosh would otherwise swallow the only key that leaves the session,
+    // when the pane's keyboard is the terminal's. The first press is still only a Ctrl+C for
+    // every other program, and "none" program keys still hand the key over.
+    void stopKeyActsInsidePrograms() {
+        Keymap &keymap = Keymap::instance();
+        keymap.setPreset(QStringLiteral("relay"));
+        keymap.clearOverrides();
+        keymap.setProgramKeys(QStringLiteral("shift-only"));
+        QKeyEvent altEsc(QEvent::KeyPress, Qt::Key_Escape, Qt::AltModifier, QString());
+        QCOMPARE(keymap.match(&altEsc), QStringLiteral("terminal.interrupt"));
+        QVERIFY(keymap.actsInsidePrograms(&altEsc));
+        keymap.setProgramKeys(QStringLiteral("none"));
+        QVERIFY(!keymap.actsInsidePrograms(&altEsc));
+    }
     // The owner's pairing rule (#QWAS): no letter has one Relay action on Ctrl and another on
     // Ctrl+Shift, and the everyday editing keys stay the editor's.
     void ctrlAndCtrlShiftNeverDiffer() {

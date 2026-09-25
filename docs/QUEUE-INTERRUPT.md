@@ -44,6 +44,13 @@ Both running resources display their controls: **Stop agent (Esc)** and
 **Stop shell (Alt+Esc)**. A sole running shell displays **Stop shell (Esc)**.
 Controls remain available with no waiting items. Labels follow the live keymap.
 
+A pane whose foreground program is a session client (ssh, mosh, mosh-client, telnet,
+autossh) is left, not stopped: Alt+Esc terminates the client's process group on the first
+press, the pane returns to its own shell, and the queue pauses around the exit like any
+stop. A Ctrl+C there would only be forwarded to the far side, so the two-press rule never
+applies to a session; the busy line names the exit key while one runs. A mosh server stays
+up on the host for the next attach, which is what mosh is designed to allow (#234Z).
+
 Queue editing and agent questions do not consume Esc. Stopping preserves the draft.
 Popups may consume Esc to close first. In native terminal mode Esc remains input to
 the foreground program. Ctrl+C remains copying in the composer; native terminal

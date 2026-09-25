@@ -134,7 +134,12 @@ public:
                                    && !(mods & Qt::ControlModifier);
         const bool dimmer = action == QStringLiteral("pane.brighten") || action == QStringLiteral("pane.darken")
                             || action == QStringLiteral("pane.dimToggle") || action == QStringLiteral("pane.autoDim");
-        return dimmer || fkey || shiftAltArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
+        // #234Z: the stop key acts inside programs — its action says "Alt+Esc anytime", and a
+        // remote session client (ssh, mosh) would otherwise swallow the only key that leaves it.
+        // From the prompt box it already never reaches the program, so this is consistency, not
+        // a new claim on the key: the first press is still only a Ctrl+C for every other program.
+        const bool stop = action == QStringLiteral("terminal.interrupt");
+        return dimmer || stop || fkey || shiftAltArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
     }
 
     void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }

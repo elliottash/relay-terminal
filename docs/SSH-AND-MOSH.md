@@ -209,6 +209,12 @@ an agent is configured and the pane can show it the screen. The banner then offe
 password prompt revokes that grant, and taking over is final for that login; later prompts do not
 hand it back. A per-program choice to take human control of `ssh` still wins.
 
+Leaving the session is Alt+Esc (#234Z): the client's process group is terminated here, the pane
+comes back to its own shell, and the queue pauses around the exit like any stop. Esc stays what it
+is everywhere — a Ctrl+C, which inside a session only reaches the far side — and the Relaying line
+names the exit key while a session runs. mosh is designed for exactly this: the server survives on
+the host, and the same connect re-attaches to it.
+
 ### 5. Remote passwords
 
 A masked prompt read off the screen (`Password:`, `[sudo] password for`, `Enter passphrase`) while a
