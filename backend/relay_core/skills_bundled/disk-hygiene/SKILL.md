@@ -51,6 +51,11 @@ written in the last `--idle-hours`, and leaves `land/` to `land.py gc` (which kn
 snapshots are live). Budget and floor: `RELAY_SCRATCH_BUDGET_GB` (default the smaller of 20 GB and
 5% of the disk) and `RELAY_SCRATCH_MIN_FREE_GB` (default the larger of 5 GB and 5%).
 
+The Relay app runs the same check itself, a few minutes after launch and then every six hours, and
+puts a failing verdict on the notification bell (at most once a day) with a **Clean up** button that
+runs `gc --apply`. `RELAY_SCRATCH_MONITOR=0` turns that off. A user who mentions that notice is
+asking about this: follow "When the user asks to clean up" below.
+
 ## When the user asks to clean up
 
 1. Run `relay-scratch` and show the top of the report and the total.

@@ -59,6 +59,16 @@ void NotificationCenter::amend(const QString &id, const QString &title, const QS
     }
 }
 
+void NotificationCenter::addActionHandler(ActionHandler handler) {
+    if (handler) m_actionHandlers.push_back(std::move(handler));
+}
+
+bool NotificationCenter::handleAction(const QString &noteId, const QString &actionId) {
+    for (const ActionHandler &handler : m_actionHandlers)
+        if (handler(noteId, actionId)) return true;
+    return false;
+}
+
 QList<Notification> NotificationCenter::entries() const {
     QList<Notification> newestFirst;
     newestFirst.reserve(m_entries.size());

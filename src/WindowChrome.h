@@ -458,6 +458,8 @@ private:
             offer->setCursor(Qt::PointingHandCursor);
             const QString noteId = note.id, actionId = note.actionId;
             connect(offer, &QToolButton::clicked, this, [this, noteId, actionId] {
+                // An owner outside the windows (the scratch monitor, #SZHQ) takes its own first.
+                if (relay::NotificationCenter::instance().handleAction(noteId, actionId)) return;
                 if (onAction) onAction(noteId, actionId);
             });
             auto *offerRow = new QHBoxLayout;

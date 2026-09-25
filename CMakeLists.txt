@@ -357,6 +357,13 @@ target_include_directories(relay-notifications PUBLIC src)
 target_link_libraries(relay-notifications PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-notifications PRIVATE ${RELAY_WARNINGS})
 
+# The app's watch on agent scratch (#SZHQ): runs `relay-scratch check --json` off the GUI thread
+# every few hours and posts to the bell, with a "Clean up" button. QtCore only, so it is tested.
+add_library(relay-scratchmonitor STATIC src/ScratchMonitor.cpp src/ScratchMonitor.h)
+target_include_directories(relay-scratchmonitor PUBLIC src)
+target_link_libraries(relay-scratchmonitor PUBLIC relay-notifications relay-logging ${RELAY_QT}::Core)
+target_compile_options(relay-scratchmonitor PRIVATE ${RELAY_WARNINGS})
+
 # Queue navigation: when Up and Down move between queued items and when they belong to the text of
 # the item being edited in the prompt box. Pure rules, no widgets.
 add_library(relay-queuenav STATIC src/QueueNav.cpp src/QueueNav.h)
@@ -652,6 +659,7 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     target_link_libraries(relay PRIVATE relay-actionpalette)
+    target_link_libraries(relay PRIVATE relay-scratchmonitor)   # agent scratch on the bell (#SZHQ)
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
         RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -1067,6 +1075,11 @@ if(BUILD_TESTING)
     target_link_libraries(relay-notifications-tests PRIVATE relay-notifications ${RELAY_QT}::Test)
     add_test(NAME notifications COMMAND relay-notifications-tests)
     set_tests_properties(notifications PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Card #SZHQ: the scratch monitor's verdict, schedule and once-a-day rule, and a round with a
+    # stand-in relay-scratch (no disk walk).
+    add_executable(relay-scratchmonitor-tests tests/scratchmonitor_test.cpp)
+    target_link_libraries(relay-scratchmonitor-tests PRIVATE relay-scratchmonitor ${RELAY_QT}::Test)
+    add_test(NAME scratchmonitor COMMAND relay-scratchmonitor-tests)
     add_executable(relay-theme-tests tests/theme_test.cpp)
     target_link_libraries(relay-theme-tests PRIVATE relay-theme ${RELAY_QT}::Test)
     add_test(NAME theme COMMAND relay-theme-tests)

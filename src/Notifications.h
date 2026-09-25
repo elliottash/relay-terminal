@@ -18,6 +18,9 @@
 #include <QObject>
 #include <QString>
 
+#include <functional>
+#include <vector>
+
 namespace relay {
 
 struct Notification {
@@ -66,6 +69,14 @@ public:
                const QString &actionLabel, const QString &actionId,
                const QString &kind = QString());
 
+    // An entry's button whose owner is not a window (#SZHQ): the scratch monitor belongs to the
+    // process, so no window's handler knows its action id. The popup offers every click here
+    // first; a handler returns true when the id was its own, and the window's handler is asked
+    // only when none did.
+    using ActionHandler = std::function<bool(const QString &noteId, const QString &actionId)>;
+    void addActionHandler(ActionHandler handler);
+    bool handleAction(const QString &noteId, const QString &actionId);
+
     // Newest first.
     QList<Notification> entries() const;
     int count() const;
@@ -91,6 +102,7 @@ Q_SIGNALS:
 
 private:
     QList<Notification> m_entries;   // newest last, so appending is cheap
+    std::vector<ActionHandler> m_actionHandlers;
     int m_nextId = 1;
 };
 

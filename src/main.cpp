@@ -10,6 +10,7 @@
 #include "ShellHighlighter.h"
 #include "Hints.h"
 #include "Notifications.h"        // window header: the bell and its list
+#include "ScratchMonitor.h"       // agent scratch on the disk, watched and posted to the bell
 #include "Reminders.h"            // persistent agent reminders, including missed ones at launch
 #include "InputPolicy.h"           // prompt-box-only input: where a submitted line goes
 #include "ScreenPrompt.h"          // "is the program waiting for input?", read off the screen
@@ -473,6 +474,10 @@ int main(int argc, char **argv) {
                 relay::log::info(QStringLiteral("runtime_sweep removed=%1 kept_alive=%2 kept_young=%3 errors=%4")
                                      .arg(swept.removed).arg(swept.keptAlive).arg(swept.keptYoung).arg(swept.errors));
         });
+        // Agent scratch (#SZHQ): 380 GB of agent temp trees filled the owner's /tmp with nothing
+        // saying so. A few minutes after launch, then every six hours across all Relays, the
+        // monitor runs `relay-scratch check` in a child process and puts a bad verdict on the bell.
+        relay::scratch::Monitor::instance().start(relayPython(), {scripts + QStringLiteral("/relay-scratch")});
         // "Reopen where I left off": on by default, unless --fresh or an explicit --workspace asks
         // for a new window. A fresh profile, an unreadable file or a second Relay opens one window.
         const bool startFresh = parser.isSet(fresh) || parser.isSet(workspace);

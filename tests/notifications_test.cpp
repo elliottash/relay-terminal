@@ -37,6 +37,24 @@ private Q_SLOTS:
         QCOMPARE(centre.unseen(), 2);
     }
 
+    // An owner outside the windows takes its own button (#SZHQ); anything else is left for the
+    // window's handler.
+    void actionHandlersTakeOnlyTheirOwn() {
+        auto &centre = NotificationCenter::instance();
+        QString took;
+        centre.addActionHandler([&took](const QString &noteId, const QString &actionId) {
+            if (actionId != QStringLiteral("test.mine")) return false;
+            took = noteId;
+            return true;
+        });
+        const QString id = centre.postWithAction(QStringLiteral("Disk"), QString(), NotificationCenter::kindWarning,
+                                                 QString(), QStringLiteral("Clean up"), QStringLiteral("test.mine"));
+        QVERIFY(!centre.handleAction(id, QStringLiteral("appundo:3")));
+        QVERIFY(took.isEmpty());
+        QVERIFY(centre.handleAction(id, QStringLiteral("test.mine")));
+        QCOMPARE(took, id);
+    }
+
     void emptyTitleIsIgnored() {
         auto &centre = NotificationCenter::instance();
         QVERIFY(centre.post(QStringLiteral("   ")).isEmpty());
