@@ -2178,10 +2178,14 @@ Ctrl+Shift+S and the palette rows all reach `RelayWindow::openSessionsFor(pane, 
 focus): one manager per tab, bound to the pane that asked (its queries go to that pane's worker). Its
 **Project** chooser beside the Kind filter (#916B) lists the projects Relay knows, fed by the window
 from the registry (`setKnownProjects`), and asks the worker with `project` / `outside_projects`
-(protocol 14.3) — the index answers by workspace folder — rather than filtering rows client-side. Enter resumes
+(protocol 14.3) — the index answers by workspace folder — rather than filtering rows client-side. Enter or a
+double-click on a row resumes
 in that pane (`resume`, or `load_state` with a session reference when the session belongs to
 another workspace); Shift+Enter opens it in a new pane through the same path as a fork; a session
-already open in some pane is focused there instead (`paneWithSession`). The "Subagent threads" box
+already open in some pane is focused there instead (`paneWithSession`). The preview of a session's
+transcript is its own path — **P** or the Preview button (`openPreview`), never the fastest click —
+and a terminal-history row, which has no conversation to reattach, keeps the double-click as its
+preview. The "Subagent threads" box
 (off by default) lists threads under their owner sessions; Enter on one opens its history in the
 ⓘ pane. Other features add tabs beside the list with `RelayWindow::addSessionsTab(id, label,
 factory)` and open one with `RelayWindow::openSessions(tab)`.
