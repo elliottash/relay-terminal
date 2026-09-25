@@ -42,3 +42,21 @@ commit itself, whole.
 The pool is 1 on this host because the pane's cgroup memory limit (about 8 GiB) bounds it —
 the new `verify_slots()` sizing at work; the other session's slot shows its holder, pid,
 hold age and the last tree it built, and the unused slot reads free.
+
+## Whole-card check on a clean export (parent session, 2026-09-25)
+
+Commits: `f5896f3d` (land.py try, slot configure, pool sizing, who holders), `d88d10bc` (this
+evidence), `da4294d6` (CLAUDE.md, RELAY.md, deliver skill + POLICY regeneration, Try-it binary from
+the card's landed commit, briefs, protocol), `e491e055` (`land_try` agent tool).
+
+Run on `git archive 68776e05` in a scratch directory, never in the checkout:
+
+```
+PYTHONPATH=backend python3 -m pytest tests/test_land.py -q             113 passed
+PYTHONPATH=backend python3 -m pytest tests/test_tryit_protocol.py -q    37 passed
+PYTHONPATH=backend python3 -m pytest tests/test_tools.py -q             57 passed
+```
+
+Known, not this card's: `tests/test_system_prompt.py::SizeTests` — the tool list is 455 bytes over
+its budget after `land_try` (and #FYEY's `agent_stop`); recorded on #K54A, which already tracks the
+prompt's own overage.
