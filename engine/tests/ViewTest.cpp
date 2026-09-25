@@ -1727,6 +1727,50 @@ private slots:
     // text. The block is what the pane prints: pre-wrapped by the streaming
     // wrapper at 80, wrapped in an OSC 8 prose run, its logical lines handed
     // to the engine beside the bytes.
+    // #BJJK: a pane whose saved text was replayed into a buffer that already held it carries each
+    // prose block twice, other blocks between the copies. The pieces of one block used to be
+    // unioned into a single range reaching from the first copy to the last, which overlapped
+    // every block in between, and the view then drew no rows at all — not even the prompt.
+    void proseBlockPrintedTwiceStillDraws()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(30, 30);
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        const QString a = QStringLiteral("alpha words that wrap across several rows at thirty columns wide");
+        const QString b = QStringLiteral("beta words that wrap across a few rows as well");
+        auto block = [](const QString &uri, const QString &text) {
+            relay::WordWrap w;
+            w.setColumns(30);
+            QByteArray bytes = "\x1b]8;;" + uri.toUtf8() + "\x1b\\";
+            bytes += QString(w.feed(text + QLatin1Char('\n')) + w.flush())
+                         .replace(QLatin1Char('\n'), QStringLiteral("\r\n")).toUtf8();
+            return bytes + "\x1b]8;;\x1b\\";
+        };
+        const QString ua = QStringLiteral("relay://prose/t/1"), ub = QStringLiteral("relay://prose/t/2");
+        QByteArray bytes = block(ua, a) + "tool row one\r\n" + block(ub, b) + "tool row two\r\n";
+        bytes += bytes;   // the replay: the same blocks again, below the first copy
+        t.backend->writeToDisplay(bytes + "PROMPT$ ");
+        QVERIFY(t.waitScreen(QStringLiteral("PROMPT$")));
+        t.backend->setProseBlock(ua, proseLines({a}), 30);
+        t.backend->setProseBlock(ub, proseLines({b}), 30);
+
+        t.backend->resizeTerminal(30, 80);
+        QElapsedTimer since;
+        since.start();
+        auto rows = [&t] { return t.view->visibleRowsText().join(QLatin1Char('\n')); };
+        while (since.elapsed() < 4000 && !(rows().contains(QStringLiteral("PROMPT$")) && rows().contains(a)))
+            QTest::qWait(50);
+        const QString shown = rows();
+        QVERIFY2(shown.contains(QStringLiteral("PROMPT$")), qPrintable(shown));
+        // The newest copy of each block re-wraps to one row at 80 columns.
+        QVERIFY2(shown.contains(a), qPrintable(shown));
+        QVERIFY2(shown.contains(b), qPrintable(shown));
+        QCOMPARE(shown.count(QStringLiteral("tool row one")), 2);
+        const QImage img = t.grab();
+        QVERIFY(countNonBackground(img, img.rect(), t.view->colorScheme().background) > 0);
+    }
+
     void proseReflowsOnResize()
     {
         QFETCH_GLOBAL(QString, core);

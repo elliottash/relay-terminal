@@ -3600,11 +3600,24 @@ void TerminalView::resolveFoldAnchors()
     // the label, the cells after it — and a label can be the whole of the block's first or last
     // grid row. The pieces are one anchor: the block's rows are their union, and without the union
     // the layer would hide the wrong rows on a resize (the last piece wins otherwise).
+    //
+    // The union is only for pieces that sit together. A pane whose saved text was replayed into a
+    // buffer that already held it carries a block's rows twice, hundreds of rows apart with other
+    // blocks between them (#BJJK); the union of those spans every block in between, the layer's
+    // "blocks never overlap" stops holding, and the view drew no rows at all. The prose runs come
+    // oldest first, so a piece of a block that arrives after some other block's piece is a later
+    // copy: it starts the block over, and the newest copy is the one that re-wraps. The older copy
+    // stays on screen as the plain rows it was printed as.
     QHash<QString, int> at;
+    QString lastProse;
     for (const VtCore::HyperlinkRun &r : runs) {
         const QString uri = relay::labellink::anchorOf(r.uri);
         if (!m_folds.known(uri))
             continue;
+        const bool prose = uri.startsWith(QLatin1String(kProsePrefix));
+        const bool interrupted = prose && !lastProse.isEmpty() && lastProse != uri;
+        if (prose)
+            lastProse = uri;
         const auto it = at.constFind(uri);
         if (it == at.constEnd()) {
             at.insert(uri, int(anchors.size()));
@@ -3613,6 +3626,11 @@ void TerminalView::resolveFoldAnchors()
             continue;
         }
         FoldLayer::AnchorRows &have = anchors[size_t(*it)];
+        if (interrupted) {
+            have.startRow = r.startRow;
+            have.endRow = r.endRow;
+            continue;
+        }
         have.startRow = std::min(have.startRow, r.startRow);
         have.endRow = std::max(have.endRow, r.endRow);
     }
