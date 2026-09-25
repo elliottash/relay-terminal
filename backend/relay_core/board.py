@@ -2753,11 +2753,11 @@ DELIVER_SKILL = "deliver"
 #: what is outside them is the project's own text and is never read, moved or rewritten.
 POINTER_START = "<!-- relay:switchboard-policy start -->"
 POINTER_END = "<!-- relay:switchboard-policy end -->"
-#: Where the `@RELAY.md` note goes: the instruction files the guest tools read.  `AGENTS.md` is
-#: created when it is missing (`_new_agents_text`); `CLAUDE.md` and a Warp-terminal `WARP.md` are
-#: only ever annotated when they exist — **`WARP.md` is the Warp terminal's own agents file and is
-#: never created or renamed** (#C8XD).  The Board policy itself lives in `RELAY.md`
-#: (`relay_md_text`); the note is an import, so every tool loads it rather than being told to.
+#: Where the `@RELAY.md` note goes: the instruction files the guest tools read — annotated in
+#: place when they exist and **never created** (owner, 2026-09-25, #C8XD: "dont create agents or
+#: claude or warp when absent"; `WARP.md` is the Warp terminal's own agents file).  `RELAY.md` is
+#: the one file the scaffold creates (`relay_md_text`); the note is an import, so every tool that
+#: reads one of these files loads the guidance rather than being told to.
 POINTER_TARGETS = ("CLAUDE.md", "AGENTS.md", "WARP.md")
 
 
@@ -3153,33 +3153,6 @@ def _with_pointer(text: str, block: str) -> str | None:
     return None if new == text else new
 
 
-def _new_agents_text(board: "Board", block: str) -> str:
-    """A project's first `AGENTS.md`: the pointer, over an import of what it must not shadow.
-
-    `instructions.py` loads the **first** hit per directory in `PROJECT_ORDER` (.relay/relay.md,
-    AGENTS.override.md, AGENTS.md, CLAUDE.md, ...), so an `AGENTS.md` created beside a project's
-    `CLAUDE.md` would stop Relay's own agent reading that CLAUDE.md.  A CLAUDE-style `@path` import
-    on the first line is the fix: Relay resolves it (`instructions._imports`), and so do Claude Code
-    and Codex, so the project's instructions still reach every prompt.
-    """
-    imports = [name for name in ("CLAUDE.md", "CLAUDE.local.md") if (board.repo / name).is_file()]
-    lines = ["# Agent instructions", ""]
-    if imports:
-        lines += [f"@{name}" for name in imports]
-        lines += ["",
-                  _wrap("<!-- The import(s) above are this project's own instructions. They are "
-                        "imported rather than repeated because a tool that reads AGENTS.md instead "
-                        "of CLAUDE.md would otherwise miss them: Relay takes the first instruction "
-                        "file it finds per directory (relay_core.instructions.PROJECT_ORDER), and "
-                        "so do the CLIs. -->", indent="     "), ""]
-    else:
-        lines += ["Instructions for any coding agent working in this project.", ""]
-    rules = sorted(p.name for p in (board.repo / ".claude" / "rules").glob("*.md")) \
-        if (board.repo / ".claude" / "rules").is_dir() else []
-    if rules:
-        lines += ["Also read " + ", ".join(f"`.claude/rules/{name}`" for name in rules) + ".", ""]
-    lines += [block, ""]
-    return "\n".join(lines)
 
 
 def pointer_files(board: "Board") -> list[tuple[str, str]]:
@@ -3187,10 +3160,10 @@ def pointer_files(board: "Board") -> list[tuple[str, str]]:
 
     `RELAY.md` is the default agent guidance (#C8XD): created when missing (`relay_md_text`) and
     always holding the Board policy block, replaced in place.  `CLAUDE.md`, `AGENTS.md` and a
-    `WARP.md` that exists get only the `@RELAY.md` note — an old full policy block between the
-    markers migrates to the note on the next run — and `AGENTS.md` is created when it is missing,
-    because the owner's decision is that both files point at the policy (#R9G7).  Nothing outside
-    the markers is changed, and `WARP.md` is never created or renamed: the Warp terminal's own.
+    `WARP.md` get the `@RELAY.md` note when — and only when — they already exist; none of the
+    three is ever created (owner, 2026-09-25; this supersedes #R9G7's created `AGENTS.md`), and an
+    old full policy block between the markers migrates to the note on the next run.  Nothing
+    outside the markers is changed, and `WARP.md` is never renamed: the Warp terminal's own.
     """
     out: list[tuple[str, str]] = []
     relay_md = board.repo / "RELAY.md"
@@ -3214,9 +3187,6 @@ def pointer_files(board: "Board") -> list[tuple[str, str]]:
             continue
         if new is not None:
             out.append((str(path), new))
-    agents = board.repo / "AGENTS.md"
-    if not agents.exists():
-        out.append((str(agents), _new_agents_text(board, note)))
     return out
 
 
