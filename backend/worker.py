@@ -236,7 +236,11 @@ def main():
     # on a thread begun by the first `configure`; RELAY_MEMORY_IMPORT=off skips it.
     memory_startup = memory_import.StartupImport(emit)
 
-    emit({"event": "ready", "version": __version__})
+    # Card #FYEY: which backend this worker runs from, so the pane can show it and say when the
+    # checkout has moved on. A pinned worker (spawned from the cache store, RuntimeDirs.cpp)
+    # carries RELAY_BUILD_ID = the pin's content hash; a live, unpinned worker reports "live".
+    emit({"event": "ready", "version": __version__,
+          "backend_rev": os.environ.get("RELAY_BUILD_ID") or "live"})
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
         if not line:

@@ -64,6 +64,40 @@ void setMtimes(const QString &dir, qint64 secondsAgo) {
     ::utimes(QFile::encodeName(dir).constData(), times);
 }
 
+void writeBytes(const QString &path, const QByteArray &bytes) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    QVERIFY2(file.open(QIODevice::WriteOnly), qPrintable(file.errorString()));
+    file.write(bytes);
+}
+
+// A checkout-shaped data root (card #FYEY): backend/worker.py and one module, with the noise a
+// real tree has. Returns the backend directory's path.
+QString makeBackendTree(const QString &dataRoot, const QString &workerSource) {
+    const QString backend = dataRoot + QStringLiteral("/backend");
+    writeBytes(backend + QStringLiteral("/worker.py"), workerSource.toUtf8());
+    writeBytes(backend + QStringLiteral("/relay_core/logs.py"), "pass\n");
+    QDir().mkpath(backend + QStringLiteral("/relay_core"));
+    writeBytes(backend + QStringLiteral("/relay_core/x.pyc"), "bytecode");
+    QDir().mkpath(backend + QStringLiteral("/__pycache__"));
+    writeBytes(backend + QStringLiteral("/.gitignore"), "noise\n");
+    return backend;
+}
+
+// Point the pin store at this test's temp dir (card #FYEY), keeping the machine's real cache —
+// and any unpinned override — out of the way for the test's lifetime.
+class PinStore {
+public:
+    explicit PinStore(const QString &root) {
+        qputenv("RELAY_BACKEND_PINS_HOME", QFile::encodeName(root));
+        qunsetenv("RELAY_BACKEND_UNPINNED");
+    }
+    ~PinStore() {
+        qunsetenv("RELAY_BACKEND_PINS_HOME");
+        qunsetenv("RELAY_BACKEND_UNPINNED");
+    }
+};
+
 }  // namespace
 
 class RuntimeDirsTest : public QObject {
@@ -324,6 +358,132 @@ private slots:
         QCOMPARE(none.removed + none.keptAlive + none.keptYoung + none.errors, 0);
         // And a directory that cannot be marked still reads back as unowned rather than crashing.
         QVERIFY(!markOwned(root.path() + QStringLiteral("/not-here")));
+    }
+
+    // --- the pinned backend store (card #FYEY) ----------------------------------------------
+    //
+    // Every test builds a checkout-shaped data root (backend/worker.py plus noise) and points the
+    // pin store at its own temp dir; the machine's real cache is never touched here.
+
+    // A pin is created once per hash and then reused: same path, same id, same inode — never a
+    // second copy of an id that already has one.
+    void aPinIsCreatedOncePerHashAndReused() {
+        QTemporaryDir data;
+        PinStore store(data.path() + QStringLiteral("/pins"));
+        makeBackendTree(data.path(), QStringLiteral("def start(): pass\n"));
+        const BackendPin first = pinBackend(data.path());
+        QCOMPARE(first.hash.size(), 12);
+        QCOMPARE(first.path, backendPinRoot() + QStringLiteral("/backend-") + first.hash
+                                 + QStringLiteral("/backend"));
+        QVERIFY(QFileInfo::exists(first.path + QStringLiteral("/worker.py")));
+        // The noise of a working tree is not the code: none of it is pinned.
+        QVERIFY(!QFileInfo::exists(first.path + QStringLiteral("/__pycache__")));
+        QVERIFY(!QFileInfo::exists(first.path + QStringLiteral("/.gitignore")));
+        QVERIFY(!QFileInfo::exists(first.path + QStringLiteral("/relay_core/x.pyc")));
+        const QFileInfo pinned(first.path + QStringLiteral("/relay_core/logs.py"));
+        QVERIFY(pinned.isFile());
+
+        // Same tree, one spawn later: the same pin, not a new copy of it.
+        const BackendPin again = pinBackend(data.path());
+        QCOMPARE(again.hash, first.hash);
+        QCOMPARE(again.path, first.path);
+        // The reused pin's files are the same inodes — Qt 6 dropped QFileInfo::inode(), so ask
+        // the file system directly.
+        struct stat original {}, reused {};
+        QVERIFY(::stat(QFile::encodeName(first.path + QStringLiteral("/relay_core/logs.py")).constData(), &original) == 0);
+        QVERIFY(::stat(QFile::encodeName(again.path + QStringLiteral("/relay_core/logs.py")).constData(), &reused) == 0);
+        QCOMPARE(original.st_ino, reused.st_ino);
+        QCOMPARE(pinnedBackend(data.path()), first.path);
+        // Exactly one pin in the store, named for its hash.
+        const QStringList pins = QDir(backendPinRoot()).entryList(
+            QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        QCOMPARE(pins, QStringList{QStringLiteral("backend-") + first.hash});
+    }
+
+    // The id tracks the code, not the clock or the noise: an editor that touches every file
+    // changes nothing, and __pycache__ was never the program.
+    void theHashTracksContentsNotMtimesOrNoise() {
+        QTemporaryDir data;
+        PinStore store(data.path() + QStringLiteral("/pins"));
+        makeBackendTree(data.path(), QStringLiteral("def start(): pass\n"));
+        const QString first = backendTreeHash(data.path());
+        QCOMPARE(first.size(), 12);
+
+        // Only mtimes move.
+        setMtimes(data.path() + QStringLiteral("/backend"), 24 * 60 * 60);
+        QCOMPARE(backendTreeHash(data.path()), first);
+
+        // Bytecode churn under the tree.
+        writeBytes(data.path() + QStringLiteral("/backend/__pycache__/worker.cpython-312.pyc"), "churn");
+        writeBytes(data.path() + QStringLiteral("/backend/.hidden"), "noise");
+        QCOMPARE(backendTreeHash(data.path()), first);
+
+        // Contents change: a different id. The same contents elsewhere: the same id (that is
+        // what makes a pin shareable and a test reproducible).
+        writeBytes(data.path() + QStringLiteral("/backend/worker.py"),
+                   "def start(): return 1\n");
+        const QString second = backendTreeHash(data.path());
+        QCOMPARE(second.size(), 12);
+        QVERIFY(second != first);
+
+        QTemporaryDir copy;
+        QDir(copy.path()).mkpath(QStringLiteral("root"));
+        writeBytes(copy.path() + QStringLiteral("/root/backend/worker.py"), "def start(): return 1\n");
+        writeBytes(copy.path() + QStringLiteral("/root/backend/relay_core/logs.py"), "pass\n");
+        QCOMPARE(backendTreeHash(copy.path() + QStringLiteral("/root")), second);
+    }
+
+    // RELAY_BACKEND_UNPINNED=1 (and nothing to pin) fails open onto the live tree, the way
+    // things worked before pins existed: the caller cannot tell the difference except by the id.
+    void unpinnedRunsTheLiveTree() {
+        QTemporaryDir data;
+        PinStore store(data.path() + QStringLiteral("/pins"));
+        makeBackendTree(data.path(), QStringLiteral("def start(): pass\n"));
+        qputenv("RELAY_BACKEND_UNPINNED", "1");
+        const BackendPin unpinned = pinBackend(data.path());
+        QCOMPARE(unpinned.path, data.path() + QStringLiteral("/backend"));
+        QVERIFY(unpinned.hash.isEmpty());
+        QCOMPARE(pinnedBackend(data.path()), data.path() + QStringLiteral("/backend"));
+        qunsetenv("RELAY_BACKEND_UNPINNED");
+        QVERIFY(QFileInfo::exists(backendPinRoot()) == false || QDir(backendPinRoot()).isEmpty());
+
+        // No backend tree at all: same fail-open answer.
+        QTemporaryDir empty;
+        const BackendPin missing = pinBackend(empty.path());
+        QCOMPARE(missing.path, empty.path() + QStringLiteral("/backend"));
+        QVERIFY(missing.hash.isEmpty());
+        QVERIFY(backendTreeHash(empty.path()).isEmpty());
+    }
+
+    // The sweep: a pin whose owner is dead goes once its grace is past, the current hash is
+    // never taken out from under the spawn using it, and a live Relay's pin stays put.
+    void deadOwnerPinsAreSweptTheCurrentOneNever() {
+        QTemporaryDir data;
+        PinStore store(data.path() + QStringLiteral("/pins"));
+        makeBackendTree(data.path(), QStringLiteral("one\n"));
+        const QString keep = pinBackend(data.path()).hash;   // owned by this very test process
+
+        // A second, different tree: its pin, with the owner switched to a process that is gone.
+        writeBytes(data.path() + QStringLiteral("/backend/worker.py"), "two\n");
+        const BackendPin other = pinBackend(data.path());
+        writeOwner(backendPinRoot() + QStringLiteral("/backend-") + other.hash, deadPid(), 7);
+
+        // Dead but inside the grace: an orphaned worker may still be running from it.
+        QCOMPARE(sweepBackendPins(keep, kDefaultGraceSeconds), 0);
+        QVERIFY(QFileInfo::exists(other.path));
+        // The grace past: gone — and never the current hash, however dead its owner is.
+        writeOwner(backendPinRoot() + QStringLiteral("/backend-") + keep, deadPid(), 8);
+        setMtimes(backendPinRoot() + QStringLiteral("/backend-") + other.hash, 2 * 60 * 60);
+        setMtimes(backendPinRoot() + QStringLiteral("/backend-") + keep, 2 * 60 * 60);
+        QCOMPARE(sweepBackendPins(keep, 60 * 60), 1);
+        QVERIFY(!QFileInfo::exists(other.path));
+        QVERIFY(QFileInfo::exists(backendPinRoot() + QStringLiteral("/backend-") + keep));
+
+        // A live Relay's pin — the normal case, every pane of one Relay sharing its pid —
+        // survives a sweep that is not told any current hash at all.
+        markOwned(backendPinRoot() + QStringLiteral("/backend-") + keep);
+        QCOMPARE(sweepBackendPins(QString(), 0), 0);
+        QVERIFY(QFileInfo::exists(backendPinRoot() + QStringLiteral("/backend-") + keep));
     }
 };
 

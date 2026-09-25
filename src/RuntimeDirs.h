@@ -87,6 +87,8 @@ constexpr qint64 kDefaultGraceSeconds = 7 * 24 * 60 * 60;
 constexpr int kDefaultMaxDirectories = 400;
 // ...and it gives up after this long even if the cap is not reached (a slow or huge /tmp).
 constexpr qint64 kDefaultBudgetMs = 1500;
+// A backend pin whose owner is dead waits this long before the sweep removes it (card #FYEY).
+constexpr qint64 kPinDeadOwnerGraceSeconds = 60 * 60;
 
 // Who owns a runtime directory: a pid, and the start time that tells it from a recycled pid.
 struct Owner {
@@ -130,6 +132,52 @@ struct SweepResult {
 SweepResult sweep(const QString &tempRoot = QDir::tempPath(),
                   qint64 graceSeconds = kDefaultGraceSeconds,
                   int maxDirectories = kDefaultMaxDirectories);
+
+// Card #FYEY — the pinned backend store. A pane's worker must keep running the code it started
+// with while uncommitted edits pile up in the working tree, so the `backend/` tree a spawn uses
+// is hashed and copied aside once per hash. The pin lives at
+// `$XDG_CACHE_HOME/relay/backend-<hash12>/backend`, carries the same `owner` file as a runtime
+// directory, and is filled with hardlinks into the checkout (a copy when the link fails), so a
+// pin costs little more than the directories it is made of. The working tree at spawn time is
+// the source of truth, never git HEAD (decision on the card).
+//
+// A file is hashed by its contents and relative path only; mtimes are never looked at, and
+// `__pycache__`, `*.pyc` and hidden entries are skipped — they change from run to run without
+// the code changing. RELAY_BACKEND_UNPINNED=1 (development) returns the live tree untouched.
+struct BackendPin {
+    QString path;   // the pinned `backend` tree, or dataRoot's own when unpinned
+    QString hash;   // the 12-hex id the pin is stored under; empty when running unpinned
+};
+
+// The 12-hex content id of `<dataRoot>/backend`, as pinBackend() computes it (the same input
+// gives the same id). Empty when there is no such tree to hash.
+QString backendTreeHash(const QString &dataRoot);
+
+// Resolve this spawn's backend: hash the tree, reuse the pin for that hash if one exists, and
+// otherwise materialise it — into a `backend-<hash>.making.<random>` sibling that is renamed
+// into place only once whole, so a half-made pin is never run from. Sweeps the store on the way
+// (see sweepBackendPins). Returns dataRoot's own `backend` and an empty hash when
+// RELAY_BACKEND_UNPINNED is set, when there is no tree to hash, or when the pin could not be
+// written: failing open onto the live tree, the way things worked before pins existed.
+BackendPin pinBackend(const QString &dataRoot);
+
+// pinBackend().path on its own.
+QString pinnedBackend(const QString &dataRoot);
+
+// The pin store's root under the XDG cache: `$XDG_CACHE_HOME/relay` (or `$RELAY_BACKEND_PINS_HOME`
+// when set, for the tests).
+QString backendPinRoot();
+
+// Remove the backend pins of Relays that are gone. Timid like sweep(): only names pinBackend()
+// itself could have made, only real directories owned by this uid in mode 0700 that really sit
+// in the store, and never the pin named by `currentHash` — the spawn calling this may be about
+// to use it. A pin whose owner file names a live Relay is kept (all of one Relay's panes share
+// its pid); one whose owner is dead is removed after kPinDeadOwnerGraceSeconds, an hour being
+// long enough for an orphaned worker to outlive the crash that orphaned it; an unmarked pin
+// waits the same week as an unmarked runtime directory. `graceSeconds` is a parameter so the
+// tests need not wait an hour.
+int sweepBackendPins(const QString &currentHash = QString(),
+                     qint64 graceSeconds = kPinDeadOwnerGraceSeconds);
 
 }  // namespace runtimedirs
 }  // namespace relay

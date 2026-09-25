@@ -769,6 +769,8 @@ public:
 
     ~Pane() override {
         m_closing = true;
+        // Card #FYEY: this pane's conversations are over; its land.py holds can be reaped.
+        reapLandScripts();
         // Retire the address before anything else goes (#R5TC): a send in flight while this
         // pane closes is refused with the roster, not delivered into a dying hook.
         relay::panedir::Directory::instance().remove(m_token);
@@ -10743,7 +10745,15 @@ private:
         if (sharesWorker()) return;   // the tab's worker is the window's; this pane has none
         if (!m_workerConnected) connectWorker();
         m_workerBuffer.clear(); m_workerPending.clear();
-        const QStringList command{m_python, QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-S"), QStringLiteral("-u"), m_data + QStringLiteral("/backend/worker.py")};
+        // Card #FYEY: this worker runs from a content-addressed pin of the working tree's
+        // backend/, resolved here once per spawn (RuntimeDirs.cpp), so it keeps running the code
+        // it started with while the checkout moves under it. RELAY_BUILD_ID tells
+        // relay_core.logs that a changed tree is expected and stops its source_changed() nudge.
+        const relay::runtimedirs::BackendPin pin = relay::runtimedirs::pinBackend(m_data);
+        m_backendRev = pin.hash.isEmpty() ? QStringLiteral("live") : pin.hash;
+        const QStringList command{m_python, QStringLiteral("-X"), QStringLiteral("utf8"),
+                                  QStringLiteral("-S"), QStringLiteral("-u"),
+                                  pin.path + QStringLiteral("/worker.py")};
         // The worker writes worker.log itself; it needs this pane's id and the chosen detail level.
         // Passed per process rather than with qputenv, which would leak between panes.
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -10753,6 +10763,9 @@ private:
         // worker's own run_command children share one ledgered TMPDIR under
         // relay::scratchpaths::sessionRoot(m_token).
         environment.insert(QStringLiteral("RELAY_SESSION_TOKEN"), m_token);
+        // The pin's id (card #FYEY): relay_core.logs.source_changed() sees it and stops firing
+        // for a worker whose tree is frozen by design. Never set for a live, unpinned worker.
+        if (!pin.hash.isEmpty()) environment.insert(QStringLiteral("RELAY_BUILD_ID"), pin.hash);
         environment.insert(QStringLiteral("RELAY_LOG_LEVEL"), relay::log::levelName(relay::log::level()));
         // Programs the agent starts — tmux, Chrome — move themselves into their own app.slice
         // scopes over the session bus (StartTransientUnit), escaping this pane's memory cap
@@ -10788,6 +10801,11 @@ private:
         }
         m_worker.start();
     }
+
+    // Card #FYEY: run `scripts/land.py reap --token <m_token>` detached when a pane's worker
+    // goes away for good (the worker-finished handler while closing, and ~Pane). Defined in
+    // PaneRuntime.cpp: output discarded, failure ignored — the subcommand may not exist yet.
+    void reapLandScripts() const;
 
     void connectWorker();
 
@@ -10940,7 +10958,11 @@ private:
                         relay::NotificationCenter::kindError);
     }
 
-    void showBanner(const QString &text, const QString &actionLabel, std::function<void()> action) {
+    // Card #FYEY: a banner can carry a second action ("Reload backend" beside "Restart agent"
+    // in the agent-stopped banner, PaneRuntime.cpp). Optional, so every other banner is a
+    // three-argument call.
+    void showBanner(const QString &text, const QString &actionLabel, std::function<void()> action,
+                    const QString &secondLabel = QString(), std::function<void()> secondAction = {}) {
         if (!m_banner) {
             m_banner = new QFrame;
             m_banner->setObjectName(QStringLiteral("paneBanner"));
@@ -10952,6 +10974,9 @@ private:
             m_bannerAction = new QPushButton;
             connect(m_bannerAction, &QPushButton::clicked, this, [this] { if (m_bannerCallback) { auto run = m_bannerCallback; run(); } });
             row->addWidget(m_bannerAction);
+            m_bannerSecond = new QPushButton;
+            connect(m_bannerSecond, &QPushButton::clicked, this, [this] { if (m_bannerSecondCallback) { auto run = m_bannerSecondCallback; run(); } });
+            row->addWidget(m_bannerSecond);
             auto *dismiss = new QToolButton; dismiss->setText(QStringLiteral("×")); dismiss->setAutoRaise(true);
             connect(dismiss, &QToolButton::clicked, this, [this] { hideBanner(); });
             row->addWidget(dismiss);
@@ -10962,6 +10987,9 @@ private:
         const QString shortcut = Keymap::instance().shortcutText(QStringLiteral("pane.restartShell"));
         m_bannerAction->setText(shortcut.isEmpty() || actionLabel.isEmpty() ? actionLabel : actionLabel + QStringLiteral("  (") + shortcut + ')');
         m_bannerAction->setVisible(!actionLabel.isEmpty());
+        m_bannerSecondCallback = std::move(secondAction);
+        m_bannerSecond->setText(secondLabel);
+        m_bannerSecond->setVisible(!secondLabel.isEmpty());
         m_banner->show();
     }
 
@@ -10972,6 +11000,7 @@ private:
     void hideBanner() {
         if (m_banner) m_banner->hide();
         m_bannerCallback = nullptr;
+        m_bannerSecondCallback = nullptr;
     }
 
 public:
@@ -17263,6 +17292,10 @@ private:
     QJsonArray m_knownCommands;
     QTemporaryDir m_runtime{QDir::tempPath() + QStringLiteral("/relay-XXXXXX")};
     QProcess m_worker;
+    // Card #FYEY: the id of the backend pin this pane's worker runs from ("live" when
+    // unpinned), set at spawn and confirmed from the worker's ready message. PaneRuntime.cpp
+    // shows it in pane info and reaps the pane's land scripts when the worker goes away.
+    QString m_backendRev;
     // The pane's resource meter (usageSample() above); one baseline per pane, so percentages
     // are always over the status poll's own interval.
     relay::usage::Meter m_usageMeter;
@@ -17423,6 +17456,8 @@ private:
     QLabel *m_bannerText = nullptr;
     QPushButton *m_bannerAction = nullptr;
     std::function<void()> m_bannerCallback;
+    QPushButton *m_bannerSecond = nullptr;   // a banner's optional second action (#FYEY)
+    std::function<void()> m_bannerSecondCallback;
     QString m_shellUnit, m_agentUnit;
     int m_shellGeneration = 0, m_agentGeneration = 0;
     long m_oomKills = -1;

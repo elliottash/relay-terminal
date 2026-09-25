@@ -304,9 +304,15 @@ private:
         // install's copy of it); the pane's own RELAY_DATA_DIR is what names that root. The data
         // root itself goes on the path too, because the sidecar's WebSocket *is* `remote/ws.py`
         // (26.5) and `remote/` sits beside `backend/` in the tree and in the install.
+        // Card #FYEY: the backend entry is the content-addressed pin of that tree resolved once
+        // per spawn (RuntimeDirs.cpp), so the sidecar keeps running the code it started with —
+        // only `remote/` stays on the live root beside it. RELAY_BUILD_ID goes with the pin so
+        // relay_core.logs.source_changed() does not fire for a tree that is frozen by design.
+        const relay::runtimedirs::BackendPin pin = relay::runtimedirs::pinBackend(m_data);
+        if (!pin.hash.isEmpty()) environment.insert(QStringLiteral("RELAY_BUILD_ID"), pin.hash);
         const QString existing = environment.value(QStringLiteral("PYTHONPATH"));
         environment.insert(QStringLiteral("PYTHONPATH"),
-                           m_data + QStringLiteral("/backend") + QDir::listSeparator() + m_data
+                           pin.path + QDir::listSeparator() + m_data
                                + (existing.isEmpty() ? QString() : QDir::listSeparator() + existing));
         environment.insert(QStringLiteral("PYTHONUNBUFFERED"), QStringLiteral("1"));
         m_process.setProcessEnvironment(environment);

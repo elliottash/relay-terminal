@@ -70,6 +70,10 @@ void Pane::handle(const QJsonObject &event) {
         if (handleMemorySuggestionEvent(type, event)) return;   // Keep / No answered, and imports (#MEMS)
         if (type == QStringLiteral("ready")) {
             m_workerReady = true; requestRoute(false, QStringLiteral("auto"));
+            // Card #FYEY: which backend pin this worker runs from, as the worker itself sees it
+            // (set in Pane::startWorker from the pin, echoed here as the source of truth).
+            const QString backendRev = event.value(QStringLiteral("backend_rev")).toString();
+            if (!backendRev.isEmpty()) m_backendRev = backendRev;
             // A conversation opened in a new pane with no saved text: its transcript comes off the
             // shared index, so it is asked for now. A pane whose harness is deferred is not
             // configured until its first prompt, and waiting for that left it empty (#0TJ9).

@@ -102,6 +102,8 @@ target_link_libraries(relay-board PUBLIC relay-sourcedir)
 # relay-modelcatalog: a card comment records the model id its turn ran on; the page names the
 # model (card #MDL1, rule 1), through the same `nameOf` as everywhere else.
 target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog relay-panestatus ${RELAY_QT}::Widgets)
+# The switchboard's worker is pinned from the working tree like any pane's (#FYEY).
+target_link_libraries(relay-board PRIVATE relay-runtimedirs)
 target_compile_options(relay-board PRIVATE ${RELAY_WARNINGS})
 
 # Which project a pane is in, where that project's Switchboard folder is (or would be), and the

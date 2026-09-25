@@ -683,7 +683,21 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
         if (type == QStringLiteral("sessions")) return true;
         // ----- conversation info, the ⓘ view (protocol section 25) --------------------------
         if (type == QStringLiteral("session_info")) {
-            if (m_infoView) m_infoView->setInfo(event);
+            if (m_infoView) {
+                // Card #FYEY: the pane knows which backend pin its worker runs from, and can
+                // tell whether the checkout has moved on since; the worker's own report cannot.
+                // Both are stamped here — hashing the tree again is a cost an opening info view
+                // can pay, and a spawn must not.
+                QJsonObject stamped = event;
+                // Only the pane's own live conversation has this worker's backend; a saved
+                // session shown in the same view does not.
+                stamped.insert(QStringLiteral("backend_rev"),
+                               event.value(QStringLiteral("live")).toBool() ? m_backendRev : QString());
+                stamped.insert(QStringLiteral("backend_changed"),
+                               !m_backendRev.isEmpty() && m_backendRev != QStringLiteral("live")
+                                   && relay::runtimedirs::backendTreeHash(m_data) != m_backendRev);
+                m_infoView->setInfo(stamped);
+            }
             return true;
         }
         if (type == QStringLiteral("context_breakdown")) {

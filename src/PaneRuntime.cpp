@@ -639,7 +639,12 @@ void Pane::connectWorker() {
                 .arg(logIdentity(relay::buildinfo::running().id));
             if (expectedExit) relay::log::info(exitRecord);
             else relay::log::error(exitRecord);
-            if (m_closing) return;
+            if (m_closing) {
+                // Card #FYEY: the pane is going away with its worker; its land.py holds can be
+                // reaped now (below, ~Pane covers a worker that never reports a finish).
+                reapLandScripts();
+                return;
+            }
             if (m_restartConfigure) {
                 QTimer::singleShot(250, this, [this] { if (!m_closing) startWorker(); });
                 return;
@@ -649,7 +654,10 @@ void Pane::connectWorker() {
             showBanner(oom ? QStringLiteral("The agent worker stopped because it ran out of memory (limit %1).")
                                  .arg(isolation::memory("isolation/agent_memory_max", isolation::agentDefault()))
                            : killed ? QStringLiteral("The agent worker was stopped.") : QStringLiteral("The agent worker exited."),
-                       QStringLiteral("Restart agent"), [this] { hideBanner(); startWorker(); });
+                       QStringLiteral("Restart agent"), [this] { hideBanner(); startWorker(); },
+                       // Card #FYEY: restart from the checkout as it stands — startWorker pins
+                       // from the current tree, so this loads a backend that has changed.
+                       QStringLiteral("Reload backend"), [this] { hideBanner(); startWorker(); });
         });
         connect(&m_worker, &QProcess::started, this, [this] {
             // A fresh worker knows nothing (#J0VY): clear the gate so the first `app_catalog`
@@ -2501,4 +2509,18 @@ void Pane::runMasterKeepalive() {
     // Detached: a hung or dead ssh must never take the pane — or Relay — down with it, and the
     // keepalive's lifetime is the master's, not the pane's.
     QProcess::startDetached(argv.first(), argv.mid(1));
+}
+
+void Pane::reapLandScripts() const {
+    // Card #FYEY, step 6: this pane's conversations are over, so any holds land.py made for its
+    // token can be released — uncommitted-work holds building up until sessions die is the whole
+    // card. Run only where the checkout really has scripts/land.py (installs do not), detached
+    // through a shell that discards output: failure is ignored by design, and until the `reap`
+    // subcommand lands (a later step of this card) it exits non-zero and that is fine. Never
+    // keyed on idle time: a pane that is merely quiet still holds its work.
+    const QString script = QFileInfo(m_data, QStringLiteral("scripts/land.py")).absoluteFilePath();
+    if (!QFileInfo(script).isFile()) return;
+    const QString command = QStringLiteral("exec python3 '%1' reap --token '%2' >/dev/null 2>&1")
+                                .arg(script, m_token);
+    QProcess::startDetached(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), command});
 }

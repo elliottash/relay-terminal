@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "BoardWorker.h"
 #include "AppPaths.h"
+#include "RuntimeDirs.h"
 
 #include <QJsonDocument>
 #include <QProcessEnvironment>
@@ -114,10 +115,15 @@ void BoardWorker::start(const QJsonObject &configure)
     m_queued.clear();
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("RELAY_PANE_ID"), QStringLiteral("switchboard"));
+    // Card #FYEY: the switchboard's worker runs from a content-addressed pin of the working
+    // tree's backend/, resolved once per spawn (RuntimeDirs.cpp) — the same pin the panes use —
+    // and RELAY_BUILD_ID stops relay_core.logs.source_changed() firing for a frozen tree.
+    const relay::runtimedirs::BackendPin pin = relay::runtimedirs::pinBackend(m_data);
+    if (!pin.hash.isEmpty()) environment.insert(QStringLiteral("RELAY_BUILD_ID"), pin.hash);
     m_process.setProcessEnvironment(environment);
     m_process.setProgram(m_python.isEmpty() ? relayPython() : m_python);
     m_process.setArguments({QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-S"), QStringLiteral("-u"),
-                            m_data + QStringLiteral("/backend/worker.py")});
+                            pin.path + QStringLiteral("/worker.py")});
     m_process.start();
     // `configure` goes out when the worker answers `ready`, so it never races the handshake.
 }

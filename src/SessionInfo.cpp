@@ -290,6 +290,20 @@ QString sessionHtml(const QJsonObject &info, const QDateTime &now) {
     const QString branch = info.value(QStringLiteral("git_branch")).toString();
     if (!branch.isEmpty()) workspace += QStringLiteral(" <span class=m>· branch %1</span>").arg(esc(branch));
     html += row(QStringLiteral("Workspace"), workspace);
+    // Card #FYEY: which backend this pane's worker runs from — the pane stamps the id in
+    // (PaneSession.cpp); the worker cannot see the checkout moving under its pin. "live" means
+    // running unpinned from the checkout; "changed" means the checkout has moved on and only a
+    // worker restart (the pane's Restart agent banner) loads the new tree.
+    const QString backendRev = info.value(QStringLiteral("backend_rev")).toString();
+    if (!backendRev.isEmpty()) {
+        const QString cell = backendRev == QLatin1String("live")
+                                 ? QStringLiteral("live <span class=m>· unpinned, from the checkout</span>")
+                                 : QStringLiteral("<code>%1</code>").arg(esc(backendRev))
+                                       + (info.value(QStringLiteral("backend_changed")).toBool()
+                                              ? QStringLiteral(" <span class=m>· backend changed; Restart agent to load it</span>")
+                                              : QString());
+        html += row(QStringLiteral("Backend"), cell);
+    }
     html += row(QStringLiteral("Started"), esc(when(info.value(QStringLiteral("created")).toDouble(), now)));
     html += row(QStringLiteral("Updated"), esc(when(info.value(QStringLiteral("updated")).toDouble(), now)));
     const int threads = info.value(QStringLiteral("thread_count")).toInt();
