@@ -93,10 +93,10 @@ QString bevelStylesheet(const ThemeSpec &spec) {
     const QString light = hex(extraColor(spec, QStringLiteral("bevel.light"), SurfaceRaised.lighter(125)));
     const QString dark = hex(extraColor(spec, QStringLiteral("bevel.dark"), SurfaceRaised.darker(160)));
     QString css = QStringLiteral(R"(
-QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
+QPushButton, QComboBox, QToolButton#stripChip, QToolButton#runInBackgroundButton, QLabel#stripChipLabel, QLabel#keyCap,
 QFrame#paneChrome, QFrame#helpPopup, QFrame#paneInfoPopover, QMenu, QFrame#notificationsPopup {
     border-top: 2px solid %1; border-left: 2px solid %1; border-bottom: 2px solid %2; border-right: 2px solid %2; }
-QPushButton:pressed, QToolButton#stripChip:pressed {
+QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#runInBackgroundButton:pressed {
     border-top: 2px solid %2; border-left: 2px solid %2; border-bottom: 2px solid %1; border-right: 2px solid %1; }
 QLineEdit, QSpinBox, QPlainTextEdit, QTextEdit, QFrame#composer, QWidget#pane,
 QTreeView#fileExplorerView, QTreeWidget#turnTools, QScrollArea#filePreviewImageArea {
@@ -142,15 +142,15 @@ Material materialOf(const ThemeSpec &spec) {
 QString metalStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
-QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
+QPushButton, QComboBox, QToolButton#stripChip, QToolButton#runInBackgroundButton, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
 QFrame#helpPopup, QFrame#paneInfoPopover, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.09 %1, stop:0.55 %2, stop:1 %3); }
-QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
+QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#runInBackgroundButton:hover, QToolButton#workChip:hover {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %4, stop:0.14 %1, stop:0.6 %1, stop:1 %2); }
-QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#workChip:pressed {
+QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#runInBackgroundButton:pressed, QToolButton#workChip:pressed {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %3, stop:0.9 %2, stop:1 %4); }
 QPushButton:disabled { background: %3; }
 /* The chassis the panes are bolted to: one sheet, with a shallower sheen than a chip, so the
@@ -171,15 +171,15 @@ QTabBar, QToolBar { background: transparent; }
 QString plasticStylesheet(const ThemeSpec &spec) {
     const Material m = materialOf(spec);
     QString css = QStringLiteral(R"(
-QPushButton, QComboBox, QToolButton#stripChip, QLabel#stripChipLabel, QLabel#keyCap,
+QPushButton, QComboBox, QToolButton#stripChip, QToolButton#runInBackgroundButton, QLabel#stripChipLabel, QLabel#keyCap,
 QToolButton#workChip, QFrame#paneChrome, QMenu, QFrame#notificationsPopup,
 QFrame#helpPopup, QFrame#paneInfoPopover, QLabel#toast {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 %1, stop:0.45 %2, stop:1 %3); }
-QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#workChip:hover {
+QPushButton:hover, QComboBox:hover, QToolButton#stripChip:hover, QToolButton#runInBackgroundButton:hover, QToolButton#workChip:hover {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %4, stop:0.5 %1, stop:1 %2); }
 /* A pressed key is the same piece of plastic with the light coming from the other side. */
-QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#workChip:pressed {
+QPushButton:pressed, QToolButton#stripChip:pressed, QToolButton#runInBackgroundButton:pressed, QToolButton#workChip:pressed {
     background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %3, stop:0.5 %2, stop:1 %1); }
 QPushButton:disabled { background: %3; }
 /* The case: the largest moulded surface here, and the one that has to read as a machine rather
@@ -507,9 +507,13 @@ QLabel#helpFooter { color: @muted; font-size: 9pt; padding-top: 6px; border-top:
 /* Warp-style chips in the composer's status strip: a slightly raised rectangle each. The
    min-height is a line of the chips' 9pt text, so an icon-only chip (Switchboard, tasks,
    microphone) is exactly as tall as the text chip beside it (2026-09-17). */
-QToolButton#stripChip { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
+QToolButton#stripChip, QToolButton#runInBackgroundButton { background: @raised; border: 1px solid @border; border-radius: 6px; padding: 2px 8px;
                         color: @muted; font-size: 9pt; min-height: 17px; }
-QToolButton#stripChip:hover { color: @text; border-color: @accent; }
+QToolButton#stripChip:hover, QToolButton#runInBackgroundButton:hover { color: @text; border-color: @accent; }
+/* The ↗ corner button is a lone glyph, so it takes a shade less padding than a labelled chip:
+   at the box's one-line rest height it shares the chips row, and it sits level with them
+   instead of poking below it (card #4CXY). */
+QToolButton#runInBackgroundButton { padding: 1px 8px; }
 /* The mode chip takes the destination's colour, like the caret. */
 QToolButton#stripChip[dest="shell"] { color: @shell; border-color: @shell; }
 QToolButton#stripChip[dest="agent"] { color: @agent; border-color: @agent; }
@@ -807,7 +811,7 @@ QToolButton#boardChatImport { background: @raised; color: @text; border: 1px sol
 QToolButton#boardChatImport:hover { border-color: @accent; }
 /* The helper's prompt box had ten rules here — a frame, an editor, a mic chip and a context chip
    — copied value for value from `QFrame#composer`, `QPlainTextEdit#composerEditor`,
-   `QToolButton#stripChip` and `QLabel#stripChipLabel` above, because "make it like the pane
+   `QToolButton#stripChip, QToolButton#runInBackgroundButton` and `QLabel#stripChipLabel` above, because "make it like the pane
    agent" (owner, 2026-09-20) and a panel was not a pane. It is a pane now (card #AGNT), so the
    copies are gone and the originals paint it: one control, one rule, and no second place for the
    two to drift apart. */

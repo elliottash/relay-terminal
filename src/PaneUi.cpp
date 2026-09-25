@@ -95,6 +95,7 @@ void Pane::buildUi() {
         layout->addWidget(m_terminalHost, 1);
         m_terminalHost->installEventFilter(this);   // the toast follows the terminal host's corner
         auto *composer = new QFrame; composer->setFrameShape(QFrame::StyledPanel);
+        composer->setObjectName(QStringLiteral("promptBox"));   // the drawn box; its input area is a plain child (#4CXY)
         // The prompt box never sets the pane's minimum width. Its chip row is wider than a pane in
         // a three-pane split, and a splitter that cannot satisfy every minimum redistributes as
         // soon as one of them changes — which is what made taking control (Ctrl+H) shrink a pane
@@ -179,7 +180,6 @@ void Pane::buildUi() {
         m_secretChip->setToolTip(QStringLiteral("The line is written to the program and never stored"));
         m_secretChip->hide();
         corner->addWidget(m_secretChip);
-        corner->addWidget(backgroundSend);
         corner->addWidget(m_modeChip);
         // The routing verdict has no chip of its own: it is the mode chip's tooltip. The label
         // survives only as the place that text and tooltip live, so it is parented to the composer
@@ -253,7 +253,9 @@ void Pane::buildUi() {
         QTimer::singleShot(0, this, [this] { refreshDestinationColor(); });
         m_editor->setAutoHeight(1, 1000);   // the pane height caps long drafts
         m_editor->setHeightLimit(std::max(m_editor->minimumHeight(), height() * 2 / 3 - 72));
-        auto *inputRow = new QHBoxLayout;
+        auto *inputArea = new QWidget;   // the input area as one widget (#4CXY): the ↗ button floats on it
+        inputArea->setObjectName(QStringLiteral("promptInputArea"));
+        auto *inputRow = new QHBoxLayout(inputArea);
         inputRow->setContentsMargins(0, 0, 0, 0);
         inputRow->setSpacing(6);
         auto *inputColumn = new QVBoxLayout;
@@ -265,6 +267,21 @@ void Pane::buildUi() {
         cornerColumn->addLayout(corner);
         cornerColumn->addStretch(1);
         inputRow->addLayout(cornerColumn);
+        // Card #4CXY: the ↗ run-in-background button waits in the prompt box's bottom-right
+        // corner, the way a chat input's send affordance does, and the text wraps around the
+        // corner column rather than running underneath it. It gets no layout seat on purpose:
+        // the box is one line tall at rest (setAutoHeight(1, …) above), and a second corner row
+        // under the chips would add the button's height to every pane's idle box. It floats on
+        // the input area instead and takes whatever corner the box can give it. The geometry
+        // that moves it: the area resizes as the box auto-grows and as the pane does, and the
+        // mode chip moves when the `!` / `*` / password chips or a mode retitle re-seat the row.
+        backgroundSend->setParent(inputArea);
+        backgroundSend->raise();
+        m_promptArea = inputArea;
+        m_backgroundSend = backgroundSend;
+        placeBackgroundSend();
+        inputArea->installEventFilter(this);
+        m_modeChip->installEventFilter(this);
         // The "Relaying · …" line (cards #4E13, #HQ2B, #RR0G, #R3YN): agent work in the agent's
         // violet, saying what
         // it is doing right now ("Relaying · reading src/Pane.h… · 12 s · Esc stops"), a terminal
@@ -292,7 +309,7 @@ void Pane::buildUi() {
         // keymap action and the palette make, so a second click brings the open one forward.
         // `fromMouse` is what teaches the key the first time (the `internals.open` hint).
         m_busyLine->onOpenActivity = [this] { openInternalsPane(QString(), true); };
-        composerLayout->addLayout(inputRow);
+        composerLayout->addWidget(inputArea);
         // Password prompts (checkPasswordPrompt): the prompt box becomes a masked field whose
         // line goes to the running program. It is a separate widget so the password can never
         // reach the composer's document, its history, its undo stack or route assist.
@@ -429,3 +446,26 @@ void Pane::buildUi() {
         setupJobsUi(layout);        // commands the agent left running, beneath that
         updatePaths();
     }
+
+// Card #4CXY. Where the ↗ run-in-background button sits in the prompt box. The box is one
+// text line tall at rest, so its bottom-right corner and the chips row are the same row: the
+// button keeps the seat beside the mode chip it always had. Once the box has grown enough to
+// have a corner of its own below the chips (a second line of prompt text), the button moves
+// down into it, flush with the box's right edge under the mode chip, and keeps moving down as
+// the box grows. Text never runs underneath it: text wraps before the corner column (comment
+// at the `corner` layout), which is never narrower than the mode chip the button rides under.
+void Pane::placeBackgroundSend()
+{
+    if (!m_backgroundSend || !m_promptArea || !m_modeChip) return;
+    const QSize want = m_backgroundSend->sizeHint();
+    const int areaWidth = m_promptArea->width(), areaHeight = m_promptArea->height();
+    const QPoint modeTop = m_modeChip->mapTo(m_promptArea, QPoint(0, 0));
+    const int chipsBottom = modeTop.y() + m_modeChip->height();
+    if (areaHeight - chipsBottom >= want.height())
+        m_backgroundSend->setGeometry(areaWidth - want.width(), areaHeight - want.height(),
+                                      want.width(), want.height());
+    else   // one-line box: beside the mode chip, the seat the corner row gives it
+        m_backgroundSend->setGeometry(modeTop.x() - 6 - want.width(), modeTop.y(),
+                                      want.width(), want.height());
+    m_backgroundSend->raise();
+}

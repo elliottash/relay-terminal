@@ -1042,6 +1042,8 @@ if(BUILD_TESTING)
     set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME queuecontract COMMAND relay-consolemode-tests --xcxd-only)
     set_tests_properties(queuecontract PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_test(NAME consolecorner COMMAND relay-consolemode-tests --corner-only)
+    set_tests_properties(consolecorner PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
