@@ -958,7 +958,9 @@ public:
             if (!processBusy() || m_altScreen || m_native || m_secretMode) return;
             if (m_modeValue != mode) m_preProgramMode = m_modeValue;
         } else if (m_modeValue == QStringLiteral("program")) m_preProgramMode.clear();
-        m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); refreshDestinationColor(); changed();
+        m_modeValue = mode; requestRoute(false, QStringLiteral("auto")); refreshDestinationColor();
+        refreshProgramHint(); updateTakeControl();   // the hint's wording and the busy row's offer follow the mode
+        changed();
     }
     bool isNative() const { return m_native; }
     void toggleNative() { setNative(!m_native); }
@@ -10704,7 +10706,11 @@ private:
         const bool repl = name.startsWith(QStringLiteral("python")) || name == QStringLiteral("ipython")
             || name == QStringLiteral("node") || name == QStringLiteral("psql") || name == QStringLiteral("sqlite3")
             || name == QStringLiteral("stata");
-        if (text.contains('\n') && !repl) return false;
+        if (text.contains('\n') && !repl) {
+            if (mode != QStringLiteral("program")) return false;   // Auto/Terminal: the old rules
+            status(QStringLiteral("%1 takes one line at a time").arg(program.isEmpty() ? QStringLiteral("The program") : program));
+            return true;   // the draft stays in the box
+        }
         if (!routedText || m_editor->toPlainText() == text) m_editor->clear();
         hideAtPopup();
         clearAiGhost();
@@ -14008,7 +14014,9 @@ private:
         // terminal or the agent, like Claude Code's `!`. Backspace in the empty box undoes it.
         // `!` and `*` work from every mode: in Terminal mode `*` sends this one line to the agent,
         // in Agent mode `!` runs this one line in the terminal (owner, 2026-09-17).
-        if (m_prefixMode.isEmpty() && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+        // In PROGRAM mode both are the program's own characters (IPython's `!ls`), so no switch.
+        if (m_prefixMode.isEmpty() && m_modeValue != QStringLiteral("program")
+            && m_editor->toPlainText().isEmpty() && !(mods & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
             && (key->text() == QStringLiteral("!") || key->text() == QStringLiteral("*"))) {
             setPrefixMode(key->text() == QStringLiteral("!") ? QStringLiteral("shell") : QStringLiteral("agent"));
             return true;
@@ -16174,7 +16182,14 @@ private:
                 text = relay::screen::waitingLine(program, m_screenPrompt);
                 state = QStringLiteral("needs-you");
             } else if (m_waiting) {
-                text = QStringLiteral("%1 is waiting for input · Type into it from here in PROGRAM mode").arg(who);
+                // A canonical prompt (`[Y/n]`, `read -p`) takes the next Enter from any mode; a
+                // line editor (python3, psql, sqlite3) reads raw keys, so its lines need PROGRAM
+                // mode, which the busy row's "Type into it from here" turns on (#S976).
+                text = m_modeValue == QStringLiteral("program")
+                    ? QStringLiteral("%1 is at its prompt · your lines go to it").arg(who)
+                    : relay::input::lineEditorWaiting(inputState())
+                    ? QStringLiteral("%1 is waiting for input · Type into it from here to send it your lines").arg(who)
+                    : QStringLiteral("%1 is waiting for input · Enter sends your line to it").arg(who);
                 state = QStringLiteral("needs-you");
             } else if (!m_opaqueProgram.isEmpty()) {
                 text = QStringLiteral("%1 is running · prompts queue until it exits · %2 to type into it")
@@ -16198,8 +16213,11 @@ private:
         if (m_waiting) return;   // the poll re-checks every tick; the toast is shown once
         m_waiting = true;
         refreshProgramHint();
-        toast(QStringLiteral("%1 is waiting for input · Enter here sends your answer to it")
-                  .arg(foregroundProgramName().isEmpty() ? QStringLiteral("The program") : foregroundProgramName()));
+        const QString who = foregroundProgramName().isEmpty() ? QStringLiteral("The program") : foregroundProgramName();
+        if (m_modeValue == QStringLiteral("program")) return;   // already typing into it
+        toast(relay::input::lineEditorWaiting(inputState())
+                  ? QStringLiteral("%1 is waiting for input · Type into it from here to send it your lines").arg(who)
+                  : QStringLiteral("%1 is waiting for input · Enter here sends your answer to it").arg(who));
     }
 
     void endWaiting(bool) {

@@ -514,6 +514,7 @@ QToolButton#stripChip:hover { color: @text; border-color: @accent; }
 /* The mode chip takes the destination's colour, like the caret. */
 QToolButton#stripChip[dest="shell"] { color: @shell; border-color: @shell; }
 QToolButton#stripChip[dest="agent"] { color: @agent; border-color: @agent; }
+QToolButton#stripChip[dest="program"] { color: @link; border-color: @link; }   /* the box's program ink is SyntaxPath, = Link (#S976) */
 /* Wrong-mode hints: a blinking fill while the chip suggests the other input mode (Pane::flashModeChip). */
 QToolButton#stripChip[flash="agent"] { color: @agent; border-color: @agent; background: @agentSoft; }
 QToolButton#stripChip[flash="shell"] { color: @shell; border-color: @shell; background: @shellSoft; }

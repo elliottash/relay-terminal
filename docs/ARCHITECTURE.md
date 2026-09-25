@@ -968,7 +968,7 @@ Pasting never submits.
 
 | Key in the composer | Destination sent to the router |
 |---|---|
-| Enter | selected input mode (`auto`, `shell`, `agent`); a program reading a line gets it instead (section 9) |
+| Enter | selected input mode (`auto`, `shell`, `agent`, `program`); a program reading a line gets it instead (section 9) |
 | Ctrl+Enter | `agent`; on an empty prompt box with the agent idle, the ordinary prompt `Continue` (card #SXF1) |
 | Ctrl+Shift+Enter | `shell` (terminal mode) |
 | Ctrl+Alt+Enter | Run the composer prompt in background; the pane hides once the agent starts |
@@ -1063,7 +1063,9 @@ GUI dispatch (`Pane::dispatch`):
 |---|---|
 | `shell`, a program owns the terminal, not terminal mode | send to the agent with a note |
 | `shell`, terminal mode, invalid, `agent_signal` | wrong-mode hint (below): nothing runs, the text stays, Ctrl+I then Enter resubmits |
-| `shell`, terminal mode, invalid | start the fix loop (section 7) without running |
+| `shell`, terminal mode, invalid | nothing runs and no agent turn starts: a `✗ <reason> · did you mean <command>?` line (`relay::input::invalidTerminalLine`, the closest known command by `relay::slash::closest` or one swapped pair, #S976), the text stays in the box |
+| `program` | write the line into the foreground program (`Pane::sendLineToProgram`, below) |
+| `incomplete` | keep the draft and say "Incomplete input · keep typing" |
 | `shell`, terminal mode, valid | run in the terminal and watch the exit status |
 | `shell`, auto, invalid | send to the agent with the reason |
 | `shell`, auto, valid | run in the terminal |
@@ -1433,7 +1435,26 @@ mode, the line is written to that program's stdin:
   question such as `apt`'s `[Y/n]`: the line is sent with a short "Sent to apt" status.
 
 Anything else keeps the existing behaviour: run in the shell now, or queue until the terminal is
-free. `sudo`, `doas`, `pkexec`, `su` and processes of another user do not expose
+free.
+
+**Program mode** (card #S976). A line editor at its prompt — `python3`, `psql`, `sqlite3`, `node`
+— reads raw keys, so the rules above never see it asking (`relay::input::lineEditorWaiting`: a
+program running, not alt-screen, `TerminalMode::Raw`, blocked in `read()`). The fourth input mode,
+`program`, is for it: the busy row beside Take control offers **Type into it from here**, the
+waiting hint names it, the mode chip's menu and the palette's Input mode submenu list it
+(`input.modeProgram`, unbound), and Ctrl+I's cycle includes it after `agent` while a program is
+waiting. The chip then reads `PROGRAM · <name>` in link ink and the box's text wears the same ink.
+Enter pastes the line into the program (`VtCore::paste`, bracketed only when the program turned
+bracketed paste on) and sends `\r`; no Ctrl+U first, and the line is never kept in history. A
+multi-line draft goes only to a REPL (python, ipython, node, psql, sqlite3, stata); anything else
+keeps it and says it takes one line at a time. `!` and `*` are the program's own characters here,
+not the one-line prefixes, and Tab completes from `relay::completeProgram`
+(`src/ProgramCompletion.h`: python/ipython keywords, builtins and `%` magics, psql backslash
+commands, sqlite3 dot commands, node's REPL commands) instead of paths. When the program exits
+the pane drops back to the mode it was in and toasts it; `program` is never saved as a pane's
+`input_mode` (a restored pane comes back in `auto`). The router request carries
+`foreground_program` (the argv from `/proc`), and a worker verdict of `program` or `incomplete`
+is acted on as the table above says (docs/AGENT-SESSIONS-PROTOCOL.md, protocol 36). `sudo`, `doas`, `pkexec`, `su` and processes of another user do not expose
 `/proc/<pid>/syscall`, so Relay cannot see them waiting; only their password prompts are detected,
 and everything else queues (the composer row says so).
 

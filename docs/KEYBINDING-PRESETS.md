@@ -95,6 +95,7 @@ Sources:
 | agent.stop | — | Warp: Ctrl+C while the agent responds (W4). Left unbound (same reason as interrupt) |
 | input.modeAuto | — | none (auto-detection is a setting, W4) |
 | input.modeAgent | — | Superseded 2026-09-17: Relay added `input.toggle`, which now takes Ctrl+I |
+| input.modeProgram | — | Relay-only (#S976): types into a line editor at its prompt. Reached from the mode chip, "Type into it from here" and Ctrl+I's cycle while a program waits; no default key |
 | input.toggle | Ctrl+I, Ctrl+Shift+I | W4: Ctrl+I toggles shell ↔ agent (acts from the prompt box only). Ctrl+Shift+I is the Relay default's twin |
 | input.modeTerminal | — | Was Ctrl+Shift+I (an adaptation: in Warp that key toggles auto-approve) until #QWAS: with Ctrl+I on input.toggle it broke the pairing rule. Esc (Warp's "back to terminal") is taken by Relay |
 | keybindings.edit | Ctrl+, | **adapt.** W1's Linux column says `Ctrl+⌘+K`, which is a macOS key; the keybindings page has a macOS-only binding. Ctrl+, opens Warp Settings, where the shortcuts live |
@@ -141,6 +142,7 @@ the registrations that "Preferences: Open Default Keyboard Shortcuts (JSON)" is 
 | input.modeAuto | — | none (Ctrl+. opens the chat mode picker, V10, but there is no auto mode) |
 | input.modeTerminal | — | none |
 | input.modeAgent | Ctrl+Shift+Alt+I | V8: open chat in Agent mode. Linux override (other platforms: Ctrl+Shift+I) |
+| input.modeProgram | — | Relay-only (#S976): types into a line editor at its prompt. Reached from the mode chip, "Type into it from here" and Ctrl+I's cycle while a program waits; no default key |
 | keybindings.edit | Ctrl+, | **adapt.** The chord `Ctrl+K Ctrl+S` (V1, V11) can't be used. Ctrl+, is VS Code's Settings (V11), which users know as the way into keybindings |
 | keybindings.reload | — | none (Reload Window's Ctrl+R applies only in development, V6) |
 
