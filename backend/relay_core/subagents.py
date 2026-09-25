@@ -375,6 +375,9 @@ class SubagentFactory:
         pane_checklist = getattr(getattr(self.main_agent, "executor", None), "approvals", None)
         if pane_checklist is not None:
             agent.executor.approvals = pane_checklist
+        # The files open in the pane's window (card #F8R7): a subagent's edit to one lands in the
+        # editor as the pane's own would, rather than behind it on disk.
+        agent.executor.buffers = getattr(getattr(self.main_agent, "executor", None), "buffers", None)
         # Its prompt is its own, not the pane's (#GMCF decision 3): `SUBAGENT_SYSTEM`, the
         # workspace line, the skills by name, then the section naming this subagent. Replacing the
         # bound method rather than the message is what makes it survive — `refresh_system_prompt`
@@ -408,7 +411,7 @@ class Subagent:
     model: str
     effort: str | None
     agent: object = None
-    status: str = "waiting"            # waiting | running | done | limit | blocked | failed | stopped | paused
+    status: str = "waiting"            # waiting | running | done | limit | blocked | failed | stopped | paused | interrupted
     outcome: str | None = None         # last terminal event of the current run
     stop_reason: str | None = None     # the done event's stop_reason ("limit"), when it carried one
     warnings: list = field(default_factory=list)   # model warnings from the factory, for the reply
@@ -881,6 +884,97 @@ class SubagentManager:
                     data["live"] = sub.live
                     return data
         return None
+
+    def restore_threads(self, main) -> int:
+        """Rebuild the durable threads of ``main``'s session into the roster, idle (card #12JX).
+
+        A close stops the threads it catches running and saves them ``stopped``; a kill leaves
+        them at whatever status their run began with. Restoring puts every thread that had not
+        finished back in the roster on the agent id its parent knows, with its conversation, so
+        ``agent_message`` continues it from where the transcript stops. A thread saved at a live
+        status — ``running``/``waiting``/``paused``, the worker never wrote a stop — is re-saved
+        ``interrupted``: nothing restored from disk shows ``running`` again. Returns how many
+        threads were restored; it never raises, because it runs inside a resume.
+        """
+        store = getattr(main, "store", None)
+        owner = getattr(main, "session_id", None)
+        if store is None or not isinstance(owner, str):
+            return 0
+        try:
+            rows = store.threads(owner)
+        except (OSError, ValueError, TypeError):
+            return 0
+        restored = 0
+        for row in rows:
+            # done/failed/limit/blocked delivered their report into the conversation already.
+            if row.get("status") in ("done", "failed", "limit", "blocked"):
+                continue
+            try:
+                data = store.load_thread(str(row.get("id")), owner_id=owner)
+                restored += 1 if self._restore_thread(store, owner, data) else 0
+            except (OSError, ValueError, TypeError, KeyError):
+                continue
+        return restored
+
+    def _restore_thread(self, store, owner: str, data: dict) -> bool:
+        """Rebuild one thread file into the roster. False when it cannot or need not be restored."""
+        agent_id = data.get("agent_id")
+        if not isinstance(agent_id, str) or not agent_id[1:].isdigit():
+            return False
+        try:
+            definition = self.catalog.get(str(data.get("type") or "general"))
+        except (ValueError, AttributeError, TypeError):
+            return False          # a type this worker no longer knows cannot be rebuilt
+        effort = data.get("effort")
+        effort = effort if effort in EFFORTS else definition.effort
+        models = [m for m in data.get("models") or [] if isinstance(m, str)][:50]
+        named = data.get("model") if isinstance(data.get("model"), str) else None
+        with self._lock:
+            if self._closed or self.catalog is None or self.factory is None or agent_id in self._agents:
+                return False
+            self._next = max(self._next, int(agent_id[1:]) + 1)
+            sub = Subagent(agent_id, definition.name, str(data.get("description") or agent_id)[:200],
+                           True, "", effort, created=self.clock(), generation=self._generation)
+            agent, model_label, _warnings = self.factory(
+                definition, named, effort, lambda event, s=sub: self._on_event(s, event), agent_id)
+            agent.inbox = _SubInbox(self, sub)
+            # The file holds messages[1:] of the subagent that saved it; the rebuilt agent already
+            # carries the same system prompt, so the conversation replays behind it unchanged.
+            agent.messages = agent.messages[:1] + [m for m in data.get("messages") or [] if isinstance(m, dict)]
+            agent.models_used = list(models)
+            agent.usage_totals = session_files.load_usage(data.get("usage"))
+            sub.agent, sub.model, sub.warnings = agent, model_label, []
+            orphan = data.get("status") in ("running", "waiting", "paused")
+            sub.status = "interrupted" if orphan else "stopped"
+            sub.result = str(data.get("result_preview") or "")
+            sub.task = str(data.get("task") or "")[:8000]
+            sub.thread_id = str(data.get("id") or "")
+            sub.owner_session = owner
+            sub.store = store
+            sub.parent_thread = data.get("parent_thread") if isinstance(data.get("parent_thread"), str) else None
+            turn = data.get("spawn_turn")
+            sub.spawn_turn = turn if type(turn) is int else None
+            sub.spawn_call = data.get("spawn_call") if isinstance(data.get("spawn_call"), str) else None
+            sub.workspace = str(data.get("workspace") or "")
+            sub.signal = str(data.get("signal") or "")[:200]
+            sub.started_at = data.get("created") if isinstance(data.get("created"), (int, float)) else 0.0
+            runs = data.get("runs")
+            sub.runs = runs if type(runs) is int else 0
+            sub.run_start_index = len(agent.messages)
+            sub.usage_tokens = sum(v for v in agent.usage_totals.values() if isinstance(v, int))
+            sub.saw_usage = sub.usage_tokens > 0
+            sub.last_activity = "restored after a restart"
+            sub.finished = self.clock()
+            sub.done.set()
+            self._agents[agent_id] = sub
+            self._emit({"event": "subagent_started", "id": agent_id, "type": sub.type,
+                        "description": sub.description, "background": True, "model": model_label,
+                        "effort": effort, "thread_id": sub.thread_id, "status": sub.status,
+                        "restored": True})
+            if orphan:
+                self._save_thread(sub)     # the file still says the run is going; it is not
+            self._report_usage(sub)
+            return True
 
     def _start_thread(self, sub: Subagent, text: str) -> None:
         threading.Thread(target=self._run, args=(sub, text), name=f"relay-subagent-{sub.id}", daemon=True).start()

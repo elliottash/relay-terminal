@@ -133,6 +133,7 @@ QString SubagentModel::statusIcon(const QString &status) {
     if (status == QStringLiteral("limit")) return QStringLiteral("◔");   // ran out of turns, resumable (#VTJR)
     if (status == QStringLiteral("stopped")) return QStringLiteral("■");
     if (status == QStringLiteral("paused")) return QStringLiteral("‖");   // held, resumable (#ZQNG)
+    if (status == QStringLiteral("interrupted")) return QStringLiteral("⊘");  // killed mid-run, restored idle (#12JX)
     return QStringLiteral("○");   // waiting
 }
 

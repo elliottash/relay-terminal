@@ -529,6 +529,16 @@ class SessionCommands:
         self.on_conversation_replaced()
         # Protocol v1 names the session "id"; "session_id" is also accepted.
         event = agent.resume(request.get("session_id", request.get("id")))
+        # Card #12JX: subagent threads that had not finished when Relay closed or crashed come
+        # back with the conversation — idle, with their history, on the id the parent knew. The
+        # restore must never break the resume it belongs to.
+        if self.subagents is not None:
+            try:
+                restored = self.subagents.restore_threads(agent)
+            except (OSError, ValueError, TypeError, KeyError):
+                restored = 0
+            if restored:
+                event["threads_restored"] = restored
         self.emit(event)
         # Protocol 29.3: the session file says which guest ran it and under which of the guest's own
         # sessions; a pane already on that guest points its harness back at the same one.

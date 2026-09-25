@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -340,6 +341,103 @@ class LiveThreadTests(Home):
         commands.handle("session_info", {"id": "i4"})
         self.assertTrue(self.rec.of("session_info")[-1]["file_exists"])
         self.assertEqual(info["history"][-1]["role"], "assistant")
+
+
+class RestoreThreadsTests(LiveThreadTests):
+    """Card #12JX: threads interrupted by a close or a crash come back with the conversation —
+    idle, with their history, on the id the parent knew — and nothing restored shows `running`."""
+
+    def manager_over(self, hub, rec):
+        """A restarted worker's manager: fresh roster, same workspace and store."""
+        manager = SubagentManager(rec)
+        factory = SubagentFactory(CONFIG, str(self.workspace), provider_factory=lambda config: SubProvider(hub))
+        manager.configure(load_catalog(self.workspace, []), factory)
+        self.addCleanup(manager.shutdown)
+        return manager
+
+    def agent_over(self, rec, emit=None):
+        agent = Agent(CONFIG, str(self.workspace), emit or rec, provider=MainProvider([]), session_dir=str(self.dir))
+        return agent
+
+    def test_a_stopped_thread_comes_back_idle_and_continues_after_a_close(self):
+        agent = self.agent_over(self.rec)
+        self.manager.attach(agent)
+        self.manager.spawn({"description": "rebuild the index", "prompt": "gate:rebuild rebuild the index",
+                            "background": True}, call_id="call-1")
+        self.rec.wait(lambda e: e.get("event") == "subagent_started")
+        thread_id = self.rec.of("subagent_started")[0]["thread_id"]
+        deadline = time.time() + 5          # the run is inside the provider, held at its gate
+        while self.hub.active < 1 and time.time() < deadline:
+            time.sleep(0.01)
+        self.manager.shutdown()             # the clean close: every running thread stops and saves
+        self.rec.wait(lambda e: e.get("event") == "subagent_finished")
+        self.assertEqual(self.store.load_thread(thread_id)["status"], "stopped")
+
+        # A restarted worker resumes the conversation and its threads come back with it, idle.
+        rec2, hub2 = Recorder(), Hub()
+        manager2 = self.manager_over(hub2, rec2)
+        agent2 = self.agent_over(rec2)
+        agent2.session_id = agent.session_id
+        manager2.attach(agent2)
+        self.assertEqual(manager2.restore_threads(agent2), 1)
+        self.assertEqual(rec2.of("subagent_started")[-1].get("restored"), True)
+        row = manager2.list()[0]
+        self.assertEqual((row["id"], row["status"], row["thread_id"]), ("a1", "stopped", thread_id))
+        self.assertEqual(row["description"], "rebuild the index")
+
+        # The parent continues it exactly as it would a stopped live subagent, history intact.
+        with hub2.lock:
+            hub2.gates["rebuild"] = True
+            hub2.lock.notify_all()
+        self.assertEqual(manager2.send_message("a1", "go on", origin="main")["delivered"], "resumed")
+        rec2.wait(lambda e: e.get("event") == "subagent_finished")
+        saved = self.store.load_thread(thread_id)
+        self.assertEqual(saved["status"], "done")
+        self.assertEqual(saved["runs"], 2)
+        self.assertIn("go on", saved["messages"][-2]["content"])
+        self.assertIn("REPORT[gate:rebuild]", saved["messages"][-1]["content"])
+        self.assertIn("go on", saved["messages"][-1]["content"])   # `last=` keeps the message it was sent
+
+    def test_a_thread_the_kill_left_running_restores_interrupted(self):
+        self.store.save_thread(thread(status="running", owner=OWNER))   # no stop was ever written
+        rec2, hub2 = Recorder(), Hub()
+        manager2 = self.manager_over(hub2, rec2)
+        agent2 = self.agent_over(rec2)
+        agent2.session_id = OWNER
+        manager2.attach(agent2)
+        self.assertEqual(manager2.restore_threads(agent2), 1)
+        self.assertEqual(manager2.list()[0]["status"], "interrupted")
+        self.assertEqual(self.store.load_thread(THREAD)["status"], "interrupted")   # never `running` again
+        # Not going: agent_wait returns at once instead of timing out on a run that is not there.
+        outcome = manager2.wait("a1", 1, threading.Event())
+        self.assertFalse(outcome["timed_out"])
+        self.assertEqual(outcome["agents"][0]["status"], "interrupted")
+
+    def test_finished_threads_stay_records(self):
+        self.store.save_thread(thread(status="done", owner=OWNER))
+        rec2, hub2 = Recorder(), Hub()
+        manager2 = self.manager_over(hub2, rec2)
+        agent2 = self.agent_over(rec2)
+        agent2.session_id = OWNER
+        manager2.attach(agent2)
+        self.assertEqual(manager2.restore_threads(agent2), 0)
+        self.assertEqual(manager2.list(), [])
+
+    def test_resume_brings_the_threads_back_with_the_conversation(self):
+        agent = Agent(CONFIG, str(self.workspace), lambda e: None, provider=MainProvider([final("saved")]),
+                      session_dir=str(self.dir))
+        agent.ask("hello")                  # a turn writes the session file
+        self.store.save_thread(thread(status="stopped", owner=agent.session_id))
+        turns = TurnSupervisor(self.rec)
+        self.addCleanup(turns.shutdown)
+        agent2 = Agent(CONFIG, str(self.workspace), turns.agent_emit, provider=MainProvider([]),
+                       session_dir=str(self.dir))
+        turns.set_agent(agent2)
+        self.manager.attach(agent2)
+        commands = SessionCommands(turns, self.rec, subagents=self.manager)
+        commands.handle("resume", {"session_id": agent.session_id})
+        self.assertEqual(self.rec.of("state_loaded")[-1].get("threads_restored"), 1)
+        self.assertEqual([r["id"] for r in self.manager.list()], ["a1"])
 
 
 class SessionInfoTests(Home):
