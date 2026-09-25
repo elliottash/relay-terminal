@@ -4,11 +4,13 @@
 #include <QRegularExpression>
 #include "Notifications.h"
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QHash>
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QSet>
+#include <QTimer>
 
 namespace relay {
 namespace appcommands {
@@ -188,29 +190,30 @@ const QSet<QString> &refusedByTheOwner() {
     return keys;
 }
 
-// Allowed by the owner on 2026-09-20 and still off, for a reason that is not his: the handler
-// enters a **nested event loop** and does not come back until the person answers a dialog. That is
-// #AG7R group 4's finding and it is mechanical — `AppCommands::execute()` calls `item.run()` inline
-// and the window returns its answer synchronously, so `run()` blocking means the
-// `app_command_result` is never sent, §30.3's 20-second deadline expires, the agent is told
-// `no_reply`, and the window sits frozen behind a dialog nobody asked for. Marking these would
-// hand the person a hang instead of the feature.
+// Allowed by the owner on 2026-09-20 and still off, for a reason that is not his. Until #FRVM this
+// was `waitingOnTheModalPass()` and also held `windows.fresh`: both handlers enter a nested event
+// loop behind a dialog, and `execute()` ran `item.run()` inline, so the answer never went back
+// before §30.3's deadline (#AG7R group 4). Unaudited actions now run on the next turn of the event
+// loop, after the answer (see `run_action` in execute()), so a dialog no longer hangs anything and
+// `windows.fresh` is on — it asks the person, which is the point of it.
 //
-// They go on as soon as group 4's non-blocking pass lands (`open()` with a finished-callback rather
-// than `exec()`), and not before. Tracked on #AG7R; this set is the list that pass has to clear.
-const QSet<QString> &waitingOnTheModalPass() {
+// `pane.close` stays off on the other half of the old reason: it closes the *focused* leaf rather
+// than a named pane, so an agent asking to close its own pane would close whichever one the person
+// is sitting in. It goes on when it can be aimed (`paneScopedActions()`).
+const QSet<QString> &notYetAimable() {
     static const QSet<QString> keys = {
-        // startFreshWindowSet() asks "Start a fresh window set?" with QMessageBox::question and
-        // waits for the answer (src/RelayWindow.h).
-        QStringLiteral("windows.fresh"),
-        // closePane() asks before closing a Preview pane with unsaved edits (#SEJ2) — only in that
-        // one case, but the executor cannot tell in advance which pane is dirty, and "usually
-        // returns" is not a property a deadline can be built on. It also still closes the *focused*
-        // leaf rather than a named pane, which `pane.close` needs before it means anything an agent
-        // can aim.
         QStringLiteral("pane.close"),
     };
     return keys;
+}
+
+// Options buttons refused by name, by row id (#FRVM: a button is safe unless named here).
+// `remote.pair` admits a device to the phone link; #W5N2's floor is that a person does that.
+const QSet<QString> &refusedRowButtons() {
+    static const QSet<QString> ids = {
+        QStringLiteral("remote.pair"),
+    };
+    return ids;
 }
 
 // The actions that act on one pane. `run_action`'s `pane` selects which (§30.3); everything not
@@ -253,22 +256,34 @@ bool actionIsRead(const QString &key) {
     return readActions().contains(key) || isOneNamedClosedPane(key);
 }
 
-bool actionIsAgentSafe(const QString &key) {
-    // Owner decision 2 (2026-09-20). Everything not named in the two sets above is off, including
-    // every action added after they were written: opt-in has to mean that adding an action does not
-    // widen what an agent may do.
-    //
-    // `palette.agent` used to be here and is gone: src/Keymap.h:176 migrates it to `palette.open`
-    // and it exists nowhere else in the tree, so the table was naming a key that could never
-    // arrive (#AG7R group 1).
-    //
-    // The two refusals are tested *first* and not merely left out of the sets. Left out, a key is
-    // off because nobody put it in; named, it is off because somebody decided, and a later reader
-    // adding it to the set above gets a contradiction they have to resolve rather than a silent
-    // widening. That is the whole point of an opt-in table, and both lists cost one lookup.
-    if (refusedByTheOwner().contains(key) || waitingOnTheModalPass().contains(key)) return false;
+bool actionIsAudited(const QString &key) {
     return actionIsRead(key) || writingActions().contains(key)
         || isOnePickedModel(key) || isOnePickedEffort(key);
+}
+
+bool actionIsAgentSafe(const QString &key) {
+    // Owner, 2026-09-24 (#FRVM): "by default agents, should be able to control relay -- options,
+    // actions, etc". This was decision 2's opt-in table — everything not named was off, including
+    // every action added later — and it is now the reverse: everything is on except what somebody
+    // refused by name. The refusals stay named, with their reasons beside them, so that a later
+    // reader removing one has to argue with the reason rather than with an absence.
+    //
+    // `palette.agent` used to be here and is gone: src/Keymap.h:176 migrates it to `palette.open`
+    // (#AG7R group 1).
+    return !refusedByTheOwner().contains(key) && !notYetAimable().contains(key);
+}
+
+bool rowButtonIsAgentSafe(const SettingRow &row, int button) {
+    Q_UNUSED(button);
+    return !refusedRowButtons().contains(row.id);
+}
+
+QStringList refusedActionKeys() {
+    QStringList keys;
+    for (const QString &key : refusedByTheOwner()) keys << key;
+    for (const QString &key : notYetAimable()) keys << key;
+    keys.sort();
+    return keys;
 }
 
 QString lossNote(const QString &key) {
@@ -511,7 +526,7 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                     {QStringLiteral("label"), row.buttonText.isEmpty() ? row.label
                                                 : row.label + QStringLiteral(" · ") + row.buttonText},
                     {QStringLiteral("detail"), row.detail},
-                    {QStringLiteral("agent_safe"), row.agentSafeButtons.contains(0)}});
+                    {QStringLiteral("agent_safe"), rowButtonIsAgentSafe(row, 0)}});
             } else if (row.kind == SettingRow::Buttons && row.onButton) {
                 for (int i = 0; i < row.buttonTexts.size(); ++i)
                     actionRows.append(QJsonObject{
@@ -519,7 +534,7 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                         {QStringLiteral("section"), section.title},
                         {QStringLiteral("label"), row.label + QStringLiteral(" · ") + row.buttonTexts.at(i)},
                         {QStringLiteral("detail"), row.detail},
-                        {QStringLiteral("agent_safe"), row.agentSafeButtons.contains(i)}});
+                        {QStringLiteral("agent_safe"), rowButtonIsAgentSafe(row, i)}});
             }
         }
     }
@@ -563,6 +578,20 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                                           {QStringLiteral("detail"), QString()},
                                           {QStringLiteral("agent_safe"), true}});
         }
+        // …and the refused ones, marked refused (#FRVM). Every other registry key is safe now, and
+        // the worker lists those itself from the keybinding registry it already holds; it can only
+        // tell a refused key from the rest if the catalog names it.
+        for (const QString &key : refusedActionKeys()) {
+            if (listed.contains(key)) continue;
+            const QString label = registryLabel(key);
+            if (label.isEmpty()) continue;
+            listed.insert(key);
+            actionRows.append(QJsonObject{{QStringLiteral("key"), key},
+                                          {QStringLiteral("section"), QStringLiteral("Shortcuts")},
+                                          {QStringLiteral("label"), label},
+                                          {QStringLiteral("detail"), QString()},
+                                          {QStringLiteral("agent_safe"), false}});
+        }
     }
 
     app.insert(QStringLiteral("options"), options);
@@ -594,7 +623,7 @@ bool AppCommands::findAction(const QString &key, ActionItem *item, bool *agentSa
                 const int buttons = row.kind == SettingRow::Button ? 1 : int(row.buttonTexts.size());
                 for (int i = 0; i < buttons; ++i) {
                     if (appcommands::rowActionKey(section.id, row.id, i) != key) continue;
-                    if (agentSafe) *agentSafe = row.agentSafeButtons.contains(i);
+                    if (agentSafe) *agentSafe = appcommands::rowButtonIsAgentSafe(row, i);
                     if (item) {
                         ActionItem wrapped;
                         wrapped.key = key;
@@ -603,6 +632,7 @@ bool AppCommands::findAction(const QString &key, ActionItem *item, bool *agentSa
                             ? (row.buttonText.isEmpty() ? row.label : row.label + QStringLiteral(" · ") + row.buttonText)
                             : row.label + QStringLiteral(" · ") + row.buttonTexts.value(i);
                         wrapped.detail = row.detail;
+                        // The audited mark, not the policy (see `run_action` in execute()).
                         wrapped.agentSafe = row.agentSafeButtons.contains(i);
                         if (row.kind == SettingRow::Button) wrapped.run = row.run;
                         else if (row.onButton) wrapped.run = [fn = row.onButton, i] { fn(i); };
@@ -631,9 +661,9 @@ bool AppCommands::findAction(const QString &key, ActionItem *item, bool *agentSa
     // every one of them answered `unknown_action` (#AG7R group 1). Running one here is what
     // pressing its shortcut does, through the same `runAction()`.
     //
-    // The lookup is deliberately not filtered by the safe table: a registered key the table does
-    // not name is found and then refused `not_agent_safe` by execute(), which tells the agent the
-    // policy said no rather than that Relay has no such action.
+    // The lookup is deliberately not filtered by the policy: a refused registered key is found and
+    // then refused `not_agent_safe` by execute(), which tells the agent the policy said no rather
+    // than that Relay has no such action.
     if (registryLabel && runRegistryAction) {
         const QString label = registryLabel(key);
         if (!label.isEmpty()) {
@@ -645,7 +675,7 @@ bool AppCommands::findAction(const QString &key, ActionItem *item, bool *agentSa
                 // between sections depending on which answer the agent is reading.
                 wrapped.section = QStringLiteral("Shortcuts");
                 wrapped.label = label;
-                wrapped.agentSafe = appcommands::actionIsAgentSafe(key);
+                wrapped.agentSafe = appcommands::actionIsAudited(key);
                 wrapped.run = [run = runRegistryAction, key] { run(key); };
                 *item = wrapped;
             }
@@ -920,8 +950,15 @@ QJsonObject AppCommands::execute(const QJsonObject &command, const QString &who)
             // It could have been closed between the check above and this line.
             if (!runActionAt(key, aim))
                 return refuse(QStringLiteral("unknown_pane"), unknownPaneMessage(command));
-        } else {
+        } else if (item.agentSafe || (!key.startsWith(QStringLiteral("row:")) && actionIsAudited(key))) {
             item.run();
+        } else {
+            // Nobody audited this one (#FRVM made every action safe by default), so it may open a
+            // modal dialog — and a nested event loop here would hold this answer past §30.3's
+            // deadline and freeze the window. Run it on the next turn instead: the answer goes back
+            // first, and whatever it asks, it asks the person.
+            QTimer::singleShot(0, qApp, [run = item.run] { run(); });
+            result.insert(QStringLiteral("deferred"), true);
         }
 
         AppChange change;

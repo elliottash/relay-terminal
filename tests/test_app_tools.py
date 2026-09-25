@@ -209,7 +209,11 @@ class ReadToolsTest(unittest.TestCase):
             self.assertEqual(rows["settings.open"]["keys"], ["Ctrl+,"])
             self.assertNotIn("keys", rows["keys.reset_all"])     # a palette row, not a shortcut
             self.assertEqual(rows["pane.focusLeft"]["keys"], ["Alt+Left"])
-            self.assertFalse(rows["pane.focusLeft"]["agent_safe"])
+            # #FRVM: a registry key the GUI catalog does not refuse is runnable, and runs.
+            self.assertTrue(rows["pane.focusLeft"]["agent_safe"])
+            ran = tools.run("app_action_run", {"key": "pane.focusLeft"})
+            self.assertTrue(ran.get("ok"), ran)
+            self.assertEqual(self.gui.last["key"], "pane.focusLeft")
             self.assertEqual(tools.run("app_action_list", {})["total"], 3)
             # The search reaches the shortcut-only rows by id and by description.
             found = tools.run("app_action_list", {"search": "focus the pane"})["actions"]

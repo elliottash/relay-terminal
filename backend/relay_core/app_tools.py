@@ -21,8 +21,9 @@ What the GUI sends and what this module owns:
   because `set_keybinding`'s schema stopped listing them.
 * the **policy** is in the catalog too, because it is the GUI's to decide: `writes_enabled`
   (Options › Agent, "Agents may change options and run actions" — owner decision 3 of
-  2026-09-20), `settable` per row and `agent_safe` per action (decisions 1 and 2: every value
-  row except a secret, and actions that are undoable in one click).
+  2026-09-20), `settable` per row and `agent_safe` per action (decision 1: every value row
+  except a secret; decision 2 as the owner reversed it on 2026-09-24, #FRVM: every action except
+  the ones the GUI refuses by name).
 * the **change log** is this worker's own record of what it wrote, so `app_changes` can list it
   and `app_undo` can reverse one.  The GUI keeps the authoritative log and performs the undo
   itself (§30.6), so Undo works with no agent in the room; this is the agent's view of its own
@@ -39,7 +40,10 @@ Guardrails, in one place so they can be reviewed:
 * **Values are validated against the catalog before the GUI is asked** (§30.3: the worker
   refuses `not_settable`, `secret`, `writes_disabled`, `not_agent_safe` and `invalid_value`
   itself, as 22.3 refuses a command `bash -n` rejects).  A refused value costs no round trip.
-* **Only `agent_safe` actions run.**  The catalog marks them; the fence is the GUI's.
+* **Every action runs unless the GUI refuses it** (#FRVM, owner 2026-09-24: "by default agents,
+  should be able to control relay").  The catalog marks the refused ones `agent_safe: false`; a
+  registry key it does not list at all is runnable, and the GUI re-checks it — the fence is the
+  GUI's.
 * **A pane-scoped action is aimed, not aimed at whatever has the focus.**  `app_action_run`
   takes an optional `pane` (#AG7R group 2, §30.3): with none, the GUI runs it on the pane whose
   worker asked — it knows which, because the command arrives with that pane's session token — and
@@ -596,8 +600,9 @@ TOOL_SPECS = [
          ["id", "value"]),
     spec("app_action_list",
          "List the actions Relay offers — the entries of its actions palette, and the shortcuts "
-         "it can bind. `agent_safe` says whether you may run one: only the actions the person can "
-         "undo in a click are, and the rest are listed so you can say where the button is. `keys` "
+         "it can bind. `agent_safe` says whether you may run one: every action is, except the few "
+         "the person refused (the microphone, the control handoff, the bulk shortcut wipe, the "
+         "prompt-history wipe, pairing a phone, closing a pane you cannot aim). `keys` "
          "is the shortcut the action is on now, and the key set_keybinding takes.",
          {"search": {"type": "string", "description": "Case-insensitive text matched against the key, label and section."}},
          []),
@@ -1029,29 +1034,43 @@ class AppTools:
         """The live keybinding catalog (`keybindings.KeybindingCatalog`), or None (#GMCF)."""
         return self.keybindings() if self.keybindings is not None else None
 
+    def _runnable_action(self, catalog: AppCatalog, key) -> ActionRow:
+        """The catalog's row for `key`, or — for a registry key the palette has no row for — one
+        built from the keybinding registry.  Such a key is runnable (#FRVM): the GUI lists every
+        refused key in the catalog, so one it does not list is not refused, and the GUI's
+        `findAction()` resolves it through the same registry the keyboard dispatches through."""
+        try:
+            return catalog.action(key)
+        except AppToolError:
+            bindable = self._bindable()
+            found = bindable.actions.get(key.strip()) if bindable is not None and isinstance(key, str) else None
+            if found is None:
+                raise
+            return ActionRow(key=found.id, section="Shortcuts", label=found.description, agent_safe=True)
+
     @staticmethod
     def _shortcut_rows(catalog: AppCatalog, bindable, search) -> list[dict]:
         """The bindable actions the palette has no row for, matched the way the palette rows are.
 
-        No `agent_safe`: there is no palette entry to run, only a shortcut to rebind (#GMCF).
+        Runnable (#FRVM): the GUI names every refused key in the catalog, so a registry key it
+        does not list is one an agent may run — through the registry, as its shortcut would.
         """
         if bindable is None:
             return []
         needle = (search or "").strip().lower()[:MAX_SEARCH] if isinstance(search, str) else ""
         return [{"key": action.id, "section": "Shortcuts", "label": action.description,
-                 "agent_safe": False, "keys": list(action.keys)}
+                 "agent_safe": True, "keys": list(action.keys)}
                 for action in bindable.actions.values()
                 if action.id not in catalog.actions
                 and (not needle or needle in f"{action.id} {action.description}".lower())]
 
     def _action_run(self, args: dict) -> dict:
         catalog = self._need_writes("running an action")
-        action = catalog.action(args.get("key"))
+        action = self._runnable_action(catalog, args.get("key"))
         if not action.agent_safe:
             raise AppToolError(
-                f"\"{action.label or action.key}\" is not one of the actions an agent may run "
-                "(only the ones the person can undo in a click are). Tell them where it is and "
-                "let them run it.", code="not_agent_safe")
+                f"\"{action.label or action.key}\" is one of the few actions the person has kept "
+                "for themselves. Tell them where it is and let them run it.", code="not_agent_safe")
         fields = {"key": action.key}
         # The pane the action is aimed at (§30.3, #AG7R group 2).  Sent only when the model named
         # one: with no `pane` the GUI aims a pane-scoped action at the asking agent's own pane —

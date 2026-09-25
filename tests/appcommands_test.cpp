@@ -119,7 +119,8 @@ QList<SettingsSection> catalog(State *state) {
         models.rows << row;
     }
     {
-        // Test is reversible and Remove is not, on one row: decision 2, per button.
+        // Test was audited and Remove was not, on one row: since #FRVM both are safe, and Remove
+        // (which may ask) runs on the next turn rather than inline.
         SettingRow row;
         row.kind = SettingRow::Buttons;
         row.id = QStringLiteral("provider:acme");
@@ -127,6 +128,16 @@ QList<SettingsSection> catalog(State *state) {
         row.buttonTexts = QStringList{QStringLiteral("test"), QStringLiteral("remove")};
         row.agentSafeButtons = QList<int>{0};
         row.onButton = [state](int index) { state->ran << QStringLiteral("button %1").arg(index); };
+        models.rows << row;
+    }
+    {
+        // Refused by name (#FRVM): pairing admits a device, which a person does (#W5N2).
+        SettingRow row;
+        row.kind = SettingRow::Button;
+        row.id = QStringLiteral("remote.pair");
+        row.label = QStringLiteral("Pair a phone");
+        row.buttonText = QStringLiteral("Pair…");
+        row.run = [state] { state->ran << QStringLiteral("pair"); };
         models.rows << row;
     }
     sections << models;
@@ -140,7 +151,7 @@ QList<ActionItem> actions(State *state) {
         item.key = QStringLiteral("app.settings");
         item.section = QStringLiteral("Relay");
         item.label = QStringLiteral("Options");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("app.settings"); };
         items << item;
     }
@@ -150,7 +161,7 @@ QList<ActionItem> actions(State *state) {
         item.key = QStringLiteral("pane.splitRight");
         item.section = QStringLiteral("Panes");
         item.label = QStringLiteral("New pane to the right");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("pane.splitRight"); };
         items << item;
     }
@@ -159,7 +170,7 @@ QList<ActionItem> actions(State *state) {
         item.key = QStringLiteral("pane.close");
         item.section = QStringLiteral("Panes");
         item.label = QStringLiteral("Close pane");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("pane.close"); };
         items << item;
     }
@@ -168,7 +179,7 @@ QList<ActionItem> actions(State *state) {
         item.key = QStringLiteral("windows.fresh");
         item.section = QStringLiteral("Relay");
         item.label = QStringLiteral("Start a fresh window set");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("windows.fresh"); };
         items << item;
     }
@@ -179,7 +190,7 @@ QList<ActionItem> actions(State *state) {
         item.key = QStringLiteral("input.toggle");
         item.section = QStringLiteral("Agent");
         item.label = QStringLiteral("Toggle terminal / agent input");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("input.toggle"); };
         items << item;
     }
@@ -209,7 +220,7 @@ QList<ActionItem> actions(State *state) {
         item.key = QStringLiteral("theme.reload");
         item.section = QStringLiteral("Relay");
         item.label = QStringLiteral("Reload themes");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("theme.reload"); };
         items << item;
     }
@@ -221,7 +232,7 @@ QList<ActionItem> actions(State *state) {
         item.section = QStringLiteral("Agent");
         item.label = QStringLiteral("Compact conversation");
         item.detail = QStringLiteral("Summarize the conversation so far");
-        item.agentSafe = relay::appcommands::actionIsAgentSafe(item.key);
+        item.agentSafe = relay::appcommands::actionIsAudited(item.key);
         item.run = [state] { state->ran << QStringLiteral("agent.compact"); };
         items << item;
     }
@@ -373,7 +384,7 @@ private Q_SLOTS:
         QVERIFY(!QJsonDocument(app.catalog(QStringLiteral("tab-7"))).toJson().contains("sk-do-not-leak"));
     }
 
-    void buttonRowsAreListedAsActionsOneMarkedSafeAndOneNot() {
+    void buttonRowsAreListedAsActionsSafeUnlessRefusedByName() {
         const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
         const QJsonObject buttons = rowOf(block, QStringLiteral("options"), QStringLiteral("provider:acme"));
         QCOMPARE(buttons.value(QStringLiteral("kind")).toString(), QStringLiteral("buttons"));
@@ -382,13 +393,22 @@ private Q_SLOTS:
         const QString test = relay::appcommands::rowActionKey(QStringLiteral("models"), QStringLiteral("provider:acme"), 0);
         const QString remove = relay::appcommands::rowActionKey(QStringLiteral("models"), QStringLiteral("provider:acme"), 1);
         QVERIFY(rowOf(block, QStringLiteral("actions"), test).value(QStringLiteral("agent_safe")).toBool());
-        QVERIFY(!rowOf(block, QStringLiteral("actions"), remove).value(QStringLiteral("agent_safe")).toBool());
+        QVERIFY(rowOf(block, QStringLiteral("actions"), remove).value(QStringLiteral("agent_safe")).toBool());
+        const QString pair = relay::appcommands::rowActionKey(QStringLiteral("models"), QStringLiteral("remote.pair"));
+        QVERIFY(!rowOf(block, QStringLiteral("actions"), pair).isEmpty());
+        QVERIFY(!rowOf(block, QStringLiteral("actions"), pair).value(QStringLiteral("agent_safe")).toBool());
     }
 
-    void agentSafeIsOptInPerAction() {
+    // Owner, 2026-09-24 (#FRVM): "by default agents, should be able to control relay". An action
+    // nobody named is safe — including one added after the table was written — and only the
+    // refused ones are not.
+    void agentSafeIsOnUnlessRefused() {
         const QJsonObject block = app.catalog(QStringLiteral("tab-7"));
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("app.settings")).value(QStringLiteral("agent_safe")).toBool());
-        QVERIFY(!rowOf(block, QStringLiteral("actions"), QStringLiteral("windows.fresh")).value(QStringLiteral("agent_safe")).toBool());
+        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("windows.fresh")).value(QStringLiteral("agent_safe")).toBool());
+        QVERIFY(!rowOf(block, QStringLiteral("actions"), QStringLiteral("pane.close")).value(QStringLiteral("agent_safe")).toBool());
+        QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("some.actionAddedTomorrow")));
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("some.actionAddedTomorrow")));
     }
 
     void theToggleRidesOnTheCatalog() {
@@ -519,7 +539,7 @@ private Q_SLOTS:
 
         const QJsonObject unsafe = run({{QStringLiteral("id"), QStringLiteral("r2")},
                                         {QStringLiteral("command"), QStringLiteral("run_action")},
-                                        {QStringLiteral("key"), QStringLiteral("windows.fresh")}});
+                                        {QStringLiteral("key"), QStringLiteral("pane.close")}});
         QCOMPARE(unsafe.value(QStringLiteral("error")).toString(), QStringLiteral("not_agent_safe"));
 
         const QJsonObject missing = run({{QStringLiteral("id"), QStringLiteral("r3")},
@@ -562,12 +582,26 @@ private Q_SLOTS:
             QVERIFY2(!relay::appcommands::actionIsAgentSafe(key), qPrintable(key));
     }
 
-    // Allowed by the owner and still off, for a reason that is not his: the handler enters a nested
-    // event loop and `execute()` runs it inline, so the result would never be sent and §30.3's
-    // deadline would expire with the window frozen behind a dialog (#AG7R group 4). These go on
-    // when that pass lands, and this test is what fails to remind whoever lands it.
-    void theTwoActionsThatWouldHangAreStillOff() {
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("windows.fresh")));
+    // `windows.fresh` enters a nested event loop behind a dialog (#AG7R group 4). Run inline, the
+    // answer would never be sent before §30.3's deadline; since #FRVM an unaudited action runs on
+    // the next turn instead, so the answer comes back first and the dialog is the person's. The
+    // action has not run when the answer arrives, and has once the event loop turns.
+    void anUnauditedActionRunsAfterTheAnswer() {
+        const QJsonObject result = run({{QStringLiteral("id"), QStringLiteral("r1")},
+                                        {QStringLiteral("command"), QStringLiteral("run_action")},
+                                        {QStringLiteral("key"), QStringLiteral("windows.fresh")}});
+        QVERIFY2(result.value(QStringLiteral("ok")).toBool(), qPrintable(result.value(QStringLiteral("error")).toString()));
+        QVERIFY(result.value(QStringLiteral("deferred")).toBool());
+        QVERIFY(state.ran.isEmpty());
+        QCoreApplication::processEvents();
+        QCOMPARE(state.ran, QStringList{QStringLiteral("windows.fresh")});
+        // An audited one still runs inline, and says nothing about deferring.
+        const QJsonObject inlineRun = run({{QStringLiteral("id"), QStringLiteral("r2")},
+                                           {QStringLiteral("command"), QStringLiteral("run_action")},
+                                           {QStringLiteral("key"), QStringLiteral("app.settings")}});
+        QVERIFY(!inlineRun.contains(QStringLiteral("deferred")));
+        QCOMPARE(state.ran.last(), QStringLiteral("app.settings"));
+        // `pane.close` stays off: it closes the focused pane, not one an agent can aim.
         QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("pane.close")));
     }
 
@@ -658,8 +692,11 @@ private Q_SLOTS:
         QCOMPARE(focus.value(QStringLiteral("label")).toString(), QStringLiteral("Focus pane to the left"));
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("help.shortcuts"))
                     .value(QStringLiteral("agent_safe")).toBool());
-        // Not safe, so not added here: the fallback finds it, the catalog does not advertise it.
-        QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("keybindings.clearOverrides")).isEmpty());
+        // Refused, and listed as refused (#FRVM): the worker sees the whole registry and treats
+        // every key the catalog does not name as runnable, so a refusal has to be said here.
+        const QJsonObject wipe = rowOf(block, QStringLiteral("actions"), QStringLiteral("keybindings.clearOverrides"));
+        QVERIFY(!wipe.isEmpty());
+        QVERIFY(!wipe.value(QStringLiteral("agent_safe")).toBool());
         // …and one the owner *did* allow in group 5 is advertised, from the registry, like the
         // focus keys above it — the same fallback, the other side of the policy.
         QVERIFY(rowOf(block, QStringLiteral("actions"), QStringLiteral("agent.interrupt"))
@@ -672,9 +709,10 @@ private Q_SLOTS:
     }
 
     // `palette.agent` was in the table and nowhere else in the tree: src/Keymap.h migrates the key
-    // to `palette.open`, so the policy was naming a key that could never arrive.
+    // to `palette.open`, so the policy was naming a key that could never arrive. (The audited table
+    // since #FRVM; the policy itself no longer names keys it allows.)
     void theRetiredPaletteAgentKeyIsGone() {
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("palette.agent")));
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("palette.agent")));
         QVERIFY(!relay::appcommands::agentSafeActionKeys().contains(QStringLiteral("palette.agent")));
     }
 
@@ -712,15 +750,16 @@ private Q_SLOTS:
 
     // `model:<id>` and `effort:<level>` carry a suffix nothing can enumerate — a stored preset,
     // and whatever levels the pane's provider offers — so they are matched by prefix, exactly as
-    // `closed:<id>` is. A near miss must not become safe by looking like one.
+    // `closed:<id>` is. A near miss must not become audited by looking like one (since #FRVM every
+    // key is safe unless refused; the audit decides only whether it runs inline).
     void aPickedModelMatchesByPrefixAndANearMissDoesNot() {
         QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("model:local/bonsai")));
         QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("model:anything-at-all")));
         QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("effort:high")));
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("model:")));      // no id at all
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("effort:")));
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("models:local")));  // not the prefix
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("model.pick")));
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("model:")));      // no id at all
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("effort:")));
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("models:local")));  // not the prefix
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("model.pick")));
         // Being named by the policy is not being in the catalog: the id has to be one the pane
         // really has, and `model:anything-at-all` is in no submenu, so it is still unknown.
         QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r1")},
@@ -913,8 +952,8 @@ private Q_SLOTS:
         QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("closed:2")));
         QVERIFY(relay::appcommands::actionIsAgentSafe(QStringLiteral("closed:c-91f3ab")));
         QVERIFY(relay::appcommands::actionIsRead(QStringLiteral("closed:2")));
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("closed:")));       // no id at all
-        QVERIFY(!relay::appcommands::actionIsAgentSafe(QStringLiteral("closed.forget")));  // not the prefix
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("closed:")));       // no id at all
+        QVERIFY(!relay::appcommands::actionIsAudited(QStringLiteral("closed.forget")));  // not the prefix
     }
 
     // ----- group 7: the writes toggle is about writing ------------------------------------------
@@ -1092,18 +1131,26 @@ private Q_SLOTS:
         }
     }
 
-    void aSafeButtonOnARowRunsAndAnUnsafeOneDoesNot() {
+    void aButtonRunsUnlessRefusedAndAnUnauditedOneRunsAfterTheAnswer() {
         const QString test = relay::appcommands::rowActionKey(QStringLiteral("models"), QStringLiteral("provider:acme"), 0);
         const QString remove = relay::appcommands::rowActionKey(QStringLiteral("models"), QStringLiteral("provider:acme"), 1);
         QVERIFY(run({{QStringLiteral("id"), QStringLiteral("r1")},
                      {QStringLiteral("command"), QStringLiteral("run_action")},
                      {QStringLiteral("key"), test}}).value(QStringLiteral("ok")).toBool());
         QCOMPARE(state.ran, QStringList{QStringLiteral("button 0")});
-        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r2")},
+        const QJsonObject removed = run({{QStringLiteral("id"), QStringLiteral("r2")},
+                                         {QStringLiteral("command"), QStringLiteral("run_action")},
+                                         {QStringLiteral("key"), remove}});
+        QVERIFY(removed.value(QStringLiteral("ok")).toBool());
+        QVERIFY(removed.value(QStringLiteral("deferred")).toBool());
+        QCoreApplication::processEvents();
+        QCOMPARE(state.ran, (QStringList{QStringLiteral("button 0"), QStringLiteral("button 1")}));
+        QCOMPARE(run({{QStringLiteral("id"), QStringLiteral("r3")},
                       {QStringLiteral("command"), QStringLiteral("run_action")},
-                      {QStringLiteral("key"), remove}}).value(QStringLiteral("error")).toString(),
+                      {QStringLiteral("key"), relay::appcommands::rowActionKey(QStringLiteral("models"), QStringLiteral("remote.pair"))}})
+                     .value(QStringLiteral("error")).toString(),
                  QStringLiteral("not_agent_safe"));
-        QCOMPARE(state.ran.size(), 1);
+        QCOMPARE(state.ran.size(), 2);
     }
 
     // ----- undo and the row marker (§30.6) ------------------------------------------------------

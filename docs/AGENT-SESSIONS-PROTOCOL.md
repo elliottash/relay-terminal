@@ -7119,8 +7119,20 @@ floor this refusal was protecting and which stands without it); and the rest of 
 (`app.update`, `project.detach`, `hints.reset`, `conversations.rebuild`, `helper.ask`,
 `ssh.splitSameHost`).
 
-`agent_safe` is `false` on everything else — including every action added after the table was
-written, which is what opt-in has to mean: resetting to defaults, removing a key or a server,
+**Reversed 2026-09-24 (card #FRVM).** Owner: "i think by default agents, should be able to control
+relay -- options, actions, etc". `agent_safe` is now `true` on every action, every Options button
+and every registry key, *except* the ones refused by name: `refusedByTheOwner()` below, `pane.close`
+(it closes the focused pane, not one an agent can aim) and the `remote.pair` button (a person admits
+a device, #W5N2). The GUI catalog lists the refused registry keys with `agent_safe: false`; a
+registry key it does not list is runnable, and the worker offers it from the keybinding registry.
+The table this section describes survives as the **audit** (`appcommands::actionIsAudited()`): an
+audited action runs inline, and one nobody audited runs on the next turn of the event loop, after
+the `app_command_result` has gone back (the answer carries `deferred: true`), so a handler that
+opens a modal dialog can no longer hold the answer past the deadline or freeze the window. That is
+what let `windows.fresh` on. The paragraphs below are the record of the opt-in period.
+
+`agent_safe` was `false` on everything else — including every action added after the table was
+written, which is what opt-in had to mean: resetting to defaults, removing a key or a server,
 deleting a session. The table lives in `appcommands::actionIsAgentSafe()`, which is the read set
 (`appcommands::actionIsRead()`) plus the writing one; an `ActionItem` may also carry its own
 `agentSafe`, and either is enough.

@@ -200,8 +200,8 @@ BRIEFS = {
     "actions": (
         "You are the helper agent in Relay's Actions pane — the palette of everything Relay can "
         "do, with its keyboard shortcut beside it. app_action_list is that list; `agent_safe` "
-        "says which ones you may run yourself (the ones the person can undo in a click) and the "
-        "rest are for you to find and describe, with the shortcut, so they can run them. "
+        "says which ones you may run yourself (all but the few the person kept for themselves); "
+        "for those, find and describe them, with the shortcut, so they can run them. "
         "app_action_run runs one, and the person sees that it ran. When someone asks \"how do I "
         "…\", name the action and its shortcut, and app_open the palette at it. set_keybinding "
         "moves a shortcut — an action id from that list and the keys to put it on — and Relay "

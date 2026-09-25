@@ -13,8 +13,9 @@
 //
 // What the owner decided, 2026-09-20, and where it lives here:
 //  1. **Settable** is every value row (Toggle/Choice/Number/Text) except a secret — `catalog()`.
-//  2. **agent_safe** is opt-in per action, the line being "undoable in one click" —
-//     `appcommands::actionIsAgentSafe()` and `SettingRow::agentSafeButtons`.
+//  2. **agent_safe** was opt-in per action, the line being "undoable in one click". Since
+//     2026-09-24 it is on for every action but the ones named as refused (card #FRVM) —
+//     `appcommands::actionIsAgentSafe()` and `appcommands::rowButtonIsAgentSafe()`.
 //  3. One toggle in Options › Agent gates the helper and the pane agent together —
 //     `writesEnabled`, re-checked here however the catalog was marked (§30.3: the catalog the
 //     worker holds is a snapshot, the row is the truth).
@@ -82,17 +83,29 @@ QJsonObject answerFor(const QJsonObject &command,
 bool conversationToOpen(const QJsonObject &command, QJsonObject *item, bool *newPane,
                         QString *error);
 
-// Whether an agent may run this action without being asked (owner decision 2, §30.2). It starts
-// with the reversible ones — opening or revealing anything, testing a key, refreshing or detecting
-// local servers, copying a page, reordering models, undo — and everything else is off until the
-// owner says otherwise: resetting to defaults, removing a key or a server, deleting a session,
-// pairing and sharing, quit and restart.
+// Whether an agent may run this action (§30.2). Owner, 2026-09-24 on card #FRVM: "i think by
+// default agents, should be able to control relay -- options, actions, etc". That reverses decision
+// 2's opt-in table: every action is safe except the ones a person refused by name
+// (`refusedByTheOwner()` in the .cpp — the microphone, the control handoff, the bulk shortcut wipe,
+// the prompt-history wipe) and `pane.close`, which still closes the focused pane rather than one an
+// agent can aim. A new action is therefore runnable by an agent the day it is added; the
+// notification that says what it did (and, for a destructive one, what it cost) is the guard.
 //
-// It is one table rather than a flag typed at each of two hundred `actionItem()` calls, because
-// the answer is a property of the *policy*, not of the call site: a new action is unsafe by
-// default and stays unsafe until it is named here, which is what "opt-in" has to mean if adding an
-// action is not to widen what agents may do by accident.
+// What the old table did still matters, because it was an audit: `actionIsAudited()`. An audited
+// action runs inline. One nobody audited is run on the next turn of the event loop, after the
+// answer has gone back — its handler may open a modal dialog, and a nested event loop inside the
+// executor would hold the answer past §30.3's deadline and freeze the window behind a dialog.
 bool actionIsAgentSafe(const QString &key);
+// The keys decision 2's table named (reads, the writing set, one picked model or effort): known to
+// return without waiting on the person.
+bool actionIsAudited(const QString &key);
+// The same rule for a Button/Buttons row of Options: every button but the refused ones (pairing a
+// phone admits a device, never an agent's to press). `SettingRow::agentSafeButtons` now marks
+// buttons as audited — run inline — rather than as the only ones allowed.
+bool rowButtonIsAgentSafe(const SettingRow &row, int button);
+// Registered keys that are refused, sorted: listed in the catalog as `agent_safe: false`, so the
+// worker, which sees the whole keybinding registry, can tell a refused key from a runnable one.
+QStringList refusedActionKeys();
 
 // The half of that table that only opens, reveals, focuses or restores a view — and so changes
 // nothing at all. Owner, 2026-09-20 on card #AG7R: "7 pass the toggle like app_open". Options ›
@@ -103,7 +116,7 @@ bool actionIsAgentSafe(const QString &key);
 // (`keybindings.reload`, `theme.reload`, `agents.reload`, `pane.equalize`, `agent.screenshotPane`
 // and every `row:` button) stays behind it, so the toggle still means "may change things".
 //
-// Every read action is agent-safe; `actionIsAgentSafe()` is this set plus the writing ones.
+// Every read action is agent-safe and audited.
 bool actionIsRead(const QString &key);
 
 // Whether an action acts on **a pane** rather than on the window or on the app as a whole: the
@@ -116,9 +129,10 @@ bool actionIsRead(const QString &key);
 // it did before an agent could name a pane at all.
 bool actionIsPaneScoped(const QString &key);
 
-// Every key the safe table names outright, sorted. `catalog()` uses it to list the safe keys the
+// Every key the audited table names outright, sorted. `catalog()` uses it to list the safe keys the
 // palette has no row for (#AG7R group 1); the prefix entries (`closed:<id>`) are not in it,
-// because there is no fixed set of them to list.
+// because there is no fixed set of them to list. Registry keys outside it are safe too since
+// #FRVM; the worker lists those from the keybinding registry it already holds.
 QStringList agentSafeActionKeys();
 
 // A value row that is named like a credential — `key`, `token`, `secret`, `password`,
