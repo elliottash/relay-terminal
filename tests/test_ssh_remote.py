@@ -28,10 +28,10 @@ class RemoteRouterTests(unittest.TestCase):
         return classify(text, mode, known_commands=[], path="/nonexistent", cwd="/", remote=REMOTE)
 
     def test_command_shaped_lines_are_typed_on_the_host(self):
-        for text in ["ls -la /srv", "htop", "sudo systemctl restart nginx", "cp a b", "make all",
+        for text in ["ls -la /srv", "htop", "sudo systemctl restart nginx", "make all",
                      "docker ps", "vim /etc/nginx/nginx.conf", "cd /srv && git status", "gti status",
                      "journalctl -u nginx", "tail -f /var/log/syslog", "go build ./...", "top", "exit",
-                     "kubectl get pods in the namespace", "./deploy.sh --dry-run"]:
+                     "./deploy.sh --dry-run"]:
             with self.subTest(text=text):
                 decision = self.route(text)
                 self.assertEqual(decision.route, "shell")
@@ -40,6 +40,16 @@ class RemoteRouterTests(unittest.TestCase):
                 self.assertIn("typed on filly", decision.reason)
                 self.assertEqual(decision.remote_host, "filly")
                 self.assertEqual(decision.to_dict()["remote_host"], "filly")
+
+    def test_sentence_shaped_lines_ask_instead_of_running(self):
+        # #VJX7, owner decision 2026-09-25: remotely the #1ZNS sentence rule outranks typing a
+        # command-shaped line on the host. Nothing on the remote machine can be checked, so
+        # neither line is executed or sent off silently: both ask first, best guess agent.
+        for text in ["cp a b", "kubectl get pods in the namespace"]:
+            with self.subTest(text=text):
+                decision = self.route(text)
+                self.assertEqual(decision.route, "agent")
+                self.assertTrue(decision.needs_assist)
 
     def test_never_not_found_locally(self):
         # htop is not on this (empty) PATH; locally the same line is "command not found".
@@ -52,9 +62,7 @@ class RemoteRouterTests(unittest.TestCase):
     def test_sentences_go_to_the_agent(self):
         for text in ["why is the disk full on this box", "continue", "ok", "yes", "Sounds good",
                      "yeah, do it", "don't restart it", "disk is full on this box", "nginx running?",
-                     "the build is broken", "thanks", "explain the last error", "can you check the logs",
-                     # #1ZNS's sentence after a non-English command name: punctuation still wins (#VJX7)
-                     "claude has usage rests now, so we should track them"]:
+                     "the build is broken", "thanks", "explain the last error", "can you check the logs"]:
             with self.subTest(text=text):
                 self.assertEqual(self.route(text).route, "agent")
 

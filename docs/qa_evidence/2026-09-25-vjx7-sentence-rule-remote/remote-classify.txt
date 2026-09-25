@@ -1,0 +1,6 @@
+'cp a b'                                                   route=agent needs_assist=True
+'kubectl get pods in the namespace'                        route=agent needs_assist=True
+'kubectl get pods'                                         route=shell needs_assist=False
+'claude has usage rests now, so we should track them'      route=agent needs_assist=True
+'make the tests pass'                                      route=agent needs_assist=True
+'git status'                                               route=shell needs_assist=False
