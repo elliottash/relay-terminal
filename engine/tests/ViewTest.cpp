@@ -15,6 +15,8 @@
 #include "core/InlineMedia.h"
 
 #include <QAccessible>
+#include <QDir>
+#include <QFile>
 #include <QFontDatabase>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -1055,6 +1057,205 @@ private slots:
                 t.grab().save(qEnvironmentVariable("RELAY_HOVER_EVIDENCE")
                              + (osc ? "/osc-hover.png" : "/plain-hover.png"));
             }
+        }
+    }
+
+    // #9MYY step 1: the hover measurement. Sweeping the pointer across the
+    // cells of one wrapped logical line must run its link scan at most once per
+    // frame — not once per cell — and must scan again when new output makes a
+    // new frame. A counting setLinkProbe is the counter; its numbers land in
+    // the card's evidence folder. The per-cell behaviour the fix replaces is
+    // only bounded loosely here; the fix commit tightens the ceiling.
+    void hoverSweepProbesOncePerFrame()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/9myy-hover-XXXXXX"));
+        QVERIFY(dir.isValid());
+        for (const char *name : {"alpha.log", "beta.log", "gamma.log", "delta.log", "epsilon.log", "zeta.log"}) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+        }
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        t.view->setLinksColouredAtRest(false);
+        int probes = 0;
+        t.view->setLinkProbe([&probes](const QString &path) {
+            ++probes;
+            return QFileInfo::exists(path) ? links::Entry::File : links::Entry::Missing;
+        });
+        QByteArray line = "see ";
+        for (const char *name : {"alpha.log", "beta.log", "gamma.log", "delta.log", "epsilon.log", "zeta.log"}) {
+            line += name;
+            line += " and ";
+        }
+        line += "end\r\n";
+        t.backend->writeToDisplay(line);
+        QVERIFY(t.waitScreen(QStringLiteral("zeta.log")));
+        t.grab();
+        // Every screen row the wrapped line occupies, swept cell by cell. The
+        // view's frame follows the screen on its own timer, so poll for it.
+        const auto rowContaining = [&t](const QString &token) {
+            for (int wait = 0; wait < 400; ++wait) {
+                const QStringList visible = t.view->visibleRowsText();
+                for (int i = 0; i < visible.size(); ++i)
+                    if (visible[i].contains(token))
+                        return i;
+                QTest::qWait(10);
+            }
+            return -1;
+        };
+        QVector<int> rows;
+        for (const QString &token : {QStringLiteral("alpha.log"), QStringLiteral("gamma.log"),
+                                     QStringLiteral("zeta.log")}) {
+            const int row = rowContaining(token);
+            QVERIFY2(row >= 0, qPrintable(token));
+            if (!rows.contains(row))
+                rows << row;
+        }
+        std::sort(rows.begin(), rows.end());
+        const int cells = 44 * rows.size();
+        const auto sweep = [&]() {
+            for (const int row : rows)
+                for (int col = 2; col < 46; ++col) {
+                    QMouseEvent move(QEvent::MouseMove, QPointF(t.cellPoint(row, col)),
+                                     Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                    QApplication::sendEvent(t.view, &move);
+                }
+        };
+        const int before = probes;
+        sweep();
+        const int firstSweep = probes - before;
+        qInfo("#9MYY %s: sweep over %d cells ran %d probe calls", qPrintable(core), cells, firstSweep);
+        QVERIFY2(firstSweep >= 1, "the sweep never scanned the line");
+        // Loose before the fix — every cell re-scans, so the count is cells
+        // times candidates. The fix commit replaces this with the per-frame
+        // ceiling the card promises.
+        QVERIFY2(firstSweep <= 100 * cells, "the sweep probed unreasonably often");
+        // New output is a new frame: the next sweep has to scan again.
+        t.backend->writeToDisplay("again\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("again")));
+        t.grab();
+        const int second = probes;
+        sweep();
+        qInfo("#9MYY %s: sweep after new output ran %d probe calls", qPrintable(core), probes - second);
+        QVERIFY2(probes > second, "a new frame did not re-scan the line");
+        if (qEnvironmentVariableIsSet("RELAY_VIEW_EVIDENCE")) {
+            QFile out(QStringLiteral("%1/hover-sweep-%2.txt").arg(qEnvironmentVariable("RELAY_VIEW_EVIDENCE"), core));
+            QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            out.write(qPrintable(QStringLiteral("cells=%1 probes=%2 probesAfterNewOutput=%3\n")
+                                     .arg(cells).arg(firstSweep).arg(probes - second)));
+        }
+    }
+
+    // #9MYY step 1: the paint golden. An idle screen carrying everything the
+    // three hot paths touch — a find with several highlights, a selection,
+    // reverse video, a wide character, rest-coloured links, a banded role row
+    // and a fold chevron — grabbed and saved under RELAY_PAINT_GOLDEN when that
+    // names a directory. The card's before and after runs must then cmp
+    // byte-identical.
+    void paintGrabGolden()
+    {
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/9myy-gold-XXXXXX"));
+        QVERIFY(dir.isValid());
+        const QString log = dir.filePath(QStringLiteral("build.log"));
+        { QFile f(log); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("ok\n"); }
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        t.view->setCursorBlink(false);   // the caret must not move between grabs
+        t.view->setFoldPrefix(QStringLiteral("relay://call/"));
+        QByteArray text;
+        text += "\x1b[7mreversed \xe6\xbc\xa2\xe5\xad\x97 wide\x1b[0m\r\n";            // reverse video, wide cells
+        text += "match one, match two, match three, match four\r\n";
+        text += "see ./build.log and ./docs/BUILDING.md in the tree\r\n";             // rest-coloured links
+        text += "\x1b]7772;agent\x1b\\\x1b[1m* banded role row\x1b[0m\r\n";
+        text += "\x1b]8;;relay://call/p/1/a\x1b\\* ran python\x1b]8;;\x1b\\\r\n";     // fold anchor, chevron cell
+        t.backend->writeToDisplay(text);
+        QVERIFY(t.waitScreen(QStringLiteral("ran python")));
+        QTest::qWait(120);
+        t.view->find(QStringLiteral("match"), true);
+        const auto rowContaining = [&t](const QString &token) {
+            for (int wait = 0; wait < 400; ++wait) {
+                const QStringList visible = t.view->visibleRowsText();
+                for (int i = 0; i < visible.size(); ++i)
+                    if (visible[i].contains(token))
+                        return i;
+                QTest::qWait(10);
+            }
+            return -1;
+        };
+        const int selected = rowContaining(QStringLiteral("build.log"));
+        QVERIFY(selected >= 0);
+        QTest::mousePress(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(selected, 2));
+        QMouseEvent drag(QEvent::MouseMove, t.cellPoint(selected, 30), Qt::NoButton,
+                         Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(t.view, &drag);
+        QTest::mouseRelease(t.view, Qt::LeftButton, Qt::NoModifier, t.cellPoint(selected, 30));
+        const int anchor = rowContaining(QStringLiteral("ran python"));
+        QVERIFY(anchor >= 0);
+        QTest::mouseMove(t.view, t.cellPoint(anchor, 4));
+        const QImage grab = t.grab();
+        if (qEnvironmentVariableIsSet("RELAY_PAINT_GOLDEN")) {
+            const QString out = qEnvironmentVariable("RELAY_PAINT_GOLDEN");
+            QVERIFY(QDir().mkpath(out));
+            QVERIFY(grab.save(QStringLiteral("%1/paint-%2.png").arg(out, core)));
+        }
+    }
+
+    // #9MYY step 1: the hover sweep, under RELAY_VIEW_BENCH. 44 mouse moves
+    // along one wrapped candidate line: before the fix every cell rebuilds and
+    // re-scans the logical line, after it the line is scanned once per frame.
+    void benchHoverSweep()
+    {
+        if (!qEnvironmentVariableIsSet("RELAY_VIEW_BENCH"))
+            QSKIP("RELAY_VIEW_BENCH not set");
+        QFETCH_GLOBAL(QString, core);
+        QTemporaryDir dir(QDir::tempPath() + QStringLiteral("/9myy-bench-XXXXXX"));
+        QVERIFY(dir.isValid());
+        for (const char *name : {"alpha.log", "beta.log", "gamma.log", "delta.log", "epsilon.log", "zeta.log"}) {
+            QFile f(dir.filePath(QString::fromLatin1(name)));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+        }
+        Term t(core, QStringLiteral("/bin/cat"), {}, dir.path());
+        t.view->setLinksColouredAtRest(false);
+        QByteArray line = "see ";
+        for (const char *name : {"alpha.log", "beta.log", "gamma.log", "delta.log", "epsilon.log", "zeta.log"}) {
+            line += name;
+            line += " and ";
+        }
+        line += "end\r\n";
+        t.backend->writeToDisplay(line);
+        QVERIFY(t.waitScreen(QStringLiteral("zeta.log")));
+        t.grab();
+        QStringList debugRows;
+        QTRY_VERIFY2(!(debugRows = t.view->visibleRowsText()).filter(QLatin1String("gamma.log")).isEmpty(),
+                     qPrintable(debugRows.join(QLatin1Char('|'))));
+        const QStringList visible = debugRows;
+        const int row = visible.indexOf(visible.filter(QStringLiteral("gamma.log")).value(0));
+        QBENCHMARK {
+            for (int col = 2; col < 46; ++col) {
+                QMouseEvent move(QEvent::MouseMove, QPointF(t.cellPoint(row, col)),
+                                 Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(t.view, &move);
+            }
+        }
+    }
+
+    // #9MYY step 1: a highlighted paint, under RELAY_VIEW_BENCH. Every row
+    // carries matches for the find, so a full-widget grab walks the highlight
+    // rules for the whole screen — once per cell before the fix, once per row
+    // after it.
+    void benchPaintHighlights()
+    {
+        if (!qEnvironmentVariableIsSet("RELAY_VIEW_BENCH"))
+            QSKIP("RELAY_VIEW_BENCH not set");
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        for (int i = 0; i < 12; ++i)
+            t.backend->writeToDisplay("match one match two match three\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("match")));
+        t.view->find(QStringLiteral("match"), true);
+        t.grab();
+        QBENCHMARK {
+            t.view->grab().toImage();   // QWidget::grab paints now, no event-loop wait
         }
     }
 
