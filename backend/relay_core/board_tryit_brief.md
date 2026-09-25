@@ -1,4 +1,4 @@
-<!-- Board "Try it" brief v1 (docs/AGENT-SESSIONS-PROTOCOL.md 31.10, card #JNYN).
+<!-- Board "Try it" brief v2 (docs/AGENT-SESSIONS-PROTOCOL.md 31.10, card #JNYN).
      Versioned here, beside board_policy.md and board_cleanup_brief.md, so evals can pin it and
      the owner can change what Try it does without touching code.  It is sent as the *prompt* of
      the Try it turn (relay_core.tryit_protocol.tryit_prompt), not as part of the system prompt,
@@ -12,7 +12,12 @@
      Owner, 2026-09-21: an app card is verified in three steps — (1) run the tests, (2) an AI
      simulator verifies it, (3) the person is put into a simulated environment that exercises the
      issue.  Try it is step 3.  Step 2 is Verify (#WC3E), and when its record already names a
-     staged environment this turn REUSES it instead of staging and playing a second time. -->
+     staged environment this turn REUSES it instead of staging and playing a second time.
+
+     v2, 2026-09-25 (card #J6MF): a session handed a person a build/relay linked before the change
+     was compiled, and a working fix looked missing. Step 3 now requires proving the binary holds
+     the change with `scripts/relay-build --check`, and step 7 names the stale binary as a reason
+     to stop. -->
 
 You are preparing **Try it** for one card, because somebody pressed the Try it button on it.
 
@@ -93,6 +98,12 @@ The fixture is **disposable and rerunnable**, and it is not the owner's working 
   tree and takes minutes), else `build/relay` of this checkout as the fallback — never a stale
   shared binary that predates the card. Say which of the two was used, with its path, in the
   section, and have `stage.sh` resolve the binary the same way on its first line.
+- **Prove the binary holds the change before anyone sees it.** Build `build/relay` only through
+  `scripts/relay-build` (never `cmake --build`, never a bare binary), then run
+  `scripts/relay-build --check-only --check "<marker>" --check-binary <binary>` where the marker
+  is a string literal the landed change adds (a label, a message, a setting key). Put the same
+  check in `stage.sh` right after it resolves the binary. Exit 5 means `binary predates the
+  change`: stop at step 7 with the build id and commit it printed.
 - Write the whole staging as one script, **`<evidence dir>/stage.sh`**, that takes no arguments,
   needs no model and no network, and can be run twice. It creates the fixture and prints the one
   line that opens it. The person runs that script, or presses the button that runs it.
@@ -173,9 +184,10 @@ result, which stays sealed.
 
 ## 7. If you cannot open it
 
-It fails for honest reasons: the binary will not build, the verifying session's `stage.sh` is
-broken and the card is about a machine you do not have, the fixture needs a key nobody gave you,
-opening it crashed and you could not get past it.
+It fails for honest reasons: the binary will not build, the binary predates the change
+(`relay-build --check` exit 5 — name its build id and the commit), the verifying session's
+`stage.sh` is broken and the card is about a machine you do not have, the fixture needs a key
+nobody gave you, opening it crashed and you could not get past it.
 
 Then write **one `board_comment` of kind `note`** whose first words are exactly:
 

@@ -2,11 +2,54 @@
 # Run a disposable Relay worker or GUI probe without touching the user's profile or logs.
 set -euo pipefail
 
+#
+# A probe of the app must run the change, not whatever build/relay happens to be (card #J6MF).
+# When the command is this checkout's build/relay, or any --check is given, the binary is built
+# through scripts/relay-build first and must then pass `relay-build --check-only` with every
+# --check literal (a string the landed change adds). A miss prints "binary predates the change"
+# with the build id and HEAD, and the command never runs. --check alone checks build/relay (a
+# drive script launches it); --check-binary names another binary to check, and one outside this
+# checkout is not built here (a packaged binary, or a test's fake). Build output goes to stderr.
+repo=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+usage='usage: scripts/relay-qa-run [--keep] [--check STRING]... [--check-binary PATH] command [args...]'
+
 keep=0
-if [[ ${1:-} == --keep ]]; then keep=1; shift; fi
+checks=()
+check_binary=
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --keep) keep=1; shift ;;
+        --check) [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }; checks+=(--check "$2"); shift 2 ;;
+        --check-binary) [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }; check_binary=$2; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
 if [[ $# -eq 0 ]]; then
-    echo 'usage: scripts/relay-qa-run [--keep] command [args...]' >&2
+    echo "$usage" >&2
     exit 2
+fi
+
+# Which binary does this probe hand over? --check-binary; else build/relay when the command is
+# it, or when a --check was given (a drive script launches build/relay itself).
+target=$check_binary
+if [[ -z $target ]]; then
+    resolved=$(readlink -f -- "$(command -v -- "$1" 2>/dev/null || printf '%s' "$1")" 2>/dev/null || true)
+    if [[ $resolved == "$repo/build/relay" || ${#checks[@]} -gt 0 ]]; then target=$repo/build/relay; fi
+fi
+if [[ -n $target ]]; then
+    target=$(readlink -f -- "$target" 2>/dev/null || printf '%s' "$target")
+    if [[ $target == "$repo/build/relay" ]]; then
+        "$repo/scripts/relay-build" >&2 || { echo 'relay-qa-run: build failed; nothing was run' >&2; exit 4; }
+    fi
+    if [[ ${#checks[@]} -gt 0 ]]; then
+        status=0
+        "$repo/scripts/relay-build" --check-only "${checks[@]}" --check-binary "$target" >&2 || status=$?
+        if (( status != 0 )); then
+            echo "relay-qa-run: not running $1: the binary predates the change" >&2
+            exit "$status"
+        fi
+    fi
 fi
 
 umask 077

@@ -373,6 +373,27 @@ class ReuseTests(TryItTest):
         self.assertGreaterEqual(ran[0][1]["timeout"], 1800)  # a cold slot builds the tree
         self.assertIn(f"`land.py try --commit {sha} --print-binary`", prompt)
         self.assertIn(str(slot), prompt)
+        # Card #J6MF: the slot binary is not rebuilt here, but it is still proven to hold the change.
+        self.assertIn(f"--check-only --check", prompt)
+        self.assertIn(f"--check-binary {slot}", prompt)
+        self.assertNotIn("scripts/relay-build --check \"", prompt)
+
+    def test_the_prompt_requires_proving_the_binary_holds_the_change(self):
+        # Card #J6MF: session 3f4a20ad handed a person a build/relay linked before the change was
+        # compiled. The turn builds build/relay only through scripts/relay-build, checks it for a
+        # literal the change adds, and stops with the named failure when it is stale.
+        with mock.patch("relay_core.tryit_protocol.subprocess.run",
+                        side_effect=AssertionError("no commits, nothing builds")):
+            prompt = TI.tryit_prompt(self.commands.tools, self.card, self.evidence())
+        shared = self.repo / "build" / "relay"
+        self.assertIn("build it only through `scripts/relay-build --check", prompt)
+        self.assertIn(f"--check-only --check", prompt)
+        self.assertIn(f"--check-binary {shared}", prompt)
+        self.assertIn("binary predates the change", prompt)
+        self.assertIn("Try it could not be staged: binary predates the change", prompt)
+        brief = T.card_brief("tryit")
+        self.assertIn("binary predates the change", brief)
+        self.assertIn("scripts/relay-build --check-only", brief)
 
     def test_without_a_landed_commit_nothing_shells_out(self):
         self.start()

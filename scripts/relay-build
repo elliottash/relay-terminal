@@ -26,7 +26,8 @@ Usage:
     scripts/relay-build                      # configure if needed, then build
     scripts/relay-build --target relay       # extra args go to `cmake --build`
     scripts/relay-build --fast --target relay # separate Ninja build with faster developer flags
-    scripts/relay-build --check "Fold thinking"   # fail unless build/relay has it
+    scripts/relay-build --check "<a literal your change adds>"   # fail unless build/relay has it
+    scripts/relay-build --check-only --check "<literal>"  # check it, build nothing
     scripts/relay-build --wait-seconds 300   # give up if another build holds the lock
 
 Environment: RELAY_JOBS sets the parallelism (default 8) but is only an upper
@@ -209,6 +210,45 @@ def binary_contains(path: Path, needle: str) -> bool:
             tail = window[-overlap:] if overlap else b""
 
 
+def build_id(binary: Path) -> str:
+    """The `relay.build-id` scripts/build-id.py wrote beside the binary at link time."""
+    try:
+        return (binary.parent / "relay.build-id").read_text().strip() or "empty"
+    except OSError:
+        return "none"
+
+
+def head_commit() -> str:
+    """HEAD of the checkout as `<short sha> <commit date>`, the change being verified."""
+    try:
+        out = subprocess.run(["git", "log", "-1", "--format=%h %cI"], cwd=str(ROOT),
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else "unknown"
+
+
+def run_checks(args: argparse.Namespace) -> int:
+    """Prove the binary holds the change: every --check literal must be in it (card #J6MF).
+
+    A miss is named `binary predates the change`, with the binary's build id and HEAD, because
+    a hand-off (Try-it, relay-qa-run) that runs a stale binary presents a working fix as missing.
+    """
+    binary = Path(args.check_binary) if args.check_binary else BUILD / "relay"
+    if not binary.is_file():
+        say(f"binary predates the change: {binary} does not exist "
+            f"(HEAD {head_commit()})")
+        return EXIT_CHECK
+    for needle in args.check:
+        if not binary_contains(binary, needle):
+            say(f"binary predates the change: {binary} does not contain {needle!r} "
+                f"(build id {build_id(binary)}; HEAD {head_commit()}); the binary is "
+                f"stale, or the marker is not a literal this change adds")
+            return EXIT_CHECK
+        say(f"--check: {binary.name} contains {needle!r}")
+    return EXIT_OK
+
+
 # -------------------------------------------------------------------- memory cap
 
 
@@ -330,6 +370,9 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
                              "build/relay (repeatable)")
     parser.add_argument("--check-binary", metavar="PATH", default=None,
                         help="the binary --check looks in (default build/relay)")
+    parser.add_argument("--check-only", action="store_true",
+                        help="build nothing: only run the --check list against the "
+                             "binary (no lock, no configure)")
     parser.add_argument("--cmake-arg", metavar="ARG", action="append", default=[],
                         help="extra argument for the configure step; passing one "
                              "forces a reconfigure (repeatable)")
@@ -349,6 +392,11 @@ def main(argv: list[str]) -> int:
     if args.fast:
         BUILD = ROOT / "build-fast"
         LOCK = BUILD / ".relay-build.lock"
+    if args.check_only:
+        if not args.check:
+            say("--check-only needs at least one --check STRING")
+            return EXIT_USAGE
+        return run_checks(args)
 
     lock_fd = acquire(args.wait_seconds)
     if lock_fd is None:
@@ -390,16 +438,7 @@ def main(argv: list[str]) -> int:
             say(f"built in {time.time() - start:.0f}s; mtimes left alone")
 
         if args.check:
-            binary = Path(args.check_binary) if args.check_binary else BUILD / "relay"
-            if not binary.is_file():
-                say(f"--check: {binary} does not exist")
-                return EXIT_CHECK
-            for needle in args.check:
-                if not binary_contains(binary, needle):
-                    say(f"--check failed: {binary.name} does not contain "
-                        f"{needle!r} -- the build did not pick up your change")
-                    return EXIT_CHECK
-                say(f"--check: {binary.name} contains {needle!r}")
+            return run_checks(args)
         return EXIT_OK
     finally:
         try:

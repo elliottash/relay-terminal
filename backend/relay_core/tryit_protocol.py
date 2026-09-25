@@ -696,6 +696,7 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
             f"Stage fixtures under: {_run_dir()}",
             f"The app's binary, unless the card names another — {origin}: {binary}"
             + ("" if binary.is_file() else "  (not built here — build it, or say so and stop)"),
+            _binary_proof_rule(binary, shared),
             f"Today: {datetime.date.today().isoformat()}",
             ""]
     # Step 2's environment, if it left one: the one line that decides whether this turn reuses a
@@ -716,6 +717,23 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
                         "(step 3).")
     return "\n".join(head + [_platform_brief(), "", "--- the card ---",
                              _card_text(tools, card_id), "--- end of the card ---"])
+
+
+def _binary_proof_rule(binary: Path, shared: Path) -> str:
+    """Stage only a binary proven to hold the change (card #J6MF).
+
+    Session 3f4a20ad handed a person `./build/relay` linked before #234Z's edit was compiled, and
+    the working fix looked missing. So the turn builds `build/relay` only through
+    `scripts/relay-build`, and proves either binary holds a literal the landed change adds.
+    """
+    marker = '"<a string literal the landed change adds>"'
+    build = (f"build it only through `scripts/relay-build --check {marker}` (never `cmake --build` "
+             f"or a bare binary), then " if binary == shared else "")
+    return (f"Before staging, {build}prove the binary holds the change: "
+            f"`scripts/relay-build --check-only --check {marker} --check-binary {binary}`. "
+            f"On exit 5 it prints `binary predates the change` with the build id and HEAD — stop "
+            f"there and note `Try it could not be staged: binary predates the change (build id …, "
+            f"commit …)`; never stage a binary you have not proven.")
 
 
 def _stage_command(path: str) -> str:

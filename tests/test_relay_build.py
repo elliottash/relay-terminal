@@ -269,7 +269,41 @@ class RelayBuildTest(unittest.TestCase):
 
         missing = self.build(root, "--check", "MARKER-NOWHERE", slow=0, cwd=elsewhere)
         self.assertEqual(missing.returncode, 5, missing.stdout)
-        self.assertIn("did not pick up your change", missing.stdout)
+        self.assertIn("binary predates the change", missing.stdout)
+
+    def test_check_only_names_a_stale_binary_with_its_build_id_and_head(self):
+        """Card #J6MF: a hand-off must not run a binary that predates the change.
+
+        The binary is built with MARKER-ONE; the "landed change" added MARKER-ABSENT, which
+        this binary does not hold. --check-only builds nothing and says so by name.
+        """
+        root = self.make_project()
+        self.first_build(root, slow=0)
+        (root / "build" / "relay.build-id").write_text("0924.07.3\n")
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "init", "-q"], cwd=str(root), check=True)
+        subprocess.run([*git, "add", "main.cpp"], cwd=str(root), check=True)
+        subprocess.run([*git, "commit", "-qm", "change"], cwd=str(root), check=True)
+        sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=str(root),
+                             capture_output=True, text=True, check=True).stdout.strip()
+        # Make the source newer than the binary: a build here would relink, --check-only must not.
+        binary_mtime = self.binary(root).stat().st_mtime_ns
+        self.write_marker(root, "MARKER-ABSENT")
+
+        stale = self.build(root, "--check-only", "--check", "MARKER-ABSENT", slow=0)
+        self.assertEqual(stale.returncode, 5, stale.stdout)
+        self.assertIn("binary predates the change", stale.stdout)
+        self.assertIn("build id 0924.07.3", stale.stdout)
+        self.assertIn("HEAD " + sha, stale.stdout)
+        self.assertNotIn("building:", stale.stdout)
+        self.assertEqual(self.binary(root).stat().st_mtime_ns, binary_mtime)
+
+        fresh = self.build(root, "--check-only", "--check", "MARKER-ONE", slow=0)
+        self.assertEqual(fresh.returncode, 0, fresh.stdout)
+        self.assertNotIn("building:", fresh.stdout)
+
+        bare = self.build(root, "--check-only", slow=0)
+        self.assertEqual(bare.returncode, 1, bare.stdout)
 
     def test_check_finds_a_qstringliteral_which_is_utf16_in_the_binary(self):
         # No cmake needed: load the wrapper as a module and ask its search directly.
