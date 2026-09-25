@@ -543,6 +543,11 @@ class ToolExecutor:
         self.keybindings = keybindings
         self.emit = emit
         self.cancel = cancel
+        # Whether a user message waits to join the running turn (the agent wires Queue.peek_steer
+        # in). command_output's wait polls it so a steer ends the wait early and the message is
+        # delivered at the step boundary right after; the job itself keeps running. A subagent's
+        # executor leaves it None: steers belong to the main agent.
+        self.steer_wake = None
         # Typing into the program in the user's visible pane. Offered only for a turn the user
         # handed the program over for; see relay_core/program_input.py.
         self.program = ProgramControl(emit, cancel)
@@ -1146,7 +1151,7 @@ class ToolExecutor:
             job = self.jobs.get(args["job_id"])
             if "from_line" in args:
                 return self._job_lines(job, args)
-            return self._await(job, args["wait_seconds"])
+            return self._await(job, args["wait_seconds"], self.steer_wake)
         if name == "stop_command":
             job = self.jobs.get(args["job_id"])
             self.jobs.stop(job)
@@ -1219,8 +1224,11 @@ class ToolExecutor:
         # A background job still gets a moment: a server that fails at once says so in this result.
         return self._await(job, BACKGROUND_GLANCE if background else timeout)
 
-    def _await(self, job, seconds: float) -> dict:
-        """Wait on a job with the live output stream on; Stop during the wait ends the job."""
+    def _await(self, job, seconds: float, wake: Callable[[], bool] | None = None) -> dict:
+        """Wait on a job with the live output stream on; Stop during the wait ends the job.
+
+        `wake` (command_output only) ends the wait early with the job still running: the user
+        steered this turn, and the step boundary after the early result delivers the message."""
         streamed = 0
 
         def live(text: str) -> None:
@@ -1233,7 +1241,7 @@ class ToolExecutor:
         with self._lock:
             self._waiting = job
         try:
-            self.jobs.wait(job, seconds, self.cancel, live)
+            self.jobs.wait(job, seconds, self.cancel, live, wake)
         finally:
             with self._lock:
                 self._waiting = None
@@ -1249,7 +1257,7 @@ class ToolExecutor:
             with self._lock:
                 self._waiting = job
             try:
-                self.jobs.wait(job, args["wait_seconds"], self.cancel)
+                self.jobs.wait(job, args["wait_seconds"], self.cancel, None, self.steer_wake)
             finally:
                 with self._lock:
                     self._waiting = None

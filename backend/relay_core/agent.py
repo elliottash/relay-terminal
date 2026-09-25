@@ -789,6 +789,12 @@ class Agent:
         self.terminal_context = terminal_context.Service()
         self.executor = ToolExecutor(workspace, emit, self.cancel_event, keybindings, skills,
                                      policy=security.policy_from(security_options or {}))
+        # command_output's wait polls this (Queue.peek_steer, wired by set_agent): a pending steer
+        # ends the wait with the job still running, and the step boundary after the early tool
+        # result delivers the message. Through the agent, not a stored copy, so a reconfigure's
+        # rebinding is picked up. A subagent's executor never sets it: steers are the main
+        # agent's.
+        self.executor.steer_wake = lambda: bool(self.steer_peek and self.steer_peek())
         self.media = media.MediaTools(self.executor.workspace, self.cancel_event,
                                       emit=self._provider_emit)
         # Card #K2FV: the approval checklist. A configure that says nothing about approvals gets
@@ -889,6 +895,10 @@ class Agent:
         # --- end subagents ---
         # steer: callable returning user prompts to add at the next step boundary (TurnSupervisor.take_steer).
         self.steer_source = None
+        # steer_peek: callable telling whether a steering prompt waits (Queue.peek_steer); a long
+        # wait inside a tool call (agent_wait, command_output) polls it so a steer ends the wait
+        # and is delivered at the step boundary right after, instead of when the wait finishes.
+        self.steer_peek = None
         self.mode = "build"
         self.effort = None
         if effort is not None:
@@ -2914,7 +2924,8 @@ class Agent:
                                 self.emit({"event": "tool_started", "tool": func["name"], "preview": preview,
                                            "label": _safe_label(tool_labels.started_label, func["name"], label_args),
                                            "turn_id": turn_id, "call_id": call["id"]})
-                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
+                                result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event,
+                                                                 steer_wake=self.steer_peek)
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
                                 self._autosave_soon()

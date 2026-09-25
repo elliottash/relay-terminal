@@ -162,6 +162,7 @@ class TurnSupervisor:
             self._agent = agent
             if agent is not None:
                 agent.steer_source = self.take_steer
+                agent.steer_peek = self.peek_steer
                 agent.steer_reserve = self.reserve_steer
                 agent.steer_settle = self.settle_steer
             self._clear_locked()
@@ -446,6 +447,15 @@ class TurnSupervisor:
             self._changed_locked()
         return [{"prompt": i["prompt"], "ledger_id": i.get("ledger_id"), "context": i.get("context"),
                  "attachments": i.get("attachments")} for i in items]
+
+    def peek_steer(self) -> bool:
+        """take_steer without draining: is a steering prompt waiting to be delivered?
+
+        The running agent polls this from inside a long wait (agent_wait, command_output): a
+        pending steer ends the wait early so the step boundary that follows delivers the message
+        now instead of when the wait happens to finish."""
+        with self._lock:
+            return bool(self._steer or self._steer_inflight)
 
     def steer(self, item_id) -> None:
         """Upgrade a queued prompt to steer the running turn at its next step boundary."""

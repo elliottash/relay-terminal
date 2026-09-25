@@ -16,13 +16,17 @@ namespace relay::queuesubmit {
 enum class Decision {
     StartNow,   // the agent is free: begin the turn at once, bypassing the queue; queued items keep their order
     Queue,      // the agent already has a turn: join the back of the queue
+    Steer,      // the agent's turn is parked waiting for background work (agent_wait, a background job): queue, then steer straight in (#T4VK)
 };
 
-// The pane facts that can change the answer. Everything else — a shell command running, shell or
-// agent items queued ahead, the queue paused — deliberately cannot (see #N8VK).
+// The pane facts that can change the answer. A shell command running, shell items queued ahead
+// or the queue paused deliberately cannot (see #N8VK); an agent prompt queued ahead can only
+// hold a would-be steer back to a plain queue (#T4VK) — it never delays or reorders the submit.
 struct State {
     bool agentBusy = false;         // the worker reports a turn running
     bool agentTurnStarting = false; // an agent entry left the queue, and the worker's "busy" report has not arrived yet
+    bool agentWaitingBackground = false; // that running turn is parked in a wait: agent_wait or command_output on a still-running job
+    bool agentQueueEmpty = true;    // no agent prompt queued ahead of the submit: it would be the lane's head
 };
 
 Decision decide(const State &state);

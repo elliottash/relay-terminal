@@ -694,7 +694,8 @@ class SubagentManager:
             if isinstance(entry, Subagent) and not entry.background and not entry.done.is_set():
                 self.stop(entry.id)
 
-    def run_tool(self, name: str, args: dict, call_id, batch: dict | None, cancel: threading.Event) -> dict:
+    def run_tool(self, name: str, args: dict, call_id, batch: dict | None, cancel: threading.Event,
+                 steer_wake=None) -> dict:
         if not isinstance(args, dict):
             raise ValueError("Tool arguments must be an object.")
         if name == "agent":
@@ -717,7 +718,7 @@ class SubagentManager:
         if name == "agent_wait":
             if set(args) - {"id", "timeout_seconds"}:
                 raise ValueError("Unknown tool or unexpected argument.")
-            return self.wait(args.get("id"), args.get("timeout_seconds", 600), cancel)
+            return self.wait(args.get("id"), args.get("timeout_seconds", 600), cancel, wake=steer_wake)
         if name == "agent_set_model":
             if set(args) != {"id", "model"}:
                 raise ValueError("agent_set_model needs id and model, with no unexpected arguments.")
@@ -1205,7 +1206,7 @@ class SubagentManager:
                 raise ValueError(f"Subagent {sub.id} is not paused; send agent_message to resume it.")
         return self.send_message(target, "Continue.", origin="user")
 
-    def wait(self, agent_id, timeout, cancel: threading.Event) -> dict:
+    def wait(self, agent_id, timeout, cancel: threading.Event, wake=None) -> dict:
         if type(timeout) is not int or not 1 <= timeout <= 1800:
             raise ValueError("timeout_seconds must be an integer from 1 to 1800.")
         with self._lock:
@@ -1216,14 +1217,22 @@ class SubagentManager:
                 targets = [sub]
             else:
                 targets = [s for s in self._agents.values() if s.live and s.background]
-        finished = self._wait(targets, cancel, timeout, stop_on_cancel=False)
+        finished = self._wait(targets, cancel, timeout, stop_on_cancel=False, wake=wake)
         with self._lock:
             for sub in targets:
                 if sub.done.is_set():
                     self._pending.pop(sub.id, None)
-        return {"agents": [self.result(sub) for sub in targets], "timed_out": not finished}
+        out = {"agents": [self.result(sub) for sub in targets], "timed_out": finished is False}
+        if finished == "steer":
+            # Not timed out: the wait returned early because a user message is waiting to join
+            # this turn (the message follows this tool result). The subagents keep running.
+            out["stopped_for_user_message"] = True
+            out["note"] = ("wait stopped early: the user sent a message, delivered after this "
+                           "result. The subagents above are still running; call agent_wait again "
+                           "to keep waiting for them.")
+        return out
 
-    def _wait(self, targets, cancel, timeout, *, stop_on_cancel: bool) -> bool:
+    def _wait(self, targets, cancel, timeout, *, stop_on_cancel: bool, wake=None):
         with self._lock:
             for sub in targets:
                 sub.waiters += 1
@@ -1237,6 +1246,8 @@ class SubagentManager:
                         for sub in targets:
                             sub.done.wait(5)
                     raise Cancelled("Stopped.")
+                if wake is not None and wake():
+                    return "steer"
                 if deadline is not None and self.clock() >= deadline:
                     return False
                 targets[0].done.wait(0.05) if len(targets) == 1 else time.sleep(0.05)

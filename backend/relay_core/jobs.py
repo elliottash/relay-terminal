@@ -277,13 +277,19 @@ class JobTable:
             live(chunk.decode("utf-8", "replace"))
 
     def wait(self, job: Job, seconds: float, cancel: threading.Event,
-             live: Callable[[str], None] | None = None) -> bool:
-        """Wait until the job ends, `seconds` pass, or `cancel` is set. True when it ended."""
+             live: Callable[[str], None] | None = None, wake: Callable[[], bool] | None = None) -> bool:
+        """Wait until the job ends, `seconds` pass, or `cancel` is set. True when it ended.
+
+        `wake` (command_output's steer check, Queue.peek_steer) ends the wait early too, leaving
+        the job running: a user message is waiting to join the turn, and the step boundary that
+        follows the early tool result delivers it."""
         with self._lock:
             job.live = live if job.running else None
         deadline = time.monotonic() + max(0.0, seconds)
         try:
             while not job.done.is_set() and not cancel.is_set():
+                if wake is not None and wake():
+                    break
                 left = deadline - time.monotonic()
                 if left <= 0:
                     break

@@ -13124,6 +13124,13 @@ private:
         relay::queuesubmit::State state;
         state.agentBusy = m_agentBusy;
         state.agentTurnStarting = m_activeAgentValid;
+        // The running turn is parked in a wait — agent_wait, or command_output on a
+        // still-running job (#V7QD, #KP4M) — the one turn a prompt can reach without
+        // interrupting it (#T4VK): the worker ends that wait for a steered message. And the
+        // agent lane's own FIFO: only its head steers, so a prompt queued ahead is not passed.
+        state.agentWaitingBackground = !m_waitCall.isEmpty() || !m_jobWaitCall.isEmpty();
+        for (const QueueEntry &e : m_entries)
+            if (e.agent && !e.written()) { state.agentQueueEmpty = false; break; }
         return state;
     }
 
@@ -13215,12 +13222,20 @@ private:
         // same submission: when the agent itself is free it starts now, bypassing the queue
         // exactly as the interrupt branch above does, and the queued items keep their order
         // (#N8VK). Only a busy — or just-started — agent turn sends a prompt to the back.
-        if (m_configured && relay::queuesubmit::decide(queueSubmitState()) == relay::queuesubmit::Decision::StartNow) {
+        const relay::queuesubmit::Decision decision = m_configured
+                ? relay::queuesubmit::decide(queueSubmitState()) : relay::queuesubmit::Decision::Queue;
+        if (decision == relay::queuesubmit::Decision::StartNow) {
             // Reserve the agent slot while the reply starts, before the busy event arrives.
             startAgentEntry(entry, resumingEntries);
             return;
         }
         enqueue(entry);
+        // The turn is parked waiting for background agents or a background job (#T4VK): steer
+        // this prompt straight into it instead of holding it for the turn's end — the worker
+        // ends the wait for a steered message, so it joins the conversation right after that
+        // wait's tool result, one Enter, as in Claude Code. No queue jumping: this entry is the
+        // agent lane's head — the decision would have been Queue otherwise.
+        if (decision == relay::queuesubmit::Decision::Steer) steerQueuedEntry(m_lastQueuedEntryId);
     }
 
     // A prompt from a paired device. It never touches the composer: the person at the desktop may

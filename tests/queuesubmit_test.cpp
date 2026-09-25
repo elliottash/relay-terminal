@@ -21,6 +21,15 @@ State turnStarting() {
     state.agentTurnStarting = true;   // left the queue; the worker's "busy" report has not landed
     return state;
 }
+State waitingOnBackground() {
+    // The running turn is parked inside a wait — agent_wait, or command_output on a
+    // still-running job — with no step boundary of its own: the worker ends that wait for a
+    // steered message (Queue.peek_steer), so the submit can steer straight in (#T4VK).
+    State state;
+    state.agentBusy = true;
+    state.agentWaitingBackground = true;
+    return state;
+}
 }   // namespace
 
 class QueueSubmitTest : public QObject {
@@ -106,6 +115,31 @@ private slots:
 
     void busy_and_starting_together_queue() {
         State state = turnRunning();
+        state.agentTurnStarting = true;
+        QCOMPARE(decide(state), Decision::Queue);
+    }
+
+    void a_turn_waiting_for_background_agents_takes_the_prompt_as_a_steer() {
+        // The reported bug (#T4VK): a steered prompt had nowhere to land while the turn sat in
+        // agent_wait, so the only way through was the double-Enter interrupt. Now the submit
+        // itself steers in — one Enter, as in Claude Code — because the worker ends the wait
+        // for it and the message joins right after the wait's tool result.
+        QCOMPARE(decide(waitingOnBackground()), Decision::Steer);
+    }
+
+    void an_agent_prompt_queued_ahead_keeps_its_place_before_a_new_steer() {
+        // Only the lane's head steers: with an older prompt waiting, the submit queues behind it
+        // (the empty-Enter steer delivers the first of them instead) — no queue jumping.
+        State state = waitingOnBackground();
+        state.agentQueueEmpty = false;
+        QCOMPARE(decide(state), Decision::Queue);
+    }
+
+    void a_turn_still_starting_never_steers_even_if_a_wait_was_reported() {
+        // agentTurnStarting and a live wait call cannot both be real (a wait arrives mid-turn),
+        // but the rule holds either way: a turn whose busy report has not landed cannot take a
+        // steer, or two asks could race.
+        State state = waitingOnBackground();
         state.agentTurnStarting = true;
         QCOMPARE(decide(state), Decision::Queue);
     }

@@ -684,6 +684,46 @@ class HandoffTests(Base):
         time.sleep(0.3)
         self.assertEqual(len(self.rec.of('agent_started')), 1)
 
+    def test_steer_ends_agent_wait_and_lands_next_step(self):
+        # #T4VK: a turn parked in agent_wait has no step boundary, so a steer had nowhere to
+        # land until the subagents finished. A pending steer now ends the wait (Queue.peek_steer):
+        # the tool result says so, the subagents keep running, and the steered text reaches the
+        # model as the next user message without the turn being interrupted.
+        agent, provider = self.with_turns([
+            calls(call('agent', {'description': 'bg', 'prompt': 'X gate:g1', 'subagent_type': 'general',
+                                 'background': True}, 'c1')),
+            lambda messages, cancel: (threading.Timer(0.3, self.turns.submit, args=('steered in',),
+                                                      kwargs={'when': 'steer'}).start(),
+                                      calls(call('agent_wait', {'id': 'a1', 'timeout_seconds': 5}, 'c2')))[1],
+            final('after steer')])
+        self.turns.submit('go')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        waited = self.tool_results(provider, 2)['c2']
+        self.assertFalse(waited['timed_out'])
+        self.assertTrue(waited['stopped_for_user_message'])
+        self.assertIn('user sent a message', waited['note'])
+        self.assertEqual(waited['agents'][0]['status'], 'running')
+        messages = provider.seen[2][0]
+        self.assertEqual(messages[-1]['role'], 'user')
+        self.assertIn('steered in', messages[-1]['content'])
+        time.sleep(0.3)
+        self.assertEqual(len(self.rec.of('agent_started')), 1)
+
+    def test_agent_wait_without_a_steer_still_waits_the_timeout(self):
+        # The wake is not a shortcut: nothing steered means the wait keeps its own deadline and
+        # reports timed_out, not stopped_for_user_message.
+        agent, provider = self.with_turns([
+            calls(call('agent', {'description': 'bg', 'prompt': 'X gate:g2', 'subagent_type': 'general',
+                                 'background': True}, 'c1')),
+            calls(call('agent_wait', {'id': 'a1', 'timeout_seconds': 1}, 'c2')),
+            final('done waiting')])
+        self.turns.submit('go')
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        waited = self.tool_results(provider, 2)['c2']
+        self.assertTrue(waited['timed_out'])
+        self.assertNotIn('stopped_for_user_message', waited)
+        self.assertEqual(waited['agents'][0]['status'], 'running')
+
     def test_reset_stops_background_and_drops_pending(self):
         agent, provider = self.with_turns([final('x')])
         self.manager.spawn({'description': 'd', 'prompt': 'Z gate:g1', 'subagent_type': 'general', 'background': True})
