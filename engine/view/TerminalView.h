@@ -584,6 +584,10 @@ private:
     // the core's mutex, and neither can change inside one frame.
     QString m_frameCwd;
     bool m_frameCwdValid = false;
+    // Bumped by every pullFrame() that changed the screen (#9MYY). Anything
+    // derived from the frame alone — the hover caches, the accessible text —
+    // keys its one entry on this instead of diffing the screen.
+    quint64 m_frameVersion = 0;
     std::vector<std::pair<uint32_t, bool>> m_frameProse;
     // Inline images (#1MGS): which link ids of this frame are image rows (thrown away with the
     // frame, like m_frameProse), the parsed URIs across frames, and the decoded pictures.

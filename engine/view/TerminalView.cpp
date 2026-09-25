@@ -638,6 +638,7 @@ void TerminalView::pullFrame()
         m_frameTimer.start(300);
     if (!changed)
         return;
+    ++m_frameVersion;
     emit frameChanged();
 
     // A link underline belongs to every row it spans, including continuations.
