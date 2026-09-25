@@ -18,3 +18,10 @@ OK (skipped=1)
 test_remote_browser 25 OK; test_pane_view 37 OK; test_remote_browser_storage 6 OK; test_remote_terminal 12 OK; test_remote_push 75 OK; test_web_screen 10 OK; test_remote_guest_browser 14 OK; test_web_meet_code 16 OK; test_web_viewport 7: 1 error on first run, OK on 3 reruns (flaky, not a Chrome start failure)
 
 ## scripts/relay-build --target relay: Built target relay
+
+## follow-up: nothing left behind (tests/browser.py always gives Chrome a private TMPDIR, ends its whole process group, then removes profile + TMPDIR)
+Before: /tmp held 32377 com.google.Chrome.* dirs, and a run under TMPDIR=<fresh dir> left tmp* profiles (Default/Cache...) behind.
+After, each module run with TMPDIR=<fresh short dir>, then `ls -A` of that dir:
+test_board_view OK left=0; test_web_viewport OK left=0; test_remote_browser OK left=0; test_pane_view OK left=0; test_remote_terminal OK left=0; test_remote_guest_browser OK left=0
+With a pane-length TMPDIR: test_board_view, test_remote_push, test_web_screen, test_web_meet_code, test_remote_browser_storage all OK left=0; /dev/shm/chrome-* left: 0
+python3 -m unittest tests.test_browser_tmpdir: 4/4 OK

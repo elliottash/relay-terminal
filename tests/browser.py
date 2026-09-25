@@ -13,6 +13,7 @@ import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import urllib.request
@@ -47,15 +48,14 @@ _SINGLETON_SUFFIX = "/com.google.Chrome.XXXXXX/SingletonSocket"
 
 
 def _chrome_tmpdir() -> str | None:
-    """A short private TMPDIR for Chrome when the inherited one cannot hold its singleton socket.
+    """A private TMPDIR for one Chrome, short enough for its singleton socket; the caller removes it.
 
-    None means the inherited TMPDIR fits and Chrome keeps it. Otherwise a fresh directory under
-    /dev/shm or /tmp, whichever works first; the caller removes it. If neither can be made, None
-    again: today's behaviour, never worse.
+    Always private, not only when the inherited TMPDIR is too long: a terminated Chrome leaves its
+    com.google.Chrome.* singleton and url-fetcher directories behind, and every test run used to
+    add a few to /tmp for good (#H1BS). Made under the inherited TMPDIR when that fits, else under
+    /dev/shm or /tmp. None only if none of them can be made: Chrome then inherits TMPDIR as before.
     """
-    if len(tempfile.gettempdir()) + len(_SINGLETON_SUFFIX) <= SOCKET_PATH_LIMIT:
-        return None
-    for parent in ("/dev/shm", "/tmp"):
+    for parent in (tempfile.gettempdir(), "/dev/shm", "/tmp"):
         if len(parent) + len("/chrome-XXXXXXXX") + len(_SINGLETON_SUFFIX) > SOCKET_PATH_LIMIT:
             continue
         with contextlib.suppress(OSError):
@@ -109,11 +109,14 @@ class Browser:
             arguments += ["--use-fake-device-for-media-stream",
                           "--use-fake-ui-for-media-stream"]
         arguments.append("about:blank")
-        # Only the singleton socket needs the short path; the profile stays where it is.
+        # Chrome's own temp files go in a dir stop() removes; the profile stays where it is.
         self.tmpdir = _chrome_tmpdir()
         env = {**os.environ, "TMPDIR": self.tmpdir} if self.tmpdir else None
+        # Its own process group, so stop() can end the zygote and GPU children too: one that
+        # outlives the browser writes its cache back into a profile stop() already removed.
         self.process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL, env=env)
+                                        stderr=subprocess.DEVNULL, env=env,
+                                        start_new_session=True)
 
         target = None
         for _ in range(200):
@@ -211,18 +214,41 @@ class Browser:
         if self.socket:
             await self.socket.close()
         if self.process:
-            self.process.terminate()
-            try:
-                await asyncio.to_thread(self.process.wait, 10)
-            except Exception:
-                self.process.kill()
+            await _end_group(self.process)
         if self.profile:
-            # Chrome writes to its profile as it exits, so a strict cleanup races it.
-            with contextlib.suppress(OSError):
-                self.profile.cleanup()
+            await _remove(self.profile.name)
+            self.profile = None
         if self.tmpdir:
-            shutil.rmtree(self.tmpdir, ignore_errors=True)
+            await _remove(self.tmpdir)
             self.tmpdir = None
+
+
+async def _end_group(process: subprocess.Popen) -> None:
+    """Terminate Chrome's whole process group and wait until every member has gone."""
+    group = process.pid   # start_new_session made Chrome the leader of its own group
+    for sig, seconds in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(group, sig)
+        for _ in range(seconds * 10):
+            process.poll()   # reap the leader, or the group never looks empty
+            try:
+                os.killpg(group, 0)
+            except ProcessLookupError:
+                return
+            await asyncio.sleep(0.1)
+
+
+async def _remove(path: str) -> None:
+    """Remove a directory Chrome was using, retrying while its exiting children still write to it.
+
+    One ignore-errors pass left a profile (or a com.google.Chrome.* dir) behind on every few runs
+    (#H1BS): the main process is gone but a zygote or GPU child is still flushing into it.
+    """
+    for _ in range(50):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return
+        await asyncio.sleep(0.1)
 
 
 def _free_port() -> int:

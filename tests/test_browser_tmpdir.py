@@ -3,13 +3,15 @@
 
 Chrome's singleton socket lives at $TMPDIR/com.google.Chrome.XXXXXX/SingletonSocket and a Unix
 socket path must fit in 108 bytes. A Relay pane's TMPDIR is its per-session scratch dir, long
-enough that Chrome died before opening a page. No Chrome is needed here: this pins the choice.
+enough that Chrome died before opening a page; and a terminated Chrome leaves its temp dirs
+behind, so the dir is always private and removed. No Chrome is needed here: this pins the choice.
 """
 from __future__ import annotations
 
 import asyncio
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -29,9 +31,13 @@ class ChromeTmpdirTests(unittest.TestCase):
         os.makedirs(path, exist_ok=True)
         tempfile.tempdir = path
 
-    def test_short_tmpdir_is_kept(self):
+    def test_short_tmpdir_gets_a_private_dir_inside_it(self):
+        # Private even when TMPDIR fits: a terminated Chrome leaves com.google.Chrome.* behind,
+        # and only a dir that stop() removes takes them with it.
         self.use_tmpdir(self.base)
-        self.assertIsNone(browser._chrome_tmpdir())
+        chosen = browser._chrome_tmpdir()
+        self.assertEqual(os.path.dirname(chosen), self.base)
+        self.assertTrue(os.path.basename(chosen).startswith("chrome-"))
 
     def test_long_tmpdir_gets_a_short_private_dir(self):
         # The shape that failed: <scratch home>/<36-char pane uuid>/tmp, padded past the limit.
@@ -60,6 +66,13 @@ class ChromeTmpdirTests(unittest.TestCase):
         asyncio.run(b.stop())
         self.assertFalse(os.path.exists(made))
         self.assertIsNone(b.tmpdir)
+
+    def test_end_group_waits_for_children_that_outlive_the_leader(self):
+        # A Chrome child that outlived the browser rewrote a profile stop() had just removed.
+        leader = subprocess.Popen(["sh", "-c", "sleep 30 & sleep 30"], start_new_session=True)
+        asyncio.run(browser._end_group(leader))
+        with self.assertRaises(ProcessLookupError):
+            os.killpg(leader.pid, 0)
 
 
 if __name__ == "__main__":
