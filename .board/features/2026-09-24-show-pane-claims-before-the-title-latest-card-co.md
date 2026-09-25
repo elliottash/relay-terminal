@@ -67,3 +67,6 @@ Evidence, from a staged Relay under Xvfb on a throwaway project with two cards c
 `ctest --test-dir build -R '^board$'` (claimedByListsThisPanesOpenCardsNewestFirst)
 `ctest --test-dir build -R '^themeswitch$'`
 manual: docs/qa_evidence/2026-09-25-0FBB/
+
+## Verdict
+Verified by the owner from the evidence screenshots (2026-09-25): "that screenshot verifies it for me". The header shows `#K7Q2 (2)` before the title with no `[n]` badge, and the click lists both claims with title and stage. Commits `aa613e6d`, `cdef2a5c`.

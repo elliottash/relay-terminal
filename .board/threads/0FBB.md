@@ -35,3 +35,9 @@ Implementing the claims chip in the pane header: latest claimed card code before
 
 <!-- relay:entry 20260925T020407Z-tt author=agent kind=event model=claude-fable-5-1 pane=983a6a3c turn=92776ab6493d4adca6ab798cb400383d/427adb1785e74b7e9e7b6906f8deec63 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["aa613e6d"], "evidence": ["docs/qa_evidence/2026-09-25… → {"plans": [], "commits": ["aa613e6d", "cdef2a5c"], "evidence": ["docs/qa_evidenc…
+
+<!-- relay:entry 20260925T021104Z-bj author=agent kind=decision model=claude-fable-5-1 pane=983a6a3c turn=92776ab6493d4adca6ab798cb400383d/1e4a3f0526324ee4bfb2cc065d3e53d8 -->
+Owner, 2026-09-25, on the header and list screenshots in docs/qa_evidence/2026-09-25-0FBB/: "that screenshot verifies it for me"
+
+<!-- relay:entry 20260925T021106Z-xj author=agent kind=event model=claude-fable-5-1 pane=983a6a3c turn=92776ab6493d4adca6ab798cb400383d/1e4a3f0526324ee4bfb2cc065d3e53d8 -->
+- ✦ agent updated this card · replaced `## Verdict`
