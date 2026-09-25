@@ -1,0 +1,6 @@
+glm-coding ProviderQuotaExhausted after 0.6s
+  text : Provider HTTP 429 for glm-5.3 at api.z.ai (z.ai · glm-5.3 · coding plan): 5-hour usage limit reached; resets 17:53 (in 0.8 h). Relay skips z.ai · glm-5.3 · coding plan until the reset; pick another model now, or wait.
+  issue: {"kind": "quota_5h", "label": "5-hour usage limit reached", "preset": "glm-coding", "model": "glm-5.3", "host": "api.z.ai", "status": 429, "hint": "Relay skips z.ai \u00b7 glm-5.3 \u00b7 coding plan until the reset; pick another model now, or wait.", "resets_at": 1790373205, "vendor_code": "1308"}
+  retry events: ['quota']
+kimi-code answered OK
+  retry events: []

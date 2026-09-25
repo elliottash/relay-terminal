@@ -785,6 +785,8 @@ void Pane::handle(const QJsonObject &event) {
             // nothing here.
             if (reason == QStringLiteral("failover")) pushServingModel(reason, event);
             else if (reason == QStringLiteral("failover_ended")) popServingModel(QStringLiteral("failover"));
+            noteProviderIssue(event.value(QStringLiteral("issue")).toObject(),
+                              event.value(QStringLiteral("turn_id")).toString());
             // A provider can report exhaustion through 429 even before its quota poll lands:
             // repeated refusals until the transport's retries are spent and the turn moves on (#YJG7 —
             // fifteen hours of six retries a turn on a plan out of quota until Tuesday). Only that
@@ -904,6 +906,8 @@ void Pane::handle(const QJsonObject &event) {
                 const QString code = event.value(QStringLiteral("code")).toString();
                 if (code == QStringLiteral("quota_exhausted") || code == QStringLiteral("free_unavailable")) onHostedRefusal(code, event);
                 else { ensureLineStart(); printInline(QStringLiteral("✗ ") + text + '\n', Ink::Error); }
+                noteProviderIssue(event.value(QStringLiteral("issue")).toObject(),
+                                  event.value(QStringLiteral("turn_id")).toString());
                 // The turn died on the 429s the transport had been retrying (the text is the pane's
                 // own provider's, even after a failover chain: agent._failover_failure): a cool-off.
                 if (m_turnSaw429 && text.contains(QStringLiteral("HTTP 429")) && !onHostedPreset())
@@ -915,3 +919,56 @@ void Pane::handle(const QJsonObject &event) {
             }
         }
     }
+
+void Pane::noteProviderIssue(const QJsonObject &issue, const QString &turnId) {
+    const QString kind = issue.value(QStringLiteral("kind")).toString();
+    if (kind.isEmpty()) return;
+    m_providerIssue = issue;
+    const QString preset = issue.value(QStringLiteral("preset")).toString();
+    const qint64 resets = static_cast<qint64>(issue.value(QStringLiteral("resets_at")).toDouble());
+    // A spent window with a known reset holds that provider out until then — the provider's own
+    // instant, not the half-hour cool-off an unexplained run of 429s earns.
+    if (kind.startsWith(QStringLiteral("quota")) && !preset.isEmpty()
+        && resets > QDateTime::currentSecsSinceEpoch())
+        markExhausted(preset, issue.value(QStringLiteral("label")).toString(), resets);
+    // A rate limit or an overloaded provider clears by itself; there is nothing to fix.
+    if (kind == QStringLiteral("rate_limit") || kind == QStringLiteral("overloaded")) return;
+    if (!turnId.isEmpty() && turnId == m_issueOfferedTurn) return;
+    m_issueOfferedTurn = turnId;
+    ensureLineStart();
+    if (!onAskModelsHelper || !shellIdleAtPrompt()) {
+        printInline(QStringLiteral("▸ The Options › Models helper can help fix this\n"), Ink::Note);
+        return;
+    }
+    const QByteArray url = QStringLiteral("relay://fix-provider/%1").arg(m_token).toUtf8();
+    QByteArray out = takeWrapped() + closeProseRun();
+    if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+    if (!m_atLineStart) out += "\r\n";
+    out += "\x1b]8;;" + url + "\x1b\\" + inkCode(Ink::Agent) + QByteArray("▸ Ask the helper to fix this")
+         + "\x1b[0m" + "\x1b]8;;\x1b\\";
+    out += inkCode(Ink::Note) + QByteArray("  (Ctrl+click · opens Options › Models)") + "\x1b[0m\r\n";
+    m_atLineStart = true;
+    writeTerminal(out);
+}
+
+void Pane::askHelperAboutIssue() {
+    const QJsonObject &issue = m_providerIssue;
+    if (issue.isEmpty()) return;
+    const QString model = issue.value(QStringLiteral("model")).toString();
+    const QString preset = issue.value(QStringLiteral("preset")).toString();
+    const QString host = issue.value(QStringLiteral("host")).toString();
+    QString what = QStringLiteral("A turn in one of my panes failed on %1 (%2): %3")
+        .arg(model, preset.isEmpty() ? host : preset, issue.value(QStringLiteral("label")).toString());
+    const int status = issue.value(QStringLiteral("status")).toInt();
+    if (status) what += QStringLiteral(", HTTP %1").arg(status);
+    const qint64 resets = static_cast<qint64>(issue.value(QStringLiteral("resets_at")).toDouble());
+    if (resets > 0)
+        what += QStringLiteral("; it resets %1").arg(QDateTime::fromSecsSinceEpoch(resets).toString(QStringLiteral("ddd HH:mm")));
+    const QString vendor = issue.value(QStringLiteral("vendor_code")).toString();
+    if (!vendor.isEmpty()) what += QStringLiteral(" (provider code %1)").arg(vendor);
+    what += QStringLiteral(". Relay's suggestion: %1 ").arg(issue.value(QStringLiteral("hint")).toString());
+    what += QStringLiteral("Look at my Providers and model priorities, tell me what is wrong and what you would "
+                           "change (a key, a login, the order, another provider), and ask before changing anything.");
+    if (onAskModelsHelper) onAskModelsHelper(what);
+    else draftInComposer(what);
+}

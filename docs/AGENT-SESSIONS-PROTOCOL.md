@@ -102,6 +102,30 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
   provider. Z.AI HTTP 429 code 1310 is quota exhaustion, not a transient retry: a `provider_retry`
   event with `reason: "quota"`, `attempt: 0` precedes `provider_quota_exhausted`. The message includes
   a recognised reset timestamp in provider time, never the arbitrary response body.
+- **Recognised refusals and `issue` (#QK2Q, 2026-09-25).** The transport sorts every hosted
+  401/402/403/429 by the vendor's code, error type and a few matched phrases
+  (`backend/relay_core/provider_errors.py`) into a kind: `quota_5h`, `quota_daily`, `quota_weekly`,
+  `quota_monthly`, `quota_period`, `quota`, `rate_limit`, `overloaded`, `balance`, `plan_expired`,
+  `account`, `auth`, `token_expired`. Spent windows, `balance` and `plan_expired` are final — no
+  transient retries — which now covers Z.AI's 5-hour code 1308 as well as 1310. A provider-local
+  "reset at" becomes a Unix instant when the zone is known (Z.AI's `X-LOG-ID` clock against `Date`,
+  or the quota poll naming the same reset); the refusal is then held until that instant, re-asked
+  at most every 15 minutes. The failover note, the quota-failover note, and a turn's `error` carry
+  `issue {kind, label, preset, model, host, status, hint, resets_at?, vendor_code?}`; the text says
+  the label ("login token expired", "5-hour usage limit reached; resets 17:53 (in 1.1 h)"). The
+  body itself is never shown or logged: the log line `provider_http_refusal` /
+  `provider_quota_refusal` has the kind, vendor code and type only. The pane prints one
+  "▸ Ask the helper to fix this" link a turn for an issue that is not a rate limit or an overload,
+  which sends the failure to the Options › Models helper; a spent window with `resets_at` marks
+  that preset exhausted until then.
+- **A rotated stored key is read again (#QK2Q, #9R2V).** A key that came from the keyring
+  (`ProviderConfig.key_source`) is looked up again on a 401/403, and the request is sent once more
+  when the keyring now holds a different key; a key that is a JWT already past its `exp` is looked
+  up again before the request. A key typed into the request is never swapped.
+- **Failover skips spent providers.** The failover walk and a side call's chain skip a preset this
+  pane holds a quota refusal for, or whose last fresh quota report (`provider_limits` for the
+  Coding Plan and Kimi Code, a guest's `usage_limits`) has a window at 100% before its reset; the
+  note says what it skipped and why, and the worker logs `provider_failover_skip`.
 - `set_effort {effort}` → event `effort_changed {effort, applied: {...provider params}}`.
 
 ## 3. Effort levels (v3.11, 2026-09-21: the model's own words)

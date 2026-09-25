@@ -138,6 +138,7 @@ def provider_config(request: dict) -> ProviderConfig:
     # Only the preset's own endpoint is hosted; a request that names it and points elsewhere is a
     # custom endpoint that needs a key like any other.
     is_hosted = bool(preset is not None and preset.hosted and base_url == preset.base_url)
+    key_source = ""                    # the keyring entry the key came from (#QK2Q)
     if local or is_hosted:
         api_key = ""
     elif not api_key and request.get("use_stored_key"):
@@ -150,13 +151,14 @@ def provider_config(request: dict) -> ProviderConfig:
         if preset_id == "relay-pro":
             raise ValueError("Relay Pro access codes cannot be used as provider API keys.")
         api_key = keystore.lookup(preset_id) if preset_id else ""
+        key_source = preset_id
         if not api_key:
             raise ValueError(f"No stored key for {provider_name(preset_id, base_url)}. "
                              "Import from Warp or enter a key.")
     config = ProviderConfig(base_url, model, api_key, extra,
                             localmodels.clamp_max_tokens(
                                 request.get("max_tokens", AUTOMATIC_OUTPUT_TOKENS), local),
-                            hosted=is_hosted, **local)
+                            hosted=is_hosted, key_source=key_source if api_key else "", **local)
     config.validate()
     return config
 

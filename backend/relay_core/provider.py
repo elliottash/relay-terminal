@@ -388,16 +388,21 @@ class ProviderError(RuntimeError):
     ``code`` identifies a recognised refusal; ``resets_at`` is a Unix timestamp only when
     the service supplies an unambiguous reset instant. Provider-local times are display-only.
     """
-    def __init__(self, text: str = "", code: str = "", resets_at: int | None = None):
+    def __init__(self, text: str = "", code: str = "", resets_at: int | None = None,
+                 issue: dict | None = None):
         super().__init__(text)
         self.code = code
         self.resets_at = resets_at
+        # What was recognised in the refusal (provider_errors.Issue.as_event): kind, label,
+        # preset, model, host, status, hint, resets_at. None when nothing was.
+        self.issue = issue
 
 
 class ProviderQuotaExhausted(ProviderError):
     """A recognised exhausted account quota, distinct from transient HTTP 429."""
-    def __init__(self, text: str, retry_after_s: float):
-        super().__init__(text, code="provider_quota_exhausted")
+    def __init__(self, text: str, retry_after_s: float, resets_at: int | None = None,
+                 issue: dict | None = None):
+        super().__init__(text, code="provider_quota_exhausted", resets_at=resets_at, issue=issue)
         self.retry_after_s = retry_after_s
 
 
@@ -582,6 +587,11 @@ class ProviderConfig:
     # Relay's own hosted service (hosted.py, the relay-free preset): no key is stored, because the
     # transport takes a short-lived bearer token before each call. Only make_provider reads it.
     hosted: bool = False
+    # The keyring id the key was read from, "" for a key typed in or none. Set only where the key
+    # came from `keystore.lookup`: a 401 then reads that entry again, because a login token (Kimi
+    # Code's lasts fifteen minutes) may have been rotated under a pane that looked it up once
+    # (#QK2Q, #9R2V).
+    key_source: str = field(default="", repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Settle ``max_tokens`` at construction, so everything downstream — the request, the
@@ -769,7 +779,7 @@ class ChatProvider:
         return last is not None and not response_closed(last)
 
     # ----- error text ----------------------------------------------------------------
-    def http_message(self, code: int) -> str:
+    def http_message(self, code: int, refusal=None) -> str:
         """One line for an HTTP failure, naming the endpoint that produced it.
 
         The response body is never included: providers quote the request they were sent, key
@@ -785,6 +795,9 @@ class ChatProvider:
         host = urllib.parse.urlsplit(base_url).hostname or base_url
         preset = match_preset(base_url, self.config.model)
         where = f"{self.config.model} at {host}" + (f" ({preset.label})" if preset else "")
+        if refusal is not None and refusal.kind and refusal.kind != "auth":
+            from . import provider_errors
+            return provider_errors.sentence(refusal, where, preset_label=preset.label if preset else host)
         if code in (401, 403):
             return (f"Provider HTTP {code}: the API key was rejected for {where}. "
                     "The stored key is missing, wrong, belongs to a different endpoint of the same "
@@ -857,6 +870,7 @@ class ChatProvider:
                                     "or fewer of them.")
             raise ProviderError("Conversation exceeds the local request size limit. Start a new conversation.")
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream", "User-Agent": "Relay/0.1"}
+        self._fresh_key()
         if self.config.api_key:
             headers["Authorization"] = "Bearer " + self.config.api_key
         request = urllib.request.Request(self.config.base_url.rstrip("/") + "/chat/completions",
@@ -1005,12 +1019,22 @@ class ChatProvider:
                 raise ProviderQuotaExhausted(str(quota), deadline - time.monotonic())
             self._quota_refusal = None
         loading_announced = False
+        key_reloaded = False
         origin = self._retry_origin if self._retry_origin is not None else started
         retries = self._retries_used
         while True:
             try:
                 return opener.open(request, timeout=self.open_timeout)
             except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403) and not key_reloaded and self._reload_stored_key(f"http_{exc.code}"):
+                    # The keyring holds a different key than this pane read (a rotated login
+                    # token): send the same request once more with it, before calling it refused.
+                    key_reloaded = True
+                    if getattr(exc, "fp", None) is not None:
+                        hard_close(exc.fp)
+                    request.add_header("Authorization", "Bearer " + self.config.api_key)
+                    emit({"event": "status", "text": "The stored key had changed · asking again with the new one"})
+                    continue
                 quota = self._coding_quota_error(exc)
                 if quota is not None:
                     self._quota_refusal = (identity, time.monotonic() + quota.retry_after_s, quota)
@@ -1033,7 +1057,9 @@ class ChatProvider:
                     delay = None if cancel.is_set() else self._http_retry_wait(
                         exc, retries + 1, time.monotonic() - origin)
                     if delay is not None:
-                        note = (f"Provider HTTP {exc.code} · asking again in {self._wait_text(delay)} s "
+                        refusal = None if self.config.local else self._refusal(exc)
+                        said = f" ({refusal.label})" if refusal is not None and refusal.kind else ""
+                        note = (f"Provider HTTP {exc.code}{said} · asking again in {self._wait_text(delay)} s "
                                 f"(retry {retries + 1} of {self.HTTP_RETRY_ATTEMPTS})")
                         # `status` is what was refused: the pane reads a 429 that the retries
                         # never cleared as a spent subscription (owner, 2026-09-20).
@@ -1045,9 +1071,12 @@ class ChatProvider:
                     raise
                 retries += 1
                 self._retries_used = retries
+                refusal = None if self.config.local else self._refusal(exc)
                 logs.event(_log, "provider_http_retry", level_name="error",
                            model=self.config.model, host=_host(self.config.base_url),
-                           status=exc.code, attempt=retries, wait_s=round(delay, 2))
+                           status=exc.code, attempt=retries, wait_s=round(delay, 2),
+                           kind=(refusal.kind if refusal else "") or "unrecognised",
+                           vendor_code=refusal.vendor_code if refusal else "")
                 if getattr(exc, "fp", None) is not None:
                     hard_close(exc.fp)
                 self._note_progress()
@@ -1159,42 +1188,118 @@ class ChatProvider:
         """A wait as the status line shows it: ``8``, ``0.5``, ``0``."""
         return f"{seconds:.1f}".rstrip("0").rstrip(".") or "0"
 
-    def _coding_quota_error(self, exc) -> ProviderQuotaExhausted | None:
-        """Recognise Z.AI's permanent Coding Plan refusal; never echo its arbitrary body."""
-        if exc.code != 429 or _host(self.config.base_url) != "api.z.ai":
-            return None
+    def _refusal(self, exc):
+        """What this refusal says (provider_errors.classify), worked out once per exception."""
+        cached = getattr(exc, "_relay_refusal", None)
+        if cached is not None:
+            return cached
+        from . import provider_errors
+        from .presets import match_preset
+        preset = None if self.config.local else match_preset(self.config.base_url, self.config.model)
+        poll = None
+        if preset is not None:
+            from . import provider_limits
+            if preset.id in provider_limits.PRESETS:
+                poll = provider_limits.last(preset.id) or None
+        refusal = provider_errors.classify(exc, host=_host(self.config.base_url),
+                                           api_key=self.config.api_key, poll=poll)
         try:
-            body = json.loads(exc.read(8192))
-            error = body.get("error", {}) if isinstance(body, dict) else {}
-            if not isinstance(error, dict) or str(error.get("code")) != "1310":
-                return None
-            message = str(error.get("message", ""))
-            reset = re.search(r"reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", message)
-            when = ""
-            # Provider time has no timezone. Never guess the machine's zone or invent a Unix
-            # reset. Suppress for at most a minute, and never beyond the earliest possible
-            # reset (UTC+14). At/after that boundary, let the service decide again.
-            cooldown = 60.0
-            if reset:
-                try:
-                    wall = datetime.strptime(reset.group(1), "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    pass
-                else:
-                    when = f" Resets at {reset.group(1)} (provider time)."
-                    earliest = wall.replace(tzinfo=timezone(timedelta(hours=14))).timestamp()
-                    cooldown = min(cooldown, max(0.0, earliest - time.time()))
-            return ProviderQuotaExhausted(
-                f"Z.AI Coding Plan quota exhausted for {self.config.model}.{when} "
-                "Choose another provider or wait for the quota reset.", cooldown)
-        except (ValueError, OSError, AttributeError):
+            exc._relay_refusal = refusal
+        except AttributeError:
+            pass
+        return refusal
+
+    def _issue(self, refusal) -> dict | None:
+        """The structured failure the agent and the pane read (protocol: `issue`)."""
+        if refusal is None or not refusal.kind:
             return None
+        from . import provider_errors
+        from .presets import match_preset
+        preset = None if self.config.local else match_preset(self.config.base_url, self.config.model)
+        host = _host(self.config.base_url)
+        return provider_errors.Issue(
+            kind=refusal.kind, label=refusal.label, preset=preset.id if preset else "",
+            model=self.config.model, host=host, status=refusal.status, resets_at=refusal.resets_at,
+            hint=provider_errors.hint(refusal.kind, preset_label=preset.label if preset else host,
+                                      token_expired_at=refusal.token_expired_at),
+            extra={"vendor_code": refusal.vendor_code} if refusal.vendor_code else {}).as_event()
+
+    def _coding_quota_error(self, exc) -> ProviderQuotaExhausted | None:
+        """A refusal that asking again soon cannot change — a spent 5-hour, weekly or monthly
+        window, an empty balance, an expired plan — as ProviderQuotaExhausted, or None.
+
+        This began as Z.AI's 1310 alone (#YJG7); #QK2Q found its 5-hour limit, code 1308, being
+        retried six times a turn. Classification is `provider_errors.classify`, and the body is
+        matched, never echoed. When the provider's zone is known (Z.AI's X-LOG-ID header, or the
+        quota poll naming the same reset) the refusal carries the instant and holds until then,
+        re-asked every 15 minutes; otherwise the old rule stands — provider time has no zone, so
+        suppress for at most a minute and never beyond the earliest possible reset (UTC+14).
+        """
+        if exc.code not in (402, 429) or self.config.local:
+            return None
+        refusal = self._refusal(exc)
+        if not refusal.final:
+            return None
+        now = time.time()
+        if refusal.resets_at:
+            cooldown = min(900.0, max(0.0, refusal.resets_at - now))
+        else:
+            cooldown = 60.0
+            if refusal.provider_reset:
+                wall = datetime.strptime(refusal.provider_reset, "%Y-%m-%d %H:%M:%S")
+                earliest = wall.replace(tzinfo=timezone(timedelta(hours=14))).timestamp()
+                cooldown = min(cooldown, max(0.0, earliest - now))
+        message = self.http_message(exc.code, refusal)
+        logs.event(_log, "provider_quota_refusal", level_name="warning", model=self.config.model,
+                   host=_host(self.config.base_url), status=exc.code, cooldown_s=round(cooldown, 1),
+                   **refusal.log_fields())
+        return ProviderQuotaExhausted(message, cooldown, resets_at=refusal.resets_at,
+                                      issue=self._issue(refusal))
+
+    def _reload_stored_key(self, reason: str) -> bool:
+        """Read the key's keyring entry again; True when it now holds a different key.
+
+        For a key that came from the keyring (``config.key_source``) and was refused, or is a
+        login token already past its expiry. The config object is shared with the agent's own
+        copy, so the next provider built from it — a failover's return, a subagent — has it too.
+        """
+        source = self.config.key_source
+        if not source or self.config.local:
+            return False
+        try:
+            from . import keystore
+            fresh = keystore.lookup(source)
+        except Exception as exc:                        # a locked keyring is not a turn failure
+            logs.event(_log, "provider_key_reload_failed", level_name="warning", preset=source,
+                       reason=reason, error=type(exc).__name__)
+            return False
+        if not fresh or fresh == self.config.api_key:
+            logs.event(_log, "provider_key_reload", preset=source, reason=reason, changed=False)
+            return False
+        self.config.api_key = fresh
+        logs.event(_log, "provider_key_reload", preset=source, reason=reason, changed=True)
+        return True
+
+    def _fresh_key(self) -> None:
+        """Before a request: a stored login token that has already expired is re-read first."""
+        if not self.config.key_source or not self.config.api_key:
+            return
+        from . import provider_errors
+        expiry = provider_errors.jwt_expiry(self.config.api_key)
+        if expiry is not None and expiry[0] <= time.time() + 30:
+            self._reload_stored_key("token_expired")
 
     def _http_error(self, exc) -> ProviderError:
         """The ProviderError for an HTTP failure. Only the status survives, plus the one phrase a
         local server's overflow body is matched for; HostedChatProvider reads Relay's own body."""
-        return ProviderError(self._local_http_reason(exc) or self.http_message(exc.code),
-                             code="provider_rate_limited" if exc.code == 429 else "")
+        refusal = None if self.config.local else self._refusal(exc)
+        if refusal is not None:
+            logs.event(_log, "provider_http_refusal", level_name="error", model=self.config.model,
+                       host=_host(self.config.base_url), status=exc.code, **refusal.log_fields())
+        return ProviderError(self._local_http_reason(exc) or self.http_message(exc.code, refusal),
+                             code="provider_rate_limited" if exc.code == 429 else "",
+                             resets_at=refusal.resets_at if refusal is not None else None,
+                             issue=self._issue(refusal))
 
     def _local_http_reason(self, exc) -> str | None:
         """A sentence for a local server's 4xx, or None. Only a *recognised* phrase survives: the

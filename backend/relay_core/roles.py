@@ -752,7 +752,10 @@ class RoleResolver:
             extra, _ = apply_effort(extra, effort_style(preset, extra, base_url), effort)
         config = ProviderConfig(base_url, model, "" if local else key, extra,
                                 localmodels.clamp_max_tokens(self.main_config.max_tokens, local),
-                                hosted=is_hosted, **local)
+                                hosted=is_hosted,
+                                # The keyring entry it came from, so a 401 can read it again (#QK2Q).
+                                key_source=preset_id if key and not local and preset_id else "",
+                                **local)
         config.validate()
         return Resolved(role, config, preset_id, effort, source, tier=tier)
 

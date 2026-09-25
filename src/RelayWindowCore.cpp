@@ -1030,6 +1030,27 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         pane->onOpenModelsPane = [guard](const relay::ModelsPane::Target &target, const QString &tab, const QString &filter) {
             if (auto *w = windowOf(guard)) w->openModelsPaneFor(guard, target, tab, filter);
         };
+        // "▸ Ask the helper to fix this" under a provider failure (#QK2Q): Models › Providers beside
+        // this pane, and the failure sent to its helper — drafted instead while that helper runs on
+        // a guest or has no model yet, the way the guest-account setup offer does it.
+        pane->onAskModelsHelper = [guard](const QString &prompt) {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            w->openModelsPaneFor(guard, guard->modelsTarget(), relay::ModelsPane::providersTab(), QString());
+            auto *view = modelsViewOf(modelsPaneIn(w->m_tabs->currentWidget()));
+            if (!view) return;
+            view->focusHelper();
+            if (auto *console = dynamic_cast<Pane *>(view->agentConsole().widget))
+                QTimer::singleShot(800, console, [w, console, prompt] {
+                    const QString preset = console->currentPreset();
+                    if (console->agentReady() && !preset.isEmpty() && !preset.startsWith(QStringLiteral("guest:")))
+                        console->askAgent(prompt);
+                    else {
+                        console->draftInComposer(prompt);
+                        w->notice(QStringLiteral("The failure is drafted in the Models helper; choose a model for it and send."));
+                    }
+                });
+        };
         // `/profile` swapped the five lists: the same two steps a switch on Options › Models takes.
         pane->onProfileApplied = [guard] {
             if (auto *w = windowOf(guard)) w->modelsCurated();

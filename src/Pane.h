@@ -917,6 +917,9 @@ public:
     // door a pick takes back into it — and the window opens, re-targets or closes the one pane its
     // window has. Unset (a console with no window behind it) and the keys say so instead.
     std::function<void(const relay::ModelsPane::Target &target, const QString &tab, const QString &filter)> onOpenModelsPane;
+    // "▸ Ask the helper to fix this" under a provider failure the worker recognised (#QK2Q): the
+    // window opens Options › Models › Providers beside this pane and sends `prompt` to its helper.
+    std::function<void(const QString &prompt)> onAskModelsHelper;
     // The worker resolved the roles again (`model_roles`, and the table `configured` carries): an
     // open models pane re-reads its target, so the jobs tab's "runs on" column follows the report
     // (card #MDL1, design 5.9). Fired only on those two events, which is a handful a minute at
@@ -4001,6 +4004,7 @@ public:
             const QUrl url(target);
             const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
             if (url.host() == QStringLiteral("continue")) { continueTurn(true); return; }
+            if (url.host() == QStringLiteral("fix-provider")) { askHelperAboutIssue(); return; }
             // "Remember: … Keep · Edit · No" (#MEMS): relay://memory/<pane>/<keep|edit|no>/<id>.
             if (url.host() == QStringLiteral("memory") && parts.size() == 3) {
                 decideMemorySuggestion(parts.at(1), QUrl::fromPercentEncoding(parts.at(2).toUtf8()));
@@ -10571,6 +10575,12 @@ private:
         const QString line = m_ledger.turnEndLine();
         if (!line.isEmpty()) { ensureLineStart(); printInline(QStringLiteral("✦ ") + line + QStringLiteral("  · /tasks\n"), Ink::Note); }
     }
+
+    // A provider failure the worker recognised (`issue` on provider_retry / error, #QK2Q): a spent
+    // window with its reset marks that preset exhausted until then, and an actionable one (not a
+    // transient rate limit) gets one "▸ Ask the helper to fix this" line per turn. PaneEvents.cpp.
+    void noteProviderIssue(const QJsonObject &issue, const QString &turnId);
+    void askHelperAboutIssue();
 
     // "▸ Continue" as a terminal hyperlink (relay://continue/<pane>), like the tool-calls link.
     // The link text is white (owner, 2026-09-18): it continues the agent's turn, so it sits with
@@ -17648,6 +17658,8 @@ private:
     QHash<QString, qint64> m_resetsExpireAt;   // their earliest use-by, unix seconds (#KQNP)
     bool m_turnSaw429 = false;
     QString m_failoverTarget;   // the preset the last failover of this turn moved to
+    QJsonObject m_providerIssue;  // the last recognised provider failure (#QK2Q)
+    QString m_issueOfferedTurn;   // the turn that already printed its "Ask the helper" line
     bool m_configuring = false;
     bool m_restartConfigure = false, m_configureAutoRetried = false;
     QJsonObject m_lastConfigure;

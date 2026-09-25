@@ -2080,6 +2080,9 @@ class Agent:
         def spare():
             while entries:
                 target = self.roles.fallback_candidate(entries.pop(0), resolved.tier, tried, hosts, role=role)
+                if target is not None and self._spent_reason(target.preset_id):
+                    tried.add(target.preset_id)
+                    continue
                 if target is not None:
                     tried.add(target.preset_id)
                     hosts.add(_host(target.config.base_url))
@@ -3016,6 +3019,8 @@ class Agent:
                 # user's own (protocol 13.9).
                 failed["code"] = reported.code
                 failed["resets_at"] = reported.resets_at
+            if isinstance(reported, ProviderError) and reported.issue:
+                failed["issue"] = reported.issue      # what the pane offers the helper for (#QK2Q)
             self._end_turn(record, failed)
         finally:
             # A turn that ended without _end_turn (an exception) still files its usage (#0C0V).
@@ -3515,6 +3520,30 @@ class Agent:
         from . import guest_harness_provider as ghp
         return ghp.config_preset(self.config)
 
+    def _spent_reason(self, preset: str | None) -> str:
+        """Why ``preset`` cannot take a turn right now — a refusal this pane is holding, or a spent
+        window in its provider's last fresh quota report — or "" when it can (#QK2Q)."""
+        if not preset:
+            return ""
+        try:
+            from . import provider_errors
+            from .roles import _usage_weight
+            if self._quota_hold_active(preset):
+                hold = self._quota_blocked.get(preset) or {}
+                when = hold.get("resets_at")
+                return "usage limit reached" + (f"; resets {provider_errors.when_text(when)}" if when else "")
+            if _usage_weight(preset) != 0:
+                return ""
+            from . import guest_harness_provider as ghp
+            if is_guest_preset(preset):
+                limits = ghp.last_limits(ghp.preset_key(preset))
+            else:
+                from . import provider_limits
+                limits = provider_limits.last(preset)
+            return provider_errors.spent_text(limits) or "usage limit reached"
+        except Exception:                               # routing must never break a turn
+            return ""
+
     def _mark_quota_hold(self, exc: ProviderError) -> None:
         preset = self._routing_preset()
         if not preset:
@@ -3613,6 +3642,7 @@ class Agent:
         if self.provider is not swap["provider"] and isinstance(self.provider, ghp.HarnessProvider):
             self.provider.close()
         from_model = self.config.model
+        from_name = _provider_name(from_model, self.preset)
         self._ensure_no_open_response(record["turn_id"], "quota_failover")
         self._close_thinking(record)
         swap["tried"].add(target.preset_id)
@@ -3631,11 +3661,20 @@ class Agent:
         swap["names"].append(_provider_name(target.config.model, target_preset))
         swap["last_model"], swap["last_preset"] = target.config.model, target.preset_id
         record["retries"] = record.get("retries", 0) + 1
+        issue = getattr(exc, "issue", None)
+        said = issue.get("label") if issue else ""
+        if issue and issue.get("resets_at"):
+            from . import provider_errors
+            said += f"; resets {provider_errors.when_text(issue['resets_at'])}"
         self.emit({"event": "provider_retry", "turn_id": record["turn_id"],
                    "reason": "quota_exhausted", "attempt": swap["switches"],
                    "max_attempts": swap["max_attempts"], "from_model": from_model,
+                   "from_preset": current or "",
                    "to_model": target.config.model, "to_preset": target.preset_id,
-                   "step": step, "text": "Usage exhausted; continuing on another subscription."})
+                   "step": step,
+                   "text": (f"{from_name}: {said or 'usage exhausted'}; continuing this turn on "
+                            f"{swap['names'][-1]}."),
+                   **({"issue": issue} if issue else {})})
         return True
 
     def _next_plan_model(self, exc: Exception, record: dict, step: int) -> bool:
@@ -3791,10 +3830,22 @@ class Agent:
             # same terms as any candidate, and one that cannot take the turn — no key, the failing
             # host, a preset already asked, a guest — is skipped silently for the next.
             target, twin = None, False
+            skipped = []
             while target is None and swap["next"] < len(swap["fallbacks"]):
                 entry = swap["fallbacks"][swap["next"]]
                 swap["next"] += 1
                 target = self.roles.fallback_candidate(entry, swap["tier"], swap["tried"], swap["hosts"])
+                # A provider whose own quota report (or an earlier refusal this pane saw) says a
+                # window is spent is no spare: #QK2Q watched a Kimi 401 fail over onto a Z.AI plan
+                # whose 5-hour window the poll already had at 100%, six refusals every turn.
+                spent = self._spent_reason(target.preset_id) if target is not None else ""
+                if spent:
+                    swap["tried"].add(target.preset_id)
+                    skipped.append(f"{_provider_name(target.config.model, resolve_preset(target.preset_id, target.config.base_url, target.config.model))}: {spent}")
+                    logs.event(_log, "provider_failover_skip", session=self.session_id,
+                               turn=record["turn_id"], preset=target.preset_id,
+                               model=target.config.model, reason=spent)
+                    target = None
             # Then the same model on OpenRouter, for a model the user opted in by id, and then
             # nothing: the list is the whole of where a turn may go. The resolver checks the rest:
             # a twin exists, the OpenRouter key is stored, and the failing host is not
@@ -3846,22 +3897,31 @@ class Agent:
         # The OpenRouter twin is said as what it is — the same model, through OpenRouter — because
         # that is what the user opted in per model, and "z-ai/glm-5.3 (openrouter · …)" alone
         # reads like a different model on a router.
+        # Say *why* when the refusal was recognised (#QK2Q): "login token expired" or "5-hour usage
+        # limit reached; resets 17:53" is something the user can act on; "keeps failing" is not.
+        issue = getattr(exc, "issue", None) if isinstance(exc, ProviderError) else None
+        failing = (f"{from_name} failed ({issue['label']})" if issue and issue.get("label")
+                   else f"{from_name} keeps failing")
         if target.config.hosted:
-            text = (f"{from_name} keeps failing; continuing this turn on Relay's hosted service "
+            text = (f"{failing}; continuing this turn on Relay's hosted service "
                     f"({to_name}).")
         elif twin:
-            text = (f"{from_name} keeps failing; continuing this turn on the same model through "
+            text = (f"{failing}; continuing this turn on the same model through "
                     f"OpenRouter ({to_name}).")
         else:
-            text = f"{from_name} keeps failing; continuing this turn on {to_name}."
+            text = f"{failing}; continuing this turn on {to_name}."
+        if skipped:
+            text += " Skipped " + "; ".join(skipped) + "."
         logs.event(_log, "provider_failover", session=self.session_id, turn=record["turn_id"],
                    step=step, from_model=from_model, from_preset=from_preset,
                    to_model=target.config.model, to_preset=target.preset_id or "",
                    host=_host(target.config.base_url), error=str(exc)[:160])
         self.emit({"event": "provider_retry", "turn_id": record["turn_id"], "reason": "failover",
                    "attempt": swap["switches"], "max_attempts": swap["max_attempts"],
-                   "from_model": from_model, "to_model": target.config.model,
-                   "to_preset": target.preset_id or "", "step": step, "text": text})
+                   "from_model": from_model, "from_preset": from_preset,
+                   "to_model": target.config.model,
+                   "to_preset": target.preset_id or "", "step": step, "text": text,
+                   **({"issue": issue} if issue else {})})
         self.emit({"event": "status",
                    "text": f"{from_name} failed · continuing on {to_name}"})
         return True
