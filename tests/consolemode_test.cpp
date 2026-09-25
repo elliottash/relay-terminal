@@ -20,9 +20,14 @@
 
 #include "Pane.h"
 #include "Images.h"
+#include "RemoteShare.h"
+#include "RemoteSettings.h"
 
 #include <QApplication>
 #include <QComboBox>
+#include <QElapsedTimer>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QPointer>
@@ -2022,6 +2027,59 @@ int main(int argc, char **argv)
     QCoreApplication::setOrganizationName(QStringLiteral("RelayTerminal"));
     QCoreApplication::setApplicationName(QStringLiteral("relay"));
     QApplication app(argc, argv);
+
+    // --repeat N (card #8ABD): re-run an --X-only filter N times and print a summary, so a
+    // stability check is one call rather than a shell `for` loop re-running the whole binary.
+    int repeat = 1;
+    const QStringList cliArgs = app.arguments();
+    const int repeatAt = cliArgs.indexOf(QStringLiteral("--repeat"));
+    if (repeatAt >= 0) {
+        bool ok = false;
+        const int parsed =
+            repeatAt + 1 < cliArgs.size() ? cliArgs.at(repeatAt + 1).toInt(&ok) : 0;
+        bool hasFilter = false;
+        for (const QString &arg : cliArgs)
+            if (arg.startsWith(QStringLiteral("--")) && arg.endsWith(QStringLiteral("-only")))
+                hasFilter = true;
+        if (!ok || parsed < 1 || !hasFilter) {
+            std::fprintf(stderr,
+                         "--repeat N: N must be a positive count and an --X-only filter must be "
+                         "given\n");
+            return 2;
+        }
+        repeat = qMin(parsed, 200);
+    }
+
+    // Runs one filter's cases. repeat == 1 keeps the single-run output byte-identical; with
+    // --repeat N it counts the iterations that added no failures and prints
+    // "<label>: P/N passed (<elapsed> ms)", exiting 1 if any iteration failed.
+    auto runRepeated = [&repeat](const char *label, const char *passedLine, auto &&body) -> int {
+        if (repeat == 1) {
+            body();
+            if (!failures && passedLine)
+                std::fprintf(stdout, "%s\n", passedLine);
+            return failures ? 1 : 0;
+        }
+        int passed = 0;
+        QElapsedTimer timer;
+        timer.start();
+        for (int i = 0; i < repeat; ++i) {
+            const int before = failures;
+            QElapsedTimer iter;
+            iter.start();
+            body();
+            if (qEnvironmentVariableIsSet("RELAY_REPEAT_VERBOSE"))
+                std::fprintf(stderr, "  iter %d: %lld ms%s\n", i + 1,
+                             static_cast<long long>(iter.elapsed()),
+                             failures == before ? "" : " (FAILED)");
+            if (failures == before)
+                ++passed;
+        }
+        std::fprintf(stdout, "%s: %d/%d passed (%lld ms)\n", label, passed, repeat,
+                     static_cast<long long>(timer.elapsed()));
+        return passed == repeat ? 0 : 1;
+    };
+
     if (app.arguments().contains(QStringLiteral("--queue-arrow-only"))) {
         QTemporaryDir queueScratch;
         CHECK(queueScratch.isValid());
@@ -2044,63 +2102,66 @@ int main(int argc, char **argv)
     }
 
     if (app.arguments().contains(QStringLiteral("--recall-only"))) {
-        relay::theme::applyTheme(app);
-        cases::recallPromptCases();
-        cases::recallAfterAToolCallCases();
-        if (!failures) std::fprintf(stdout, "recall: all cases passed\n");
-        return failures ? 1 : 0;
+        return runRepeated("recall", "recall: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::recallPromptCases();
+            cases::recallAfterAToolCallCases();
+        });
     }
 
     if (app.arguments().contains(QStringLiteral("--xcxd-only"))) {
-        relay::theme::applyTheme(app);
-        cases::xcxdQueueCases();
-        cases::xcxdReviewCases();
-        cases::xcxdUiCases();
-        cases::xcxdContextCases();
-        if (!failures) std::fprintf(stdout, "queuecontract: all cases passed\n");
-        return failures ? 1 : 0;
+        return runRepeated("xcxd", "queuecontract: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::xcxdQueueCases();
+            cases::xcxdReviewCases();
+            cases::xcxdUiCases();
+            cases::xcxdContextCases();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--model-queue-only"))) {
-        relay::theme::applyTheme(app);
-        cases::modelQueueCases();
-        if (!failures) std::fprintf(stdout, "modelqueue: all cases passed\n");
-        return failures ? 1 : 0;
+        return runRepeated("modelqueue", "modelqueue: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::modelQueueCases();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--h2kq-only"))) {
-        relay::theme::applyTheme(app);
-        cases::h2kqCases();
-        cases::h2kqQueueLabelCases();
-        if (!failures) std::fprintf(stdout, "h2kq: all cases passed\n");
-        return failures ? 1 : 0;
+        return runRepeated("h2kq", "h2kq: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::h2kqCases();
+            cases::h2kqQueueLabelCases();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--234z-only"))) {
-        relay::theme::applyTheme(app);
-        cases::z234zCases();
-        if (!failures) std::fprintf(stdout, "234z: all cases passed\n");
-        return failures ? 1 : 0;
+        return runRepeated("234z", "234z: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::z234zCases();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--composer-only"))) {
         // Themed, because the box's face — surface fill, rounded border, copper accent when a
         // relay is active — comes from the theme sheet; the case exists to keep that wiring
         // intact (#6JS0).
-        relay::theme::applyTheme(app);
-        cases::theComposerKeepsItsThemeName();
-        if (!failures) std::fprintf(stdout, "composer: all cases passed\n");
-        return failures ? 1 : 0;
+        return runRepeated("composer", "composer: all cases passed", [&app] {
+            relay::theme::applyTheme(app);
+            cases::theComposerKeepsItsThemeName();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--memory-only"))) {
-        cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
-        return failures ? 1 : 0;
+        return runRepeated("memory", nullptr, [] {
+            cases::aMemorySuggestionIsKeptEditedOrRejectedFromTheTranscript();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--plan-click-only"))) {
-        cases::enteringPlanSelectsHigh();
-        cases::clickingPlanLeavesModeAndPreservesDraft();
-        cases::planWhileConfiguringSelectsHighBeforeMode();
-        return failures ? 1 : 0;
+        return runRepeated("plan-click", nullptr, [] {
+            cases::enteringPlanSelectsHigh();
+            cases::clickingPlanLeavesModeAndPreservesDraft();
+            cases::planWhileConfiguringSelectsHighBeforeMode();
+        });
     }
     if (app.arguments().contains(QStringLiteral("--activity-history-only"))) {
-        cases::openingActivityReplaysCompletedTurnsWithoutReprintingThem();
-        return failures ? 1 : 0;
+        return runRepeated("activity-history", nullptr, [] {
+            cases::openingActivityReplaysCompletedTurnsWithoutReprintingThem();
+        });
     }
 
     cases::aContextWithoutAShellStartsNoProgram();
