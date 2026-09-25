@@ -129,7 +129,13 @@ void Pane::buildUi() {
             if (m_login.active) {
                 if (loginReachable() && !m_login.cwd.isEmpty()) onOpenPath(relay::remote::folderUrl(loginHost(), m_login.cwd), 0);
                 else status(QStringLiteral("Remote folder is not available until the SSH shell is ready."));
-            } else onOpenPath(m_cwd, 0);
+                return;
+            }
+            // Shift+click hands the chip's folder to the system file manager (#KKYC's Shift
+            // chord, owner 2026-09-25), as a Shift+click on a folder link in the output does;
+            // a plain click keeps opening the explorer pane.
+            if (QApplication::queryKeyboardModifiers() & Qt::ShiftModifier) { openPathExternally(m_cwd); return; }
+            onOpenPath(m_cwd, 0);
         });
         routeRow->addWidget(m_cwdChip);
         m_shareChip = new QToolButton;

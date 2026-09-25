@@ -16925,7 +16925,7 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
             const QFontMetrics metrics(m_cwdChip->font());
             m_cwdChip->setText(metrics.elidedText(shown, Qt::ElideLeft, 260));
             m_cwdChip->setToolTip(QStringLiteral("Terminal: ") + (m_login.active ? shown : m_cwd) + QStringLiteral("\nAgent workspace: ") + m_workspace
-                                  + QStringLiteral("\nClick to open it in an explorer pane"));
+                                  + QStringLiteral("\nClick to open it in an explorer pane, Shift+click in the file manager"));
         }
         if (!m_cwdLabel) return;
         const QString home = QDir::homePath();
