@@ -95,6 +95,11 @@ NO_LIST_TOOL_CALLS = 4
 # said again. Silent when nothing is open, and never sent to a subagent (it has no ledger).
 RECITE_STEPS = 25
 RECITE_TOOL_CALLS = 50
+# The cadence alone is not enough to recite (card #VQXA): a turn working steadily through one task
+# was told "keep working through the open items" ten times in 193 requests. The recital waits for
+# something that could have pushed the ask out of mind since the last one — a mid-turn compaction,
+# a model takeover, a steer, or a tool call that held the turn at least this long.
+LONG_TOOL_WAIT_S = 30.0
 # How long the trigger-only loop double-check (a Lite-role side call) may hold the turn before its
 # deterministic verdict stands. A check never blocks a turn: the thread is a daemon and abandoned.
 LOOP_CHECK_TIMEOUT_S = 20.0
@@ -2669,7 +2674,7 @@ class Agent:
                # assistant's tool calls and their results. `nudges` counts the ones already sent:
                # past loopdetect.MAX_NUDGES the turn is stopped. `recited_*` are the cadence marks.
                "loop": loopdetect.Detector(), "loop_pattern": None, "nudges": 0, "recent": [],
-               "recited_step": 0, "recited_calls": 0, "prompt": prompt,
+               "recited_step": 0, "recited_calls": 0, "recite_warrant": False, "prompt": prompt,
                # "Say what you are doing" (owner, 2026-09-20). A console draws the agent's
                # *text*, not its tool calls, so a turn that opened three panes and finished with
                # an empty message is indistinguishable from a turn that did not run — which is
@@ -2768,6 +2773,7 @@ class Agent:
                     steered = self.steer_source()
                     if steered:
                         add(self._steer_message(steered, ctx, turn))
+                        ctx["recite_warrant"] = True
                 # A loop the detector found inside the last tool batch is answered here, at the step
                 # boundary: this is the only place a user-role note may join the conversation without
                 # separating an assistant's tool calls from their results (card #2CZP).
@@ -2776,27 +2782,37 @@ class Agent:
                 if pattern is not None and self._handle_loop(record, ctx, pattern, add):
                     self._stop_at_limit(record, ctx, steps, calls_used, pattern=pattern)
                     return
-                if (self._todos_enabled() and ctx["since_todos"] >= STALE_TODO_STEPS
-                        and self.todos.open_items(include_delegated=False)):
-                    add({"role": "user", "content": todo_tool.reminder_text(self.todos.open_items(include_delegated=False),
-                                                                             ctx["since_todos"]),
-                         "relay_kind": "note"})
-                    ctx["since_todos"] = 0
+                open_todos = self.todos.open_items(include_delegated=False) if self._todos_enabled() else []
+                # Staleness: only while something is `pending` (card #VQXA) — an all-in_progress list
+                # is the model's own current statement, and reminding it every 8 steps cost #234Z
+                # 17 notes and as many broken cache prefixes.
+                if open_todos:
+                    if (ctx["since_todos"] >= STALE_TODO_STEPS
+                            and todo_tool.update_reminder_needed(open_todos)):
+                        add({"role": "user", "content": todo_tool.reminder_text(open_todos, ctx["since_todos"]),
+                             "relay_kind": "note"})
+                        self._log_reminder("todos_stale", ctx, steps, calls_used)
+                        ctx["since_todos"] = 0
                 # A turn that has done real work without ever writing a list gets one nudge: the
                 # reminder above cannot fire (no open todos), and nothing else notices. See
                 # todos.no_list_reminder_text.
                 elif (self._todos_enabled() and not ctx["todos_touched"] and not ctx["no_list_note"]
                         and calls_used >= NO_LIST_TOOL_CALLS):
                     add({"role": "user", "content": todo_tool.no_list_reminder_text(calls_used), "relay_kind": "note"})
+                    self._log_reminder("todos_missing", ctx, steps, calls_used)
                     ctx["no_list_note"] = True
                 # Cadence recitation (card #2CZP): with the turn limits raised to a backstop, a long
                 # run's original ask would otherwise sit further and further back in the context.
-                if (steps - ctx["recited_step"] >= RECITE_STEPS
+                # Since card #VQXA the cadence only makes it due; it is said once something happened
+                # that could have displaced the ask (LONG_TOOL_WAIT_S), and the marks wait until then.
+                if ctx["recite_warrant"] and (steps - ctx["recited_step"] >= RECITE_STEPS
                         or calls_used - ctx["recited_calls"] >= RECITE_TOOL_CALLS):
                     ctx["recited_step"], ctx["recited_calls"] = steps, calls_used
+                    ctx["recite_warrant"] = False
                     recital = self._recitation(ctx)
                     if recital:
                         add({"role": "user", "content": recital, "relay_kind": "recitation"})
+                        self._log_reminder("recitation", ctx, steps, calls_used)
                         self.emit({"event": "recitation", "turn_id": turn_id, "steps": steps,
                                    "tool_calls": calls_used})
                 # A model switched mid-turn takes over here, before the next request and before the
@@ -2811,8 +2827,12 @@ class Agent:
                     # `_open_items` then counts its open requests too, which draws the completion
                     # check on a wrap-up instead of ending the turn.
                     ctx["takeover"] = True
+                    ctx["recite_warrant"] = True
                     add({"role": "user", "content": self._takeover_note(applied), "relay_kind": "note"})
+                before_compaction = len(self.messages)
                 self._maybe_compact()
+                if len(self.messages) < before_compaction:
+                    ctx["recite_warrant"] = True
                 self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None
                 try:
@@ -2870,6 +2890,7 @@ class Agent:
                                    "reminder": reminders, "max_reminders": MAX_COMPLETION_REMINDERS})
                         add({"role": "user", "content": self._completion_reminder(open_items, reminders),
                              "relay_kind": "note"})
+                        self._log_reminder("completion", ctx, steps, calls_used)
                         if monologue is not None and self._handle_loop(record, ctx, monologue, add):
                             self._stop_at_limit(record, ctx, steps, calls_used, pattern=monologue)
                             return
@@ -2940,6 +2961,8 @@ class Agent:
                                      "content": json.dumps(result, ensure_ascii=False)})
                                 self._autosave_soon()
                                 ms = int((time.monotonic() - call_started) * 1000)
+                                if ms >= LONG_TOOL_WAIT_S * 1000:
+                                    ctx["recite_warrant"] = True
                                 label = _safe_label(tool_labels.result_label, func["name"], label_args, result, ms=ms)
                                 self._record_tool(record, call["id"], func["name"], preview, result, ms,
                                                   label=label, args=label_args)
@@ -2970,6 +2993,8 @@ class Agent:
                          "content": json.dumps(model_result(func["name"], result), ensure_ascii=False)})
                     self._autosave_soon()
                     ms = int((time.monotonic() - call_started) * 1000)
+                    if ms >= LONG_TOOL_WAIT_S * 1000:
+                        ctx["recite_warrant"] = True
                     label = _safe_label(tool_labels.result_label, func["name"], label_args, result, ms=ms,
                                                      existed=label_existed)
                     self._record_tool(record, call["id"], func["name"], preview, result, ms,
@@ -4245,6 +4270,11 @@ class Agent:
             event["error"] = out["error"]
         self.emit(event)
         return verdict
+
+    def _log_reminder(self, kind: str, ctx: dict, steps: int, calls_used: int) -> None:
+        """One worker-log line per injected reminder, so a turn's count can be measured (card #VQXA)."""
+        logs.event(_log, "reminder_injected", kind=kind, session=self.session_id, turn=ctx["turn_id"],
+                   step=steps, tool_calls=calls_used)
 
     def _recitation(self, ctx: dict) -> str:
         """The cadence reminder's text, or "" when there is nothing open to recite.

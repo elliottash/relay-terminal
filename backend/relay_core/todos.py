@@ -271,6 +271,16 @@ def no_list_reminder_text(tool_calls: int) -> str:
             "are tracked and none is missed; ignore this if it is a single simple ask.]")
 
 
+def update_reminder_needed(open_todos: list[dict]) -> bool:
+    """Whether the staleness reminder below has anything to say (card #VQXA).
+
+    Only a `pending` item can have been forgotten: an `in_progress` one was set by the model itself,
+    so a list of nothing but those is current by construction. Session 3f4a20ad (#234Z) held one
+    `in_progress` todo for 193 requests and was told to update it 17 times.
+    """
+    return any(t.get("status") == "pending" for t in open_todos)
+
+
 def reminder_text(open_todos: list[dict], steps: int) -> str:
     listed = "; ".join(f'{t["id"]} "{t["text"][:80]}" ({t["status"]})' for t in open_todos[:8])
     return (f"[Relay reminder: update_todos has not been used for {steps} steps while tasks are open: {listed}. "

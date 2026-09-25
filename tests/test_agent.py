@@ -654,7 +654,9 @@ class LoopAndRecitationTests(unittest.TestCase):
         events=[]
         fake=self.walking(60, finish_at=60)
         agent=Agent(CONFIG, self.temp.name, events.append, provider=fake, context_window=2_000_000)
-        agent.ask('read all of them and tell me what changed')
+        # Every call counts as a long wait, so the cadence alone decides when (card #VQXA).
+        with mock.patch.object(agent_module, 'LONG_TOOL_WAIT_S', 0.0):
+            agent.ask('read all of them and tell me what changed')
         recited=self.of(events, 'recitation')
         self.assertEqual([e['steps'] for e in recited], [25, 50])
         notes=[m for m in agent.messages if m.get('relay_kind') == 'recitation']
@@ -681,7 +683,9 @@ class LoopAndRecitationTests(unittest.TestCase):
                                   for i in range(10)]}
         agent=Agent(CONFIG, self.temp.name, events.append, provider=ScriptedProvider(plan),
                     context_window=2_000_000)
-        agent.ask('read them all in batches and report')
+        # Every call counts as a long wait, so the cadence alone decides when (card #VQXA).
+        with mock.patch.object(agent_module, 'LONG_TOOL_WAIT_S', 0.0):
+            agent.ask('read them all in batches and report')
         recited=self.of(events, 'recitation')
         self.assertTrue(recited, 'a turn past 50 tool calls recites what is still open')
         self.assertLess(recited[0]['steps'], 25)
@@ -701,6 +705,15 @@ class LoopAndRecitationTests(unittest.TestCase):
         sub.ask('read all of them')
         self.assertEqual(self.of(events, 'recitation'), [])
         self.assertEqual([m for m in sub.messages if m.get('relay_kind') == 'recitation'], [])
+
+    def test_the_cadence_alone_recites_nothing(self):
+        # Card #VQXA: 60 quick steps with no compaction, steer, takeover or slow tool. The recital
+        # is due at 25 and 50, but nothing happened that could have displaced the ask.
+        events=[]
+        agent=Agent(CONFIG, self.temp.name, events.append, provider=self.walking(60, finish_at=60),
+                    context_window=2_000_000)
+        agent.ask('read all of them and tell me what changed')
+        self.assertEqual(self.of(events, 'recitation'), [])
 
 
 class GuestAggregateUsageTests(unittest.TestCase):

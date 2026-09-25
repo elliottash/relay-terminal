@@ -399,14 +399,61 @@ class AgentRequestTests(Base):
         agent.ask('a and b')
         self.assertFalse(self.of('completion_check'))
 
-    def test_stale_todo_reminder(self):
-        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 9,
+    def test_single_in_progress_todo_gets_no_stale_reminder(self):
+        """Card #VQXA: one `in_progress` todo for a whole long turn is current by construction.
+
+        The #234Z shape — 193 requests, one in_progress task — drew 17 staleness notes and ~10
+        recitals. Replayed here at 40 steps with no compaction, steer or slow tool: neither fires,
+        and the worker log holds no reminder line."""
+        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 40,
                           default=text('finished'))
         agent = self.agent(provider, completion_check=False)
-        agent.ask('long job')
+        with self.assertLogs('relay.agent', 'INFO') as logged:
+            agent.ask('long job')
+        self.assertEqual([m for m in agent.messages if 'update_todos has not been used' in (m.get('content') or '')], [])
+        self.assertEqual([m for m in agent.messages if m.get('relay_kind') == 'recitation'], [])
+        self.assertFalse([line for line in logged.output if 'reminder_injected' in line])
+
+    def test_stale_todo_reminder_while_an_item_is_pending(self):
+        """A `pending` item may have been forgotten: one reminder per 8 further steps, each logged."""
+        provider = Script([todos_call({'text': 'first', 'status': 'in_progress'},
+                                      {'text': 'second', 'status': 'pending'})] + [forever_tools] * 17,
+                          default=text('finished'))
+        agent = self.agent(provider, completion_check=False)
+        with self.assertLogs('relay.agent', 'INFO') as logged:
+            agent.ask('first and second')
         reminders = [m for m in agent.messages if 'update_todos has not been used for 8 steps' in (m.get('content') or '')]
-        self.assertEqual(len(reminders), 1)
-        self.assertEqual(reminders[0]['relay_kind'], 'note')
+        self.assertEqual(len(reminders), 2)
+        self.assertEqual({m['relay_kind'] for m in reminders}, {'note'})
+        stale = [line for line in logged.output if 'reminder_injected' in line and 'kind=todos_stale' in line]
+        self.assertEqual(len(stale), 2)
+        self.assertIn('step=9 ', stale[0])     # 8 steps after the update_todos at step 1
+
+    def test_recital_waits_for_an_event_after_the_cadence(self):
+        """Card #VQXA: 25 steps make the recital due; only a steer (or compaction, takeover, slow
+        tool) makes it said, once, at that step boundary."""
+        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 40,
+                          default=text('finished'))
+        agent = self.agent(provider, completion_check=False)
+        boundaries = []
+        def steer():
+            boundaries.append(1)
+            return [{'prompt': 'also keep it short', 'ledger_id': None}] if len(boundaries) == 30 else []
+        agent.steer_source = steer
+        with self.assertLogs('relay.agent', 'INFO') as logged:
+            agent.ask('long job')
+        recitals = [i for i, m in enumerate(agent.messages) if m.get('relay_kind') == 'recitation']
+        self.assertEqual(len(recitals), 1)
+        self.assertEqual(agent.messages[recitals[0] - 1].get('relay_kind'), 'steer')
+        self.assertEqual(len([line for line in logged.output if 'kind=recitation' in line]), 1)
+
+    def test_a_slow_tool_call_warrants_the_recital(self):
+        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 30,
+                          default=text('finished'))
+        agent = self.agent(provider, completion_check=False)
+        with mock.patch('relay_core.agent.LONG_TOOL_WAIT_S', 0.0):   # every call counts as a long wait
+            agent.ask('long job')
+        self.assertEqual(len([m for m in agent.messages if m.get('relay_kind') == 'recitation']), 1)
 
     def test_no_list_reminder_when_the_model_never_writes_one(self):
         """A turn doing real work with no todo list gets exactly one nudge (card D8VN).
@@ -430,8 +477,10 @@ class AgentRequestTests(Base):
         agent = self.agent(short, completion_check=False)
         agent.ask('read one file')
         self.assertEqual([m for m in agent.messages if 'update_todos has not been used' in (m.get('content') or '')], [])
-        # A model that does write a list gets the stale reminder instead, never this one.
-        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 9,
+        # A model that does write a list gets the stale reminder instead (while something is pending,
+        # card #VQXA), never this one.
+        provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'},
+                                      {'text': 'then this', 'status': 'pending'})] + [forever_tools] * 9,
                           default=text('finished'))
         agent = self.agent(provider, completion_check=False)
         agent.ask('long job')
