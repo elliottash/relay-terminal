@@ -1686,6 +1686,43 @@ private Q_SLOTS:
         last.clear();
         QVERIFY(AppCommands::catalogChanged(last, light));
     }
+
+    // #BT7C: a provider row's detail carries live usage ("5h 62% left · resets in 2h"), which made
+    // every catalog differ from the last, so the gate above never held and each `presets` event
+    // re-sent the catalog to every worker. The catalog carries `agentDetail` instead, in both the
+    // option and its button actions, and two builds that differ only in the live figure are equal.
+    void theCatalogCarriesTheStableDetailNotTheLiveFigures() {
+        QString live = QStringLiteral("key stored in the keyring · 5h 62% left");
+        app.sections = [&live] {
+            SettingRow row;
+            row.kind = SettingRow::Buttons;
+            row.id = QStringLiteral("provider:acme");
+            row.label = QStringLiteral("acme");
+            row.detail = live;
+            row.agentDetail = QStringLiteral("key stored in the keyring");
+            row.buttonTexts = QStringList{QStringLiteral("test")};
+            row.onButton = [](int) {};
+            return QList<SettingsSection>{SettingsSection{QStringLiteral("models"), QStringLiteral("Models"), {}, {row}}};
+        };
+        const QJsonObject first = app.catalog(QStringLiteral("t1"));
+        bool sawOption = false, sawAction = false;
+        for (const QJsonValue &value : first.value(QStringLiteral("options")).toArray())
+            if (value.toObject().value(QStringLiteral("id")).toString() == QStringLiteral("provider:acme")) {
+                QCOMPARE(value.toObject().value(QStringLiteral("detail")).toString(), QStringLiteral("key stored in the keyring"));
+                sawOption = true;
+            }
+        for (const QJsonValue &value : first.value(QStringLiteral("actions")).toArray())
+            if (value.toObject().value(QStringLiteral("label")).toString() == QStringLiteral("acme · test")) {
+                QCOMPARE(value.toObject().value(QStringLiteral("detail")).toString(), QStringLiteral("key stored in the keyring"));
+                sawAction = true;
+            }
+        QVERIFY(sawOption);
+        QVERIFY(sawAction);
+        QByteArray last;
+        QVERIFY(AppCommands::catalogChanged(last, first));
+        live = QStringLiteral("key stored in the keyring · 5h 61% left");
+        QVERIFY(!AppCommands::catalogChanged(last, app.catalog(QStringLiteral("t1"))));
+    }
 };
 
 QTEST_MAIN(AppCommandsTests)

@@ -147,6 +147,7 @@
 #include <memory>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 // ----- windows, tabs and panes --------------------------------------------------------------
 //
@@ -452,7 +453,8 @@ public:
         // A setting was written anywhere — this window's Options pane, another window's, a dialog,
         // a page reset, an agent — so every worker is sent the catalog again (#FEJQ, §30.2: the
         // block carries current values, and nothing is cached across a refresh).
-        relay::SettingsWatch::instance().listen(this, [this] { sendAppCatalog(); });
+        // Coalesced (#BT7C): a burst of `presets` events from many workers is one fan-out.
+        relay::SettingsWatch::instance().listen(this, [this] { scheduleAppCatalog(); });
         // Cross-pane messaging (#R5TC, protocol 37): every pane registers in the process-wide
         // directory; when the roster settles (250 ms of quiet) each pane pushes it to its worker,
         // so every agent can pane_list the others. The whole-process sweep is paneWithSession's
@@ -1702,7 +1704,31 @@ private:
 
     // The `app` block for a worker in this tab. Rebuilt every time: it carries current values, so
     // a setting the person changed by hand has to reach the agent about to describe it (§30.2).
-    QJsonObject appCatalogFor(QWidget *page) { return appCommands().catalog(tabIdOf(page)); }
+    QJsonObject appCatalogFor(QWidget *page) { return appCatalogForTab(tabIdOf(page)); }
+
+    // During a fan-out each tab's catalog is built once, not once per pane (#BT7C): a window with
+    // 26 panes rebuilt every Options section 26 times per notify, even when the gate then sent
+    // nothing. Outside a fan-out it is built fresh, as §30.2 asks.
+    QJsonObject appCatalogForTab(const QString &tab) {
+        if (!m_fanOutCatalogs) return appCommands().catalog(tab);
+        auto it = m_fanOutCatalogs->constFind(tab);
+        if (it == m_fanOutCatalogs->constEnd()) it = m_fanOutCatalogs->insert(tab, appCommands().catalog(tab));
+        return it.value();
+    }
+    QHash<QString, QJsonObject> *m_fanOutCatalogs = nullptr;
+
+    // A settings change sends the catalog within half a second. The timer is not restarted by
+    // later calls, so a steady stream of changes still goes out twice a second, never starved.
+    void scheduleAppCatalog() {
+        if (!m_appCatalogTimer) {
+            m_appCatalogTimer = new QTimer(this);
+            m_appCatalogTimer->setSingleShot(true);
+            m_appCatalogTimer->setInterval(500);
+            QObject::connect(m_appCatalogTimer, &QTimer::timeout, this, [this] { sendAppCatalog(); });
+        }
+        if (!m_appCatalogTimer->isActive()) m_appCatalogTimer->start();
+    }
+    QTimer *m_appCatalogTimer = nullptr;
 
     // The catalog changed — a setting written anywhere, a key added, the Agent toggle flipped — so
     // every worker of this window is sent the whole block again. It is still the whole block and
@@ -1710,8 +1736,11 @@ private:
     // last got (#J0VY): the old resend-everything behaviour fed a presets → notify → resend →
     // echo loop that put ~50k `app_catalog_updated` events on the GUI thread in three hours.
     void sendAppCatalog() {
+        QHash<QString, QJsonObject> built;
+        QHash<QString, QJsonObject> *outer = std::exchange(m_fanOutCatalogs, &built);
         for (Pane *pane : allPanes()) if (pane) pane->sendAppCatalog();
         sendHelperCatalogs();   // the tab's helper worker runs the same tools (§30.7)
+        m_fanOutCatalogs = outer;
     }
 
     // The helper workers of this window, each sent its own tab's block: the helper is an agent
@@ -1719,7 +1748,7 @@ private:
     void sendHelperCatalogs() {
         for (auto it = m_boardWorkers.cbegin(); it != m_boardWorkers.cend(); ++it)
             if (relay::BoardWorker *worker = it.value().data()) {
-                const QJsonObject app = appCommands().catalog(helperTab(worker));
+                const QJsonObject app = appCatalogForTab(helperTab(worker));
                 // #J0VY: the same brake as `Pane::sendAppCatalog()`, held as a property so it dies
                 // with the worker and a fresh helper always gets its first block.
                 QByteArray last = worker->property("relayLastAppCatalog").toByteArray();

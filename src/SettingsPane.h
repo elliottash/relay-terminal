@@ -73,6 +73,11 @@ struct SettingRow {
     Kind kind = Toggle;
     QString id;                 // stable identity: keeps focus and scroll across rebuilds
     QString label, detail;
+    // What the app catalog (§30.2) carries instead of `detail`, when set: the detail without
+    // figures that change by the minute. The provider rows' "5h 62% left · resets in 2h" made
+    // every catalog differ from the last, so the #J0VY gate never held and each `presets` event
+    // re-sent the catalog to every worker (#BT7C). Options still draws `detail`.
+    QString agentDetail;
     QString aliases;            // extra search terms
     bool checked = false;                                   // Toggle
     std::function<void(bool)> onToggle;

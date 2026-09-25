@@ -284,13 +284,19 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             } else {
                 status = QStringLiteral("no key yet · get one at %1").arg(str(preset, "key_url"));
             }
+            // The agent catalog gets the status without the live figures (#BT7C): they change on
+            // every usage event and every minute, and a catalog that differs is re-sent to every
+            // worker. Options still draws them.
+            const QString note = str(preset, "note").isEmpty() ? QString() : QStringLiteral(" · ") + str(preset, "note").toLower();
+            const QString stableStatus = status + note;
             if (!limits.isEmpty()) status += QStringLiteral(" · ") + limits;
-            if (!str(preset, "note").isEmpty()) status += QStringLiteral(" · ") + str(preset, "note").toLower();
+            status += note;
             relay::SettingRow row;
             row.kind = relay::SettingRow::Buttons;
             row.id = QStringLiteral("provider:") + id;
             row.label = label;
             row.detail = status;
+            if (stableStatus != status) row.agentDetail = stableStatus;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
             row.infoUrl = guest ? (id.startsWith(QStringLiteral("guest:claude")) ? QStringLiteral("https://docs.claude.com/en/docs/claude-code")
                                                                          : QStringLiteral("https://developers.openai.com/codex"))

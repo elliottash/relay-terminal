@@ -465,6 +465,8 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
     app.insert(QStringLiteral("writes_enabled"), !writesEnabled || writesEnabled());
 
     QJsonArray options, actionRows;
+    // A row's stable detail when it has one: live usage figures would make every catalog new (#BT7C).
+    const auto detailOf = [](const SettingRow &row) { return row.agentDetail.isEmpty() ? row.detail : row.agentDetail; };
     const QList<SettingsSection> catalogSections = sections ? sections() : QList<SettingsSection>();
     for (const SettingsSection &section : catalogSections) {
         for (const SettingRow &row : section.rows) {
@@ -492,7 +494,7 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                               {QStringLiteral("section"), section.id},
                               {QStringLiteral("section_label"), section.title},
                               {QStringLiteral("label"), row.label},
-                              {QStringLiteral("detail"), row.detail},
+                              {QStringLiteral("detail"), detailOf(row)},
                               {QStringLiteral("kind"), kindName(row.kind)},
                               // Owner decision 1: every value row except a secret. A button is not
                               // a value; it is an action, and is listed as one below.
@@ -525,7 +527,7 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                     {QStringLiteral("section"), section.title},
                     {QStringLiteral("label"), row.buttonText.isEmpty() ? row.label
                                                 : row.label + QStringLiteral(" · ") + row.buttonText},
-                    {QStringLiteral("detail"), row.detail},
+                    {QStringLiteral("detail"), detailOf(row)},
                     {QStringLiteral("agent_safe"), rowButtonIsAgentSafe(row, 0)}});
             } else if (row.kind == SettingRow::Buttons && row.onButton) {
                 for (int i = 0; i < row.buttonTexts.size(); ++i)
@@ -533,7 +535,7 @@ QJsonObject AppCommands::catalog(const QString &tab) const {
                         {QStringLiteral("key"), rowActionKey(section.id, row.id, i)},
                         {QStringLiteral("section"), section.title},
                         {QStringLiteral("label"), row.label + QStringLiteral(" · ") + row.buttonTexts.at(i)},
-                        {QStringLiteral("detail"), row.detail},
+                        {QStringLiteral("detail"), detailOf(row)},
                         {QStringLiteral("agent_safe"), rowButtonIsAgentSafe(row, i)}});
             }
         }
