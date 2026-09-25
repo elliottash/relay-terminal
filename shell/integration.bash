@@ -39,6 +39,9 @@ relay() {
 # ssh and mosh share their connection so the pane's agent can reuse the login (docs/SSH-AND-MOSH.md,
 # section 1). The GUI sets RELAY_SSH_WRAP=1 and creates RELAY_SSH_DIR. `command ssh` bypasses this.
 if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
+    # The GUI sources this file from its data dir; the persistent-holder script is a sibling.
+    __relay_shell_dir=.
+    case ${BASH_SOURCE[0]} in */*) __relay_shell_dir=${BASH_SOURCE[0]%/*} ;; esac
     # A directory ssh can take in ControlPath (no %, spaces or quotes; room for %C and ssh's
     # temporary suffix in a 108-byte socket path) and mosh can take in --ssh.
     __relay_ssh_dir_ok() {
@@ -160,8 +163,225 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
 
     declare -A __relay_ssh_asked=()
 
+    # The argv walk behind persistence: sets __relay_ssh_dest to the destination and
+    # returns 0 only when the words are one plain interactive login - a destination,
+    # nothing after it (that would be a remote command) and no option that gives ssh
+    # other work: no shell, forwarding, tunnels or control operations. Valued options
+    # are consumed the way __relay_ssh_shareable consumes them.
+    __relay_ssh_dest=
+    __relay_ssh_login_argv() {
+        __relay_ssh_dest=
+        local arg rest opt
+        while (($#)); do
+            arg=$1
+            shift
+            case $arg in
+                --)
+                    # Only a `--` that introduces the destination is safe to append after.
+                    [[ -n $__relay_ssh_dest ]] && return 1
+                    (($#)) || return 1
+                    __relay_ssh_dest=$1
+                    shift
+                    (($# == 0)) || return 1
+                    ;;
+                -?*)
+                    rest=${arg#-}
+                    while [[ -n $rest ]]; do
+                        opt=${rest:0:1}
+                        rest=${rest:1}
+                        case $opt in
+                            [NWOGVQsTfMDLRw]) return 1 ;;
+                            [46AaCcgKkntvXxYy]) ;;
+                            [BbcEeFIiJLlmOoPpQS])
+                                if [[ -n $rest ]]; then rest=
+                                elif (($#)); then shift
+                                else return 1
+                                fi
+                                ;;
+                            *) return 1 ;;
+                        esac
+                    done
+                    ;;
+                -) return 1 ;;
+                *) [[ -n $__relay_ssh_dest ]] && return 1; __relay_ssh_dest=$arg ;;
+            esac
+        done
+        [[ -n $__relay_ssh_dest ]]
+    }
+
+    # The same walk for mosh's own options: `--` and a word after the destination both
+    # mean a remote command there. mosh's valued options are the ones the mosh function
+    # knows about.
+    __relay_mosh_login_argv() {
+        __relay_ssh_dest=
+        local arg next=
+        while (($#)); do
+            arg=$1
+            shift
+            if [[ -n $next ]]; then
+                next=
+                continue
+            fi
+            case $arg in
+                --)
+                    [[ -n $__relay_ssh_dest ]] && return 1
+                    (($#)) || return 1
+                    __relay_ssh_dest=$1
+                    shift
+                    (($# == 0)) || return 1
+                    ;;
+                --ssh | --experimental-remote-ip | -p | --port | --client | --server | --predict | --family | --bind-server) next=skip ;;
+                -*) ;;
+                *) [[ -n $__relay_ssh_dest ]] && return 1; __relay_ssh_dest=$arg ;;
+            esac
+        done
+        [[ -n $__relay_ssh_dest ]]
+    }
+
+    # The half of the gate both transports share: the NEVER list, the session name and
+    # the start directory, kept in __relay_persist_session and __relay_persist_cwd.
+    __relay_persist_session=
+    __relay_persist_cwd=
+    __relay_ssh_persist_prepare() {
+        local -a never=()
+        local IFS=,
+        read -r -a never <<< "${RELAY_SSH_NEVER:-}"
+        local host=${__relay_ssh_dest#*@} entry
+        host=${host,,}
+        for entry in "${never[@]}"; do
+            entry=${entry#"${entry%%[![:space:]]*}"}; entry=${entry%"${entry##*[![:space:]]}"}
+            [[ ${entry,,} == "$host" ]] && return 1
+        done
+        local name=${RELAY_SSH_SESSION:-relay-${RELAY_PANE_ID:0:8}}
+        # tmux session names must not hold a dot or a colon; screen takes any word.
+        name=${name//[!A-Za-z0-9_-]/}
+        [[ -n $name ]] || return 1
+        __relay_persist_session=$name
+        __relay_persist_cwd=
+        # The directory travels as an unquoted word in the remote command, so it may
+        # hold none of the characters this pattern allows past.
+        local re='^[-A-Za-z0-9_./~+@%:]+$'
+        [[ ${RELAY_SSH_CWD:-} =~ $re ]] && __relay_persist_cwd=$RELAY_SSH_CWD
+        return 0
+    }
+
+    # True when this ssh may become a persistent pane login: persistence is on, the
+    # pane (or a session name) is known, the words are one interactive login, and the
+    # host is not on the NEVER list.
+    __relay_ssh_persist_ok() {
+        [[ ${RELAY_SSH_PERSIST:-0} == 1 ]] || return 1
+        [[ -n ${RELAY_PANE_ID:-} || -n ${RELAY_SSH_SESSION:-} ]] || return 1
+        __relay_ssh_login_argv "$@" || return 1
+        __relay_ssh_persist_prepare
+    }
+
+    __relay_mosh_persist_ok() {
+        [[ ${RELAY_SSH_PERSIST:-0} == 1 ]] || return 1
+        [[ -n ${RELAY_PANE_ID:-} || -n ${RELAY_SSH_SESSION:-} ]] || return 1
+        __relay_mosh_login_argv "$@" || return 1
+        __relay_ssh_persist_prepare
+    }
+
+    # The holder script, from the shell directory this file was sourced from, as one
+    # single-quoted word: comments and blank lines stripped, the rest joined with a
+    # semicolon and a space. Cached on the first use; empty, and persistence silently
+    # off, when the file is missing or holds a quote, backslash or bang that would not
+    # survive the single quotes on its way through the remote login shell.
+    __relay_holder_text=
+    __relay_holder_loaded=0
+    __relay_holder() {
+        if (( ! __relay_holder_loaded )); then
+            __relay_holder_loaded=1
+            local line text= file=$__relay_shell_dir/remote-holder.sh
+            if [[ -r $file ]]; then
+                while IFS= read -r line || [[ -n $line ]]; do
+                    line=${line#"${line%%[![:space:]]*}"}; line=${line%"${line##*[![:space:]]}"}
+                    [[ -z $line || $line == \#* ]] && continue
+                    text+="${text:+; }$line"
+                done < "$file"
+            fi
+            [[ $text == *\'* || $text == *\\* || $text == *!* ]] && text=
+            __relay_holder_text=$text
+        fi
+        [[ -n $__relay_holder_text ]]
+    }
+
+    # The persistent ssh form: the share options when the configuration allows them,
+    # -t, the user's own words, then the holder as one word after them. The GUI knows
+    # the shape: relay-holder marks the session name, and the directory, when there is
+    # one, is the last word.
+    __relay_ssh_persist_run() {
+        local -a pre=()
+        __relay_ssh_shareable "$@" && pre=(-o ControlMaster=auto -o "ControlPath=$RELAY_SSH_DIR/%C" -o ControlPersist=600)
+        local remote="sh -c '$__relay_holder_text' relay-holder $__relay_persist_session"
+        [[ -n $__relay_persist_cwd ]] && remote="$remote $__relay_persist_cwd"
+        command ssh "${pre[@]}" -t "$@" "$remote"
+    }
+
+    # mosh's sharing extra: --ssh=ssh with Relay's sharing, plus
+    # --experimental-remote-ip=remote unless the user named a mode; an explicit proxy
+    # turns sharing off entirely. Kept in __relay_mosh_extra for the mosh function and
+    # the RELAY_SSH_LINK=mosh form of ssh.
+    __relay_mosh_extra=()
+    __relay_mosh_prepare_extra() {
+        __relay_mosh_extra=()
+        local arg next= mode=
+        __relay_ssh_dir_ok || return 0
+        __relay_mosh_extra=("--ssh=ssh -o ControlMaster=auto -o ControlPath=$RELAY_SSH_DIR/%C -o ControlPersist=600")
+        for arg in "$@"; do
+            if [[ -n $next ]]; then
+                [[ $next == mode ]] && mode=$arg
+                next=
+                continue
+            fi
+            case $arg in
+                --) break ;;
+                --ssh | --ssh=*) __relay_mosh_extra=() && break ;;
+                --experimental-remote-ip) next=mode ;;
+                --experimental-remote-ip=*) mode=${arg#*=} ;;
+                -p | --port | --client | --server | --predict | --family | --bind-server) next=skip ;;
+                -*) ;;
+                *) break ;;
+            esac
+        done
+        if (( ${#__relay_mosh_extra[@]} > 0 )); then
+            case $mode in
+                '') __relay_mosh_extra+=(--experimental-remote-ip=remote) ;;
+                proxy) __relay_mosh_extra=() ;;
+            esac
+        fi
+    }
+
+    # The persistent mosh form, for RELAY_SSH_LINK=mosh and for a mosh typed by the
+    # user. mosh joins the words after `--` and the remote login shell parses the
+    # single quotes, so the holder reaches the host the same way it does over ssh.
+    # A mosh that dies within twenty seconds (no mosh-server there, UDP blocked)
+    # falls back to the persistent ssh form, with a line saying so.
+    __relay_mosh_persist_run() {
+        __relay_mosh_prepare_extra "$@"
+        local started=$SECONDS status=0
+        local -a after=(-- sh -c "'$__relay_holder_text'" relay-holder "$__relay_persist_session")
+        [[ -n $__relay_persist_cwd ]] && after+=("$__relay_persist_cwd")
+        command mosh "${__relay_mosh_extra[@]}" "$@" "${after[@]}" || status=$?
+        # A session that lived a while and then ended is the user's business.
+        if (( status != 0 && SECONDS - started < 20 )); then
+            printf 'relay: mosh could not connect to %s; using ssh\n' "$__relay_ssh_dest" >&2
+            __relay_ssh_persist_run "$@"
+            return
+        fi
+        return "$status"
+    }
+
     # `function name` rather than `name()`: an alias called ssh must not expand here.
     function ssh {
+        if __relay_ssh_persist_ok "$@" && __relay_holder; then
+            if [[ ${RELAY_SSH_LINK:-ssh} == mosh ]] && type -P mosh > /dev/null; then
+                __relay_mosh_persist_run "$@"
+            else
+                __relay_ssh_persist_run "$@"
+            fi
+            return
+        fi
         if __relay_ssh_shareable "$@"; then
             command ssh -o ControlMaster=auto -o "ControlPath=$RELAY_SSH_DIR/%C" -o ControlPersist=600 "$@"
         else
@@ -179,42 +399,17 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
     # never comes. Sharing is not worth breaking a session that worked before Relay, so a shared
     # mosh that dies quickly is run again exactly as the user typed it, with a line saying so.
     function mosh {
-        local -a extra=()
-        local arg next= mode=
-        if __relay_ssh_dir_ok; then
-            extra=("--ssh=ssh -o ControlMaster=auto -o ControlPath=$RELAY_SSH_DIR/%C -o ControlPersist=600")
-            for arg in "$@"; do
-                if [[ -n $next ]]; then
-                    [[ $next == mode ]] && mode=$arg
-                    next=
-                    continue
-                fi
-                case $arg in
-                    # Past the destination everything belongs to the remote command: `mosh host
-                    # --ssh=x` runs `--ssh=x` over there and says nothing about mosh's own ssh.
-                    --) break ;;
-                    --ssh | --ssh=*) extra=() && break ;;
-                    --experimental-remote-ip) next=mode ;;
-                    --experimental-remote-ip=*) mode=${arg#*=} ;;
-                    # mosh's own options that take a separate value; the value is not a destination.
-                    -p | --port | --client | --server | --predict | --family | --bind-server) next=skip ;;
-                    -*) ;;
-                    *) break ;;
-                esac
-            done
-            if [[ ${#extra[@]} -gt 0 ]]; then
-                case $mode in
-                    '') extra+=(--experimental-remote-ip=remote) ;;
-                    proxy) extra=() ;;
-                esac
-            fi
+        if __relay_mosh_persist_ok "$@" && __relay_holder; then
+            __relay_mosh_persist_run "$@"
+            return
         fi
-        if [[ ${#extra[@]} -eq 0 ]]; then
+        __relay_mosh_prepare_extra "$@"
+        if [[ ${#__relay_mosh_extra[@]} -eq 0 ]]; then
             command mosh "$@"
             return
         fi
         local started=$SECONDS status=0
-        command mosh "${extra[@]}" "$@" || status=$?
+        command mosh "${__relay_mosh_extra[@]}" "$@" || status=$?
         # A session that lived a while and then ended is the user's business, whatever its status.
         if (( status != 0 && SECONDS - started < 20 )); then
             printf 'relay: mosh could not use the shared connection; retrying as you typed it\n' >&2

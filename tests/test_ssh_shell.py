@@ -75,19 +75,23 @@ class WrapperTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def bash(self, script, wrap="1", ssh_dir=None, before="", exit_code=None, log=None):
+    def bash(self, script, wrap="1", ssh_dir=None, before="", exit_code=None, log=None, extra_env=None):
         env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}",
                    RELAY_RUNTIME_DIR=str(self.runtime), RELAY_SHELL_EVENT="/nonexistent",
                    RELAY_SESSION_TOKEN="t", RELAY_CLEAN_SHELL="1", RELAY_TEST_REAL_SSH=self.real_ssh,
                    HOME=str(self.temp.name))   # the wrapper reads ~/.ssh/config: never the developer's
-        env.pop("RELAY_SSH_WRAP", None)
-        env.pop("RELAY_SSH_DIR", None)
+        for name in ("RELAY_SSH_WRAP", "RELAY_SSH_DIR", "RELAY_SSH_PERSIST", "RELAY_SSH_LINK",
+                     "RELAY_SSH_NEVER", "RELAY_PANE_ID", "RELAY_SSH_SESSION", "RELAY_SSH_CWD",
+                     "RELAY_HOLDER_SOCK"):
+            env.pop(name, None)
         if wrap is not None:
             env["RELAY_SSH_WRAP"] = wrap
         if exit_code is not None:
             env["RELAY_TEST_EXIT"] = str(exit_code)   # what the fake ssh/mosh exits with
         if log is not None:
             env["RELAY_TEST_LOG"] = str(log)          # every call the fake sees, one per line
+        if extra_env:
+            env.update(extra_env)                     # the persistence gate's knobs, per test
         dir_ = str(self.sockets) if ssh_dir is None else ssh_dir
         if dir_:
             env["RELAY_SSH_DIR"] = dir_
@@ -249,6 +253,125 @@ class WrapperTests(unittest.TestCase):
         spaced = Path(self.temp.name) / "a b"
         spaced.mkdir(exist_ok=True)
         self.assertEqual(self.mosh(["host"], ssh_dir=str(spaced)), ["host"])
+
+    # --- persistence (Board card #XQ8F): the login lands in a holder session on the host ---
+
+    def persist_env(self, **extra):
+        env = {"RELAY_SSH_PERSIST": "1", "RELAY_PANE_ID": "abcdef1234xyz"}
+        env.update(extra)
+        return env
+
+    def runs(self, result):
+        """The fake transports' calls, in order: {name: [[arg, ...], ...]}."""
+        calls, current = {}, None
+        for line in result.stdout.splitlines():
+            if line.startswith("ARGV "):
+                current = line.split()[1]
+                calls.setdefault(current, []).append([])
+            elif line.startswith("ARG[") and current is not None:
+                calls[current][-1].append(line[4:-1])
+        return calls
+
+    def test_ssh_persistence_appends_the_holder(self):
+        args = self.argv(["host"], extra_env=self.persist_env())
+        self.assertEqual(args[:6], self.control())
+        self.assertEqual(args[6:8], ["-t", "host"])
+        self.assertEqual(len(args), 9)   # the holder is one word after the user's own
+        remote = args[8]
+        self.assertTrue(remote.startswith("sh -c '"), remote)
+        self.assertTrue(remote.endswith(" relay-holder relay-abcdef12"), remote)
+        # The script rides inside single quotes through the login shell on the host: it may
+        # not bring a quote, a bang or a backslash of its own.
+        self.assertEqual(remote.count("'"), 2)
+        self.assertNotIn("!", remote)
+        self.assertNotIn("\\", remote)
+
+    def test_ssh_persistence_session_and_directory(self):
+        env = self.persist_env(RELAY_SSH_CWD="/srv/app")
+        self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder relay-abcdef12 /srv/app"))
+        env = self.persist_env(RELAY_SSH_CWD="/bad dir")   # would not survive the command line
+        self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder relay-abcdef12"))
+        env = self.persist_env(RELAY_SSH_SESSION="custom-1")
+        self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder custom-1"))
+
+    def test_ssh_persistence_gates(self):
+        self.assertShared(["host", "ls"], extra_env=self.persist_env())   # a remote command
+        self.assertShared(["-N", "host"], extra_env=self.persist_env())
+        self.assertShared(["-T", "host"], extra_env=self.persist_env())
+        self.assertPlain(["-O", "check", "host"], extra_env=self.persist_env())
+        self.assertPlain(["-W", "a:1", "host"], extra_env=self.persist_env())
+        self.assertShared(["host"], extra_env=self.persist_env(RELAY_SSH_PERSIST="0"))
+        self.assertShared(["host"], extra_env={"RELAY_SSH_PERSIST": "1"})   # no pane, no session
+        self.assertShared(["host"], extra_env=self.persist_env(RELAY_SSH_NEVER="other,HOST"))
+        self.assertShared(["me@Host"], extra_env=self.persist_env(RELAY_SSH_NEVER="host"))
+
+    def test_ssh_persistence_destination_forms(self):
+        args = self.argv(["--", "host"], extra_env=self.persist_env())
+        self.assertEqual(args[:7], self.control() + ["-t"])
+        self.assertEqual(args[7:9], ["--", "host"])
+        self.assertTrue(args[9].endswith(" relay-holder relay-abcdef12"))
+        args = self.argv(["-p", "2222", "me@host"], extra_env=self.persist_env())
+        self.assertEqual(args[6], "-t")
+        self.assertEqual(args[9], "me@host")
+        self.assertTrue(args[-1].endswith(" relay-holder relay-abcdef12"))
+
+    def test_ssh_persistence_without_the_holder_file(self):
+        # A missing holder is not an error: the login shares as before, just not persistently.
+        result = self.bash('__relay_shell_dir=/nonexistent; ssh host; echo "STATUS $?"',
+                           extra_env=self.persist_env())
+        self.assertIn("STATUS 7", result.stdout)
+        self.assertEqual(result.stderr, "")
+        args = [line[4:-1] for line in result.stdout.splitlines() if line.startswith("ARG[")]
+        self.assertEqual(args, self.control() + ["host"])
+
+    def test_ssh_persistence_rejects_a_quoted_holder(self):
+        # A holder that would not survive the single quotes is ignored, not mangled.
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "remote-holder.sh").write_text("echo it's broken\n")
+            result = self.bash(f'__relay_shell_dir={d}; ssh host; echo "STATUS $?"',
+                               extra_env=self.persist_env())
+        self.assertIn("STATUS 7", result.stdout)
+        self.assertEqual(result.stderr, "")
+        args = [line[4:-1] for line in result.stdout.splitlines() if line.startswith("ARG[")]
+        self.assertEqual(args, self.control() + ["host"])
+
+    def test_ssh_link_mosh_uses_the_holder(self):
+        result = self.bash('ssh host; echo "STATUS $?"', exit_code=0,
+                           extra_env=self.persist_env(RELAY_SSH_LINK="mosh"))
+        self.assertEqual(result.stderr, "")
+        self.assertIn("STATUS 0", result.stdout)
+        self.assertEqual(list(self.runs(result)), ["mosh"])   # no ssh fallback on success
+        mosh = self.runs(result)["mosh"][0]
+        self.assertEqual(mosh[:2], ["--ssh=ssh " + " ".join(self.control()),
+                                    "--experimental-remote-ip=remote"])
+        self.assertEqual(mosh[2:6], ["host", "--", "sh", "-c"])
+        self.assertTrue(mosh[6].startswith("'") and mosh[6].endswith("'"), mosh[6][:20])
+        self.assertNotIn("'", mosh[6][1:-1])
+        self.assertEqual(mosh[7:], ["relay-holder", "relay-abcdef12"])
+
+    def test_ssh_link_mosh_falls_back_to_ssh(self):
+        # A mosh that dies at once (no mosh-server there, UDP blocked) is retried over ssh.
+        result = self.bash('ssh host; echo "STATUS $?"', exit_code=1,
+                           extra_env=self.persist_env(RELAY_SSH_LINK="mosh"))
+        calls = self.runs(result)
+        self.assertEqual(list(calls), ["mosh", "ssh"])
+        self.assertEqual(calls["mosh"][0][-2:], ["relay-holder", "relay-abcdef12"])
+        ssh = calls["ssh"][0]
+        self.assertEqual(ssh[:6], self.control())
+        self.assertEqual(ssh[6:8], ["-t", "host"])
+        self.assertTrue(ssh[8].endswith(" relay-holder relay-abcdef12"))
+        self.assertIn("relay: mosh could not connect to host; using ssh", result.stderr)
+        self.assertIn("STATUS 1", result.stdout)
+
+    def test_mosh_persistence_appends_the_holder(self):
+        # A mosh the user typed shares the same gate: words after the destination would be
+        # the remote command, so only a bare destination takes the holder.
+        ssh = "--ssh=ssh " + " ".join(self.control())
+        args = self.mosh(["host"], extra_env=self.persist_env())
+        self.assertEqual(args[:2], [ssh, "--experimental-remote-ip=remote"])
+        self.assertEqual(args[2:], ["host", "--", "sh", "-c", args[6], "relay-holder", "relay-abcdef12"])
+        self.assertEqual(self.mosh(["host", "sleep", "5"], extra_env=self.persist_env()),
+                         [ssh, "--experimental-remote-ip=remote", "host", "sleep", "5"])
 
 
 def typed_line(rows):
@@ -717,6 +840,190 @@ class RemoteScriptTests(unittest.TestCase):
         # The file may grow: what is typed is the file without its comments and blank lines.
         self.assertLess(len(REMOTE.read_bytes()), 6144)
         self.assertLess(len(typed_line(10)), 3000)
+
+
+HOLDER = ROOT / "shell/remote-holder.sh"
+
+
+def holder_script():
+    """remote-holder.sh as the wrapper embeds it: comments and blank lines stripped, the
+    rest joined with a semicolon and a space — one line the remote login shell parses."""
+    lines = [line.strip() for line in HOLDER.read_text().splitlines()]
+    return "; ".join(line for line in lines if line and not line.startswith("#"))
+
+
+class PtyProcess:
+    """A command on its own pty, for holders that draw rather than prompt (tmux, screen).
+
+    PtyShell is no use here: it waits for a prompt that a holder never prints.
+    """
+
+    def __init__(self, argv, env):
+        self.master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+        self.proc = subprocess.Popen(
+            argv, stdin=slave, stdout=slave, stderr=slave, env=env,
+            start_new_session=True, preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0),
+        )
+        os.close(slave)
+
+    def read(self, seconds=0.2):
+        """Whatever the pty printed within the window, for failure messages."""
+        out, end = b"", time.monotonic() + seconds
+        while time.monotonic() < end:
+            if not select.select([self.master], [], [], 0.05)[0]:
+                continue
+            try:
+                out += os.read(self.master, 65536)
+            except OSError:
+                break
+        return out
+
+    def close(self):
+        try:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            self.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.close(self.master)
+        except OSError:
+            pass
+
+
+class HolderTests(unittest.TestCase):
+    """The holder script itself, run the way the host runs it."""
+
+    def holder_env(self, temp, sock):
+        env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+        env.update(TERM="xterm-256color", HOME=temp, XDG_CACHE_HOME=str(Path(temp) / ".cache"),
+                   RELAY_HOLDER_SOCK=sock)
+        return env
+
+    def kill_holder(self, tmux, sock):
+        subprocess.run([tmux, "-L", sock, "kill-server"], capture_output=True)
+        Path(os.environ.get("TMUX_TMPDIR", "/tmp"), f"tmux-{os.getuid()}", sock).unlink(missing_ok=True)
+
+    def test_shape(self):
+        # The wrapper embeds the file as one single-quoted word through the login shell on
+        # the host, so it may hold no quote, no bang (csh expands history in quotes) and no
+        # backslash (fish rewrites those inside quotes), and must stay small enough to send.
+        text = HOLDER.read_text()
+        self.assertNotIn("'", text)
+        self.assertNotIn("!", text)
+        self.assertNotIn("\\", text)
+        self.assertLess(len(holder_script()), 1500)
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_holder(self):
+        tmux = shutil.which("tmux")
+        tag = os.getpid()
+        sock = session = f"relay-test-{tag}"
+        temp = tempfile.TemporaryDirectory(prefix="relay-holder-")
+        self.addCleanup(temp.cleanup)
+        home = temp.name
+        env = self.holder_env(home, sock)
+        argv = ["/bin/sh", "-c", holder_script(), "relay-holder", session, "/tmp"]
+
+        def call(*args):
+            return subprocess.run([tmux, "-L", sock, *args], capture_output=True,
+                                  text=True, env=env, timeout=10)
+
+        first = PtyProcess(argv, env)
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                listing = call("list-sessions")
+                if listing.returncode == 0 and f"{session}: " in listing.stdout:
+                    break
+                if time.monotonic() > deadline:
+                    self.fail(f"the holder never made the session: {listing.stderr}\n{first.read()!r}")
+                time.sleep(0.1)
+            self.assertEqual(call("show", "-g", "status").stdout, "status off\n")
+            self.assertEqual(call("show", "-g", "prefix").stdout, "prefix None\n")
+            self.assertEqual(call("show", "-g", "allow-passthrough").stdout, "allow-passthrough on\n")
+            self.assertEqual((Path(home) / ".cache" / "relay" / "tmux.conf").read_text().splitlines(),
+                             ["set -g status off", "set -g prefix None", "set -g prefix2 None",
+                              "set -g mouse off", "set -s set-clipboard on",
+                              "set -g allow-passthrough on", "set -g window-size latest",
+                              "set -g history-limit 50000", "set -s escape-time 10",
+                              "set -g focus-events on"])
+            # A second attach detaches the first (-D): a client that died without letting go
+            # (a killed mosh-server) must not pin the pane for the next login.
+            second = PtyProcess(argv, env)
+            try:
+                first.proc.wait(timeout=5)
+            finally:
+                second.close()
+        finally:
+            first.close()
+            self.kill_holder(tmux, sock)
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_holder_in_other_shells(self):
+        # The same holder must work whatever sh the host ships: dash is test_tmux_holder's
+        # /bin/sh; bash and busybox sh take their turn here.
+        tmux = shutil.which("tmux")
+        for name in ("bash", "busybox"):
+            shell = shutil.which(name)
+            if shell is None:
+                continue
+            with self.subTest(shell=name):
+                sock = session = f"relay-shell-{name}-{os.getpid()}"
+                temp = tempfile.TemporaryDirectory(prefix="relay-holder-")
+                home = temp.name
+                env = self.holder_env(home, sock)
+                argv = ([shell] if name == "bash" else [shell, "sh"]) \
+                    + ["-c", holder_script(), "relay-holder", session, "/tmp"]
+                proc = PtyProcess(argv, env)
+                try:
+                    deadline = time.monotonic() + 10
+                    while True:
+                        listing = subprocess.run([tmux, "-L", sock, "list-sessions"],
+                                                 capture_output=True, text=True, env=env, timeout=10)
+                        if listing.returncode == 0 and f"{session}: " in listing.stdout:
+                            break
+                        if time.monotonic() > deadline:
+                            self.fail(f"{name} never made the session: {listing.stderr}\n{proc.read()!r}")
+                        time.sleep(0.1)
+                    options = subprocess.run([tmux, "-L", sock, "show", "-g", "status"],
+                                             capture_output=True, text=True, env=env, timeout=10)
+                    self.assertEqual(options.stdout, "status off\n")
+                finally:
+                    proc.close()
+                    self.kill_holder(tmux, sock)
+                temp.cleanup()
+
+    def test_fallback_without_tmux_or_screen(self):
+        # With neither multiplexer on the host the login still happens, with one line
+        # saying why it will not persist, a cd to the start directory, and the login shell.
+        script = holder_script()
+        hostname = subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip()
+        shells = ["/bin/sh"] + [shutil.which(n) for n in ("bash", "busybox") if shutil.which(n)]
+        for shell in shells:
+            with self.subTest(shell=shell):
+                temp = tempfile.TemporaryDirectory(prefix="relay-fallback-")
+                home = Path(temp.name) / "home"
+                start = Path(temp.name) / "start"
+                bin_ = Path(temp.name) / "bin"
+                for d in (home, start, bin_):
+                    d.mkdir()
+                shutil.copy(shutil.which("hostname"), bin_ / "hostname")   # the one command it runs
+                argv = [shell] if Path(shell).name != "busybox" else [shell, "sh"]
+                result = subprocess.run(
+                    argv + ["-c", script, "relay-holder", "fb-test", str(start)],
+                    input="pwd\n", capture_output=True, text=True, timeout=15,
+                    env={"PATH": str(bin_), "HOME": str(home), "TERM": "xterm-256color"},
+                )
+                lines = result.stdout.splitlines()
+                self.assertEqual(lines[0], f"relay: {hostname} has neither tmux nor screen, "
+                                           "so this session will not persist")
+                self.assertIn(str(start), lines[1])   # the cd happened before the exec
+                self.assertEqual(result.returncode, 0)
+                temp.cleanup()
 
 
 if __name__ == "__main__":
