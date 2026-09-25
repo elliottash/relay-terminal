@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [probe], human: none, sign_off: none, effort: high, stakes: rework, blast: capability}
 source: Relay pane, 2026-09-25
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-JX8Z/evidence.md], related: [495G], github: null}
+links: {plans: [], commits: [2041b744207f725e781c4b05ed1cec8c7a009f30], evidence: [docs/qa_evidence/2026-09-25-JX8Z/evidence.md], related: [495G], github: null}
 ---
 # Record timestamped subscription usage states and restore fresh routing scores
 
