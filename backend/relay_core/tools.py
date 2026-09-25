@@ -1058,6 +1058,24 @@ class ToolExecutor:
                               + (f" Saving failed: {reason}" if reason else ""))
         if reply.get("applied") == "merged":
             result["note"] += " It was merged around the user's own unsaved edits."
+        if reply.get("applied") == "held":
+            # Review before apply (card #PBZ4, owner decision D1): nothing is in the file yet.
+            result["written_bytes"] = 0
+            result["note"] = (f"{where} with Review before apply on: your change is waiting on the file's "
+                              "agent bar for the user to Apply or Discard. It is not in the buffer or on disk "
+                              "yet, so a read shows the file without it. Tell them what you proposed; do not "
+                              "make the edit again.")
+        elif reply.get("applied") == "conflict":
+            # Same-line conflicts are merged inline (owner decision D2): both versions are in the buffer.
+            regions = [c for c in (reply.get("conflicts") or []) if isinstance(c, dict)]
+            lines = ", ".join(str(c["line"]) for c in regions if isinstance(c.get("line"), int))
+            result["note"] = (f"{where} and the user has unsaved edits on the same lines, so the change went into "
+                              f"that unsaved buffer with both versions between conflict markers (<<<<<<< editor, "
+                              f"||||||| base, =======, >>>>>>> agent)"
+                              + (f" at line {lines}" if lines else "")
+                              + ". They resolve it; do not edit those lines again unless they ask, and say that "
+                              "the conflict is there.")
+            result["open_buffer"]["conflicts"] = len(regions)
         return result
 
     def _edited(self, args: dict, old: bytes) -> tuple[str, int]:

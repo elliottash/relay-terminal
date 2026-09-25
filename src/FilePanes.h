@@ -3,6 +3,7 @@
 // Plain-Qt folder explorer and file preview widgets. No KDE dependencies are required, so these
 // are the portable path for macOS and Windows later. KSyntaxHighlighting and Qt PDF are optional.
 #include <QDateTime>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QList>
@@ -15,6 +16,7 @@
 #include <QWidget>
 #include <functional>
 
+#include "ArtifactContext.h"   // relay::agent::ArtifactContext: the docked agent's context (#PBZ4)
 #include "RemoteFiles.h"   // files and folders on the host a pane is logged into (#S5SH)
 #include "TextMerge.h"     // revisions, base snapshots and the three-way merge (#F8R7)
 
@@ -24,6 +26,7 @@ class QFileSystemModel;
 class QFileSystemWatcher;
 class QHBoxLayout;
 class QLabel;
+class QListWidget;
 class QLineEdit;
 class QPlainTextEdit;
 class QScrollArea;
@@ -179,6 +182,83 @@ private:
     QToolButton *m_up = nullptr, *m_hidden = nullptr;
 };
 
+// ----- the agent docked under a file editor (card #PBZ4) -----------------------------------------
+//
+// The owner, 2026-09-25: "in an artifact pane, you have the agent system prompt docked at the
+// bottom, same as a console pane." This is that foot: one "Agent (Alt+Q)" row until it is asked
+// for, then the console — the ordinary no-shell `Pane` the window builds through `onCreateConsole`,
+// the seam Options, Sessions and Models already have, so `RelayWindow::wireConsoleHost` wires it
+// with the same lines. The console is made on the **first expand**, so a file nobody asks about
+// pays for nothing.
+//
+// Over the composer sit two rows only a file artifact has (owner decisions D1 and U5 of #P2W8):
+// the per-turn change list — each agent turn that changed this buffer, and under it each change
+// with its lines, a click going to them — and the "Review before apply" switch, which is per
+// workspace: on, an agent's edit waits on the file's agent bar for Apply instead of landing.
+class ArtifactDock : public QWidget {
+public:
+    explicit ArtifactDock(QWidget *parent = nullptr);
+    ~ArtifactDock() override;
+
+    relay::agent::ArtifactContext *context() const { return m_context; }
+
+    // ----- the console host seam (RelayWindow::wireConsoleHost) -------------------------------
+    relay::agent::ConsoleFactory onCreateConsole;
+    // The tab and its project are the window's to put into the spec (TabConsoleContext); the
+    // workspace is kept here as well, because "Review before apply" is remembered per workspace.
+    void setHelperTabId(const QString &) {}
+    void setHelperWorkspace(const QString &workspace);
+    void setHelperShortcut(const QString &hintId, const QString &keys);
+    std::function<void()> onHelperHint;
+    void focusHelper();                 // Alt+Q and a click on the row: build, open, focus
+    void helperDraft(const QString &text);
+    void fold();                        // back to the one row; the conversation is kept
+    bool expanded() const { return !m_collapsed; }
+    const relay::agent::ConsoleHandle &agentConsole() const { return m_console; }
+    // The header follows the file: "README.md agent".
+    void refreshTitle();
+
+    // ----- the per-turn change list (U5) ------------------------------------------------------
+    struct Change {
+        QString turnId;
+        QString text;          // "lines 4-5 · Edit README.md (+1 -0) · merged"
+        int line = 0;          // where a click goes
+    };
+    void setChanges(const QList<Change> &changes);
+    // What a turn is called in the list: the words that asked for it, once the turn has ended.
+    void nameTurn(const QString &turnId, const QString &label);
+    QStringList changeListRows() const;   // the list as drawn, headers included, for a test
+    std::function<void(int line)> onGoToLine;
+
+    // ----- review before apply (D1), per workspace --------------------------------------------
+    bool reviewBeforeApply() const { return m_review; }
+    void setReviewBeforeApply(bool on);   // remembered for this workspace
+    std::function<void()> onReviewChanged;
+
+protected:
+    void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+
+private:
+    void ensureConsole();
+    void applyCollapsed();
+    void updateRow();
+    void updateHeight();
+    void redrawChanges();
+    QString reviewKey() const;
+
+    relay::agent::ArtifactContext *m_context = nullptr;   // owned; outlives the console
+    relay::agent::ConsoleHandle m_console;
+    QWidget *m_askRow = nullptr, *m_body = nullptr;
+    QToolButton *m_ask = nullptr, *m_changesToggle = nullptr, *m_reviewToggle = nullptr;
+    QLabel *m_head = nullptr;
+    QListWidget *m_changesList = nullptr;
+    QString m_askKeys, m_askHintId, m_workspace;
+    QList<Change> m_changes;
+    QHash<QString, QString> m_turnNames;
+    bool m_collapsed = true, m_review = false;
+};
+
 // A preview of one file. The viewer is chosen by MIME type: text and code (with syntax
 // highlighting when KSyntaxHighlighting is built in), Markdown (rendered or source), images
 // (fit or 100%), PDF (when Qt PDF is built in), otherwise a file-info panel. A local text or
@@ -328,6 +408,21 @@ public:
     // back. False when there is none, or when later edits overlap it.
     bool undoAgentChange();
 
+    // ----- the docked agent (card #PBZ4) -------------------------------------------------------
+    // Text and Markdown files get an `ArtifactDock` at the foot of the pane; every other kind has
+    // none (a picture has no buffer for an agent to edit).
+    ArtifactDock *artifactDock() const;
+    // Where the task plugins are looked for, for every preview in this process: the window sets
+    // it once, from the installed `plugins_bundled/`. Unset, a file has no plugin.
+    static void setPluginSearch(const relay::agent::PluginSearch &search);
+    // "Review before apply" (D1): a patch that arrives while the dock's switch is on is held
+    // here — answered `applied: "held"` so the agent's turn goes on — until the person applies
+    // or discards it on the agent bar. Apply runs each through the ordinary patch path in order,
+    // so each is its own undo step, merged around whatever was typed meanwhile.
+    int heldAgentChanges() const;
+    int applyHeldAgentChanges();       // how many landed
+    void discardHeldAgentChanges();
+
     // Every open FilePreview, and the `open_buffers` list for the ones in `window`.
     static QList<FilePreview *> livePreviews();
     static QJsonArray openBuffers(const QWidget *window);
@@ -405,6 +500,7 @@ private:
                          const QString &applied, bool saved);
     void showAgentBar();
     void notifyOpenBuffers();
+    void updateArtifactDock();   // the dock's file, plugin and change list follow the pane
 
     QString m_path, m_notice;
     Kind m_kind = Kind::None;
@@ -448,6 +544,9 @@ public:
     QPlainTextEdit *editor() const { return m_editor; }
     // Plans show the Execute buttons; other documents (relay.md) only Save and Reload.
     void setPlanActions(bool enabled);
+    // The docked agent (card #PBZ4). A plan's edits by the agent go to the disk, which this
+    // editor reloads when it is clean; the change list is the preview's alone.
+    ArtifactDock *artifactDock() const;
 
     std::function<void(bool fresh)> onExecute;
     std::function<void()> onKeepPlanning;

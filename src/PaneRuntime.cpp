@@ -502,6 +502,11 @@ void Pane::updateSlashPopup() {
             if (description.size() > 60) description = description.left(59).trimmed() + QChar(0x2026);
             commands.append({skill.name, skill.args, QStringLiteral("Skill · ") + description});
         }
+        // Then what this console's context adds (card #PBZ4): an artifact console's plugin
+        // commands, after every Relay-owned row and already namespaced where they collide.
+        for (const auto &command : contextSlashCommands())
+            commands.append({command.name, command.args,
+                             QStringLiteral("✦ %1 · %2").arg(command.group, command.description)});
         // A guest catalog follows every Relay-owned surface. Relay's own names (and its aliases
         // and skills) win a collision, while a guest-only or newly introduced command passes
         // through verbatim rather than Relay diagnosing it as unknown.
@@ -1030,6 +1035,7 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
             if (tryRunSlashCommand(m_editor->toPlainText())) return;
             if (tryRunAliasSlash(m_editor->toPlainText())) return;
             if (tryRunSkillSlash(m_editor->toPlainText())) return;
+            if (tryRunContextSlash(m_editor->toPlainText())) return;   // the context's own (#PBZ4)
             if (deferSlashUntilSkillCatalog(m_editor->toPlainText())) return;
             // A guest pane (26.8): the prompt box, the mode chip and the auto router work exactly
             // as in any other pane; only the delivery differs. A line that is a terminal command —
@@ -1072,6 +1078,13 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
             return;
         } else if (const QString skill = skillFor(m_editor->toPlainText()); !skill.isEmpty()) {
             setRouteText(QStringLiteral("SKILL · /%1 · %2").arg(skill, skillCommand(skill)->description));
+            return;
+        } else if (const QString typed = m_editor->toPlainText().trimmed(); typed.startsWith(QLatin1Char('/'))
+                   && relay::agent::findSlashCommand(contextSlashCommands(), typed.section(QLatin1Char(' '), 0, 0)) >= 0) {
+            // A plugin command of this console's context (#PBZ4): say whose it is before Enter.
+            const QList<relay::agent::ContextCommand> offered = contextSlashCommands();
+            const auto &command = offered.at(relay::agent::findSlashCommand(offered, typed.section(QLatin1Char(' '), 0, 0)));
+            setRouteText(QStringLiteral("COMMAND · /%1 · ✦ %2 · %3").arg(command.name, command.group, command.description));
             return;
         } else if (const QString name = relay::slash::attemptedName(m_editor->toPlainText());
                    !name.isEmpty() && !slashNames().contains(name)) {

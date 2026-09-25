@@ -31,6 +31,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QLabel>
+#include <QListWidget>
 #include <QLayout>
 #include <QPlainTextEdit>
 #include <QToolButton>
@@ -80,6 +81,7 @@ public:
     }
     QString placeholder() const override { return QStringLiteral("Ask about this board…"); }
     QList<relay::agent::Action> actions() const override { return rows; }
+    QList<relay::agent::ContextCommand> slashCommands() const override { return commands; }
     bool resolveLink(const relay::links::Target &target) override
     {
         seen << target.target;
@@ -97,6 +99,7 @@ public:
     QString workspace;
     QString surface = QStringLiteral("stub");
     QList<relay::agent::Action> rows;
+    QList<relay::agent::ContextCommand> commands;
     QStringList seen, finished, submitted;
     QList<int> kinds;
     bool swallow = false, takeSubmit = false;
@@ -423,6 +426,48 @@ void aClickedActionTeachesItsLetter()
     // A context that takes the line before the pane routes it: a card's Enter travels as
     // `board_ask`, not as an ordinary `ask` (19.10, owner decision 2). The pane clears and
     // remembers the draft either way, so the composer behaves the same.
+// Card #PBZ4: a context's slash commands join the `/` popup after Relay's rows, under
+// "✦ <group>", a name Relay already has moved to the plugin's namespace; Enter on one sends the
+// prompt it makes from the words after it, and nothing reaches the router.
+void aContextsSlashCommandsJoinThePopup()
+{
+    StubContext context;
+    context.workspace = home->path();
+    QStringList asked;
+    relay::agent::ContextCommand outline;
+    outline.name = QStringLiteral("outline");
+    outline.description = QStringLiteral("Outline the document.");
+    outline.group = QStringLiteral("Markdown");
+    outline.space = QStringLiteral("markdown");
+    outline.prompt = [&asked](const QString &args) { asked << args; return QStringLiteral("Outline it: ") + args; };
+    relay::agent::ContextCommand help = outline;
+    help.name = QStringLiteral("help");          // a Relay built-in: offered as /markdown:help
+    context.commands = {outline, help};
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.resize(800, 500);
+    console.draftInComposer(QStringLiteral("/"));
+    QListWidget *popup = nullptr;
+    for (QListWidget *list : console.findChildren<QListWidget *>(QStringLiteral("atPicker")))
+        if (list->isVisibleTo(&console)) popup = list;
+    CHECK(popup != nullptr);
+    QStringList names;
+    for (int i = 0; popup && i < popup->count(); ++i) names << popup->item(i)->data(Qt::UserRole).toString();
+    CHECK(names.contains(QStringLiteral("outline")));
+    CHECK(names.contains(QStringLiteral("markdown:help")));
+    CHECK(names.indexOf(QStringLiteral("outline")) > names.indexOf(QStringLiteral("help")));
+    for (int i = 0; popup && i < popup->count(); ++i)
+        if (popup->item(i)->data(Qt::UserRole).toString() == QStringLiteral("outline"))
+            CHECK(popup->item(i)->text().contains(QStringLiteral("✦ Markdown · Outline the document.")));
+    console.draftInComposer(QStringLiteral("/outline the intro"));
+    console.interruptAgentWithPrompt();
+    CHECK_EQ(asked, QStringList{QStringLiteral("the intro")});
+    CHECK(console.composerText().isEmpty());
+    CHECK(context.submitted.isEmpty());          // the context's own submit never saw it
+    console.draftInComposer(QStringLiteral("/markdown:outline"));
+    console.interruptAgentWithPrompt();
+    CHECK_EQ(asked.size(), 2);
+    }
+
 void aContextMaySwallowASubmit()
 {
     StubContext context;
@@ -1965,6 +2010,7 @@ int main(int argc, char **argv)
     cases::queueRowArrowSendsOnlyThatPrompt();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
+    cases::aContextsSlashCommandsJoinThePopup();
     cases::anIdleQueueChangedClearsABusyFlagNothingWillFinish();
     cases::ctrlEnterStartsADeferredGuestOnItsFirstPrompt();
     cases::everyChordReachesTheContextWithItsOwnRoute();

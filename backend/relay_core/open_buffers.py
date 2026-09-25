@@ -6,7 +6,11 @@ the same file is open in a preview pane, a write behind the editor's back is at 
 user did not ask for and at worst a conflict bar over their unsaved typing. So the GUI tells this
 worker which files are open, and a write to one of them goes *through* the editor: the GUI applies
 it to the buffer as one named undo step, three-way merges it with unsaved edits
-(src/TextMerge.h), and refuses — with the lines in question — when the two overlap.
+(src/TextMerge.h), and — since card #PBZ4 (owner decision D2 of #P2W8) — puts an overlap into the
+buffer between conflict markers (`applied: "conflict"`, with the regions) rather than refusing it.
+With the file's "Review before apply" switch on (D1) the change is held for the person instead
+(`applied: "held"`), and the tool result says it is not in the file yet. A GUI from before #PBZ4
+still answers `error: "conflict"`, which is still read.
 
 What the GUI sends (protocol §35):
 

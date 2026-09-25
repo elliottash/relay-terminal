@@ -36,7 +36,7 @@ Slice 7 of #P2W8 (model row 2; decisions D1, D2, U5). **Wave 2: waits for the ho
 ## Tasks
 
 - [x] ArtifactContext and the file/plugin wire fields <!-- t:5j -->
-- [ ] Context::slashCommands merged into the / popup <!-- t:ar blocked_by=#6FDD -->
-- [ ] Docked console on Preview and Plan panes (after the hold lifts) <!-- t:m5 blocked_by=5j -->
-- [ ] Agent edits as buffer undo steps with change list and review toggle <!-- t:j2 blocked_by=m5 -->
+- [x] Context::slashCommands merged into the / popup <!-- t:ar blocked_by=#6FDD -->
+- [x] Docked console on Preview and Plan panes (after the hold lifts) <!-- t:m5 blocked_by=5j -->
+- [x] Agent edits as buffer undo steps with change list and review toggle <!-- t:j2 blocked_by=m5 -->
 - [ ] Docs and live evidence <!-- t:ry blocked_by=ar,j2 -->

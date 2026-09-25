@@ -189,6 +189,28 @@ class OpenBufferToolTests(unittest.TestCase):
         self.assertIn("TWO", str(caught.exception))
         self.assertEqual(self.file.read_text(), "one\ntwo\nthree\n")
 
+    def test_a_held_change_is_reported_as_waiting_for_review(self):
+        # Card #PBZ4, D1: Review before apply is on in the editor.
+        self.open("one\ntwo\nthree\n", dirty=False)
+        self.editor.reply = {"ok": True, "applied": "held", "saved": False, "sha256": sha("one\ntwo\nthree\n")}
+        result = self.run_tool("write_file", {"path": "paper.tex", "content": "one\n2\nthree\n"})
+        self.assertEqual(result["open_buffer"], {"applied": "held", "saved": False})
+        self.assertEqual(result["written_bytes"], 0)
+        self.assertIn("waiting on the file's agent bar", result["note"])
+        self.assertEqual(self.file.read_text(), "one\ntwo\nthree\n")
+
+    def test_an_inline_conflict_is_reported_with_its_lines(self):
+        # Card #PBZ4, D2: an overlap is merged into the buffer between markers, not refused.
+        self.open("one\nTWO\nthree\n", dirty=True)
+        self.editor.reply = {"ok": True, "applied": "conflict", "saved": False, "sha256": sha("one\ntwo\nthree\n"),
+                             "conflicts": [{"line": 2, "buffer": "TWO\n", "base": "two\n", "agent": "2\n"}]}
+        result = self.run_tool("edit_file", {"path": "paper.tex", "old_string": "three", "new_string": "3"})
+        self.assertEqual(result["open_buffer"]["applied"], "conflict")
+        self.assertEqual(result["open_buffer"]["conflicts"], 1)
+        self.assertIn("between conflict markers", result["note"])
+        self.assertIn("at line 2", result["note"])
+        self.assertEqual(self.file.read_text(), "one\ntwo\nthree\n")
+
     def test_an_editor_that_cannot_hold_it_leaves_the_disk_write(self):
         self.open("one\ntwo\nthree\n", dirty=False)
         self.editor.reply = {"ok": False, "error": "not_open"}

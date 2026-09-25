@@ -37,6 +37,7 @@
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QListWidget>
 #include <QImageReader>
 #include <QInputDialog>
 #include <QContextMenuEvent>
@@ -917,6 +918,300 @@ private:
 }  // namespace
 #endif
 
+
+// ----- ArtifactDock: the agent docked under a file editor (card #PBZ4) ---------------------------
+//
+// SettingsPane's helper foot, member for member (src/SettingsPane.cpp, "the helper agent"): the
+// pane owns the *context* and the row; the window, the only place a `Pane` can be made, turns the
+// context into a console through `onCreateConsole` on the first expand. The object names are that
+// foot's, so the theme draws all of them alike.
+
+namespace {
+// "Review before apply" is remembered per workspace — the tab's project, or the file's folder for
+// a tab with none — under one QSettings group.
+const QString kReviewGroup = QStringLiteral("artifact/reviewBeforeApply");
+}  // namespace
+
+ArtifactDock::ArtifactDock(QWidget *parent) : QWidget(parent), m_context(new relay::agent::ArtifactContext) {
+    setObjectName(QStringLiteral("boardChatPanel"));
+    setAttribute(Qt::WA_StyledBackground);
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(0);
+
+    // ---- collapsed: one button at the bottom right ------------------------------------------
+    m_askRow = new QWidget(this);
+    m_askRow->setObjectName(QStringLiteral("boardChatAskRow"));
+    auto *askLine = new QHBoxLayout(m_askRow);
+    askLine->setContentsMargins(10, 4, 10, 4);
+    askLine->setSpacing(6);
+    askLine->addStretch(1);
+    m_ask = new QToolButton(m_askRow);
+    m_ask->setObjectName(QStringLiteral("boardChatAsk"));
+    m_ask->setCursor(Qt::PointingHandCursor);
+    m_ask->setFocusPolicy(Qt::StrongFocus);
+    askLine->addWidget(m_ask, 0);
+    outer->addWidget(m_askRow);
+    connect(m_ask, &QToolButton::clicked, this, [this] {
+        // The mouse, not the key: Alt+Q comes in through `focusHelper()` and teaches nothing.
+        if (onHelperHint && !m_askHintId.isEmpty()) onHelperHint();
+        focusHelper();
+    });
+
+    // ---- expanded: the head row, the change list, then the console --------------------------
+    m_body = new QWidget(this);
+    m_body->setObjectName(QStringLiteral("boardChatBody"));
+    auto *body = new QVBoxLayout(m_body);
+    body->setContentsMargins(10, 6, 10, 6);
+    body->setSpacing(4);
+    auto *headRow = new QHBoxLayout;
+    headRow->setSpacing(6);
+    m_head = new QLabel(m_body);
+    m_head->setObjectName(QStringLiteral("boardChatHead"));
+    m_head->setTextFormat(Qt::PlainText);
+    headRow->addWidget(m_head, 0);
+    headRow->addStretch(1);
+    m_changesToggle = new QToolButton(m_body);
+    m_changesToggle->setObjectName(QStringLiteral("artifactChanges"));
+    m_changesToggle->setCheckable(true);
+    m_changesToggle->setToolTip(QStringLiteral("What the agent changed in this file, turn by turn"));
+    m_changesToggle->setFocusPolicy(Qt::NoFocus);
+    m_changesToggle->hide();
+    headRow->addWidget(m_changesToggle, 0);
+    m_reviewToggle = new QToolButton(m_body);
+    m_reviewToggle->setObjectName(QStringLiteral("artifactReview"));
+    m_reviewToggle->setText(QStringLiteral("Review before apply"));
+    m_reviewToggle->setCheckable(true);
+    m_reviewToggle->setToolTip(QStringLiteral("On: the agent's edits to this file wait on the file's agent bar for "
+                                              "Apply. Off: they land at once as undo steps. Remembered per project."));
+    m_reviewToggle->setFocusPolicy(Qt::NoFocus);
+    headRow->addWidget(m_reviewToggle, 0);
+    auto *foldButton = new QToolButton(m_body);
+    foldButton->setObjectName(QStringLiteral("boardChatFold"));
+    foldButton->setText(QStringLiteral("⌄"));
+    foldButton->setToolTip(QStringLiteral("Fold the agent back to one row. The conversation is kept — it opens where "
+                                    "you left it."));
+    foldButton->setCursor(Qt::PointingHandCursor);
+    foldButton->setFocusPolicy(Qt::NoFocus);
+    headRow->addWidget(foldButton, 0);
+    body->addLayout(headRow);
+    m_changesList = new QListWidget(m_body);
+    m_changesList->setObjectName(QStringLiteral("artifactChangeList"));
+    m_changesList->setFocusPolicy(Qt::NoFocus);
+    m_changesList->setUniformItemSizes(true);
+    m_changesList->hide();
+    body->addWidget(m_changesList, 0);
+    m_body->setVisible(false);
+    outer->addWidget(m_body);
+
+    connect(foldButton, &QToolButton::clicked, this, [this] { fold(); });
+    connect(m_changesToggle, &QToolButton::toggled, this, [this](bool open) {
+        m_changesList->setVisible(open && !m_changes.isEmpty());
+        redrawChanges();
+    });
+    connect(m_reviewToggle, &QToolButton::toggled, this, [this](bool on) { setReviewBeforeApply(on); });
+    connect(m_changesList, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        const int line = item->data(Qt::UserRole).toInt();
+        if (line > 0 && onGoToLine) onGoToLine(line);
+    });
+    updateRow();
+}
+
+ArtifactDock::~ArtifactDock() {
+    // The console's wrapper clears the context's callback when the console goes, so the console
+    // must go first (~BoardView's rule): children die in ~QWidget, after this body.
+    delete m_body;
+    m_body = nullptr;
+    delete m_context;
+}
+
+void ArtifactDock::setHelperWorkspace(const QString &workspace) {
+    if (workspace == m_workspace) return;
+    m_workspace = workspace;
+    const bool on = QSettings().value(reviewKey(), false).toBool();
+    const QSignalBlocker block(m_reviewToggle);
+    m_reviewToggle->setChecked(on);
+    if (on != m_review) {
+        m_review = on;
+        if (onReviewChanged) onReviewChanged();
+    }
+}
+
+QString ArtifactDock::reviewKey() const {
+    QString where = m_workspace;
+    if (where.isEmpty() && !m_context->file().startsWith(QStringLiteral("ssh://")))
+        where = QFileInfo(m_context->file()).absolutePath();
+    // QSettings keys may not hold '/' as data: the path is hashed into one segment.
+    const QByteArray digest = QCryptographicHash::hash(where.toUtf8(), QCryptographicHash::Sha1).toHex().left(16);
+    return kReviewGroup + QLatin1Char('/') + QString::fromLatin1(digest);
+}
+
+void ArtifactDock::setReviewBeforeApply(bool on) {
+    QSettings().setValue(reviewKey(), on);
+    {
+        const QSignalBlocker block(m_reviewToggle);
+        m_reviewToggle->setChecked(on);
+    }
+    if (on == m_review) return;
+    m_review = on;
+    if (onReviewChanged) onReviewChanged();
+}
+
+void ArtifactDock::setHelperShortcut(const QString &hintId, const QString &keys) {
+    m_askHintId = hintId;
+    m_askKeys = keys;
+    updateRow();
+}
+
+void ArtifactDock::refreshTitle() {
+    if (m_head) m_head->setText(m_context->title());
+    // The switch follows the file when the tab has no project (the folder is the key then).
+    const bool on = QSettings().value(reviewKey(), false).toBool();
+    if (on != m_review) {
+        m_review = on;
+        const QSignalBlocker block(m_reviewToggle);
+        m_reviewToggle->setChecked(on);
+        if (onReviewChanged) onReviewChanged();
+    }
+    updateRow();
+}
+
+void ArtifactDock::focusHelper() {
+    if (!onCreateConsole) return;
+    ensureConsole();
+    if (m_collapsed) {
+        m_collapsed = false;
+        applyCollapsed();
+    }
+    if (m_console.focusComposer) m_console.focusComposer();
+}
+
+void ArtifactDock::helperDraft(const QString &text) {
+    focusHelper();
+    if (m_console.draftInComposer) m_console.draftInComposer(text);
+}
+
+void ArtifactDock::fold() {
+    if (m_collapsed) return;
+    m_collapsed = true;
+    applyCollapsed();
+}
+
+void ArtifactDock::ensureConsole() {
+    if (m_console || !onCreateConsole || !m_body) return;
+    // The context sends a plugin command's prompt through the console it now has.
+    QPointer<ArtifactDock> self(this);
+    m_context->sendPrompt = [self](const QString &prompt) {
+        if (!self) return;
+        self->focusHelper();
+        if (self->m_console.submitPrompt) self->m_console.submitPrompt(prompt);
+    };
+    m_console = onCreateConsole(m_context, m_body);
+    if (!m_console) return;
+    if (auto *body = qobject_cast<QVBoxLayout *>(m_body->layout())) body->addWidget(m_console.widget, 1);
+    m_console.widget->show();
+    m_context->changed();   // the action row and the `/` popup now have somewhere to send to
+    updateHeight();
+}
+
+void ArtifactDock::applyCollapsed() {
+    if (m_askRow) m_askRow->setVisible(m_collapsed);
+    if (m_collapsed && m_ask && m_body && m_body->isAncestorOf(QApplication::focusWidget()))
+        m_ask->setFocus(Qt::OtherFocusReason);
+    if (m_body) m_body->setVisible(!m_collapsed);
+    if (m_console.setCollapsed) m_console.setCollapsed(m_collapsed);
+    if (!m_collapsed) updateHeight();
+}
+
+void ArtifactDock::updateRow() {
+    if (m_ask) {
+        m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("✦ Agent") : QStringLiteral("✦ Agent (%1)").arg(m_askKeys));
+        const QString about = m_context->file().isEmpty() ? QStringLiteral("this file")
+                                                          : QFileInfo(m_context->file()).fileName();
+        m_ask->setToolTip(m_askKeys.isEmpty() ? QStringLiteral("Ask the agent about %1.").arg(about)
+                                              : QStringLiteral("Ask the agent about %1 (%2).").arg(about, m_askKeys));
+    }
+    if (m_head) m_head->setText(m_context->title());
+}
+
+// At most ~45 % of the host, and never so little that the transcript is a slot: the editor above
+// is what the person came for.
+void ArtifactDock::updateHeight() {
+    if (!m_body) return;
+    const QWidget *host = parentWidget();
+    const int line = QFontMetrics(font()).lineSpacing();
+    const int total = host ? host->height() : 600;
+    const int cap = std::max(10 * line, total * 9 / 20);
+    m_body->setMaximumHeight(cap);
+    m_body->setMinimumHeight(std::min(cap, 14 * line));
+}
+
+void ArtifactDock::showEvent(QShowEvent *event) {
+    QWidget::showEvent(event);
+    // An ask row that does nothing is worse than none: with no window to build a console (a
+    // test, a library), there is no row.
+    if (m_askRow) m_askRow->setVisible(m_collapsed && bool(onCreateConsole));
+}
+
+void ArtifactDock::resizeEvent(QResizeEvent *event) {
+    QWidget::resizeEvent(event);
+}
+
+void ArtifactDock::setChanges(const QList<Change> &changes) {
+    m_changes = changes;
+    redrawChanges();
+}
+
+void ArtifactDock::nameTurn(const QString &turnId, const QString &label) {
+    if (turnId.isEmpty() || label.trimmed().isEmpty()) return;
+    QString text = label.simplified();
+    if (text.size() > 60) text = text.left(59) + QChar(0x2026);
+    m_turnNames.insert(turnId, text);
+    redrawChanges();
+}
+
+void ArtifactDock::redrawChanges() {
+    if (!m_changesToggle || !m_changesList) return;
+    QStringList turns;
+    for (const Change &change : std::as_const(m_changes))
+        if (!turns.contains(change.turnId)) turns << change.turnId;
+    m_changesToggle->setVisible(!m_changes.isEmpty());
+    m_changesToggle->setText(QStringLiteral("%1 %2 · %3 %4")
+                                 .arg(m_changesToggle->isChecked() ? QStringLiteral("▾") : QStringLiteral("▸"))
+                                 .arg(m_changes.size())
+                                 .arg(m_changes.size() == 1 ? QStringLiteral("change") : QStringLiteral("changes"))
+                                 .arg(turns.size() == 1 ? QStringLiteral("1 turn") : QStringLiteral("%1 turns").arg(turns.size())));
+    m_changesList->clear();
+    // Newest turn first; under each, its changes in the order they landed.
+    for (qsizetype t = turns.size() - 1; t >= 0; --t) {
+        const QString &turn = turns.at(t);
+        const QString name = m_turnNames.value(turn);
+        auto *head = new QListWidgetItem(
+            name.isEmpty() ? (turn.isEmpty() ? QStringLiteral("Turn") : QStringLiteral("Turn %1").arg(turn.left(8)))
+                           : QStringLiteral("Turn · “%1”").arg(name),
+            m_changesList);
+        QFont bold = head->font();
+        bold.setBold(true);
+        head->setFont(bold);
+        head->setFlags(Qt::ItemIsEnabled);
+        for (const Change &change : std::as_const(m_changes)) {
+            if (change.turnId != turn) continue;
+            auto *row = new QListWidgetItem(QStringLiteral("    ") + change.text, m_changesList);
+            row->setData(Qt::UserRole, change.line);
+            row->setToolTip(QStringLiteral("Go to line %1").arg(change.line));
+        }
+    }
+    const int rows = std::min(8, m_changesList->count());
+    m_changesList->setFixedHeight(rows * std::max(18, m_changesList->sizeHintForRow(0)) + 6);
+    m_changesList->setVisible(m_changesToggle->isChecked() && !m_changes.isEmpty());
+}
+
+QStringList ArtifactDock::changeListRows() const {
+    QStringList rows;
+    for (int i = 0; m_changesList && i < m_changesList->count(); ++i) rows << m_changesList->item(i)->text().trimmed();
+    return rows;
+}
+
 // ----- FilePreview -------------------------------------------------------------------------------
 
 struct FilePreview::Private {
@@ -981,7 +1276,19 @@ struct FilePreview::Private {
     QLabel *agentText = nullptr;
     QToolButton *agentUndo = nullptr, *agentList = nullptr, *agentDismiss = nullptr;
     QTimer *agentFade = nullptr;       // takes the changed lines' highlight off again
+
+    // ----- the docked agent (card #PBZ4) ---------------------------------------------------------
+    ArtifactDock *dock = nullptr;
+    QVector<QJsonObject> held;         // patches waiting for Apply while "Review before apply" is on
+    QToolButton *agentApply = nullptr, *agentDiscard = nullptr;
 };
+
+namespace {
+relay::agent::PluginSearch &pluginSearch() {
+    static relay::agent::PluginSearch search;
+    return search;
+}
+}  // namespace
 
 namespace {
 // ----- which files are open, for the agents' workers (#F8R7, protocol §35) ----------------------
@@ -1138,10 +1445,19 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
         });
         d->agentDismiss = headerButton(QStringLiteral("×"), QStringLiteral("Hide"));
         d->agentDismiss->setObjectName(QStringLiteral("filePreviewAgentDismiss"));
+        // Review before apply (#PBZ4, D1): what the agent proposed, waiting for the person.
+        d->agentApply = headerButton(QStringLiteral("Apply"), QStringLiteral("Put the agent's proposed change in the buffer, as an undo step"));
+        d->agentApply->setObjectName(QStringLiteral("filePreviewAgentApply"));
+        d->agentDiscard = headerButton(QStringLiteral("Discard"), QStringLiteral("Drop the agent's proposed change"));
+        d->agentDiscard->setObjectName(QStringLiteral("filePreviewAgentDiscard"));
         bar->addWidget(d->agentText, 1);
+        bar->addWidget(d->agentApply);
+        bar->addWidget(d->agentDiscard);
         bar->addWidget(d->agentUndo);
         bar->addWidget(d->agentList);
         bar->addWidget(d->agentDismiss);
+        connect(d->agentApply, &QToolButton::clicked, this, [this] { applyHeldAgentChanges(); });
+        connect(d->agentDiscard, &QToolButton::clicked, this, [this] { discardHeldAgentChanges(); });
         connect(d->agentUndo, &QToolButton::clicked, this, [this] { undoAgentChange(); });
         connect(d->agentDismiss, &QToolButton::clicked, this, [this] { d->agentBar->hide(); });
     }
@@ -1323,6 +1639,52 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     for (QWidget *widget : {m_textView->viewport(), m_markdownView->viewport(),
                             static_cast<QWidget *>(m_image), static_cast<QWidget *>(m_info)})
         widget->installEventFilter(this);
+
+    // The agent docked at the foot (card #PBZ4). The context asks the editor for the cursor, the
+    // selection and the dirty flag fresh before every ask, so nothing here pushes them.
+    d->dock = new ArtifactDock(this);
+    d->dock->hide();
+    {
+        relay::agent::ArtifactContext *context = d->dock->context();
+        QPointer<FilePreview> self(this);
+        context->state = [self] {
+            relay::agent::ArtifactState state;
+            if (!self) return state;
+            const QTextCursor cursor = self->m_textView->textCursor();
+            state.line = cursor.blockNumber() + 1;
+            state.column = cursor.positionInBlock() + 1;
+            if (cursor.hasSelection()) {
+                QTextCursor first(self->m_textView->document()), last(self->m_textView->document());
+                first.setPosition(cursor.selectionStart());
+                last.setPosition(cursor.selectionEnd());
+                state.firstLine = first.blockNumber() + 1;
+                state.lastLine = last.blockNumber() + 1;
+                state.selection = cursor.selectedText().replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+            }
+            state.dirty = self->isDirty();
+            state.editable = self->isEditable();
+            state.mode = self->m_kind == Kind::Markdown
+                             ? (self->showingSource() ? QStringLiteral("markdown source") : QStringLiteral("markdown, rendered"))
+                             : QStringLiteral("text");
+            return state;
+        };
+        context->save = [self] { return self && self->save(); };
+        context->revert = [self] {
+            if (!self || !self->isDirty()) return false;
+            return self->reload();
+        };
+        context->goToLine = [self](int line) { if (self) self->goToLine(line); };
+        context->onTurnFinished = [self](const relay::agent::TurnRecord &record) {
+            if (!self) return;
+            self->d->dock->nameTurn(record.turnId, record.prompt);
+        };
+        d->dock->onGoToLine = [self](int line) { if (self) self->goToLine(line); };
+        d->dock->onReviewChanged = [self] { if (self) self->showAgentBar(); };
+        connect(m_textView->document(), &QTextDocument::modificationChanged, this, [this](bool) {
+            d->dock->context()->changed();   // Save and Revert light up with something to save
+        });
+    }
+    layout->addWidget(d->dock, 0);
 }
 
 FilePreview::~FilePreview() {
@@ -1334,6 +1696,9 @@ FilePreview::~FilePreview() {
     delete d->settle;
     delete d->remotePoll;
     delete d->agentFade;
+    // The dock and its console go while `d` is still here: its context's callbacks read it.
+    delete d->dock;
+    d->dock = nullptr;
     if (m_remote) m_remote->cancel();
     delete d;
 }
@@ -1411,6 +1776,7 @@ bool FilePreview::open(const QString &path) {
     if (info.absoluteFilePath() != m_path) {
         d->agentChanges.clear();
         d->agentSteps.clear();
+        d->held.clear();
         d->agentBar->hide();
     }
     if (auto *button = findChild<QPushButton *>(QStringLiteral("filePreviewOpenExternal"))) button->show();
@@ -1449,6 +1815,7 @@ bool FilePreview::open(const QString &path) {
     if (samePath && m_kind == Kind::Text) m_textView->verticalScrollBar()->setValue(scroll);
     watchLocal();
     notifyOpenBuffers();
+    updateArtifactDock();
 
     updateTitleText();
     m_title->setToolTip(absolute);
@@ -1477,6 +1844,7 @@ bool FilePreview::openRemote(const QString &url) {
     if (url != m_path) {
         d->agentChanges.clear();
         d->agentSteps.clear();
+        d->held.clear();
         d->agentBar->hide();
     }
     m_path = url;
@@ -1618,6 +1986,7 @@ void FilePreview::showRemoteContent(const QByteArray &content) {
     m_pendingLine = 0;
     updateModeButton();
     updateTitleText();
+    updateArtifactDock();
     if (onTitleChanged) onTitleChanged(title());
 }
 
@@ -2362,6 +2731,21 @@ void FilePreview::answerBufferRequest(const QJsonObject &request, const std::fun
         return refuse(QStringLiteral("not_representable"),
                       QStringLiteral("The new text has line endings or characters the editor would change, so it goes to the disk instead."));
 
+    // Review before apply (#PBZ4, owner decision D1): the patch waits on the agent bar for the
+    // person and the agent's turn goes on, told plainly that nothing is in the file yet. Apply
+    // runs it through the path below, marked so it is not held a second time.
+    if (d->dock && d->dock->reviewBeforeApply() && !request.value(QStringLiteral("reviewed")).toBool()) {
+        d->held.append(request);
+        showAgentBar();
+        out.insert(QStringLiteral("ok"), true);
+        out.insert(QStringLiteral("applied"), QStringLiteral("held"));
+        out.insert(QStringLiteral("saved"), false);
+        out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
+        out.insert(QStringLiteral("message"), QStringLiteral("%1 is open in Relay with Review before apply on: the change waits "
+                                                             "for the person to Apply it, and is not in the file yet.").arg(name));
+        return reply(out);
+    }
+
     const QString baseHex = request.value(QStringLiteral("base_sha256")).toString();
     const relay::merge::Labels labels{QStringLiteral("editor"), QStringLiteral("base"), QStringLiteral("agent")};
     QString target, applied;
@@ -2414,20 +2798,18 @@ void FilePreview::answerBufferRequest(const QJsonObject &request, const std::fun
             conflicted = false;
         }
     }
+    QJsonArray conflictRegions;
     if (conflicted) {
-        QJsonArray regions;
+        // Owner decision D2 of #P2W8 (card #PBZ4): an overlap is no longer refused. The three-way
+        // merge goes into the buffer with each contested region between markers — the person's
+        // lines, the base, the agent's — as one undo step, and the agent bar says how many there
+        // are. The agent is told the same, with each region, so it does not redo the edit.
         for (const relay::merge::Conflict &c : overlap.conflicts) {
-            QJsonObject region{{QStringLiteral("buffer"), c.ours}, {QStringLiteral("base"), c.base},
-                               {QStringLiteral("agent"), c.theirs}};
-            const qsizetype at = c.ours.isEmpty() ? -1 : buffer.indexOf(c.ours);
-            if (at >= 0) region.insert(QStringLiteral("line"), int(buffer.left(at).count(QLatin1Char('\n'))) + 1);
-            regions.append(region);
+            conflictRegions.append(QJsonObject{{QStringLiteral("buffer"), c.ours}, {QStringLiteral("base"), c.base},
+                                               {QStringLiteral("agent"), c.theirs}, {QStringLiteral("line"), c.line + 1}});
         }
-        out.insert(QStringLiteral("conflicts"), regions);
-        return refuse(QStringLiteral("conflict"),
-                      QStringLiteral("%1 is open in Relay and the user has unsaved edits on the same lines (%2 %3), so "
-                                     "nothing was changed.")
-                          .arg(name).arg(regions.size()).arg(regions.size() == 1 ? QStringLiteral("place") : QStringLiteral("places")));
+        target = overlap.text;
+        applied = QStringLiteral("conflict");
     }
     if (applied.isEmpty())
         return refuse(QStringLiteral("stale"),
@@ -2436,6 +2818,14 @@ void FilePreview::answerBufferRequest(const QJsonObject &request, const std::fun
 
     out.insert(QStringLiteral("ok"), true);
     out.insert(QStringLiteral("applied"), applied);
+    if (!conflictRegions.isEmpty()) {
+        out.insert(QStringLiteral("conflicts"), conflictRegions);
+        out.insert(QStringLiteral("message"),
+                   QStringLiteral("%1 is open in Relay and the user has unsaved edits on the same lines: both versions are "
+                                  "in the buffer between conflict markers (%2 %3) for them to resolve.")
+                       .arg(name).arg(conflictRegions.size())
+                       .arg(conflictRegions.size() == 1 ? QStringLiteral("place") : QStringLiteral("places")));
+    }
     if (applied == QStringLiteral("unchanged")) {
         out.insert(QStringLiteral("saved"), !document->isModified());
         out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
@@ -2445,7 +2835,8 @@ void FilePreview::answerBufferRequest(const QJsonObject &request, const std::fun
     replaceBuffer(target);
     noteAgentChange(buffer, target, request, applied, false);
     out.insert(QStringLiteral("buffer_sha256"), sha256Hex(target.toUtf8()));
-    if (!wasClean) {
+    // Conflict markers are never saved for the person: they resolve them, then save.
+    if (!wasClean || applied == QStringLiteral("conflict")) {
         // The user's unsaved edits are theirs to save: the agent's change joins them.
         out.insert(QStringLiteral("saved"), false);
         out.insert(QStringLiteral("sha256"), QString::fromLatin1(d->base.revision.hash.toHex()));
@@ -2537,6 +2928,24 @@ void FilePreview::noteAgentChange(const QString &before, const QString &after, c
 }
 
 void FilePreview::showAgentBar() {
+    updateArtifactDock();
+    const bool holding = !d->held.isEmpty();
+    d->agentApply->setVisible(holding);
+    d->agentDiscard->setVisible(holding);
+    d->agentUndo->setVisible(!holding);
+    d->agentList->setVisible(!holding && !d->agentChanges.isEmpty());
+    if (holding) {
+        // Review before apply (#PBZ4, D1): what waits, in the agent's own words.
+        const QString intent = d->held.first().value(QStringLiteral("intent")).toString();
+        d->agentText->setText(d->held.size() == 1
+                                  ? QStringLiteral("Agent proposes: %1 · review, then Apply").arg(intent.isEmpty() ? QStringLiteral("an edit") : intent)
+                                  : QStringLiteral("Agent proposes %1 changes, first: %2 · review, then Apply")
+                                        .arg(d->held.size()).arg(intent.isEmpty() ? QStringLiteral("an edit") : intent));
+        d->agentText->setToolTip(QStringLiteral("Review before apply is on for this project: Apply puts each proposed change "
+                                                "in the buffer as its own undo step, merged around your typing."));
+        d->agentBar->show();
+        return;
+    }
     if (d->agentChanges.isEmpty()) {
         d->agentBar->hide();
         return;
@@ -2546,6 +2955,9 @@ void FilePreview::showAgentBar() {
         change.firstLine == change.lastLine ? QStringLiteral("line %1").arg(change.firstLine)
                                             : QStringLiteral("lines %1–%2").arg(change.firstLine).arg(change.lastLine));
     if (change.applied == QStringLiteral("merged")) text += QStringLiteral(" · merged with your edits");
+    // D2: the chip over an inline conflict — the markers are in the buffer, the person resolves.
+    if (change.applied == QStringLiteral("conflict"))
+        text += QStringLiteral(" · ⚠ conflicts with your edits: both versions are between <<<<<<< editor and >>>>>>> agent");
     if (!change.saved) text += QStringLiteral(" · unsaved");
     d->agentText->setText(text);
     QStringList tip;
@@ -2593,6 +3005,66 @@ bool FilePreview::undoAgentChange() {
     showAgentBar();
     if (written) setNotice(QStringLiteral("Undid the agent's change."));
     return true;
+}
+
+// ----- the docked agent (card #PBZ4) -------------------------------------------------------------
+
+ArtifactDock *FilePreview::artifactDock() const { return d->dock; }
+
+void FilePreview::setPluginSearch(const relay::agent::PluginSearch &search) { pluginSearch() = search; }
+
+int FilePreview::heldAgentChanges() const { return int(d->held.size()); }
+
+int FilePreview::applyHeldAgentChanges() {
+    const QVector<QJsonObject> held = std::exchange(d->held, {});
+    int landed = 0;
+    QStringList failed;
+    for (QJsonObject request : held) {
+        request.insert(QStringLiteral("reviewed"), true);
+        answerBufferRequest(request, [&](const QJsonObject &result) {
+            if (result.value(QStringLiteral("ok")).toBool()) ++landed;
+            else failed << result.value(QStringLiteral("message")).toString(result.value(QStringLiteral("error")).toString());
+        });
+    }
+    showAgentBar();
+    if (!failed.isEmpty())
+        setNotice(QStringLiteral("%1 of the agent's proposed changes could not be applied: %2")
+                      .arg(failed.size()).arg(failed.first()));
+    return landed;
+}
+
+void FilePreview::discardHeldAgentChanges() {
+    if (d->held.isEmpty()) return;
+    const int count = int(d->held.size());
+    d->held.clear();
+    showAgentBar();
+    setNotice(count == 1 ? QStringLiteral("Discarded the agent's proposed change.")
+                         : QStringLiteral("Discarded the agent's %1 proposed changes.").arg(count));
+}
+
+// The dock follows the pane: shown for text and Markdown only, about this file and the plugin its
+// name activates, with the change list drawn from the agent changes this buffer holds.
+void FilePreview::updateArtifactDock() {
+    if (!d->dock) return;
+    const bool text = m_kind == Kind::Text || m_kind == Kind::Markdown;
+    d->dock->setVisible(text && !m_path.isEmpty());
+    relay::agent::ArtifactContext *context = d->dock->context();
+    if (context->file() != m_path) {
+        context->setFile(m_path);
+        context->setPlugin(relay::agent::pluginForFile(m_path, pluginSearch()));
+        d->dock->refreshTitle();
+    }
+    QList<ArtifactDock::Change> changes;
+    for (const AgentChange &change : std::as_const(d->agentChanges)) {
+        QStringList parts{change.firstLine == change.lastLine ? QStringLiteral("line %1").arg(change.firstLine)
+                                                              : QStringLiteral("lines %1–%2").arg(change.firstLine).arg(change.lastLine),
+                          change.intent};
+        if (change.applied == QStringLiteral("merged")) parts << QStringLiteral("merged");
+        if (change.applied == QStringLiteral("conflict")) parts << QStringLiteral("⚠ conflict");
+        if (!change.saved) parts << QStringLiteral("unsaved");
+        changes << ArtifactDock::Change{change.turnId, parts.join(QStringLiteral(" · ")), change.firstLine};
+    }
+    d->dock->setChanges(changes);
 }
 
 // ----- which files are open, for the agents' workers ----------------------------------------------
@@ -2989,6 +3461,11 @@ struct PlanEditor::Private {
     LazyHighlighter *highlighter = nullptr;
 #endif
     QSyntaxHighlighter *fallback = nullptr;
+    // The docked agent (card #PBZ4), and the watch that shows its writes: a plan's edits by the
+    // agent go to the disk, so a clean editor follows the file as one undo step.
+    ArtifactDock *dock = nullptr;
+    QFileSystemWatcher *watcher = nullptr;
+    QString loaded;   // what was last read from or written to the disk
 };
 
 PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
@@ -3019,6 +3496,70 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
     auto *keep = new QPushButton(QStringLiteral("Keep planning"));
     actions->addWidget(execute); actions->addWidget(fresh); actions->addStretch(1); actions->addWidget(keep);
     layout->addWidget(m_planActions);
+    d->dock = new ArtifactDock(this);
+    {
+        relay::agent::ArtifactContext *context = d->dock->context();
+        QPointer<PlanEditor> self(this);
+        context->state = [self] {
+            relay::agent::ArtifactState state;
+            if (!self) return state;
+            const QTextCursor cursor = self->m_editor->textCursor();
+            state.line = cursor.blockNumber() + 1;
+            state.column = cursor.positionInBlock() + 1;
+            if (cursor.hasSelection()) {
+                QTextCursor first(self->m_editor->document()), last(self->m_editor->document());
+                first.setPosition(cursor.selectionStart());
+                last.setPosition(cursor.selectionEnd());
+                state.firstLine = first.blockNumber() + 1;
+                state.lastLine = last.blockNumber() + 1;
+                state.selection = cursor.selectedText().replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+            }
+            state.dirty = self->isDirty();
+            state.editable = true;
+            state.mode = QStringLiteral("plan");
+            return state;
+        };
+        context->save = [self] { return self && self->save(); };
+        context->revert = [self] { return self && self->isDirty() && self->open(self->m_path); };
+        context->goToLine = [self](int line) {
+            if (!self) return;
+            QTextCursor cursor(self->m_editor->document()->findBlockByNumber(std::max(0, line - 1)));
+            self->m_editor->setTextCursor(cursor);
+            self->m_editor->centerCursor();
+        };
+        d->dock->onGoToLine = context->goToLine;
+        context->onTurnFinished = [self](const relay::agent::TurnRecord &record) {
+            if (self) self->d->dock->nameTurn(record.turnId, record.prompt);
+        };
+    }
+    layout->addWidget(d->dock, 0);
+    d->watcher = new QFileSystemWatcher(this);
+    connect(d->watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &) {
+        QTimer::singleShot(80, this, [this] {
+            if (m_path.isEmpty()) return;
+            if (!d->watcher->files().contains(m_path) && QFileInfo::exists(m_path)) d->watcher->addPath(m_path);
+            QFile file(m_path);
+            if (!file.open(QIODevice::ReadOnly) || file.size() > FilePreview::kMaxTextBytes) return;
+            const QString now = QString::fromUtf8(file.readAll());
+            if (now == d->loaded || now == m_editor->toPlainText()) { d->loaded = now; return; }
+            if (isDirty()) {
+                m_notice->setText(QStringLiteral("%1 changed on disk. Reload shows it; Save keeps yours.").arg(title()));
+                m_notice->show();
+                return;
+            }
+            // Clean: follow the disk as one undo step, keeping the cursor where it was.
+            const int position = m_editor->textCursor().position();
+            QTextCursor all(m_editor->document());
+            all.select(QTextCursor::Document);
+            all.insertText(now);
+            QTextCursor back(m_editor->document());
+            back.setPosition(std::min(position, int(now.size())));
+            m_editor->setTextCursor(back);
+            m_editor->document()->setModified(false);
+            d->loaded = now;
+        });
+    });
+    connect(m_editor->document(), &QTextDocument::modificationChanged, this, [this](bool) { d->dock->context()->changed(); });
     connect(saveButton, &QToolButton::clicked, this, [this] { save(); });
     connect(reload, &QToolButton::clicked, this, [this] { if (!m_path.isEmpty()) open(m_path); });
     connect(execute, &QPushButton::clicked, this, [this] { if (onExecute) onExecute(false); });
@@ -3043,15 +3584,28 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
 #endif
 }
 
-PlanEditor::~PlanEditor() { delete d; }
+PlanEditor::~PlanEditor() {
+    delete d->dock;   // the console's wrapper reads the context, which the dock owns
+    delete d;
+}
+
+ArtifactDock *PlanEditor::artifactDock() const { return d->dock; }
 
 bool PlanEditor::open(const QString &path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) { m_notice->setText(QStringLiteral("Could not open %1").arg(path)); m_notice->show(); return false; }
     if (file.size() > FilePreview::kMaxTextBytes) { m_notice->setText(QStringLiteral("File is too large to edit here.")); m_notice->show(); return false; }
     m_path = QFileInfo(path).absoluteFilePath();
-    m_editor->setPlainText(QString::fromUtf8(file.readAll()));
+    d->loaded = QString::fromUtf8(file.readAll());
+    m_editor->setPlainText(d->loaded);
     m_editor->document()->setModified(false);
+    if (!d->watcher->files().isEmpty()) d->watcher->removePaths(d->watcher->files());
+    d->watcher->addPath(m_path);
+    if (d->dock->context()->file() != m_path) {
+        d->dock->context()->setFile(m_path);
+        d->dock->context()->setPlugin(relay::agent::pluginForFile(m_path, pluginSearch()));
+        d->dock->refreshTitle();
+    }
 #ifdef RELAY_HAVE_SYNTAX_HIGHLIGHTING
     // A new document, so the colouring starts again at the top (#MDSG).
     if (d->highlighter) d->highlighter->start();
@@ -3067,6 +3621,8 @@ bool PlanEditor::save() {
     if (!out.open(QIODevice::WriteOnly)) { m_notice->setText(QStringLiteral("Could not save: %1").arg(out.errorString())); m_notice->show(); return false; }
     out.write(m_editor->toPlainText().toUtf8());
     if (!out.commit()) { m_notice->setText(QStringLiteral("Could not save: %1").arg(out.errorString())); m_notice->show(); return false; }
+    d->loaded = m_editor->toPlainText();
+    if (!d->watcher->files().contains(m_path)) d->watcher->addPath(m_path);   // an atomic save replaced the inode
     m_editor->document()->setModified(false);
     m_notice->hide();
     updateTitle();

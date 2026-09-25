@@ -7,10 +7,13 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QFile>
 #include <QLabel>
+#include <QListWidget>
+#include <QSettings>
 #include <QPlainTextEdit>
 #include <QSaveFile>
 #include <QTemporaryDir>
@@ -20,7 +23,9 @@
 #include <QTextDocument>
 #include <QToolButton>
 
+using relay::ArtifactDock;
 using relay::FilePreview;
+using relay::PlanEditor;
 
 namespace {
 void writeInPlace(const QString &path, const QByteArray &data) {
@@ -61,6 +66,12 @@ const QByteArray kBase = "one\ntwo\nthree\nfour\nfive\n";
 class FileSyncTests : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase() {
+        // "Review before apply" is a QSettings value: kept in this run's own folder.
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, m_dir.filePath(QStringLiteral("settings")));
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_dir.filePath(QStringLiteral("settings")));
+    }
+
     void init() {
         QVERIFY(m_dir.isValid());
         m_path = m_dir.filePath(QStringLiteral("notes-%1.txt").arg(++m_counter));
@@ -333,19 +344,129 @@ private slots:
         QCOMPARE(preview.text(), QStringLiteral("my one\ntwo\nthree\nfour\nfive\n"));
     }
 
-    void anOverlappingPatchIsAConflictAndChangesNothing() {
+    // Owner decision D2 of #P2W8 (card #PBZ4): an overlap is merged into the buffer with both
+    // versions between markers, as one undo step, never saved — and the agent is told where.
+    void anOverlappingPatchLandsBetweenConflictMarkersAsOneUndoStep() {
         FilePreview preview;
         QVERIFY(preview.open(m_path));
         preview.startEditing();
         typeAt(editorOf(preview), 1, QStringLiteral("my "));
         const QString before = preview.text();
         const QJsonObject result = patch(preview, sha256(kBase), QStringLiteral("one\nTWO\nthree\nfour\nfive\n"));
-        QVERIFY(!result.value(QStringLiteral("ok")).toBool());
-        QCOMPARE(result.value(QStringLiteral("error")).toString(), QStringLiteral("conflict"));
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(result.value(QStringLiteral("applied")).toString(), QStringLiteral("conflict"));
+        QVERIFY(!result.value(QStringLiteral("saved")).toBool());
         const QJsonObject region = result.value(QStringLiteral("conflicts")).toArray().first().toObject();
         QVERIFY(region.value(QStringLiteral("buffer")).toString().contains(QStringLiteral("my two")));
+        QCOMPARE(region.value(QStringLiteral("agent")).toString(), QStringLiteral("TWO\n"));
+        QCOMPARE(region.value(QStringLiteral("line")).toInt(), 2);
+        QVERIFY(preview.text().contains(QStringLiteral("<<<<<<< editor\nmy two\n")));
+        QVERIFY(preview.text().contains(QStringLiteral("=======\nTWO\n>>>>>>> agent\n")));
+        QCOMPARE(readAll(m_path), kBase);                                    // markers never reach the disk
+        QCOMPARE(preview.agentChanges().last().applied, QStringLiteral("conflict"));
+        QVERIFY(preview.findChild<QLabel *>(QStringLiteral("filePreviewAgentText"))->text().contains(QStringLiteral("conflicts with your edits")));
+        editorOf(preview)->document()->undo();                               // one step takes it all back
         QCOMPARE(preview.text(), before);
-        QVERIFY(preview.agentChanges().isEmpty());
+    }
+
+    // ----- the docked agent (card #PBZ4) -------------------------------------------------------
+
+    void theDockIsAboutTheFileAndItsPlugin() {
+        const QString md = m_dir.filePath(QStringLiteral("notes.md"));
+        writeInPlace(md, "# Notes\n\nfirst\n");
+        const QString bundled = m_dir.filePath(QStringLiteral("bundled"));
+        QDir().mkpath(bundled + QStringLiteral("/markdown"));
+        writeInPlace(bundled + QStringLiteral("/markdown/plugin.json"),
+                     R"({"schema_version": 2, "id": "relay.markdown", "name": "Markdown", "activation": {"files": ["*.md"]}, )"
+                     R"("commands": [{"name": "outline", "description": "Outline it.", "action": {"kind": "prompt", "prompt": "Outline {file}."}}]})");
+        relay::agent::PluginSearch search;
+        search.bundled = bundled;
+        FilePreview::setPluginSearch(search);
+        FilePreview preview;
+        QVERIFY(preview.open(md));
+        ArtifactDock *dock = preview.artifactDock();
+        QVERIFY(dock);
+        QVERIFY(!dock->isHidden());
+        const relay::agent::ContextSpec spec = dock->context()->spec();
+        QCOMPARE(spec.name, QStringLiteral("artifact"));
+        QCOMPARE(spec.file, md);
+        QCOMPARE(spec.plugin, QStringLiteral("relay.markdown"));
+        QVERIFY(spec.screen.contains(QStringLiteral("read only")));
+        preview.startEditing();
+        typeAt(editorOf(preview), 2, QStringLiteral("x"));
+        QVERIFY(dock->context()->spec().screen.contains(QStringLiteral("unsaved edits")));
+        QVERIFY(dock->context()->spec().screen.contains(QStringLiteral("Cursor: line 3")));
+        // Save and Revert follow the buffer.
+        const QList<relay::agent::Action> row = relay::agent::withUniqueLetters(dock->context()->actions());
+        QCOMPARE(row.last().label, QStringLiteral("Revert"));
+        QVERIFY(row.last().enabled);
+        // A picture has no buffer, so no dock.
+        const QString png = m_dir.filePath(QStringLiteral("dot.png"));
+        QImage(2, 2, QImage::Format_RGB32).save(png);
+        FilePreview picture;
+        QVERIFY(picture.open(png));
+        QVERIFY(picture.artifactDock()->isHidden());
+        FilePreview::setPluginSearch({});
+    }
+
+    // U5: the file's record is the undo steps plus a per-turn change list, named by the words
+    // that asked once the turn has ended. The typing around a change survives it.
+    void theChangeListNamesTheTurnAndTheTypingSurvives() {
+        FilePreview preview;
+        QVERIFY(preview.open(m_path));
+        preview.startEditing();
+        typeAt(editorOf(preview), 0, QStringLiteral("my "));
+        QVERIFY(patch(preview, sha256(kBase), QStringLiteral("one\ntwo\nthree\nfour\nfive\nsix\n")).value(QStringLiteral("ok")).toBool());
+        QCOMPARE(preview.text(), QStringLiteral("my one\ntwo\nthree\nfour\nfive\nsix\n"));
+        relay::agent::TurnRecord turn;
+        turn.turnId = QStringLiteral("turn-1");
+        turn.prompt = QStringLiteral("add a line six");
+        preview.artifactDock()->context()->turnFinished(turn);
+        const QStringList rows = preview.artifactDock()->changeListRows();
+        QCOMPARE(rows.value(0), QStringLiteral("Turn · “add a line six”"));
+        QVERIFY(rows.value(1).startsWith(QStringLiteral("line 6 · Write notes · merged")));
+        editorOf(preview)->document()->undo();                               // the agent's step
+        QCOMPARE(preview.text(), QStringLiteral("my one\ntwo\nthree\nfour\nfive\n"));
+    }
+
+    // D1: with Review before apply on, a patch waits for Apply and the agent is told so.
+    void reviewBeforeApplyHoldsAPatchUntilApply() {
+        FilePreview preview;
+        QVERIFY(preview.open(m_path));
+        preview.startEditing();
+        preview.artifactDock()->setReviewBeforeApply(true);
+        const QJsonObject held = patch(preview, sha256(kBase), QStringLiteral("one\nTWO\nthree\nfour\nfive\n"));
+        QVERIFY(held.value(QStringLiteral("ok")).toBool());
+        QCOMPARE(held.value(QStringLiteral("applied")).toString(), QStringLiteral("held"));
+        QCOMPARE(preview.text(), QString::fromUtf8(kBase));
+        QCOMPARE(preview.heldAgentChanges(), 1);
+        QVERIFY(preview.findChild<QToolButton *>(QStringLiteral("filePreviewAgentApply"))->isVisibleTo(&preview));
+        typeAt(editorOf(preview), 4, QStringLiteral("my "));                   // the person keeps typing
+        QCOMPARE(preview.applyHeldAgentChanges(), 1);
+        QCOMPARE(preview.text(), QStringLiteral("one\nTWO\nthree\nfour\nmy five\n"));
+        QCOMPARE(preview.heldAgentChanges(), 0);
+        // Discard drops it, and the setting is remembered for this folder's next pane.
+        QVERIFY(patch(preview, sha256(kBase), QStringLiteral("zero\n")).value(QStringLiteral("applied")) == QStringLiteral("held"));
+        preview.discardHeldAgentChanges();
+        QCOMPARE(preview.heldAgentChanges(), 0);
+        FilePreview again;
+        QVERIFY(again.open(m_path));
+        QVERIFY(again.artifactDock()->reviewBeforeApply());
+        preview.artifactDock()->setReviewBeforeApply(false);
+    }
+
+    // A plan pane's agent writes the disk; a clean plan follows it as one undo step.
+    void aCleanPlanFollowsTheAgentsWrite() {
+        const QString plan = m_dir.filePath(QStringLiteral("plan.md"));
+        writeInPlace(plan, "# Plan\n\n1. one\n");
+        PlanEditor editor;
+        QVERIFY(editor.open(plan));
+        QCOMPARE(editor.artifactDock()->context()->spec().file, plan);
+        writeAtomically(plan, "# Plan\n\n1. one\n2. two\n");
+        QTRY_COMPARE(editor.text(), QStringLiteral("# Plan\n\n1. one\n2. two\n"));
+        QVERIFY(!editor.isDirty());
+        editor.editor()->document()->undo();
+        QCOMPARE(editor.text(), QStringLiteral("# Plan\n\n1. one\n"));
     }
 
     void aPatchAgainstUnknownTextIsStaleButAnUniqueEditStillApplies() {

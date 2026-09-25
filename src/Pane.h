@@ -4677,6 +4677,11 @@ public:
     // Put text in the box and focus it, replacing whatever draft is there. `insertInComposer`
     // appends at the cursor; a host offering "ask about this" wants the box to say just that.
     QString composerText() const { return m_editor ? m_editor->toPlainText() : QString(); }
+    // Send `text` to this pane's agent as a prompt, as though typed and entered: an artifact
+    // console's action row sends its plugin commands this way (card #PBZ4).
+    void submitPrompt(const QString &text) {
+        if (!text.trimmed().isEmpty()) submitAgent(text, false);
+    }
     void draftInComposer(const QString &text) {
         if (!m_editor) return;
         m_editor->setPlainText(text);
@@ -9067,6 +9072,7 @@ private:
             submitGuest(QStringLiteral("/") + name, false);
             return;
         }
+        if (tryRunContextSlash(QStringLiteral("/") + name)) return;   // a plugin's (card #PBZ4)
         // An alias name that reached the popup is not a built-in (issue G8DK); a skill is neither.
         if (std::none_of(slashCommands().cbegin(), slashCommands().cend(),
                          [&](const auto &c) { return c.name == name; })) {
@@ -9101,7 +9107,43 @@ private:
             if (!alias.shadowed && !names.contains(alias.name)) names << alias.name;
         for (const auto &skill : m_skillCommands)
             if (!names.contains(skill.name)) names << skill.name;
+        for (const auto &command : contextSlashCommands()) names << command.name;
         return names;
+    }
+
+    // ----- the commands this console's context adds (card #PBZ4) ------------------------------
+    // An artifact console offers its file's task-plugin commands (`relay::agent::ContextCommand`).
+    // They come after every Relay-owned name — built-ins (hidden ones too), aliases and skills —
+    // and a name one of those already has moves into the plugin's namespace (`/markdown:toc`), so
+    // a context can never shadow a Relay command.
+    QList<relay::agent::ContextCommand> contextSlashCommands() const {
+        if (!m_context) return {};
+        const QList<relay::agent::ContextCommand> mine = m_context->slashCommands();
+        if (mine.isEmpty()) return {};
+        QStringList taken;
+        for (const auto &command : slashCommands()) taken << command.name;
+        for (const auto &alias : m_aliasList) taken << alias.name;
+        for (const auto &skill : m_skillCommands) taken << skill.name;
+        return relay::agent::offeredSlashCommands(mine, taken);
+    }
+    // `/name args` for one of them: its prompt goes to this console's agent, or it runs. True when
+    // the line was one, and then the box is cleared and remembered as for any other command.
+    bool tryRunContextSlash(const QString &text) {
+        const QString trimmed = text.trimmed();
+        if (!trimmed.startsWith(QLatin1Char('/')) || trimmed.contains(QLatin1Char('\n'))) return false;
+        static const QRegularExpression space(QStringLiteral("\\s"));
+        const QString word = trimmed.mid(1).section(space, 0, 0);
+        const QList<relay::agent::ContextCommand> offered = contextSlashCommands();
+        const int at = relay::agent::findSlashCommand(offered, word);
+        if (at < 0) return false;
+        const relay::agent::ContextCommand command = offered.at(at);
+        const QString args = trimmed.mid(1 + word.size()).trimmed();
+        m_editor->remember(trimmed);
+        m_editor->clear();
+        hideSlashPopup();
+        if (command.prompt) submitAgent(command.prompt(args), false);
+        else if (command.run) command.run(args);
+        return true;
     }
 
     // ----- skills as `/name` (feature intake 2026-09-18: "add skills as / commands like warp, eg

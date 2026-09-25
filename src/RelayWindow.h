@@ -1225,6 +1225,9 @@ private:
                 sessions->setHelperTabId(tab);
                 sessions->setHelperWorkspace(workspace);
             }
+            if (relay::ArtifactDock *dock = tool->preview() ? tool->preview()->artifactDock()
+                                            : tool->plan()   ? tool->plan()->artifactDock() : nullptr)
+                dock->setHelperWorkspace(workspace);   // "Review before apply" is per project (#PBZ4)
             if (auto *models = modelsViewOf(tool)) {
                 models->setHelperTabId(tab);
                 models->setHelperWorkspace(workspace);
@@ -1306,8 +1309,13 @@ private:
         if (tool && tool->board()) { tool->board()->focusChat(); return; }
         if (auto *sessions = sessionsViewOf(tool)) { sessions->focusHelper(); return; }
         if (auto *models = modelsViewOf(tool)) { models->focusHelper(); return; }
-        notice(QStringLiteral("The agent is in Options, Actions, Sessions, Models and the "
-                              "Board — open one of those and ask it there."), 5000);
+        // A text or Markdown file, and a plan: the agent docked under the editor (#PBZ4).
+        relay::ArtifactDock *dock = !tool           ? nullptr
+                                  : tool->preview() ? tool->preview()->artifactDock()
+                                  : tool->plan()    ? tool->plan()->artifactDock() : nullptr;
+        if (dock && !dock->isHidden()) { dock->focusHelper(); return; }
+        notice(QStringLiteral("The agent is in Options, Actions, Sessions, Models, the Board and "
+                              "file editors — open one of those and ask it there."), 5000);
     }
 
     ToolPane *createSettingsPane(relay::SettingsPane::Mode mode) {
@@ -5760,6 +5768,20 @@ private:
         } else {
             tool->plan()->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
         }
+        // The agent docked at the foot of a file editor (card #PBZ4): the same console seam as
+        // Options and Models, built on first expand. The plugins it lists are the installed ones.
+        if (relay::ArtifactDock *dock = tool->preview() ? tool->preview()->artifactDock()
+                                        : tool->plan()   ? tool->plan()->artifactDock() : nullptr) {
+            static const bool searched = [] {
+                try {
+                    relay::FilePreview::setPluginSearch(relay::agent::PluginSearch::defaults(
+                        dataRoot() + QStringLiteral("/backend/relay_core/plugins_bundled")));
+                } catch (const std::exception &) {}
+                return true;
+            }();
+            Q_UNUSED(searched);
+            wireConsoleHost(dock, tool, QStringLiteral("artifact.ask"));
+        }
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
         return tool;
@@ -5857,7 +5879,9 @@ private:
             // a view has no idea what a tab is; a host that already knows it and put it in front
             // (`BoardView::setTabId`) is not prefixed twice. Options, Sessions and the board list
             // share the tab's key exactly as they did.
-            const int card = spec.persistKey.indexOf(QStringLiteral("card:"));
+            // A file artifact's is its own the same way, keyed per (tab, file) (card #PBZ4).
+            int card = spec.persistKey.indexOf(QStringLiteral("card:"));
+            if (card < 0 && spec.persistKey.startsWith(QStringLiteral("file:"))) card = 0;
             spec.persistKey = card < 0                   ? tab
                             : tab.isEmpty()              ? spec.persistKey.mid(card)
                                                          : tab + QLatin1Char('/') + spec.persistKey.mid(card);
@@ -5871,6 +5895,9 @@ private:
         }
         QList<relay::agent::Action> actions() const override {
             return m_host ? m_host->actions() : QList<relay::agent::Action>();
+        }
+        QList<relay::agent::ContextCommand> slashCommands() const override {
+            return m_host ? m_host->slashCommands() : QList<relay::agent::ContextCommand>();
         }
         // Every virtual of `relay::agent::Context` is forwarded, and `submit` is the one that
         // must be: a card's Enter has to travel as the `board_ask` of 19.10 — the thread written
@@ -5935,6 +5962,7 @@ private:
         handle.widget = console;
         handle.focusComposer = [guard] { if (guard) guard->focusComposer(); };
         handle.draftInComposer = [guard](const QString &text) { if (guard) guard->draftInComposer(text); };
+        handle.submitPrompt = [guard](const QString &text) { if (guard) guard->submitPrompt(text); };
         handle.composerText = [guard] { return guard ? guard->composerText() : QString(); };
         handle.setCollapsed = [guard](bool collapse) { if (guard) guard->setCollapsed(collapse); };
         handle.collapsed = [guard] { return guard && guard->collapsed(); };
