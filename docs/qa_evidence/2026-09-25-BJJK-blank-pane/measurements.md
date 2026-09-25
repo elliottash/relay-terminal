@@ -22,3 +22,25 @@ overlapping ranges were the cause.
 Regression: `RELAY_ENGINE_TEST=ViewTest relay-engine-tests proseBlockPrintedTwiceStillDraws` —
 fails with the fix disabled (`'shown.contains("PROMPT$")' returned FALSE`, every visible row empty),
 passes with it. Whole ViewTest: 79 passed, 0 failed (libvterm core; ghostty is not built here).
+
+## Where the doubled text came from
+
+`save-cycle.cpp` prints a single-copy text, saves it the way `Pane::saveScrollback` does
+(`formattedScrollbackText` + `formattedScreenText`), replays the save into a fresh backend at another
+width, and repeats. At the bottom of the pane every cycle keeps one copy of each block. With the view
+scrolled up before the save (`SCROLLUP=1`), before the fix:
+
+```
+cycle 0: hist=238 screen=60  'I have the ground truth' x1  'Previous conversation' x2  PROMPT x0
+```
+
+`formattedScreenText()` read the core's *viewport*: scrolled up, it returned history rows, so a
+stretch of history was saved twice and the live screen (the prompt) was not saved at all. Every
+restart and every reopen replays that file. The owner's pane is 29 columns wide and about 100 rows
+tall, which is why a screenful of history went in twice.
+
+Fix: `formattedScreenText()` scrolls the core to the bottom, reads the live screen (what the plain
+`screenText()` of both cores already returns), and puts the viewport back.
+
+Regression: `savedScreenIsTheLiveScreenWhenScrolledUp` — fails with the fix disabled (`line N`
+saved twice), passes with it. Whole ViewTest: 80 passed, 0 failed.

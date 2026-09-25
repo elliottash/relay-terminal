@@ -1771,6 +1771,37 @@ private slots:
         QVERIFY(countNonBackground(img, img.rect(), t.view->colorScheme().background) > 0);
     }
 
+    // #BJJK, the source of the doubled text: the pane saves history + formattedScreenText(), and
+    // the screen half read the viewport. Scrolled up, it saved a stretch of history twice and
+    // dropped the live screen. It is the live screen whatever the view shows, and the view stays
+    // where the person left it.
+    void savedScreenIsTheLiveScreenWhenScrolledUp()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        t.backend->resizeTerminal(10, 40);
+        QByteArray bytes;
+        for (int i = 0; i < 60; ++i)
+            bytes += "line " + QByteArray::number(i) + "\r\n";
+        t.backend->writeToDisplay(bytes + "PROMPT$ ");
+        QVERIFY(t.waitScreen(QStringLiteral("PROMPT$")));
+        t.view->scrollToTop();
+        QTest::qWait(80);
+        const QStringList top = t.view->visibleRowsText();
+        QVERIFY2(top.join(QLatin1Char('\n')).contains(QStringLiteral("line 0")), qPrintable(top.join('|')));
+
+        QStringList saved = t.backend->formattedScrollbackText(5000)
+            + t.backend->formattedScreenText().split(QLatin1Char('\n'));
+        static const QRegularExpression sgr(QStringLiteral("\x1b\\[[0-9;:]*m"));
+        QStringList plain;
+        for (QString line : saved)
+            plain << line.remove(sgr).trimmed();
+        for (int i = 0; i < 60; ++i)
+            QCOMPARE(plain.count(QStringLiteral("line ") + QString::number(i)), 1);
+        QVERIFY2(plain.contains(QStringLiteral("PROMPT$")), qPrintable(plain.join('|')));
+        QCOMPARE(t.view->visibleRowsText(), top);   // the save did not move the view
+    }
+
     void proseReflowsOnResize()
     {
         QFETCH_GLOBAL(QString, core);

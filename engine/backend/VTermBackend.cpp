@@ -305,10 +305,18 @@ QStringList savedLines(VtCore &core, const std::vector<Line> &lines, int first)
 
 QString VTermBackend::formattedScreenText() const
 {
+    // The live screen, as screenText() is, not the viewport: a pane scrolled up into its history
+    // when it was saved wrote that stretch of history a second time where the screen belonged, and
+    // lost the screen (#BJJK). Every restart and every reopen then replayed the doubled rows, and a
+    // prose block anchored in both copies blanked the view.
     return m_session->withCore([](VtCore &core) {
+        const int savedTop = core.viewportTop();
+        core.scrollViewportToBottom();
         ViewportFrame frame;
         core.updateFrame(&frame, true);
-        return savedLines(core, frame.lines, core.viewportTop()).join(QLatin1Char('\n'));
+        const QString text = savedLines(core, frame.lines, core.viewportTop()).join(QLatin1Char('\n'));
+        core.scrollViewportToRow(savedTop);
+        return text;
     });
 }
 
