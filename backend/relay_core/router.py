@@ -792,6 +792,16 @@ FUNCTION_WORDS = REPLY_WORDS | LOOP_ONLY | SENTENCE_LEAD | SIGNAL_WORDS.keys()
 MAX_SEGMENTS = 40
 
 
+def _is_attachment(word: str) -> bool:
+    """Whether one token is an `@path` or `@"path"` composer attachment (src/Images.h): Relay hands
+    it to the agent as a file and the shell never sees it, so it is neither evidence of a mistyped
+    command nor a mistyped command itself (owner report 2026-09-25 on card #EB4A: a prose prompt
+    pasted with the @mention on its own line kept a "command not found: remove" note under its ✦
+    echo, because the @path segment read as a meant command)."""
+    stripped = word.strip()
+    return stripped.startswith("@") and len(stripped) > 1
+
+
 def _as_writing(text: str) -> tuple[list[str] | None, bool]:
     """The line as a reader takes it: its sentences, with the punctuation of writing removed.
 
@@ -937,10 +947,15 @@ def explain_invalid(text: str, reason: str, known: Iterable[str] = (),
         if not any(ch.isalpha() for ch in reason[len(prefix):]):
             return False                        # "35 * 30" -> "command not found: 35"
     elif not reason.startswith("syntax error"):
+        if _is_attachment(reason.rsplit(": ", 1)[-1]):
+            return False                        # "no such file: @/home/…png": an attachment
         return True                             # no such file, not executable: a path was typed
     segments, ambiguous = _as_writing(text.strip())
     if segments is None:
         return True
+    segments = [s for s in segments if not _is_attachment(s)]
+    if not segments:
+        return False                            # a lone @mention: an attachment line, not a command
     known = set(known)
     commands = as_commands(path)
     cwd = cwd or os.getcwd()

@@ -272,6 +272,31 @@ class ValidityTests(unittest.TestCase):
             result = self.check("./run.sh", cwd=d)
             self.assertEqual((result.route, result.explain_invalid), ("agent", True))
 
+    def test_an_at_mention_attachment_is_not_a_mistyped_command(self):
+        # Card #EB4A recurrence, owner report 2026-09-25: the prompt below pasted with the
+        # @mention attachment on its own line, and the pane printed "command not found: remove"
+        # under the ✦ echo while sending the line to the agent. explain_invalid judged the
+        # "@/home/…png" segment a meant command — a name that is not a plain word, same reading
+        # as "./run.sh" — so the prose gate stood aside. An @mention is Relay's own composer
+        # attachment (src/Images.h): the shell never sees it.
+        owner = ("remove this diamond prefix in agent prompts. just start at the beginning of the "
+                 "line\n@/home/elliott/.cache/RelayTerminal/relay/images/relay-paste.png")
+        result = self.check(owner)
+        self.assertEqual(result.route, "agent")
+        self.assertFalse(result.explain_invalid, f"{owner!r}: {result.invalid_reason}")
+        # An @mention inside the prose, and a lone @mention line, are quiet too.
+        for text in ["remove this diamond prefix @/home/elliott/notes.md from agent prompts",
+                     "@/home/elliott/.cache/RelayTerminal/relay/images/relay-paste.png",
+                     '@"/home/elliott/rel a y.png"']:
+            with self.subTest(text=text):
+                result = self.check(text)
+                self.assertEqual(result.route, "agent", text)
+                self.assertFalse(result.explain_invalid, f"{text!r}: {result.invalid_reason}")
+        # A genuine typo on another segment of the same paste keeps its note.
+        result = self.check("remove this diamond prefix\nmkae clean\n@/home/elliott/notes.md")
+        self.assertTrue(result.explain_invalid)
+        self.assertIn("command not found", result.invalid_reason)
+
     def test_a_sentence_naming_a_file_is_not_a_mistyped_command(self):
         # Card #N3WC, owner report 2026-09-18 (the tenth "command not found under a request"
         # report): the line below went to the agent with "command not found: new" under it.
