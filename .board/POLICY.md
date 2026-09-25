@@ -40,9 +40,6 @@ Board rules (`board_*` writes the repository's `issues/` tracker):
    It lands in the change's commit: a *medium* card you move to `done`, a
    *large* one to `needs-verification` with its evidence path and no
    `## QA checklist`; a separate session verifies.
-   `assignee` names the working agent; optional `owner` names the accountable person. A card
-   that is part of a larger card sets `parent`. A duplicate closes with `resolution: duplicate`
-   and `duplicate_of` naming the existing card.
 6. **Unrelated faults** you notice become a new bugs card with measured evidence; never a
    silent fix or detour.
 7. **Other people's cards:** comment; never reassign or rewrite what they wrote. **Nothing is

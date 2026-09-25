@@ -121,6 +121,11 @@ class PromptFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.workspace, self.repo, self.library = make_workspace(Path(self.temp.name))
+        # The global Board's pinned memories are loaded into every prompt; left at
+        # `~/.config/relay/switchboard` they measured the owner's own memories (#K54A).
+        patch = mock.patch.dict(os.environ, {'RELAY_GLOBAL_SWITCHBOARD': str(Path(self.temp.name) / 'global')})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -131,11 +136,12 @@ class PromptFixture(unittest.TestCase):
 
 # What a worker restart looks like: a new process, a new PYTHONHASHSEED, the same configuration.
 RESTART = textwrap.dedent("""
-    import hashlib, json, sys, tempfile
+    import hashlib, json, os, sys, tempfile
     from pathlib import Path
     sys.path.insert(0, sys.argv[1] + '/tests')
     from test_system_prompt import build_agent, make_workspace
     with tempfile.TemporaryDirectory(dir=sys.argv[2]) as temp:
+        os.environ['RELAY_GLOBAL_SWITCHBOARD'] = str(Path(temp) / 'global')
         workspace, repo, library = make_workspace(Path(temp))
         agent = build_agent(workspace, repo, library)
         out = agent.system_prompt().replace(str(workspace), '<ws>').replace(str(repo), '<repo>')
@@ -583,11 +589,13 @@ class SizeTests(PromptFixture):
         tools = len(json.dumps(agent.tools(), ensure_ascii=False).encode('utf-8'))
         # Measured 2026-09-20 (#GMCF): 5.9 KB of prompt with three skills, 15.8 KB of tools.
         # 8.2 KB before the policy was tiered (decision 8), `SYSTEM` distilled (decision 2) and
-        # the todo rules split from `update_todos`'s schema (decision 6).
+        # the todo rules split from `update_todos`'s schema (decision 6). Measured 2026-09-25
+        # (#K54A): 6.3 KB of prompt, 17.5 KB of tools — the scratch, media and land_try schemas
+        # landed since, paid for by cutting what their descriptions repeated from parameters.
         self.assertLess(prompt, 6 * 1024 + 512, f'system prompt grew to {prompt} bytes')
         self.assertLess(tools, 18 * 1024, f'tool schemas grew to {tools} bytes')
         board = len(self.agent().system_prompt().encode('utf-8'))
-        # 8.9 KB since decisions 2, 6 and 8; it was 13.9 KB before any of them.
+        # 8.9 KB since decisions 2, 6 and 8; it was 13.9 KB before any of them. 9.5 KB on 2026-09-25.
         self.assertLess(board, 9 * 1024 + 512, f'prompt with a board grew to {board} bytes')
 
     def test_the_board_policy_block_stays_tiered(self):

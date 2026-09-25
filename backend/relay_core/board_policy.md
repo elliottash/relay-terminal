@@ -26,6 +26,9 @@
      v9, 2026-09-25 (#EMWF): rule 2 is summarize-then-quote — the Issue opens with the agent's
      `summary` and keeps the user's words as an attributed, session-linked quote. The same pass
      re-tightened rules 1, 3, 5, 8 and the memory note to bring the block back under 3 KB.
+     v10, 2026-09-25 (#K54A): rule 5's card-metadata lines (#MJ76: assignee/owner, parent,
+     resolution and duplicate_of) left again — `board_update_card` and `board_move_card` say
+     each of them where they are set, and the block had grown to 3,302 bytes.
      Versioned here so evals can pin it; loaded into the system prompt by
      relay_core.board_tools.prompt_section when issues/board.yaml exists and autonomy is not off.
      Keep it short: every line costs context on every turn. -->
@@ -51,9 +54,6 @@ Board rules (`board_*` writes the repository's `issues/` tracker):
    It lands in the change's commit: a *medium* card you move to `done`, a
    *large* one to `needs-verification` with its evidence path and no
    `## QA checklist`; a separate session verifies.
-   `assignee` names the working agent; optional `owner` names the accountable person. A card
-   that is part of a larger card sets `parent`. A duplicate closes with `resolution: duplicate`
-   and `duplicate_of` naming the existing card.
 6. **Unrelated faults** you notice become a new bugs card with measured evidence; never a
    silent fix or detour.
 7. **Other people's cards:** comment; never reassign or rewrite what they wrote. **Nothing is

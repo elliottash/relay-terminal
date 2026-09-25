@@ -656,19 +656,16 @@ TOOL_SPECS = [
                    "description": "Which pane, as app_panes gives it. Your own by default."}},
          ["what", "name"]),
     spec("app_user_memory",
-         "Review and maintain what Relay remembers about the user across projects, in Globals > User memory. "
+         "What Relay remembers about the user across projects (Globals > User memory). "
          "When you learn a durable fact about the user — a preference, a recurring correction, their work "
          "or tools — call suggest with that one fact: it waits for the user's Keep / Edit / No, so do not "
-         "ask them about it yourself, and do not save it. suggest declines a fact the user has already "
-         "rejected or that is already remembered; its result lists their rejections, so do not offer "
-         "those again. Never infer sensitive traits (health, beliefs, relationships and the like) and "
+         "ask them about it yourself, and do not save it. suggest declines a fact already remembered "
+         "or rejected; its result lists the rejections, so do not offer those again. Never infer sensitive traits (health, beliefs, relationships and the like) and "
          "never suggest or store credentials. save is only for an explicit \"remember this\" from the user "
          "or a fact they confirm in an interview: list first to avoid duplicates, get a record before "
-         "changing it, then save its full Markdown with the returned base_hash. New records omit key and "
-         "use base_hash ''. Memory cards need type: memory, status: active, a stable name, scope: user, "
+         "changing it, then save its full Markdown with the returned base_hash. Memory cards need type: memory, status: active, a stable name, scope: user, "
          "pinned: true, a # title and a concise fact. Preserve id on edits. Retire stops future loading "
-         "but keeps the source and history; it is not erasure. list, get and suggestions do not write. "
-         "Writes use the same validation and conflict checks as the Globals editor.",
+         "but keeps the source and history; it is not erasure.",
          {"action": {"type": "string",
                      "enum": ["list", "get", "suggest", "suggestions", "save", "retire"]},
           "key": {"type": "string", "description": "Memory id from list/get; omit for new memory."},

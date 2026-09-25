@@ -333,13 +333,12 @@ SCRATCH_LIFETIME_RE = re.compile(r"^(task|session|until-promoted|user|days:\d+)$
 
 TOOLS = [
     spec("run_command", "Run a non-interactive Bash command in the chosen workspace, or with host on the ssh host the Relay context names. NOT an OS sandbox. Does not share interactive shell variables or aliases. "
-         "Waits up to timeout_seconds (default 30, at most 1800) for the command to finish. A command still running then is NOT killed: "
+         "Waits up to timeout_seconds for the command to finish. A command still running then is NOT killed: "
          "the result has still_running: true, a job_id and the output so far; read more with command_output (it can wait) and end it with stop_command. "
          "Set timeout_seconds to the time a long build or test suite needs; do not ask the user how long it takes. For a server or watcher that should keep running, set background: true and stop it when done. "
          "There is no tty and stdin is closed, so a command that prompts, needs sudo or logs in somewhere fails instead of waiting: hand that one to run_in_terminal when the tool is offered. "
-         "A recursive search or listing (grep -r, rg, find, du, ls -R) whose root is the home directory, / or a directory above the home is refused because it would take minutes: give it a narrower path. "
-         "memory_max (a size like 8G, 512M, 4T or infinity, local commands only, card #WBDX) runs this one command in a cgroup scope of its own with that MemoryMax, inside the app-relay.slice ceiling that bounds all of Relay's panes together — "
-         "a job that knows its size, such as a model training run, asks for the bound it needs instead of dying at the pane's cap. Everything a command spawns is in that scope; an over-limit process is killed alone, and its result says why.",
+         "A recursive search or listing (grep -r, rg, find, du, ls -R) rooted at /, the home directory or above is refused: give it a narrower path. "
+         "A job that knows its size, such as a model training run, sets memory_max instead of dying at the pane's cap (card #WBDX): everything it spawns is in that scope, an over-limit process is killed alone, and its result says why.",
          {"command": {"type": "string"}, "cwd": {"type": "string", "description": "Workspace-relative directory; default '.'"},
           "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT,
                               "description": "Seconds to wait before handing a still-running command back as a job; default 30."},
@@ -355,33 +354,28 @@ TOOLS = [
          {"path": {"type": "string"}}, ["path"]),
     spec("write_file", "Create a new UTF-8 file, or replace an existing one in full. To change part of a file that already exists, use edit_file instead: it does not resend the whole file. The diff is shown to the user. Fails if the file changes while the write is prepared.",
          {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
-    spec("edit_file", "Change an existing UTF-8 file by replacing an exact string. Preferred over write_file for editing a file you have read. old_string must match the file byte for byte, including whitespace and indentation, and must appear exactly once unless replace_all is true: include enough surrounding lines to make it unique. The diff is shown to the user. Fails if the file changes while the edit is prepared. Works on files up to 8 MiB.",
+    spec("edit_file", "Change an existing UTF-8 file by replacing an exact string. old_string must match the file byte for byte, including whitespace and indentation, and must appear exactly once unless replace_all is true: include enough surrounding lines to make it unique. The diff is shown to the user. Fails if the file changes while the edit is prepared. Works on files up to 8 MiB.",
          {"path": {"type": "string"}, "old_string": {"type": "string", "description": "The exact text to replace, copied from the file."},
           "new_string": {"type": "string", "description": "The text to put in its place; empty deletes the old text."},
           "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match; default false."}},
          ["path", "old_string", "new_string"]),
     spec("scratch_dir",
          "Ask for a working directory instead of inventing a path (#DVV2): Relay creates it under a root "
-         "it owns, records it in the scratch ledger, and returns the path. Never invent temp paths, never "
-         "write to /tmp, and never create a new top-level folder under $HOME — ask for scratch instead. "
-         "class=scratch (default) is task working space reclaimed at session end; class=keep must live in "
-         "the project and be promoted into it later (scratch_release with promote_to) or dropped; "
-         "class=install is a persistent tool install root only the user removes.",
+         "it owns, records it in the scratch ledger, and returns the path. Never write to /tmp or create a "
+         "new top-level folder under $HOME. scratch is reclaimed at session end; keep must be promoted into "
+         "the project (scratch_release promote_to) or dropped; install is a tool root only the user removes.",
          {"class": {"type": "string", "enum": ["scratch", "keep", "install"],
-                    "description": "scratch (default), keep, or install"},
+                    "description": "default scratch"},
           "purpose": {"type": "string", "description": "One line: what this directory is for."},
           "card": {"type": "string", "description": "Board card this directory serves, if any."},
           "lifetime": {"type": "string",
-                       "description": "task | session | days:N | until-promoted | user; "
-                                      "default follows the class (scratch: session, keep: until-promoted, install: user)."}},
+                       "description": "task | session | days:N | until-promoted | user; default follows the class."}},
          ["purpose"]),
     spec("scratch_release",
-         "End a ledgered scratch directory (#DVV2): ref is the row id scratch_dir returned, or its path. "
-         "scratch is reclaimed (deleted safely). keep must be promoted into the project first "
-         "(promote_to: a path inside it — the tree is moved there and the row marked promoted) or "
-         "explicitly dropped with drop; it is never silently deleted. install is refused: the user "
-         "removes those. A refusal here is guidance, not a failure.",
-         {"ref": {"type": "string", "description": "Row id or path of the directory to end."},
+         "End a ledgered scratch directory: scratch is deleted safely; keep is never silently deleted — "
+         "promote it into the project (promote_to) or drop it; install is refused: the user removes those. "
+         "A refusal here is guidance, not a failure.",
+         {"ref": {"type": "string", "description": "Row id scratch_dir returned, or the path."},
           "promote_to": {"type": "string",
                          "description": "keep only: move the tree to this path in the project first."},
           "drop": {"type": "boolean", "description": "keep only: delete it explicitly instead of promoting."}},
@@ -1693,7 +1687,7 @@ def clamp_seconds(value, default: int, low: int, high: int) -> int:
 BACKGROUND_GLANCE = 2
 JOB_TOOLS = [
     spec("command_output", "Read the output a run_command job has printed since you last read it, and whether it is still running. "
-         "wait_seconds (default 0, at most 1800) waits for the job to finish first; it returns early when it does. "
+         "wait_seconds (default 0) waits for the job to finish first; it returns early when it does. "
          "from_line/to_line instead re-read those lines of its output, finished or not.",
          {"job_id": {"type": "string"}, "wait_seconds": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT},
           "from_line": {"type": "integer", "minimum": 1}, "to_line": {"type": "integer", "minimum": 1}}, ["job_id"]),
