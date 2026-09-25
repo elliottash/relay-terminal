@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [probe], human: optional, criteria: 'After a reload, the two reported panes show their earlier conversation turns.', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: Codex guest in Relay, 2026-09-25
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-69BV-reload/measurements.md], related: [HEY7], github: null}
+links: {plans: [], commits: [2c08deee786a, a5f9ce06007e], evidence: [docs/qa_evidence/2026-09-25-69BV-reload/measurements.md], related: [HEY7], github: null}
 ---
 # Restored panes lose conversation scrollback on reload
 
@@ -24,28 +24,34 @@ After Relay reloads, some panes retain their conversation but show only a short 
 > — elliott · [session:8d0a250058984f218d447c48e4a97d4d](relay://session/8d0a250058984f218d447c48e4a97d4d) · 2026-09-25
 
 ## Done means
-- Reloading a pane with a saved conversation shows its earlier turns even when the pane's scrollback file contains only a short recap.
-- A reload does not replace a fuller conversation text sidecar with a shorter recap-only snapshot.
-- A targeted regression check proves both recovery and sidecar preservation; failure is a pane retaining its session but losing earlier visible turns.
+- Reloading a pane restores its previous conversation and scrollback without appending a “Session loaded” notice, restore dividers, or an automatic resume recap.
+- Existing saved scrollback from repeated restarts is cleaned of wrapped legacy dividers and “Session loaded” lines; another save and reload does not bring them back.
+- Earlier turns are recovered when saved text is recap-only, and a reload does not reduce a fuller conversation sidecar to that recap.
+- Targeted tests cover wrapped legacy chrome and transcript recovery; a separate live reload verifies the display.
 
 ## Plan
-**Goal.** Restore prior conversation turns after reload, including when saved pane text is a recap-only fragment.
+**Goal.** A restored pane resumes at its previous content without adding reload text, even after several restarts.
 
-**Findings.** The reported panes map to saved pane files `1a09e2d3…txt` (19 KB) and `81e219d7…txt` (7.5 KB); the latter contains no earlier turn despite a four-turn transcript. `Pane::initRestore` replays only the pane file. `syncSessionText` resets the conversation boundary after replay, so a later save can overwrite the fuller session sidecar with a recap.
+**Findings.** Pane `97149268` maps to `state/scrollback/d0d996b2…txt`: three divider pairs and multiple wrapped “Session loaded” rows are saved there. `Pane::dropRestoreMarks` matches only whole physical rows, so narrow panes keep wrapped dividers. `PaneSession.cpp` prints a new “Session loaded” line on every resume, and replay plus transcript fill print additional dividers.
 
-**Steps.** 1. Request transcript coverage when restoring a pane with a saved session, using the existing fill path. 2. Render the transcript when no saved-text anchor matches, and preserve fuller sidecars during the restore boundary. 3. Add targeted tests for the recovery and preservation rules.
+**Steps.** 1. Add a tested saved-row cleanup that recognizes wrapped historical dividers and load notices, then use it on save and on replay input. 2. Keep session state restoration but stop printing reload notices and dividers. 3. Build and run targeted tests; inspect pane `97149268`'s saved rows through the cleanup to confirm repeated-restore idempotence.
 
-**Risks.** A transcript may have fewer formatting details than the original terminal text; replay the saved text where it covers turns and fill only what is missing.
+**Risks.** The transcript can still have less formatting than original terminal text when the saved pane file already lost its history. Cleanup should remove only exact Relay-generated notices and leave user content intact.
 
-**Verify.** Build through `scripts/relay-build`, run the targeted C++ tests, and inspect the two reported panes' saved files and transcript coverage.
+**Verify.** `windowstate` and `transcriptreplay` C++ tests, exact-tree `relay` build, and a later live reload check.
 
 ## Tests
-`ctest:transcriptreplay`
+`ctest -R windowstate` — tests/windowstate_test.cpp
+`ctest -R transcriptreplay` — tests/transcriptreplay_test.cpp
 
 ### Check
-Pass (2026-09-25): `ctest --test-dir build -R '^transcriptreplay$' --output-on-failure` — 1/1 passed. `scripts/relay-build --target relay` completed successfully. The reported pane 825839fb has four transcript turns but zero saved prompt markers; the regression case covers this recap-only state.
+Pass (2026-09-25): `ctest --test-dir build -R '^(windowstate|transcriptreplay)$' --output-on-failure` — 2/2 passed. The new windowstate case removes wrapped historical dividers and load notices and is idempotent. `scripts/relay-build --target relay` completed successfully.
 
+### Check 2026-09-25 14:10
+- passed · ctest:windowstate — ctest -R windowstate passed for this revision on spark-dcc9, 2026-09-25T18:10:13Z
+- passed · ctest:transcriptreplay — ctest -R transcriptreplay passed for this revision on spark-dcc9, 2026-09-25T18:10:13Z
+history: thread
 ## Execution Summary
-Restored panes now request transcript coverage for their saved session. When saved text has no matching prompt or reply, Relay draws the transcript before replaying the saved fragment. After a restored session loads, its save boundary begins before the replayed text, so a later save does not reduce the conversation sidecar to only the recap.
+The original scrollback recovery (commit `2c08deee`) remains. This follow-up removes the `Session loaded` line and the automatic resume recap, and replays saved terminal text without adding divider rows. A reader now strips wrapped legacy dividers and load notices from old pane/session files before replay and from future saves. Prose blocks whose visible anchor was removed are not restored.
 
-The reported pane 825839fb has a four-turn transcript but a 7.5 KB pane file with zero prompt markers; 266dc3f5 has a one-turn transcript and a 19 KB pane file. The current running app has not been restarted onto the new binary; a separate reload check is still needed for visual confirmation.
+Pane `97149268` contains five historical load notices and six dividers spread across physical rows; the cleanup recognizes all 11 generated blocks while retaining conversation rows. See `docs/qa_evidence/2026-09-25-69BV-reload/measurements.md`. The live desktop has not been restarted onto this build, so an independent repeated-reload display check remains.
