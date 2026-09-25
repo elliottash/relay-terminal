@@ -1,10 +1,12 @@
 ---
 id: 9FX8
 type: work
-status: discussing
+status: executing
 labels: [feature, switchboard, skills, board, qa]
 component: [gui, worker, skills]
-waiting_on: owner
+assignee: agent
+implemented_by: glm/glm-5.3
+session: cca5043b-76a8-47aa-bbab-5971db9e0226
 rank: zzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: visual, primary: script, also: [ai-visual, person], human: required, criteria: 'the Board''s three tabs read as one surface; a skill page answers version, profile, cases and staleness at a glance without a QA plan in view', sign_off: none, effort: high, stakes: rework, blast: capability}
@@ -45,9 +47,17 @@ the board should become 3 tabs, cards, skills, memories [...] globals also needs
 - **Owner decisions** (questions in the thread): categories under Cards, which skills the project tab lists, SkillsDialog's fate, what a case row shows.
 
 **Verify.** `PYTHONPATH=backend python3 -m unittest tests.test_skills tests.test_board_tools.RegistryTests`; `ctest --test-dir build -R '^(boardpane|globalspane)$'`; the screenshots; then a person opens a project with skills, switches the three tabs, opens one skill page and one memory, and confirms the Cards tab is unchanged (`human: required`, criteria in `verify`).
+**Amendment (owner decisions, 2026-09-25).** Step 2's Skills tab lists **project skills only** (decision 2): the registry request still returns every visible skill with its `source` (Globals' Skills section needs the global ones), and the Board's tab filters to project sources — `.relay/skills` and the workspace's `.claude`/`.codex`/`.warp` — with the source label kept on the row. Cards is the tab the Board opens on (decision 1), and a card pane (#P2W8) never carries these tabs.
 
 ## Done means
-- The Board pane shows Cards | Skills | Memories; Cards is pixel-for-pixel today's list page, and the choice persists per board.
-- The Skills tab lists every skill the agent can load from this workspace with source, version, cases, pass rate, last verified and stale; a row opens a page with the profile strip, provenance, the last ten cases (ids only when confidential) and the linked cards; Load, Exclude, Refine, Open file and Re-verify work.
-- Globals has a Skills section with the same list for global skills plus import and update actions; the Memories tab shows this board's memory cards and Globals no longer shows them.
-- Failure looks like: a skill the console can load that the tab does not list, a stale flag that disagrees with `cases.stats`, or a QA plan (the verify block) drawn on a skill page.
+- The Board pane shows Cards | Skills | Memories; Cards is pixel-for-pixel today's list page, is the tab the pane opens on, and the choice persists per board.
+- The Skills tab lists the **project** skills (`.relay/skills`, workspace `.claude`/`.codex`/`.warp`) with source, version, cases, pass rate, last verified and stale; a row opens a page with the profile strip, provenance, the last ten cases (ids only when confidential) and the linked cards; Load, Exclude, Refine, Open file and Re-verify work. Global skills are not on the Board tab — Globals' Skills section lists them with the same list and page plus import and update actions (decision 2).
+- The Memories tab shows this board's memory cards and Globals no longer shows them.
+- Failure looks like: a project skill the console can load that the tab does not list, a global skill appearing on the Board tab, a stale flag that disagrees with `cases.stats`, or a QA plan (the verify block) drawn on a skill page.
+
+## Decisions
+Owner, 2026-09-25 (answers to the four questions in the thread):
+1. **Tabs are objects, Cards is the default.** "the current board goes into cards, yes, which i think is the default open pane. no tabs for a card pane (cf #P2W8)" — today's list is the Cards tab and opens first; the `board.yaml` categories stay inside Cards; a card pane (#P2W8) never carries these tabs.
+2. **The Skills tab lists project skills only.** "project skills. global skills are in the global manager." — project sources (`.relay/skills`, workspace `.claude`/`.codex`/`.warp`) on the Board; every non-project source lives in Globals' Skills section. Step 2's list and Done means are read through this decision; the `skills_registry` request still returns every visible skill with its `source` so both surfaces share it.
+3. **SkillsDialog retires into Globals › Skills** by a follow-up card once the section has the import-from-repository and Check-updates actions (step 3 as written).
+4. **Case rows show their `input` reference** (a path) when the pane is on the board's own workspace, ids only otherwise (the ledger's existing rule).
