@@ -153,7 +153,8 @@ def poll_once(*, key_lookup, emit, fetcher=fetch, clock=time.time) -> None:
                 continue
             with _lock:
                 _last[preset] = {"windows": windows, "updated_at": int(clock())}
-            emit({"event": "usage_limits", "preset": preset, "windows": windows})
+            emit({"event": "usage_limits", "preset": preset, "windows": windows,
+                  "source": "provider_poll"})
             if _listener:
                 _listener()
         except Exception as exc:

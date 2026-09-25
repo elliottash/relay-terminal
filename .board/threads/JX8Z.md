@@ -1,0 +1,25 @@
+<!-- relay:entry 20260925T041710Z-60 author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent created this card in Inbox · .board/features/2026-09-25-record-timestamped-subscription-usage-states-and.md
+
+<!-- relay:entry 20260925T041713Z-q3 author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent claimed this card · assignee agent, Inbox → Executing, implemented_by openai/gpt-6-sol via codex, session 323e184d
+
+<!-- relay:entry 20260925T041713Z-q4 author=agent kind=progress model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 pane_token=323e184d-caae-46e5-9de8-9161a0c1e62e -->
+Claimed (323e184d) · working on it from a terminal pane
+
+Trace quota event flow, record timestamped usage snapshots, restore fresh Claude/Codex scores, and verify with tests and a live probe.
+
+<!-- relay:entry 20260925T041727Z-kf author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent updated this card · verify: (unset) → {"artifact": "code", "primary": "script", "also": ["probe"], "human": "none", "s…; replaced `## Done means`
+
+<!-- relay:entry 20260925T041738Z-a8 author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent updated this card · replaced `## Plan`
+
+<!-- relay:entry 20260925T042423Z-8f author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent updated this card · replaced `## Tests`
+
+<!-- relay:entry 20260925T042648Z-zj author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent updated this card · replaced `## Execution Summary`
+
+<!-- relay:entry 20260925T042652Z-b5 author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent moved this card · Executing → Needs verification · Implementation and targeted tests passed; live read-only snapshots recorded, with independent verification still needed. · evidence docs/qa_evidence/2026-09-25-JX8Z/evidence.md · implemented_by openai/gpt-6-sol via codex

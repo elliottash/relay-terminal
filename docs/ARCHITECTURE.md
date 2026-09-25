@@ -3285,6 +3285,16 @@ for an exhausted account left out. The entry actually run is the first in `order
 (a stored key, an installed harness), which the pane's session records. Test runs that do not set
 `RELAY_LOG_ORIGIN=test` with their own data directory write none.
 
+**Usage states** (`#JX8Z`). Every worker `usage_limits` event appends a raw snapshot to
+`usage-states.jsonl` beside the draw log. Each line has `v`, Unix `ts`, `preset` (the join key for
+the draw's candidate key before `|`), `source` (`subscription_poll` or the reporting harness),
+`pane`, `windows` (`kind`, `used_percent`, `resets_at`), and optional `status`,
+`resets_available` and `resets_expire_at`. Worker context adds `origin`, `run_id`, `build_id`.
+The file is private (`0600`), append-only, and unrotated; it contains no auth token, directory,
+prompt, or raw HTTP response. Each worker polls signed-in Claude and Codex accounts through their
+read-only usage endpoint every 15 minutes, and a recent snapshot can seed the window's first
+draw before its own worker reports. Routing still treats readings older than 30 minutes as absent.
+
 **Nothing about content is logged**: no prompts, model answers, reasoning, tool arguments, tool
 output, file contents, terminal output, API keys or password-mode input. Identifiers, model and
 host, event types, counts, durations and error types only; `scrub()` masks credential-shaped text

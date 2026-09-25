@@ -24,6 +24,7 @@ import hashlib
 import json
 from functools import lru_cache
 import logging
+import math
 import os
 import re
 import sys
@@ -316,6 +317,58 @@ def event(logger: logging.Logger, message: str, *, level_name: str = "info", **v
 
 
 ROUTING_DRAWS = "routing-draws.jsonl"
+USAGE_STATES = "usage-states.jsonl"
+
+
+def usage_state(event: dict) -> None:
+    """Keep the raw subscription reading that arrived on the worker protocol.
+
+    Only named numeric/window fields cross this boundary. In particular, no provider response,
+    credential, prompt, or account directory is persisted. An append is one write so workers
+    cannot interleave records. A logging failure must not affect a turn.
+    """
+    if level() == "off" or event.get("event") != "usage_limits":
+        return
+    if "unittest" in sys.modules and os.environ.get("RELAY_LOG_ORIGIN") != "test":
+        return
+    if os.environ.get("RELAY_LOG_ORIGIN") == "test":
+        data_home = os.environ.get("XDG_DATA_HOME", "")
+        if not data_home or Path(data_home).expanduser().resolve() == (Path.home() / ".local/share").resolve():
+            return
+    windows = []
+    for item in event.get("windows", []):
+        if not isinstance(item, dict) or item.get("kind") not in ("5h", "weekly", "daily"):
+            continue
+        window = {"kind": item["kind"]}
+        for field in ("used_percent", "resets_at"):
+            value = item.get(field)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                window[field] = value
+        windows.append(window)
+    if not windows:
+        return
+    record = {"v": 1, "ts": round(time.time(), 3), "component": "worker",
+              "pane": _state.get("pane") or os.environ.get("RELAY_PANE_ID") or "",
+              "preset": str(event.get("preset", ""))[:100],
+              "source": str(event.get("source", "harness"))[:40], "windows": windows,
+              **context()}
+    for field in ("guest", "account", "status"):
+        if isinstance(event.get(field), str):
+            record[field] = event[field][:100]
+    for field in ("resets_available", "resets_expire_at", "updated_at"):
+        value = event.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            record[field] = value
+    try:
+        directory = log_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        fd = os.open(directory / USAGE_STATES, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, (json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n").encode())
+        finally:
+            os.close(fd)
+    except (OSError, TypeError, ValueError):
+        pass
 
 
 def routing_draw(record: dict) -> None:
@@ -331,7 +384,9 @@ def routing_draw(record: dict) -> None:
     # A test must not put synthetic draws into the live file an evaluation reads. Origin=test alone
     # is not isolation: on 2026-09-24 a run exported it without its own data directory and wrote
     # twelve draws into the real profile. A test process writes only under a private XDG_DATA_HOME.
-    if "unittest" in sys.modules or os.environ.get("RELAY_LOG_ORIGIN") == "test":
+    if "unittest" in sys.modules and os.environ.get("RELAY_LOG_ORIGIN") != "test":
+        return
+    if os.environ.get("RELAY_LOG_ORIGIN") == "test":
         data_home = os.environ.get("XDG_DATA_HOME", "")
         if not data_home or Path(data_home).expanduser().resolve() == (Path.home() / ".local/share").resolve():
             return

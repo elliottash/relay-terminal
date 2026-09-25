@@ -5,10 +5,13 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -1516,6 +1519,42 @@ private Q_SLOTS:
         QCOMPARE(drawTier(catalog, tier, now, 0.60).key, QStringLiteral("kimi-code|k3"));
     }
 
+    void firstDrawReadsRecentUsageState() {
+        Catalog catalog = catalogFrom(presets());
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("high"), 1},
+            {QStringLiteral("guest:claude|opus"), QStringLiteral("high"), 1}});
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+            + QStringLiteral("/relay/logs");
+        QVERIFY(QDir().mkpath(dir));
+        QFile log(dir + QStringLiteral("/usage-states.jsonl"));
+        QVERIFY(log.open(QIODevice::WriteOnly));
+        QJsonObject row{{QStringLiteral("v"), 1}, {QStringLiteral("ts"), double(now)},
+                        {QStringLiteral("preset"), QStringLiteral("guest:claude")},
+                        {QStringLiteral("windows"), QJsonArray{QJsonObject{
+                            {QStringLiteral("kind"), QStringLiteral("weekly")},
+                            {QStringLiteral("used_percent"), 50},
+                            {QStringLiteral("resets_at"), double(now + 3600)}}}}};
+        log.write(QJsonDocument(row).toJson(QJsonDocument::Compact) + '\n');
+        log.close();
+        QJsonObject trace;
+        drawTier(catalog, tier, now, 0.5, &trace);
+        const QJsonArray candidates = trace.value(QStringLiteral("candidates")).toArray();
+        QVERIFY(candidates.size() == 2);
+        QCOMPARE(candidates.at(1).toObject().value(QStringLiteral("score")).toDouble(), 50.0);
+        // A stale reading no longer supplies a score.
+        row.insert(QStringLiteral("ts"), double(now - 1801));
+        QVERIFY(log.open(QIODevice::WriteOnly));
+        log.write(QJsonDocument(row).toJson(QJsonDocument::Compact) + '\n');
+        log.close();
+        drawTier(catalog, tier, now, 0.5, &trace);
+        QVERIFY(candidates.at(1).toObject().value(QStringLiteral("score")).isDouble());
+        QVERIFY(trace.value(QStringLiteral("candidates")).toArray().at(1).toObject()
+                    .value(QStringLiteral("score")).isNull());
+    }
+
     // Every new-pane choice is recorded with the probability it was made with, for evaluating the
     // routing later: the trace names every tied candidate, its score, weight and probability.
     void aDrawTracesEveryCandidateWithItsProbability() {
@@ -1724,6 +1763,7 @@ private Q_SLOTS:
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir dir;
+    qputenv("XDG_DATA_HOME", dir.path().toUtf8());
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
     QCoreApplication::setOrganizationName(QStringLiteral("relay-tests"));

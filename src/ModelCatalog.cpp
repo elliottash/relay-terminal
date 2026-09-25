@@ -2,13 +2,16 @@
 #include "ModelCatalog.h"
 
 #include <QDateTime>
+#include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
 #include <QHash>
 #include <QRandomGenerator>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QVariant>
 #include <QSet>
 
@@ -114,6 +117,49 @@ QList<LimitWindow> windowsOf(const QJsonObject &preset, int *resetsAvailable) {
         windows << w;
     }
     return windows;
+}
+
+Catalog withRecordedUsage(const Catalog &source, qint64 now) {
+    Catalog catalog = source;
+    // A pane's first draw precedes its worker's background poll. Recent readings from another
+    // worker or the previous run make that first choice informed too. Read only a bounded tail:
+    // a poll refreshes every 15 minutes, while routing accepts at most 30-minute-old figures.
+    const QString path = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+        + QStringLiteral("/relay/logs/usage-states.jsonl");
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return catalog;
+    constexpr qint64 tailBytes = 1024 * 1024;
+    if (file.size() > tailBytes) file.seek(file.size() - tailBytes);
+    const QByteArray tail = file.readAll();
+    const QList<QByteArray> lines = tail.split('\n');
+    for (int index = lines.size() - 1; index >= 0; --index) {
+        const QJsonObject record = QJsonDocument::fromJson(lines.at(index)).object();
+        const QString preset = record.value(QStringLiteral("preset")).toString();
+        if (preset.isEmpty() || !catalog.presets().contains(preset)) continue;
+        const qint64 observed = qint64(record.value(QStringLiteral("ts")).toDouble());
+        if (observed <= 0 || observed > now || now - observed > 1800
+            || observed <= catalog.limitUpdatedAt.value(preset)) continue;
+        QList<LimitWindow> windows;
+        for (const QJsonValue &value : record.value(QStringLiteral("windows")).toArray()) {
+            const QJsonObject row = value.toObject();
+            const QString kind = row.value(QStringLiteral("kind")).toString();
+            if (kind != QStringLiteral("5h") && kind != QStringLiteral("weekly")) continue;
+            const double used = row.value(QStringLiteral("used_percent")).toDouble(-1);
+            const qint64 resets = row.value(QStringLiteral("resets_at")).toVariant().toLongLong();
+            if (used >= 0 && used <= 100 && resets > 0)
+                windows << LimitWindow{kind, used, resets};
+        }
+        if (windows.isEmpty()) continue;
+        catalog.limits.insert(preset, windows);
+        catalog.limitUpdatedAt.insert(preset, observed);
+        const QString status = record.value(QStringLiteral("status")).toString();
+        if (!status.isEmpty()) catalog.status.insert(preset, status);
+        const QJsonValue credits = record.value(QStringLiteral("resets_available"));
+        if (credits.isDouble()) catalog.resetsAvailable.insert(preset, credits.toInt());
+        const qint64 expires = record.value(QStringLiteral("resets_expire_at")).toVariant().toLongLong();
+        if (expires > 0) catalog.resetsExpireAt.insert(preset, expires);
+    }
+    return catalog;
 }
 
 }  // namespace
@@ -1239,8 +1285,9 @@ QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
     return out;
 }
 
-Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double unitDraw, QJsonObject *trace) {
+Entry drawTier(const Catalog &sourceCatalog, const QString &tier, qint64 now, double unitDraw, QJsonObject *trace) {
     if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
+    const Catalog catalog = withRecordedUsage(sourceCatalog, now);
     struct Candidate { Entry entry; double weight; double score = -1.0; };
     QList<Candidate> peers;
     int bestRank = std::numeric_limits<int>::max();

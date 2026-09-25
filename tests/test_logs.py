@@ -24,6 +24,25 @@ PROMPT = 'delete the staging database and tell nobody'
 
 
 class LogFileTests(unittest.TestCase):
+    def test_usage_state_is_private_timestamped_and_excludes_secrets(self):
+        logs.configure("worker", level="info")
+        event = {"event": "usage_limits", "preset": "guest:claude:work",
+                 "account": "work", "source": "subscription_poll",
+                 "windows": [{"kind": "5h", "used_percent": 31.2,
+                              "resets_at": 1790320000}],
+                 "resets_available": 1, "resets_expire_at": 1792703299,
+                 "access_token": "SECRET"}
+        with mock.patch.dict(os.environ, {"RELAY_LOG_ORIGIN": "test"}):
+            logs.usage_state(event)
+        path = self.dir / "usage-states.jsonl"
+        row = json.loads(path.read_text())
+        self.assertEqual(row["preset"], "guest:claude:work")
+        self.assertEqual(row["windows"][0]["used_percent"], 31.2)
+        self.assertEqual(row["resets_expire_at"], 1792703299)
+        self.assertIn("ts", row)
+        self.assertNotIn("SECRET", path.read_text())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.home = os.environ.get('XDG_DATA_HOME')
@@ -46,7 +65,7 @@ class LogFileTests(unittest.TestCase):
 
     def test_routing_draws_from_a_test_go_only_to_a_private_data_directory(self):
         """A test writes draws under its own XDG_DATA_HOME, never into the real profile's file."""
-        with mock.patch.dict(os.environ, {'RELAY_LOG_LEVEL': 'info'}):
+        with mock.patch.dict(os.environ, {'RELAY_LOG_LEVEL': 'info', 'RELAY_LOG_ORIGIN': 'test'}):
             logs.routing_draw({'surface': 'probe'})
         self.assertIn('"surface":"probe"', self.text(logs.ROUTING_DRAWS))
         fake_home = Path(self.temp.name) / 'home'

@@ -2013,15 +2013,20 @@ public:
     // /swap all read this and all switch through selectEntry, so a pick is one thing.
     relay::models::Catalog modelCatalog() const {
         relay::models::Catalog catalog = relay::models::catalogFrom(m_presets);
-        // The figures that arrived since the last `presets` answer are the fresher ones.
-        for (auto it = m_limits.constBegin(); it != m_limits.constEnd(); ++it) catalog.limits.insert(it.key(), it.value());
-        for (auto it = m_limitUpdatedAt.constBegin(); it != m_limitUpdatedAt.constEnd(); ++it)
-            catalog.limitUpdatedAt.insert(it.key(), it.value());
+        // A later presets answer can contain a poll newer than this pane's last event. Keep the
+        // newer reading instead of letting a stale pane overlay hide a fresh account poll.
+        for (auto it = m_limits.constBegin(); it != m_limits.constEnd(); ++it) {
+            if (m_limitUpdatedAt.value(it.key()) < catalog.limitUpdatedAt.value(it.key())) continue;
+            catalog.limits.insert(it.key(), it.value());
+            catalog.limitUpdatedAt.insert(it.key(), m_limitUpdatedAt.value(it.key()));
+        }
         for (auto it = m_limitStatus.constBegin(); it != m_limitStatus.constEnd(); ++it) {
+            if (m_limitUpdatedAt.value(it.key()) < catalog.limitUpdatedAt.value(it.key())) continue;
             if (it.value().isEmpty()) catalog.status.remove(it.key());
             else catalog.status.insert(it.key(), it.value());
         }
         for (auto it = m_resetsAvailable.constBegin(); it != m_resetsAvailable.constEnd(); ++it) {
+            if (m_limitUpdatedAt.value(it.key()) < catalog.limitUpdatedAt.value(it.key())) continue;
             catalog.resetsAvailable.insert(it.key(), it.value());
             const qint64 expires = m_resetsExpireAt.value(it.key());
             if (expires > 0) catalog.resetsExpireAt.insert(it.key(), expires);

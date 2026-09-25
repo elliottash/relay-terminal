@@ -17,7 +17,7 @@ from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
 from relay_core import guest_accounts
 from relay_core import board_chat
-from relay_core import memory_import, openrouter_catalog, provider_limits
+from relay_core import memory_import, openrouter_catalog, provider_limits, guest_usage_poll
 from relay_core import final_summary
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
@@ -77,6 +77,8 @@ def main():
     requests_stream = request_stream.RequestStream()
 
     def emit(obj: dict):
+        if obj.get("event") == "usage_limits":
+            logs.usage_state(obj)
         if not stream_tool_output[0]:
             obj = tool_stream.counted(obj)
         if requests_delta[0]:
@@ -166,6 +168,7 @@ def main():
         # that is stale, and re-pushed below when the fetch lands. Never on this thread.
         openrouter_catalog.start_refresh()
         provider_limits.start(key_lookup=keystore.lookup, emit=emit)
+        guest_usage_poll.start(emit=emit, changed=lambda: emit_presets())
         # The two default fillings of Options › Models' five lists (owner, 2026-09-20; 13.7),
         # computed from what can take a turn right now so the GUI's two buttons only apply them.
         guest_rows = guest_harness_provider.preset_rows()
