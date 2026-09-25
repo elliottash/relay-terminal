@@ -40,6 +40,10 @@ from .presets import PRESETS
 
 PRESET_ID = "relay-free"
 ENV_URL = "RELAY_HOSTED_URL"          # tests point it at an in-process gateway over loopback HTTP
+# ``RELAY_HOSTED=off`` makes this profile unable to reach the gateway at all (#RCPF): QA drives set
+# it (scripts/relay-qa-run) so a forgotten tier list cannot fall through to Relay Free.
+ENV_OFF = "RELAY_HOSTED"
+DISABLED = "Relay Free is switched off in this profile (RELAY_HOSTED=off). Use one of your own providers."
 ATTRIBUTE = "relay-free-identity"     # the keyring entry; distinct from "remote-identity"
 FILENAME = "identity.key"
 LABEL = "Relay Free installation key"
@@ -85,6 +89,16 @@ def base_url() -> str:
     """The gateway's base URL: the preset's, unless ``RELAY_HOSTED_URL`` points elsewhere."""
     override = os.environ.get(ENV_URL, "").strip()
     return override.rstrip("/") if override else PRESETS[PRESET_ID].base_url
+
+
+def disabled() -> bool:
+    """Whether ``RELAY_HOSTED`` switches Relay Free off here: ``off``, ``0``, ``no`` or ``false``."""
+    return os.environ.get(ENV_OFF, "").strip().lower() in ("off", "0", "no", "false")
+
+
+def _refuse_if_disabled() -> None:
+    if disabled():
+        raise HostedUnavailable(DISABLED)
 
 
 def endpoint_for(configured: str) -> str:
@@ -154,7 +168,10 @@ def _import_remote():
 
 
 def available() -> bool:
-    """Whether Relay Free can run here at all: ``cryptography`` imports. Never touches the network."""
+    """Whether Relay Free can run here at all: not switched off, and ``cryptography`` imports.
+    Never touches the network."""
+    if disabled():
+        return False
     try:
         _import_remote()
     except HostedUnavailable:
@@ -346,6 +363,7 @@ class Session:
         ``force`` throws the cached token away first: the gateway answered 401 to it, so the clock
         was wrong about it (a restart rotated it, say) and the cache must not be trusted.
         """
+        _refuse_if_disabled()
         with self._lock:
             if force or not self._token or self._expires - self._clock() <= REFRESH_MARGIN:
                 self._register()
@@ -422,6 +440,7 @@ class Session:
         return send(self.token(force=True))
 
     def _exchange_image(self, request) -> dict:
+        _refuse_if_disabled()
         try:
             with self._opener_().open(request, timeout=IMAGE_TIMEOUT) as response:
                 raw = response.read(MAX_IMAGE_BODY + 1)
@@ -520,6 +539,7 @@ class Session:
         return self._exchange(request, path)
 
     def _exchange(self, request, path: str) -> dict:
+        _refuse_if_disabled()
         try:
             with self._opener_().open(request, timeout=TIMEOUT) as response:
                 raw = response.read(MAX_BODY + 1)
@@ -584,6 +604,8 @@ def image_roles(clock=time.time) -> list[dict]:
     as ``[{role, model, price_usd, resolutions, aspect_ratios}]``. Empty when the gateway serves
     none or cannot be reached: images then need the person's own key, as before."""
     global _image_roles_cache, _image_roles_when
+    if disabled():
+        return []
     with _image_roles_lock:
         if _image_roles_cache is not None and clock() - _image_roles_when < 600:
             return _image_roles_cache

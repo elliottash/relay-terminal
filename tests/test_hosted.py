@@ -239,7 +239,9 @@ class HostedCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": self.temp.name, "RELAY_KEYRING": "off",
-                                                hosted.ENV_URL: self.gateway.base})
+                                                hosted.ENV_URL: self.gateway.base,
+                                                # a QA shell (scripts/relay-qa-run) exports it
+                                                hosted.ENV_OFF: ""})
         self.env.start()
         self.addCleanup(self.env.stop)
         gateway = self.gateway
@@ -576,6 +578,36 @@ class TransportTests(HostedCase):
         self.assertIn("python3-cryptography", str(caught.exception))
         self.assertEqual(caught.exception.code, "")
         self.assertEqual(self.gateway.chat_calls, 0)
+
+    def test_relay_hosted_off_reaches_the_gateway_by_no_path(self):
+        """#RCPF: with ``RELAY_HOSTED=off`` nothing registers, chats, fetches Pro access, makes a
+        picture or asks for the image roles — the fake gateway sees no request at all."""
+        for value in ("off", "0", "no", "OFF"):
+            with mock.patch.dict(os.environ, {hosted.ENV_OFF: value}):
+                self.assertTrue(hosted.disabled(), value)
+        with mock.patch.dict(os.environ, {hosted.ENV_OFF: "off"}):
+            self.assertFalse(hosted.available())
+            self.assertEqual(hosted.status(), {"available": False, "quota": None, "image_quota": None})
+            session = hosted.Session()
+            for call in (session.token, lambda: session.token(force=True),
+                         lambda: session.fetch_pro("code"), lambda: session.image({"prompt": "x"}),
+                         lambda: session._post("/challenge", {})):
+                with self.assertRaises(hosted.HostedUnavailable) as caught:
+                    call()
+                self.assertIn("RELAY_HOSTED=off", str(caught.exception))
+            with self.assertRaises(ProviderError) as caught:
+                self.complete(HostedChatProvider(self.config(), session=session))
+            self.assertIn("RELAY_HOSTED=off", str(caught.exception))
+            hosted.reset_image_roles_cache()
+            self.assertEqual(hosted.image_roles(), [])
+        self.assertEqual(self.gateway.registrations, 0)
+        self.assertEqual(self.gateway.chat_calls, 0)
+        self.assertEqual(self.gateway.image_calls, 0)
+        self.assertEqual(list(self.gateway.requests), [])
+        # And unset, the same session registers and chats as ever.
+        self.assertTrue(hosted.available())
+        self.assertTrue(session.token())
+        self.assertEqual(self.gateway.registrations, 1)
 
     def test_a_missing_cryptography_module_is_what_makes_it_unavailable(self):
         # The real import path: with `cryptography` gone, `remote.noise` cannot import.

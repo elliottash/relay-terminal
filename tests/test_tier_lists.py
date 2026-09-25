@@ -185,6 +185,30 @@ class ResolutionTests(unittest.TestCase):
             self.assertTrue(RoleResolver(guest_main, 'guest:claude', key_lookup=lambda p: '',
                                          guest_check=lambda g: True).resolve('chores').is_main)
 
+    def test_relay_hosted_off_keeps_a_harness_panes_background_jobs_off_relay_free(self):
+        """#RCPF: ``RELAY_HOSTED=off`` is the one setting that stops a profile falling through to
+        Relay Free. The same harness pane as above, with the real ``hosted.available()``: switched
+        off, the summaries a recap asks for stay on the pane's own model; unset, the fall-through
+        above still happens (where ``cryptography`` imports)."""
+        from relay_core import hosted
+        guest_main = ProviderConfig('harness://claude', 'fable', '', {}, 32_768)
+
+        def made():
+            return RoleResolver(guest_main, 'guest:claude', key_lookup=lambda p: '',
+                                tiers={'flash': [{'preset': 'guest:claude', 'model': 'fable'}]},
+                                guest_check=lambda g: True)
+        with mock.patch.dict('os.environ', {'RELAY_HOSTED': 'off'}):
+            self.assertFalse(hosted.available())
+            for role in ('summaries', 'chores', 'terminal_use'):
+                resolved = made().resolve(role)
+                self.assertNotEqual(resolved.preset_id, 'relay-free', role)
+                self.assertTrue(resolved.is_main, role)
+            self.assertFalse(made().has_key('relay-free'))
+        with mock.patch.dict('os.environ', {'RELAY_HOSTED': ''}):
+            if not hosted.available():
+                self.skipTest('cryptography is not importable here, so Relay Free never is')
+            self.assertEqual(made().resolve('summaries').preset_id, 'relay-free')
+
     def test_a_guest_whose_harness_runs_here_serves_the_high_tier(self):
         """Owner, 2026-09-20: "claude and codex weren't showing up under 'high' models" — and
         "for codex planning you pick xhigh". The first usable entry of the High list may be a

@@ -23,6 +23,9 @@ export XDG_CACHE_HOME="$qa_dir/cache"
 export RELAY_LOG_ORIGIN=qa
 export RELAY_LOG_RUN_ID="qa-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 export RELAY_KEYRING=off
+# No Relay Free either (#RCPF): a drive cannot reach the hosted gateway by forgetting a tier list.
+# A drive that exercises Relay Free on purpose (like #PH0N's hosted drive) passes RELAY_HOSTED= itself.
+export RELAY_HOSTED="${RELAY_HOSTED-off}"
 export RELAY_LOCAL_MODELS="$qa_dir/local-models.json"
 export RELAY_MEMORY_IMPORT=off
 

@@ -40,7 +40,7 @@ class ProClientTests(unittest.TestCase):
         self.secret = self.gateway.store.issue_pro_code('person')
         self.base = f'http://127.0.0.1:{self.gateway.port}/v1'
         self.env = patch.dict(os.environ, {'RELAY_HOSTED_URL': self.base, 'RELAY_KEYRING': 'off',
-            'XDG_DATA_HOME': self.temp.name, KEY_ENV: 'upstream-secret'})
+            'XDG_DATA_HOME': self.temp.name, KEY_ENV: 'upstream-secret', hosted.ENV_OFF: ''})
         self.env.start()
         self.addCleanup(self.env.stop)
         hosted.reset(hosted.Session(base=self.base))
@@ -141,6 +141,15 @@ class ProClientTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertTrue(relay_pro.status()['has_stored_key'])
         self.assertFalse(relay_pro.status()['available'])
+
+    def test_relay_hosted_off_names_the_switch_and_reaches_nothing(self):
+        # #RCPF: a QA profile's Relay Pro check says why it cannot run, not "try again".
+        with patch.dict(os.environ, {hosted.ENV_OFF: 'off'}):
+            with self.assertRaises(hosted.HostedUnavailable) as caught:
+                relay_pro.validate(self.secret)
+        self.assertIn('RELAY_HOSTED=off', str(caught.exception))
+        self.assertIn('Relay Pro', str(caught.exception))
+        self.assertEqual(self.upstream.requests, [])
 
     def test_real_transport_rechecks_code_each_call_and_revocation_invalidates(self):
         self.operation('store', self.secret)

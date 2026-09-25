@@ -45,6 +45,8 @@ def code() -> str:
 def validate(value: str) -> list[str]:
     if not isinstance(value, str) or not value or len(value) > 128 or any(c.isspace() for c in value):
         raise hosted.HostedUnavailable("Enter a valid Relay Pro access code.", "pro_access_denied")
+    if hosted.disabled():   # RELAY_HOSTED=off (#RCPF): say so, not "try again"
+        raise hosted.HostedUnavailable(hosted.DISABLED.replace("Relay Free", "Relay Pro", 1))
     try:
         result = hosted.session().fetch_pro(value)
     except hosted.HostedUnavailable as exc:

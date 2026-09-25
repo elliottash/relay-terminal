@@ -39,7 +39,7 @@ For a disposable worker or GUI probe, use the QA launcher:
 scripts/relay-qa-run ./build/relay --workspace /path/to/disposable/project
 ```
 
-It creates private XDG data/config/cache directories, sets a bounded QA run ID, disables the user's keyring and memory import, and removes the profile on exit. Use `scripts/relay-qa-run --keep …` to retain the profile and its logs for an incident; the launcher prints its path when the command ends. Use a disposable workspace too: the launcher isolates Relay's profile, not files passed as command arguments. Existing QA drivers that already isolate their profiles can set `RELAY_LOG_ORIGIN=qa` and `RELAY_LOG_RUN_ID` themselves.
+It creates private XDG data/config/cache directories, sets a bounded QA run ID, disables the user's keyring, memory import and Relay Free (`RELAY_HOSTED=off`, so nothing reaches the hosted gateway; run `RELAY_HOSTED= scripts/relay-qa-run …` for a drive that exercises Relay Free on purpose), and removes the profile on exit. Use `scripts/relay-qa-run --keep …` to retain the profile and its logs for an incident; the launcher prints its path when the command ends. Use a disposable workspace too: the launcher isolates Relay's profile, not files passed as command arguments. Existing QA drivers that already isolate their profiles can set `RELAY_LOG_ORIGIN=qa` and `RELAY_LOG_RUN_ID` themselves.
 
 Use the supported targeted test runner to isolate logs and label test origin:
 

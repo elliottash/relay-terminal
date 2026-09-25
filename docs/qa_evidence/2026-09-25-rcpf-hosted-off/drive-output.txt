@@ -1,0 +1,23 @@
+## scripts/relay-qa-run (RELAY_HOSTED defaults to off)
+RELAY_HOSTED='off'  available=False  status={'available': False, 'quota': None, 'image_quota': None}
+harness pane summaries     -> preset=None model=fable is_main=True
+harness pane chores        -> preset=None model=fable is_main=True
+harness pane terminal_use  -> preset=None model=fable is_main=True
+chat turn (recap/title/summary transport): ProviderError: Relay Free is switched off in this profile (RELAY_HOSTED=off). Use one of your own providers.
+token(): HostedUnavailable: Relay Free is switched off in this profile (RELAY_HOSTED=off). Use one of your own providers.
+fetch_pro: HostedUnavailable: Relay Pro is switched off in this profile (RELAY_HOSTED=off). Use one of your own providers.
+image: HostedUnavailable: Relay Free is switched off in this profile (RELAY_HOSTED=off). Use one of your own providers.
+image_roles: []
+REQUESTS SEEN BY STUB: none
+
+## RELAY_HOSTED= scripts/relay-qa-run (switch unset, control)
+RELAY_HOSTED=''  available=True  status={'available': True, 'quota': None, 'image_quota': None}
+harness pane summaries     -> preset=relay-free model=relay-flash is_main=False
+harness pane chores        -> preset=relay-free model=relay-lite is_main=False
+harness pane terminal_use  -> preset=relay-free model=relay-flash is_main=False
+chat turn (recap/title/summary transport): ProviderError: Relay Free is not available right now. Use one of your own providers (Options › Models › API keys…), or try ag
+token(): HostedUnavailable: Relay Free is not available right now. Use one of your own providers (Options › Models › API keys…), or try ag
+fetch_pro: HostedUnavailable: Relay Pro access could not be checked. Try again.
+image: HostedUnavailable: Relay Free is not available right now. Use one of your own providers (Options › Models › API keys…), or try ag
+image_roles: []
+REQUESTS SEEN BY STUB: ['POST /v1/challenge', 'POST /v1/challenge', 'POST /v1/challenge', 'POST /v1/challenge', 'GET /v1/health']

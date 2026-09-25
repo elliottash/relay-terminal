@@ -1263,6 +1263,10 @@ sends this when a model is picked out of the model box's Flash, High or Local pa
 - `set_model` rebases the role defaults on the new model and puts the pane back on `agent_role: "main"`.
 - `RELAY_KEYRING=off` (environment) skips the desktop keyring entirely; environment keys still work. Tests
   set it so no test run can reach a real keyring.
+- `RELAY_HOSTED=off` (environment; also `0`, `no`, `false`) switches Relay Free off in the profile: no pane
+  turn, recap, title, summary, key test, Relay Pro check or image call registers with or calls the hosted
+  gateway, `presets` reports it unavailable, and a role that would have fallen through to it stays on the
+  pane's own model. `scripts/relay-qa-run` sets it, so QA drives are offline by default (#RCPF).
 - Not implemented on purpose (owner: "later"): routing between the Main and Flash agent by estimated task
   difficulty.
 
