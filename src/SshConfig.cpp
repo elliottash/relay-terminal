@@ -543,18 +543,17 @@ QString holderCwd(const QStringList &argv) {
 }
 
 QString killSessionCommand(const QString &session) {
-    // "Close and end the remote session" (card #XQ8F): the holder server on the host is Relay's
-    // own socket, so one line over the shared connection ends it and nothing on the host outlives
-    // the pane.
-    return QStringLiteral("tmux -L relay kill-session -t ") + shellQuote(session);
+    // The holder prefers Relay's own tmux socket, but a host without tmux uses screen.
+    const QString name = shellQuote(session);
+    return QStringLiteral("tmux -L relay kill-session -t ") + name
+        + QStringLiteral(" 2>/dev/null || screen -S ") + name + QStringLiteral(" -X quit");
 }
 
 QString listSessionsCommand() {
-    // "Remote sessions on this host…": a real tab between the fields is what keeps a session name
-    // with a space from shifting the columns parseSessionList splits on, and an empty answer must
-    // not be an error the pane sees.
+    // tmux emits tab-separated records; screen emits its normal socket listing. The parser accepts
+    // both. `true` makes an empty host return an empty list rather than an error.
     return QStringLiteral("tmux -L relay list-sessions -F '#{session_name}\t#{session_created}\t#{session_attached}'"
-                          " 2>/dev/null");
+                          " 2>/dev/null; screen -ls 2>/dev/null; true");
 }
 
 QList<RemoteSession> parseSessionList(const QByteArray &output) {
@@ -562,9 +561,18 @@ QList<RemoteSession> parseSessionList(const QByteArray &output) {
     // else in it (a "no server" line, a truncated tail) must not surface as a session Relay could
     // offer to re-attach.
     QList<RemoteSession> sessions;
+    static const QRegularExpression screenLine(
+        QStringLiteral("^\\s*[0-9]+\\.(relay-[A-Za-z0-9_-]+)\\s+.*\\((Attached|Detached)\\)"));
     for (QByteArray line : output.split('\n')) {
         if (line.endsWith('\r')) line.chop(1);
         const QList<QByteArray> parts = line.split('\t');
+        if (const auto match = screenLine.match(QString::fromLocal8Bit(line)); match.hasMatch()) {
+            RemoteSession session;
+            session.name = match.captured(1);
+            session.attached = match.captured(2) == QStringLiteral("Attached") ? 1 : 0;
+            sessions << session;
+            continue;
+        }
         if (parts.isEmpty() || parts.first().isEmpty()) continue;
         const QString name = QString::fromLocal8Bit(parts.first());
         if (!name.startsWith(QStringLiteral("relay-"))) continue;  // not a Relay holder session

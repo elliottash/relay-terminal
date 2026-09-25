@@ -289,8 +289,8 @@ class WrapperTests(unittest.TestCase):
     def test_ssh_persistence_session_and_directory(self):
         env = self.persist_env(RELAY_SSH_CWD="/srv/app")
         self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder relay-abcdef12 /srv/app"))
-        env = self.persist_env(RELAY_SSH_CWD="/bad dir")   # would not survive the command line
-        self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder relay-abcdef12"))
+        env = self.persist_env(RELAY_SSH_CWD="/good dir")
+        self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder relay-abcdef12 /good\\ dir"))
         env = self.persist_env(RELAY_SSH_SESSION="custom-1")
         self.assertTrue(self.argv(["host"], extra_env=env)[-1].endswith("relay-holder custom-1"))
 

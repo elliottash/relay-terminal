@@ -258,10 +258,11 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
         [[ -n $name ]] || return 1
         __relay_persist_session=$name
         __relay_persist_cwd=
-        # The directory travels as an unquoted word in the remote command, so it may
-        # hold none of the characters this pattern allows past.
-        local re='^[-A-Za-z0-9_./~+@%:]+$'
-        [[ ${RELAY_SSH_CWD:-} =~ $re ]] && __relay_persist_cwd=$RELAY_SSH_CWD
+        # The ssh remote command quotes this word for the host shell. Keep control
+        # characters out of a command line that may be logged or shown to the person.
+        if [[ -n ${RELAY_SSH_CWD:-} && $RELAY_SSH_CWD != *[$'\001'-$'\037']* ]]; then
+            __relay_persist_cwd=$RELAY_SSH_CWD
+        fi
         return 0
     }
 
@@ -314,7 +315,11 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
         local -a pre=()
         __relay_ssh_shareable "$@" && pre=(-o ControlMaster=auto -o "ControlPath=$RELAY_SSH_DIR/%C" -o ControlPersist=600)
         local remote="sh -c '$__relay_holder_text' relay-holder $__relay_persist_session"
-        [[ -n $__relay_persist_cwd ]] && remote="$remote $__relay_persist_cwd"
+        if [[ -n $__relay_persist_cwd ]]; then
+            local quoted_cwd
+            printf -v quoted_cwd '%q' "$__relay_persist_cwd"
+            remote="$remote $quoted_cwd"
+        fi
         command ssh "${pre[@]}" -t "$@" "$remote"
     }
 

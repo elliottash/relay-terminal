@@ -287,10 +287,10 @@ private Q_SLOTS:
     void buildsHolderSessionCommands() {
         // "Close and end the remote session" and "Remote sessions on this host…" (card #XQ8F).
         QCOMPARE(killSessionCommand(QStringLiteral("relay-a b")),
-                 QStringLiteral("tmux -L relay kill-session -t 'relay-a b'"));
+                 QStringLiteral("tmux -L relay kill-session -t 'relay-a b' 2>/dev/null || screen -S 'relay-a b' -X quit"));
         QCOMPARE(listSessionsCommand(),
                  QStringLiteral("tmux -L relay list-sessions -F "
-                                "'#{session_name}\t#{session_created}\t#{session_attached}' 2>/dev/null"));
+                                "'#{session_name}\t#{session_created}\t#{session_attached}' 2>/dev/null; screen -ls 2>/dev/null; true"));
         const QList<RemoteSession> sessions = parseSessionList(
             QByteArray("relay-abcdef12\t1727000000\t1\nrelay-x\t1727000001\t0\nother\t1\t0\njunk\n"));
         QCOMPARE(sessions.size(), 2);
@@ -300,6 +300,13 @@ private Q_SLOTS:
         QCOMPARE(sessions.at(1).name, QStringLiteral("relay-x"));
         QCOMPARE(sessions.at(1).created, qint64(1727000001));
         QCOMPARE(sessions.at(1).attached, 0);
+        const QList<RemoteSession> screenSessions = parseSessionList(
+            QByteArray("There are screens on:\n\t1234.relay-screen-a\t(09/24/26 21:08:49)\t(Detached)\n"
+                       "\t1235.relay-screen-b\t(09/24/26 21:08:50)\t(Attached)\n"));
+        QCOMPARE(screenSessions.size(), 2);
+        QCOMPARE(screenSessions.at(0).name, QStringLiteral("relay-screen-a"));
+        QCOMPARE(screenSessions.at(0).attached, 0);
+        QCOMPARE(screenSessions.at(1).attached, 1);
         // A short line answers with what it has.
         const QList<RemoteSession> shortList = parseSessionList(QByteArray("relay-only\t1727\n"));
         QCOMPARE(shortList.size(), 1);

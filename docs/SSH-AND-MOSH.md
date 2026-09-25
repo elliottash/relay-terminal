@@ -4,8 +4,8 @@ Owner decisions, 2026-09-18 (card #S5SH):
 
 - **Relay wraps `ssh` automatically** in its own pane shells, and Options can turn that down to
   "ask per host" or off.
-- **The pane's agent may always run commands on the host the pane is ssh'd into**, over the user's
-  own authenticated connection (OpenSSH connection sharing). No second password, no second 2FA.
+- **At a confirmed remote prompt, the pane's agent can run commands on that host** over the user's
+  own authenticated, shared OpenSSH connection. No second password or second 2FA is needed.
 - **While ssh sits at a remote prompt, the agent's reply prints into the terminal**, as it does at a
   local prompt. The side panel ("output will also print in the terminal when ssh exits") is kept
   only for full-screen programs and programs that are mid-output.
@@ -33,8 +33,9 @@ While `ssh` owned the terminal:
 ### 1. The wrapper (`shell/integration.bash`)
 
 Relay's pane shell defines `ssh()` and `mosh()` when `RELAY_SSH_WRAP=1` (set by the GUI from
-`ssh/enhance` ≠ `off`). They never change what the user asked for; they only add connection
-sharing so the agent can reuse the login:
+`ssh/enhance` ≠ `off`). They add connection sharing so the agent can reuse the login. With Persistent sessions
+on (the default), an interactive login also enters a host-side session named for this
+Relay pane; command forms and excluded hosts keep their usual behavior:
 
 - `ssh`: adds `-o ControlMaster=auto -o ControlPath=$RELAY_SSH_DIR/%C -o ControlPersist=600` —
   unless `ssh -G` shows the user already configured `ControlMaster`/`ControlPath` for that host (then
@@ -169,9 +170,10 @@ classifier, as an un-enhanced one does.
 
 When: `ssh/enhance` = `auto` → at the first remote prompt of each login, unless the host is in
 `ssh/hosts_never`. `ask` → a banner offers "Enhance" for this login (hosts in `ssh/hosts_always` are
-enhanced without asking; both lists are edited in Options). `off` → never, and no wrapper. mosh
-drops unknown OSC sequences, so a mosh session is never enhanced; it still gets everything the
-screen classifier can give (items 4–6).
+enhanced without asking; both lists are edited in Options). `off` → never, and no wrapper.
+An enhanced mosh login carries OSC 7 and prompt marks inside OSC 52, the sequence mosh
+forwards. The marks are decoded by Relay and are not copied to the clipboard. The screen
+classifier still handles shells whose integration is unavailable (items 4–6).
 
 ### 3b. The alternate screen is not the end of a login
 
@@ -212,8 +214,8 @@ hand it back. A per-program choice to take human control of `ssh` still wins.
 Leaving the session is Alt+Esc (#234Z): the client's process group is terminated here, the pane
 comes back to its own shell, and the queue pauses around the exit like any stop. Esc stays what it
 is everywhere — a Ctrl+C, which inside a session only reaches the far side — and the Relaying line
-names the exit key while a session runs. mosh is designed for exactly this: the server survives on
-the host, and the same connect re-attaches to it.
+names the exit key while a session runs. With a persistent holder, the host-side
+programs survive and a restored pane can reattach to them (section 11).
 
 ### 5. Remote passwords
 
@@ -325,9 +327,12 @@ clicking it folds the detail open rather than opening a local file of the same n
   from `~/.ssh/config` and its `Include`s, plus recently used hosts. Choose a host or enter a new
   hostname or `user@host`, then Connect opens a new tab running `ssh <target>`. Host rows stay out
   of the Actions list. Typing `ssh <host>` or `user@host` in Actions still offers a direct connection.
-- **Split on the same host**: a split that runs the same ssh command line; with connection sharing
-  it opens without a login.
-- **Options › Terminal › SSH sessions**: `auto` / `ask` / `off`, and the never-enhance host list.
+- **New pane (Ctrl+E)** and directional splits from a remote pane open another pane on the
+  same host in its own session, using the shared connection. **New local pane** opens one on
+  this machine. See section 11 for the start-directory limit.
+- **Options › Terminal › SSH sessions**: enhancement (`auto` / `ask` / `off`), host lists,
+  **Persistent sessions** (on by default), and **Link** (`ssh` by default or `mosh`).
+  These settings apply to new panes.
 - The pane chrome's remote chip and hatched backdrop (card #SPBN) already mark a remote pane.
 
 ### 9. The host's files: clicking one opens it, editing it saves it back
@@ -409,37 +414,70 @@ code with it.
   server): heavy, per-architecture, and Warp's own tmux experiment was removed after it broke users'
   tmux. A plain remote tmux or screen is served by the DCS wrapping of section 3 instead, which
   installs nothing and asks the user for one line of tmux configuration.
-- No OSC passthrough under mosh: mosh drops unknown sequences upstream.
+- mosh drops most OSC sequences; Relay carries its remote marks through OSC 52 instead.
+  Other arbitrary OSC passthrough remains unavailable.
 - No editing of the host's folders: an explorer pane on a remote folder lists and opens, it does
   not rename, delete or create (section 9).
 
-### 11. Zellij (#VD2M)
+### 11. Persistent remote panes (#XQ8F)
 
-zellij on a host or in a pane is served by detection and the screen, not by a channel:
+An interactive `ssh <host>` typed in a Relay pane, or started with **Actions › Connect to SSH…**,
+is persistent by default. Relay sends a small holder script over the connection. On the host it
+starts or attaches to a session named for that Relay pane: a bare tmux on Relay's own `relay`
+socket, then screen if tmux is unavailable. Its status bar and prefix keys are disabled, so
+Relay's tabs and panes remain the interface. Relay installs no remote binary and leaves the
+user's normal tmux sessions alone. If the host has neither tmux nor screen, the holder starts a
+login shell and prints a warning that this session will not persist.
+
+Persistence applies to plain interactive logins, not remote commands or SSH control and forwarding
+forms such as `ssh host command`, `ssh -N`, `-W`, or `-O`. It requires Relay's SSH wrapper and a
+shared connection. **Options › Terminal › SSH sessions › Persistent sessions** turns it off; the
+**Never enhance on** host list and enhancement **Off** also prevent it. `command ssh` bypasses
+the wrapper. A normal pane close, Alt+Esc, or quitting Relay ends the local link but leaves the
+holder and its programs running on the host. **Close and end the remote session** in the pane
+menu or Actions ends the host session before closing the pane; if the shared connection cannot
+reach the host, Relay says so and keeps the pane open.
+
+**Options › Terminal › SSH sessions › Link** chooses how a persistent `ssh` login travels: `ssh`
+by default, or `mosh` for a bare destination when mosh is installed locally and works on the
+host. SSH options that mosh cannot express keep the SSH link. A mosh attempt that fails quickly
+falls back to SSH. A typed `mosh` login may also get a holder. Relay keeps the shared SSH master
+alive while a mosh login is open so host tools remain available. Under mosh, remote integration
+sends prompt and cwd marks through OSC 52, which mosh forwards; Relay consumes those marks
+without changing the clipboard. Other mosh screen behavior described above still applies.
+
+**New pane (Ctrl+E)** and the directional split actions from a remote pane connect the new pane
+to the same host in a separate session. The new pane uses the shared connection and starts in
+the source pane's current remote directory when OSC 7 marks are available, including paths with
+spaces. Without a live remote cwd mark, it uses the holder's recorded start directory.
+**New local pane**
+forces a pane on this machine. **Split right on the same host** remains an explicit action.
+
+Saved window layouts and **Restore last closed** retain the pane identity and reattach command.
+When Relay restarts, the restored pane runs that command at its first local prompt; the existing
+host session and its programs return if the host is reachable. The person's queued commands stay
+paused for review. From a connected remote pane, **Remote sessions on this host…** in Actions
+lists Relay holder sessions on that host, including attached or detached state. Enter or a
+double-click reattaches one in a new tab; **End session** ends the selected host session. This
+list queries Relay's tmux socket and screen sessions and requires the shared SSH connection;
+plain-shell fallback sessions do not appear in it.
+
+### 12. Zellij compatibility (#VD2M)
+
+A user-started zellij session is still supported, but Relay does not use zellij as its holder:
 
 - **No passthrough.** zellij (verified 0.45.1) passes no OSC out — not 133, not 7, not even 52 —
   and has no tmux-style DCS escape. So `shell/remote-integration.sh` detects `$ZELLIJ` (which
   zellij sets to `0`, truthy by presence, never by value), prints one line saying so, and its
-  `__relay_r_o` wrapper becomes a no-op: marks cannot reach Relay from inside zellij, and
-  emitting them would be noise.
+  `__relay_r_o` wrapper becomes a no-op: marks cannot reach Relay from inside zellij.
 - **The screen says where the prompt is.** A zellij or tmux side-by-side split puts the pane
-  separator and the neighbour pane's text after the prompt on the cursor's row, which used to
-  defeat the login path's "cursor at the row's end" check. `rowHoldsPrompt`
+  separator and the neighbour pane's text after the prompt on the cursor's row. `rowHoldsPrompt`
   (`src/ScreenPrompt.cpp`) reads the row only up to the cursor and accepts a separator
   (`│ ┃ ┆ ┇ ┊ ┋ ╎ ╏ ║`, or `|`) after it.
 - **Keys.** zellij and tmux use plain Alt+arrows to move between their own panes, so inside any
-  program those now go to the program; Shift+Alt+arrows are Relay's pane navigation fallback
-  that still escapes a full-screen program (owner decision 2026-09-24).
+  program those go to the program; Shift+Alt+arrows are Relay's pane navigation fallback.
 - **First run.** A fresh zellij session shows a tips overlay that eats input until ESC —
   `tests/test_zellij.py` dismisses it the way a person does.
-- **Persistent connects.** "Connect to host (persistent)…" in the palette runs
-  `mosh <target> -- sh -c '…'` (`ssh -t` when this machine has no mosh), where the host script
-  runs `zellij attach --create relay-<user-host>`, or `tmux new -A -s relay-<user-host>` when the
-  host has tmux and no zellij, or a login shell when it has neither. Losing the network, closing
-  the pane or quitting Relay leaves the session running on the host; running the same connect
-  again re-attaches to it. Nothing is installed on the host; the session name is the sanitized
-  target, so the same user and host always meet the same session (zellij, unlike tmux, refuses a
-  second concurrent attach to one session — connect once per host).
 
 ## Research notes
 
@@ -454,7 +492,8 @@ zellij on a host or in a pane is served by detection and the screen, not by a ch
 - **Ghostty** wraps `ssh` in a shell function for terminfo/env, and caches per `user@host`.
 - **Claude Desktop, Codex, Zed, VS Code** run a server on the remote; the lighter pattern that fits
   Relay is kitty's and Warp's: reuse the user's authenticated connection with `ssh -S`.
-- **mosh** syncs the screen, not the byte stream: OSC 7/133/1337 never arrive; only titles and OSC 52.
+- **mosh** syncs the screen, not the byte stream: OSC 7/133/1337 do not pass through directly;
+  Relay encapsulates its marks in OSC 52, which mosh forwards.
 
 ## SSH parity and guest tools (#S7GX, #S7KC, #S7CX)
 
