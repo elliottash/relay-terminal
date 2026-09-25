@@ -6196,6 +6196,10 @@ private:
             if (const QJsonObject picks = pane->modePicks(); !picks.isEmpty())
                 leaf.insert(QStringLiteral("mode_picks"), picks);
             if (!pane->sessionIdForLayout().isEmpty()) leaf.insert(QStringLiteral("session_id"), pane->sessionIdForLayout());
+            // The guest session a guest preset is running right now (#PCJY): a restored pane whose
+            // conversation could not be resumed still names the session to resume its guest on.
+            if (const QString guestSession = pane->guestSessionForLayout(); !guestSession.isEmpty())
+                leaf.insert(QStringLiteral("guest_session"), guestSession);
             // Which file holds this pane's terminal text (src/WindowState.h). The id is in every
             // node, including "restore last closed": a reopened pane finds the text of the pane it
             // came from, and the ids in the saved layout are what keeps the store pruned.
