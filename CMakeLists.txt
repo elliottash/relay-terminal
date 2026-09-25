@@ -1261,6 +1261,14 @@ if(BUILD_TESTING)
     add_test(NAME boardfocus COMMAND relay-boardfocus-tests)
     set_tests_properties(boardfocus PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+    # Find inside an open card (#9NBZ): `find.inView` on the board finds in the open card's
+    # document and focuses the filter on the list page, where before it did nothing at all.
+    # Its own executable for the same reason as boardfocus just above.
+    add_executable(relay-boardfind-tests tests/boardfind_test.cpp)
+    target_link_libraries(relay-boardfind-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardfind COMMAND relay-boardfind-tests)
+    set_tests_properties(boardfind PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     # The card's `## Tests` strip and its Check (#7BM4): the strip appears only for a card that
     # lists tests, Check sends one `tests_check`, the answer's findings and actions are drawn as
     # the worker sent them, and a refused move offers the gate's Override. Its own executable

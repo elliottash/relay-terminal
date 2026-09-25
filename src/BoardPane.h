@@ -320,6 +320,10 @@ public:
     // narrow pane's open card, and a link's reveal at any width (#K4SQ). For tests.
     bool listPaneVisible() const { return m_listPane && !m_listPane->isHidden(); }
     void focusFilter();
+    // `find.inView` (Ctrl+F) with the keyboard on the board (#9NBZ): an open card is a
+    // document that can scroll for screens, so that page finds inside its own document; the
+    // list page's find is the filter, which `/` already focuses — same key, either page.
+    void openFind();
     // "Clean up" (protocol 19.9): hands the whole board to the agent to tidy — merge or split
     // sections and cards, review statuses. The first click is always a **preview** (`dry_run`),
     // because a cleanup rewrites many of the owner's files; the result panel then offers Apply.

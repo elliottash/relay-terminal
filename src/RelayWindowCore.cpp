@@ -351,6 +351,13 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
             if (id == QStringLiteral("agent.modelBox")) openConsoleModelBox();
             else toggleModelsPane(focusedConsole());
         }
+        // The Board answers `find.inView` before the `!pane` guard too, for the same reason as
+        // the model box just above: the Switchboard holds no terminal pane, so Ctrl+F used to
+        // fall through the guard and do nothing at all (#9NBZ). Asked of the focus widget, so
+        // an open card is the document searched, the list page's filter is focused instead, and
+        // a terminal pane — never inside a board — keeps the key and finds in itself.
+        else if (id == QStringLiteral("find.inView") && !target && focusedBoardView())
+            focusedBoardView()->openFind();
         else if (!pane) return;
         else if (id == QStringLiteral("terminal.native")) pane->toggleNative();
         else if (id == QStringLiteral("pane.restartShell")) pane->restartStopped();

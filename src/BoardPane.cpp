@@ -2148,6 +2148,47 @@ public:
         m_verifyPlanLine->setTextInteractionFlags(Qt::NoTextInteraction);
         layout->insertWidget(layout->indexOf(m_doc), m_verifyPlanLine);
 
+        // Find inside the open card (#9NBZ). The terminal's FindBar is not reused: it is built
+        // around a backend's scrollback and a conversation, and the board links neither — the
+        // card's document is the only text on this page that scrolls for screens. The strip
+        // sits directly over the document, hidden until `openFind` asks for it, so an unread
+        // card keeps its whole first screen.
+        m_findStrip = new QWidget(this);
+        m_findStrip->setObjectName(QStringLiteral("boardCardFindStrip"));
+        auto *findLayout = new QHBoxLayout(m_findStrip);
+        findLayout->setContentsMargins(8, 4, 8, 4);
+        findLayout->setSpacing(6);
+        m_findEdit = new QLineEdit(m_findStrip);
+        m_findEdit->setObjectName(QStringLiteral("boardCardFind"));
+        m_findEdit->setPlaceholderText(QStringLiteral("Find in this card"));
+        m_findEdit->setClearButtonEnabled(true);
+        m_findEdit->installEventFilter(this);
+        m_findCount = new QLabel(m_findStrip);
+        m_findCount->setObjectName(QStringLiteral("boardCardFindCount"));
+        m_findPrevious = new QToolButton(m_findStrip);
+        m_findPrevious->setText(QStringLiteral("↑"));
+        m_findPrevious->setAutoRaise(true);
+        m_findPrevious->setToolTip(QStringLiteral("Previous match (Shift+Enter)"));
+        m_findNext = new QToolButton(m_findStrip);
+        m_findNext->setText(QStringLiteral("↓"));
+        m_findNext->setAutoRaise(true);
+        m_findNext->setToolTip(QStringLiteral("Next match (Enter)"));
+        m_findClose = new QToolButton(m_findStrip);
+        m_findClose->setText(QStringLiteral("×"));
+        m_findClose->setAutoRaise(true);
+        m_findClose->setToolTip(QStringLiteral("Close (Esc)"));
+        findLayout->addWidget(m_findEdit, 1);
+        findLayout->addWidget(m_findCount);
+        findLayout->addWidget(m_findPrevious);
+        findLayout->addWidget(m_findNext);
+        findLayout->addWidget(m_findClose);
+        m_findStrip->hide();
+        layout->insertWidget(layout->indexOf(m_doc), m_findStrip);
+        connect(m_findEdit, &QLineEdit::textChanged, this, [this] { refreshFind(); });
+        connect(m_findNext, &QToolButton::clicked, this, [this] { findStep(false); });
+        connect(m_findPrevious, &QToolButton::clicked, this, [this] { findStep(true); });
+        connect(m_findClose, &QToolButton::clicked, this, [this] { closeFind(); });
+
         // Editing the card's own words (`## Issue`). It takes the document's place rather than
         // opening beside it, so the card is either being read or being written, never both.
         m_editFrame = new QFrame(this);
@@ -2561,6 +2602,67 @@ public:
         onTryRequest(QJsonObject{{QStringLiteral("type"), QStringLiteral("try_answer")},
                                  {QStringLiteral("card"), m_id},
                                  {QStringLiteral("answer"), text}});
+    }
+
+    // Find in the open card (#9NBZ). Reached from `find.inView` through BoardView::openFind;
+    // it searches only this page's document, because the list page's find is the filter and
+    // the conversation has its own.
+    void openFind()
+    {
+        // Prefill from what the document has selected, as an editor's find does: Ctrl+F over
+        // a word is almost always a search for that word. A selection that spans a line break
+        // is a copy, not a needle, and is left out.
+        const QString selected = m_doc->textCursor().selectedText();
+        if (!selected.isEmpty() && !selected.contains(QChar(0x2029)))
+            m_findEdit->setText(selected);   // textChanged runs the search itself
+        m_findStrip->show();
+        m_findEdit->setFocus();
+        m_findEdit->selectAll();
+    }
+
+    void closeFind()
+    {
+        m_findStrip->hide();
+        m_doc->setFocus();   // Esc gave up the search, not the card
+    }
+
+    // What the strip draws after every edit of the needle: the first match from the top and
+    // how many there are. Called again by `render` when a new card lands under an open strip.
+    void refreshFind()
+    {
+        const QString needle = m_findEdit->text();
+        if (needle.isEmpty()) {
+            m_findCount->clear();
+            return;
+        }
+        // Start every search at the top of the card: where the last needle left the cursor is
+        // not a place this one knows about.
+        QTextCursor top = m_doc->textCursor();
+        top.movePosition(QTextCursor::Start);
+        m_doc->setTextCursor(top);
+        const bool found = findStep(false);
+        const int total = m_doc->toPlainText().count(needle, Qt::CaseInsensitive);
+        m_findCount->setText(found ? (total == 1 ? QStringLiteral("1 match")
+                                                : QStringLiteral("%1 matches").arg(total))
+                                   : QStringLiteral("No matches"));
+    }
+
+    bool findStep(bool backwards)
+    {
+        const QString needle = m_findEdit->text();
+        if (needle.isEmpty())
+            return false;
+        const QTextDocument::FindFlags flags =
+            backwards ? QTextDocument::FindBackward : QTextDocument::FindFlags();
+        // Case-insensitive by leaving FindCaseSensitively off, as the terminal's find is.
+        if (m_doc->find(needle, flags))
+            return true;
+        // Wrap around the ends: the last match on the page is not the end of the search, and
+        // neither is the first the beginning.
+        QTextCursor wrap = m_doc->textCursor();
+        wrap.movePosition(backwards ? QTextCursor::End : QTextCursor::Start);
+        m_doc->setTextCursor(wrap);
+        return m_doc->find(needle, flags);
     }
 
     // What the strip draws, read out of the section the turn wrote. The same shape-not-grammar
@@ -3209,6 +3311,28 @@ protected:
             auto *key = static_cast<QKeyEvent *>(event);
             const auto mods = key->modifiers() & ~Qt::KeypadModifier;
             const bool enter = key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter;
+            // The find strip's own keys (#9NBZ): Esc closes it, Enter steps through the
+            // matches (backwards with Shift), and the arrows do the same so the strip works
+            // one-handed. Everything else — typing, the clear button's Tab — stays Qt's.
+            if (object == m_findEdit) {
+                if (key->key() == Qt::Key_Escape) {
+                    closeFind();
+                    return true;
+                }
+                if (enter) {
+                    findStep(mods & Qt::ShiftModifier);
+                    return true;
+                }
+                if (key->key() == Qt::Key_Down && mods == Qt::NoModifier) {
+                    findStep(false);
+                    return true;
+                }
+                if (key->key() == Qt::Key_Up && mods == Qt::NoModifier) {
+                    findStep(true);
+                    return true;
+                }
+                return QWidget::eventFilter(object, event);
+            }
             if (object == m_doc && !m_editing && mods == Qt::NoModifier
                 && key->text() == QStringLiteral("e")) {
                 beginEdit(false);
@@ -4371,6 +4495,10 @@ private:
             bar->setValue(bar->maximum());
             break;
         }
+        // A new card landed under an open find strip (#9NBZ): its count and cursor describe a
+        // document that no longer exists, so the search runs again over the new one.
+        if (!m_findStrip->isHidden() && !m_findEdit->text().isEmpty())
+            refreshFind();
     }
 
     PriorityFlagButton *m_flag = nullptr;   // the card page's priority flag (#DPJB)
@@ -4427,6 +4555,11 @@ private:
     bool m_tryRunning = false;        // a Try it turn is in flight on this card
     // The Verify strip (#WFRA): the card's `verify:` block as one line under the Try it strip.
     QLabel *m_verifyPlanLine = nullptr;
+    // Find in the open card (#9NBZ): the strip over the document, hidden until `openFind`.
+    QWidget *m_findStrip = nullptr;
+    QLineEdit *m_findEdit = nullptr;
+    QLabel *m_findCount = nullptr;
+    QToolButton *m_findPrevious = nullptr, *m_findNext = nullptr, *m_findClose = nullptr;
     QLineEdit *m_titleEdit = nullptr;
     QPlainTextEdit *m_issueEdit = nullptr;
     QPushButton *m_saveEdit = nullptr, *m_cancelEdit = nullptr;
@@ -8903,6 +9036,17 @@ void BoardView::focusFilter()
         closeDetail();
     m_filter->setFocus();
     m_filter->selectAll();
+}
+
+void BoardView::openFind()
+{
+    // `find.inView` (Ctrl+F) with the keyboard on the board (#9NBZ): an open card is a
+    // document that can scroll for screens, so that page finds inside its own document; the
+    // list page's find is the filter, which `/` already focuses — same key, either page.
+    if (detailOpen())
+        m_detail->openFind();
+    else
+        focusFilter();
 }
 
 void BoardView::selectCard(const QString &id)

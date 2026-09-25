@@ -1267,6 +1267,15 @@ private:
             if (auto *pane = dynamic_cast<Pane *>(widget)) return pane == m_active ? nullptr : pane;
         return nullptr;
     }
+    // The Switchboard the keyboard is in, or null — asked of the focus widget for the same
+    // reason as focusedConsole() just above: the active leaf is the last terminal pane, which
+    // is not where the key went when a card is open. A terminal pane is never inside a board,
+    // so Ctrl+F in one of those still finds in that terminal and never reaches this walk.
+    relay::BoardView *focusedBoardView() const {
+        for (QWidget *widget = QApplication::focusWidget(); widget != nullptr; widget = widget->parentWidget())
+            if (auto *board = dynamic_cast<relay::BoardView *>(widget)) return board;
+        return nullptr;
+    }
     bool helperComposerHasFocus() const { return focusedConsole() != nullptr; }
     void openConsoleModelBox() {
         if (Pane *console = focusedConsole()) console->openModelBox();
