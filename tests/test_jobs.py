@@ -3,6 +3,7 @@
 conversation (relay_core/jobs.py)."""
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -158,6 +159,19 @@ class JobToolTests(unittest.TestCase):
         result = self.run_tool("run_command", command="cat /proc/self/cgroup", memory_max="1G")
         self.assertEqual(result.get("exit_code"), 0)
         self.assertIn("app-relay.slice", result.get("output", ""))
+
+    @unittest.skipUnless(shutil.which("systemd-run") and Path(f"/run/user/{os.getuid()}/bus").exists(),
+                         "needs a systemd user session")
+    def test_memory_max_kills_only_the_command_when_passed(self):
+        # The bound must bind: MemorySwapMax=0, because a limit a job swaps past is not a limit
+        # (the #ZPWT rehearsal caught a 900M hog surviving a 600M memory.max that way).
+        hog = ("import sys; b = bytearray(int(sys.argv[1]) * 1000 * 1000); "
+               "[b.__setitem__(i, 1) for i in range(0, len(b), 4096)]")
+        result = self.run_tool("run_command", command=f"{sys.executable} -c {hog!r} 700",
+                               memory_max="400M", timeout_seconds=90)
+        self.assertEqual(result.get("exit_code"), -9)
+        self.assertTrue(result.get("killed_for_memory"))
+        self.assertIn("memory_max=400M", result.get("note", ""))
 
     def test_long_output_keeps_the_newest(self):
         result = self.run_tool("run_command", command="head -c 100000 /dev/zero | tr '\\0' x; echo; echo LAST")

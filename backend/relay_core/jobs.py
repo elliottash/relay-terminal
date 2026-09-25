@@ -170,8 +170,11 @@ def scoped_argv(argv: list[str], memory_max: str) -> list[str]:
     exe = shutil.which("systemd-run")
     if not exe:
         raise ValueError("memory_max needs systemd-run, which this machine does not have.")
+    # MemorySwapMax=0 because memory.max alone bounds only RAM: without it a job simply swaps
+    # past the bound (a rehearsal for #ZPWT caught a 900M hog surviving a 600M max that way).
+    # A bound the job can sidestep on disk is not a bound.
     return [exe, "--user", "--scope", "--quiet", "--collect", "--slice=app-relay.slice",
-            "-p", f"MemoryMax={size}", "-p", "OOMPolicy=continue", "--"] + argv
+            "-p", f"MemoryMax={size}", "-p", "MemorySwapMax=0", "-p", "OOMPolicy=continue", "--"] + argv
 
 
 def shell_argv(command: str, env: dict) -> list[str]:

@@ -1,0 +1,26 @@
+
+=== A. plain run_command, hog past the pane cap (pane scope: 1500M)
+{
+ "truncated": false,
+ "omitted_bytes": 0,
+ "job_id": "job-1",
+ "duration_seconds": 0.441,
+ "exit_code": -9,
+ "killed_for_memory": true,
+ "note": "exit code -9 (SIGKILL): the kernel killed this command for memory \u2014 it passed the pane's cap. Run it again with run_command memory_max (a size like 64G) for a bound that fits."
+}
+output: ''
+
+=== B. run_command memory_max=600M, hog 900M past its own bound
+{
+ "truncated": false,
+ "omitted_bytes": 0,
+ "job_id": "job-2",
+ "duration_seconds": 0.203,
+ "exit_code": -9,
+ "killed_for_memory": true,
+ "note": "exit code -9 (SIGKILL): this command ran in its own scope with memory_max=600M, and was killed for passing that bound."
+}
+output: ''
+
+PANE-ALIVE: this pane process survived both kills and is still reporting.

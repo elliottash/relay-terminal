@@ -76,7 +76,8 @@ class ScopedArgvTests(unittest.TestCase):
             argv = self.jobs.scoped_argv(["bash", "-c", "true"], "64G")
         self.assertEqual(argv, ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect",
                                 "--slice=app-relay.slice", "-p", "MemoryMax=64G",
-                                "-p", "OOMPolicy=continue", "--", "bash", "-c", "true"])
+                                "-p", "MemorySwapMax=0", "-p", "OOMPolicy=continue",
+                                "--", "bash", "-c", "true"])
 
     def test_rejects_sizes_that_are_not_sizes(self):
         for bad in ("banana", "-1G", "8GB", "1 GiB", ""):
