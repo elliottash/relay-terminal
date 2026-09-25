@@ -2360,12 +2360,16 @@ void Pane::pollShell() {
             leaveSecretMode();
             if (m_native && m_autoHuman) { m_autoHuman = false; setNative(false, false); }
             updateTakeControl();
-            if (m_activeValid && !m_active.agent && m_activeLoaded) {
+            const bool activeFinished = m_activeValid && !m_active.agent && m_activeLoaded;
+            if (activeFinished) {
                 // The queued command finished; a failure pauses whatever is queued behind it.
                 m_activeValid = false; m_activeLoaded = false;
                 if (status != 0) pauseQueue(QStringLiteral("`%1` exited with status %2").arg(m_active.text).arg(status));
-                QTimer::singleShot(150, this, [this] { rebuildQueueStrip(); pumpQueue(); });
             }
+            // The strip came up with the program ("running" above) whether or not the queue ran
+            // it, so it goes down the same way: a command typed straight at the prompt is no
+            // queue entry, but its Stop-shell control must not outlive it.
+            QTimer::singleShot(150, this, [this, activeFinished] { rebuildQueueStrip(); if (activeFinished) pumpQueue(); });
             if (m_fixArmed) {
                 const QString command = m_fixCommand;
                 const int attempt = m_fixAttempt;

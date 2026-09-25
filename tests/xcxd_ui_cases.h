@@ -327,6 +327,26 @@ void xcxdUiCases()
     CHECK(xcxdEditor(shell) && xcxdEditor(shell)->toPlainText()
               == QStringLiteral("draft that must survive the stop"));
 
+    // ----- a program typed at the prompt: the strip leaves when the program does ------------
+    // The queue never ran this one, so nothing marks it active; the strip came up on
+    // "running" and must still go down on "ready" (owner's report: empty strip stayed up).
+    {
+        QTemporaryDir typedHome;
+        XcxdShellContext typedContext;
+        typedContext.workspace = typedHome.path();
+        Pane typed(typedContext.workspace, typedContext.workspace, true, relay::defaultEngineCore(), &typedContext);
+        typed.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
+        xcxdPump(100);
+        typed.sendShellInput(QStringLiteral("sleep 2\n"));
+        for (int i = 0; i < 200 && !xcxdHasButton(typed, QStringLiteral("Stop shell (")); ++i)
+            xcxdPump(25);
+        CHECK(xcxdHasButton(typed, QStringLiteral("Stop shell (")));
+        // No Esc, nothing queued: sleep exits on its own and its stop control follows.
+        for (int i = 0; i < 400 && xcxdHasButton(typed, QStringLiteral("Stop shell (")); ++i)
+            xcxdPump(25);
+        CHECK(!xcxdHasButton(typed, QStringLiteral("Stop shell (")));
+    }
+
     // ----- lanes: separate resume/clear, the shell ×, and stable rebuilds -------------------
     {
         QTemporaryDir laneHome;
