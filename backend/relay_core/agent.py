@@ -4599,6 +4599,10 @@ class Agent:
             # Card #F8R7: what an edit to a file open in the editor is labelled with there.
             self.executor.provenance = {"turn_id": (self._turn_ctx or {}).get("turn_id"),
                                         "model": self.config.model}
+            # Card #WNKN: the board card this pane is working (its first live claim, "#WNKN"),
+            # for the authorship journal the executor writes when a land.py repo is edited.
+            claims = getattr(self.board, "claimed", None) or []
+            self.executor.authorship_card = f"#{claims[0]}" if claims else ""
         if prepared.name in ("write_file", "edit_file") and prepared.path is not None:
             # Card #DVV2: Relay owns agent scratch — the write may not go to the system temp
             # dir, a new top-level $HOME entry, or a deliverable outside the workspace. The

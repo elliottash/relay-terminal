@@ -15,6 +15,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
+import logging
 import os
 from .filelock import chmod_fd
 import posixpath
@@ -24,6 +25,7 @@ import shlex
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -69,6 +71,11 @@ LARGE_FILE_REFUSAL = "File exceeds the 8 MiB limit of Relay's file tools."
 DEFAULT_WAIT = 30
 MAX_WAIT = 1800
 SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE)", re.I)
+# Card #WNKN: the two RELAY_ names that are pane identity, not secrets, so command_env() keeps
+# them where it strips every other RELAY_* — a command Relay starts can say which pane ran it.
+RELAY_PASS_THROUGH = frozenset({"RELAY_SESSION_TOKEN", "RELAY_PANE_ID"})
+
+log = logging.getLogger(__name__)
 
 
 def _subject(payload: dict) -> str:
@@ -585,6 +592,12 @@ class ToolExecutor:
         # labelled with in the editor, set by the agent before each write.
         self.buffers = None
         self.provenance: dict = {}
+        # Card #WNKN: the board card this pane has claimed ("#WNKN"; "" with no board or no
+        # claim), set by the agent from the board's claim list so the authorship journal can
+        # name what a write was for. `_land_begun`: paths this executor has already claimed
+        # with scripts/land.py, so the auto-begin below runs once per path.
+        self.authorship_card = ""
+        self._land_begun: set[str] = set()
 
     def _approval(self, name: str, args: dict, *, exists: bool = False, outside_workspace: bool = False,
                   subject: str = "", already: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -1206,6 +1219,9 @@ class ToolExecutor:
         old = self.workspace.read_bytes(path) if path.exists() else b""
         if hashlib.sha256(old).hexdigest() != prepared.old_sha:
             raise ValueError("File changed while the write was prepared. Nothing was overwritten; request a fresh diff.")
+        # Card #WNKN: claim the path with scripts/land.py before the first write this executor
+        # makes to it, so its snapshot holds the pre-write bytes the code below replaces.
+        self._land_begin(path)
         # edit_file computed its whole new text while preparing; write_file carries the model's.
         data = (prepared.content if prepared.content is not None else args["content"]).encode("utf-8")
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
@@ -1229,6 +1245,9 @@ class ToolExecutor:
         finally:
             if os.path.exists(tempname):
                 os.unlink(tempname)
+        # Card #WNKN: with the write on disk, journal it (both blobs, content-addressed) so
+        # another session's commit can credit this pane's hunks. Never fails the write.
+        self._land_journal(path, prepared.existed, old, data)
         result = {"path": args["path"], "written_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                   "added": prepared.added, "removed": prepared.removed}
         if name == "edit_file":
@@ -1236,6 +1255,81 @@ class ToolExecutor:
         else:
             result["created"] = not prepared.existed
         return result
+
+    def _land_begin(self, path: Path) -> None:
+        """Card #WNKN: claim `path` with scripts/land.py before this executor's first write to
+        it, so the bytes about to be replaced are snapshotted first. The token identifies the
+        pane (RELAY_SESSION_TOKEN), the contact names it and the board card it is working. Best
+        effort by contract: every failure — nonzero exit, timeout, a land.py without --auto
+        yet, no python — is logged and the write proceeds."""
+        token = os.environ.get("RELAY_SESSION_TOKEN") or ""
+        if not token:
+            return
+        repo = land_repo(path)
+        if repo is None:
+            return
+        root, rel = repo
+        if str(path) in self._land_begun or land_claimed(land_root(), token, rel.as_posix()):
+            return
+        self._land_begun.add(str(path))     # attempted once: a broken land.py never stalls writes
+        pane = os.environ.get("RELAY_PANE_ID") or ""
+        contact = f"pane {pane}" + (f" {self.authorship_card}" if self.authorship_card else "")
+        try:
+            done = subprocess.run(
+                [sys.executable or "python3", str(root / LAND_SCRIPT), "begin", token, rel.as_posix(),
+                 "--auto", "--contact", contact],
+                cwd=str(root), timeout=LAND_BEGIN_TIMEOUT,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if done.returncode != 0:
+                log.warning("land.py begin --auto for %s exited %s: %s", rel, done.returncode,
+                            done.stderr.decode("utf-8", "replace").strip()[:200])
+        except Exception as error:
+            log.warning("land.py begin --auto for %s failed: %s", rel, error)
+
+    def _land_journal(self, path: Path, existed: bool, old: bytes, data: bytes) -> None:
+        """Card #WNKN: append the write that just landed to <land root>/authors/<token>.jsonl
+        and store its before/after blobs content-addressed under <land root>/blobs/<sha256>,
+        the record scripts/land.py's commit side reads to credit another session's hunks. Only
+        when a token is set and the path is in a land.py repo; failures are logged, never
+        raised — the write is already on disk."""
+        token = os.environ.get("RELAY_SESSION_TOKEN") or ""
+        if not token:
+            return
+        repo = land_repo(path)
+        if repo is None:
+            return
+        root, rel = repo
+        before = hashlib.sha256(old).hexdigest() if existed else None
+        after = hashlib.sha256(data).hexdigest()
+        line = json.dumps({"ts": time.time(), "repo": str(root), "path": rel.as_posix(),
+                           "before": before, "after": after,
+                           "pane": os.environ.get("RELAY_PANE_ID") or "", "token": token,
+                           "card": self.authorship_card,
+                           "turn_id": (self.provenance or {}).get("turn_id") or ""}) + "\n"
+        try:
+            base = land_root()
+            for directory in (base / "authors", base / "blobs"):
+                directory.mkdir(parents=True, exist_ok=True)
+                os.chmod(directory, 0o700)
+            for digest, blob in ((before, old), (after, data)):
+                target = base / "blobs" / digest if digest else None
+                if target is None or target.exists():
+                    continue
+                fd, tempname = tempfile.mkstemp(prefix=".blob-", dir=base / "blobs")
+                try:
+                    with os.fdopen(fd, "wb") as out:
+                        out.write(blob)
+                    os.replace(tempname, target)
+                finally:
+                    if os.path.exists(tempname):
+                        os.unlink(tempname)
+            journal = base / "authors" / f"{token}.jsonl"
+            if journal.exists() and journal.stat().st_size > LAND_JOURNAL_MAX:
+                journal.replace(base / "authors" / f"{token}.1.jsonl")
+            with journal.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError as error:
+            log.warning("authorship journal for %s failed: %s", rel, error)
 
     def _run(self, command: str, cwd: Path, timeout: int, background: bool = False, *,
              argv: list[str] | None = None, host: str | None = None,
@@ -1374,14 +1468,68 @@ class ToolExecutor:
         return result
 
 
+# ----- scripts/land.py authorship (card #WNKN) ---------------------------------------------------
+#
+# A pane that edits a repo whose land flow this checkout runs (a git repository whose root carries
+# scripts/land.py) claims the path there before its first write to it, and journals the write's
+# before/after blobs content-addressed, so a commit another session lands can credit this one's
+# hunks. All of it is best effort: nothing here may ever block or fail the write itself.
+
+#: The script whose presence in a repo root marks a repo this land flow runs in.
+LAND_SCRIPT = Path("scripts") / "land.py"
+#: How long the auto-begin below may hold a write; past that it is killed and the write proceeds.
+LAND_BEGIN_TIMEOUT = 5.0
+#: Past this size a token's journal rotates to <token>.1.jsonl (one old file is kept).
+LAND_JOURNAL_MAX = 4 * 1024 * 1024
+
+
+def land_root() -> Path:
+    """The land root scripts/land.py itself defaults to (its DEFAULT_ROOT): RELAY_LAND_ROOT
+    overrides, else $XDG_STATE_HOME/relay/land, else ~/.local/state/relay/land."""
+    override = os.environ.get("RELAY_LAND_ROOT")
+    if override:
+        return Path(override)
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return Path(base) / "relay" / "land"
+
+
+def land_repo(path: Path) -> tuple[Path, Path] | None:
+    """(repo root, `path` relative to it) when `path` sits inside a git repository whose root
+    carries scripts/land.py — the repos whose hunks this land flow lands. The first `.git`
+    upwards owns the path; a repo without the script is not part of the flow."""
+    try:
+        here = path.resolve()
+        for parent in (here, *here.parents):
+            if (parent / ".git").exists():
+                if (parent / LAND_SCRIPT).is_file():
+                    return parent, here.relative_to(parent)
+                return None
+    except OSError:
+        pass
+    return None
+
+
+def land_claimed(root: Path, token: str, rel: str) -> bool:
+    """True when scripts/land.py's registry (`registry_file(root)` there) already lists this
+    token claiming `rel` — a session that began by hand is never auto-begun again."""
+    try:
+        data = json.loads((root / "registry.json").read_text(encoding="utf-8"))
+        session = data["sessions"].get(token)
+        return rel in ((session or {}).get("claims") or [])
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        return False
+
+
 def command_env() -> dict:
     """The environment every command Relay starts gets: this process's, without the names that
     carry secrets or would change how a shell starts. ssh inherits it too (card #S5SH) — without
-    SSH_AUTH_SOCK, because the user's master connection needs no agent."""
+    SSH_AUTH_SOCK, because the user's master connection needs no agent. RELAY_PASS_THROUGH names
+    (card #WNKN) survive both strips: they identify the pane, they do not open anything."""
     env = {key: value for key, value in os.environ.items()
-           if not SECRET_NAME.search(key) and not key.startswith("RELAY_")
-           and key not in {"BASH_ENV", "ENV", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "SSH_AUTH_SOCK"}
-           and not key.startswith("BASH_FUNC_")}
+           if key in RELAY_PASS_THROUGH
+           or (not SECRET_NAME.search(key) and not key.startswith("RELAY_")
+               and key not in {"BASH_ENV", "ENV", "PYTHONPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "SSH_AUTH_SOCK"}
+               and not key.startswith("BASH_FUNC_"))}
     env.update({"TERM": "dumb", "PAGER": "cat", "GIT_TERMINAL_PROMPT": "0"})
     return env
 

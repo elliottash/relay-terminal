@@ -1,4 +1,7 @@
+import hashlib
+import json
 import os
+import subprocess
 import tempfile
 import threading
 import time
@@ -31,11 +34,22 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(result['exit_code'], 7)
 
     def test_secret_env_removed(self):
-        with patch.dict(os.environ, {'MOONSHOT_API_KEY': 'DO_NOT_LEAK', 'ZAI_API_KEY': 'NO', 'RELAY_SESSION_TOKEN': 'NO'}):
+        with patch.dict(os.environ, {'MOONSHOT_API_KEY': 'DO_NOT_LEAK', 'ZAI_API_KEY': 'NO', 'RELAY_UNRELATED': 'NO'}):
             result = self.tools.execute(self.tools.prepare('run_command', {'command': 'env'}))
         self.assertNotIn('DO_NOT_LEAK', result['output'])
         self.assertNotIn('ZAI_API_KEY', result['output'])
-        self.assertNotIn('RELAY_SESSION_TOKEN', result['output'])
+        self.assertNotIn('RELAY_UNRELATED', result['output'])
+
+    # Card #WNKN: the two RELAY_ names that are pane identity pass through command_env() where
+    # every other RELAY_* (and every secret-looking name) is stripped.
+    def test_command_env_relay_identity_passes_through(self):
+        with patch.dict(os.environ, {'RELAY_SESSION_TOKEN': 'tok-1', 'RELAY_PANE_ID': 'pane-9',
+                                     'RELAY_UNRELATED': 'x', 'ANTHROPIC_API_KEY': 'DO_NOT_LEAK'}):
+            env = tools_mod.command_env()
+        self.assertEqual('tok-1', env.get('RELAY_SESSION_TOKEN'))
+        self.assertEqual('pane-9', env.get('RELAY_PANE_ID'))
+        self.assertNotIn('RELAY_UNRELATED', env)
+        self.assertNotIn('ANTHROPIC_API_KEY', env)
 
     # At its timeout a command is handed back as a job, not killed (relay_core/jobs.py).
     def test_timeout(self):
@@ -390,3 +404,153 @@ class WalkCostTests(unittest.TestCase):
             self.assertIn('cost limit', str(caught.exception))
             found = board_tools.search_workspace(self.home, {'pattern': 'needle', 'path': 'work'})
         self.assertEqual(found['matches'], [])
+
+
+# ----- scripts/land.py authorship, before a pane's first tool write (card #WNKN) -----------------
+class LandAuthorshipTests(unittest.TestCase):
+    """The auto-begin + authorship-journal hook in ToolExecutor.execute, run against a temp git
+    repo with a fake scripts/land.py that records its argv and what the claimed file still
+    held. Every failure mode must leave the write itself untouched."""
+
+    TOKEN = "wnkn-tok"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.repo = self.base / "repo"
+        (self.repo / "scripts").mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        (self.repo / "file.txt").write_text("old\n")
+        self.land = self.base / "land"           # the land root (authors/, blobs/, registry.json)
+        self.calls = self.base / "calls.jsonl"   # what the fake scripts/land.py saw
+        self.fake_land()
+        self.events = []
+        self.tools = ToolExecutor(str(self.repo), self.events.append, threading.Event())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def fake_land(self, exit_code=0, sleep=0):
+        """A scripts/land.py that records its argv, and whether the claimed file still holds
+        FAKE_EXPECT bytes when it runs (the auto-begin must precede the write), then exits."""
+        (self.repo / "scripts" / "land.py").write_text(
+            "import json, os, sys, time\n"
+            "rel = sys.argv[3]\n"
+            "content = open(rel, 'rb').read() if os.path.exists(rel) else b''\n"
+            "with open(os.environ['FAKE_CALLS'], 'a', encoding='utf-8') as fh:\n"
+            "    fh.write(json.dumps({'argv': sys.argv[1:],\n"
+            "                         'content_ok': content == os.environ['FAKE_EXPECT'].encode()})\n"
+            "             + '\\n')\n"
+            f"time.sleep({sleep})\n"
+            f"sys.exit({exit_code})\n")
+
+    def write(self, path, content, expected_before):
+        """One write_file through the executor, as if this pane (token + pane id) made it."""
+        with patch.dict(os.environ, {"RELAY_SESSION_TOKEN": self.TOKEN, "RELAY_PANE_ID": "pane-7",
+                                      "RELAY_LAND_ROOT": str(self.land),
+                                      "FAKE_CALLS": str(self.calls), "FAKE_EXPECT": expected_before}):
+            return self.tools.execute(self.tools.prepare("write_file", {"path": path, "content": content}))
+
+    def calls_read(self):
+        return [json.loads(line) for line in self.calls.read_text(encoding="utf-8").splitlines()]
+
+    def journal_read(self):
+        journal = self.land / "authors" / f"{self.TOKEN}.jsonl"
+        return journal, [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+
+    def test_begin_runs_once_per_path_before_the_write(self):
+        self.write("file.txt", "new\n", "old\n")
+        calls = self.calls_read()
+        self.assertEqual(1, len(calls))
+        self.assertEqual(["begin", self.TOKEN, "file.txt", "--auto", "--contact", "pane pane-7"],
+                         calls[0]["argv"])
+        self.assertTrue(calls[0]["content_ok"], "auto-begin must see the pre-write bytes")
+        self.assertEqual("new\n", (self.repo / "file.txt").read_text())
+        self.write("file.txt", "newer\n", "new\n")   # a second write to the same path
+        self.assertEqual(1, len(self.calls_read()), "one auto-begin per path")
+
+    def test_begin_contact_carries_the_claimed_card(self):
+        self.tools.authorship_card = "#WNKN"
+        self.write("file.txt", "new\n", "old\n")
+        self.assertEqual("pane pane-7 #WNKN", self.calls_read()[0]["argv"][-1])
+
+    def test_journal_line_shape_and_blobs(self):
+        self.tools.authorship_card = "#WNKN"
+        self.tools.provenance = {"turn_id": "turn-42", "model": "test-model"}
+        self.write("file.txt", "new\n", "old\n")
+        journal, entries = self.journal_read()
+        self.assertEqual(1, len(entries))
+        self.assertEqual({"ts", "repo", "path", "before", "after", "pane", "token", "card", "turn_id"},
+                         set(entries[0]))
+        self.assertEqual(str(self.repo.resolve()), entries[0]["repo"])
+        self.assertEqual("file.txt", entries[0]["path"])
+        self.assertEqual(hashlib.sha256(b"old\n").hexdigest(), entries[0]["before"])
+        self.assertEqual(hashlib.sha256(b"new\n").hexdigest(), entries[0]["after"])
+        self.assertEqual("pane-7", entries[0]["pane"])
+        self.assertEqual(self.TOKEN, entries[0]["token"])
+        self.assertEqual("#WNKN", entries[0]["card"])
+        self.assertEqual("turn-42", entries[0]["turn_id"])
+        self.assertIsInstance(entries[0]["ts"], float)
+        self.assertEqual(b"old\n", (self.land / "blobs" / entries[0]["before"]).read_bytes())
+        self.assertEqual(b"new\n", (self.land / "blobs" / entries[0]["after"]).read_bytes())
+        self.assertEqual(0o700, (self.land / "authors").stat().st_mode & 0o777)
+        self.assertEqual(0o700, (self.land / "blobs").stat().st_mode & 0o777)
+
+    def test_journal_of_a_new_file_has_null_before(self):
+        self.write("made.txt", "first\n", "")
+        journal, entries = self.journal_read()
+        self.assertIsNone(entries[0]["before"])
+        self.assertEqual(hashlib.sha256(b"first\n").hexdigest(), entries[0]["after"])
+        self.assertEqual(b"first\n", (self.land / "blobs" / entries[0]["after"]).read_bytes())
+        self.assertFalse((self.land / "blobs" / hashlib.sha256(b"").hexdigest()).exists())
+
+    def test_failing_begin_does_not_block_the_write(self):
+        self.fake_land(exit_code=1)
+        self.write("file.txt", "new\n", "old\n")
+        self.assertEqual("new\n", (self.repo / "file.txt").read_text())
+        self.assertEqual(1, len(self.calls_read()))
+        _, entries = self.journal_read()            # the journal is independent of the claim
+        self.assertEqual(hashlib.sha256(b"new\n").hexdigest(), entries[0]["after"])
+
+    def test_slow_begin_times_out_and_does_not_block_the_write(self):
+        self.fake_land(sleep=30)
+        started = time.monotonic()
+        self.write("file.txt", "new\n", "old\n")
+        self.assertEqual("new\n", (self.repo / "file.txt").read_text())
+        self.assertEqual(1, len(self.calls_read()))  # it ran, then was killed at the timeout
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertTrue((self.land / "authors" / f"{self.TOKEN}.jsonl").exists())
+
+    def test_a_registry_claim_already_on_the_path_skips_auto_begin(self):
+        (self.land).mkdir(parents=True, exist_ok=True)
+        (self.land / "registry.json").write_text(json.dumps(
+            {"version": 1, "sessions": {self.TOKEN: {"claims": ["file.txt"]}}}), encoding="utf-8")
+        self.write("file.txt", "new\n", "old\n")
+        self.assertFalse(self.calls.exists(), "a hand-begun claim is never auto-begun again")
+        _, entries = self.journal_read()
+        self.assertEqual(1, len(entries))
+
+    def test_no_token_means_no_begin_and_no_journal(self):
+        env = {key: value for key, value in os.environ.items() if key != "RELAY_SESSION_TOKEN"}
+        with patch.dict(os.environ, env, clear=True):
+            self.tools.execute(self.tools.prepare("write_file", {"path": "file.txt", "content": "new\n"}))
+        self.assertEqual("new\n", (self.repo / "file.txt").read_text())
+        self.assertFalse(self.calls.exists())
+        self.assertFalse((self.land / "authors").exists())
+        self.assertFalse((self.land / "blobs").exists())
+
+    def test_a_repo_without_scripts_land_is_untouched(self):
+        (self.repo / "scripts" / "land.py").unlink()
+        self.write("file.txt", "new\n", "old\n")
+        self.assertEqual("new\n", (self.repo / "file.txt").read_text())
+        self.assertFalse(self.calls.exists())
+        self.assertFalse((self.land / "authors").exists())
+
+    def test_the_journal_rotates_past_4mb(self):
+        authors = self.land / "authors"
+        authors.mkdir(parents=True)
+        (authors / f"{self.TOKEN}.jsonl").write_text("x" * (4 * 1024 * 1024 + 1))
+        self.write("file.txt", "new\n", "old\n")
+        self.assertEqual(4 * 1024 * 1024 + 1, (authors / f"{self.TOKEN}.1.jsonl").stat().st_size)
+        journal, entries = self.journal_read()
+        self.assertEqual(1, len(entries))
