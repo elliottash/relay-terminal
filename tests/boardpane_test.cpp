@@ -776,6 +776,12 @@ void BoardPaneTests::namedDriverUsesControlsAndRefusesUnavailableTargets()
 void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
 {
     relay::BoardView view(QStringLiteral("/tmp/relay-skills-tab-test"));
+    // #9FX8 evidence: RELAY_SHOT_DIR set writes the tab and the skill page (the pattern above).
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+    if (!shotDir.isEmpty()) {
+        view.resize(1000, 760);
+        view.show();
+    }
     view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
     auto *tabs = view.findChild<QWidget *>(QStringLiteral("boardPageTabs"));
     QVERIFY(tabs);
@@ -853,12 +859,20 @@ void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
     auto *linked = view.findChild<QWidget *>(QStringLiteral("boardSkillLinked"));
     QVERIFY(linked);
     QVERIFY(linked->findChild<QPushButton *>() != nullptr);
+    if (!shotDir.isEmpty()) {
+        QTest::qWait(50);   // the layout settles before the grab
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-skills-tab.png")));
+    }
 
     // The stale skill's page says stale and why.
     list->topLevelItem(staleRow)->setSelected(true);
     list->setCurrentItem(list->topLevelItem(staleRow));
     QVERIFY(stats->text().contains(QStringLiteral("<b>stale</b>")));
     QVERIFY(stats->text().contains(QStringLiteral("last passed 2026-08-01")));
+    if (!shotDir.isEmpty()) {
+        QTest::qWait(50);   // the layout settles before the grab
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-skill-page-stale.png")));
+    }
 
     // The choice rides navigation state: a restored pane lands back on Skills.
     QCOMPARE(view.navigationState().value(QStringLiteral("page")).toInt(), 1);
@@ -873,6 +887,11 @@ void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
 void BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
 {
     relay::BoardView view(QStringLiteral("/tmp/relay-memories-tab-test"));
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");   // #9FX8 evidence
+    if (!shotDir.isEmpty()) {
+        view.resize(1000, 600);
+        view.show();
+    }
     const QJsonObject expiredMemory{{"id", "TM1A"}, {"title", "expired memory"},
         {"type", "memory"}, {"status", "active"}, {"rank", "i"},
         {"path", "issues/memory/tm1a-expired-memory.md"}, {"name", "expired memory"},
@@ -908,6 +927,10 @@ void BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
                 .contains(QStringLiteral("paths moved 2026-09-20")));
     auto *count = view.findChild<QLabel *>(QStringLiteral("boardMemoryCount"));
     QVERIFY(count->text().contains(QStringLiteral("1 expired")));
+    if (!shotDir.isEmpty()) {
+        QTest::qWait(50);   // the layout settles before the grab
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-memories-tab.png")));
+    }
 
     // Opening a memory goes to the ordinary card page, solo — a memory is a card, `#ID` and all.
     QList<QJsonObject> sent;
