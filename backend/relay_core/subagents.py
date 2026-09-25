@@ -258,11 +258,19 @@ class SubagentFactory:
             return resolved.config, resolved.preset_id, self._tier_of(resolved)
         base_config, base_preset = self.base()
         base = base_config, base_preset, self._named_tier(base_config, base_preset)
-        # Claude Code accepts `opus` as a CLI model alias. The generic compatibility alias
-        # means "inherit", which would silently leave a Fable child on Fable here.
+        # Claude Code accepts `opus`/`sonnet`/`haiku` as CLI model aliases. The generic
+        # compatibility aliases mean "inherit", which silently ran the child on whatever the
+        # pane runs — a GLM pane asked for Opus and got GLM (2026-09-25, card #JQQF). A Claude
+        # word means Claude Code: the pane's own guest when it is one, otherwise an installed
+        # claude CLI, and only the main model (with a warning) when neither can run.
         from .guest_harness_provider import config_guest_id
-        if spec_.lower() == "opus" and "opus" not in self.user_aliases and config_guest_id(base_config) == "claude":
-            return dataclasses.replace(base_config, model="opus"), base_preset, None
+        word = spec_.lower()
+        if word in ("opus", "sonnet", "haiku") and word not in self.user_aliases:
+            if config_guest_id(base_config) == "claude":
+                return dataclasses.replace(base_config, model=word), base_preset, None
+            harness = self._claude_harness(word, warnings)
+            if harness is not None:
+                return harness, None, None
         spec_ = self.aliases.get(spec_.lower(), spec_)
         if spec_ == "inherit" or spec_ == base_config.model:
             return base
@@ -296,6 +304,18 @@ class SubagentFactory:
         model_name, extra = (tier_model[1], {**preset.extra, **tier_model[2]}) if tier_model else (preset.model, preset.extra)
         config = ProviderConfig(preset.base_url, model_name, key, dict(extra), self.config.max_tokens)
         return config, preset.id, self._named_tier(config, preset.id)
+
+    def _claude_harness(self, model_word: str, warnings: list[str]) -> ProviderConfig | None:
+        """A Claude Code guest config for `opus`/`sonnet`/`haiku` asked on a non-Claude pane
+        (card #JQQF), or None — with a warning, never a silent inherit — when no claude CLI
+        that could run it is installed and signed in here."""
+        from .guest_harness_provider import (adapter_available, base_url, installations,
+                                             login_status)
+        state = (installations() or {}).get("claude") or {}
+        if not state.get("installed") or not adapter_available("claude") or login_status("claude") is False:
+            warnings.append(f"no Claude Code CLI here; model {model_word!r} runs on the main model")
+            return None
+        return ProviderConfig(base_url("claude"), model_word, "")
 
     def _tier_model(self, spec_: str) -> tuple[str, str, dict] | None:
         """(preset, model, extra) from the tier table for a model name, preferring a keyed preset."""

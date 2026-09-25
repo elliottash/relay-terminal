@@ -815,8 +815,11 @@ class FactoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             kimi = ProviderConfig('https://api.moonshot.ai/v1', 'kimi-k3', 'k', {'reasoning_effort': 'high'})
             keys = {'glm-coding': 'zkey'}
+            # Explicit inherit aliases: without one a Claude word (sonnet) resolves to the
+            # installed claude CLI (card #JQQF), which this test is not about.
             factory = SubagentFactory(kimi, temp, preset_id='kimi', key_lookup=lambda p: keys.get(p, ''),
-                                      provider_factory=lambda config: config)
+                                      provider_factory=lambda config: config,
+                                      aliases={'opus': 'inherit', 'sonnet': 'inherit', 'haiku': 'inherit'})
             catalog = load_catalog(temp, [])
             warnings = []
             self.assertIs(factory.resolve('inherit', warnings)[0], kimi)
@@ -1034,6 +1037,30 @@ class ModelChoiceTests(unittest.TestCase):
         manager.run_tool('agent_set_model', {'id': child.id, 'model': 'opus'},
                          None, None, threading.Event())
         self.assertEqual((child.model, child.agent.provider.config.model), ('opus', 'opus'))
+
+    def test_opus_on_a_non_claude_pane_runs_the_claude_guest(self):
+        """A GLM pane asked for Opus and got GLM: the alias meant inherit (card #JQQF)."""
+        glm = ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm-5.3', 'z')
+        factory = SubagentFactory(glm, self.temp.name, preset_id='glm-coding')
+        self.assertIs(factory.resolve('inherit', [])[0], glm)
+        with mock.patch('relay_core.guest_harness_provider.installations',
+                        return_value={'claude': {'installed': True}}), \
+             mock.patch('relay_core.guest_harness_provider.adapter_available', return_value=True), \
+             mock.patch('relay_core.guest_harness_provider.login_status', return_value=True):
+            config, preset = factory.resolve('opus', [])
+        self.assertEqual((config.base_url, config.model, preset), ('harness://claude', 'opus', None))
+
+    def test_claude_word_without_a_cli_warns_and_inherits(self):
+        """No claude CLI here: the pane's model, and the tool reply says why (card #JQQF)."""
+        glm = ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm-5.3', 'z')
+        factory = SubagentFactory(glm, self.temp.name, preset_id='glm-coding')
+        with mock.patch('relay_core.guest_harness_provider.installations', return_value={}), \
+             mock.patch('relay_core.guest_harness_provider.adapter_available', return_value=False):
+            warnings = []
+            config, preset = factory.resolve('opus', warnings)
+        self.assertIs(config, glm)
+        self.assertEqual(preset, 'glm-coding')
+        self.assertTrue(any('Claude Code' in w for w in warnings), warnings)
 
 
 class _Idle:
