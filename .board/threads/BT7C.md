@@ -49,3 +49,6 @@ Which fix do you want? My recommendation: coalesce `sendAppCatalog()` fan-outs o
 
 <!-- relay:entry 20260925T181240Z-7c author=agent kind=event model=claude-opus-5-5 pane=3fc19f58 turn=38881d303fa344d7a078e1d28e41ae8c/246365c1ce4f4557b4b58acf3ecb8b4f -->
 - ✦ agent updated this card · waiting_on: owner → (unset); assignee: (unset) → claude-opus-5-5; appended to `## Execution Summary`
+
+<!-- relay:entry 20260925T181327Z-gb author=agent kind=event model=claude-opus-5-5 pane=3fc19f58 turn=38881d303fa344d7a078e1d28e41ae8c/246365c1ce4f4557b4b58acf3ecb8b4f -->
+- ✦ agent moved this card · Discussing → Needs verification · Landed 69eb1565 (stable catalog detail, per-tab build, 500 ms coalesce); the CPU drop needs measuring after a Relay restart. · evidence .board/changes/2026-09-25-presets-events-fan-the-app-catalog-out-to-every.md · implemented_by anthropic/claude-opus-5-5 via claude-code

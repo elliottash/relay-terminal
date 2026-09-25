@@ -1,12 +1,13 @@
 ---
 id: BT7C
 type: work
-status: discussing
+status: needs-verification
 labels: [bug, performance]
 assignee: claude-opus-5-5
+implemented_by: anthropic/claude-opus-5-5 via claude-code
 rank: zzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [69eb1565ec78], evidence: [.board/changes/2026-09-25-presets-events-fan-the-app-catalog-out-to-every.md], related: [], github: null}
 ---
 # presets events fan the app catalog out to every worker; GUI main thread idles at 50–70% CPU
 
