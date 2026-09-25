@@ -371,6 +371,21 @@ void Pane::handle(const QJsonObject &event) {
                 m_selectedWorkerRow.clear();
                 m_editor->clear();   // what was in the box was the row's, not the user's
             }
+            // Busy normally follows agent_started/agent_finished, but two paths set or keep it
+            // with no turn that will ever finish: a refused ask carries the worker's
+            // `agent_busy` on an error event, and an exclusive task (set_model, compaction)
+            // borrows `running` without a turn. The queue is the worker's truth: an event with
+            // nothing running, queued or steering clears the stale flag. That is also exactly
+            // what Esc's `cancel` is answered with on an idle queue, so interrupting a wedged
+            // pane recovers it (#X6XV). m_guestBusy is untouched: a TUI guest runs in-pane, not
+            // through this queue.
+            if (m_runningItem.isEmpty() && m_workerItems.isEmpty() && m_workerSteering.isEmpty()
+                && m_agentBusy) {
+                m_agentBusy = false;
+                m_currentItem.clear();
+                stopTurnClock();
+                m_idleTip.start();
+            }
             rebuildQueueStrip();
             changed();
         } else if (type == QStringLiteral("agents") && m_agentsListPending) {

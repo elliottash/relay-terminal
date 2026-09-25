@@ -383,6 +383,12 @@ class TurnSupervisor:
         agent = self._agent
         self._running = f"{name}-{uuid.uuid4().hex}"
         agent.cancel_event.clear()
+        # The GUI follows `running` ids in queue_changed and clears its busy flag only from an
+        # agent_finished for the id it holds. An exclusive task borrows the slot with no turn of
+        # its own, so it must say it took the slot — and, in the runner's finally, that the slot
+        # is free again. Without both ends a pane wedges busy forever with nothing in flight, and
+        # Esc's cancel, answered by an idle queue_changed, changes nothing (#X6XV).
+        self._changed_locked()
 
         def runner():
             try:
@@ -395,6 +401,7 @@ class TurnSupervisor:
                 with self._lock:
                     self._running = None
                     self._settle_model_locked(agent)
+                    self._changed_locked()   # settle may chain another exclusive; report whatever holds the slot now (#X6XV)
                     self._lock.notify_all()
 
         threading.Thread(target=runner, name=f"relay-{name}", daemon=True).start()

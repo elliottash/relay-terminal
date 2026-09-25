@@ -122,6 +122,22 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(p.max_active, 1)
         self.assertEqual([e['id'] for e in self.rec.of('agent_started')], ids)
 
+    def test_exclusive_tasks_announce_the_running_slot(self):
+        """Exclusive tasks borrow the queue's running slot without a turn (#X6XV).
+
+        The GUI clears its busy flag when an agent_finished arrives for the running id it
+        holds. A set_model switch or compaction runs as an exclusive task that takes that
+        slot with no turn of its own, so queue_changed must say it took the slot and — when
+        the runner ends — that the slot is free again. Without both ends the pane wedges
+        busy with nothing in flight, and Esc's cancel on the idle queue changes nothing.
+        """
+        self.use(GatedProvider())
+        self.sup.run_exclusive('probe', lambda agent: None)
+        self.assertTrue(self.rec.wait(
+            lambda e: e['event'] == 'queue_changed' and str(e.get('running') or '').startswith('probe-')))
+        self.assertTrue(self.rec.wait(
+            lambda e: e['event'] == 'queue_changed' and e.get('running') is None))
+
     def test_question_reply_precedes_queued_work(self):
         p = self.use(GatedProvider())
         first = self.sup.submit('which option?', 'queue')
