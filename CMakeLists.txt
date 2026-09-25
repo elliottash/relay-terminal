@@ -1241,6 +1241,15 @@ if(BUILD_TESTING)
     set_tests_properties(reviewpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     set_tests_properties(boardpane PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+    # Focus belongs to the reader, not the card: a card page open in a narrow pane used to take
+    # the keyboard focus on every re-read of the card (any change to it, #N5JJ), pulling the
+    # pane out from whoever was typing. Its own executable rather than more of
+    # boardpane_test.cpp, which several sessions hold at once.
+    add_executable(relay-boardfocus-tests tests/boardfocus_test.cpp)
+    target_link_libraries(relay-boardfocus-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardfocus COMMAND relay-boardfocus-tests)
+    set_tests_properties(boardfocus PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     # The card's `## Tests` strip and its Check (#7BM4): the strip appears only for a card that
     # lists tests, Check sends one `tests_check`, the answer's findings and actions are drawn as
     # the worker sent them, and a refused move offers the gate's Override. Its own executable

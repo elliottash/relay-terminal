@@ -7245,9 +7245,11 @@ void BoardView::handleEvent(const QJsonObject &event)
         // told whose transcript it is drawing: the one it was drawing is put away under its own
         // surface and this card's, if it has been here before, is drawn again.
         // Only when the card actually changed: a card is re-read whenever its file changes
-        // under it (#N5JJ), and that must not wipe what is on screen.
-        if (const QString showing = event.value(QStringLiteral("card_id")).toString();
-            m_cardConsoleHandle.clearTranscript && m_detail->cardId() != showing)
+        // under it (#N5JJ), and that must not wipe what is on screen. `wasShowing` is read
+        // before the `show()` below overwrites the page's card id.
+        const QString showing = event.value(QStringLiteral("card_id")).toString();
+        const QString wasShowing = m_detail->cardId();
+        if (m_cardConsoleHandle.clearTranscript && wasShowing != showing)
             m_cardConsoleHandle.clearTranscript(QStringLiteral("card:") + showing);
         m_detail->show(event);
         refreshContexts();   // switch the console's draft key to the card just opened
@@ -7283,8 +7285,14 @@ void BoardView::handleEvent(const QJsonObject &event)
         } else if (m_detail->editing()) {
             // A re-read while the card is being edited (its file changed, or a save was refused)
             // leaves the fields, and the focus, exactly where they were.
-        } else if (m_listPane->isHidden() && !m_detail->isAncestorOf(QApplication::focusWidget())) {
-            m_detail->focusDocument();   // the list it came from is hidden in a narrow pane
+        } else if (wasShowing != showing && m_listPane->isHidden()
+                   && !m_detail->isAncestorOf(QApplication::focusWidget())) {
+            // Only a card newly opened in this pane takes the focus: the list it came from is
+            // hidden in a narrow pane, so the reader is brought to the page. A re-read of the
+            // card already open (its file changed under it) must not touch the focus at all —
+            // the reader is typing in another pane, and updates arriving here used to pull the
+            // pane away from them.
+            m_detail->focusDocument();
         }
         return;
     }
