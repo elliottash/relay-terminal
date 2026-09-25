@@ -511,10 +511,18 @@ target_compile_options(relay-outputlinks PRIVATE ${RELAY_WARNINGS})
 # able to link one without pulling in a window — a `Pane` exists only inside the `relay`
 # executable's translation unit. relay-outputlinks: `Context::resolveLink` takes the same
 # `relay::links::Target` an activated link in the transcript already resolves to.
-add_library(relay-agentcontext STATIC src/AgentContext.cpp src/AgentContext.h src/ArtifactContext.cpp src/ArtifactContext.h)
+add_library(relay-agentcontext STATIC src/AgentContext.cpp src/AgentContext.h src/ArtifactContext.cpp src/ArtifactContext.h
+    src/SystemContexts.cpp src/SystemContexts.h)
 target_include_directories(relay-agentcontext PUBLIC src)
 target_link_libraries(relay-agentcontext PUBLIC relay-outputlinks ${RELAY_QT}::Core)
 target_compile_options(relay-agentcontext PRIVATE ${RELAY_WARNINGS})
+# The "Agent (Alt+Q)" foot of a system pane (card #3B1B): the collapsed row, the fold and the
+# console the window builds on the first expand. Its own library because the Test suites pane
+# (compiled into `relay` and its tests) and the Sharing pane (relay-sharing) both dock one.
+add_library(relay-contextdock STATIC src/ContextDock.cpp src/ContextDock.h)
+target_include_directories(relay-contextdock PUBLIC src)
+target_link_libraries(relay-contextdock PUBLIC relay-agentcontext relay-theme ${RELAY_QT}::Widgets)
+target_compile_options(relay-contextdock PRIVATE ${RELAY_WARNINGS})
 
 # relay-panedir (card #R5TC): pane addresses (`p<n>`, never reused) and the directory one pane's
 # agent messages another through. PaneHooks are std::function only, so no window is included;
@@ -631,7 +639,7 @@ add_library(relay-sharing STATIC src/SharingPane.cpp src/SharingPane.h)
 target_include_directories(relay-sharing PUBLIC src)
 # relay-remotesettings for the pairing-code row, the address names and the status line the Devices
 # page draws (#SMDX): the sentences stay pinned by tests/remotesettings_test.cpp, said once.
-target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets relay-remotesettings)
+target_link_libraries(relay-sharing PUBLIC ${RELAY_QT}::Widgets relay-remotesettings relay-contextdock)
 target_compile_options(relay-sharing PRIVATE ${RELAY_WARNINGS})
 
 # Remote control as a service (card #PH0N): which QSettings keys remember the switch and the
@@ -900,7 +908,7 @@ if(BUILD_TESTING)
     add_executable(relay-testsuites-tests tests/testsuites_test.cpp
         src/TestSuitesModel.cpp src/TestSuitesPane.cpp)
     target_include_directories(relay-testsuites-tests PRIVATE src)
-    target_link_libraries(relay-testsuites-tests PRIVATE relay-highlight ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    target_link_libraries(relay-testsuites-tests PRIVATE relay-highlight relay-contextdock ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
     target_compile_options(relay-testsuites-tests PRIVATE ${RELAY_WARNINGS})
     add_test(NAME testsuites COMMAND relay-testsuites-tests)
     set_tests_properties(testsuites PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -4,6 +4,7 @@
 // countdown has run out, what the pane header says — so it is exercised without a hub and without
 // a display.
 #include "SharingPane.h"
+#include "ContextDock.h"
 
 #include <QDateTime>
 #include <QJsonArray>
@@ -97,6 +98,7 @@ private slots:
     void guestsGetABlockEachAndTheOptionsNoteOnce();
     void blocksAreHeadedByTheirScope();
     void tickMovesEveryClock();
+    void theDockedAgentReadsThePaneAndEndsOnlyASharedOne();
 
 private:
     // The window's scope catalogue, as onScopes hands it over: three panes in two tabs, the two
@@ -1118,6 +1120,41 @@ void SharingTest::tickMovesEveryClock()
     view.showCodeState(QStringLiteral("WXYZ"), QStringLiteral("used"), 0);
     QVERIFY(buttons(view, QStringLiteral("Copy")).isEmpty());
     QVERIFY(allLabels(view).contains(QStringLiteral("Used")));
+}
+
+// Card #3B1B: the agent docked under both pages. Its `screen` names each shared pane by token (so
+// its answer can link `pane:<token>`), its guests and the pane this was opened from; End sharing
+// is offered only while that pane is shared, and runs the pane's own End sharing; a `pane:` link
+// goes to the window through onFocusPane.
+void SharingTest::theDockedAgentReadsThePaneAndEndsOnlyASharedOne()
+{
+    Model model;
+    model.setSharedPanes({{QStringLiteral("p1"), QStringLiteral("build")}});
+    model.setParticipants(items(R"([{"id":"a1","name":"alice","role":"editor","panes":["p1"]}])"), {});
+    SharingView view;
+    view.setModel(&model);
+    QVERIFY(view.agentDock());
+    view.focusPane(QStringLiteral("p9"));
+    view.refresh();
+    QString screen = view.agentContext()->spec().screen;
+    QVERIFY2(screen.contains(QStringLiteral("- pane:p1 (build) · 1 guest")), qPrintable(screen));
+    QVERIFY2(screen.contains(QStringLiteral("Guests: alice (editor) on build")), qPrintable(screen));
+    QVERIFY2(screen.contains(QStringLiteral("Opened from: pane:p9")), qPrintable(screen));
+    QVERIFY(!view.agentContext()->actions().at(1).enabled);   // p9 is not shared
+    QStringList ended;
+    view.onEndShare = [&ended](const QString &pane) { ended << pane; };
+    view.focusPane(QStringLiteral("p1"));
+    const QList<relay::agent::Action> row = view.agentContext()->actions();
+    QVERIFY(row.at(1).enabled);
+    row.at(1).run();
+    QCOMPARE(ended, QStringList{QStringLiteral("p1")});
+    QString focused;
+    view.onFocusPane = [&focused](const QString &token) { focused = token; return true; };
+    relay::links::Target link;
+    link.valid = true;
+    link.target = relay::links::paneTarget(QStringLiteral("p1"));
+    QVERIFY(view.agentContext()->resolveLink(link));
+    QCOMPARE(focused, QStringLiteral("p1"));
 }
 
 QTEST_MAIN(SharingTest)

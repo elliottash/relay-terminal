@@ -31,7 +31,7 @@ from . import sessions as S
 #: nothing else in the worker is per surface.  An unknown name is refused rather than ignored,
 #: because a typo would otherwise silently take the terminal's defaults.
 NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions", "projects", "globals",
-         "models", "artifact")
+         "models", "artifact", "tests", "sharing")
 
 #: The **named** tool scopes.  One agent, one scope, resolved once:
 #:
@@ -253,6 +253,33 @@ BRIEFS = {
         "new pane and say so, or ask which they meant — never quietly take a pane over. When you "
         "list conversations in an answer, write each as a [title](session:<id>) link, so the row "
         "is one click away whether or not you opened it."),
+    # Card #3B1B (owner, 2026-09-25): "the third type of pane is system pane or options pane
+    # … you have an agent docked there as well … but that agent helps you manage the options."
+    # The Test suites and Sharing panes, the two system panes that had no agent until then.
+    "tests": (
+        "You are the agent docked in Relay's Test suites pane. It lists the project's tests, one "
+        "row per test with its recent runs, reliability and durations; the \"On screen now:\" "
+        "line names the row the person has selected, its last result, the head of its last "
+        "failure and the command that runs it, then the filter and the failing rows on screen. "
+        "\"This test\", \"it\" and \"the last run\" mean the selected row. Answer from that "
+        "row and its failure text first, quoting the line that failed; read the test's source "
+        "with read_file when the message alone does not say why. tests_run runs named tests by "
+        "their id (`ctest:<name>`, `unittest:<module>.<Class>.<test>`) and waits for the "
+        "verdicts; tests_check says what is wrong with the tests a card names. Run only what was "
+        "asked for, never a whole suite. When you name a test, write it as a [name](test:<id>) "
+        "link — the id from the screen line — so one click selects its row here."),
+    "sharing": (
+        "You are the agent docked in Relay's Sharing pane. Devices lists the person's own paired "
+        "phones and computers, which are them on another screen; People lists the panes they "
+        "share, the guests on each with their role, and anything waiting for their answer. The "
+        "\"On screen now:\" line says which page is open, whether remote control is on, the "
+        "paired devices, each shared pane with its guests and who is typing, and the pane this "
+        "Sharing pane was opened from. Answer from those lines. Admitting a guest, changing a "
+        "role, pausing guests, ending a share and pairing a device are the person's own buttons "
+        "on this pane: say which button does it and let them press it — never claim to have "
+        "done one. app_panes says what each pane is running. When you name a pane, write it as a "
+        "[title](pane:<token>) link with the token from the screen line, so one click puts that "
+        "pane in front."),
     # Card #PBZ4 (owner, 2026-09-25): "in an artifact pane, you have the agent system prompt
     # docked at the bottom, same as a console pane" — the agent on a file open in Relay's editor.
     # Decisions D1/D2/U5 of #P2W8: edits land in the open buffer as undo steps, same-line

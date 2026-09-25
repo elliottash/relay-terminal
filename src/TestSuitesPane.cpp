@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "TestSuitesPane.h"
+#include "ContextDock.h"
 
 #include "Theme.h"
 
@@ -307,6 +308,12 @@ private:
 // ----- the pane -----------------------------------------------------------------------------------
 
 TestSuitesPane::TestSuitesPane(QWidget *parent) : QWidget(parent) {
+    // What the docked agent is about (card #3B1B), set before the dock that reads it is built.
+    m_agentContext.state = [this] { return agentState(); };
+    m_agentContext.runSelected = [this] { runSelected(0); };
+    m_agentContext.runFailed = [this] { runFailed(); };
+    m_agentContext.attachToCard = [this] { attachSelectedToCard(); };
+    m_agentContext.selectTest = [this](const QString &id) { return selectTest(id); };
     buildUi();
     m_model.onChanged = [this] { modelChanged(); };
     connect(theme::notifier(), &theme::Notifier::themeChanged, this, [this] { refreshTheme(); });
@@ -314,7 +321,12 @@ TestSuitesPane::TestSuitesPane(QWidget *parent) : QWidget(parent) {
     modelChanged();
 }
 
-TestSuitesPane::~TestSuitesPane() = default;
+TestSuitesPane::~TestSuitesPane() {
+    // The console inside the dock clears its context's callback as it goes, so it must go before
+    // `m_agentContext` does — and children are only deleted in ~QWidget, after the members.
+    delete m_dock;
+    m_dock = nullptr;
+}
 
 QString TestSuitesPane::paneTitle() const { return QStringLiteral("Test suites"); }
 
@@ -455,8 +467,11 @@ void TestSuitesPane::buildUi() {
     auto *actions = new QHBoxLayout;
     actions->setSpacing(6);
     m_run = new QPushButton(QStringLiteral("Run"));
-    m_run->setToolTip(QStringLiteral("Run the selected test (Enter)"));
-    connect(m_run, &QPushButton::clicked, this, [this] { runSelected(0); });
+    m_run->setToolTip(QStringLiteral("Run the selected test (Enter or r)"));
+    connect(m_run, &QPushButton::clicked, this, [this] {
+        if (onShortcutHint) onShortcutHint(QStringLiteral("tests.run"), QStringLiteral("r"), QStringLiteral("run the selected test"));
+        runSelected(0);
+    });
     actions->addWidget(m_run);
     m_repeat = new QPushButton(QStringLiteral("Rerun until fail"));
     m_repeat->setToolTip(QStringLiteral("Run it up to ten times and stop at the first failure — "
@@ -475,9 +490,19 @@ void TestSuitesPane::buildUi() {
     connect(m_makeCard, &QPushButton::clicked, this, [this] { makeCardForSelected(); });
     actions->addWidget(m_makeCard);
     m_attach = new QPushButton(QStringLiteral("Attach to card"));
-    connect(m_attach, &QPushButton::clicked, this, [this] { attachSelectedToCard(); });
+    m_attach->setToolTip(QStringLiteral("Name this test in a card's ## Tests section (a)"));
+    connect(m_attach, &QPushButton::clicked, this, [this] {
+        if (onShortcutHint) onShortcutHint(QStringLiteral("tests.attach"), QStringLiteral("a"), QStringLiteral("attach a test to a card"));
+        attachSelectedToCard();
+    });
     actions->addWidget(m_attach);
     layout->addLayout(actions);
+
+    // The docked agent (card #3B1B): one "Agent (Alt+Q)" row until it is asked for. The console is
+    // built by the window on the first expand, so a Tests pane nobody asks anything pays nothing.
+    m_dock = new relay::ContextDock(&m_agentContext, m_agentContext.title(),
+                                    QStringLiteral("Ask the Tests agent about these tests"), this);
+    layout->addWidget(m_dock, 0);
 
     // The Display menu: the columns, then the five sorts the model knows.
     auto *menu = new QMenu(this);
@@ -671,6 +696,9 @@ void TestSuitesPane::updateButtons() {
     m_makeCard->setEnabled(row != nullptr);
     m_attach->setEnabled(row != nullptr);
     m_stop->setVisible(m_model.running());
+    // Every selection and model change comes through here, and so does what the agent's action
+    // row may offer (Run selected needs a row, Run failed a failing one).
+    m_agentContext.changed();
 }
 
 // The detail: the executions, the last failure, the cards and the file — the four things a row
@@ -830,6 +858,62 @@ void TestSuitesPane::runAll() {
     send(QJsonObject{{"type", "tests_run"}, {"ids", ids}, {"repeat_until_fail", 0}});
 }
 
+void TestSuitesPane::runFailed() {
+    QJsonArray ids;
+    QStringList list;
+    for (const TestRow &row : m_model.rows()) {
+        if (!row.failing()) continue;
+        ids.append(row.id);
+        list << row.id;
+    }
+    if (ids.isEmpty()) return;
+    m_model.markRequested(list);
+    send(QJsonObject{{"type", "tests_run"}, {"ids", ids}, {"repeat_until_fail", 0}});
+}
+
+bool TestSuitesPane::selectTest(const QString &id) {
+    if (!m_model.row(id)) return false;
+    // A filter that hides it is cleared, not argued with: the link said "this one".
+    if (m_model.indexOf(id) < 0) m_filter->clear();
+    const int index = m_model.indexOf(id);
+    if (index < 0) return false;
+    selectRow(index);
+    m_table->scrollTo(m_rows->index(index, ColName));
+    return true;
+}
+
+relay::agent::TestsState TestSuitesPane::agentState() const {
+    relay::agent::TestsState state;
+    state.summary = m_model.summaryLine();
+    state.runLine = m_model.runLine();
+    state.filter = m_model.filter();
+    state.visible = int(m_model.rows().size());
+    state.total = int(m_model.allRows().size());
+    state.running = m_model.running();
+    for (const TestRow &row : m_model.rows())
+        if (row.failing()) state.failingIds << row.id;
+    const TestRow *row = selectedRow();
+    if (!row) return state;
+    const QDateTime now = m_model.clock ? m_model.clock() : QDateTime::currentDateTimeUtc();
+    state.selectedId = row->id;
+    state.selectedName = row->name;
+    state.selectedInvocation = row->invocation;
+    if (!row->file.isEmpty())
+        state.selectedFile = row->hasLine ? QStringLiteral("%1:%2").arg(row->file).arg(row->line) : row->file;
+    state.lastResult = row->lastResult;
+    if (!row->lastRun.isEmpty()) state.lastRun = row->lastRunText(now);
+    state.reliability = row->reliabilityText();
+    state.badges = row->badges();
+    state.cards = row->cards;
+    if (row->hasLastFailure) {
+        state.failureAt = relativeTime(row->failureAt, now);
+        state.failureCommit = row->failureCommit;
+        state.failureMessage = row->failureMessage;
+        state.failureExcerpt = row->failureExcerpt;
+    }
+    return state;
+}
+
 void TestSuitesPane::stopRun() {
     if (!m_model.running()) return;
     send(QJsonObject{{"type", "tests_stop"}, {"run_id", m_model.runId()}});
@@ -914,6 +998,17 @@ bool TestSuitesPane::eventFilter(QObject *object, QEvent *event) {
             return false;
         case Qt::Key_Return: case Qt::Key_Enter:
             if (selectedRow()) { runSelected(0); return true; }
+            return false;
+        // The agent's action row wears these letters (card #3B1B), and they work in the table
+        // whether or not the agent was ever opened.
+        case Qt::Key_R:
+            if (selectedRow() && !m_model.running()) { runSelected(0); return true; }
+            return false;
+        case Qt::Key_F:
+            runFailed();
+            return true;
+        case Qt::Key_A:
+            if (selectedRow()) { attachSelectedToCard(); return true; }
             return false;
         default: return false;
         }

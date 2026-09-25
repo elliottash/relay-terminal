@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QUrl>
 
 #include <algorithm>
 
@@ -13,6 +14,8 @@ namespace {
 const QLatin1String kCardScheme("relay://card/");
 const QLatin1String kOptionScheme("relay://option/");
 const QLatin1String kSessionScheme("relay://session/");
+const QLatin1String kTestScheme("relay://test/");
+const QLatin1String kPaneScheme("relay://pane/");
 
 // `option:<section>/<row>` and `session:<id>` — the two schemes an agent's answer writes when it
 // names something the app can show (#FEJQ; the backend tells it to, `board_chat.py:140`). Both
@@ -48,12 +51,30 @@ const QRegularExpression &sessionExpression()
     return re;
 }
 
+// `test:<runner>:<invocation>` (card #3B1B). The id must have its runner prefix — `test:foo` alone
+// is ordinary English in a commit message — and keeps the `::` and `/` of a pytest node id; a
+// bracket or a quote ends it, so `[name](test:ctest:x)` and `(test:ctest:x)` both stop in time.
+const QRegularExpression &testExpression()
+{
+    static const QRegularExpression re(
+        openers() + QStringLiteral("test:(?://)?([a-z][a-z0-9_-]*:[^\\s\"'`<>()\\[\\]{}|]+)"));
+    return re;
+}
+
+// `pane:<token>`: a session token is a UUID, so the class is the session id's.
+const QRegularExpression &paneExpression()
+{
+    static const QRegularExpression re(
+        openers() + QStringLiteral("pane:(?://)?([A-Za-z0-9_][A-Za-z0-9_.-]*)"));
+    return re;
+}
+
 // The character classes above are deliberately loose at the end — a row id may hold `.` and `-`
 // — so a sentence stop, a trailing slash or a dash left hanging comes off here, the way the URL
 // stage chops its own. Returns false when nothing is left to name.
 bool trimSchemeTail(QString &target)
 {
-    while (!target.isEmpty() && QStringLiteral("./-").contains(target.back()))
+    while (!target.isEmpty() && QStringLiteral("./-,;:!?").contains(target.back()))
         target.chop(1);
     return !target.isEmpty();
 }
@@ -208,6 +229,24 @@ QString sessionIdOf(const QString &target)
     return target.startsWith(kSessionScheme) ? target.mid(kSessionScheme.size()) : QString();
 }
 
+QString testTarget(const QString &id)
+{
+    return kTestScheme + QString::fromLatin1(QUrl::toPercentEncoding(id));
+}
+
+QString testIdOf(const QString &target)
+{
+    return target.startsWith(kTestScheme) ? QUrl::fromPercentEncoding(target.mid(kTestScheme.size()).toUtf8())
+                                          : QString();
+}
+
+QString paneTarget(const QString &token) { return kPaneScheme + token; }
+
+QString paneTokenOf(const QString &target)
+{
+    return target.startsWith(kPaneScheme) ? target.mid(kPaneScheme.size()) : QString();
+}
+
 bool splitLocation(const QString &token, QString *path, int *line, int *column)
 {
     *line = -1;
@@ -250,7 +289,9 @@ QVector<Candidate> candidates(const QString &text)
         Kind kind;
     };
     for (const Scheme &scheme : {Scheme{optionExpression(), Kind::Option},
-                                 Scheme{sessionExpression(), Kind::Session}}) {
+                                 Scheme{sessionExpression(), Kind::Session},
+                                 Scheme{testExpression(), Kind::Test},
+                                 Scheme{paneExpression(), Kind::Pane}}) {
         for (auto it = scheme.re.globalMatch(text); it.hasNext();) {
             const QRegularExpressionMatch m = it.next();
             QString name = m.captured(1);
@@ -449,6 +490,17 @@ Target resolve(const Candidate &candidate, const QString &cwd, const QString &ho
     if (candidate.kind == Kind::Session) {
         target.valid = true;
         target.target = sessionTarget(candidate.path);
+        return target;
+    }
+    // Spelled out like `option:`, so no probe: the context on screen decides (card #3B1B).
+    if (candidate.kind == Kind::Test) {
+        target.valid = true;
+        target.target = testTarget(candidate.path);
+        return target;
+    }
+    if (candidate.kind == Kind::Pane) {
+        target.valid = true;
+        target.target = paneTarget(candidate.path);
         return target;
     }
     struct Attempt {

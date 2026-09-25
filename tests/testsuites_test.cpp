@@ -5,6 +5,7 @@
 //
 // Setting RELAY_TESTSUITES_SHOT=<path> makes the fixture test save a PNG of the pane instead of
 // only drawing it, which is how docs/qa_evidence/2026-09-20-test-suites-pane/ was made.
+#include "ContextDock.h"
 #include "TestSuitesModel.h"
 #include "TestSuitesPane.h"
 #include "Theme.h"
@@ -488,6 +489,63 @@ private slots:
         QTest::keyClick(pane.filterBox(), Qt::Key_Escape);
         QVERIFY(pane.filterBox()->text().isEmpty());
         QCOMPARE(pane.visibleRowCount(), 30);
+    }
+
+    // Card #3B1B: the docked agent. One "Agent (Alt+Q)" row until it is asked for, the console
+    // built once through the window's factory, a `screen` that is the selected row and its last
+    // failure, a `test:` link that finds its row through a filter, and the row's three letters.
+    void theDockedAgentIsAboutTheSelectedRow() {
+        TestSuitesPane pane;
+        pane.resize(1000, 700);
+        pane.handleEvent(listEvent(fixture()));
+        pane.show();
+        relay::ContextDock *dock = pane.agentDock();
+        QVERIFY(dock);
+        dock->setHelperShortcut(QStringLiteral("tests.ask"), QStringLiteral("Alt+Q"));
+        QCOMPARE(dock->rowText(), QStringLiteral("Agent (Alt+Q)"));
+        dock->focusHelper();                // no factory: no window, so nothing to open
+        QVERIFY(!dock->expanded());
+        int built = 0;
+        relay::agent::Context *asked = nullptr;
+        dock->onCreateConsole = [&](relay::agent::Context *context, QWidget *parent) {
+            ++built;
+            asked = context;
+            relay::agent::ConsoleHandle handle;
+            handle.widget = new QWidget(parent);
+            return handle;
+        };
+        dock->focusHelper();
+        QCOMPARE(built, 1);
+        QCOMPARE(asked, static_cast<relay::agent::Context *>(pane.agentContext()));
+        QVERIFY(dock->expanded());
+        dock->fold();
+        QVERIFY(!dock->expanded());
+        dock->focusHelper();
+        QCOMPARE(built, 1);                 // folded, not rebuilt: the conversation is kept
+
+        const QStringList failing = pane.agentState().failingIds;
+        QVERIFY(!failing.isEmpty());
+        pane.filterBox()->setText(QStringLiteral("nothing-is-called-this"));
+        QCOMPARE(pane.visibleRowCount(), 0);
+        QVERIFY(pane.selectTest(failing.first()));
+        QVERIFY(pane.filterBox()->text().isEmpty());
+        QCOMPARE(pane.selectedId(), failing.first());
+        QVERIFY(!pane.selectTest(QStringLiteral("ctest:no-such-test")));
+        const QString screen = pane.agentContext()->spec().screen;
+        QVERIFY2(screen.startsWith(QStringLiteral("Selected: test:") + failing.first()), qPrintable(screen));
+        QVERIFY2(screen.contains(QStringLiteral("FAIL: the queue row kept its old height")), qPrintable(screen));
+        QVERIFY(pane.agentContext()->actions().at(0).enabled);
+
+        QList<QJsonObject> sent;
+        pane.onSend = [&](const QJsonObject &request) { sent << request; };
+        int attached = 0;
+        pane.onAttachToCard = [&](const TestRow &) { ++attached; };
+        pane.table()->setFocus();
+        QTest::keyClick(pane.table(), Qt::Key_F);
+        QCOMPARE(sent.size(), 1);
+        QCOMPARE(sent.last().value(QStringLiteral("ids")).toArray().size(), failing.size());
+        QTest::keyClick(pane.table(), Qt::Key_A);
+        QCOMPARE(attached, 1);
     }
 
     void columnsCanBeHidden() {

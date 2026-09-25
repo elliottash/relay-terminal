@@ -1876,6 +1876,9 @@ named — is one more class implementing `Context`, and nothing else.
 | **Options / Actions** (`OptionsContext`) | `src/SettingsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | `option:` reveals the row here | the transcript |
 | **Sessions** (`SessionsContext`) | `src/Conversations.cpp` | `switchboard` | no | `helper` / the tab id | — | `session:` selects the row here | the transcript |
 | **Models** (`ModelsContext`) | `src/ModelsPane.cpp` | `switchboard` | no | `helper` / the tab id | — | none of its own (`option:` goes to the window) | the transcript |
+| **Artifact** (`relay::agent::ArtifactContext`) | `src/ArtifactContext.cpp`, hosted by `ArtifactDock` in `src/FilePanes.cpp` | `switchboard` | no | `helper` / `<tab id>/file:<path>` | the file's plugin commands, then Save (s), Revert (r) | `file:line` for this file goes to the editor | the change list names the turn |
+| **Tests** (`relay::agent::TestsContext`) | `src/SystemContexts.cpp`, hosted by `ContextDock` in `src/TestSuitesPane.cpp` | `switchboard` | no | `helper` / the tab id | Run selected (r), Run failed (f), Attach to card (a) | `test:` selects the row here | the transcript |
+| **Sharing** (`relay::agent::SharingContext`) | `src/SystemContexts.cpp`, hosted by `ContextDock` in `src/SharingPane.cpp` | `switchboard` | no | `helper` / the tab id | Pair device (p), End sharing (e) — only while the pane is shared | `pane:` focuses the pane here | the transcript |
 
 Each context answers `spec()` fresh, so `screen` is what that surface is showing right now — the open
 Options section and the visible row ids, the Sessions query and the filters actually narrowing, the
@@ -1921,9 +1924,9 @@ and is handed a `relay::agent::ConsoleHandle` — the widget to embed plus `focu
 `relay::PaneView` pattern. `RelayWindow::createAgentConsole(Context *, QWidget *parent)` builds it and
 `wireConsoleHost(view, leaf, hintId)` is the one template that sets the factory, the tab id, the tab's
 workspace and the live `helper.ask` key on Options, Actions and Sessions; `createBoardPane` does the
-same for the Board. Options, Actions and Sessions build their console **on first expand** of the
-collapsed "Agent (Alt+Q)" row, which is the host's — so a tab nobody asks anything pays for
-nothing.
+same for the Board, and card #3B1B the same for the Tests and Sharing panes. Options, Actions,
+Sessions, Tests and Sharing build their console **on first expand** of the collapsed "Agent (Alt+Q)"
+row, which is the host's — so a tab nobody asks anything pays for nothing.
 
 - **One worker and one conversation per tab** (owner decision 1), **and one conversation per open
   card** (owner decision 1 on card #CTRN). `RelayWindow::TabConsoleContext` wraps the host's context

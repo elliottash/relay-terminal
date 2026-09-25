@@ -72,6 +72,8 @@
 #include "SharingPane.h"
 #include "RemotePane.h"   // Relay-to-Relay: a pane another desktop shares, opened here
 #include "TestSuitesPane.h"   // the Test suites pane, beside the Switchboard (card #7BM4)
+#include "ContextDock.h"      // the docked agent row Test suites and Sharing host (#3B1B); the
+                              // panes' headers only forward-declare it, and the window calls it
 #include "ProfilePane.h"      // the Profile result pane, ditto (card #7BM4 phase 5)
 #include "ActionPalette.h"    // the Actions palette, Ctrl+? (card #MAGP)
 #include "PaletteCardSearch.h" // exact #card lookup for Actions search (#WM4K)
@@ -1311,13 +1313,20 @@ private:
         if (tool && tool->board()) { tool->board()->focusChat(); return; }
         if (auto *sessions = sessionsViewOf(tool)) { sessions->focusHelper(); return; }
         if (auto *models = modelsViewOf(tool)) { models->focusHelper(); return; }
+        // The Test suites and Sharing panes' docked agent (card #3B1B).
+        if (auto *tests = testSuitesViewOf(tool)) { tests->agentDock()->focusHelper(); return; }
+        if (auto *sharing = tool && tool->kind() == ToolPane::Kind::Sharing
+                                ? dynamic_cast<relay::sharing::SharingView *>(tool->hosted()) : nullptr) {
+            sharing->agentDock()->focusHelper();
+            return;
+        }
         // A text or Markdown file, and a plan: the agent docked under the editor (#PBZ4).
         relay::ArtifactDock *dock = !tool           ? nullptr
                                   : tool->preview() ? tool->preview()->artifactDock()
                                   : tool->plan()    ? tool->plan()->artifactDock() : nullptr;
         if (dock && !dock->isHidden()) { dock->focusHelper(); return; }
-        notice(QStringLiteral("The agent is in Options, Actions, Sessions, Models, the Board and "
-                              "file editors — open one of those and ask it there."), 5000);
+        notice(QStringLiteral("The agent is in Options, Actions, Sessions, Models, Tests, Sharing, "
+                              "the Board and file editors — open one of those and ask it there."), 5000);
     }
 
     ToolPane *createSettingsPane(relay::SettingsPane::Mode mode) {
@@ -3558,6 +3567,14 @@ public:
         tool->setProperty("paneType", QStringLiteral("testsuites"));   // pane-type header colours
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
+        // The docked agent (card #3B1B), wired as Options' and Models' are: the pane owns the
+        // collapsed "Agent (Alt+Q)" row and asks for a console on the first expand. Here rather
+        // than in linkTestSuitesPane so a restored pane has it too.
+        wireConsoleHost(view->agentDock(), tool, QStringLiteral("tests.ask"));
+        QPointer<ToolPane> guard(tool);
+        view->onShortcutHint = [guard](const QString &hintId, const QString &keys, const QString &what) {
+            if (auto *w = windowOf(guard)) w->hint(hintId, relay::ShortcutHints::nextTime(keys, what));
+        };
         return tool;
     }
 

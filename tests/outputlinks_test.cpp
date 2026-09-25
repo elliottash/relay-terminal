@@ -477,6 +477,51 @@ private slots:
                  {QStringLiteral("relay://option/agent/allow_writes")});
     }
 
+    // ---- test: and pane: (card #3B1B) -------------------------------------------------------
+    void aTestIdAndAPaneTokenAreLinksTheirContextsResolve()
+    {
+        // What `[panelayout](test:ctest:panelayout)` leaves in the transcript: the label, then the
+        // target in parentheses — the closing bracket is not part of the id.
+        const QString line = QStringLiteral("It is panelayout (test:ctest:panelayout).");
+        const auto links = found(line);
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Test);
+        QCOMPARE(testIdOf(links[0].target.target), QStringLiteral("ctest:panelayout"));
+        QCOMPARE(line.mid(links[0].candidate.start, links[0].candidate.length),
+                 QStringLiteral("test:ctest:panelayout"));
+        // A pytest node id keeps its `::` and its slashes, and a sentence stop comes off.
+        const QString node = QStringLiteral("unittest:tests/test_board.py::CardTests::test_roundtrip");
+        QCOMPARE(proseTargets(QStringLiteral("see test:") + node + QStringLiteral(".")), {testTarget(node)});
+        QCOMPARE(testIdOf(testTarget(node)), node);
+        // The whole markdown target, as the label's link resolves it.
+        QCOMPARE(proseTargets(QStringLiteral("test:ctest:panelayout")), {testTarget(QStringLiteral("ctest:panelayout"))});
+        // A pane by its session token.
+        const QString token = QStringLiteral("3478d988-a618-47c5-a4f4-7196fdc7261f");
+        const auto panes = found(QStringLiteral("shared as (pane:") + token + QStringLiteral(")"));
+        QCOMPARE(panes.size(), 1);
+        QCOMPARE(panes[0].target.kind, Kind::Pane);
+        QCOMPARE(paneTokenOf(panes[0].target.target), token);
+    }
+
+    void aTestOrPaneWordThatNamesNothingIsNotALink()
+    {
+        const auto spans = [](const QString &text) {
+            QVector<Candidate> out;
+            for (const Candidate &c : candidates(text))
+                if (c.kind == Kind::Test || c.kind == Kind::Pane) out << c;
+            return out;
+        };
+        // A runner is required: `test:foo` alone is ordinary English in a commit message.
+        QVERIFY(spans(QStringLiteral("test:foo failed")).isEmpty());
+        QVERIFY(spans(QStringLiteral("make test: all passed")).isEmpty());
+        QVERIFY(spans(QStringLiteral("the Tests pane: it lists them")).isEmpty());
+        QVERIFY(spans(QStringLiteral("unittest:ctest:x")).isEmpty());   // must open a word
+        // Inside a URL, the URL stays whole.
+        const auto links = found(QStringLiteral("https://relay.test/test:ctest:x"));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0].target.kind, Kind::Url);
+    }
+
     void optionAndSessionTargetsRoundTrip()
     {
         QString section, row;

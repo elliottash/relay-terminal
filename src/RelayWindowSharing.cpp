@@ -63,6 +63,22 @@ ToolPane *RelayWindow::openSharingPane(Pane *owner, bool focus) {
         view->onCreateCode = [guard](const relay::sharing::Scope &scope, const QString &role) {
             if (auto *w = windowOf(guard)) w->codeForScope(scope, role);
         };
+        // The docked agent (card #3B1B): the collapsed "Agent (Alt+Q)" row under both pages, the
+        // console built on the first expand, wired exactly as Options' and Models' are. A `pane:`
+        // link in its answer puts that pane in front, in whichever tab it is.
+        wireConsoleHost(view->agentDock(), tool, QStringLiteral("sharing.ask"));
+        view->onFocusPane = [guard](const QString &token) {
+            auto *w = windowOf(guard);
+            Pane *pane = w ? w->findPaneByToken(token) : nullptr;
+            if (!pane) {
+                if (w) w->notice(QStringLiteral("That pane is not open in this window."), 4000);
+                return false;
+            }
+            if (QWidget *shown = w->pageOf(pane)) w->m_tabs->setCurrentWidget(shown);
+            w->setActiveLeaf(pane);
+            focusLeaf(pane);
+            return true;
+        };
         dockBeside(owner, tool);
     }
     if (view) {

@@ -178,6 +178,23 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Say what you are doing", text)
         self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
 
+    def test_the_tests_and_sharing_panes_have_briefs_of_their_own(self):
+        # Card #3B1B: the docked agent on the two system panes that had none. The worker must
+        # accept both names, and each brief says what the screen line holds and the link to write.
+        # The blocks are the ones tests/agentcontext_test.cpp pins for TestsContext/SharingContext.
+        for name, words in (("tests", ("selected", "tests_run", "tests_check", "test:<id>")),
+                            ("sharing", ("Devices", "People", "remote control", "pane:<token>"))):
+            spec = AC.ContextSpec.from_json({"name": name, "surface": name, "agent_role": "switchboard",
+                                             "scope": "console", "shell": False, "routing": "agent",
+                                             "persist": {"scope": "helper", "key": "t1"},
+                                             "brief": {"key": name, "title": name.title() + " agent"}})
+            self.assertEqual(spec.scope, "console")
+            text = spec.brief_text()
+            for word in words:
+                self.assertIn(word, text, msg=name)
+            self.assertIn("Say what you are doing", text)
+            self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
+
     def test_an_unknown_brief_key_is_no_brief_rather_than_an_error(self):
         # The GUI may name a context this worker is older than; a console with no brief still works.
         spec = AC.ContextSpec.from_json({"name": "options", "brief": {"key": "diffview"}})

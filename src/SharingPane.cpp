@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SharingPane.h"
+#include "ContextDock.h"
 #include "CopyOnSelect.h"
 #include "PaneTabNavigation.h"
 #include "RemoteSettings.h"
@@ -721,12 +722,26 @@ SharingView::SharingView(QWidget *parent) : QWidget(parent)
     m_scroll = pageScroll(&m_body, &m_column);
     m_pages->addWidget(m_scroll);
 
+    // The docked agent (card #3B1B), under both pages: one "Agent (Alt+Q)" row until it is asked
+    // for; the window builds the console on the first expand.
+    m_agentContext.state = [this] { return agentState(); };
+    m_agentContext.pairDevice = [this] { startPairing(); };
+    m_agentContext.stopSharing = [this] {
+        if (!m_pane.isEmpty() && onEndShare) onEndShare(m_pane);
+    };
+    m_agentContext.focusPane = [this](const QString &token) { return onFocusPane && onFocusPane(token); };
+    m_dock = new relay::ContextDock(&m_agentContext, m_agentContext.title(),
+                                    QStringLiteral("Ask the Sharing agent about devices, guests and shared panes"),
+                                    this);
+    column->addWidget(m_dock, 0);
+
     QObject::connect(m_tabs, &QTabBar::currentChanged, this, [this](int index) {
         if (index < 0) return;
         m_pages->setCurrentIndex(index);
         // Leaving Devices withdraws a live offer: a code left live would pair a phone while
         // nobody is looking at the five digits it shows.
         if (index != kDevicesTab) stopPairing();
+        m_agentContext.changed();
     });
 
     build();
@@ -738,6 +753,48 @@ SharingView::SharingView(QWidget *parent) : QWidget(parent)
 SharingView::~SharingView()
 {
     stopPairing();
+    // Before `m_agentContext` goes: children are only deleted in ~QWidget, after the members.
+    delete m_dock;
+    m_dock = nullptr;
+}
+
+relay::agent::SharingState SharingView::agentState() const
+{
+    relay::agent::SharingState state;
+    state.page = page() == Page::Devices ? QStringLiteral("Devices") : QStringLiteral("People");
+    if (!m_model) return state;
+    state.remote = m_model->topLine();
+    for (const Device &device : m_model->devices()) {
+        QStringList facts{device.online ? QStringLiteral("online") : QStringLiteral("offline")};
+        if (!device.capability.isEmpty()) facts << device.capability;
+        if (!device.platform.isEmpty()) facts << device.platform;
+        state.devices << QStringLiteral("%1 (%2)").arg(device.name.isEmpty() ? device.id : device.name,
+                                                       facts.join(QStringLiteral(", ")));
+    }
+    for (const SharedPane &pane : m_model->sharedPanes()) {
+        relay::agent::SharingState::Shared shared;
+        shared.token = pane.id;
+        shared.title = pane.title;
+        shared.scope = pane.tab.isEmpty() ? QStringLiteral("pane")
+                     : pane.tab == QStringLiteral("all-tabs") ? QStringLiteral("all tabs")
+                                                              : QStringLiteral("tab");
+        shared.guests = m_model->guestsOn(pane.id);
+        shared.waiting = m_model->waitingOn(pane.id);
+        shared.driver = m_model->driverOn(pane.id);
+        if (shared.driver.isEmpty()) shared.driver = m_model->deviceDriverOn(pane.id);
+        shared.paused = m_model->options(pane.id).paused;
+        state.shared << shared;
+        for (const Participant &guest : m_model->participantsOn(pane.id))
+            state.guests << QStringLiteral("%1 (%2%3) on %4")
+                                .arg(guest.name.isEmpty() ? guest.id : guest.name, guest.role,
+                                     guest.online ? QString() : QStringLiteral(", away"), pane.title);
+        if (pane.id == m_pane) state.currentShared = true;
+    }
+    state.guests.removeDuplicates();
+    state.waiting = m_model->waiting();
+    state.currentToken = m_pane;
+    state.currentTitle = m_pane.isEmpty() ? QString() : m_model->paneTitle(m_pane);
+    return state;
 }
 
 // ---- pages -----------------------------------------------------------------------------------
@@ -795,6 +852,7 @@ void SharingView::focusPane(const QString &pane)
     if (m_pane == pane) return;
     m_pane = pane;
     rebuildPeople();
+    m_agentContext.changed();
 }
 
 void SharingView::refresh()
@@ -803,6 +861,8 @@ void SharingView::refresh()
     refreshDevices();
     refreshTabs();
     if (onTitleChanged) onTitleChanged();
+    // End sharing is offered only while the pane this is on is shared, and that is what moved.
+    m_agentContext.changed();
 }
 
 // Only the numbers: a row that has lapsed is taken out of the model by whoever owns the clock

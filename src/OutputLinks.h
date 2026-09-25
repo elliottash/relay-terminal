@@ -31,6 +31,8 @@ enum class Kind {
     Card,    // #K7Q2 — a Switchboard card the pane has seen (design section 5)
     Option,  // option:agent/allow_writes — a row of Options (#FEJQ)
     Session, // session:0f3a… — a saved conversation (#FEJQ)
+    Test,    // test:ctest:panelayout — a row of the Test suites pane (card #3B1B)
+    Pane,    // pane:<session token> — a pane of this window, as the Sharing pane lists it (#3B1B)
 };
 
 // One span of a logical line that could be a link. `start`/`length` are UTF-16 indices
@@ -116,6 +118,17 @@ bool optionOf(const QString &target, QString *section, QString *row);
 QString sessionTarget(const QString &id);
 // The id inside a `relay://session/<id>` target, or empty when it is not one.
 QString sessionIdOf(const QString &target);
+
+// The two a system pane's agent writes (card #3B1B): `test:<runner>:<invocation>` names a row of
+// the Test suites pane by its stable id (`test:ctest:panelayout`), `pane:<token>` a pane of the
+// window by its session token, the way the Sharing pane lists shared panes. They travel as
+// `relay://test/<id>` and `relay://pane/<token>`, the id percent-encoded because a pytest id
+// holds `::` and `/`. Only a context resolves them — the Tests and Sharing consoles select the row
+// or focus the pane — so a pane with neither leaves the link inert rather than guessing.
+QString testTarget(const QString &id);
+QString testIdOf(const QString &target);
+QString paneTarget(const QString &token);
+QString paneTokenOf(const QString &target);
 
 struct Target {
     bool valid = false;

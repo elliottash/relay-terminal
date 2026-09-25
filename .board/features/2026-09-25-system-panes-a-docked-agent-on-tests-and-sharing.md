@@ -1,12 +1,13 @@
 ---
 id: 3B1B
 type: work
-status: planned
+status: needs-verification
 labels: [feature, agent-ui, panes]
+assignee: claude-code
 rank: zzzzzzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 source: 'Owner in a Relay pane, 2026-09-25; slice of #P2W8 (U4)'
-links: {plans: [], commits: [], evidence: [], related: [P2W8, AGNT], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-system-panes/], related: [P2W8, AGNT], github: null}
 ---
 # System panes: a docked agent on Tests and Sharing, the same console the Board, Models, Options and Sessions have
 
@@ -32,6 +33,55 @@ Slice 9 of #P2W8 (decision U4). Wave 2 only because `src/RelayWindow.h`, where `
 
 ## Tasks
 
-- [ ] TestsContext with screen, actions and links <!-- t:we -->
-- [ ] SharingContext with screen, actions and links <!-- t:4e -->
-- [ ] wireConsoleHost on both panes, docs, evidence <!-- t:xr blocked_by=we,4e -->
+- [x] TestsContext with screen, actions and links <!-- t:we -->
+- [x] SharingContext with screen, actions and links <!-- t:4e -->
+- [x] wireConsoleHost on both panes, docs, evidence <!-- t:xr blocked_by=we,4e -->
+
+## Execution Summary
+
+Both contexts live in `src/SystemContexts.{h,cpp}` (`relay::agent::TestsContext`,
+`relay::agent::SharingContext`, on the #AGNT `Context` base), hosted by a shared
+`src/ContextDock.{h,cpp}` — a dock shaped like `ArtifactDock`, collapsed to an
+"Agent (Alt+Q)" row until first expand, which is when the console host is built.
+
+- `TestsContext`: the screen is the pane's model state — the filter, the selected row with
+  its last result (`Selected: <id> · last result pass · 2 d ago · 50% reliable · gone`,
+  plus `Last failure` and `Run it with:`), and the summary line (`5351 tests · 2052 passed
+  (37 slow) · 2 failed · 3297 never run · 2.6 m`, with `Failing on screen:` naming the
+  failing rows, long lines cut to 180 chars per row so the screen stays under the limit).
+  Actions: Run selected (r, needs a selection), Run failed (f, only while a failing test is
+  on screen), Attach to card (a, only with a workspace board). Links: `test:` ids select
+  their row and claim nothing else. `runStarted` clears the selection's failure line.
+- `SharingContext`: the screen is the pane's share state — `Sharing › People`, remote
+  control, the opener (`Opened from: pane:<token>`), `Paired devices:` and
+  `Shared panes:` with each pane's token and state, `Guests:`. Actions: Pair device (p),
+  Stop sharing (e — only while a pane is shared). Links: `pane:` tokens focus the pane.
+- Wiring: `createTestSuitesPane` and `openSharingPane` call `wireConsoleHost` with
+  `tests.ask` / `sharing.ask`; `RelayWindow::focusAgentOn` expands the pane's own dock
+  instead of the Board's panel when the Tests or Sharing pane has focus; the
+  `onShortcutHint` note on both panes names the dock.
+- Output links (`src/OutputLinks.{h,cpp}`): `test:` and `pane:` became link kinds, with
+  context resolvers so a `test:` in any output selects the row in the Tests pane and a
+  `pane:` token focuses that pane.
+- Backend (`backend/relay_core/agent_context.py`): `tests` and `sharing` briefs — one
+  paragraph each, into the system prompt once; `docs/AGENT-SESSIONS-PROTOCOL.md` names
+  both. `docs/ARCHITECTURE.md`: the context table gains the two rows, and the
+  `wireConsoleHost` prose covers the two system panes.
+
+## Tests
+
+- `ctest --test-dir build -R agentcontext` — pass. New cases:
+  `theTestsContextIsAConsoleAboutTheSelectedRow`, `theTestsActionRowFollowsTheSelectionAndTheRun`,
+  `aTestLinkSelectsItsRowAndNothingElseIsClaimed`, `theSharingContextNamesEverySharedPaneByItsToken`,
+  `endSharingIsOfferedOnlyOnASharedPaneAndAPaneLinkFocusesIt`,
+  `aLongFailureIsCutAndTheScreenStaysUnderTheLimit`.
+- `ctest --test-dir build -R "testsuites|^sharing$|outputlinks"` — pass; the panes'
+  `theDockedAgentIsAboutTheSelectedRow` / `theDockedAgentReadsThePaneAndEndsOnlyASharedOne`
+  and the output-links cases for `test:` / `pane:` run there.
+- `PYTHONPATH=backend python3 -m pytest tests/test_agent_context.py` — 28 passed (the
+  `tests` and `sharing` briefs).
+- Live pass under Xvfb `:109` with an isolated profile:
+  `docs/qa_evidence/2026-09-25-system-panes/` — Alt+Q on both panes, and the answer to
+  "why did the last run fail?" cites the pane's screen (the selected row, its last result,
+  the summary and the failing rows), echoed by the stub provider and logged in
+  `stub-requests.log`.

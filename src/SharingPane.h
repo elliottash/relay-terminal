@@ -27,6 +27,7 @@
 //  * "Approve once" only. There is no "Approve always" in v1 and the absence is by design
 //    (section 10.5): every v1 invite is a bare link with no identity behind it.
 #include "PaneView.h"
+#include "SystemContexts.h"
 
 #include <QHash>
 #include <QJsonArray>
@@ -51,6 +52,10 @@ class QSpinBox;
 class QStackedWidget;
 class QTabBar;
 class QVBoxLayout;
+
+namespace relay {
+class ContextDock;
+}
 
 namespace relay::sharing {
 
@@ -383,6 +388,16 @@ public:
     void focusView() override;
     void setHeaderRightInset(int pixels) override;
 
+    // ---- the docked agent (card #3B1B) ------------------------------------------------------
+    // The "Agent (Alt+Q)" row at the foot of both pages and the `SharingContext` it is about; the
+    // window wires the dock with `wireConsoleHost`, as it wires Options' and Models'.
+    relay::ContextDock *agentDock() const { return m_dock; }
+    relay::agent::SharingContext *agentContext() { return &m_agentContext; }
+    // What the agent's `screen` says: the page, remote control, the devices, the shared panes.
+    relay::agent::SharingState agentState() const;
+    // A `pane:` link in the agent's answer: the window focuses that pane. Wired by the window.
+    std::function<bool(const QString &token)> onFocusPane;
+
 protected:
     void keyPressEvent(QKeyEvent *event) override;
 
@@ -439,6 +454,9 @@ private:
     QWidget *m_rows = nullptr;
     QVBoxLayout *m_rowsColumn = nullptr;
     QString m_pane;                       // the share shown first, and the picker's default
+    // Deleted before the context in ~SharingView: the console's wrapper writes to it as it goes.
+    relay::agent::SharingContext m_agentContext;
+    relay::ContextDock *m_dock = nullptr;
     // The countdown labels of the rows on screen, by request key, so a tick moves the numbers
     // without rebuilding the rows under the owner's fingers.
     QHash<QString, QLabel *> m_clocks;

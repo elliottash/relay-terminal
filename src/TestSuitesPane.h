@@ -17,6 +17,7 @@
 // Colours come from relay::theme — the run grid's pass/fail/skip cells are the theme's semantic
 // inks, never literals — and the pane re-reads them on themeChanged() (docs/THEMES.md).
 #include "PaneView.h"
+#include "SystemContexts.h"
 #include "TestSuitesModel.h"
 
 #include <QJsonObject>
@@ -35,6 +36,10 @@ class QStackedWidget;
 class QTableView;
 class QTextBrowser;
 class QToolButton;
+
+namespace relay {
+class ContextDock;
+}
 
 namespace relay::tests {
 
@@ -77,6 +82,8 @@ public:
     // ----- the row actions, as the buttons and the context menu fire them ------------------------
     void runSelected(int repeatUntilFail = 0);
     void runAll();
+    // Every failing row the filter leaves on screen (`f`, and the agent's "Run failed").
+    void runFailed();
     void stopRun();
     void openSelectedSource();
     void makeCardForSelected();
@@ -96,6 +103,19 @@ public:
     QString emptyStateText() const;
     // The theme changed: re-read every colour this pane paints with.
     void refreshTheme();
+
+    // ----- the docked agent (card #3B1B) ---------------------------------------------------------
+    // The "Agent (Alt+Q)" row at the foot of the pane, and the `TestsContext` it is about. The
+    // window wires the dock with `wireConsoleHost`, exactly as it wires Options' and Models'.
+    relay::ContextDock *agentDock() const { return m_dock; }
+    relay::agent::TestsContext *agentContext() { return &m_agentContext; }
+    // What the agent's `screen` says: the selected row, its last failure, the filter, the header.
+    relay::agent::TestsState agentState() const;
+    // Put this test on screen — clearing a filter that hides it — and select it. A `test:` link.
+    bool selectTest(const QString &id);
+    // A button pressed with the mouse where a key does the same (RELAY.md's shortcut hints): the
+    // window shows `nextTime(keys, what)` through the usual gates.
+    std::function<void(const QString &hintId, const QString &keys, const QString &what)> onShortcutHint;
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -137,6 +157,10 @@ private:
     QPushButton *m_attach = nullptr;
     QString m_selected;           // the test id, so a re-sort keeps the selection
     QString m_askedHistoryFor;
+    // Declared before the dock and deleted after it (~TestSuitesPane): the console's wrapper
+    // writes to its context as it goes.
+    relay::agent::TestsContext m_agentContext;
+    relay::ContextDock *m_dock = nullptr;
 };
 
 }  // namespace relay::tests

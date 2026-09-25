@@ -9,6 +9,7 @@
 // renamed on either side fails here with the diff in the message.
 #include "AgentContext.h"
 #include "ArtifactContext.h"
+#include "SystemContexts.h"
 
 #include <QDir>
 #include <QFile>
@@ -694,6 +695,211 @@ private slots:
         relay::links::Target other = here;
         other.target = tmp.path();
         QVERIFY(!context.resolveLink(other));
+    }
+
+    // ----- the system panes' contexts (card #3B1B) --------------------------------------------
+
+    static TestsState failingRow()
+    {
+        TestsState s;
+        s.summary = QStringLiteral("42 tests · 1 failed");
+        s.filter = QStringLiteral("layout");
+        s.visible = 3;
+        s.total = 42;
+        s.selectedId = QStringLiteral("ctest:panelayout");
+        s.selectedName = QStringLiteral("panelayout");
+        s.selectedInvocation = QStringLiteral("ctest -R panelayout");
+        s.selectedFile = QStringLiteral("tests/panelayout_test.cpp:88");
+        s.lastResult = QStringLiteral("fail");
+        s.lastRun = QStringLiteral("3 m ago");
+        s.reliability = QStringLiteral("92 %");
+        s.badges = QStringList{QStringLiteral("flaky")};
+        s.cards = QStringList{QStringLiteral("K7Q2")};
+        s.failureAt = QStringLiteral("3 m ago");
+        s.failureCommit = QStringLiteral("a0041445deadbeef");
+        s.failureMessage = QStringLiteral("FAIL!  : PaneLayoutTests::splitKeepsRatio() Compared values are not the same");
+        s.failureExcerpt = QStringLiteral("   Actual   (ratio): 0.4\n   Expected (0.5)   : 0.5");
+        s.failingIds = QStringList{QStringLiteral("ctest:panelayout"), QStringLiteral("ctest:panestate")};
+        return s;
+    }
+
+    void theTestsContextIsAConsoleAboutTheSelectedRow()
+    {
+        TestsContext context;
+        context.state = [] { return failingRow(); };
+        const ContextSpec spec = context.spec();
+        QCOMPARE(compact(spec.toJson()),
+                 QStringLiteral(R"({"agent_role":"switchboard","brief":{"key":"tests","title":"Tests agent"},)"
+                                R"("name":"tests","routing":"agent","scope":"console","shell":false,)"
+                                R"("surface":"tests","workspace":""})"));
+        QCOMPARE(ContextSpec::fromJson(spec.toJson()).toJson(), spec.toJson());
+        // The selected row and its failure come first: "why did the last run fail" is about them.
+        QCOMPARE(spec.screen,
+                 QStringLiteral("Selected: test:ctest:panelayout (panelayout) · last result fail · 3 m ago · 92 % reliable · flaky\n"
+                                "Run it with: ctest -R panelayout\n"
+                                "Source: tests/panelayout_test.cpp:88\n"
+                                "Cards: #K7Q2\n"
+                                "Last failure (3 m ago at a0041445dead):\n"
+                                "FAIL!  : PaneLayoutTests::splitKeepsRatio() Compared values are not the same\n"
+                                "Actual   (ratio): 0.4\n   Expected (0.5)   : 0.5\n"
+                                "Filter: layout (3 of 42 shown)\n"
+                                "Summary: 42 tests · 1 failed\n"
+                                "Failing on screen: test:ctest:panelayout, test:ctest:panestate"));
+        QCOMPARE(spec.askFields().value(QStringLiteral("screen")).toString(), spec.screen);
+        QVERIFY(context.placeholder().startsWith(QStringLiteral("Ask the Tests agent")));
+        // A context with no pane behind it still answers.
+        TestsContext bare;
+        QCOMPARE(bare.spec().screen, QStringLiteral("Test suites"));
+    }
+
+    void aLongFailureIsCutAndTheScreenStaysUnderTheLimit()
+    {
+        TestsContext context;
+        context.state = [] {
+            TestsState s = failingRow();
+            s.failureExcerpt = QString(5000, QLatin1Char('x'));
+            for (int i = 0; i < 400; ++i) s.failingIds << QStringLiteral("ctest:case%1").arg(i);
+            return s;
+        };
+        const QString screen = context.spec().screen;
+        QVERIFY(screen.size() <= kScreenLimit);
+        QVERIFY(screen.contains(QString(699, QLatin1Char('x')) + QChar(0x2026)));
+        QVERIFY(screen.contains(QStringLiteral("Failing on screen: test:ctest:panelayout")));
+        QVERIFY(screen.endsWith(QStringLiteral("…")));
+    }
+
+    void theTestsActionRowFollowsTheSelectionAndTheRun()
+    {
+        TestsState now = failingRow();
+        int ran = 0, failed = 0, attached = 0;
+        TestsContext context;
+        context.state = [&now] { return now; };
+        context.runSelected = [&ran] { ++ran; };
+        context.runFailed = [&failed] { ++failed; };
+        context.attachToCard = [&attached] { ++attached; };
+        QList<Action> row = withUniqueLetters(context.actions());
+        QCOMPARE(row.size(), 3);
+        QCOMPARE(row[0].fullLabel(), QStringLiteral("Run selected (r)"));
+        QCOMPARE(row[1].fullLabel(), QStringLiteral("Run failed (f)"));
+        QCOMPARE(row[2].fullLabel(), QStringLiteral("Attach to card (a)"));
+        for (const Action &action : row) QVERIFY(action.enabled);
+        row[actionForLetter(row, QStringLiteral("r"))].run();
+        row[actionForLetter(row, QStringLiteral("f"))].run();
+        row[actionForLetter(row, QStringLiteral("a"))].run();
+        QCOMPARE(ran + failed + attached, 3);
+        // Nothing selected, nothing failing: only a row the person can act on is offered.
+        now.selectedId.clear();
+        now.failingIds.clear();
+        row = context.actions();
+        QVERIFY(!row[0].enabled && !row[1].enabled && !row[2].enabled);
+        // A run in flight holds both runs back.
+        now = failingRow();
+        now.running = true;
+        row = context.actions();
+        QVERIFY(!row[0].enabled && !row[1].enabled && row[2].enabled);
+    }
+
+    void aTestLinkSelectsItsRowAndNothingElseIsClaimed()
+    {
+        QString selected;
+        TestsContext context;
+        context.selectTest = [&selected](const QString &id) { selected = id; return true; };
+        // The link as the transcript resolves it: `[x](test:<id>)` scanned in prose.
+        const QString node = QStringLiteral("unittest:tests/test_board.py::CardTests::test_roundtrip");
+        const auto found = relay::links::scan(QStringLiteral("test:") + node, QStringLiteral("/"), QStringLiteral("/"),
+                                              [](const QString &) { return relay::links::Entry::Missing; }, {},
+                                              relay::links::Mode::Prose);
+        QCOMPARE(found.size(), 1);
+        QVERIFY(context.resolveLink(found[0].target));
+        QCOMPARE(selected, node);
+        relay::links::Target option;
+        option.valid = true;
+        option.kind = relay::links::Kind::Option;
+        option.target = relay::links::optionTarget(QStringLiteral("agent"), QString());
+        QVERIFY(!context.resolveLink(option));
+        relay::links::Target pane = option;
+        pane.target = relay::links::paneTarget(QStringLiteral("p1"));
+        QVERIFY(!context.resolveLink(pane));
+    }
+
+    static SharingState sharingNow(bool currentShared)
+    {
+        SharingState s;
+        s.page = QStringLiteral("People");
+        s.remote = QStringLiteral("Remote control on · relay-terminal.ai · iPhone connected");
+        s.devices = QStringList{QStringLiteral("iPhone (online, full, ios)")};
+        SharingState::Shared build;
+        build.token = QStringLiteral("3478d988-a618-47c5-a4f4-7196fdc7261f");
+        build.title = QStringLiteral("Build log");
+        build.scope = QStringLiteral("pane");
+        build.guests = 2;
+        build.driver = QStringLiteral("alice");
+        build.waiting = 1;
+        s.shared << build;
+        s.guests = QStringList{QStringLiteral("alice (editor) on Build log"), QStringLiteral("bob (viewer, away) on Build log")};
+        s.waiting = 1;
+        s.currentToken = currentShared ? build.token : QStringLiteral("p-other");
+        s.currentTitle = currentShared ? build.title : QStringLiteral("zsh");
+        s.currentShared = currentShared;
+        return s;
+    }
+
+    void theSharingContextNamesEverySharedPaneByItsToken()
+    {
+        SharingContext context;
+        context.state = [] { return sharingNow(true); };
+        const ContextSpec spec = context.spec();
+        QCOMPARE(compact(spec.toJson()),
+                 QStringLiteral(R"({"agent_role":"switchboard","brief":{"key":"sharing","title":"Sharing agent"},)"
+                                R"("name":"sharing","routing":"agent","scope":"console","shell":false,)"
+                                R"("surface":"sharing","workspace":""})"));
+        QCOMPARE(spec.screen,
+                 QStringLiteral("Sharing › People\n"
+                                "Remote control on · relay-terminal.ai · iPhone connected\n"
+                                "Opened from: pane:3478d988-a618-47c5-a4f4-7196fdc7261f (Build log), shared\n"
+                                "Paired devices: iPhone (online, full, ios)\n"
+                                "Shared panes:\n"
+                                "- pane:3478d988-a618-47c5-a4f4-7196fdc7261f (Build log) · 2 guests · alice is typing · 1 waiting\n"
+                                "Guests: alice (editor) on Build log; bob (viewer, away) on Build log\n"
+                                "Waiting for you: 1"));
+        SharingContext bare;
+        QCOMPARE(bare.spec().screen, QStringLiteral("Sharing"));
+        bare.state = [] { return SharingState(); };
+        QCOMPARE(bare.spec().screen,
+                 QStringLiteral("Sharing › People\nPaired devices: none\nShared panes: none"));
+    }
+
+    void endSharingIsOfferedOnlyOnASharedPaneAndAPaneLinkFocusesIt()
+    {
+        bool shared = true;
+        int paired = 0, stopped = 0;
+        QString focused;
+        SharingContext context;
+        context.state = [&shared] { return sharingNow(shared); };
+        context.pairDevice = [&paired] { ++paired; };
+        context.stopSharing = [&stopped] { ++stopped; };
+        context.focusPane = [&focused](const QString &token) { focused = token; return true; };
+        QList<Action> row = context.actions();
+        QCOMPARE(row.size(), 2);
+        QCOMPARE(row[0].fullLabel(), QStringLiteral("Pair device (p)"));
+        QCOMPARE(row[1].fullLabel(), QStringLiteral("End sharing (e)"));
+        QVERIFY(row[0].enabled && row[1].enabled);
+        row[0].run();
+        row[1].run();
+        QCOMPARE(paired, 1);
+        QCOMPARE(stopped, 1);
+        shared = false;
+        row = context.actions();
+        QVERIFY(row[0].enabled);
+        QVERIFY(!row[1].enabled);
+        const auto found = relay::links::scan(QStringLiteral("(pane:p-42)"), QStringLiteral("/"), QStringLiteral("/"),
+                                              [](const QString &) { return relay::links::Entry::Missing; });
+        QCOMPARE(found.size(), 1);
+        QVERIFY(context.resolveLink(found[0].target));
+        QCOMPARE(focused, QStringLiteral("p-42"));
+        relay::links::Target test = found[0].target;
+        test.target = relay::links::testTarget(QStringLiteral("ctest:x"));
+        QVERIFY(!context.resolveLink(test));
     }
 };
 
