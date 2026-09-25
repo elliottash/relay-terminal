@@ -500,7 +500,7 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
   {id: planning, folder: planning},
   {id: deferred, filter: "status:deferred"}, {id: done, filter: "status:done,dropped"}]
 columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done]
-agent: {autonomy: auto, max_creates_per_turn: 5}
+agent: {autonomy: auto, max_creates_per_turn: 20}
 memory: {autonomy: auto}
 ```
 

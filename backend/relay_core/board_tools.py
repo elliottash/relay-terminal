@@ -89,9 +89,9 @@ UNINITIALIZED_NOTE = ("\n\nBoard: this project has no Board yet; creating a card
 #: read, move or comment on until the first card exists.
 UNINITIALIZED_TOOLS = ("board_create_card",)
 
-#: Per-turn and per-hour ceilings (design 6.3).  `board.yaml` may lower the create ceiling.
+#: Per-turn and per-hour ceilings (design 6.3).  `board.yaml` may override the create ceiling.
 DEFAULT_LIMITS = {
-    "max_creates_per_turn": 5,
+    "max_creates_per_turn": 20,
     "max_writes_per_turn": 100,
     "max_creates_per_hour": 30,
 }
