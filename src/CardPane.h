@@ -858,6 +858,9 @@ public:
     // A `#ID` in the card's own words or the thread names another card on this board: zoom to
     // it, the way the cleanup panel's `card:` anchors do (#3ZAP).
     std::function<void(const QString &id)> onOpenCard;
+    // Middle-click on one of those `#ID` links (#HKY4): the card docks in a pane of its own
+    // and this page stays.
+    std::function<void(const QString &id)> onOpenOwnPane;
     // Whether a word after a `#` names a card on this board (#3ZAP): the board decides whether
     // `#K7Q2` is a card reference — unknown words remain plain text.
     std::function<bool(const QString &id)> hasCard;
@@ -1935,6 +1938,23 @@ protected:
                 onEditHint();
             beginEdit(true);
             return true;
+        }
+        // Middle-click on a `#ID` link in the doc (#HKY4): the browser's new-tab gesture —
+        // the card docks in a pane of its own and this page stays. Only the doc is
+        // hit-testable (a QLabel gives no anchorAt), so the meta line's links take Ctrl+click.
+        if (m_doc && object == m_doc->viewport() && event->type() == QEvent::MouseButtonPress
+            && static_cast<QMouseEvent *>(event)->button() == Qt::MiddleButton && onOpenOwnPane) {
+            auto *press = static_cast<QMouseEvent *>(event);
+#if QT_VERSION_MAJOR >= 6
+            const QPoint at = press->position().toPoint();
+#else
+            const QPoint at = press->pos();
+#endif
+            const QString link = m_doc->anchorAt(at);
+            if (link.startsWith(QLatin1String("card:"))) {
+                onOpenOwnPane(link.mid(QStringLiteral("card:").size()).toUpper());
+                return true;
+            }
         }
         // `m_doc` is still null while the widgets above it are being built and their first
         // show() runs through this filter.

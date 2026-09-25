@@ -765,6 +765,7 @@ void SkillRegistryView::setLinkedCards(const QStringList &ids, const QString &em
                                              : QStringLiteral("#%1 %2").arg(id, title);
         auto *chip = new QPushButton(text, chips);
         chip->setObjectName(name("LinkedChip"));
+        chip->setProperty("card", id);   // a middle-click finds it by this (#HKY4)
         if (openCard) {
             chip->setCursor(Qt::PointingHandCursor);
             chip->setToolTip(QStringLiteral("Open #%1 on the card page").arg(id));

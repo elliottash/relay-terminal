@@ -1369,6 +1369,14 @@ if(BUILD_TESTING)
     add_test(NAME boardfilter COMMAND relay-boardfilter-tests)
     set_tests_properties(boardfilter PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+    # The browser's new-tab gestures (#HKY4): middle-click and Ctrl+click dock a card in a pane
+    # of its own, on a list row, a `#ID` link in a card page, or a skill's Linked chip. Its own
+    # executable rather than more of boardpane_test.cpp, which several sessions hold at once.
+    add_executable(relay-boardgestures-tests tests/boardgestures_test.cpp)
+    target_link_libraries(relay-boardgestures-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardgestures COMMAND relay-boardgestures-tests)
+    set_tests_properties(boardgestures PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     add_executable(relay-boardwatch-tests tests/boardwatch_test.cpp)
     target_link_libraries(relay-boardwatch-tests PRIVATE relay-board ${RELAY_QT}::Test)
     add_test(NAME boardwatch COMMAND relay-boardwatch-tests)

@@ -376,6 +376,11 @@ public:
     // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text, and the cleanup panel's
     // `card:` anchors, land here.
     void openCard(const QString &id);
+    // The browser's new-tab gestures (#HKY4): middle-click and Ctrl+click dock the card in a
+    // pane of its own instead of opening it here. False when there is no pane to make.
+    bool openInOwnPane(const QString &id);
+    // Every click-shaped open comes through here: Ctrl+click docks, anything else opens here.
+    void openCardFromClick(const QString &id);
     // A card link clicked outside the board (#K4SQ) — a `#ID` in chat or a notification — opens
     // the board *on* that card: the page takes the whole pane whatever the width, and the list is
     // one Esc away. In-board links (openCard) keep the layout the pane already had.

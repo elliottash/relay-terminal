@@ -2324,10 +2324,23 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // A click opens the card, the way a card board did; a drag never counts as a click.
     connect(m_list, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
         const QString id = item->data(kCardRole).toString();
-        if (id.isEmpty() || QApplication::keyboardModifiers() != Qt::NoModifier)
+        if (id.isEmpty())
+            return;
+        // Ctrl+click (#HKY4): the browser's new-tab gesture — the card docks in a pane of its
+        // own and this list keeps its place. Middle-click is the mouse-only version, caught in
+        // RowList::mousePressEvent. Any other modifier still does nothing, so a drag or an
+        // unfinished chord never opens anything.
+        if (QApplication::keyboardModifiers() == Qt::ControlModifier) {
+            openInOwnPane(id);
+            return;
+        }
+        if (QApplication::keyboardModifiers() != Qt::NoModifier)
             return;
         m_selected = id;
         openSelected();
+        // A click is the slow path (#HKY4): teach the mouse gesture that skips it.
+        if (onHint)
+            onHint(QStringLiteral("cardOwnPane"), QStringLiteral("middle-click"));
     });
     connect(m_list, &QListWidget::itemActivated, this, [this](QListWidgetItem *item) {
         const QString id = item->data(kCardRole).toString();
@@ -2357,7 +2370,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (board::rowOfSignal(m_rows, key) >= 0)
             selectSignal(key);
     };
-    m_signalDetail->onOpenCard = [this](const QString &id) { openCard(id); };
+    m_signalDetail->onOpenCard = [this](const QString &id) { openCardFromClick(id); };
     m_signalDetail->onFocusPane = [this](const QString &token) { revealClaim(token); };
     m_signalDetail->onClaim = [this] {
         sendSignal(QStringLiteral("signals_claim"),
@@ -2498,7 +2511,9 @@ void BoardView::buildChrome(QVBoxLayout *layout)
         if (onHint)
             onHint(QStringLiteral("copyId"), QStringLiteral("y"));
     };
-    m_detail->onOpenCard = [this](const QString &id) { openCard(id); };
+    m_detail->onOpenCard = [this](const QString &id) { openCardFromClick(id); };
+    // Middle-click on a `#ID` link in the card page (#HKY4): the same docking as Ctrl+click.
+    m_detail->onOpenOwnPane = [this](const QString &id) { openInOwnPane(id); };
     m_detail->onOpenCommits = [this](const QString &command) {
         if (onRunCommand)
             onRunCommand(command);
@@ -2537,7 +2552,7 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             const QUrl url(target);
             const QString card = url.path().section(QLatin1Char('/'), -1).toUpper();
             if (url.host() == QStringLiteral("card") && !card.isEmpty())
-                openCard(card);
+                openCardFromClick(card);
             else
                 QDesktopServices::openUrl(url);
             return;
@@ -2918,7 +2933,29 @@ void BoardView::buildSkillsPage(QVBoxLayout *layout)
         setPage(Page::Cards);
         draftForAgent(text);
     };
-    m_skillsPage->openCard = [this](const QString &id) { openCardSolo(id); };
+    // Ctrl+click on a Linked chip docks the card in its own pane (#HKY4); a plain click still
+    // reveals it in this list, where a skill's cards are a zoom, not a page swap.
+    m_skillsPage->openCard = [this](const QString &id) {
+        if (QApplication::keyboardModifiers() == Qt::ControlModifier && openInOwnPane(id))
+            return;
+        openCardSolo(id);
+    };
+    m_skillsPage->installEventFilter(this);   // middle-click on a Linked chip docks it (#HKY4)
+    // The list's viewport and the Live surface's chips are filtered for their middle-clicks
+    // too (#HKY4). The Live surface is found by name — a strip over the list (#TBRH) or a tab
+    // of its own (#C52H), whichever shape it has — and remove-then-install keeps a rebuild
+    // from stacking the filter.
+    if (m_list != nullptr && m_list->viewport() != nullptr) {
+        m_list->viewport()->removeEventFilter(this);
+        m_list->viewport()->installEventFilter(this);
+    }
+    for (const char *name : {"boardLiveStrip", "boardLivePage"}) {
+        QWidget *live = findChild<QWidget *>(QString::fromLatin1(name));
+        if (live != nullptr) {
+            live->removeEventFilter(this);
+            live->installEventFilter(this);
+        }
+    }
     m_skillsPage->cardTitle = [this](const QString &id) {
         const board::Card *card = m_model.card(id);
         return card != nullptr ? card->title : QString();
@@ -7455,8 +7492,82 @@ void BoardView::autoScrollDuringDrag()
         bar->setValue(bar->value() + 14);
 }
 
+// The card in a pane of its own — #Y2BA's docking, and the one path every gesture to it
+// shares (#HKY4): Shift+Enter, middle-click and Ctrl+click. A pinned pane is already one
+// card's pane, so it keeps its card and the gesture is refused. A page here on the same card
+// closes with it — or the board would show the same card as the new pane — while a page on
+// another card stays where it is, like the browser tab the click came from.
+bool BoardView::openInOwnPane(const QString &id)
+{
+    if (id.isEmpty() || !onOpenInNewPane || m_pinned)
+        return false;
+    if (detailOpen() && m_detail->cardId() == id)
+        closeDetail();
+    onOpenInNewPane(id);
+    return true;
+}
+
+// Every click-shaped open of a card in this pane (#HKY4): Ctrl+click takes the browser's
+// new-tab meaning and docks the card beside this one; any other state opens it here as before.
+void BoardView::openCardFromClick(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    if (QApplication::keyboardModifiers() == Qt::ControlModifier && openInOwnPane(id))
+        return;
+    openCard(id);
+}
+
 bool BoardView::eventFilter(QObject *object, QEvent *event)
 {
+    // Middle-click on a card row in the list (#HKY4): the browser's new-tab gesture — the card
+    // docks in a pane of its own and the list keeps its selection. Caught on the viewport the
+    // press lands on, before the list's own handling swallows it.
+    if (m_list != nullptr && object == m_list->viewport()
+        && event->type() == QEvent::MouseButtonPress
+        && static_cast<QMouseEvent *>(event)->button() == Qt::MiddleButton) {
+        auto *press = static_cast<QMouseEvent *>(event);
+#if QT_VERSION_MAJOR >= 6
+        const QListWidgetItem *item = m_list->itemAt(press->position().toPoint());
+#else
+        const QListWidgetItem *item = m_list->itemAt(press->pos());
+#endif
+        const QString id = item != nullptr ? item->data(kCardRole).toString() : QString();
+        if (!id.isEmpty() && openInOwnPane(id)) {
+            press->accept();
+            return true;
+        }
+        return false;   // a header row or an empty spot: the list keeps the press
+    }
+    // A middle-click on a chip on the Live page or the skills page (#HKY4): the chip buttons
+    // ignore the press, so it walks up to the page, which finds the chip under it by its
+    // "card" property and docks that card in a pane of its own.
+    QWidget *host = qobject_cast<QWidget *>(object);
+    if (host != nullptr
+        && (object == m_skillsPage || host->objectName() == QLatin1String("boardLiveStrip")
+            || host->objectName() == QLatin1String("boardLivePage"))) {
+        if (event->type() == QEvent::MouseButtonPress
+            && static_cast<QMouseEvent *>(event)->button() == Qt::MiddleButton) {
+            auto *press = static_cast<QMouseEvent *>(event);
+#if QT_VERSION_MAJOR >= 6
+            const QPoint at = press->position().toPoint();
+#else
+            const QPoint at = press->pos();
+#endif
+            for (QWidget *child = host->childAt(at); child != nullptr;
+                 child = child->parentWidget()) {
+                const QString card = child->property("card").toString();
+                if (!card.isEmpty()) {
+                    if (openInOwnPane(card)) {
+                        press->accept();
+                        return true;
+                    }
+                    break;
+                }
+            }
+        }
+        return false;
+    }
     if ((object == m_listTranscriptHost || object == m_cardTranscriptHost)
         && (event->type() == QEvent::Show || event->type() == QEvent::Hide)) {
         // Qt sends Hide before the host's visible state changes. Recheck after that event.
@@ -7550,13 +7661,10 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
     if (mods == Qt::ShiftModifier && (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
         && onOpenInNewPane && !m_selected.isEmpty() && selectedFold().isEmpty()
         && selectedSignalFold().isEmpty() && selectedSignal().isEmpty() && m_model.card(m_selected)) {
-        // The card leaves this board the way the page's ⤴ takes it: a page here already on it
-        // closes, or the list would show the same card as the new pane, and a narrowed board
-        // would give its whole width to that page instead of the rows.
-        const QString id = m_selected;
-        if (detailOpen() && m_detail->cardId() == id)
-            closeDetail();
-        onOpenInNewPane(id);
+        // The card leaves this board the way the page's ⤴ takes it, through the one docking
+        // path every gesture shares (#HKY4): a page here already on it closes, or the list
+        // would show the same card as the new pane.
+        openInOwnPane(m_selected);
         return true;
     }
     if (handleBoardKey(key))
