@@ -30,3 +30,6 @@ Owner: “i think there might be a card on this, to also put skills in the board
 
 <!-- relay:entry 20260924T213459Z-qm author=owner kind=event pane=switchboard -->
 - ✦ owner flagged this card · priority +2
+
+<!-- relay:entry 20260925T042138Z-tv author=agent kind=event model=claude-fable-5-1 pane=06d99724 turn=cf99c92a9b1e48559ab6b383c65134c7/ddd172bea8164d12a0ac6253a6fb899d -->
+- ✦ agent updated this card · appended to `## Planning notes`

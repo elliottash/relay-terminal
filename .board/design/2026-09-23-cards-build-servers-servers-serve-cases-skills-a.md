@@ -171,3 +171,16 @@ Three cautions from the economics that the design should keep: the human signal 
 - 2026-09-23, owner: "yes, document it, and lets build all the functionality, and we can experiment with how to phase in complexity without overwhelming the user." The QA ladder is documented on #BX7B; the build is phased there as #WFRA → #1AA6 → #MSJ0 → #C3Q2 → #95VZ → the QA pane (#BX7B) → a Skills registry. This card stays the design record.
 - 2026-09-24, owner: "the board should become 3 tabs, cards, skills, memories". Project skills and project memories belong in the Board alongside work cards.
 - 2026-09-24, owner: "globals also needs global skills". Globals should show global skills; project memories should stay on their project's Board ("globals is showing local memories. local memories go in teh board").
+
+## Planning notes
+**What was left on the table after the QA build, and where it went (2026-09-25).** The build order recorded in Decisions ran to the QA pane (#BX7B, now the Review pane, with #JEWY's shortcut); the remainder of this card is now five planned cards, each with a plan, `## Done means`, a `verify` block and its questions in the thread:
+
+| Left over | Card | Open questions it answers |
+|---|---|---|
+| §5 the Skills registry; the owner's 2026-09-24 decisions (Board = Cards \| Skills \| Memories; global skills in Globals) | #9FX8 | Q4 (authoritative source: `.relay`, settled by #HS7V), Q5 in part |
+| §5 loops 1 and 2: case → card, server → card; failed-case policy per server | #G9ZD | Q1 (no single approach → `on_fail` per server with a project override), Q3 in part |
+| §2 harden / soften: steps on a skill, step outcomes on a case, the hint | #4YKJ | — (follows #9FX8 and #G9ZD; needs ledger volume) |
+| §4 the other objects: counterparty, runs and artifacts, schedules; the non-software pilot from report §7 | #FVVY | Q2 (the row's minimum grows by counterparty; confidential still drops references), Q5 |
+| §1 / §5 point 3: earned authority end to end — sampling, promotion, demotion, AI-verdict calibration | #GW74 | Q3 (the designation lives on the server, sampled per case by policy), Q6 in part |
+
+Still open on this card: Q6 (who may set a server's profile: the agent proposes, the owner corrects, policy floors it — the practice so far, not yet a rule) and the pilot decision under #FVVY. Housekeeping: the seven QA cards (#WFRA, #1AA6, #MSJ0, #C3Q2, #95VZ, #BX7B, #JEWY) sit in needs-verification awaiting a separate session's pass.
