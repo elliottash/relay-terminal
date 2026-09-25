@@ -533,6 +533,19 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             items << equalize;
         }
         items << actionItem(panes, QStringLiteral("Move tab to new window"), QStringLiteral("Keeps its panes running"), QStringLiteral("tab.moveToNewWindow"));
+        {
+            // Card #E85D: a source file, its console and its output preview as one workspace.
+            PaletteItem columns = actionItem(panes, QStringLiteral("Workspace: artifact layout 1:1:1"),
+                                             QStringLiteral("Console | editor | preview, linked as one workspace"),
+                                             QStringLiteral("workspace.layoutColumns"));
+            columns.aliases = QStringLiteral("artifact workspace tex latex pdf preview editor layout preset three columns");
+            items << columns;
+            PaletteItem stacked = actionItem(panes, QStringLiteral("Workspace: artifact layout 2:1"),
+                                             QStringLiteral("Editor over console on the left, preview on the right"),
+                                             QStringLiteral("workspace.layoutEditorOverConsole"));
+            stacked.aliases = QStringLiteral("artifact workspace tex latex pdf preview editor layout preset two columns");
+            items << stacked;
+        }
         items << actionItem(panes, QStringLiteral("Move pane left"), QStringLiteral("Then ↓ docks it beneath · or drag the ⠿ grip"), QStringLiteral("pane.moveLeft"));
         items << actionItem(panes, QStringLiteral("Move pane right"), QStringLiteral("Then ↓ docks it beneath"), QStringLiteral("pane.moveRight"));
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));

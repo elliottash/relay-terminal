@@ -553,6 +553,7 @@ public:
         index = index < 0 ? m_tabs->count() : std::min(index, m_tabs->count());
         m_tabs->insertTab(index, page, QString());
         m_tabs->setCurrentIndex(index);
+        restoreWorkspaceGroup(page, tab.value(QStringLiteral("artifact_workspace")).toObject());
         // Its theme: the one it was saved with, else the default Options › Appearance holds — what
         // Relay opens on and what a new tab starts with. (A *new* tab may then be moved on to the
         // next theme in the list: startNewTabTheme(), behind its own option.)
@@ -725,6 +726,8 @@ public:
         const bool remote = relay::remote::isFileUrl(path);
         const QFileInfo info(path);
         if (!remote && !info.exists()) { notice(QStringLiteral("No such file or folder: ") + path, 6000); return; }
+        // A source of the tab's artifact workspace opens in its linked editor, at the line (#E85D).
+        if (!remote && info.isFile() && openInWorkspaceEditor(info.absoluteFilePath(), line, anchor)) return;
         if (!anchor || !isLeaf(anchor) || anchor->window() != this) anchor = m_activeLeaf;
         if (!anchor) return;
         QWidget *page = pageOf(anchor);
@@ -738,6 +741,7 @@ public:
         for (QWidget *leaf : leavesIn(page)) {
             auto *tool = dynamic_cast<ToolPane *>(leaf);
             if (!tool || tool->kind() != kind) continue;
+            if (isWorkspaceViewer(tool)) continue;   // a workspace's editor or preview is not reused (#E85D)
             // A followed link wants its own pane, but not a second pane on a file one of them is
             // already showing: clicking back and forth between two documents would otherwise pile
             // up panes. So `newPane` reuses only an exact match, and never the anchor itself.
@@ -763,6 +767,21 @@ public:
         focusLeaf(target);
         updateTitles();
     }
+
+    // ----- artifact workspaces (card #E85D) — the bodies are in src/RelayWindowWorkspace.cpp ------
+    // A tab's editor, console and preview as one group: the two layout presets, the member id a
+    // leaf saves in its node, the group the tab saves beside its node, source file:line going to
+    // the linked editor, and the status strip over the preview (docs/ARCHITECTURE.md, 10b).
+    void applyWorkspacePreset(const QString &layout, const QString &sourceHint = QString());
+    bool openInWorkspaceEditor(const QString &path, int line, QWidget *anchor);
+    bool isWorkspaceViewer(QWidget *leaf) const;
+    QJsonObject workspaceGroupJson(QWidget *page) const;
+    void restoreWorkspaceGroup(QWidget *page, const QJsonObject &json);
+    void refreshWorkspace(QWidget *page);
+    QObject *ensureWorkspace(QWidget *page);
+    QJsonObject driveWorkspace(const QJsonObject &request);
+    static QJsonObject withWorkspaceMember(QWidget *leaf, QJsonObject node);
+    static void tagWorkspaceMember(QWidget *leaf, const QJsonObject &node);
 
     // Alt+Z (files.toggleWrap): word wrap in the preview the user is reading. The one focus sits
     // in wins; otherwise the active leaf if it is a preview pane, else any preview pane in the
@@ -3240,6 +3259,7 @@ public:
             command.insert(QStringLiteral("action"), request.value(QStringLiteral("name")));
             return executeAppCommand(command, QStringLiteral("named driver"));
         }
+        if (op == QLatin1String("workspace")) return driveWorkspace(request);   // #E85D
         if (op == QLatin1String("open")) {
             QJsonObject command{{"command", "open"}, {"target", "switchboard"}, {"card", request.value("card")}};
             return executeAppCommand(command, QStringLiteral("named driver"));
@@ -5987,6 +6007,7 @@ private:
     }
 
     QWidget *buildNode(const QJsonObject &node);
+    QWidget *buildNodeWidget(const QJsonObject &node);   // buildNode() less the workspace member (#E85D)
 
     QSplitter *newSplitter(Qt::Orientation orientation) {
         auto *splitter = new QSplitter(orientation);
@@ -6056,9 +6077,10 @@ private:
             }
             if (const QJsonArray queue = pane->queueForRestore(); !queue.isEmpty())
                 leaf.insert(QStringLiteral("queue"), queue);
-            return {{"pane", leaf}};
+            return withWorkspaceMember(widget, {{"pane", leaf}});
         }
-        if (auto *tool = dynamic_cast<ToolPane *>(widget)) return tool->node();
+        // A leaf in an artifact workspace saves its member id beside its node (#E85D).
+        if (auto *tool = dynamic_cast<ToolPane *>(widget)) return withWorkspaceMember(widget, tool->node());
         if (auto *splitter = dynamic_cast<QSplitter *>(widget)) {
             QJsonArray children, sizes;
             const QList<int> all = splitter->sizes();
@@ -6190,8 +6212,11 @@ private:
         // the shape it always was. Without it a restart would hand the tab's helper somebody
         // else's conversation, or start it a new one every time.
         const QString id = page ? page->property("relayTabId").toString() : QString();
-        if (node.isEmpty() || (project.isEmpty() && !ownTheme && id.isEmpty())) return node;
+        // The tab's artifact workspace group (#E85D), in the same wrapper and only when it has one.
+        const QJsonObject group = workspaceGroupJson(page);
+        if (node.isEmpty() || (project.isEmpty() && !ownTheme && id.isEmpty() && group.isEmpty())) return node;
         QJsonObject tab{{QStringLiteral("node"), node}};
+        if (!group.isEmpty()) tab.insert(QStringLiteral("artifact_workspace"), group);
         if (!project.isEmpty()) tab.insert(QStringLiteral("project"), project);
         if (ownTheme) tab.insert(QStringLiteral("theme"), theme);
         if (!id.isEmpty()) tab.insert(QStringLiteral("tab_id"), id);

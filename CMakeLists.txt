@@ -246,6 +246,17 @@ else()
     message(STATUS "Relay: PDF preview disabled (${RELAY_QT} Pdf not found)")
 endif()
 
+# A tab's artifact workspace (card #E85D): the editor/console/preview group, its outputs'
+# generation and state, the typed preview adapters and the layout presets. QtCore only; it is
+# after the Qt PDF check so the pdf adapter can say whether this build renders PDF.
+add_library(relay-artifactworkspace STATIC src/ArtifactWorkspace.cpp src/ArtifactWorkspace.h)
+target_include_directories(relay-artifactworkspace PUBLIC src)
+target_link_libraries(relay-artifactworkspace PUBLIC ${RELAY_QT}::Core)
+target_compile_options(relay-artifactworkspace PRIVATE ${RELAY_WARNINGS})
+if(TARGET ${RELAY_QT}::Pdf AND TARGET ${RELAY_QT}::PdfWidgets)
+    target_compile_definitions(relay-artifactworkspace PRIVATE RELAY_HAVE_QTPDF)
+endif()
+
 # Subagents UI: running-agents list and live transcript view (plain Qt).
 add_library(relay-subagents STATIC src/SubagentsPanel.cpp src/SubagentsPanel.h src/SubagentTranscript.cpp src/SubagentTranscript.h
             src/JobsPanel.cpp src/JobsPanel.h)
@@ -656,6 +667,8 @@ if(RELAY_BUILD_APP)
         # The Sharing pane's window side (#SMDX): opening it, the scope catalogue, publishing before a link.
         src/RelayWindowSharing.cpp
         src/RelayWindow.cpp src/RelayWindowModels.cpp src/RelayWindowSettings.cpp src/RelayWindowCore.cpp
+        # The artifact workspace's window side (#E85D): presets, membership, the status strip.
+        src/RelayWindowWorkspace.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
         # The seam a console makes its surface calls through (#AGNT).
         src/AgentHost.h
@@ -676,6 +689,7 @@ if(RELAY_BUILD_APP)
     # What an agent is about (#AGNT): a Pane takes a relay::agent::Context, and supplies the
     # terminal one itself. QtCore only, so this is a link edge and not a dependency.
     target_link_libraries(relay PRIVATE relay-agentcontext)
+    target_link_libraries(relay PRIVATE relay-artifactworkspace)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     target_link_libraries(relay PRIVATE relay-actionpalette)
@@ -861,6 +875,11 @@ if(BUILD_TESTING)
     add_executable(relay-textmerge-tests tests/textmerge_test.cpp)
     target_link_libraries(relay-textmerge-tests PRIVATE relay-textmerge ${RELAY_QT}::Test)
     add_test(NAME textmerge COMMAND relay-textmerge-tests)
+    # Card #E85D: the workspace group's JSON, dangling members, output states, the TeX builder's
+    # source revision, the preview adapter registry and the layout presets.
+    add_executable(relay-artifactworkspace-tests tests/artifactworkspace_test.cpp)
+    target_link_libraries(relay-artifactworkspace-tests PRIVATE relay-artifactworkspace ${RELAY_QT}::Test)
+    add_test(NAME artifactworkspace COMMAND relay-artifactworkspace-tests)
     add_executable(relay-filesync-tests tests/filesync_test.cpp)
     target_link_libraries(relay-filesync-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
     add_test(NAME filesync COMMAND relay-filesync-tests)

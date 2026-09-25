@@ -297,6 +297,12 @@ private:
         add("pane.equalize", "pane", "Equalize pane sizes (auto-resize): every splitter in this tab back to equal shares",
             {QStringLiteral("Alt+0")});
         add("tab.moveToNewWindow", "tab", "Move tab to a new window (keeps its panes)", {});
+        // Artifact workspace presets (card #E85D): the tab's editor, console and preview as one
+        // group, laid out as the task plugins' "1:1:1" and "2:1". Unbound: palette and keybindings.
+        add("workspace.layoutColumns", "pane",
+            "Workspace: artifact layout 1:1:1 (console | editor | preview)", {});
+        add("workspace.layoutEditorOverConsole", "pane",
+            "Workspace: artifact layout 2:1 (editor over console | preview)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
         add("closed.list", "pane", "Recently closed: the last 25 panes, tabs and windows, any of them reopened", {});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});

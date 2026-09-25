@@ -301,6 +301,10 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         else if (id == QStringLiteral("pane.moveToBackground")) moveBackgroundPane(pane);
         else if (id == QStringLiteral("pane.runInBackground")) runBackgroundPane(pane);
         else if (id == QStringLiteral("pane.equalize")) equalizeActivePage();
+        // Artifact workspace presets (#E85D): terminal | editor | preview, and editor over
+        // terminal beside the preview.
+        else if (id == QStringLiteral("workspace.layoutColumns")) applyWorkspacePreset(QStringLiteral("1:1:1"));
+        else if (id == QStringLiteral("workspace.layoutEditorOverConsole")) applyWorkspacePreset(QStringLiteral("2:1"));
         else if (id == QStringLiteral("tab.moveToNewWindow")) moveTabToNewWindow(m_tabs->currentIndex());
         else if (id == QStringLiteral("closed.restore")) m_manager->restore(this);
         else if (id == QStringLiteral("closed.list")) openClosedList();
@@ -1169,7 +1173,15 @@ void RelayWindow::wireAgentConsole(Pane *console) {
         relay::theme::polishWindow(console);
     }
 
+// A leaf that was in an artifact workspace comes back with its member id, so the tab's group finds
+// its editor, console and preview again (#E85D). Split nodes recurse through here too.
 QWidget *RelayWindow::buildNode(const QJsonObject &node) {
+    QWidget *built = buildNodeWidget(node);
+    if (!node.contains(QStringLiteral("split"))) tagWorkspaceMember(built, node);
+    return built;
+}
+
+QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
         if (node.contains(QStringLiteral("split"))) {
             auto *splitter = newSplitter(node.value(QStringLiteral("split")).toString() == QStringLiteral("v") ? Qt::Vertical : Qt::Horizontal);
             const auto children = node.value(QStringLiteral("children")).toArray();
