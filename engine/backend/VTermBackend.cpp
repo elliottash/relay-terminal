@@ -447,6 +447,12 @@ void VTermBackend::scrollPages(int pages)
         m_view->scrollPages(pages);
 }
 
+void VTermBackend::scrollToTop()
+{
+    if (m_view)
+        m_view->scrollToTop();
+}
+
 void VTermBackend::scrollToBottom()
 {
     if (m_view)

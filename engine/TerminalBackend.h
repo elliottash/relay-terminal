@@ -338,6 +338,7 @@ public:
     // ---- scrolling (e.g. PageUp/PageDown from a composer)
     virtual void scrollLines(int lines) = 0; // negative = back into history
     virtual void scrollPages(int pages) = 0;
+    virtual void scrollToTop() = 0;
     virtual void scrollToBottom() = 0;
     // True when the view is showing the newest output rather than sitting back in the history. The
     // host asks before it resizes the terminal (the thinking and queue bubbles are rows of the

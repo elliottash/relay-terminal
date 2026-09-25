@@ -291,6 +291,12 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
                 relay::auxiliaryZoom::zoom(m_activeLeaf, QApplication::focusWidget(), step);
             } else if (pane) pane->runTerminalMenuAction(id.mid(9), {}, {});
         }
+        // Alt+Home / Alt+End jump the pane's console to the very top of its scrollback or back
+        // to the newest output (#X55K). A viewer key: nothing is sent to the program behind it.
+        else if (id == QStringLiteral("terminal.scrollTop") || id == QStringLiteral("terminal.scrollBottom")) {
+            if (pane && !pane->scrollTerminalExtreme(id == QStringLiteral("terminal.scrollTop")))
+                pane->toast(QStringLiteral("This engine cannot scroll."), 2500);
+        }
         else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);
         else if (id == QStringLiteral("pane.moveUp")) moveActive(relay::panes::Direction::Up);

@@ -65,6 +65,7 @@ public:
 
     void scrollLines(int lines) override;
     void scrollPages(int pages) override;
+    void scrollToTop() override;
     void scrollToBottom() override;
     bool viewportAtBottom() const override;
     bool scrollToPrompt(int direction) override;

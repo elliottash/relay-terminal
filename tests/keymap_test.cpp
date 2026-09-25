@@ -79,6 +79,28 @@ private slots:
         QVERIFY(keymap.actsInsidePrograms(&altEsc));
         keymap.setProgramKeys(QStringLiteral("none"));
         QVERIFY(!keymap.actsInsidePrograms(&altEsc));
+        keymap.setProgramKeys(QStringLiteral("shift-only"));
+    }
+    // The console scroll jumps (#X55K): Alt+Home / Alt+End are viewer keys — the engine's
+    // scrollback moves, nothing reaches the program — so they answer while a program runs, like
+    // the view's own Ctrl+Shift+Home. Plain Alt+arrows stay the program's (#VD2M); Home and End
+    // under plain Alt are not multiplexer keys.
+    void altHomeEndScrollActsInsidePrograms() {
+        Keymap &keymap = Keymap::instance();
+        keymap.setPreset(QStringLiteral("relay"));
+        keymap.clearOverrides();
+        keymap.setProgramKeys(QStringLiteral("shift-only"));
+        QKeyEvent altHome(QEvent::KeyPress, Qt::Key_Home, Qt::AltModifier, QString());
+        QKeyEvent altEnd(QEvent::KeyPress, Qt::Key_End, Qt::AltModifier, QString());
+        QCOMPARE(keymap.match(&altHome), QStringLiteral("terminal.scrollTop"));
+        QCOMPARE(keymap.match(&altEnd), QStringLiteral("terminal.scrollBottom"));
+        QVERIFY(keymap.actsInsidePrograms(&altHome));
+        QVERIFY(keymap.actsInsidePrograms(&altEnd));
+        // "none" hands every key to the program — the owner's program-keys choice wins over ours.
+        keymap.setProgramKeys(QStringLiteral("none"));
+        QVERIFY(!keymap.actsInsidePrograms(&altHome));
+        QVERIFY(!keymap.actsInsidePrograms(&altEnd));
+        keymap.setProgramKeys(QStringLiteral("shift-only"));
     }
     // Program mode (#S976) is reached from the chip, the cycle and the busy row; no key of its own.
     void programModeActionIsAvailableAndUnbound() {

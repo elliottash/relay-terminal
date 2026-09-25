@@ -139,7 +139,15 @@ public:
         // From the prompt box it already never reaches the program, so this is consistency, not
         // a new claim on the key: the first press is still only a Ctrl+C for every other program.
         const bool stop = action == QStringLiteral("terminal.interrupt");
-        return dimmer || stop || fkey || shiftAltArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
+        // Alt+Home / Alt+End jump the scrollback to its top or bottom. They are viewer keys like
+        // the Ctrl+Shift+Home the view already answers inside a program: nothing is sent to the
+        // program, and the one time they are wanted is while a program (an agent console) is the
+        // thing that filled the scrollback. #VD2M kept plain Alt+arrows for the program's pane
+        // navigation; Alt+Home/Alt+End are not multiplexer keys (nothing in zellij, tmux or
+        // readline binds them by default), so claiming them costs no program its key.
+        const bool scroll = action == QStringLiteral("terminal.scrollTop")
+                            || action == QStringLiteral("terminal.scrollBottom");
+        return dimmer || stop || scroll || fkey || shiftAltArrow || ((mods & Qt::ControlModifier) && (mods & Qt::ShiftModifier));
     }
 
     void setProgramKeys(const QString &mode) { writeSetting(QStringLiteral("program_keys"), mode); }
@@ -278,6 +286,8 @@ private:
         add("terminal.zoomIn", "terminal", "Zoom terminal in", {QStringLiteral("Ctrl++"), QStringLiteral("Ctrl+="), QStringLiteral("Ctrl+Shift+=")});
         add("terminal.zoomOut", "terminal", "Zoom terminal out", {QStringLiteral("Ctrl+-"), QStringLiteral("Ctrl+Shift+-")});
         add("terminal.zoomReset", "terminal", "Reset terminal zoom", {QStringLiteral("Ctrl+0"), QStringLiteral("Ctrl+Shift+0")});
+        add("terminal.scrollTop", "terminal", "Scroll the console to the very top of its scrollback", {QStringLiteral("Alt+Home")});
+        add("terminal.scrollBottom", "terminal", "Scroll the console back to the bottom (the newest output)", {QStringLiteral("Alt+End")});
         add("pane.moveLeft", "pane", "Move pane left (swap with or dock beside the neighbor; past the page edge, into a column of its own; then the Move-down key docks it beneath)",
             {QStringLiteral("Ctrl+Alt+Left")});
         add("pane.moveRight", "pane", "Move pane right (past the page edge, into a column of its own; then the Move-down key docks it beneath)", {QStringLiteral("Ctrl+Alt+Right")});

@@ -11468,6 +11468,14 @@ private:
         showNextToast();
     }
 public:
+    // Jump the terminal's scrollback to its very top or back to the newest output (Alt+Home /
+    // Alt+End, #X55K). Says whether the engine could, so the caller can hint when it could not.
+    bool scrollTerminalExtreme(bool top) {
+        if (!m_backend || !(m_backend->capabilities() & relay::TerminalBackend::ScrollControl)) return false;
+        if (top) m_backend->scrollToTop();
+        else m_backend->scrollToBottom();
+        return true;
+    }
 private:
 
     // Scroll the terminal's scrollback by one page (the engine's viewport).
