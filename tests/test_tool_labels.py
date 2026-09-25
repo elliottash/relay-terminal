@@ -618,3 +618,49 @@ class RefusalGradeTests(unittest.TestCase):
         runtime = T.result_label("program_input", {}, {"ok": False, "refused": "busy"})
         self.assertNotIn("refused", runtime)
         self.assertEqual(runtime["error"], "refused: busy")
+
+
+class PaneSendLabelTests(unittest.TestCase):
+    """#R5TC shipped `pane_send`'s outcome note in `_base`, which has no `result`: every call
+    raised NameError at `tool_started`, before the tool ran — the worker log holds no successful
+    pane_send at all (#0CJY). The note now rides `result_label`, where the result is."""
+
+    def test_started_label_names_the_pane_without_the_result(self):
+        label = T.started_label("pane_send", {"pane": "p2"})
+        self.assertEqual(label["kind"], "agent")
+        self.assertEqual(label["running"], "messaging pane p2")
+        self.assertEqual(label["title"], "sent to pane p2")
+
+    def test_the_outcome_note_rides_the_result_title(self):
+        for outcome, note in (("woke", " · woke it"),
+                              ("delivered", " · delivered · it is busy"),
+                              ("no_wake", " · delivered · no wake")):
+            with self.subTest(outcome=outcome):
+                label = T.result_label("pane_send", {"pane": "p2"},
+                                       {"ok": True, "outcome": outcome})
+                self.assertTrue(label["ok"])
+                self.assertEqual(label["title"], f"sent to pane p2{note}")
+
+    def test_a_send_that_never_happened_stays_plain(self):
+        label = T.result_label("pane_send", {"pane": "p2"}, {"ok": False, "refused": "busy"})
+        self.assertFalse(label["ok"])
+        self.assertEqual(label["title"], "message pane p2")
+
+
+class EveryToolLabels(unittest.TestCase):
+    """The sweep #0CJY asks for: whatever a pane's executor offers, both label halves must build.
+    `pane_send` skipped this file entirely when it landed."""
+
+    def test_every_executor_tool_labels_at_start_and_result(self):
+        import tempfile, threading
+        from relay_core.tools import ToolExecutor
+        with tempfile.TemporaryDirectory() as root:
+            executor = ToolExecutor(root, lambda event: None, threading.Event(), None, None)
+            executor.panes.roster([{"handle": "p2", "title": "Release notes",
+                                    "workspace": "/w", "busy": False}], "p1")
+            names = [tool["function"]["name"] for tool in executor.tools()]
+            self.assertIn("pane_send", names)
+            for name in names:
+                with self.subTest(name=name):
+                    T.started_label(name, {})
+                    T.result_label(name, {}, {})

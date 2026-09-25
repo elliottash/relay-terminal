@@ -469,6 +469,31 @@ class ToolLabelEventTests(unittest.TestCase):
         self.assertEqual(label['title'], 'edit note.txt')
         self.assertTrue(label['error'].startswith('old_string was not found'))
 
+    def test_a_label_bug_cannot_end_the_turn(self):
+        # #0CJY: pane 6dbee2a7's turn died on a NameError inside tool_labels.started_label,
+        # before the tool even ran. A label is presentation: the call happens on a plain-name
+        # label, the ✓/✗ stays honest, and the turn finishes.
+        import relay_core.tool_labels as labels
+        def boom(*args, **kwargs):
+            raise NameError('result')
+        started, finished = labels.started_label, labels.result_label
+        labels.started_label, labels.result_label = boom, boom
+        try:
+            agent, events = self.run_tool('run_command', {'command': 'echo hi'})
+        finally:
+            labels.started_label, labels.result_label = started, finished
+        self.assertEqual(self.of(events, 'tool_started')[0]['label'],
+                         {'kind': 'tool', 'running': 'run_command', 'title': 'run_command'})
+        result = self.of(events, 'tool_result')[0]
+        self.assertEqual(result['label'],
+                         {'kind': 'tool', 'running': 'run_command', 'title': 'run_command',
+                          'ok': True})
+        self.assertEqual(result['result']['exit_code'], 0)
+        # The turn reached its summary: the model answered after the call, nothing ended early.
+        summary = self.of(events, 'turn_summary')[0]
+        self.assertEqual(summary['tools'][0]['name'], 'run_command')
+        self.assertTrue(summary['tools'][0]['ok'])
+
     def test_the_stored_output_gains_a_detail_and_keeps_everything_else(self):
         agent, events = self.run_tool('run_command', {'command': 'printf hello'})
         turn_id = self.of(events, 'tool_result')[0]['turn_id']

@@ -606,6 +606,25 @@ READONLY_REFUSAL = (
 CARD_BLOCKED = READONLY_BLOCKED | {"command_output", "stop_command"}
 
 
+def _safe_label(builder, name, *args, **kwargs) -> dict:
+    """A tool label is presentation (#TK9C); the call it describes is the work. If building one
+    raises, the turn carries the plain tool name instead of ending: `pane_send`'s label
+    NameErrored this way for every agent that called it, twice killing a half-hour turn before
+    the tool ran (#0CJY). For `result_label` the call's verdict is still reported honestly."""
+    try:
+        return builder(name, *args, **kwargs)
+    except Exception as exc:
+        logs.event(_log, "label_error", level_name="warning", tool=name,
+                   error=f"{type(exc).__name__}: {exc}"[:200])
+        label = {"kind": "tool", "running": name, "title": name}
+        if len(args) >= 2:  # result_label(name, args, result, …): keep the ✓/✗ truthful
+            try:
+                label["ok"] = tool_labels.call_ok(args[1])
+            except Exception:
+                label["ok"] = False
+        return label
+
+
 class Agent:
     def __init__(self, config: ProviderConfig, workspace: str, emit: Callable[[dict], None],
                  *, provider=None, max_steps: int = DEFAULT_MAX_STEPS, keybindings=None, skills=None,
@@ -2664,14 +2683,14 @@ class Agent:
                             if batch is not None and self.subagents.handles(func["name"]):
                                 preview = self.subagents.preview(func["name"], args)
                                 self.emit({"event": "tool_started", "tool": func["name"], "preview": preview,
-                                           "label": tool_labels.started_label(func["name"], label_args),
+                                           "label": _safe_label(tool_labels.started_label, func["name"], label_args),
                                            "turn_id": turn_id, "call_id": call["id"]})
                                 result = self.subagents.run_tool(func["name"], args, call["id"], batch, self.cancel_event)
                                 add({"role": "tool", "tool_call_id": call["id"],
                                      "content": json.dumps(result, ensure_ascii=False)})
                                 self._autosave_soon()
                                 ms = int((time.monotonic() - call_started) * 1000)
-                                label = tool_labels.result_label(func["name"], label_args, result, ms=ms)
+                                label = _safe_label(tool_labels.result_label, func["name"], label_args, result, ms=ms)
                                 self._record_tool(record, call["id"], func["name"], preview, result, ms,
                                                   label=label, args=label_args)
                                 self.emit({"event": "tool_result", "tool": func["name"], "result": result,
@@ -2684,7 +2703,7 @@ class Agent:
                             label_args = prepared.arguments if isinstance(prepared.arguments, dict) else label_args
                             label_existed, label_diff = prepared.existed, getattr(prepared, "diff", "")
                             self.emit({"event": "tool_started", "tool": prepared.name, "preview": prepared.preview,
-                                       "label": tool_labels.started_label(prepared.name, label_args,
+                                       "label": _safe_label(tool_labels.started_label, prepared.name, label_args,
                                                                           existed=label_existed),
                                        "turn_id": turn_id, "call_id": call["id"]})
                             result = self._execute(prepared, turn)
@@ -2701,7 +2720,7 @@ class Agent:
                          "content": json.dumps(model_result(func["name"], result), ensure_ascii=False)})
                     self._autosave_soon()
                     ms = int((time.monotonic() - call_started) * 1000)
-                    label = tool_labels.result_label(func["name"], label_args, result, ms=ms,
+                    label = _safe_label(tool_labels.result_label, func["name"], label_args, result, ms=ms,
                                                      existed=label_existed)
                     self._record_tool(record, call["id"], func["name"], preview, result, ms,
                                       label=label, args=label_args, diff=label_diff)
@@ -4898,7 +4917,7 @@ def transcript_items(messages: list) -> list:
             except ValueError:
                 result = None
             if isinstance(result, dict):
-                item["label"] = tool_labels.result_label(name, args, result)
+                item["label"] = _safe_label(tool_labels.result_label, name, args, result)
         elif message.get("tool_calls"):
             pending = []
             for call in message["tool_calls"]:

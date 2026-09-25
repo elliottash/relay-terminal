@@ -311,6 +311,12 @@ def result_label(name, args, result, *, ms=None, existed=None) -> dict:
     happened = ok or not _error_message(result)
     label = {"kind": base["kind"], "running": base["running"],
              "title": base["title"] if happened else base["failed"], "ok": ok}
+    if name == "pane_send" and ok:
+        # "sent to pane 2 (Release notes) · woke it" (#R5TC): the outcome is the difference
+        # between "they will see this now" and "they will see it eventually". `_base` has no
+        # result, so the note is appended here (#0CJY).
+        label["title"] += {"woke": " · woke it", "delivered": " · delivered · it is busy",
+                           "no_wake": " · delivered · no wake"}.get(result.get("outcome"), "")
     if result.get("refused") is True:
         label["refused"] = True
     if result.get("still_running"):
@@ -442,14 +448,11 @@ def _base(name, args: dict, existed) -> dict:
         return _row("agent", "listing the other panes", "listed the other panes",
                     "list the other panes")
     if name == "pane_send":
-        # "sent to pane 2 (Release notes) · woke it" (#R5TC): the outcome is the difference
-        # between "they will see this now" and "they will see this eventually".
+        # "sent to pane 2 (Release notes) · woke it" (#R5TC). The outcome note needs `result`,
+        # which only `result_label` has — referring to it here NameErrored every pane_send call
+        # before the tool even ran (#0CJY), so the note lives in `result_label` now.
         to = _short(args.get("pane"), 12) or "a pane"
-        outcome = result.get("outcome") if isinstance(result, dict) else None
-        note = {"woke": " · woke it", "delivered": " · delivered · it is busy",
-                "no_wake": " · delivered · no wake"}.get(outcome, "") if result is not None else ""
-        return _row("agent", f"messaging pane {to}", f"sent to pane {to}{note}",
-                    f"message pane {to}")
+        return _row("agent", f"messaging pane {to}", f"sent to pane {to}", f"message pane {to}")
     if name == "type_into_program":
         typed = _typed(args)
         return _row("input", f"typing {typed}", f"typed {typed}", "type into the program")
