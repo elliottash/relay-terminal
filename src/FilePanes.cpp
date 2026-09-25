@@ -930,6 +930,8 @@ namespace {
 // "Review before apply" is remembered per workspace — the tab's project, or the file's folder for
 // a tab with none — under one QSettings group.
 const QString kReviewGroup = QStringLiteral("artifact/reviewBeforeApply");
+// Where task plugins are looked for (`FilePreview::setPluginSearch`); defined further down.
+relay::agent::PluginSearch &pluginSearch();
 }  // namespace
 
 ArtifactDock::ArtifactDock(QWidget *parent) : QWidget(parent), m_context(new relay::agent::ArtifactContext) {
@@ -1099,6 +1101,13 @@ void ArtifactDock::fold() {
 
 void ArtifactDock::ensureConsole() {
     if (m_console || !onCreateConsole || !m_body) return;
+    // The plugin is looked up again now. A pane opens its file in its constructor, before the
+    // window has told the file panes where plugins live, so the first file of a session was
+    // resolved against no search at all and its console had no plugin: no plugin actions, no
+    // `/` commands, no `plugin` on the wire. Everything that shows the plugin is drawn by the
+    // console, and the console is built here, after the window has wired the pane.
+    if (!m_context->file().isEmpty())
+        m_context->setPlugin(relay::agent::pluginForFile(m_context->file(), pluginSearch()));
     // The context sends a plugin command's prompt through the console it now has.
     QPointer<ArtifactDock> self(this);
     m_context->sendPrompt = [self](const QString &prompt) {

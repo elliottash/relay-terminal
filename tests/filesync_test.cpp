@@ -409,6 +409,38 @@ private slots:
         FilePreview::setPluginSearch({});
     }
 
+    // Found live: the window opens a pane's file in the pane's constructor and only then sets
+    // where plugins live, so the first Markdown file of a session had no plugin. The console is
+    // built later, on first expand, and that is when the plugin must be read.
+    void aFileOpenedBeforeThePluginSearchGetsItsPluginWhenTheConsoleIsBuilt() {
+        const QString md = m_dir.filePath(QStringLiteral("early.md"));
+        writeInPlace(md, "# Early\n");
+        const QString bundled = m_dir.filePath(QStringLiteral("bundled-late"));
+        QDir().mkpath(bundled + QStringLiteral("/markdown"));
+        writeInPlace(bundled + QStringLiteral("/markdown/plugin.json"),
+                     R"({"schema_version": 2, "id": "relay.markdown", "name": "Markdown", "activation": {"files": ["*.md"]}, )"
+                     R"("commands": [{"name": "outline", "description": "Outline it.", "action": {"kind": "prompt", "prompt": "Outline {file}."}}]})");
+        FilePreview::setPluginSearch({});
+        FilePreview preview;
+        QVERIFY(preview.open(md));
+        ArtifactDock *dock = preview.artifactDock();
+        QVERIFY(!dock->context()->plugin().valid());          // the order the window builds a pane in
+        relay::agent::PluginSearch search;
+        search.bundled = bundled;
+        FilePreview::setPluginSearch(search);
+        QWidget body;
+        dock->onCreateConsole = [&body](relay::agent::Context *, QWidget *) {
+            relay::agent::ConsoleHandle handle;
+            handle.widget = new QWidget(&body);
+            return handle;
+        };
+        dock->focusHelper();                                   // the first expand builds the console
+        QCOMPARE(dock->context()->plugin().id, QStringLiteral("relay.markdown"));
+        QCOMPARE(dock->context()->spec().plugin, QStringLiteral("relay.markdown"));
+        QCOMPARE(dock->context()->slashCommands().size(), 1);
+        FilePreview::setPluginSearch({});
+    }
+
     // U5: the file's record is the undo steps plus a per-turn change list, named by the words
     // that asked once the turn has ended. The typing around a change survives it.
     void theChangeListNamesTheTurnAndTheTypingSurvives() {

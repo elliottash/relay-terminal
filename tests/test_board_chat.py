@@ -171,6 +171,16 @@ class TabOfTest(unittest.TestCase):
         self.assertEqual(board_chat.tab_of("t0123456789ab/card:SSRQ", None), "")
         self.assertEqual(board_chat.tab_of("card:SSRQ", "t0123456789ab"), "t0123456789ab")
 
+    def test_an_artifact_consoles_key_names_a_file_not_the_tab(self):
+        # #PBZ4: the agent docked under an open file keys its conversation `<tab>/file:<path>`.
+        # Taken for the tab, a long path was refused ("tab must be the tab's id") and the
+        # console never configured; a short one would have re-keyed the board's tab.
+        long_key = "t0123456789ab/file:/tmp/claude-1000/pbz4b/sandbox/home/project/README.md"
+        self.assertEqual(board_chat.tab_of(long_key, "t0123456789ab"), "t0123456789ab")
+        self.assertEqual(board_chat.tab_of("t0123456789ab/file:/a.md", "t0123456789ab"), "t0123456789ab")
+        self.assertEqual(board_chat.tab_of("t0123456789ab/file:sha1:0123456789abcdef", None), "")
+        self.assertEqual(board_chat.tab_of("file:/a.md", "t0123456789ab"), "t0123456789ab")
+
     def test_no_spellings_at_all_is_no_tab(self):
         self.assertEqual(board_chat.tab_of(None, None), "")
 

@@ -302,7 +302,8 @@ def main():
                 # `persist.key` is the tab id by another name and wins when both are sent —
                 # except a card console's, which names one card's conversation and not the tab
                 # (`board_chat.tab_of`, card #KSKH): it must not become the board's tab, or
-                # every card session built afterwards is keyed under it.
+                # every card session built afterwards is keyed under it. An artifact console's
+                # `<tab>/file:<path>` is the same (card #PBZ4).
                 board.set_tab(board_chat.tab_of(context.persist_key if context is not None else "",
                                                 request.get("tab")))
                 # A console's board tools offer the console's set — merge, split, the import and

@@ -72,8 +72,14 @@ def tab_of(persist_key, tab) -> str:
     2026-09-23 with five cards' conversations filed under doubled keys, files no restart
     finds again, and which file a card got depending on which card page was open first. The
     card's key belongs to the conversation store; the tab id is the top-level `tab`.
+
+    An **artifact** console's key (card #PBZ4) is the same shape, `<tab>/file:<path>`: one open
+    file's conversation. Taken for the tab it was refused outright once the path made it longer
+    than `MAX_TAB` — the docked agent's first `configure` failed with "tab must be the tab's id"
+    — and a shorter one would have re-keyed the board's tab as a card key did.
     """
-    if isinstance(persist_key, str) and ("/card:" in persist_key or persist_key.startswith("card:")):
+    if isinstance(persist_key, str) and any(f"/{kind}:" in persist_key or persist_key.startswith(f"{kind}:")
+                                            for kind in ("card", "file")):
         persist_key = ""
     return validate_tab(persist_key or tab)
 
