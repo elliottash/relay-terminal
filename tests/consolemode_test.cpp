@@ -371,6 +371,37 @@ void aContextMaySwallowASubmit()
     CHECK_EQ(console.composerText(), QStringLiteral("discuss this card"));
     }
 
+    // The wedge of #X6XV, and what unwedges it. Busy follows agent_started/agent_finished,
+    // but a refused ask carries the worker's `agent_busy` on an error event and a set_model
+    // exclusive borrows `running` without a turn: in both cases no agent_finished will ever
+    // arrive for the id the pane holds, so the pane spins busy with nothing in flight and
+    // Esc's cancel — answered by an idle queue_changed — changed nothing. The queue is the
+    // worker's truth, so an event with nothing running, queued or steering clears the flag.
+void anIdleQueueChangedClearsABusyFlagNothingWillFinish()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.onWorkerLine = [](const QJsonObject &) {};
+    console.deliverWorkerEvent(QJsonObject{{QStringLiteral("event"), QStringLiteral("agent_started")},
+                                           {QStringLiteral("id"), QStringLiteral("t1")}});
+    CHECK(console.agentActive());
+    // A later ask is refused — a model switch landed mid-turn — and the refusal says the
+    // worker still counts an agent turn. Nothing will finish one now.
+    console.deliverWorkerEvent(QJsonObject{{QStringLiteral("event"), QStringLiteral("error")},
+                                           {QStringLiteral("id"), QStringLiteral("ask-7")},
+                                           {QStringLiteral("text"), QStringLiteral("An agent turn is already active.")},
+                                           {QStringLiteral("agent_busy"), true}});
+    CHECK(console.agentActive());
+    // Esc's `cancel` on an idle queue is answered with exactly this event.
+    console.deliverWorkerEvent(QJsonObject{{QStringLiteral("event"), QStringLiteral("queue_changed")},
+                                           {QStringLiteral("running"), QString()},
+                                           {QStringLiteral("paused"), false},
+                                           {QStringLiteral("items"), QJsonArray{}},
+                                           {QStringLiteral("steering"), QJsonArray{}}});
+    CHECK(!console.agentActive());
+    }
+
     // All three chords, on a console with **no shell**, and after a turn. Ctrl+Shift+Enter is
     // the composer's "terminal, never the model" chord; on a card it is the comment that writes
     // the thread and calls no model, so a console that has no terminal must still hand it to its
@@ -1742,6 +1773,7 @@ int main(int argc, char **argv)
     cases::queueRowArrowSendsOnlyThatPrompt();
     cases::anActionThatRebuildsItsOwnRowIsSafe();
     cases::aContextMaySwallowASubmit();
+    cases::anIdleQueueChangedClearsABusyFlagNothingWillFinish();
     cases::ctrlEnterStartsADeferredGuestOnItsFirstPrompt();
     cases::everyChordReachesTheContextWithItsOwnRoute();
     cases::aClickedActionTeachesItsLetter();
