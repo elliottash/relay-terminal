@@ -133,6 +133,8 @@ public:
     // Point it at a pane. A target with a token this pane is already serving keeps the picker and
     // its undo stack and only re-reads; any other token rebuilds it around the new pane.
     void setTarget(const Target &target);
+    // Worker role reports change the Jobs result, not the picker catalog or its active controls.
+    void setRoleSummaries(const QJsonObject &roles, const QJsonObject &tiers);
     const Target &target() const { return m_target; }
     QString servedToken() const { return m_target.token; }
     QString servedTitle() const { return m_target.title; }

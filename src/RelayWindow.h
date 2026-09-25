@@ -1422,6 +1422,11 @@ private:
         // is what every Options pane redraws on, so this pane re-reads its target there too.
         QPointer<ToolPane> guard(tool);
         relay::SettingsWatch::instance().listen(tool, [guard] {
+            if (!guard) return;
+            if (guard->property("skipNextModelsCurationRefresh").toBool()) {
+                guard->setProperty("skipNextModelsCurationRefresh", false);
+                return; // this pane already applied its own edit; rebuilding it can undo a click in flight
+            }
             if (auto *w = windowOf(guard)) w->refreshModelsPane(guard);
         });
         // The helper agent at the foot of all four tabs (owner, 2026-09-22: "there needs to be a
@@ -1455,7 +1460,13 @@ private:
     // thing that has to reach an open models pane without anybody pressing a key.
     void refreshModelsPaneFor(Pane *served) {
         if (!served) return;
-        if (ToolPane *tool = modelsPaneIn(pageOf(served))) refreshModelsPane(tool);
+        if (ToolPane *tool = modelsPaneIn(pageOf(served))) {
+            auto *view = modelsViewOf(tool);
+            if (!view) return;
+            const auto target = served->modelsTarget();
+            if (view->servedToken() == target.token)
+                view->setRoleSummaries(target.roleSummary, target.tierSummary);
+        }
     }
 
     // Point an open models pane at a pane, with the tab and filter the caller asked for. Shared by
@@ -1471,6 +1482,13 @@ private:
         if (served && served->allPresets().isEmpty())
             target.catalog = relay::models::catalogFrom(m_helperPresets.value(tabIdOf(pageOf(tool))));
         target.now = QDateTime::currentSecsSinceEpoch();
+        const auto listsChanged = target.listsChanged;
+        target.listsChanged = [this, guard, listsChanged] {
+            if (listsChanged) listsChanged();
+            // The source widget has already updated itself. Keep its controls stable when the
+            // batched SettingsWatch fan-out reaches the other panes a moment later.
+            if (m_curatedTimer && m_curatedTimer->isActive()) m_curatedSource = guard;
+        };
         target.focusBack = [guard, back] {
             auto *w = windowOf(guard);
             if (!w || !back) return;
@@ -2509,6 +2527,7 @@ private:
     // tick — owner, 2026-09-23: "the checkboxes are not responsive and they are laggy". Five ticks
     // in a row now cost one fan-out, a moment after the last.
     void modelsCurated() {
+        m_curatedSource.clear();
         if (!m_curatedTimer) {
             m_curatedTimer = new QTimer(this);
             m_curatedTimer->setSingleShot(true);
@@ -2519,6 +2538,9 @@ private:
     }
     void modelsCuratedNow() {
         if (m_curatedTimer) m_curatedTimer->stop();
+        if (m_curatedSource)
+            m_curatedSource->setProperty("skipNextModelsCurationRefresh", true);
+        m_curatedSource.clear();
         refreshSettingsPanes();
         for (Pane *each : allPanes()) {
             each->modelsCurationChanged();
@@ -2526,6 +2548,7 @@ private:
         }
     }
     QTimer *m_curatedTimer = nullptr;
+    QPointer<ToolPane> m_curatedSource;
     // `applyMainDefault` was here (card #MDL1). It copied rank 1 of the list into
     // `provider/preset`, `provider/model` and `agent/effort` so that a new pane, which read those
     // keys, would land on it — a second copy of the default that ran on five of the eleven paths

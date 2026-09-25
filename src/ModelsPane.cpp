@@ -300,6 +300,21 @@ void ModelsPane::setTarget(const Target &target) {
     if (!samePane) helperScreenMoved();
 }
 
+void ModelsPane::setRoleSummaries(const QJsonObject &roles, const QJsonObject &tiers) {
+    if (roles == m_target.roleSummary && tiers == m_target.tierSummary) return;
+    m_target.roleSummary = roles;
+    m_target.tierSummary = tiers;
+    JobsTab::Data jobsData;
+    jobsData.catalog = m_target.catalog;
+    jobsData.roles = roles;
+    jobsData.tiers = tiers;
+    jobsData.now = m_target.now;
+    jobsData.rolesChanged = m_target.rolesChanged;
+    jobsData.focusBack = m_target.focusBack;
+    m_jobs->setData(jobsData);
+    if (currentTab() == jobsTab()) helperScreenMoved();
+}
+
 void ModelsPane::updateHeader() {
     // Settings for every pane, said once (card #BXMS): a pane's own model is its box's to pick.
     m_header->setText(QStringLiteral("Shared model settings · choose an individual pane's active model in its model box"));

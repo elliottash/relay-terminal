@@ -26,6 +26,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QScrollBar>
+#include <QSignalSpy>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSettings>
@@ -475,6 +476,21 @@ private Q_SLOTS:
         QVERIFY(pane.picker()->defaultsButton(false) == nullptr);
         QVERIFY(pane.picker()->defaultsButton(true) == nullptr);
         QCOMPARE(pane.currentTab(), QStringLiteral("priorities"));
+    }
+
+    void workerRoleReportDoesNotRedrawAnActiveModelControl() {
+        Served served;
+        ModelsPane pane(providerSections());
+        pane.setTarget(targetFor(&served));
+        pane.showTab(ModelsPane::availableTab());
+        ModelPicker *picker = pane.picker();
+        QSignalSpy resets(picker->list()->model(), &QAbstractItemModel::modelReset);
+        QJsonObject role{{QStringLiteral("preset"), QStringLiteral("glm-coding")},
+                         {QStringLiteral("model"), QStringLiteral("glm-5.3")}};
+        pane.setRoleSummaries({{QStringLiteral("subagent"), role}}, {});
+        QCOMPARE(pane.picker(), picker);
+        QCOMPARE(resets.count(), 0);
+        QCOMPARE(pane.target().roleSummary.value(QStringLiteral("subagent")).toObject(), role);
     }
 
     // A pane's catalog arrives late: with no providers there is nothing to draw until the worker
