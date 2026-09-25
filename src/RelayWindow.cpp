@@ -415,29 +415,89 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
         // so they can be run from here or bound (issue #78BN).
         items << actionItem(panes, QStringLiteral("New pane to the right"),
                             QStringLiteral("Then ← ↑ ↓ within two seconds places it on that side"), QStringLiteral("pane.splitRight"));
+        // Cross-pane messaging (#R5TC): the person's way in is an instruction to their own
+        // agent — the palette entry only prefills it; the agent does the sending (pane_send).
+        if (pane && relay::panedir::Directory::instance().size() > 1) {
+            items << submenu(QStringLiteral("menu:panemsg"), panes, QStringLiteral("Message another pane…"),
+                             QStringLiteral("Your agent sends it as a message, not a command"), [this] {
+                QList<PaletteItem> children;
+                for (const QJsonValue &value : relay::panedir::Directory::instance().roster(
+                         m_active ? m_active->sessionToken() : QString())) {
+                    const QJsonObject row = value.toObject();
+                    const QString handle = row.value(QStringLiteral("pane")).toString();
+                    const QString title = row.value(QStringLiteral("title")).toString();
+                    PaletteItem item;
+                    item.key = QStringLiteral("panemsg:") + handle;
+                    item.section = QStringLiteral("Panes and tabs");
+                    item.label = QStringLiteral("Tell pane %1 (%2) something").arg(handle, title);
+                    item.detail = QStringLiteral("Prefills the prompt box for this pane's agent");
+                    item.run = [this, handle, title] {
+                        if (!m_active) return;
+                        m_active->setComposerText(
+                            QStringLiteral("Tell pane %1 (%2) that ").arg(handle, title));
+                        m_active->focusComposer();
+                    };
+                    children << item;
+                }
+                return children;
+            });
+        }
+        {
+            // The kill switch (#R5TC §10): flip agent/cross_pane off — no further send is
+            // accepted — and stop every turn a peer's message started, in every window; turns
+            // their own people started are left alone.
+            if (relay::panedir::Directory::instance().enabled()
+                && QSettings().value(QStringLiteral("agent/cross_pane"), true).toBool()) {
+                PaletteItem kill;
+                kill.key = QStringLiteral("pane.killswitch");
+                kill.section = app;
+                kill.label = QStringLiteral("Stop cross-pane messaging");
+                kill.detail = QStringLiteral("Until it is turned back on in Options; panes stop talking, turns started by a message are stopped");
+                kill.run = [] {
+                    QSettings().setValue(QStringLiteral("agent/cross_pane"), false);
+                    relay::panedir::Directory::instance().setEnabled(false);
+                    relay::SettingsWatch::instance().notify();
+                    for (QWidget *top : QApplication::topLevelWidgets())
+                        if (auto *w = dynamic_cast<RelayWindow *>(top))
+                            for (Pane *p : w->allPanes()) p->stopWokenTurn();
+                };
+                items << kill;
+            }
+        }
         items << actionItem(panes, QStringLiteral("New pane below"), QString(), QStringLiteral("pane.splitDown"));
         items << actionItem(panes, QStringLiteral("New pane to the left"), QString(), QStringLiteral("pane.splitLeft"));
         items << actionItem(panes, QStringLiteral("New pane above"), QString(), QStringLiteral("pane.splitUp"));
-        // SSH (#S5SH): the split is offered only while the pane is in a session it can re-run.
+        // SSH (#S5SH, #XQ8F): the split is offered only while the pane is in a session it can
+        // re-run, and from a remote pane a split that stays here has to be asked for by name. Every
+        // login is persistent now, so the separate persistent Connect is gone.
         if (pane && !pane->remoteCommandLine().isEmpty()) {
             QString host;
             const QString again = relay::ssh::rerunCommand(relay::ssh::processArgv(pane->foregroundPid()), &host);
             if (!again.isEmpty())
-                items << actionItem(panes, QStringLiteral("Split on the same host"),
+                items << actionItem(panes, QStringLiteral("Split right on the same host"),
                                     QStringLiteral("A pane to the right running %1; a shared connection needs no second login").arg(again),
                                     QStringLiteral("ssh.splitSameHost"));
+            items << actionItem(panes, QStringLiteral("New local pane"),
+                                QStringLiteral("A pane to the right on this machine, not on the host"),
+                                QStringLiteral("pane.splitLocal"));
+            items << actionItem(panes, QStringLiteral("Close and end the remote session"),
+                                QStringLiteral("The pane closes and its session on the host stops, not keeps running"),
+                                QStringLiteral("pane.closeEndRemote"));
         }
         {
             PaletteItem hosts = actionItem(panes, QStringLiteral("Connect to SSH…"),
                                            QStringLiteral("Choose a saved or recent host, or enter a new one"),
                                            QStringLiteral("ssh.connect"));
-            PaletteItem hostsPersistent = actionItem(panes, QStringLiteral("Connect to host (persistent)…"),
-                                                     QStringLiteral("mosh (or ssh) into a zellij or tmux session on the host; work survives disconnects and Relay restarts"),
-                                                     QStringLiteral("ssh.connectPersistent"));
             hosts.aliases = QStringLiteral("ssh mosh remote server login");
             hosts.typed = [this](const QString &search) { return sshTypedItems(search); };
             items << hosts;
-            items << hostsPersistent;
+        }
+        {
+            PaletteItem sessions = actionItem(panes, QStringLiteral("Remote sessions on this host…"),
+                                              QStringLiteral("The persistent sessions on this pane's host — reattach one in a new tab, or end it"),
+                                              QStringLiteral("ssh.remoteSessions"));
+            sessions.aliases = QStringLiteral("persistent tmux holder reattach");
+            items << sessions;
         }
         items << actionItem(panes, QStringLiteral("New tab"), QString(), QStringLiteral("tab.new"));
         items << actionItem(panes, QStringLiteral("New window"), QString(), QStringLiteral("window.new"));
