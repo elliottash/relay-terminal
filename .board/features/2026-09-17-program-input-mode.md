@@ -1,7 +1,7 @@
 ---
 id: S976
 type: work
-status: executing
+status: needs-verification
 labels: [feature, panes, agent-ui]
 component: [gui, worker]
 milestone: desktop-alpha
@@ -12,7 +12,7 @@ created: '2026-09-17'
 acceptance: typing into a running program from the prompt box works, with completion for at least one program's commands, and Terminal mode never starts an agent turn on a typo
 verify: {artifact: code, primary: script, also: [ai-visual], human: required, criteria: 'with python3, psql and sqlite3 at their prompts in a Relay pane, typing in the prompt box in Program mode reaches the program (no Take control), Tab offers that program''s completions, the chip reads PROGRAM; a typo in Terminal mode starts no agent turn', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: '`issues/feature_intake.txt`, 2026-09-17: "in terminal mode, is it better to be able to type non-commands and they will just go through? ... it would be great if you could type commands and they will just go into the claude command box. or should we have an alternative input mode for that? i guess that would be best, so you could for example have autocomplete for claude / codex commands."'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [0ccf9604, c45d3fab, 48e86790, 4646a7e6, 73fac983, 48cdadf3, 93bd0678, bb265e02], evidence: [docs/qa_evidence/2026-09-25-program-input-mode/], related: [P2W8, 33G0, 83YV, Y99T, JWSA], github: null}
 ---
 # A program input mode: type into the running program, with its own completions
 
@@ -82,10 +82,41 @@ Slice 2 of #P2W8 (owner 2026-09-25: "go big and build the whole thing ... then d
 ## Tasks
 
 - [x] Policy: lineEditorWaiting and targetFor(program) with tests (0ccf9604) <!-- t:h3 -->
-- [ ] Delivery to raw-mode programs — written in the working tree, uncommitted <!-- t:yk s=in-progress blocked_by=h3 -->
-- [ ] Fourth mode PROGRAM · <name> — written in the working tree, uncommitted <!-- t:8r s=in-progress blocked_by=h3 -->
-- [ ] Offer it: 'Type into it from here' beside Take control and in the waiting hint <!-- t:fa blocked_by=8r -->
-- [ ] route carries foreground_program; dispatch handles program/incomplete — written in the working tree, uncommitted <!-- t:qd s=in-progress blocked_by=yk -->
+- [x] Delivery to raw-mode programs (73fac983) <!-- t:yk -->
+- [x] Fourth mode PROGRAM · <name> (73fac983; chip ink, `!`/`*` and mode-change refresh 48cdadf3) <!-- t:8r -->
+- [x] Offer it: 'Type into it from here' beside Take control and in the waiting hint (73fac983, 48cdadf3; REPLs detected waiting 93bd0678; hint wording bb265e02) <!-- t:fa -->
+- [x] route carries foreground_program; dispatch handles program/incomplete (73fac983; PROGRAM mode never sent to the router 93bd0678) <!-- t:qd -->
 - [x] ProgramCompletion library and tests (python/ipython, psql, sqlite3, node) (c45d3fab, GUI link 4646a7e6) <!-- t:gm -->
 - [x] Terminal-mode typo: ✗ did you mean, no agent turn (48e86790) <!-- t:4k -->
-- [ ] Docs and live evidence <!-- t:db blocked_by=fa,qd,gm,4k -->
+- [x] Docs and live evidence (48cdadf3, 93bd0678; drive and screenshots in this card's commit) <!-- t:db -->
+
+## Execution Summary
+Program mode is built and landed: a fourth input mode, `PROGRAM · <name>`, for a line editor at its prompt. A "Type into it from here" offer on the busy row, the waiting hint, the mode chip's menu, `input.modeProgram` and Ctrl+I's cycle all turn it on. Lines are pasted into the program and never kept in shell history, Tab completes from `relay::completeProgram`, and the pane drops back to its previous mode when the program exits. A Terminal-mode typo prints `✗ … · did you mean …?` and starts no agent turn.
+
+Commits: `0ccf9604` policy (`lineEditorWaiting`, `targetFor(program)`); `c45d3fab` + `4646a7e6` ProgramCompletion (python/ipython, psql, sqlite3, node); `48e86790` typo refusal; `73fac983` the mode, delivery, routing (`foreground_program`, `program`/`incomplete` verdicts) and the busy-row offer; `48cdadf3` waiting-hint wording, the one-line refusal for a non-REPL, `!`/`*` as the program's own characters, chip ink, docs (ARCHITECTURE "Program mode", KEYBINDING-PRESETS).
+
+The live pass found three defects, all fixed:
+- **No REPL was ever seen waiting** (`93bd0678`). Measured at their prompts, python3 and sqlite3 block in `pselect6(nfds=1)` on fd 0 and node in `epoll_pwait` over a reopened tty fd; none of them is ever in `read()`, the only call the poll knew. So no offer and no hint appeared, and PROGRAM was missing from the cycle. `relay::input::waitsOnTerminal` now reads select/pselect6 and epoll (via `/proc/<pid>/fdinfo` `tfd:`), with unit tests on the measured lines.
+- **"Unknown input mode." on every keystroke** (`93bd0678`). The preview route sent `mode: "program"` to the worker's router. Protocol 36.2 says PROGRAM mode bypasses routing, so the GUI no longer asks the router.
+- **"did you mean" never fired for a real command** (`bb265e02`). The shell's `known_commands` are only its aliases and functions, so PATH programs are now read once per typo, and a transposed pair is tried before the one-edit ranker (which reaches `gio` first). The same commit stops the hint from telling a raw-mode line editor "Enter sends your answer to it", which is false in Auto.
+
+Live pass, isolated profile under Xvfb, driven by `docs/qa_evidence/2026-09-25-program-input-mode/drive.sh` with the binary the land.py build gate built from `bb265e02`'s tree:
+
+![python3 at >>> in Auto: busy row offers "Type into it from here", hint names it](docs/qa_evidence/2026-09-25-program-input-mode/01-python-waiting-auto.png)
+![chip PROGRAM · python3, print(1) in the box](docs/qa_evidence/2026-09-25-program-input-mode/02-python-program-chip.png)
+![Enter: the REPL printed 1, "Sent to python3", hint "your lines go to it", no Take control](docs/qa_evidence/2026-09-25-program-input-mode/03-python-printed.png)
+![exit(): chip back to auto, toast "Input: Auto · program exited"](docs/qa_evidence/2026-09-25-program-input-mode/04-python-exited-back-to-auto.png)
+![sqlite3 in PROGRAM mode: .ta + Tab completed to .tables](docs/qa_evidence/2026-09-25-program-input-mode/05-sqlite-tab-completed.png)
+![Enter: sqlite3 listed the table created a line earlier](docs/qa_evidence/2026-09-25-program-input-mode/06-sqlite-tables.png)
+![Terminal mode, gti status: "✗ command not found: gti · did you mean git?", text kept, no agent turn](docs/qa_evidence/2026-09-25-program-input-mode/07-terminal-typo-did-you-mean.png)
+![node in PROGRAM mode: 1+1 printed 2](docs/qa_evidence/2026-09-25-program-input-mode/08-node-program-printed.png)
+![cat (not a REPL), two-line draft: "cat takes one line at a time", draft kept](docs/qa_evidence/2026-09-25-program-input-mode/09-cat-multiline-refused.png)
+
+Limits of this pass: psql is not installed on this machine. Its backslash-command completion is covered by `programcompletion` only, and the verifier should run it live where psql exists. The drive sets `terminal/persistLocal=false`. Its sandbox has no systemd user bus, so Relay would otherwise fall back to the #87HB tmux holder, and a pane under the holder cannot see its foreground program at all. That is filed with measurements as #Y99T; the owner's desktop runs no holder. The stale `running` queue row visible in 04/07 predates this card and is filed as #JWSA.
+
+## Tests
+`ctest --test-dir build -R '^input$'`
+`ctest --test-dir build -R '^programcompletion$'`
+`ctest --test-dir build -R '^keymap$'`
+`ctest --test-dir build -R '^consolemode$'`
+manual: docs/qa_evidence/2026-09-25-program-input-mode/drive.sh (docs/qa_evidence/2026-09-25-program-input-mode/01-python-waiting-auto.png … 09-cat-multiline-refused.png)
