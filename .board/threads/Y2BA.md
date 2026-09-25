@@ -52,3 +52,10 @@ Builder died at the guest restart. Landed earlier: steps 1–2 (0e198884, 459c2e
 <!-- relay:entry 20260925T203000Z-r1 author=y2ba-fix2 kind=progress -->
 ### y2ba-fix2 · 2026-09-25 20:30
 Resumed. The killed builder's `BoardPane.cpp` hint and `boardsolo_test.cpp` landed in d850939f (`boardsolo` passes). The three live failures are gone at HEAD: re-drove `docs/qa_evidence/2026-09-25-card-panes/drive.sh` on a clean `git archive` build under Xvfb, **16 passed, 0 failed** — two card panes on Alpha and Bravo, both Plan turns streamed at once, `layout.json` holds 2 card nodes, both panes come back after a restart. The earlier failures were fixed by 459c2e59/d850939f plus OCR/check fixes in the drive script. Docs: `docs/ARCHITECTURE.md` Board section, "Several cards open at once: card panes". Removed b48afea2 (#9FX8) from links.commits, where it had been appended by mistake. Still open: t:wb's remainder — `CardDetail` in `src/CardPane.{h,cpp}` behind a `CardController`; `Kind::Card` itself landed in 459c2e59.
+
+<!-- relay:entry 20260925T214443Z-5a author=agent kind=event mention=E0Y0 model=k3 pane=fc1a77ed turn=46dc7f7d90f746138bbd7773c040726f/06f47ac8e1234e868ad8ca43b00adc74 -->
+mentioned in #E0Y0 · 2026-09-25 · agent
+
+<!-- relay:entry 20260925T224500Z-r2 author=y2ba-move kind=progress -->
+### y2ba-move · 2026-09-25 22:45
+Step 2 remainder landed: `CardDetail` (and `PriorityFlagButton`, `drawPriorityFlag`, the shared action-depth guard) moved verbatim out of `src/BoardPane.cpp` into new `src/CardPane.h`; the page's std::function callback surface is the plan's `CardController`, BoardView the host that implements it. No `CardPane.cpp`: the class is fully inline, an empty TU would be noise. Full build clean; `ctest -R 'boardsolo|boardpane|windowstate'` 3/3 after the move. The live evidence in `docs/qa_evidence/2026-09-25-card-panes/` (16/16) predates this code-motion-only refactor. Also landed #E0Y0's label editor via --take-foreign (dd02b23a, owner approved; its pane was idle ~1h) — it sat inside CardDetail and blocked the cut.

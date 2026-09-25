@@ -6,7 +6,7 @@ labels: [feature, switchboard, panes]
 assignee: y2ba-cards
 rank: zzzzzzzzzzzzw
 created: '2026-09-19'
-links: {plans: [], commits: [0e1988843e50, 459c2e59b814, d850939f504d, 103e2f60645d], evidence: [docs/qa_evidence/2026-09-25-card-panes/], related: [], github: null}
+links: {plans: [], commits: [0e1988843e50, 459c2e59b814, d850939f504d, 103e2f60645d, 9a13cfe2fc22], evidence: [docs/qa_evidence/2026-09-25-card-panes/], related: [], github: null}
 ---
 # Several cards open at once: solo card panes, then a Card pane kind of its own
 
@@ -34,5 +34,5 @@ Slice 1 of #P2W8 (Discussion points, "Cards as artifact panes"; owner: "go big a
 ## Tasks
 
 - [x] A0: pinSolo, openBoardCardInNewPane, Shift+Enter / pop-out button / new-card-while-open, layout node, link routing <!-- t:ss --> (0e198884)
-- [ ] Kind::Card with CardController and CardPane.{h,cpp}; shared per-tab model <!-- t:wb blocked_by=ss -->
-- [ ] Docs and live evidence <!-- t:g5 blocked_by=wb -->
+- [x] Kind::Card with CardController and CardPane.{h,cpp}; shared per-tab model <!-- t:wb --> (459c2e59 + CardDetail moved to src/CardPane.h)
+- [x] Docs and live evidence <!-- t:g5 --> (103e2f60, 16/16 live pass)
