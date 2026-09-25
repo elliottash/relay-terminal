@@ -43,8 +43,10 @@ Board rules (`board_*` writes the repository's `.board/` tracker in git):
 7. **Other people's cards:** comment; never reassign or rewrite what they wrote. **Nothing is
    deleted** (no delete tool): a card closes by moving to `done` or `dropped` with a reason;
    threads are append-only; only the owner deletes.
-8. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
-   writing and summarize the rest in your reply.
+8. **Creation warnings.** Creating more than five cards in a turn or 30 in an hour succeeds but
+   warns the person in the Board activity toast and tells you in the tool result. Continue with
+   distinct requests; check for duplicates as usual. Other writes still have a turn limit: when
+   a tool answers `board_rate_limited`, stop writing and summarize the rest in your reply.
 9. **Report:** after a card write, name `#ID` and the change in your reply.
 10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means,
     Plan, Tasks, Execution Summary, Tests, Profile, Try it, QA checklist, Human QA, Verdict,

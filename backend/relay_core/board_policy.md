@@ -13,7 +13,7 @@
      description or the `deliver` skill already states is read there instead — the landing detail
      of the three sizes and the `## Tests` section in the skill, the stamps and the close-a-QA-card
      rule in `board_move_card`, rewriting the user's text in `board_update_card`, labelling in
-     `board_create_card`'s `labels`, the ceilings in the `board_rate_limited` refusal itself.
+     `board_create_card`'s `labels`, and the per-turn creation warning in its result.
      Nothing was deleted, and `<board>/POLICY.md` — generated from this file plus that skill plus
      the appendix — still carries every sentence for a guest who has no board tools.
      v7, 2026-09-21 (#WC3E): rule 5 stops the implementer writing the checklist, and rule 10 adds
@@ -51,8 +51,10 @@ Board rules (`board_*` writes the repository's `issues/` tracker in git):
 7. **Other people's cards:** comment; never reassign or rewrite what they wrote. **Nothing is
    deleted** (no delete tool): a card closes by moving to `done` or `dropped` with a reason;
    threads are append-only; only the owner deletes.
-8. **Limits.** A few cards per turn and per hour. When a tool answers `board_rate_limited`, stop
-   writing and summarize the rest in your reply.
+8. **Creation warnings.** Creating more than five cards in a turn or 30 in an hour succeeds but
+   warns the person in the Board activity toast and tells you in the tool result. Continue with
+   distinct requests; check for duplicates as usual. Other writes still have a turn limit: when
+   a tool answers `board_rate_limited`, stop writing and summarize the rest in your reply.
 9. **Report:** after a card write, name `#ID` and the change in your reply.
 10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means,
     Plan, Tasks, Execution Summary, Tests, Profile, Try it, QA checklist, Human QA, Verdict,

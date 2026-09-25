@@ -20,8 +20,9 @@ Guardrails, in one place so they can be reviewed:
   new text verbatim (decision 12.3).
 * **Immutable fields:** `id`, `type`, `created`, `source`, `rank`, `status`, `private`
   are never writable through `board_update_card` (rank and status move).
-* **Limits:** creates and other writes per turn, creates per hour per workspace; over the
-  limit the tool returns `{"code": "board_rate_limited"}` instead of writing.
+* **Limits:** create counts per turn and per hour are advisory: the first create past each
+  threshold succeeds with a warning in the result and the pane's activity toast. Other writes
+  remain capped per turn and return `{"code": "board_rate_limited"}` at the limit.
 * **Atomic, hash-checked writes** through `board.Board.save`; a stale `base_hash` returns
   `{"code": "board_conflict", "current_hash": ...}` and nothing is overwritten.
 * **Undo:** each write records a snapshot (file bytes plus the thread length before it),
@@ -89,9 +90,9 @@ UNINITIALIZED_NOTE = ("\n\nBoard: this project has no Board yet; creating a card
 #: read, move or comment on until the first card exists.
 UNINITIALIZED_TOOLS = ("board_create_card",)
 
-#: Per-turn and per-hour ceilings (design 6.3).  `board.yaml` may override the create ceiling.
+#: Advisory create thresholds and the other-write ceiling (design 6.3).
 DEFAULT_LIMITS = {
-    "max_creates_per_turn": 20,
+    "max_creates_per_turn": 5,
     "max_writes_per_turn": 100,
     "max_creates_per_hour": 30,
 }
@@ -688,7 +689,7 @@ class RateState:
     """Creates per hour, per workspace, shared by every pane of that workspace.
 
     Kept in one small JSON file under `.relay/` and updated under `flock`, so two panes
-    writing at the same moment cannot both slip past the ceiling.
+    writing at the same moment get one consistent crossing count.
     """
 
     def __init__(self, path: Path | None, clock: Callable[[], float] = time.time):
@@ -719,8 +720,8 @@ class RateState:
         cutoff = self.clock() - 3600
         return sum(1 for s in self._load() if s >= cutoff)
 
-    def claim(self, ceiling: int) -> bool:
-        """Record one creation, or return False when the hour's ceiling is already used."""
+    def record(self, count: int = 1) -> tuple[int, int]:
+        """Record creations and return the counts before and after, even past a threshold."""
         lock = None
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -729,11 +730,10 @@ class RateState:
         try:
             now = self.clock()
             stamps = [s for s in self._load() if s >= now - 3600]
-            if len(stamps) >= ceiling:
-                return False
-            stamps.append(now)
+            before = len(stamps)
+            stamps.extend([now] * count)
             self._store(stamps)
-            return True
+            return before, len(stamps)
         finally:
             if lock is not None:
                 fcntl.flock(lock, fcntl.LOCK_UN)
@@ -742,13 +742,12 @@ class RateState:
 
 # --------------------------------------------------------------- whole-board cleanup
 
-#: A cleanup rewrites many cards in one turn, so it runs on its own ceilings rather than a
-#: pane turn's five creates and a hundred writes.  They are still ceilings: a run that wants
-#: more than this has lost the plot and should stop and report.
+#: A cleanup can rewrite many cards, so it raises the other-write cap; create counts use the
+#: same advisory thresholds as pane turns.
 CLEANUP_LIMITS = {
-    "max_creates_per_turn": 60,
+    "max_creates_per_turn": 5,
     "max_writes_per_turn": 400,
-    "max_creates_per_hour": 200,
+    "max_creates_per_hour": 30,
 }
 
 #: Where a run's changelog is written.  `issues/` holds cards and threads and nothing else,
@@ -1941,17 +1940,26 @@ class BoardTools:
         if self.autonomy == "off":
             raise BoardToolError("Board writes are turned off for this workspace (autonomy: off).",
                                  code="board_autonomy_off")
-        if name == "board_create_card":
-            if self.creates_this_turn >= self.limit("max_creates_per_turn"):
-                raise BoardToolError(
-                    f"Board limit: {self.limit('max_creates_per_turn')} new cards per turn. "
-                    "Summarize the remaining requests in your reply instead of creating more.",
-                    code="board_rate_limited", scope="turn", limit=self.limit("max_creates_per_turn"))
-        elif self.writes_this_turn >= self.limit("max_writes_per_turn"):
+        if name != "board_create_card" and self.writes_this_turn >= self.limit("max_writes_per_turn"):
             raise BoardToolError(
                 f"Board limit: {self.limit('max_writes_per_turn')} card writes per turn. "
                 "Summarize the rest in your reply.",
                 code="board_rate_limited", scope="turn", limit=self.limit("max_writes_per_turn"))
+
+    def _create_warnings(self, before_turn: int, after_turn: int,
+                         before_hour: int, after_hour: int) -> list[str]:
+        """Warn once when a create or split crosses either advisory threshold."""
+        if not self.enforce_limits:
+            return []
+        warnings = []
+        turn_limit = self.limit("max_creates_per_turn")
+        hour_limit = self.limit("max_creates_per_hour")
+        if before_turn <= turn_limit < after_turn:
+            warnings.append(f"More than {turn_limit} Board cards created this turn; creation continues.")
+        if before_hour <= hour_limit < after_hour:
+            warnings.append(f"More than {hour_limit} Board cards created in this workspace "
+                            "in the last hour; creation continues.")
+        return warnings
 
     # ---- reads ----------------------------------------------------------------
     def _tab_map(self) -> dict[str, dict]:
@@ -2326,12 +2334,6 @@ class BoardTools:
                 "the call with not_duplicate_of listing the ids you checked.",
                 code="board_possible_duplicate", possible_duplicates=duplicates)
 
-        if self.enforce_limits and not self.rate.claim(self.limit("max_creates_per_hour")):
-            raise BoardToolError(
-                f"Board limit: {self.limit('max_creates_per_hour')} new cards per hour for this "
-                "workspace. Summarize the remaining requests in your reply.",
-                code="board_rate_limited", scope="hour", limit=self.limit("max_creates_per_hour"))
-
         taken = [c.id for c in cards if c.id]
         card = B.new_card(card_type, title, status, card_id=B.new_id(taken), request=request,
                           rank=self.board.next_rank([c for c in cards if c.status == status]),
@@ -2347,17 +2349,24 @@ class BoardTools:
         except B.BoardError as exc:
             raise BoardToolError(str(exc)) from exc
 
+        before_turn = self.creates_this_turn
         self.creates_this_turn += 1
+        before_hour, after_hour = self.rate.record() if self.enforce_limits else (0, 0)
+        warnings = self._create_warnings(before_turn, self.creates_this_turn,
+                                         before_hour, after_hour)
         self.writes_this_turn += 1
         rel = str(path.relative_to(self.board.repo))
         size = self._thread_size(card)
         self._append(card, f"- ✦ {self.context.actor} created this card in "
                            f"{_column_label(status)} · {rel}", kind="event")
         summary = f"created · {_column_label(status)}"
+        if warnings:
+            summary += " · ⚠ " + " · ⚠ ".join(warnings)
         write_id = self._record("create", card, summary, None, size)
         return {"id": card.id, "path": rel, "status": status, "section": section or None,
                 "tab": self._tab_of(card),
-                "hash": B.file_hash(path), "write_id": write_id, "created": True}
+                "hash": B.file_hash(path), "write_id": write_id, "created": True,
+                **({"warnings": warnings} if warnings else {})}
 
     def duplicates(self, title: str, request: str, cards: Sequence[B.Card] | None = None,
                    excused: set[str] = frozenset(), threshold: float = 0.66) -> list[dict]:
@@ -3853,13 +3862,6 @@ class BoardTools:
                           "status": str(part.get("status") or card.status).strip().lower(),
                           "tab": part.get("tab"),
                           "labels": _string_list(part.get("labels"), f"part {index} labels")})
-        if self.enforce_limits:
-            for _ in clean:
-                if not self.rate.claim(self.limit("max_creates_per_hour")):
-                    raise BoardToolError(
-                        f"Board limit: {self.limit('max_creates_per_hour')} new cards per hour "
-                        "for this workspace. Summarize the rest of the split in your reply.",
-                        code="board_rate_limited", scope="hour")
         category = (B.MEMORY_FOLDER if card.type == "memory" else B.ALIAS_FOLDER if card.type == "alias"
                     else self.board.category_of(card.path))
         size = self._thread_size(card)
@@ -3868,9 +3870,15 @@ class BoardTools:
         released = self._release_on_close(card, "dropped") if args.get("close") else ""
         result = B.split_card(self.board, card, clean, reason=reason, category=category,
                               close=bool(args.get("close")), tab_category=self._category_for_tab)
+        before_turn = self.creates_this_turn
         self.creates_this_turn += len(clean)
+        before_hour, after_hour = self.rate.record(len(clean)) if self.enforce_limits else (0, 0)
+        warnings = self._create_warnings(before_turn, self.creates_this_turn,
+                                         before_hour, after_hour)
         self.writes_this_turn += 1
         summary = ("split into " + ", ".join(f"#{c['id']} {c['title']}" for c in result["children"]))[:400]
+        if warnings:
+            summary += " · ⚠ " + " · ⚠ ".join(warnings)
         self._append(card, f"- ✦ {self.context.actor} {summary} · {reason}"
                            + (" · this card is closed; every piece moved out" if result["closed"] else "")
                            + (f" · session {released[:8]} released" if released else ""),
@@ -3885,7 +3893,8 @@ class BoardTools:
                                 cards=[c["id"] for c in result["children"]])
         return {"id": card.id, "path": result["path"], "hash": result["hash"],
                 "children": result["children"], "closed": result["closed"],
-                "write_id": write_id, "summary": summary}
+                "write_id": write_id, "summary": summary,
+                **({"warnings": warnings} if warnings else {})}
 
     def _sections(self, args: dict) -> dict:
         """`board_sections`: the board's own columns and category folders (protocol 19.9).

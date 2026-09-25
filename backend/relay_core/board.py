@@ -1334,7 +1334,7 @@ DEFAULT_CONFIG = {
              {"id": "done", "filter": "status:done,dropped"}],
     "columns": ["inbox", "discussing", "planning", "planned", "executing", "needs-verification",
                 "needs-qa", "done"],
-    "agent": {"autonomy": "auto", "max_creates_per_turn": 20},
+    "agent": {"autonomy": "auto", "max_creates_per_turn": 5},
     "memory": {"autonomy": "auto"},
     # Signals (#AQ6X decision 9): `auto_work` is whether a failing check nobody is on starts its
     # own agent thread.  The owner's "yes by default, but its optional", so a board that predates
@@ -1350,7 +1350,7 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
   {id: planning, folder: planning},
   {id: deferred, filter: "status:deferred"}, {id: done, filter: "status:done,dropped"}]
 columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done]
-agent: {autonomy: auto, max_creates_per_turn: 20}
+agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
 signals: {auto_work: true}
 """

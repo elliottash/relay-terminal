@@ -3284,10 +3284,10 @@ read tools and drops the four writes.
 - **Every write appends a thread entry** with `author`, `model`, `pane` and `turn`.
 - **Writes are atomic and hash-checked**, exactly like `write_file`: a stale `base_hash` returns
   `{"code": "board_conflict", "current_hash"}` and nothing is overwritten.
-- **Limits:** 5 creates and 20 other writes per turn, 30 creates per hour per workspace (the hourly
-  count lives in `<workspace>/.relay/board-rate.json` under `flock`, so panes share it). Over the
-  limit the tool returns `{"code": "board_rate_limited", "scope": "turn"|"hour"}` and the policy
-  tells the agent to summarize the rest in its reply.
+- **Limits:** the sixth create in a turn and the 31st in an hour per workspace succeed with a
+  warning in the tool result and the pane's `board_activity` toast. The hourly count lives in
+  `<workspace>/.relay/board-rate.json` under `flock`, so panes share it. Other writes remain
+  limited to 100 per turn and return `board_rate_limited` when exceeded.
 - **A fuzzy duplicate check** on create returns `{"code": "board_possible_duplicate",
   "possible_duplicates": [{id, title, score}]}`; the agent repeats the call with `not_duplicate_of`
   once it has read them.
@@ -3400,9 +3400,9 @@ with the other writes.
 `#ID` written in a commit message, a doc or another card keeps resolving — to a card that says
 where the work went. `board.merged_into(card)` reads the pointer.
 
-**Limits.** A cleanup runs on `board_tools.CLEANUP_LIMITS` (60 creates and 400 writes per turn,
-200 creates per hour) instead of a pane turn's 5/20/30; `limits` on the message may only lower
-them. Over the ceiling the tools answer `board_rate_limited` exactly as they do on a pane turn.
+**Limits.** A cleanup uses the same advisory create warnings (five per turn and 30 per hour) and
+allows 400 other writes per turn. `limits` on the message may lower those thresholds. Other-write
+excess still returns `board_rate_limited`.
 
 **Undo.** Each merge and split is one `write_id` with the 30-second toast, and undoing it restores
 *every* file it touched — the survivor, the cards it folded in (moved back to their old folders)
