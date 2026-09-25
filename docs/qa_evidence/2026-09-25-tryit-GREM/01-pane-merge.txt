@@ -1,0 +1,18 @@
+A terminal pane agent is offered board_merge_cards: True
+... and still NOT offered board_split_card: True
+
+merge result: {'id': 'E0Y7', 'path': 'issues/features/2026-09-25-filter-the-model-dropdown.md', 'hash': '72f5be6e9d7d55d0e2b63255a9baeee4ea80a28f9324e496aea2d53450ed2deb', 'write_id': 'w-1a0d9bd0f43-5fbd', 'summary': 'merged 1 card(s) in: #N1BC Model dropdown search'}
+
+survivor E0Y7: status=in-progress, title='Filter the model dropdown'
+folded  N1BC: status=dropped (file kept: N1BC nothing deleted)
+
+---- what landed on the survivor ----
+## Merged in
+### #N1BC — Model dropdown search (2026-09-25)
+Let me type in the model dropdown to narrow it.
+---- what the folded card now says ----
+Merged into [#E0Y7](../2026-09-25-filter-the-model-dropdown.md) on 2026-09-25: the same request: filtering the model dropdown
+
+Nothing was thrown away: the text above is also kept on #E0Y7 under `## Merged in`, and this card stays here so `#N1BC` keeps resolving.
+
+open: bash docs/qa_evidence/2026-09-25-tryit-GREM/stage.sh   (fixture: /home/elliott/.cache/relay/scratch/tryit/grem-merge)
