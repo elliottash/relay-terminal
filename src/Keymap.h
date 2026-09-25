@@ -250,16 +250,16 @@ private:
         // within two seconds re-docks it there instead (issue #78BN). The other three directions
         // keep actions of their own so they can be bound or run from the palette, but the separate
         // "new pane below" key (Ctrl+Alt+E) is dropped.
-        add("pane.splitRight", "pane", "New pane to the right (then ← ↑ ↓ places it)",
+        add("pane.splitRight", "pane", "New shell to the right (then ← ↑ ↓ places it)",
             {QStringLiteral("Ctrl+E"), QStringLiteral("Ctrl+Shift+E")});
-        add("pane.splitDown", "pane", "New pane below", {});
-        add("pane.splitLeft", "pane", "New pane to the left", {});
-        add("pane.splitUp", "pane", "New pane above", {});
+        add("pane.splitDown", "pane", "New shell below", {});
+        add("pane.splitLeft", "pane", "New shell to the left", {});
+        add("pane.splitUp", "pane", "New shell above", {});
         // The default splits land on the host when the focused pane is on one (#XQ8F), so a split
         // that stays here needs its own action, and ssh.splitSameHost is now only the right-hand
         // case of what the defaults do.
-        add("pane.splitLocal", "pane", "New local pane: a pane to the right on this machine, even from a remote pane", {});
-        add("ssh.splitSameHost", "pane", "Split right on the same host: a new pane to the right running this pane's ssh or mosh command again", {});
+        add("pane.splitLocal", "pane", "New local shell: a shell to the right on this machine, even from a remote pane", {});
+        add("ssh.splitSameHost", "pane", "Split right on the same host: a new shell to the right running this pane's ssh or mosh command again", {});
         add("pane.focusLeft", "pane", "Focus pane to the left", {QStringLiteral("Alt+Left"), QStringLiteral("Shift+Alt+Left")});
         add("pane.focusRight", "pane", "Focus pane to the right", {QStringLiteral("Alt+Right"), QStringLiteral("Shift+Alt+Right")});
         add("pane.focusUp", "pane", "Focus pane above", {QStringLiteral("Alt+Up"), QStringLiteral("Shift+Alt+Up")});
@@ -347,7 +347,7 @@ private:
         // Alt+Q: free in the default table and in all four preset tables, and nothing else binds
         // an Alt+Q. It is not a Ctrl+Shift chord because it never has to reach past a program —
         // the three panes it works in hold none — and the panes' own search boxes swallow letters.
-        add("helper.ask", "agent", "Ask the helper agent about this pane (Options, Actions, Sessions)",
+        add("helper.ask", "agent", "Ask the agent about this pane (Options, Actions, Sessions)",
             {QStringLiteral("Alt+Q")});
         // Direct keys for the Projects and Globals tabs of the shared pane (#P7SJ).
         // Plain Ctrl+P and Ctrl+G remain the editor/program's.

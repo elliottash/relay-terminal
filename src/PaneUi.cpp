@@ -82,6 +82,12 @@ void Pane::buildUi() {
         m_cwdLabel->installEventFilter(this);
         // Not selectable any more: dragging across the path is how you move the pane now, and a
         // half-selected path is a poor trade for that. The tooltip still has both paths in full.
+        m_consoleKindChip = new QLabel(consoleKind());
+        m_consoleKindChip->setObjectName(QStringLiteral("paneConsoleKind"));
+        m_consoleKindChip->setTextFormat(Qt::PlainText);
+        m_consoleKindChip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        m_consoleKindChip->setVisible(hasShell());
+        headerRow->addWidget(m_consoleKindChip, 0);
         headerRow->addWidget(m_cardChip, 0);
         headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);

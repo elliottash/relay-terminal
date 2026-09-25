@@ -1755,8 +1755,10 @@ that need no typing, how a link in the answer resolves, where the conversation i
 finished turn's output does. **What must not vary is the tool set.**
 
 So there is no second chat implementation anywhere in Relay. `relay::HelperChatPanel`, `BoardChat`,
-`HelperModelBox` and the `board_chat*` messages are gone; a helper agent is an **agent console** — a
+`HelperModelBox` and the `board_chat*` messages are gone; an agent on a system pane is an **agent console** — a
 `Pane` with a non-terminal context — and the terminal is one context of the same class.
+The UI calls the split action “New shell,” labels docked rows “Agent,” and shows “Shell”
+(or “Shell · host” over SSH) at the start of a terminal pane's header.
 
 **The two interfaces**, both QtCore-only headers so a pane library can name them without a window:
 
@@ -1885,7 +1887,7 @@ and is handed a `relay::agent::ConsoleHandle` — the widget to embed plus `focu
 `wireConsoleHost(view, leaf, hintId)` is the one template that sets the factory, the tab id, the tab's
 workspace and the live `helper.ask` key on Options, Actions and Sessions; `createBoardPane` does the
 same for the Board. Options, Actions and Sessions build their console **on first expand** of the
-collapsed "Helper Agent (Alt+Q)" row, which is the host's — so a tab nobody asks anything pays for
+collapsed "Agent (Alt+Q)" row, which is the host's — so a tab nobody asks anything pays for
 nothing.
 
 - **One worker and one conversation per tab** (owner decision 1), **and one conversation per open
@@ -2153,7 +2155,7 @@ because every tiered role follows a tier:
 
 | Tier | Roles | Default |
 |---|---|---|
-| Main | `main`, `subagent`, `switchboard` (labelled "Helper agent") | the pane's own model |
+| Main | `main`, `subagent`, `switchboard` (labelled "System-pane agent") | the pane's own model |
 | Flash | `terminal_use`, `flash`, `summaries`, `suggestions` | `TIER_DEFAULTS[<main preset>]["flash"]` |
 | Lite | `chores`, `audit` | `TIER_DEFAULTS[<main preset>]["lite"]` |
 | Local | `local` | the first endpoint in the local registry; no provider preset, so

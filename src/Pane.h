@@ -4160,6 +4160,11 @@ public:
     // Everything the shell implies keys off this one answer: the pty, the poll timers, the
     // routing, the mode chip, the guest bridge, the login and the foreground-program paths.
     bool hasShell() const { return m_hasShell; }
+    QString consoleKind() const {
+        if (!hasShell()) return {};
+        const QString host = m_login.active ? loginHost() : relay::panestatus::remoteHost(remoteCommandLine());
+        return host.isEmpty() ? QStringLiteral("Shell") : QStringLiteral("Shell · %1").arg(host);
+    }
     // The `context` block of `configure` (protocol 33), or `{}` when there is no context — and a
     // `configure` with no block behaves exactly as one sent before this existed.
     QJsonObject contextBlock() const {
@@ -16520,6 +16525,7 @@ public:
 
     void updateHeader() {
         if (!m_titleLabel) return;
+        if (m_consoleKindChip) m_consoleKindChip->setText(consoleKind());
         const QString shown = m_title.isEmpty() ? QFileInfo(m_cwd).fileName() : m_title;
         const QFontMetrics metrics(m_titleLabel->font());
         const QFontMetrics cwdMetrics(m_cwdLabel ? m_cwdLabel->font() : m_titleLabel->font());
@@ -16749,6 +16755,7 @@ private:
     QHBoxLayout *m_headerLayout = nullptr;
     QWidget *m_headerWidget = nullptr;
     bool m_headerWrapped = false;
+    QLabel *m_consoleKindChip = nullptr;
 
     // The header is one line taller while the title crosses two (owner, 2026-09-20), and
     // everything but the title then sits beside the title's first line instead of floating

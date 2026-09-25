@@ -413,8 +413,18 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
         items << actionItem(panes, QStringLiteral("Toggle word wrap"), QStringLiteral("Word wrap in the file preview or editor pane"), QStringLiteral("files.toggleWrap"));
         // The one key makes a pane on the right; all four directions keep an action of their own
         // so they can be run from here or bound (issue #78BN).
-        items << actionItem(panes, QStringLiteral("New pane to the right"),
+        items << actionItem(panes, QStringLiteral("New shell"),
                             QStringLiteral("Then ← ↑ ↓ within two seconds places it on that side"), QStringLiteral("pane.splitRight"));
+        for (const auto &planned : {std::pair{QStringLiteral("New Python console"), QStringLiteral("#83YV")},
+                                    std::pair{QStringLiteral("New card"), QStringLiteral("#Y2BA")}}) {
+            PaletteItem item;
+            item.key = QStringLiteral("planned:") + planned.second;
+            item.section = panes;
+            item.label = planned.first;
+            item.detail = QStringLiteral("Not built yet: ") + planned.second;
+            item.run = [this, card = planned.second] { notice(QStringLiteral("Not built yet: ") + card); };
+            items << item;
+        }
         // Cross-pane messaging (#R5TC): the person's way in is an instruction to their own
         // agent — the palette entry only prefills it; the agent does the sending (pane_send).
         if (pane && relay::panedir::Directory::instance().size() > 1) {
@@ -467,9 +477,9 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                 items << kill;
             }
         }
-        items << actionItem(panes, QStringLiteral("New pane below"), QString(), QStringLiteral("pane.splitDown"));
-        items << actionItem(panes, QStringLiteral("New pane to the left"), QString(), QStringLiteral("pane.splitLeft"));
-        items << actionItem(panes, QStringLiteral("New pane above"), QString(), QStringLiteral("pane.splitUp"));
+        items << actionItem(panes, QStringLiteral("New shell below"), QString(), QStringLiteral("pane.splitDown"));
+        items << actionItem(panes, QStringLiteral("New shell to the left"), QString(), QStringLiteral("pane.splitLeft"));
+        items << actionItem(panes, QStringLiteral("New shell above"), QString(), QStringLiteral("pane.splitUp"));
         // SSH (#S5SH, #XQ8F): the split is offered only while the pane is in a session it can
         // re-run, and from a remote pane a split that stays here has to be asked for by name. Every
         // login is persistent now, so the separate persistent Connect is gone.

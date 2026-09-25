@@ -1176,7 +1176,7 @@ private:
             if (!w) return;
             w->hint(hintId, relay::ShortcutHints::nextTime(
                                 Keymap::instance().shortcutText(QStringLiteral("helper.ask")),
-                                QStringLiteral("the helper agent")));
+                                QStringLiteral("the agent")));
         };
         QTimer::singleShot(0, this, [guard, viewGuard] {
             auto *w = windowOf(guard);
@@ -1278,7 +1278,7 @@ private:
         if (tool && tool->board()) { tool->board()->focusChat(); return; }
         if (auto *sessions = sessionsViewOf(tool)) { sessions->focusHelper(); return; }
         if (auto *models = modelsViewOf(tool)) { models->focusHelper(); return; }
-        notice(QStringLiteral("The helper agent is in Options, Actions, Sessions, Models and the "
+        notice(QStringLiteral("The agent is in Options, Actions, Sessions, Models and the "
                               "Board — open one of those and ask it there."), 5000);
     }
 
@@ -1388,8 +1388,8 @@ private:
             setup.kind = relay::SettingRow::Button;
             setup.id = QStringLiteral("models.local.setup");
             setup.label = QStringLiteral("Set up a local model");
-            setup.detail = QStringLiteral("The helper checks this machine and guides setup.");
-            setup.buttonText = QStringLiteral("Ask helper…");
+            setup.detail = QStringLiteral("The agent checks this machine and guides setup.");
+            setup.buttonText = QStringLiteral("Ask agent…");
             setup.run = [viewRef] {
                 if (!*viewRef) return;
                 QTimer::singleShot(0, viewRef->data(), [viewRef] {
