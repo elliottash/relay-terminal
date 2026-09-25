@@ -1747,26 +1747,36 @@ class PaneTokenTests(unittest.TestCase):
 # ------------------------------------------------------------------------- limits
 
 class LimitTests(BoardToolsTest):
-    def test_creates_are_capped_per_turn_and_the_cap_comes_from_board_yaml(self):
+    def test_the_turn_threshold_warns_once_and_creation_continues(self):
         self.tools.limits["max_creates_per_turn"] = 2
         self.create(title="One", request="the first distinct ask")
         self.create(title="Two", request="a second and quite different ask")
         result = self.tools.run("board_create_card", {
             "tab": "features", "status": "inbox", "title": "Three",
             "request": "a third ask, unrelated to the others"})
-        self.assertEqual(result["code"], "board_rate_limited")
-        self.assertEqual(result["scope"], "turn")
-        self.assertEqual(len(self.board.cards()), 2)
+        self.assertNotIn("error", result)
+        self.assertEqual(len(result["warnings"]), 1)
+        self.assertIn("this turn", result["warnings"][0])
+        activity = [e for e in self.events if e.get("event") == "board_activity"]
+        self.assertIn("⚠", activity[-1]["summary"])
+        fourth = self.tools.run("board_create_card", {
+            "tab": "features", "status": "inbox", "title": "Four",
+            "request": "a fourth request about something else again"})
+        self.assertNotIn("error", fourth)
+        self.assertNotIn("warnings", fourth)                  # once per crossing, not per card
+        self.assertEqual(len(self.board.cards()), 4)
 
-    def test_the_turn_budget_resets_on_the_next_turn(self):
+    def test_the_turn_warning_resets_on_the_next_turn(self):
         self.tools.limits["max_creates_per_turn"] = 1
         self.create(title="One", request="the first distinct ask")
-        self.assertEqual(self.tools.run("board_create_card", {
+        self.assertIn("warnings", self.tools.run("board_create_card", {
             "tab": "features", "status": "inbox", "title": "Two",
-            "request": "a second ask"})["code"], "board_rate_limited")
+            "request": "a second ask"}))
         self.tools.begin_turn("t-2")
-        self.create(title="Two", request="a second and quite different ask")
-        self.assertEqual(len(self.board.cards()), 2)
+        self.assertNotIn("warnings", self.tools.run("board_create_card", {
+            "tab": "features", "status": "inbox", "title": "Three",
+            "request": "a third and quite different ask"}))
+        self.assertEqual(len(self.board.cards()), 3)
 
     def test_other_writes_are_capped_per_turn(self):
         card_id = self.create()
@@ -1778,7 +1788,7 @@ class LimitTests(BoardToolsTest):
         # earned (#3XZV). The refused second note wrote nothing.
         self.assertEqual(len(self.board.thread(card_id)), 3)
 
-    def test_creates_are_capped_per_hour_across_panes_of_one_workspace(self):
+    def test_the_hour_threshold_is_shared_across_panes_and_only_warns(self):
         self.tools.limits["max_creates_per_hour"] = 2
         self.tools.limits["max_creates_per_turn"] = 50
         self.create(title="One", request="the first distinct ask")
@@ -1790,10 +1800,12 @@ class LimitTests(BoardToolsTest):
         result = other_pane.run("board_create_card", {
             "tab": "features", "status": "inbox", "title": "Three",
             "request": "a third ask from another pane entirely"})
-        self.assertEqual(result["code"], "board_rate_limited")
-        self.assertEqual(result["scope"], "hour")
+        self.assertNotIn("error", result)
+        self.assertEqual(len(result["warnings"]), 1)
+        self.assertIn("last hour", result["warnings"][0])
+        self.assertEqual(len(self.board.cards()), 3)
 
-    def test_an_hour_later_the_hourly_budget_is_free_again(self):
+    def test_an_hour_later_the_hourly_warning_can_fire_again(self):
         now = [1000.0]
         tools = T.BoardTools(self.board, autonomy="auto", clock=lambda: now[0],
                              state_path=self.repo / ".relay" / "board-rate.json")
@@ -1801,14 +1813,16 @@ class LimitTests(BoardToolsTest):
         tools.begin_turn("t-1")
         tools.run("board_create_card", {"tab": "features", "status": "inbox", "title": "One",
                                         "request": "the first distinct ask"})
-        blocked = tools.run("board_create_card", {"tab": "features", "status": "inbox", "title": "Two",
-                                                  "request": "a second and quite different ask"})
-        self.assertEqual(blocked["code"], "board_rate_limited")
+        over = tools.run("board_create_card", {"tab": "features", "status": "inbox", "title": "Two",
+                                               "request": "a second and quite different ask"})
+        self.assertIn("warnings", over)
         now[0] += 3601
         tools.begin_turn("t-2")
-        self.assertNotIn("error", tools.run("board_create_card", {
-            "tab": "features", "status": "inbox", "title": "Two",
-            "request": "a second and quite different ask"}))
+        fresh = tools.run("board_create_card", {
+            "tab": "features", "status": "inbox", "title": "Three",
+            "request": "a third request about something unrelated"})
+        self.assertNotIn("error", fresh)
+        self.assertNotIn("warnings", fresh)
 
     def test_a_limit_in_board_yaml_is_honoured(self):
         (self.root / B.BOARD_CONFIG).write_text(
