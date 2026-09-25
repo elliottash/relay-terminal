@@ -447,6 +447,24 @@ class AgentRequestTests(Base):
         self.assertEqual(agent.messages[recitals[0] - 1].get('relay_kind'), 'steer')
         self.assertEqual(len([line for line in logged.output if 'kind=recitation' in line]), 1)
 
+    def test_a_mid_turn_compaction_warrants_the_recital(self):
+        """A compaction that rewrote the transcript is an event; one that changed nothing is not."""
+        for rewrote, expected in ((True, 1), (False, 0)):
+            with self.subTest(rewrote=rewrote):
+                provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 40,
+                                  default=text('finished'))
+                agent = self.agent(provider, completion_check=False)
+                real_over = agent.context.over
+                def over(messages, tools):   # the window fills once, before step 30
+                    return len(provider.requests) == 29 or real_over(messages, tools)
+                result = {'event': 'compacted', 'reason': 'auto', 'summary_chars': 400 if rewrote else 0,
+                          'trimmed_tool_outputs': 0}
+                with mock.patch.object(agent.context, 'over', side_effect=over), \
+                        mock.patch.object(agent, 'compact', return_value=result) as compact:
+                    agent.ask('long job')
+                self.assertEqual(compact.call_count, 1)
+                self.assertEqual([m.get('relay_kind') for m in agent.messages].count('recitation'), expected)
+
     def test_a_slow_tool_call_warrants_the_recital(self):
         provider = Script([todos_call({'text': 'long job', 'status': 'in_progress'})] + [forever_tools] * 30,
                           default=text('finished'))

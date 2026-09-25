@@ -2580,9 +2580,10 @@ class Agent:
                        "times": len(earlier) + 1, "earlier_cleared": cleared})
         earlier.append(call_id)
 
-    def _maybe_compact(self) -> None:
+    def _maybe_compact(self) -> dict | None:
+        """The `compacted` event when an automatic compaction ran, else None."""
         if not self.context.over(self.messages, self.tools()):
-            return
+            return None
         # On a guest harness (protocol 29.3) the guest keeps its own context; Relay's transcript is a
         # record of it. With no summaries role of its own, an automatic compaction would ask the
         # harness for a summary it never writes and fail the turn on an empty one — so it is not
@@ -2590,8 +2591,8 @@ class Agent:
         if self._guest_harness():
             resolved = self.roles.resolve("summaries") if self.roles is not None else None
             if resolved is None or resolved.is_main:
-                return
-        self.compact("auto", trigger={"trigger": "window"})
+                return None
+        return self.compact("auto", trigger={"trigger": "window"})
 
     def _compact_after_turn(self) -> None:
         """Size-based compaction (#0C0V step 9): once a turn is over, compact when its last single
@@ -2850,10 +2851,9 @@ class Agent:
                     ctx["takeover"] = True
                     ctx["recite_warrant"] = True
                     add({"role": "user", "content": self._takeover_note(applied), "relay_kind": "note"})
-                before_compaction = len(self.messages)
-                self._maybe_compact()
-                if len(self.messages) < before_compaction:
-                    ctx["recite_warrant"] = True
+                compacted = self._maybe_compact()
+                if compacted and (compacted.get("summary_chars") or compacted.get("trimmed_tool_outputs")):
+                    ctx["recite_warrant"] = True   # the transcript was rewritten under the ask
                 self.emit({"event": "status", "text": f"Requesting model · step {steps + 1}/{self.max_steps}"})
                 self._last_usage = None
                 try:
