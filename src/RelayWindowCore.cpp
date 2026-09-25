@@ -1211,6 +1211,16 @@ QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
                     board_view->setOpenSignals(board.value(QStringLiteral("signals")).toArray());
                     board_view->restoreNavigation(board.value(QStringLiteral("navigation")).toObject());
                 }
+                // A solo card pane (#Y2BA) comes back on its card. Pinned now, so its list never
+                // shows; the card itself opens once the tab's worker has sent the rows.
+                const QString soloCard = board.value(QStringLiteral("card")).toString();
+                if (board.value(QStringLiteral("solo")).toBool() && !soloCard.isEmpty() && tool->board()) {
+                    tool->board()->pinSolo(soloCard);
+                    QPointer<ToolPane> soloGuard(tool);
+                    QTimer::singleShot(0, tool, [soloGuard, soloCard] {
+                        if (auto *w = windowOf(soloGuard)) w->waitForBoardCard(soloGuard, soloCard, 0);
+                    });
+                }
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because
                 // buildNode() runs before the page the pane will live in exists.

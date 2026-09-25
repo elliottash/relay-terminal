@@ -4746,8 +4746,9 @@ public:
         // is what this key shows — but never silently as if it were the active pane's. When the
         // two disagree, say whose board is on screen: dropping a card on it writes into that
         // project's board folder, not the one the pane is standing in.
+        // A solo card pane (#Y2BA) is one card, not the tab's Board, so it is not what this finds.
         for (QWidget *leaf : leavesIn(page))
-            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) {
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board() && !tool->board()->pinned()) {
                 setActiveLeaf(tool); focusLeaf(tool);
                 const QString shown = tool->board()->workspace();
                 if (!from.isEmpty() && shown != workspace) {
@@ -4784,11 +4785,19 @@ public:
         updateTitles();
     }
 
-    // One card in this tab's Switchboard, opening the Switchboard first if the tab has none.
+    // One card in this tab's Switchboard, opening the Switchboard first if the tab has none. A
+    // solo card pane already on that card (#Y2BA) is where a `#ID` link goes first; otherwise the
+    // tab's list Board, never a solo pane showing some other card.
     void openBoardCard(const QString &id) {
+        if (ToolPane *solo = soloCardPaneIn(m_tabs->currentWidget(), id)) {
+            setActiveLeaf(solo);
+            focusLeaf(solo);
+            return;
+        }
         auto boardInTab = [this]() -> ToolPane * {
             for (QWidget *leaf : leavesIn(m_tabs->currentWidget()))
-                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board()) return tool;
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board() && !tool->board()->pinned())
+                    return tool;
             return nullptr;
         };
         if (!boardInTab()) toggleBoardPane();
@@ -4819,8 +4828,53 @@ public:
             ToolPane *pane = guard.data();
             if (!pane || !pane->board() || pane->board()->detailOpen()) return;
             if (!pane->board()->model().card(id)) { waitForBoardCard(pane, id, attempt + 1); return; }
-            pane->board()->openCardSolo(id);
+            if (pane->board()->pinned()) pane->board()->pinSolo(id);
+            else pane->board()->openCardSolo(id);
         });
+    }
+
+    // The solo card pane (#Y2BA) in `page` that is showing `id`, if there is one.
+    ToolPane *soloCardPaneIn(QWidget *page, const QString &id) const {
+        if (!page || id.isEmpty()) return nullptr;
+        for (QWidget *leaf : leavesIn(page))
+            if (auto *tool = dynamic_cast<ToolPane *>(leaf);
+                tool && tool->board() && tool->board()->pinned() && tool->board()->pinnedCard() == id)
+                return tool;
+        return nullptr;
+    }
+
+    // A card in a Board pane of its own (#Y2BA): Shift+Enter on a row, the page's ⤴ button, and
+    // a new card created while another card's page is open all come here. The pane docks beside
+    // `anchor` (the pane that asked; the active leaf when none is given), shows that one card and
+    // never its list, and closes on Esc. Several of them make several cards open at once in one
+    // tab, each with its own docked conversation (`<tab>/card:<ID>`, keyed by the card). A pane
+    // already on that card is focused rather than duplicated.
+    void openBoardCardInNewPane(const QString &id, QWidget *anchor = nullptr) {
+        QWidget *page = anchor ? pageOf(anchor) : m_tabs->currentWidget();
+        if (!page || id.isEmpty()) return;
+        if (ToolPane *solo = soloCardPaneIn(page, id)) { setActiveLeaf(solo); focusLeaf(solo); return; }
+        if (!anchor) anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
+        QString workspace;
+        if (auto *tool = dynamic_cast<ToolPane *>(anchor); tool && tool->board()) workspace = tool->board()->workspace();
+        if (workspace.isEmpty()) workspace = tabProject(page);
+        if (workspace.isEmpty()) workspace = boardWorkspace();
+        if (workspace.isEmpty()) {
+            notice(QStringLiteral("Open a terminal in the directory whose Board you want."));
+            return;
+        }
+        ToolPane *tool = createBoardPane(workspace);
+        if (!tool) return;
+        if (anchor) dockBeside(anchor, tool);
+        else if (page->layout()) page->layout()->addWidget(tool);
+        if (tabProject(page).isEmpty())
+            attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+        tool->board()->pinSolo(id);
+        setActiveLeaf(tool);
+        focusLeaf(tool);
+        updateTitles();
+        m_manager->scheduleSave();
+        // A new pane's rows are still on their way, exactly as for a first Switchboard.
+        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
     }
 
     // Where a notification's `source` points: a pane session token, or `board:<workspace>#<id>`
@@ -4861,7 +4915,7 @@ public:
         for (int i = 0; i < w->m_tabs->count(); ++i)
             for (QWidget *leaf : w->leavesIn(w->m_tabs->widget(i)))
                 if (auto *tool = dynamic_cast<ToolPane *>(leaf);
-                    tool && tool->board() && tool->board()->workspace() == workspace)
+                    tool && tool->board() && !tool->board()->pinned() && tool->board()->workspace() == workspace)
                     return tool;
         return nullptr;
     }
@@ -5402,6 +5456,36 @@ public:
         };
         view->onTitleChanged = [guard](const QString &) { if (auto *w = windowOf(guard)) w->updateTitles(); };
         view->onNavigationChanged = [guard] { if (auto *w = windowOf(guard)) w->m_manager->scheduleSave(); };
+        // Solo card panes (#Y2BA). The close is queued: it can come from inside the view's own
+        // event handling (Esc, or the card removed under it), and the view is deleted with the pane.
+        view->onOpenInNewPane = [guard](const QString &id) {
+            if (auto *w = windowOf(guard)) w->openBoardCardInNewPane(id, guard);
+        };
+        view->onClosePane = [guard] {
+            QTimer::singleShot(0, guard, [guard] {
+                if (auto *w = windowOf(guard)) w->closeToolPane(guard);
+            });
+        };
+        view->onQuickAddElsewhere = [guard] {
+            auto *w = windowOf(guard);
+            if (!w) return;
+            QWidget *page = w->pageOf(guard);
+            ToolPane *list = nullptr;
+            for (QWidget *leaf : w->leavesIn(page))
+                if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board() && !tool->board()->pinned()) {
+                    list = tool;
+                    break;
+                }
+            if (!list) {
+                w->setActiveLeaf(guard);
+                w->toggleBoardPane();
+                list = dynamic_cast<ToolPane *>(w->m_activeLeaf.data());
+            }
+            if (!list || !list->board()) return;
+            w->setActiveLeaf(list);
+            w->focusLeaf(list);
+            list->board()->quickAdd();
+        };
         view->onOpenFile = [guard](const QString &path) {
             if (auto *w = windowOf(guard)) w->openPath(path, 0, guard);
         };

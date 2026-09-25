@@ -1288,6 +1288,13 @@ if(BUILD_TESTING)
     add_test(NAME boardfind COMMAND relay-boardfind-tests)
     set_tests_properties(boardfind PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+    # Several cards open at once (#Y2BA): a Board pane pinned to one card never shows its list and
+    # closes as a pane; Shift+Enter, the page's ⤴ and a second new card hand a card to its own pane.
+    add_executable(relay-boardsolo-tests tests/boardsolo_test.cpp)
+    target_link_libraries(relay-boardsolo-tests PRIVATE relay-board ${RELAY_QT}::Test)
+    add_test(NAME boardsolo COMMAND relay-boardsolo-tests)
+    set_tests_properties(boardsolo PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
     # The card's `## Tests` strip and its Check (#7BM4): the strip appears only for a card that
     # lists tests, Check sends one `tests_check`, the answer's findings and actions are drawn as
     # the worker sent them, and a refused move offers the gate's Override. Its own executable

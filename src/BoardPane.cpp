@@ -1904,6 +1904,16 @@ public:
         m_edit->setCursor(Qt::PointingHandCursor);
         m_edit->setFocusPolicy(Qt::NoFocus);
         titleRow->addWidget(m_edit, 0, Qt::AlignTop);
+        // ⤴ (#Y2BA): this card in a pane of its own beside the board, so a second card can be
+        // open at the same time. Hidden on a page that already is its own pane (pinSolo).
+        m_popOut = new QToolButton(this);
+        m_popOut->setObjectName(QStringLiteral("boardCardPopOut"));
+        m_popOut->setText(QStringLiteral("⤴ Own pane"));
+        m_popOut->setToolTip(QStringLiteral("Open this card in its own pane (Shift+Enter on its row)"));
+        m_popOut->setCursor(Qt::PointingHandCursor);
+        m_popOut->setFocusPolicy(Qt::NoFocus);
+        m_popOut->hide();   // shown once the view says it can open a pane (setPopOutVisible)
+        titleRow->addWidget(m_popOut, 0, Qt::AlignTop);
         // The owner's delete (#CYM9): the one action that takes a card off the board rather
         // than closing it, so it asks first and its Undo window is the only soft landing.
         m_delete = new QToolButton(this);
@@ -2290,6 +2300,10 @@ public:
                 onEditHint();
             beginEdit(false);
         });
+        connect(m_popOut, &QToolButton::clicked, this, [this] {
+            if (onPopOut)
+                onPopOut();
+        });
         connect(m_delete, &QToolButton::clicked, this, [this] {
             if (onDeleteHint)
                 onDeleteHint();
@@ -2468,6 +2482,8 @@ public:
     std::function<bool(const QString &id)> hasCard;
     std::function<void(const QString &mode)> onModeHint;   // a mode button was clicked, not keyed
     std::function<void()> onClose, onCancel, onToPrompt, onEscape;
+    std::function<void()> onPopOut;          // ⤴: this card in its own pane (#Y2BA)
+    void setPopOutVisible(bool visible) { m_popOut->setVisible(visible); }
     std::function<void(const QString &what, const QString &value)> onMove;
     // One click on the card page's priority flag (#DPJB): +1 for a left click, −1 for a right
     // one, exactly as the row's flag reports it. The view clamps and writes `board_priority`.
@@ -3202,6 +3218,7 @@ public:
             m_editFrame->show();
             m_replyFrame->hide();    // the action row is inside it, and goes down with it
             m_edit->setEnabled(false);
+            m_popOut->setEnabled(false);   // the edit stays in this pane until it is saved
             m_error->hide();
         }
         if (titleFirst) {
@@ -3228,6 +3245,7 @@ public:
         m_doc->show();
         m_replyFrame->show();
         m_edit->setEnabled(true);
+        m_popOut->setEnabled(true);
         m_error->hide();
         m_doc->setFocus();
     }
@@ -4529,6 +4547,7 @@ private:
     QPushButton *m_testsEditSave = nullptr, *m_testsEditCancel = nullptr, *m_testsEditNone = nullptr;
     QComboBox *m_status = nullptr, *m_tab = nullptr;
     QToolButton *m_close = nullptr, *m_toPrompt = nullptr, *m_openFile = nullptr, *m_edit = nullptr;
+    QToolButton *m_popOut = nullptr;
     QToolButton *m_done = nullptr;
     QToolButton *m_delete = nullptr;
     QTextBrowser *m_doc = nullptr;
@@ -5192,6 +5211,15 @@ void BoardView::buildChrome(QVBoxLayout *layout)
 
     updateDetailLayout();   // the key line's first text
     m_detail->onClose = [this] { closeDetail(); };
+    // ⤴ (#Y2BA): the card goes to its own pane and this one goes back to the list, so the list
+    // is free to open the next card.
+    m_detail->onPopOut = [this] {
+        const QString id = m_detail->cardId();
+        if (id.isEmpty() || !onOpenInNewPane || m_pinned)
+            return;
+        closeDetail();
+        onOpenInNewPane(id);
+    };
     m_detail->onEscape = [this] {
         // Esc in the reply box goes back to the rows; a second Esc there closes the card. With
         // the list hidden (a narrow pane) there is nothing to go back to but the board.
@@ -6951,6 +6979,12 @@ void BoardView::setEmptyText(const QString &text, bool retry)
 // "Switchboard · 84 open": the number the pane is actually about, not every card ever filed.
 QString BoardView::title() const
 {
+    // A solo card pane (#Y2BA) is named by its card, so two of them in a tab tell apart.
+    if (m_pinned) {
+        const board::Card *card = m_model.card(m_pinnedCard);
+        return card ? QStringLiteral("#%1 %2").arg(m_pinnedCard, card->title)
+                    : QStringLiteral("#%1").arg(m_pinnedCard);
+    }
     if (m_model.total() == 0)
         return QStringLiteral("Board");
     return QStringLiteral("Board · %1 open").arg(m_model.openCount());
@@ -7524,9 +7558,18 @@ void BoardView::handleEvent(const QJsonObject &event)
                                   "text-decoration:none\">#%1</a>")
                        .arg(card.toHtmlEscaped(), theme::Link.name());
             // The draft already collected the issue and links before the write (#5KMQ).
-            m_selected = card;
             closeQuickAdd();
-            openSelected();
+            // "New card" pressed again while the last one's page is still open (#Y2BA, the
+            // owner's ask): the new card opens in a pane of its own beside this one, rather than
+            // taking the open card's place. The selection stays put, so the follow timer does not
+            // swap the open page for it either.
+            if (detailOpen() && !m_detail->cardId().isEmpty() && m_detail->cardId() != card
+                && onOpenInNewPane) {
+                onOpenInNewPane(card);
+            } else {
+                m_selected = card;
+                openSelected();
+            }
         }
         if (kind == QStringLiteral("board_comment"))
             return;              // the thread itself shows it
@@ -8071,7 +8114,7 @@ void BoardView::syncChatVisible()
 {
     if (m_chatArea == nullptr)
         return;
-    const bool show = m_open && !m_sectionsOpen && !detailOpen() && !signalOpen();
+    const bool show = m_open && !m_pinned && !m_sectionsOpen && !detailOpen() && !signalOpen();
     if (show)
         ensureConsole();          // asked for the first time the area is actually shown
     m_chatArea->setVisible(show);
@@ -8603,8 +8646,13 @@ void BoardView::updateDetailLayout()
         "&nbsp; <b>v</b> verify &nbsp; <b>Del</b> delete &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
     // A link's reveal (#K4SQ) gives the open page the pane to itself at any width; otherwise only
     // a narrow pane stacks the page over the list.
-    const bool stacked = width() < board::kCardSplitWidth || m_soloReveal;
-    const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
+    // A pinned card pane (#Y2BA) says the same, except that Esc closes the pane.
+    static const QString pinnedKeys = QString(cardKeys).replace(
+        QStringLiteral("<b>Esc</b> back to the board"), QStringLiteral("<b>Esc</b> close pane"));
+    if (m_detail)
+        m_detail->setPopOutVisible(bool(onOpenInNewPane) && !m_pinned);
+    const bool stacked = width() < board::kCardSplitWidth || m_soloReveal || m_pinned;
+    const QString keys = m_pinned ? pinnedKeys : detailOpen() && stacked ? cardKeys : boardKeys;
     // Wherever the board's own line is the one on screen, it ends with the Switchboard agent's
     // action row — read off the context's own `actions()` (agentActionKeyLine) rather than
     // written out above, so a session that puts a keyed button there gets its entry in the line
@@ -8622,14 +8670,15 @@ void BoardView::updateDetailLayout()
     const bool pageOpen = detailOpen() || signalOpen();
     if (signalOpen() && stacked && m_keys->text() != signalKeys)
         m_keys->setText(signalKeys);
-    // The header exists only while a page is open, and then it says one thing: the way back.
-    if (m_head->isHidden() == pageOpen) {
-        m_head->setVisible(pageOpen);
+    // The header exists only while a page is open, and then it says one thing: the way back. A
+    // pinned pane (#Y2BA) keeps it while its card is still loading, and never shows its list.
+    if (m_head->isHidden() == (pageOpen || m_pinned)) {
+        m_head->setVisible(pageOpen || m_pinned);
         applyRightInset();
     }
     syncChatVisible();
     if (!pageOpen) {
-        m_listPane->setVisible(true);
+        m_listPane->setVisible(!m_pinned);
         placeNotice();      // back to the bottom of the list
         return;
     }
@@ -9018,6 +9067,12 @@ void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)
 
 void BoardView::closeDetail()
 {
+    // A pinned pane has no list to go back to (#Y2BA): closing its page closes the pane. Every way
+    // out comes through here — Esc, the page's ×, the header's button, the card being removed.
+    if (m_pinned && onClosePane) {
+        onClosePane();
+        return;
+    }
     m_soloReveal = false;   // back to the list, so the list is what comes back (#K4SQ)
     m_follow->stop();
     m_detail->hide();
@@ -9030,6 +9085,9 @@ void BoardView::closeDetail()
 
 void BoardView::focusFilter()
 {
+    // A pinned card pane has no list page and so no filter (#Y2BA).
+    if (m_pinned)
+        return;
     // The filter is the list page's, so `/` from a card that has the pane to itself goes back to
     // the board first rather than typing into a box nobody can see.
     if (m_listPane->isHidden())
@@ -9139,6 +9197,9 @@ void BoardView::openCard(const QString &id)
 {
     if (id.isEmpty())
         return;
+    // A link on a pinned page moves the pane to that card (#Y2BA): the pane is always one card's.
+    if (m_pinned)
+        m_pinnedCard = id;
     selectCard(id);
     m_selected = id;
     openSelected();
@@ -9155,6 +9216,25 @@ void BoardView::openCardSolo(const QString &id)
         return;
     m_soloReveal = true;
     openCard(id);
+}
+
+// A solo card pane (#Y2BA): openCardSolo for good. The reveal flag keeps the page stacked at any
+// width, `m_pinned` keeps the list from ever coming back, and closeDetail hands the close to the
+// window. Called again on a pinned pane it simply moves the pane to that card.
+void BoardView::pinSolo(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    m_pinned = true;
+    m_pinnedCard = id;
+    if (onTitleChanged)
+        onTitleChanged(title());
+    m_back->setText(QStringLiteral("×  Close pane (Esc)"));
+    m_back->setToolTip(QStringLiteral("Close this card's pane (Esc)"));
+    closeQuickAdd();
+    openCardSolo(id);
+    updateDetailLayout();
+    if (onNavigationChanged) onNavigationChanged();
 }
 
 void BoardView::sendSelectionToTerminal()
@@ -9421,6 +9501,13 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
         return false;
     const QString text = key->text();
     if (text == QStringLiteral("n")) {
+        // A pinned card pane has no list to put the field on (#Y2BA): the tab's list board takes
+        // the new card, and with this card still open it lands in a pane of its own.
+        if (m_pinned) {
+            if (onQuickAddElsewhere)
+                onQuickAddElsewhere();
+            return true;
+        }
         quickAdd();
         return true;
     }
@@ -9432,7 +9519,7 @@ bool BoardView::handleBoardKey(QKeyEvent *key)
     // it in the filter — one key for narrowing the list, one for asking about it. It is a bare
     // letter and not a chord on purpose: Ctrl+/ is already `help.shortcuts`, and the window's
     // event filter matches the keymap and accepts that key before the board ever sees it.
-    if (text == QStringLiteral("a")) {
+    if (text == QStringLiteral("a") && !m_pinned) {
         if (detailOpen())
             closeDetail();      // the panel is the list page's
         focusChat();
@@ -9602,6 +9689,14 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
         default:
             break;
         }
+    }
+    // Shift+Enter (#Y2BA): the selected card in a pane of its own, beside this board, which
+    // stays on its list. A fold or signal row has nothing to open, so it falls through.
+    if (mods == Qt::ShiftModifier && (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+        && onOpenInNewPane && !m_selected.isEmpty() && selectedFold().isEmpty()
+        && selectedSignalFold().isEmpty() && selectedSignal().isEmpty() && m_model.card(m_selected)) {
+        onOpenInNewPane(m_selected);
+        return true;
     }
     if (handleBoardKey(key))
         return true;

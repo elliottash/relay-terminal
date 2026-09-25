@@ -516,6 +516,12 @@ public:
         // which are unticked in the section checkboxes.
         // `self_closed` is the sections whose "N closed by the agent" row is open (#93WR), beside
         // the folded set and in the same shape: default folded, so an empty array is the default.
+        // A solo card pane (#Y2BA) adds the card it is on and `solo: true`; restore re-pins it.
+        if (m_board && m_board->pinned()) {
+            QJsonObject board{{"workspace", m_board->workspace()}, {"solo", true},
+                              {"card", m_board->pinnedCard()}};
+            return {{"board", board}};
+        }
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()},

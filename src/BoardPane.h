@@ -371,6 +371,20 @@ public:
     // the board *on* that card: the page takes the whole pane whatever the width, and the list is
     // one Esc away. In-board links (openCard) keep the layout the pane already had.
     void openCardSolo(const QString &id);
+    // A solo card pane (#Y2BA): the pane shows this card and never its list — the list page, its
+    // filter and the page agent's panel stay hidden, Esc and the page's close button close the
+    // *pane* (onClosePane) rather than going back to a list, and `n` asks the tab's list board
+    // for the new card (onQuickAddElsewhere). A `#ID` link inside the page moves the pane to that
+    // card, so the pane is always on exactly one card: pinnedCard(), which the layout saves.
+    void pinSolo(const QString &id);
+    bool pinned() const { return m_pinned; }
+    QString pinnedCard() const { return m_pinnedCard; }
+    std::function<void()> onClosePane;
+    // Shift+Enter on a row, the page's ⤴ button, and a new card created while another card's
+    // page is already open (the owner's "pressing new card again splits"): open `id` in a pane of
+    // its own beside this one. Unset (a test), the card opens here as it always did.
+    std::function<void(const QString &id)> onOpenInNewPane;
+    std::function<void()> onQuickAddElsewhere;
     void sendSelectionToTerminal();
     void openSelectedFile();
     void selectCard(const QString &id);
@@ -790,6 +804,9 @@ private:
     // the pane to itself in a wide pane too, until the page closes and the list comes back. Set
     // by openCardSolo alone — in-board navigation keeps whatever layout the pane already had.
     bool m_soloReveal = false;
+    // pinSolo (#Y2BA): the pane is one card's for good, and which card that is.
+    bool m_pinned = false;
+    QString m_pinnedCard;
     // Which of the two pages that sizing was for (#AQ6X): the card's or the signal's, so opening
     // the other one re-divides the splitter instead of leaving it sized for the first.
     bool m_sizedForSignal = false;
