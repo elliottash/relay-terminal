@@ -2036,6 +2036,28 @@ void Pane::rebuildQueueStrip() {
             item->setFlags(steer.withdraw ? Qt::NoItemFlags : Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             if (steer.requestId == m_selectedSteer) current = item;
         }
+        // A `/model` steered into the turn (card #7QH0): drawn as a steer — it lands at the next
+        // tool call — with its own ↻ glyph. Not selectable or draggable; × withdraws it, → (or
+        // the second Enter) interrupts and switches now.
+        if (m_modelSteer) {
+            const bool pending = m_modelSteer->withdrawing || m_modelSteer->interrupting;
+            auto *item = new QListWidgetItem(QStringLiteral("/model ") + m_modelSteer->name, m_queueList);
+            item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(0));
+            item->setData(Row::AgentRole, true);
+            item->setData(Row::KindRole, QStringLiteral("steer"));
+            item->setData(Row::ModelRole, true);
+            item->setData(Row::RowIdRole, QString::fromLatin1(kModelSteerRow));
+            item->setData(Row::PendingRole, pending);
+            item->setData(Row::PendingTextRole, m_modelSteer->interrupting ? QStringLiteral("  switching now…") : QString());
+            item->setData(Row::SendNowRole, !pending && m_agentBusy && !m_ask.open());
+            item->setToolTip(m_modelSteer->interrupting
+                ? QStringLiteral("Interrupting the turn · %1 takes over as it stops").arg(m_modelSteer->name)
+                : m_modelSteer->withdrawing
+                ? QStringLiteral("Withdrawing · unless the agent reaches its next tool call first")
+                : QStringLiteral("%1 takes over at the agent's next tool call · the request answering now finishes first\n\n"
+                                 "Enter again or → interrupts and switches now · × withdraws it").arg(m_modelSteer->name));
+            item->setFlags(pending ? Qt::NoItemFlags : Qt::ItemIsEnabled);
+        }
         // Then the worker's own rows for this surface, in its order: the steers it holds inside
         // the running turn, then its queue. They carry no `EntryIdRole` and are not draggable —
         // `syncEntriesFromList` reorders `m_entries`, and a row that is not in that list has no
@@ -2074,10 +2096,16 @@ void Pane::rebuildQueueStrip() {
                 item->setData(Row::EntryIdRole, QVariant::fromValue<qulonglong>(entry.id));
                 item->setData(Row::AgentRole, entry.agent);
                 item->setData(Row::KindRole, entry.agent ? QStringLiteral("agent") : QStringLiteral("command"));
+                item->setData(Row::ModelRole, entry.isModel());
                 item->setData(Row::RowIdRole, QStringLiteral("entry:%1").arg(entry.id));
                 item->setData(Row::SendNowRole, entry.agent && !entry.written() && entry.guest.isEmpty()
                                               && m_configured && !m_ask.open());
-                item->setToolTip(entry.text);
+                item->setToolTip(entry.isModel()
+                    ? QStringLiteral("Switch to %1 when its turn comes · the running turn finishes on %2\n\n"
+                                     "Enter on the empty prompt box switches at the next tool call, twice interrupts and switches now"
+                                     " · → switches now · × drops it · picking again replaces it")
+                          .arg(entry.modelName, modelNameFor(m_currentPreset, m_model))
+                    : entry.text);
                 item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled);
                 if (i == m_selected) { if (agentLane) current = item; else terminalCurrent = item; }
             }
@@ -2090,7 +2118,7 @@ void Pane::rebuildQueueStrip() {
         if (terminalCurrent) m_terminalQueueList->setCurrentItem(terminalCurrent);
         else { m_terminalQueueList->clearSelection(); m_terminalQueueList->setCurrentRow(-1); }
         const int rowHeight = std::max(20, fontMetrics().height() + 8);
-        const int agentRows = int(m_steering.size()) + int(waiting.size()) + int(queued.size())
+        const int agentRows = int(m_steering.size()) + (m_modelSteer ? 1 : 0) + int(waiting.size()) + int(queued.size())
                           + int(std::count_if(m_entries.cbegin(), m_entries.cend(), std::mem_fn(&QueueEntry::agent)));
         const int terminalRows = int(m_entries.size()) - int(std::count_if(m_entries.cbegin(), m_entries.cend(), std::mem_fn(&QueueEntry::agent)));
         const int rows = agentRows + terminalRows;

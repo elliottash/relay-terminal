@@ -1909,6 +1909,12 @@ int main(int argc, char **argv)
         if (!failures) std::fprintf(stdout, "queuecontract: all cases passed\n");
         return failures ? 1 : 0;
     }
+    if (app.arguments().contains(QStringLiteral("--model-queue-only"))) {
+        relay::theme::applyTheme(app);
+        cases::modelQueueCases();
+        if (!failures) std::fprintf(stdout, "modelqueue: all cases passed\n");
+        return failures ? 1 : 0;
+    }
     if (app.arguments().contains(QStringLiteral("--h2kq-only"))) {
         relay::theme::applyTheme(app);
         cases::h2kqCases();
@@ -1978,6 +1984,7 @@ int main(int argc, char **argv)
     cases::enterOnAnEmptyBoxResumesThisConsolesPausedQueue();
     cases::aTerminalPanesOwnQueueResumesOnEnterToo();
     cases::repeatedEnterKeepsTheFirstQueuedPrompt();
+    cases::modelQueueCases();
     cases::anImageDraftSubmitsToTheAgentRatherThanOpening();
     cases::pendingQueueSurvivesPaneRestorePaused();
     cases::enteringPlanSelectsHigh();

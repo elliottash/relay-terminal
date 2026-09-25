@@ -226,6 +226,28 @@ private slots:
         QCOMPARE(rowLabel(steer("a", "x", "withdrawing")), QStringLiteral("↪ next tool call  ✦ x  withdrawing…"));
     }
 
+    // ----- the `/model` rows (card #7QH0) ---------------------------------------------------------
+    void a_queued_model_switch_walks_the_ladder_and_is_never_edited() {
+        const Row queued = entry(4, "model", "/model fable");
+        QCOMPARE(rowActions(queued, true, 0, 2), (QStringList{"remove", "steer", "send_now", "down"}));
+        // Idle it simply runs when its turn comes: there is nothing to steer into or interrupt.
+        QCOMPARE(rowActions(queued, false, 0, 1), (QStringList{"remove"}));
+        QCOMPARE(rowLabel(queued), QStringLiteral("↻ /model fable"));
+    }
+    void a_steered_model_switch_is_withdrawn_or_sent_now_and_is_not_a_queued_row() {
+        const Row steered{QStringLiteral("model-steer"), QStringLiteral("model"), QStringLiteral("/model fable"),
+                          QStringLiteral("waiting"), false};
+        QCOMPARE(rowActions(steered, true, -1, 0), (QStringList{"remove", "send_now"}));
+        QCOMPARE(rowLabel(steered), QStringLiteral("↪ next tool call  ↻ /model fable"));
+        Row interrupting = steered; interrupting.state = QStringLiteral("interrupting");
+        QVERIFY(rowActions(interrupting, true, -1, 0).isEmpty());
+        QCOMPARE(rowLabel(interrupting), QStringLiteral("↪ next tool call  ↻ /model fable  switching now…"));
+        // Not counted among the queued rows: the first queued prompt after it still cannot move up.
+        Inputs in; in.busy = true;
+        in.rows = {steered, entry(7, "agent", "a"), entry(8, "agent", "b")};
+        QCOMPARE(actionsFor(in, QStringLiteral("entry:7")), (QStringList{"remove", "edit", "steer", "down"}));
+    }
+
     // ----- ids -----------------------------------------------------------------------------------
     void no_preset_id_or_session_file_name_is_published() {
         Tokens choices(QLatin1Char('m')), sessions(QLatin1Char('s'));

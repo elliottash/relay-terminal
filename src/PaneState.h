@@ -46,9 +46,9 @@ constexpr int kIntervalMs = 100;    // at most one message per pane this often
 // One queue row, as Pane::queueRows() has it plus what the actions depend on.
 struct Row {
     QString id;             // "steer:<request id>" or "entry:<queue id>"
-    QString kind;           // "steer", "agent" or "command"
+    QString kind;           // "steer", "agent", "command" or "model" (a `/model` switch, card #7QH0)
     QString text;           // what the strip shows for it (QueueEntry::label(), a steer's text)
-    QString state;          // "waiting", "withdrawing", "queued", "editing" or "paused"
+    QString state;          // "waiting", "withdrawing", "queued", "editing", "paused" or "interrupting"
     bool written = false;   // Relay wrote it (a fix request, a terminal result): no edit, no steer
 };
 
@@ -121,8 +121,10 @@ QString phase(const Inputs &in);
 // Whitespace collapsed (unless `simplify` is false: a row label's two-space gaps are the desktop's
 // own spacing) and cut to `max` characters with an ellipsis.
 QString clip(const QString &text, int max = kLabelMax, bool simplify = true);
+// A queued row (counted by up/down), not one inside the running turn (card #7QH0).
+bool isEntryRow(const Row &row);
 // The row as the strip draws it: "↪ next tool call  ✦ check the readme", "✦ …", "$ …", with
-// "  withdrawing…" after a steer that is being withdrawn.
+// "  withdrawing…" after a steer that is being withdrawn; "↻ /model fable" for a model switch.
 QString rowLabel(const Row &row);
 // What may be done to this row right now. `entryIndex`/`entryCount` place a queued row among the
 // queued rows (steers are not counted); `busy` is whether an agent turn is running.

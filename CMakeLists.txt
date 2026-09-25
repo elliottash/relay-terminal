@@ -1070,6 +1070,8 @@ if(BUILD_TESTING)
     set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME queuecontract COMMAND relay-consolemode-tests --xcxd-only)
     set_tests_properties(queuecontract PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_test(NAME modelqueue COMMAND relay-consolemode-tests --model-queue-only)
+    set_tests_properties(modelqueue PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME composername COMMAND relay-consolemode-tests --composer-only)
     set_tests_properties(composername PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 

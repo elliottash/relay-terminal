@@ -549,6 +549,16 @@ class TurnSupervisor:
                 self._stop_locked()
             self._changed_locked()
 
+    def interrupt_running(self) -> None:
+        """Stop the running turn *without* pausing the queue: a `/model` switch sent "now"
+        (card #7QH0) ends the turn so the switch can land, and what is queued behind it goes on
+        as it would after any turn. Re-entrant: `set_model` calls it inside `now_or_later`.
+        An exclusive task (a compaction, `name-<hex>`) is not a turn and is left to finish: the
+        held switch lands when it does."""
+        with self._lock:
+            if self._running is not None and "-" not in self._running and self._agent is not None:
+                self._stop_locked()
+
     def resume(self) -> bool:
         """resume_queue: run what is queued again after a cancel or a failed turn.
 

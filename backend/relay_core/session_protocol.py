@@ -48,7 +48,7 @@ GUEST_RECONCILE_EVERY = 5.0
 GUEST_TAIL_POLL_EVERY = 0.5
 GUEST_TAIL_RETRY_EVERY = 1.0
 
-TYPES = {"set_model", "set_effort", "context", "context_breakdown", "compact", "usage_reset", "checkpoints", "rewind", "fork", "load_state",
+TYPES = {"set_model", "model_withdraw", "set_effort", "context", "context_breakdown", "compact", "usage_reset", "checkpoints", "rewind", "fork", "load_state",
          "sessions", "resume", "recap_request", "set_mode", "plan_execute", "scan_instructions",
          "synthesize_instructions", "suggest",
          # pane title (protocol section 18)
@@ -317,8 +317,26 @@ class SessionCommands:
         the request in flight finishes on the old model and the switch lands before the next one,
         which `model_applied` announces; idle, it applies at once as it always did. A conversation
         over the new window's limit is compacted first (by the model in force); one that cannot fit
-        the new window at all is refused with `model_switch_refused`, and the model stays."""
+        the new window at all is refused with `model_switch_refused`, and the model stays.
+
+        `when` says where a mid-turn switch lands (card #7QH0): "steer" at the next step boundary
+        (what an absent `when` has always meant), "queue" at the end of the running turn — the
+        pane's queued `/model` row — and "now" at the end of the running turn, which is stopped
+        for it, so the switch lands at once. The queue is not paused by that stop. Idle, all
+        three apply at once."""
+        when = request.get("when")
+        if when not in (None, "steer", "queue", "now"):
+            raise ValueError('"when" must be "steer", "queue" or "now".')
         self.switch_model(request, provider_config(request), request.get("preset"))
+
+    def _model_withdraw(self, request):
+        """Take back a mid-turn switch that has not landed (card #7QH0, the × on a steered
+        `/model` row). `model_switch_withdrawn` names the model in force, which the pane goes
+        back to showing; with nothing left to take back — it landed, or it is compacting on its
+        way in — `withdrawn` is false and nothing changed."""
+        outcome = self._agent().withdraw_pending_model()
+        self.emit({"event": "model_switch_withdrawn", "id": request.get("id"), "withdrawn": outcome is not None,
+                   **(outcome or {})})
 
     def switch_model(self, request, config, preset_id, *, follow=None, fields=None, refused_fields=None):
         """One landing path for direct picks and role picks, including guest harnesses (#MSW7).
@@ -330,6 +348,7 @@ class SessionCommands:
         window = request.get("context_window")
         window = validate_window(window) if window is not None else None
         fields = dict(fields or {})
+        when = request.get("when")
         follow = follow or self.on_model_changed
         guest_id = guest_harness_provider.preset_guest_id(preset_id)
         if guest_id is None and request.get("effort") is not None:
@@ -394,7 +413,7 @@ class SessionCommands:
                         config, preset_id, window, idle=idle, apply_now=apply_now,
                         start_exclusive=lambda task: self.turns.start_exclusive_locked("set_model", task),
                         on_applied=landed, fields=fields, refused_fields=active_fields,
-                        apply_model=apply_target)
+                        apply_model=apply_target, hold=when in ("queue", "now"))
                 except Exception as exc:
                     outcome = {"applies": "refused", "reason": f"Model switch failed: {str(exc)[:600]}"}
                 logs.event(logs.get("models"), "model_selection", model=config.model, preset=preset_id,
@@ -407,9 +426,16 @@ class SessionCommands:
                 else:
                     if not idle and outcome["applies"] == "now":
                         landed(agent)  # same transport; commit the role/cancelled pending pick too
+                    elif not idle and when == "now":
+                        # The interrupt rung (#7QH0): the switch is held to the turn's end, and
+                        # the turn ends now; the supervisor lands it as the turn finishes.
+                        self.turns.interrupt_running()
+                        outcome["interrupting"] = True
                     changed = {"event": "model_changed", "id": request.get("id"), "model": config.model,
                                "model_name": model_name(preset_id, config.model), "preset": preset_id,
                                "effort": agent.effort, **fields, **outcome}
+                    if when and not idle:
+                        changed["when"] = when
                     provider = guest_harness_provider.agent_provider(agent)
                     if guest_id is not None:
                         changed["guest"] = guest_id

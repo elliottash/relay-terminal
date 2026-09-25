@@ -1671,7 +1671,8 @@ class Agent:
         ``at="step"``, so a switch that is going to wait for the turn's end anyway - during a plan
         or image turn, or a failed-over one - leaves the retries alone."""
         with self._model_lock:
-            return self._pending_model is not None and not (self._routed or self._failover)
+            return (self._pending_model is not None and not self._pending_model.get("hold")
+                    and not (self._routed or self._failover))
 
     def switch_fit(self, config: ProviderConfig, window: int) -> dict:
         """How the conversation fits a model it may switch to: the numbers the context bar shows for
@@ -1703,7 +1704,8 @@ class Agent:
                       context_window: int | None = None, *, idle: bool, apply_now: Callable,
                       start_exclusive: Callable, on_applied: Callable | None = None,
                       fields: dict | None = None, refused_fields: Callable | None = None,
-                      pre_land: Callable | None = None, apply_model: Callable | None = None) -> dict:
+                      pre_land: Callable | None = None, apply_model: Callable | None = None,
+                      hold: bool = False) -> dict:
         """One model switch, idle or mid-turn; returns what its `model_changed` says.
 
         Idle and fitting: ``apply_now()`` switches at once (``applies: "now"``). Idle but over the
@@ -1711,6 +1713,7 @@ class Agent:
         off the protocol thread (``applies: "after_compaction"``). Mid-turn: `defer_model`. A switch
         that cannot fit at all is refused before anything changes (``applies: "refused"``,
         ``reason``); the caller then emits `model_switch_refused` instead of `model_changed`.
+        ``hold``: a mid-turn switch waits for the turn's end instead of the next step (#7QH0).
         """
         preset = resolve_preset(preset_id, config.base_url, config.model)
         window = context_window or context_window_for(preset)
@@ -1723,7 +1726,7 @@ class Agent:
             if not idle:
                 return self.defer_model(config, preset_id, context_window, on_applied=on_applied,
                                         fields=fields, refused_fields=refused_fields, pre_land=pre_land,
-                                        apply_model=apply_model)
+                                        apply_model=apply_model, hold=hold)
             if not fit["compacts"] or same:
                 self._pending_model = None
                 apply_now()
@@ -1740,7 +1743,8 @@ class Agent:
     def defer_model(self, config: ProviderConfig, preset_id: str | None = None,
                     context_window: int | None = None, *, on_applied: Callable | None = None,
                     fields: dict | None = None, refused_fields: Callable | None = None,
-                    pre_land: Callable | None = None, apply_model: Callable | None = None) -> dict:
+                    pre_land: Callable | None = None, apply_model: Callable | None = None,
+                    hold: bool = False) -> dict:
         """Accept a set_model while a turn runs; it lands at the next step boundary.
 
         A request that has started answering is never aborted: it finishes on the model it started
@@ -1763,6 +1767,10 @@ class Agent:
         — the hook a switch off a guest harness uses to end it, as the idle path's `apply_now`
         does (card #B9V4). `apply_model()` may own transport installation instead (#MSW7),
         so a deferred guest starts only at the boundary where it can take over.
+
+        ``hold`` (card #7QH0): the switch is the pane's queued `/model` entry, so the running turn
+        finishes whole on the model it started on and the switch lands at its end, as a routed
+        turn's does. A later switch replaces a held one like any other (the last one wins).
         """
         preset = resolve_preset(preset_id, config.base_url, config.model)
         window = context_window or context_window_for(preset)
@@ -1780,11 +1788,12 @@ class Agent:
                 return {"applies": "now", "context_window": self.context.window}
             self._pending_model = {"config": config, "preset_id": preset_id, "window": context_window,
                                    "on_applied": on_applied, "fields": dict(fields or {}),
-                                   "refused_fields": refused_fields, "pre_land": pre_land, "apply_model": apply_model}
+                                   "refused_fields": refused_fields, "pre_land": pre_land, "apply_model": apply_model,
+                                   "hold": hold}
             # A routed turn (plan mode, or an image turn on its vision model) stays on the swapped
             # model to the end: the new model applies after it, and so does a turn that has failed
             # over — `_end_failover` would undo a step switch.
-            applies = "turn_end" if (routed or self._failover) else "next_step"
+            applies = "turn_end" if (routed or self._failover or hold) else "next_step"
             # `in_flight_model_name` beside it (protocol 13, card #MDL1 rule 1): "model: kimi-k3
             # from the next turn · this turn finishes on glm-5.3" is two names, not two ids.
             outcome = {"applies": applies, "in_flight_model": running,
@@ -1809,6 +1818,23 @@ class Agent:
         a guest harness) says nothing, and no status line is added for it."""
         check = getattr(self.provider, "response_open", None)
         return callable(check) and bool(check())
+
+    def withdraw_pending_model(self) -> dict | None:
+        """Drop the switch waiting for a step boundary or the turn's end (card #7QH0's × on the
+        `/model` row). None when there is none to drop — it already landed, or it is compacting
+        on its way in (`_switching`), which is past taking back. Otherwise what the pane goes back
+        to showing: the model in force, as `model_switch_refused` reports it."""
+        with self._model_lock:
+            pending = self._pending_model
+            if pending is None:
+                return None
+            self._pending_model = None
+            logs.event(_log, "model_switch_withdrawn", session=self.session_id, model=pending["config"].model,
+                       current_model=self.config.model)
+            model, preset, effort = self._own_model()
+            return {"model": pending["config"].model, "current_model": model,
+                    "preset": getattr(preset, "id", None), "context_window": self.context.window,
+                    "effort": effort}
 
     def pending_model_compacts(self) -> bool:
         """Whether the waiting switch needs a compaction first (a network call: the turn supervisor
@@ -1852,7 +1878,8 @@ class Agent:
             pending = self._pending_model
             # A failed-over turn is a routed turn for this purpose: a switch landing at a step
             # boundary would be overwritten by `_end_failover`, so it waits for the turn's end.
-            if pending is None or (at == "step" and (self._routed or self._failover)):
+            # A held switch (#7QH0) waits for the turn's end for the same reason it was asked.
+            if pending is None or (at == "step" and (self._routed or self._failover or pending.get("hold"))):
                 return None
             self._pending_model = None
             window = _pending_window(pending)

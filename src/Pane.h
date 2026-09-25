@@ -175,6 +175,7 @@
 #endif
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <memory>
 #include <cmath>
 #include <csignal>
@@ -202,6 +203,8 @@ public:
     static constexpr int RowIdRole = Qt::UserRole + 3;      // "steer:<request id>" or "entry:<id>"
     static constexpr int PendingRole = Qt::UserRole + 4;    // a steer being withdrawn
     static constexpr int SendNowRole = Qt::UserRole + 5;
+    static constexpr int ModelRole = Qt::UserRole + 6;         // a `/model` switch (card #7QH0)
+    static constexpr int PendingTextRole = Qt::UserRole + 7;   // what a pending row says, when not "withdrawing…"
     static QRect sendNowRect(const QRect &row) { return QRect(row.right() - 48, row.top(), 22, row.height()); }
     using QStyledItemDelegate::QStyledItemDelegate;
     bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option,
@@ -237,9 +240,12 @@ public:
         // on you", and a queued shell command is not waiting on anyone.
         painter->setPen(pending ? relay::theme::TextMuted
                                 : (steer || agent) ? relay::theme::Agent : relay::theme::Shell);
-        painter->drawText(QRect(left, r.top(), 18, r.height()), Qt::AlignCenter, agent ? QStringLiteral("✦") : QStringLiteral("$"));
+        const bool model = index.data(ModelRole).toBool();
+        painter->drawText(QRect(left, r.top(), 18, r.height()), Qt::AlignCenter,
+                          model ? QStringLiteral("↻") : agent ? QStringLiteral("✦") : QStringLiteral("$"));
         left += 22;
-        const QString suffix = pending ? QStringLiteral("  withdrawing…") : QString();
+        const QString pendingText = index.data(PendingTextRole).toString();
+        const QString suffix = !pending ? QString() : pendingText.isEmpty() ? QStringLiteral("  withdrawing…") : pendingText;
         const bool sendNow = index.data(SendNowRole).toBool();
         const int room = std::max(20, r.right() - (sendNow ? 54 : 28) - left - option.fontMetrics.horizontalAdvance(suffix));
         painter->setPen(pending ? relay::theme::TextMuted : (steer ? relay::theme::Agent : relay::theme::Text));
@@ -564,8 +570,16 @@ public:
         // Who asked for it, when that is not the person at this desk: a guest's display name, or
         // empty. Never the guest id — the row is read by people (card #W5N2's owner, 2026-09-18).
         QString author;
+        // A queued `/model <name>` (card #7QH0): a model picked while a turn ran. It sits in the
+        // agent lane like a prompt and, when its turn comes, sends `modelRequest` — the
+        // `set_model` the pick built — and runs `modelCommit`, what the pick would have done to
+        // the chip and the remembered preset had it applied at once. Until then the chip stays on
+        // the model in force.
+        QJsonObject modelRequest; QString modelName; std::function<void()> modelCommit;
+        bool isModel() const { return !modelRequest.isEmpty(); }
         bool written() const { return fix || (agent && handoff); }   // by Relay, not by the user
         QString label() const {
+            if (isModel()) return QStringLiteral("/model ") + modelName;
             const QString what = fix ? QStringLiteral("fix request")
                                  : written() ? QStringLiteral("terminal result") : text;
             const QString labelled = guest.isEmpty() ? what : guestName(guest) + QStringLiteral(" · ") + what;
@@ -1969,7 +1983,11 @@ public:
         // set_model changes the model and Main role together; no intermediate role request (#MSW7).
         // …unless the pane is only *holding* that preset for its first prompt (card #MDL1):
         // picking it by hand is somebody asking for it now, and the configure below starts it.
-        if (id.isEmpty() || (id == m_currentPreset && m_deferredPreset.isEmpty() && m_agentRole == QStringLiteral("main") && model.isEmpty())) return;
+        if (id.isEmpty()) return;
+        if (id == m_currentPreset && m_deferredPreset.isEmpty() && m_agentRole == QStringLiteral("main") && model.isEmpty()) {
+            dropQueuedModel();   // back to the model in force: a queued `/model` goes (#7QH0)
+            return;
+        }
         const auto preset = presetById(id);
         // A full configure starts a new conversation, which a running turn cannot have.
         if (!m_configured || preset.isEmpty()) {
@@ -1992,11 +2010,12 @@ public:
         // A guest preset (29.3): what the harness is started with — the permission mode, and a
         // model, `resume` or `fork` when the pick carried one.
         if (const QJsonObject guest = takeGuestRequest(id); !guest.isEmpty()) request.insert(QStringLiteral("guest"), guest);
-        send(request);
-        rememberPreset(id);
-        if (!model.isEmpty()) QSettings().setValue(QStringLiteral("provider/model"), model);
-        rememberPresetBeforeGuest(id);
-        m_currentPreset = id; changed();
+        sendModelSwitch(request, modelNameFor(id, request.value(QStringLiteral("model")).toString()), [this, id, model] {
+            rememberPreset(id);
+            if (!model.isEmpty()) QSettings().setValue(QStringLiteral("provider/model"), model);
+            rememberPresetBeforeGuest(id);
+            m_currentPreset = id; changed();
+        });
     }
     // The Main row of the roles modal: run this pane on another model id from the same provider
     // ("kimi-k3-turbo" rather than "kimi-k3"). The pane's model is not a tier the worker resolves,
@@ -2021,28 +2040,225 @@ public:
                                 {"base_url", preset.value(QStringLiteral("base_url")).toString()},
                                 {"model", QString()}};
             request.insert(QStringLiteral("guest"), takeGuestRequest(m_currentPreset));
-            send(request);
-            changed();
+            sendModelSwitch(request, want, [this] { changed(); });
             return;
         }
         const QString id = model.trimmed().isEmpty() ? preset.value(QStringLiteral("model")).toString()
                                                      : model.trimmed();
         if (id.isEmpty()) return;
         QSettings settings;
-        settings.setValue(QStringLiteral("provider/model"), id);
         if (!m_configured || preset.isEmpty()) {
+            settings.setValue(QStringLiteral("provider/model"), id);
             status(QStringLiteral("Model for new conversations: %1.").arg(id));
             changed();
             return;
         }
-        if (id == paneModel() && m_agentRole == QStringLiteral("main")) return;
-        send({{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
+        if (id == paneModel() && m_agentRole == QStringLiteral("main")) { dropQueuedModel(); return; }
+        sendModelSwitch({{"type", "set_model"}, {"preset", m_currentPreset}, {"use_stored_key", true},
               {"base_url", preset.value(QStringLiteral("base_url")).toString()},
               {"model", id},
               {"extra", preset.value(QStringLiteral("extra")).toObject()},
-              {"max_tokens", settings.value(QStringLiteral("provider/max_tokens"), 0).toInt()}});
-        changed();
+              {"max_tokens", settings.value(QStringLiteral("provider/max_tokens"), 0).toInt()}},
+            modelNameFor(m_currentPreset, id), [this, id] {
+                QSettings().setValue(QStringLiteral("provider/model"), id);
+                changed();
+            });
     }
+    // ----- a model picked while a turn runs: the queued `/model` entry (card #7QH0) ------------
+    // Owner, 2026-09-25: "when you change model during an active agent job, it goes into the
+    // agent queue as "/model fable" or whatever, and you can press enter again to steer at next
+    // tool call, or enter 2x to interrupt and change now". So a pick made while the agent works is
+    // not sent: it joins the agent lane as an entry, prompts queued before it run on the old model
+    // and ones after it on the new, and it walks the prompt's ladder — Enter steers it (the worker
+    // lands it at the next step, `when: "steer"`), Enter again interrupts (`when: "now"`: the
+    // worker stops the turn and lands it at once). Idle, the pick is sent and applied as before.
+    void sendModelSwitch(QJsonObject request, const QString &name, std::function<void()> commit) {
+        if (!m_agentBusy) {
+            send(request);
+            if (commit) commit();
+            return;
+        }
+        // A pick while a switch is already steered into the turn replaces it there: the worker's
+        // last switch wins, so the row just follows (#7QH0: a second pick never stacks).
+        if (m_modelSteer && !m_modelSteer->interrupting && !m_modelSteer->withdrawing) {
+            request.insert(QStringLiteral("when"), QStringLiteral("steer"));
+            send(request);
+            if (commit) commit();
+            m_modelSteer->request = request; m_modelSteer->name = name;
+            rebuildQueueStrip(); changed();
+            toast(QStringLiteral("/model %1 · at the agent's next tool call · Enter again interrupts and switches now").arg(name));
+            return;
+        }
+        // …and one while a queued `/model` waits replaces that entry, in its place.
+        QueueEntry *queued = nullptr;
+        for (QueueEntry &entry : m_entries) if (entry.isModel()) { queued = &entry; break; }
+        if (queued) {
+            queued->modelRequest = request; queued->modelName = name; queued->modelCommit = std::move(commit);
+        } else {
+            QueueEntry entry; entry.agent = true;
+            entry.modelRequest = request; entry.modelName = name; entry.modelCommit = std::move(commit);
+            entry.text = entry.label();
+            entry.id = ++m_entrySerial;
+            m_entries.append(entry);
+            queued = &m_entries.last();
+        }
+        queued->text = queued->label();
+        // The next empty Enter is about this pick, whatever else waits ahead of it: that is what
+        // "press enter again" means right after choosing a model.
+        resetEnterSteerSequence();
+        m_enterSteerDraftSeen = false;
+        m_enterModelPin = queued->id;
+        relay::log::info(QStringLiteral("model_pick_queued pane=%1 model=%2").arg(paneLogId(), name));
+        status(QStringLiteral("Queued · /model %1 · this turn finishes on %2 · Enter again switches at the next tool call, twice switches now")
+                   .arg(name, modelNameFor(m_currentPreset, m_model)));
+        toast(QStringLiteral("/model %1 queued · Enter again switches at the next tool call · twice interrupts and switches now").arg(name));
+        rebuildQueueStrip(); changed();
+    }
+    // Picking the model already in force while a `/model` waits in the queue takes it back: the
+    // pane stays where it is. A switch already steered into the turn is the worker's; picking
+    // the old model then is an ordinary pick, which the worker reads as "stay" (issue 3ES1).
+    bool dropQueuedModel() {
+        for (const QueueEntry &entry : std::as_const(m_entries)) {
+            if (!entry.isModel()) continue;
+            const QString name = entry.modelName;
+            removeEntry(entry.id);
+            status(QStringLiteral("/model %1 dropped · staying on %2").arg(name, modelNameFor(m_currentPreset, m_model)));
+            return true;
+        }
+        if (m_modelSteer && !m_modelSteer->interrupting) return withdrawModelSteer();
+        return false;
+    }
+    // A queued `/model` whose turn has come (pumpQueue): the agent is idle, so it applies at once.
+    // The lane holds until the worker answers — a switch that compacts first answers with
+    // `after_compaction` and holds it until `model_applied` — so the prompt behind it runs on it.
+    void startModelEntry(const QueueEntry &entry) {
+        QJsonObject request = entry.modelRequest;
+        request.remove(QStringLiteral("when"));
+        m_modelSwitchInFlight = QStringLiteral("model-q%1").arg(++m_askSerial);
+        request.insert(QStringLiteral("id"), m_modelSwitchInFlight);
+        if (m_enterModelPin == entry.id) m_enterModelPin = 0;
+        send(request);
+        if (entry.modelCommit) entry.modelCommit();
+        // A worker that never answers (it restarted) must not hold the lane for good.
+        const QString waiting = m_modelSwitchInFlight;
+        QTimer::singleShot(20000, this, [this, waiting] {
+            if (m_modelSwitchInFlight != waiting || m_modelSwitchAnswered) return;
+            modelSwitchSettled();
+        });
+        m_modelSwitchAnswered = false;
+    }
+    // The lane may go on: the queued switch was answered for good.
+    void modelSwitchSettled() {
+        if (m_modelSwitchInFlight.isEmpty()) return;
+        m_modelSwitchInFlight.clear();
+        m_modelSwitchAnswered = false;
+        QTimer::singleShot(0, this, [this] { pumpQueue(); rebuildQueueStrip(); });
+    }
+    // The first rung: Enter on the pinned `/model`, Ctrl+↑ on it, or a phone's "At the next tool
+    // call". Out of the queue and into the running turn, where the worker lands it at the next
+    // step boundary — never aborting a request that has started answering (issue 3ES1).
+    QString steerModelEntry(quint64 id) {
+        if (!m_agentBusy) return {};
+        const auto at = std::find_if(m_entries.cbegin(), m_entries.cend(), [id](const QueueEntry &e) { return e.id == id; });
+        if (at == m_entries.cend() || !at->isModel()) return {};
+        const quint64 selected = selectedEntryId();
+        const QueueEntry entry = m_entries.takeAt(int(at - m_entries.cbegin()));
+        keepSelectionOn(selected);
+        if (m_enterModelPin == id) m_enterModelPin = 0;
+        QJsonObject request = entry.modelRequest;
+        request.insert(QStringLiteral("when"), QStringLiteral("steer"));
+        send(request);
+        if (entry.modelCommit) entry.modelCommit();
+        m_modelSteer = ModelSteer{request, entry.modelName};
+        m_enterSteerStep = relay::queuesubmit::EnterStep::Steered;
+        m_enterSteerRequest = QString::fromLatin1(kModelSteerRow);
+        m_enterSteerWorkerItem.clear();
+        m_enterSteerDraftSeen = false;
+        clearEmptyLanePauses();
+        rebuildQueueStrip(); changed();
+        toast(QStringLiteral("/model %1 · at the agent's next tool call · Enter again interrupts and switches now").arg(entry.modelName));
+        return QString::fromLatin1(kModelSteerRow);
+    }
+    // The last rung: stop the running turn and switch now. From the steered row (the second
+    // Enter, its → or Ctrl+Enter) or straight from a queued `/model` row's →. The worker holds
+    // the switch to the turn's end and ends the turn; what is queued behind it goes on, on the
+    // new model, as after an interrupting prompt.
+    bool sendModelRowNow(const QString &rowId) {
+        if (rowId == QLatin1String(kModelSteerRow)) {
+            if (!m_modelSteer || m_modelSteer->interrupting || m_modelSteer->withdrawing) return false;
+            if (!m_agentBusy) return false;   // the turn ended; the switch is landing as it is
+            QJsonObject request = m_modelSteer->request;
+            request.insert(QStringLiteral("when"), QStringLiteral("now"));
+            m_interruptPending = true;   // before the stop, so agent_finished does not pause the lane
+            send(request);
+            m_modelSteer->request = request; m_modelSteer->interrupting = true;
+            resetEnterSteerSequence();
+            status(QStringLiteral("Interrupting the current turn to switch to %1 now…").arg(m_modelSteer->name));
+            rebuildQueueStrip(); changed();
+            return true;
+        }
+        if (!rowId.startsWith(QStringLiteral("entry:"))) return false;
+        const quint64 id = rowId.mid(6).toULongLong();
+        const auto at = std::find_if(m_entries.cbegin(), m_entries.cend(), [id](const QueueEntry &e) { return e.id == id; });
+        if (at == m_entries.cend() || !at->isModel()) return false;
+        if (!m_agentBusy) {
+            // Nothing to interrupt: it goes now, ahead of whatever else waits.
+            const quint64 selected = selectedEntryId();
+            const QueueEntry entry = m_entries.takeAt(int(at - m_entries.cbegin()));
+            keepSelectionOn(selected);
+            startModelEntry(entry);
+            rebuildQueueStrip(); changed();
+            return true;
+        }
+        if (steerModelEntry(id).isEmpty()) return false;
+        return sendModelRowNow(QString::fromLatin1(kModelSteerRow));
+    }
+    // × on the steered row: ask the worker to drop it. `model_switch_withdrawn` answers; if the
+    // switch landed first, the transcript's `model_applied` line is where it went.
+    bool withdrawModelSteer() {
+        if (!m_modelSteer || m_modelSteer->interrupting || m_modelSteer->withdrawing) return false;
+        m_modelSteer->withdrawing = true;
+        send({{"type", "model_withdraw"}, {"id", "model-withdraw"}});
+        if (m_enterSteerRequest == QLatin1String(kModelSteerRow)) resetEnterSteerSequence();
+        status(QStringLiteral("Withdrawing /model %1 before the agent's next tool call…").arg(m_modelSteer->name));
+        rebuildQueueStrip(); changed();
+        return true;
+    }
+    // The worker's model events, for the `/model` rows (PaneSession.cpp calls this first).
+    void noteModelSwitchEvent(const QString &type, const QJsonObject &event) {
+        const bool mine = !m_modelSwitchInFlight.isEmpty()
+                          && event.value(QStringLiteral("id")).toString() == m_modelSwitchInFlight;
+        if (type == QLatin1String("model_changed")) {
+            const QString applies = event.value(QStringLiteral("applies")).toString();
+            if (mine) {
+                m_modelSwitchAnswered = true;
+                if (applies != QLatin1String("after_compaction")) modelSwitchSettled();
+            }
+            // A pick of the model in force mid-turn drops the worker's pending switch and is
+            // answered "now": the steered row has nothing left to wait for.
+            if (m_modelSteer && applies == QLatin1String("now")) {
+                if (m_enterSteerRequest == QLatin1String(kModelSteerRow)) resetEnterSteerSequence();
+                m_modelSteer.reset();
+                rebuildQueueStrip(); changed();
+            }
+            return;
+        }
+        if (type == QLatin1String("model_applied") || type == QLatin1String("model_switch_refused")
+            || type == QLatin1String("model_switch_withdrawn") || type == QLatin1String("configured")) {
+            modelSwitchSettled();
+            if (m_modelSteer) {
+                // The worker lands an interrupting switch after the turn's agent_finished, which
+                // took the flag already — unless the turn had finished on its own first.
+                if (m_modelSteer->interrupting) m_interruptPending = false;
+                if (m_enterSteerRequest == QLatin1String(kModelSteerRow)) resetEnterSteerSequence();
+                m_modelSteer.reset();
+                rebuildQueueStrip(); changed();
+            }
+        }
+        if (type == QLatin1String("error") && mine) modelSwitchSettled();
+    }
+    static constexpr const char *kModelSteerRow = "model-steer";
+
     // ----- the model catalog (owner, 2026-09-20) ---------------------------------------------
     // Every model of every preset row the worker sent, as relay::models entries; what the user
     // checked and ranked lives in QSettings under models/*. The box, the picker, /model <name> and
@@ -9041,6 +9257,11 @@ public:
             rows.append({QStringLiteral("steer:") + steer.requestId, QStringLiteral("steer"), steer.text.simplified(),
                          steer.withdraw ? QStringLiteral("withdrawing")
                                         : steer.requestId == m_selectedSteer ? QStringLiteral("editing") : QStringLiteral("waiting")});
+        // A `/model` steered into the turn (card #7QH0) lands at the next tool call, with the steers.
+        if (m_modelSteer)
+            rows.append({QString::fromLatin1(kModelSteerRow), QStringLiteral("model"), QStringLiteral("/model ") + m_modelSteer->name,
+                         m_modelSteer->withdrawing ? QStringLiteral("withdrawing")
+                         : m_modelSteer->interrupting ? QStringLiteral("interrupting") : QStringLiteral("waiting")});
         // Then the worker's own rows for this console's surface, which are the truth about that
         // queue and include the ones this console never submitted (card #CTRN). A pane whose
         // context names no surface has none of these and the list is exactly what it was.
@@ -9054,7 +9275,8 @@ public:
                                                         : QStringLiteral("queued")});
         for (int i = 0; i < m_entries.size(); ++i) {
             const QueueEntry &entry = m_entries[i];
-            rows.append({QStringLiteral("entry:%1").arg(entry.id), entry.agent ? QStringLiteral("agent") : QStringLiteral("command"),
+            rows.append({QStringLiteral("entry:%1").arg(entry.id),
+                         entry.isModel() ? QStringLiteral("model") : entry.agent ? QStringLiteral("agent") : QStringLiteral("command"),
                          entry.label().simplified(),
                          i == m_selected ? QStringLiteral("editing") : m_entriesPaused ? QStringLiteral("paused") : QStringLiteral("queued")});
         }
@@ -9066,6 +9288,7 @@ public:
     // on a row and Shift+Delete both come here. False when there is no such row, or it cannot be
     // removed (what is running is stopped with Esc, not removed).
     bool removeRow(const QString &rowId) {
+        if (rowId == QLatin1String(kModelSteerRow)) return withdrawModelSteer();   // #7QH0
         if (rowId.startsWith(QStringLiteral("steer:"))) {
             const QString requestId = rowId.mid(6);
             const bool known = std::any_of(m_steering.cbegin(), m_steering.cend(),
@@ -9155,6 +9378,7 @@ private:
     QString steerQueuedEntry(quint64 id) {
         if (!m_agentBusy) return {};
         const auto at = std::find_if(m_entries.cbegin(), m_entries.cend(), [id](const QueueEntry &e) { return e.id == id; });
+        if (at != m_entries.cend() && at->isModel()) return steerModelEntry(id);   // #7QH0's first rung
         if (at == m_entries.cend() || !at->agent || at->written()) return {};
         const quint64 selected = selectedEntryId();
         const QueueEntry entry = m_entries.takeAt(int(at - m_entries.cbegin()));
@@ -9193,6 +9417,8 @@ private:
     // below, not a timer, decides what the next Enter does.
     bool upgradeFirstQueuedToSteer() {
         if (!m_agentBusy) return false;
+        // A model just picked is what "Enter again" is about (card #7QH0), ahead of any prompt.
+        if (m_enterModelPin && !steerModelEntry(m_enterModelPin).isEmpty()) return true;
         // The oldest waiting agent prompt may be the worker's, not this pane's (card #XCXD):
         // console surfaces queue there, and the strip shows that half first. Steer the worker's
         // head by item — the pane has no request id for it — and pin the item: the next Enter
@@ -9286,6 +9512,7 @@ private:
     }
 
     void resetEnterSteerSequence() {
+        m_enterModelPin = 0;
         m_enterSteerStep = relay::queuesubmit::EnterStep::Idle;
         m_enterSteerRequest.clear();
         m_enterSteerWorkerItem.clear();
@@ -9310,6 +9537,7 @@ private:
     // here, which keeps the prompt echo wired up the way startAgentEntry() does.
     bool sendSteerNow(const QString &steerRequest) {
         if (!m_agentBusy) return false;
+        if (steerRequest == QLatin1String(kModelSteerRow)) return sendModelRowNow(steerRequest);   // #7QH0
         const auto pending = std::find_if(m_steering.cbegin(), m_steering.cend(),
             [&](const SteerEntry &steer) { return steer.requestId == steerRequest && !steer.withdraw; });
         if (pending == m_steering.cend()) return false;
@@ -9339,6 +9567,7 @@ private:
     // Send the row's saved prompt, keeping the composer's unrelated draft and the other rows.
     void sendQueueRowNow(const QString &rowId) {
         if (m_ask.open()) return;
+        if (sendModelRowNow(rowId)) return;   // a `/model` row (#7QH0)
         if (rowId.startsWith(QStringLiteral("steer:"))) {
             sendSteerNow(rowId.mid(6));
             return;
@@ -11984,7 +12213,9 @@ public:
         return false;
     }
     bool remoteQueueSendNow(const QString &rowId) {
-        return remoteRowOffers(rowId, QStringLiteral("send_now")) && sendSteerNow(rowId.mid(6));
+        if (!remoteRowOffers(rowId, QStringLiteral("send_now"))) return false;
+        if (rowId == QLatin1String(kModelSteerRow) || rowId.startsWith(QLatin1String("entry:"))) return sendModelRowNow(rowId);
+        return sendSteerNow(rowId.mid(6));
     }
 
     // queue_resume: the phone's empty send, which is Enter on an empty prompt box here (#7JD1).
@@ -13276,7 +13507,8 @@ private:
             const int terminalHead = firstQueuedIndex(QueueResource::Terminal);
             relay::queuesubmit::LaneFacts facts;
             facts.agentBusy = m_agentBusy;
-            facts.agentStarting = m_activeAgentValid || agentClosed;
+            // A queued `/model` sent a moment ago holds the lane until the worker answers (#7QH0).
+            facts.agentStarting = m_activeAgentValid || agentClosed || !m_modelSwitchInFlight.isEmpty();
             facts.agentPaused = m_agentPaused;
             facts.agentQuestionOpen = m_ask.open();   // the agent's question holds the agent's queue
             facts.agentHeld = selectedIndex >= 0 && selectedIndex == agentHead;
@@ -13304,7 +13536,10 @@ private:
             if (index < 0) break;
             const QueueEntry entry = m_entries.takeAt(index);
             delivered = true;
-            if (entry.agent) {
+            if (entry.isModel()) {
+                agentClosed = true;
+                startModelEntry(entry);
+            } else if (entry.agent) {
                 agentClosed = true;
                 startAgentEntry(entry, true);
             } else if (!entry.guest.isEmpty()) {
@@ -13356,7 +13591,8 @@ private:
         m_selectedSteer.clear();   // before the text changes, so it does not read as editing the steer
         m_selectedWorkerRow.clear();
         m_selected = index;
-        m_editor->setPlainText(m_entries[index].written() ? QString() : m_entries[index].text);
+        // A `/model` row has no text to edit (#7QH0): picking again replaces it.
+        m_editor->setPlainText(m_entries[index].written() || m_entries[index].isModel() ? QString() : m_entries[index].text);
         m_editor->moveCursor(QTextCursor::End);
         rebuildQueueStrip(); changed();
         pumpQueue();   // the selection may have just left the head, which releases the queue
@@ -13367,7 +13603,8 @@ private:
     bool saveQueueEdit() {
         if (m_selected < 0 || m_selected >= m_entries.size()) return false;
         const QString text = m_editor->toPlainText();
-        if (text.trimmed().isEmpty() || m_entries[m_selected].written() || text == m_entries[m_selected].text) return false;
+        if (text.trimmed().isEmpty() || m_entries[m_selected].written() || m_entries[m_selected].isModel()
+            || text == m_entries[m_selected].text) return false;
         m_entries[m_selected].text = text;
         return true;
     }
@@ -17196,6 +17433,14 @@ private:
     bool m_finishedWhileAway = false, m_forkLoadPending = false, m_commandLoaded = false, m_initialIsFork = true;
     int m_turnsCompleted = 0, m_lastRecapTurns = -1, m_skillCount = 0;
     QList<SteerEntry> m_steering;
+    // Card #7QH0: the `/model` switch steered into the running turn (one at most — the worker's
+    // last switch wins), the id of a queued one sent while idle whose answer the agent lane waits
+    // for, and the queued one the next empty Enter steers.
+    struct ModelSteer { QJsonObject request; QString name; bool interrupting = false, withdrawing = false; };
+    std::optional<ModelSteer> m_modelSteer;
+    QString m_modelSwitchInFlight;
+    bool m_modelSwitchAnswered = false;
+    quint64 m_enterModelPin = 0;
     QSet<QString> m_withdrawnOnReturn;   // steers the turn gave back after their × was clicked
     quint64 m_lastQueuedEntryId = 0;
     QString m_lastSteerRequest;

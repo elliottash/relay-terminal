@@ -6,6 +6,7 @@ void Pane::handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
         trackRecallEvent(type, event);
         logEvent(type, event);
+        noteModelSwitchEvent(type, event);   // the queued and steered `/model` rows (#7QH0)
         // A shared pane's agent is watched from elsewhere too. The sidecar's allow-list decides
         // what actually reaches a device; this only offers it.
         relay::RemoteShare::instance().paneEvent(m_token, event);

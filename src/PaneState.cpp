@@ -20,7 +20,23 @@ QString clip(const QString &text, int max, bool simplify) {
     return simple.left(max - 1) + QChar(0x2026);
 }
 
+// A queued row, which the up/down actions count, as against one inside the running turn: a steer,
+// or a `/model` switch steered into it (card #7QH0: "waiting", "withdrawing", "interrupting").
+bool isEntryRow(const Row &row) {
+    if (row.kind == QLatin1String("steer")) return false;
+    if (row.kind == QLatin1String("model"))
+        return row.state == QLatin1String("queued") || row.state == QLatin1String("paused") || row.state == QLatin1String("editing");
+    return true;
+}
+
 QString rowLabel(const Row &row) {
+    if (row.kind == QLatin1String("model")) {
+        QString label = isEntryRow(row) ? QString() : QStringLiteral("↪ next tool call  ");
+        label += QStringLiteral("↻ ") + row.text.simplified();
+        if (row.state == QLatin1String("withdrawing")) label += QStringLiteral("  withdrawing…");
+        if (row.state == QLatin1String("interrupting")) label += QStringLiteral("  switching now…");
+        return label;
+    }
     const bool steer = row.kind == QLatin1String("steer");
     const bool agent = steer || row.kind == QLatin1String("agent");
     QString label = steer ? QStringLiteral("↪ next tool call  ") : QString();
@@ -40,6 +56,22 @@ QStringList rowActions(const Row &row, bool busy, int entryIndex, int entryCount
         if (busy) actions << QStringLiteral("send_now");
         return actions;
     }
+    if (row.kind == QLatin1String("model")) {
+        // Card #7QH0: a `/model` walks the prompt's ladder — queued, then at the next tool call,
+        // then now — and has no text to edit: picking another model replaces it.
+        if (!isEntryRow(row)) {
+            if (row.state != QLatin1String("waiting")) return actions;
+            actions << QStringLiteral("remove");
+            if (busy) actions << QStringLiteral("send_now");
+            return actions;
+        }
+        if (row.state == QLatin1String("editing")) return actions;
+        actions << QStringLiteral("remove");
+        if (busy) actions << QStringLiteral("steer") << QStringLiteral("send_now");
+        if (entryIndex > 0) actions << QStringLiteral("up");
+        if (entryIndex >= 0 && entryIndex < entryCount - 1) actions << QStringLiteral("down");
+        return actions;
+    }
     if (row.kind != QLatin1String("agent") && row.kind != QLatin1String("command")) return actions;
     if (row.state == QLatin1String("editing")) return actions;   // being edited on the desktop
     actions << QStringLiteral("remove");
@@ -54,10 +86,10 @@ QStringList rowActions(const Row &row, bool busy, int entryIndex, int entryCount
 
 QStringList actionsFor(const Inputs &in, const QString &rowId) {
     int entryCount = 0;
-    for (const Row &row : in.rows) if (row.kind != QLatin1String("steer")) ++entryCount;
+    for (const Row &row : in.rows) if (isEntryRow(row)) ++entryCount;
     int entryIndex = 0;
     for (const Row &row : in.rows) {
-        const bool entry = row.kind != QLatin1String("steer");
+        const bool entry = isEntryRow(row);
         if (row.id == rowId) return rowActions(row, in.busy, entry ? entryIndex : -1, entryCount);
         if (entry) ++entryIndex;
     }
@@ -92,10 +124,10 @@ QJsonObject build(qint64 seq, const Inputs &in, Tokens &choiceTokens, Tokens &se
 
     QJsonArray rows;
     int entryCount = 0;
-    for (const Row &row : in.rows) if (row.kind != QLatin1String("steer")) ++entryCount;
+    for (const Row &row : in.rows) if (isEntryRow(row)) ++entryCount;
     int entryIndex = 0;
     for (const Row &row : in.rows) {
-        const bool entry = row.kind != QLatin1String("steer");
+        const bool entry = isEntryRow(row);
         if (rows.size() < kRowsMax) {
             QJsonArray actions;
             for (const QString &action : rowActions(row, in.busy, entry ? entryIndex : -1, entryCount)) actions.append(action);

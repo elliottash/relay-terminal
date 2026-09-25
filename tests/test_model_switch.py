@@ -222,6 +222,117 @@ class ModelSwitchMidTurnTests(unittest.TestCase):
         self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] != self.rec.of('agent_finished')[0]['id'])
         self.assertEqual(len(self.rec.of('model_applied')), 1)
 
+    # ----- the queued `/model` entry and its ladder (card #7QH0) -----------------------------
+    def two_step_turn(self):
+        """A turn whose first step blocks until released and whose second records its model."""
+        seen, ref = [], []
+        step, gate, entered = self.blocked_first_step(ref, seen, tools_msg(call('list_directory', {'path': '.'})))
+
+        def second(_messages):
+            seen.append(ref[0].config.model)
+            return text('done')
+        agent = self.make_agent(ScriptedProvider([step, second, second]))
+        ref.append(agent)
+        return agent, seen, gate, entered
+
+    def test_a_queued_switch_lets_the_turn_finish_whole_and_lands_at_its_end(self):
+        agent, seen, gate, entered = self.two_step_turn()
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'queue'})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual((changed['applies'], changed['when'], changed['in_flight_model']), ('turn_end', 'queue', 'old'))
+        self.assertNotIn('interrupting', changed)
+        gate.set()
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual(seen, ['old', 'old'])             # the second step stayed on the old model
+        self.assertEqual((applied['at'], applied['model']), ('turn_end', 'new'))
+        self.assertLess(self.index(lambda e: e['event'] == 'agent_finished'),
+                        self.index(lambda e: e['event'] == 'model_applied'))
+        self.assertEqual(agent.config.model, 'new')
+
+    def test_a_queued_switch_does_not_cut_a_retry_wait_short(self):
+        agent, _seen, gate, entered = self.two_step_turn()
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'queue'})
+        self.assertFalse(agent._switch_waiting())          # a held switch pre-empts no retry (#DC4J)
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'steer'})
+        self.assertTrue(agent._switch_waiting())
+        gate.set()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+
+    def test_steering_a_queued_switch_lands_it_at_the_next_step(self):
+        agent, seen, gate, entered = self.two_step_turn()
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'queue'})
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'steer'})
+        self.assertEqual([(e['applies'], e['when']) for e in self.rec.of('model_changed')],
+                         [('turn_end', 'queue'), ('next_step', 'steer')])
+        gate.set()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertEqual(seen[:2], ['old', 'new'])          # (a takeover may add a completion check)
+        self.assertEqual([(e['at'], e['model']) for e in self.rec.of('model_applied')], [('step', 'new')])
+
+    def test_a_now_switch_stops_the_turn_lands_at_once_and_leaves_the_queue_running(self):
+        agent, seen, gate, entered = self.two_step_turn()
+        first = self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.sup.submit('then this', 'queue')
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'now'})
+        changed = self.rec.wait(lambda e: e['event'] == 'model_changed')
+        self.assertEqual((changed['applies'], changed['when'], changed['interrupting']), ('turn_end', 'now', True))
+        self.assertTrue(agent.cancel_event.is_set())
+        gate.set()
+        finished = self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == first)
+        self.assertEqual(finished['outcome'], 'cancelled')
+        applied = self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual((applied['at'], applied['model']), ('turn_end', 'new'))
+        # Not paused: the prompt queued behind the stopped turn runs, on the new model.
+        self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] != first)
+        self.assertEqual(seen, ['old', 'new'])
+
+    def test_a_second_queued_pick_replaces_the_first(self):
+        agent, seen, gate, entered = self.two_step_turn()
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'first', 'when': 'queue'})
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:3/v1', 'model': 'second', 'when': 'queue'})
+        gate.set()
+        self.rec.wait(lambda e: e['event'] == 'model_applied')
+        self.assertEqual([e['model'] for e in self.rec.of('model_applied')], ['second'])
+        self.assertEqual(seen, ['old', 'old'])
+
+    def test_withdrawing_a_queued_switch_keeps_the_model(self):
+        agent, seen, gate, entered = self.two_step_turn()
+        self.sup.submit('look around', 'now')
+        self.assertTrue(entered.wait(5))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'steer'})
+        self.cmds.handle('model_withdraw', {'id': 'w1'})
+        withdrawn = self.rec.wait(lambda e: e['event'] == 'model_switch_withdrawn')
+        self.assertEqual((withdrawn['id'], withdrawn['withdrawn'], withdrawn['model'], withdrawn['current_model']),
+                         ('w1', True, 'new', 'old'))
+        gate.set()
+        self.rec.wait(lambda e: e['event'] == 'agent_finished')
+        self.assertEqual(seen, ['old', 'old'])
+        self.assertEqual(self.rec.of('model_applied'), [])
+        self.cmds.handle('model_withdraw', {})              # nothing left to take back
+        self.assertFalse(self.rec.of('model_switch_withdrawn')[-1]['withdrawn'])
+
+    def test_when_is_checked(self):
+        self.make_agent(ScriptedProvider([]))
+        with self.assertRaises(ValueError):
+            self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'later'})
+
+    def test_an_idle_switch_applies_at_once_whatever_when_says(self):
+        agent = self.make_agent(ScriptedProvider([]))
+        self.cmds.handle('set_model', {'base_url': 'http://127.0.0.1:2/v1', 'model': 'new', 'when': 'queue'})
+        changed = self.rec.of('model_changed')[-1]
+        self.assertEqual(changed['applies'], 'now')
+        self.assertNotIn('when', changed)
+        self.assertEqual(agent.config.model, 'new')
+
     def seed_long_history(self, agent, turns=3, chars=40000):
         """Older turns a 16k window cannot hold, then a short one; compaction can summarise them."""
         for n in range(turns):

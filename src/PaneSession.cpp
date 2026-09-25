@@ -257,6 +257,33 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             changed();
             return true;
         }
+        if (type == QStringLiteral("model_switch_withdrawn")) {
+            // The × on a steered `/model` row (card #7QH0). Withdrawn: the pane goes back to the
+            // model in force, as after a refusal but quietly — nobody failed. Not withdrawn: it
+            // landed first, and its `model_applied` line already says so.
+            if (!event.value(QStringLiteral("withdrawn")).toBool()) {
+                status(QStringLiteral("Too late to withdraw · the switch already landed"));
+                changed();
+                return true;
+            }
+            const QString current = event.value(QStringLiteral("current_model")).toString();
+            const QString preset = event.value(QStringLiteral("preset")).toString();
+            if (!current.isEmpty()) m_model = m_paneModel = current;
+            if (!preset.isEmpty()) { m_currentPreset = preset; rememberPreset(preset); }
+            const qint64 window = event.value(QStringLiteral("context_window")).toVariant().toLongLong();
+            if (window > 0) m_ctxWindow = window;
+            clearNextContext();
+            const QString what = QStringLiteral("Withdrawn · staying on %1").arg(modelNameFor(m_currentPreset, m_model));
+            ensureLineStart();
+            printInline(QStringLiteral("↻ /model %1 withdrawn · staying on %2\n")
+                            .arg(modelNameFor(QString(), event.value(QStringLiteral("model")).toString()),
+                                 modelNameFor(m_currentPreset, m_model)), Ink::Note);
+            if (!m_agentBusy && !moreTurnsPending()) closeInline();
+            status(what); toast(what);
+            updateContextLabel();
+            changed();
+            return true;
+        }
         if (type == QStringLiteral("model_switch_refused")) {
             // A switch the new window cannot hold, even compacted (issue 3ES1): the pane stays on the
             // model in force, so the chip, the role and the provider settings go back to it.

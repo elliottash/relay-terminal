@@ -43,7 +43,8 @@ const ACTION_ORDER = ['edit', 'steer', 'send_now', 'to_queue', 'up', 'down', 're
 
 // The desktop's own words for each action (the queue strip's hint line and row tooltips, Pane.h).
 const ACTION_WORDS = {
-  remove: (row) => (row.kind === 'steer' ? 'Withdraw' : 'Remove'),
+  // A `/model` steered into the turn is withdrawn like a steer (card #7QH0).
+  remove: (row) => (row.kind === 'steer' || (row.kind === 'model' && row.state === 'waiting') ? 'Withdraw' : 'Remove'),
   edit: () => 'Edit',
   to_queue: () => 'Back to the queue',
   send_now: () => 'Send now',
