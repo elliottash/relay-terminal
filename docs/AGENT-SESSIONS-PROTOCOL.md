@@ -3061,7 +3061,6 @@ no key — that window used to show "Loading the Board…" forever.
 | `board_open {id?}` | `board {id, rev, root, workspace, project, state, exists, config, cards: [row], cards_total, more, problems}`, then a `board_cards` per further batch |
 | `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}`, then a `board_cards` per further batch |
 | `board_search {id?, query}` | `board_search {id, root, query, ids: [card_id]}` |
-| `board_links {id?, address? \| addresses?≤200, dangling?}` | `board_links {id, edges, items: [{address, kind, exists, title?, status?, forward, reverse}], dangling?}` (19.24) |
 | `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, children, reverse, commits, thread, thread_total}` |
 | `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
 
@@ -3484,9 +3483,8 @@ that is offered:
 | | Discuss | Plan | Refine (#6W9X) |
 |---|---|---|---|
 | repository | `read_file`, `list_directory`, `search_files`, skills (read) | the same | the same |
-| commands | `run_command`, `command_output`, `stop_command` — to read, inspect and verify (card #NXN0, 2026-09-25); never to change code or files | the same | the same |
 | board | `board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card`, `board_comment` | `board_list`, `board_read`; `board_update_card` **only this card's `## Plan`** (`replace_section`/`append_section` with heading `Plan`, nothing else in the patch); `board_comment` **only on this card** | `board_list`, `board_read`; `board_update_card` **only this card**, and only `fields.links` with nothing but `related` changed, `fields.labels` with words another card already carries, and a `## Done means` the card does not have yet; `board_comment` **only on this card** |
-| never | `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same | the same |
+| never | `run_command` and the job tools, `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same | the same |
 
 **Refine** (`mode: "refine"`, v1, card #6W9X, 2026-09-23) checks the *request* before anyone plans
 it: the brief, `board_refine_brief.md`, has it search the whole board, done and dropped cards
@@ -3499,13 +3497,10 @@ decided and an inbox card stays in the inbox. A phone may send it too (`BoardRem
 `discuss`, `plan` and `refine`).
 
 A call outside the mode is refused with `code: "board_mode_refused"` (board tools) or an ordinary
-tool error (the rest); the sentence names **Run** as where code-writing belongs, and the turn
+tool error (the rest); both sentences name **Execute** as where that work belongs, and the turn
 carries on and answers. The honest cost of the shape is that a Plan turn is *offered* `write_file`
-and told no if it calls it — which is what a read-only turn already is, and what
-owner decision 3 on card #CTRN chose over re-prefilling the request on every mode change. Card
-#NXN0 (2026-09-25) took commands off that refusal: a Discuss or Plan verifies by running —
-`pytest --version`, a targeted test — through the executor exactly as a console's, Options ›
-Security's command policies included, while the writers stay refused.
+and `run_command` and told no if it calls them — which is what a read-only turn already is, and what
+owner decision 3 on card #CTRN chose over re-prefilling the request on every mode change.
 `search_files {pattern, path?, glob?}` was added for a card turn and is a console's tool too (33.3):
 a case-insensitive (unless the pattern has a capital) regular-expression search of
 the workspace's text files, ≤80 matching lines as `path:line: text`, skipping `.git`, build and
@@ -4407,77 +4402,17 @@ in `board.yaml` supplies a soft effective due date to cards in that milestone wi
 read time, never stored. Snoozed open cards are hidden from active rows until their date and
 appear under the Snoozed filter.
 
-Forward links are stored once: `parent`, `blocked_by`, `duplicate_of`, `links.related`, and
-since #EE42 `discovered_from` and `supersedes` (19.24).
+Forward links are stored once: `parent`, `blocked_by`, `duplicate_of` and `links.related`.
 Writers require existing card ids, refuse self links and parent/blocking cycles. `board_card`
 computes `children` (id, title, status, done) and `reverse` (child_of, blocks,
-duplicated_by, related_from, discovered, superseded_by). A dangling link already in a file is a
-`board_check` warning (`dangling_link`) and renders as missing; it does not stop reading the board.
+duplicated_by, related_from). A dangling link already in a file is a `board_check` warning and
+renders as missing; it does not stop reading the board.
 
 `links.commits` is an oldest-first sequence of short commit hashes, de-duplicated by prefix and
 sorted by commit date when written. `land.py commit` appends the landed hash to each existing
 card named `#ID` in its message unless `--no-cards` is passed. `board_card.commits` resolves at
 most 20 rows with hash, date, subject, author and `Implemented-By` trailer; the newest entry of
 the stored sequence is the QA revision under test.
-
-### 19.24 `board_links`: the computed link index (#EE42, 2026-09-25)
-
-`docs/PROJECT-BOARD-DESIGN.md` §4. Links are stored once, forward; the reverse is computed.
-`backend/relay_core/board_links.py` builds the index from the board's files **on every request**
-and writes it nowhere. Its edges are `{from, relation, to, where}`: `relation` is the name of the
-field the edge was read from (`parent`, `blocked_by`, `duplicate_of`, `discovered_from`,
-`supersedes`, `links.related`, `links.commits`, `links.evidence`, `links.plans`, `server`,
-`card`), or `mention` for an address in prose; `where` is `front matter`, `body`,
-`thread <entry id>` or `cases.jsonl`. Sources are every card's front matter, body and thread
-(not `event` entries, which echo writes, and not mentioned-in lines, which are reverses), and the
-case ledger's rows (`case:<id>` → its `card` and its `server`). Prose inside code spans and
-fenced blocks is not scanned.
-
-Addresses (§4.1 of the design): `#ID` (a card or memory card), `skill:<id>` (an `@sha256:…` pin
-rides on the edge as `version`), `case:c-<hex>`, `run:r-<hex>` (a `#path` artifact rides as
-`artifact`), `<path>@<sha>` and `<path>:<line>@<sha>` (the line rides as `line`), a commit (7–40
-hex, from `links.commits`), or a repository path. `links:<address>` is accepted as the address.
-
-```
-→ board_links {id, address: "#EA37"}                  or  {addresses: [...], dangling: true}
-← board_links {id, edges: 4710,
-    items: [{address: "#EA37", kind: "card", exists: true, title, status,
-             forward: [{relation, to, kind, where, exists, title?, status?, version?, artifact?, line?}],
-             reverse: [{relation, name, from, kind, where, title?, status?}]}],
-    dangling?: [{from, relation, to, where}]}
-```
-
-`exists` is `true`, `false` (the address names nothing: a card not on this board, a case not in
-the ledger, a skill no skill directory or ledger row knows, a commit or `path@sha` git does not
-have, a missing path) or `null` when the board cannot tell (a `run:` address before the runs
-ledger of #FVVY exists; no git). `name` is the reverse's name for a page to draw: `children`,
-`blocks`, `duplicated_by`, `related_from`, `discovered`, `superseded_by`, `mentioned_in`,
-`commit_of`, `evidence_of`, `plan_of`, `cases` (a case row naming the card, or served by the
-skill), `built_by` (a card whose `server` names the skill). `dangling` (every edge whose target is
-`exists: false`, ≤ 500) comes with `dangling: true`, or when no address is given.
-`relay-board.py check` reports `dangling_link` for the front-matter fields only: prose quotes
-example ids (`#AAAA`), and those stay in this list rather than in the problems strip.
-
-**New work-card fields.** `discovered_from` (one id): `board_create_card` accepts it, and when the
-caller names none and the pane holds exactly one claimed card, it is set to that card — the
-deliver flow's "an unrelated fault becomes a card". `supersedes` (an id or ids) on a work card
-names the card(s) this one rewrites. Both must name cards on this board. `duplicate_of` set through
-`board_update_card` on an open work card closes it: a `board_move_card` to `dropped` with
-`resolution: duplicate`, with every gate a move has; the result carries `closed {status, path}`,
-or `close_refused` with the gate's sentence when a gate refused (the pointer stays).
-
-**The mentioned-in line.** After a Board write (`board_create_card`, `board_update_card`,
-`board_move_card`, `board_comment`, `board_claim`, `board_merge_cards`, `board_split_card`,
-from an agent or the pane) adds a reference from card S to card T that S did not hold before, T's
-thread gets one entry `mentioned in #S · YYYY-MM-DD · <actor>`, `kind=event`, with the attribute
-`mention=S`. It is appended under the threads directory's lock after checking that no entry with
-`mention=S` is already there, so a pair gets one line whoever races. It never fails the write it
-follows. When a line and the index disagree, the index wins.
-
-**The filter box.** `board_search`'s `query` accepts `links:<address>` (cards with any edge to the
-address), and `skill:<id>`, `case:<id>`, `run:<id>` (cards linked to that address either way;
-for a skill also the cards its case rows name). They are ANDed with the plain words. The pane
-already sends them as plain words, so no GUI change was needed.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 
@@ -8595,9 +8530,8 @@ Three things still withhold a tool, and each is a constraint rather than a fence
 2. **A guest harness cannot run Relay's tools** (#GH5T, #4NXH), so the helper never runs on one and never
    starts one. 29.3 and 30.7's last bullet stand exactly as written.
 3. **A card's Plan turn is refused the writers at call time** (19.20, `board_tools.CardScope`). It
-   writes only its own `## Plan`, and gets no file writes — but it runs commands (19.19, card
-   #NXN0: a Discuss or Plan verifies by reading *and* by running), and it is *offered* the same
-   tools every console turn is, told no in a sentence that names Run if it calls a writer. That is
+   writes only its own `## Plan`, gets no shell and no file writes — but it is *offered* the same
+   tools every console turn is, and told no in a sentence that names Execute if it calls one. That is
    the stage machine rather than a per-surface fence, and saying it at call time is what keeps a
    card's prefix byte-identical to any other console's (card #CTRN, owner decision 3).
 
@@ -9142,8 +9076,7 @@ manifest's rule still holds — v1 plugin groups are always lazy — so `load_to
 schemas are appended after the list. Activation therefore re-prefills once; it is rare and
 deliberate. A tool of another workspace's plugin is refused with a sentence naming it; running
 code or a build (`py_run_cell`, `py_restart`, `py_interrupt`, `tex_build` with `action: build`)
-is refused on a read-only turn and on a card's Discuss or Plan turn (commands proper —
-`run_command` — pass on a card turn since card #NXN0; the plugin's build-and-run surfaces do not).
+is refused on a read-only turn and on a card's Discuss or Plan turn, like `run_command`.
 
 | Group | Tools |
 |---|---|
