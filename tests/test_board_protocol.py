@@ -1473,13 +1473,20 @@ class CardScopeAgentTests(unittest.TestCase):
     def test_a_plan_turn_is_refused_the_writers_when_it_calls_them_and_told_about_execute(self):
         agent, tools = self.console()
         agent.set_card_turn("plan", "ABCD")
-        for name, args in (("run_command", {"command": "ls"}),
-                           ("write_file", {"path": "x", "content": "y"}),
+        for name, args in (("write_file", {"path": "x", "content": "y"}),
                            ("edit_file", {"path": "x", "old": "a", "new": "b"})):
             with self.assertRaises(ValueError) as refused:
                 agent._prepare(name, args)
             self.assertIn("Run's job", str(refused.exception))
             self.assertIn("#ABCD", str(refused.exception))
+        # Commands are not writers (card #NXN0): a card turn inspects and verifies by running,
+        # and the job tenders that read and stop what it started pass too — past the scope, as
+        # far as the jobs table, which alone decides what a job id means.
+        agent._prepare("run_command", {"command": "ls"})
+        for name in ("command_output", "stop_command"):
+            with self.assertRaises(ValueError) as caught:
+                agent._prepare(name, {"job_id": "job-0"})
+            self.assertIn("No command 'job-0'", str(caught.exception))
         # What a card turn reads is not refused, and the board's own rule is the board's.
         prepared = agent._prepare("search_files", {"pattern": "x"})
         self.assertIn("matches", agent._execute(prepared, {}))

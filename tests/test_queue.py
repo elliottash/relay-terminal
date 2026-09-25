@@ -841,16 +841,18 @@ class ConsoleFieldTests(unittest.TestCase):
 
         A board-less agent is the case that decides where this lives: the scope the board holds
         is the same answer, but it is only there when a board is. The sentence is `CardScope`'s
-        own, so the model is told what Discuss and Plan are for and that writing code is Execute.
+        own, so the model is told what Discuss and Plan are for and that writing code is Run's
+        job. Commands are not writers (card #NXN0): a card turn verifies by running.
         """
         self.use(GatedProvider())
         self.agent.set_card_turn('plan', 'CTRN')
         self.assertEqual(self.agent.card_turn, ('plan', 'CTRN'))
-        for name in ('write_file', 'edit_file', 'run_command'):
+        for name in ('write_file', 'edit_file'):
             with self.assertRaises(ValueError) as caught:
                 self.agent._prepare(name, {'path': 'x'})
-            self.assertIn('Execute', str(caught.exception))
+            self.assertIn("Run's job", str(caught.exception))
             self.assertIn('#CTRN', str(caught.exception))
+        self.agent._prepare('run_command', {'command': 'ls'})
         # What a card turn reads is not refused, and neither is anything once the turn is over.
         Path(self.temp.name, 'card.md').write_text('# a card\n')
         self.agent._prepare('read_file', {'path': 'card.md'})

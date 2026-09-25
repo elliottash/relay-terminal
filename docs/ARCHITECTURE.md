@@ -1997,7 +1997,8 @@ than a fence around a surface: no board means no `board_*` tools (there is nothi
 own tools, so a helper never runs on one and never starts one (#GH5T, #4NXH); and a card's Plan turn
 may write only its own `## Plan`, which is the stage machine of protocol 19.20 and is refused **when
 the tool is called**, in a sentence that names Run, rather than by narrowing what the turn was
-offered. What came **down** with
+offered — commands excluded (card #NXN0: a card turn verifies by running them, writers only are
+refused). What came **down** with
 this card was the fences: `ChatScope`'s "no shell, no file writes" (owner decision 3 — yes, with the
 workspace it has, and never for a card's Plan turn), `session_info` and `activity` being the pane
 agent's alone, `track_requests` / `todo_tool` / `completion_check` forced off, and `_deferred_groups`
@@ -2062,6 +2063,54 @@ windowed digest of that agent's own turns, tool calls and timings, never the who
 #AGNT they are attached to **every** agent rather than to a pane's alone — a console should be able to
 answer "why was that turn slow" about a turn of its own — and each pane keeps its Ask row, which
 prefills the owning pane's composer and focuses it, the Check-finding draft pattern.
+
+## 10b. The artifact workspace and its chain
+
+A tab can be an **artifact workspace** (#E85D, `src/ArtifactWorkspace.h`, `src/RelayWindowWorkspace.cpp`):
+a group of panes around one artifact — its source in an editor, the build's output in a preview,
+and optionally a console beside them. A group knows its `kind` (`relay.tex` today), its `root`,
+the preset that laid it out (`presetColumns`/`presetWeights`: "1:1:1" lays console | editor |
+preview, "2:1" lays editor-over-console | preview), its `sources` in join order, and its `outputs`
+— each with an `authority` (a generated output is read-only; it is rebuilt, never edited) and a
+`generation` that the preview's strip shows, so a person can see the file on screen is the one the
+last build made. The group is one pane set: `applyWorkspacePreset` docks every member in one
+motion, `openInWorkspaceEditor` routes a source's open into its linked editor at the line, and
+`reconcileWorkspaceViews` keeps the roles straight as panes open and close. The tab's state file
+saves the group (`workspaceGroupJson`), and `restoreWorkspaceGroup` puts it back at the next start.
+
+**The chain** (#R660): a workspace group is *ordered* — a chain with a head, not a bag of roles.
+`Group::order` holds the member ids head-first: the head is the origin, the shell the editor and
+preview were opened from; `upstreamOf` walks toward it (the editor was opened from the shell, the
+preview from the editor's build) and `downstreamOf` away from it. `head()` answers who the chain
+grew from. Serialization spells it in one place: `members` is an array of
+`{id, role, upstream}` head-first under `"schema": 2`; schema 1's `{id: role}` object is still
+read, upgraded to the chain the presets always built (console → editor → preview). The chain model
+lives in `ArtifactWorkspace`; everything visual lives in the workspace glue.
+
+The chain is grown **one open at a time**. `relay open main.tex` from a shell pane — or a click on
+the file in its output — offers "Open beside, linked": accepting adopts the shell as the chain's
+head and opens the editor beside it as its downstream member; declining opens the file the old
+way, so the offer costs nothing (`openWorkspaceChainSource`). From there each member can open its
+next: the editor's build joins the preview as the tail (`openWorkspaceNext`, `relay-drive workspace
+next`), and a click on a chip segment moves focus to that member. The preset follows the chain,
+not the other way round: `dockWorkspaceChain` lays the preset's columns for the members *present*,
+so a chain of two takes the preset's prefix and grows into the full shape when the tail joins.
+
+**Every member wears the chain** in its chrome: a `PaneChainChip` — "⛓ shell › main.tex ›
+main.pdf" — with the pane's own segment bold, the current member readable even when the others
+elide in a narrow pane (`refreshChainChips`).
+
+**The chain lives and dies together, deliberately** (t:fy). Closing the head asks "Close the
+linked panes too?" — all of them, or just the head (`workspaceChainClose`); when the chain is the
+whole window, the head stays as the plain shell it was rather than taking the window down. Closing
+any other member is the plain close it always was, and the chain heals around the gap. Moving a
+member across tabs moves the group (`moveWorkspaceChain`: the group's state follows the member,
+then the other members dock beside it in chain order); a drop into another window is the adopting
+window's business and leaves the chain to heal. At the next start the group restores in chain
+order with its saved sizes; a member whose editor file is gone restores as a placeholder —
+"*file* is gone — Reopen…" — and keeps its place in the chain until the file is picked again
+(`reconcileMissingMembers`). A generated output that has not been built yet is not gone: the
+preview's not-yet-built state covers it.
 
 ## 11. Agent backend
 

@@ -600,15 +600,17 @@ READONLY_REFUSAL = (
 #: passes to `TurnSupervisor.submit`; a plain `ask` forwards `surface`, `screen` and `readonly`
 #: and nothing else (`backend/worker.py`), so no pane can open a card turn by asking for one.
 #: The board's own tools are refused by `board_tools.CardScope.allows`, which has not moved; this
-#: is the executor's half — the read-only turn's list, plus the two that read and stop a command a
-#: card turn may not start in the first place.
+#: is the executor's half. Commands are no longer on it (card #NXN0, owner 2026-09-25): a
+#: Discuss or Plan turn verifies by *running* — `run_command`, and the `command_output` /
+#: `stop_command` that tend its jobs, pass the executor exactly as a console's do — while the
+#: writers stay refused, so a card turn still cannot change a file.
 #:
 #: It is a per-turn refusal and never a narrower tool list. A Discuss, a Plan and an ordinary
 #: console turn are offered byte-identical tools, so a card conversation that goes Discuss → Plan
 #: → Discuss re-prefills nothing (33.2 says the same sentence about `readonly`). The cost is
 #: honest: a Plan turn is *offered* `write_file` and told no if it calls it, in a sentence that
 #: names Execute — which is the owner's decision 3 on #CTRN.
-CARD_BLOCKED = READONLY_BLOCKED | {"command_output", "stop_command"}
+CARD_BLOCKED = READONLY_BLOCKED - {"run_command"}
 
 
 def _safe_label(builder, name, *args, **kwargs) -> dict:
@@ -1447,7 +1449,8 @@ class Agent:
         Both halves at once, exactly as `set_readonly` above: the board opens the `CardScope`
         that `_check_card_scope` and `CardScope.refusal` have always read — so the stage machine
         of 19.20 did not move an inch — and `_prepare` refuses the executor's writers
-        (`CARD_BLOCKED`) with that same scope's sentence, which already names Execute.
+        (`CARD_BLOCKED`) with that same scope's sentence, which names Run. Commands are not
+        writers (card #NXN0): `run_command` and its job tenders pass both halves.
 
         `(None, None)` closes it. Before card #CTRN a card turn ran on an agent of its own whose
         whole tool *list* was the mode's; now it is an ordinary supervised turn on an ordinary

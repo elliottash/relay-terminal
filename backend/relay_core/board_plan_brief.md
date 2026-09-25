@@ -33,7 +33,9 @@ reader.
      Run hands the card to. A small plan gets no block.
    - **Risks** — what could break, and anything the owner has to decide (as a question).
    - **Verify** — the tests to run or add, and how to see it working.
-5. **Nothing else changes.** You cannot run commands, write files, or change another card, and
+5. **Nothing else changes.** You can run commands (`run_command`) to read, build or test while
+   you plan — but never to change code or files: you cannot write files or change another card,
+   and
    the tools will refuse if you try; this card's title, issue, labels and status are not yours to
    change in a Plan turn either — `## Done means` and `## {plan_heading}` are the two sections you
    may write, and the tools refuse any other. An open question for the owner goes in the plan's

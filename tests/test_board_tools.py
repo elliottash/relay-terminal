@@ -2497,7 +2497,11 @@ class CardTurnScopeTests(BoardToolsTest):
         self.tools.begin_card_turn("plan", card_id)
         refused = self.tools.run("board_move_card", {"id": card_id, "status": "ready", "reason": "r"})
         self.assertEqual(refused["code"], "board_mode_refused")
-        self.assertFalse(T.CardScope("plan", card_id).allows("run_command"))
+        # Commands pass (card #NXN0); the writers are what a card turn still may not call.
+        self.assertTrue(T.CardScope("plan", card_id).allows("run_command"))
+        self.assertTrue(T.CardScope("plan", card_id).allows("command_output"))
+        self.assertTrue(T.CardScope("plan", card_id).allows("stop_command"))
+        self.assertFalse(T.CardScope("plan", card_id).allows("write_file"))
         self.assertFalse(hasattr(T.CardScope("plan", card_id), "tool_specs"))
 
 
