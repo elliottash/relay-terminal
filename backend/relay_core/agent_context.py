@@ -31,7 +31,7 @@ from . import sessions as S
 #: nothing else in the worker is per surface.  An unknown name is refused rather than ignored,
 #: because a typo would otherwise silently take the terminal's defaults.
 NAMES = ("terminal", "switchboard", "card", "options", "actions", "sessions", "projects", "globals",
-         "models")
+         "models", "artifact")
 
 #: The **named** tool scopes.  One agent, one scope, resolved once:
 #:
@@ -65,6 +65,8 @@ MAX_KEY = 128
 MAX_TITLE = 200
 MAX_BRIEF_KEY = 64
 MAX_WORKSPACE = 4096
+#: A task plugin id (`task_plugins.ID_RE`: up to four dotted segments of 31 characters).
+MAX_PLUGIN = 128
 
 #: How much of "what is on screen" one turn may carry (`ask {screen}`, and the context's own
 #: standing line).  It is a hint, not a context dump: the agent reads the rows live with the app
@@ -251,6 +253,26 @@ BRIEFS = {
         "new pane and say so, or ask which they meant — never quietly take a pane over. When you "
         "list conversations in an answer, write each as a [title](session:<id>) link, so the row "
         "is one click away whether or not you opened it."),
+    # Card #PBZ4 (owner, 2026-09-25): "in an artifact pane, you have the agent system prompt
+    # docked at the bottom, same as a console pane" — the agent on a file open in Relay's editor.
+    # Decisions D1/D2/U5 of #P2W8: edits land in the open buffer as undo steps, same-line
+    # conflicts are merged and shown inline, and the file's record is those steps plus a
+    # per-turn change list.
+    "artifact": (
+        "You are the agent docked under a file the person has open in Relay's editor; the "
+        "\"Open file:\" line names it, and the task plugin its name activates when there is one. "
+        "The \"On screen now:\" line says where their cursor is, what they have selected and "
+        "whether the buffer has unsaved edits: \"this\", \"here\" and \"the selection\" mean "
+        "that. read_file shows the editor's text, unsaved edits included. Your edit_file and "
+        "write_file on this file go through the editor, not behind it: each lands in the open "
+        "buffer as one undo step, merged around what the person is typing, and is listed under "
+        "your turn in the file's change list, where they can undo it. Prefer edit_file with a "
+        "small, exact old_string over rewriting the whole file, so a change and their typing can "
+        "both stand. When your change and their unsaved edits touch the same lines, both "
+        "versions are kept in the buffer between conflict markers for them to resolve; say so. "
+        "When the result says the change is waiting for their review, it is not in the file "
+        "yet: tell them what you proposed and that Apply is theirs. Change only what was "
+        "asked, and say in one line what you changed and where."),
 }
 
 #: The rule every console answers under (owner, 2026-09-20: "it also needs to reply in text that
@@ -360,6 +382,10 @@ class ContextSpec:
     scope: str = "pane"
     shell: bool = True
     routing: str = "auto"
+    #: An artifact console's file (absolute, or `ssh://host/path`) and the task plugin that file
+    #: activates (card #PBZ4).  Additive: absent from every other context's block.
+    file: str = ""
+    plugin: str = ""
 
     # ---- the wire ---------------------------------------------------------------
     @classmethod
@@ -406,16 +432,23 @@ class ContextSpec:
                    brief_key=_string(brief.get("key"), "brief.key", MAX_BRIEF_KEY),
                    brief_title=_string(brief.get("title"), "brief.title", MAX_TITLE),
                    brief_screen=validate_screen(brief.get("screen")),
-                   scope=scope, shell=bool(shell), routing=routing)
+                   scope=scope, shell=bool(shell), routing=routing,
+                   file=_string(block.get("file"), "file", MAX_WORKSPACE),
+                   plugin=_string(block.get("plugin"), "plugin", MAX_PLUGIN))
 
     def to_json(self) -> dict:
         """The same bytes back, for `configured {context}` — what the GUI reads to confirm that
         the worker understood the surface it is drawn on."""
-        return {"name": self.name, "agent_role": self.agent_role, "workspace": self.workspace,
-                "persist": {"scope": self.persist_scope, "key": self.persist_key},
-                "brief": {"key": self.brief_key, "title": self.brief_title,
-                          "screen": self.brief_screen},
-                "scope": self.scope, "shell": self.shell, "routing": self.routing}
+        out = {"name": self.name, "agent_role": self.agent_role, "workspace": self.workspace,
+               "persist": {"scope": self.persist_scope, "key": self.persist_key},
+               "brief": {"key": self.brief_key, "title": self.brief_title,
+                         "screen": self.brief_screen},
+               "scope": self.scope, "shell": self.shell, "routing": self.routing}
+        if self.file:
+            out["file"] = self.file
+        if self.plugin:
+            out["plugin"] = self.plugin
+        return out
 
     # ---- what it supplies ---------------------------------------------------------
     def is_console(self) -> bool:
@@ -433,6 +466,9 @@ class ContextSpec:
         body = brief_body(self.brief_key)
         if body:
             parts.append(body)
+        if self.file:
+            plugin = f" (task plugin {self.plugin})" if self.plugin else ""
+            parts.append(f"Open file: {self.file}{plugin}")
         if self.scope == "console":
             parts.append(SAY_WHAT_YOU_ARE_DOING)
         line = screen_line(self.brief_screen)

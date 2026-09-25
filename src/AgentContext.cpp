@@ -25,6 +25,8 @@ const QString kKey = QStringLiteral("key");
 const QString kTitle = QStringLiteral("title");
 const QString kScreen = QStringLiteral("screen");
 const QString kReadonly = QStringLiteral("readonly");
+const QString kFile = QStringLiteral("file");
+const QString kPlugin = QStringLiteral("plugin");
 
 } // namespace
 
@@ -128,6 +130,10 @@ QJsonObject ContextSpec::toJson() const
         brief.insert(kTitle, briefTitle);
         json.insert(kBrief, brief);
     }
+    if (!file.isEmpty())
+        json.insert(kFile, file);
+    if (!plugin.isEmpty())
+        json.insert(kPlugin, plugin);
     return json;
 }
 
@@ -147,6 +153,8 @@ ContextSpec ContextSpec::fromJson(const QJsonObject &json)
     const QJsonObject brief = json.value(kBrief).toObject();
     spec.briefKey = brief.value(kKey).toString();
     spec.briefTitle = brief.value(kTitle).toString();
+    spec.file = json.value(kFile).toString();
+    spec.plugin = json.value(kPlugin).toString();
     // `screen` and `readonly` are the turn's, but a spec read back from a request that carried
     // both blocks should not lose them — `fromJson` takes them when they are there.
     spec.screen = json.value(kScreen).toString();
@@ -182,7 +190,47 @@ bool ContextSpec::operator==(const ContextSpec &other) const
            && persistScope == other.persistScope && persistKey == other.persistKey
            && briefKey == other.briefKey && briefTitle == other.briefTitle
            && screen == other.screen && readonly == other.readonly && shell == other.shell
-           && routing == other.routing;
+           && routing == other.routing && file == other.file && plugin == other.plugin;
+}
+
+// ---- ContextCommand -------------------------------------------------------------------------
+
+QList<ContextCommand> offeredSlashCommands(const QList<ContextCommand> &commands, const QStringList &taken)
+{
+    QSet<QString> used;
+    for (const QString &name : taken)
+        used.insert(name.toLower());
+    QList<ContextCommand> offered;
+    for (ContextCommand command : commands) {
+        const QString name = command.name.trimmed();
+        if (name.isEmpty() || (!command.prompt && !command.run))
+            continue;
+        command.name = name;
+        if (used.contains(name.toLower())) {
+            // Relay's name wins; the plugin's command moves to its namespace, or goes.
+            if (command.space.isEmpty() || used.contains(command.qualifiedName().toLower()))
+                continue;
+            command.name = command.qualifiedName();
+            command.space.clear();
+        }
+        used.insert(command.name.toLower());
+        offered << command;
+    }
+    return offered;
+}
+
+int findSlashCommand(const QList<ContextCommand> &offered, const QString &typed)
+{
+    QString want = typed.trimmed();
+    if (want.startsWith(QLatin1Char('/')))
+        want = want.mid(1);
+    if (want.isEmpty())
+        return -1;
+    for (int i = 0; i < offered.size(); ++i)
+        if (offered.at(i).name.compare(want, Qt::CaseInsensitive) == 0
+            || offered.at(i).qualifiedName().compare(want, Qt::CaseInsensitive) == 0)
+            return i;
+    return -1;
 }
 
 // ---- TurnRecord -----------------------------------------------------------------------------

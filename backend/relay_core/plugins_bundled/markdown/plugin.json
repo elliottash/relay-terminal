@@ -1,0 +1,21 @@
+{
+  "schema_version": 2,
+  "id": "relay.markdown",
+  "version": "0.1.0",
+  "name": "Markdown",
+  "description": "Edit a Markdown document with a docked agent: outline it, tighten a passage, proofread it and keep a table of contents, each change landing in the open buffer as one undo step.",
+  "activation": {
+    "files": ["*.md", "*.markdown"]
+  },
+  "panes": {
+    "roles": ["editor", "console", "preview"],
+    "layouts": ["1:1:1", "2:1"],
+    "default_layout": "2:1"
+  },
+  "commands": [
+    {"name": "outline", "description": "Summarise the document's structure, heading by heading.", "action": {"kind": "prompt", "prompt": "Read {file} and give me its outline: one line per heading, with what each section says in a few words. Change nothing."}, "when": {"roles": ["editor"]}},
+    {"name": "tighten", "description": "Tighten the selected passage, or the paragraph at the cursor.", "args": [{"name": "focus"}], "action": {"kind": "prompt", "prompt": "Tighten the selected passage of {file} (or the paragraph at the cursor if nothing is selected): same meaning, fewer words. Edit the file in place."}, "when": {"roles": ["editor"]}},
+    {"name": "proofread", "description": "Fix spelling, grammar and broken links, and list what changed.", "action": {"kind": "prompt", "prompt": "Proofread {file}: fix spelling, grammar and broken Markdown links in place, change nothing else, and list each fix."}, "when": {"roles": ["editor"]}},
+    {"name": "toc", "description": "Insert or refresh a table of contents under the title.", "action": {"kind": "prompt", "prompt": "Insert a table of contents for {file} directly under its title, or refresh the one that is there, linking every ## and ### heading. Edit the file in place."}, "when": {"roles": ["editor"]}}
+  ]
+}

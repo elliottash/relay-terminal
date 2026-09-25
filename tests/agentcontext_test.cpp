@@ -8,8 +8,13 @@
 // Python are checked against **one written-down shape** rather than against each other; a field
 // renamed on either side fails here with the diff in the message.
 #include "AgentContext.h"
+#include "ArtifactContext.h"
 
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QTemporaryDir>
 #include <QTest>
 
 using namespace relay::agent;
@@ -485,6 +490,210 @@ private slots:
         QVERIFY(row.at(at).run);
         row.at(at).run();
         QCOMPARE(ran, 1);
+    }
+
+    // ---- artifact consoles (card #PBZ4) -------------------------------------------------------
+
+    // The golden block of a docked file agent: `file` and `plugin` are additive, so they appear
+    // only on this context and every other context's bytes above stay what they were.
+    void anArtifactContextNamesItsFileAndPlugin()
+    {
+        ArtifactContext context;
+        context.setFile(QStringLiteral("/home/dev/project/README.md"));
+        ArtifactPlugin plugin;
+        plugin.id = QStringLiteral("relay.markdown");
+        plugin.name = QStringLiteral("Markdown");
+        context.setPlugin(plugin);
+        context.state = [] {
+            ArtifactState s;
+            s.line = 12;
+            s.column = 3;
+            s.dirty = true;
+            s.editable = true;
+            s.mode = QStringLiteral("markdown source");
+            s.firstLine = 10;
+            s.lastLine = 11;
+            s.selection = QStringLiteral("two lines\nof text");
+            return s;
+        };
+        const ContextSpec spec = context.spec();
+        QCOMPARE(compact(spec.toJson()),
+                 QStringLiteral(R"({"agent_role":"switchboard","brief":{"key":"artifact","title":"README.md agent"},)"
+                                R"("file":"/home/dev/project/README.md","name":"artifact",)"
+                                R"("persist":{"key":"file:/home/dev/project/README.md","scope":"helper"},)"
+                                R"("plugin":"relay.markdown","routing":"agent","scope":"console","shell":false,)"
+                                R"("surface":"file:/home/dev/project/README.md","workspace":""})"));
+        QCOMPARE(ContextSpec::fromJson(spec.toJson()).file, spec.file);
+        QCOMPARE(ContextSpec::fromJson(spec.toJson()).plugin, spec.plugin);
+        QCOMPARE(spec.screen,
+                 QStringLiteral("File: /home/dev/project/README.md (markdown source, editing, unsaved edits)\n"
+                                "Plugin: Markdown (relay.markdown)\n"
+                                "Cursor: line 12, column 3\n"
+                                "Selection (lines 10-11):\ntwo lines\nof text"));
+        QCOMPARE(spec.askFields().value(QStringLiteral("screen")).toString(), spec.screen);
+    }
+
+    void aLongPathIsKeyedByItsDigest()
+    {
+        const QString path = QStringLiteral("/home/dev/") + QString(200, QLatin1Char('x')) + QStringLiteral(".md");
+        const QString key = artifactKey(path, 80);
+        QVERIFY(key.startsWith(QStringLiteral("file:sha1:")));
+        QCOMPARE(key.size(), 26);
+        QCOMPARE(artifactKey(path, 80), key);                                  // stable
+        QVERIFY(artifactKey(path + QLatin1Char('y'), 80) != key);
+        QCOMPARE(artifactKey(QStringLiteral("/a.md"), 80), QStringLiteral("file:/a.md"));
+    }
+
+    void pluginCommandsCollideIntoTheirNamespace()
+    {
+        ContextCommand outline;
+        outline.name = QStringLiteral("outline");
+        outline.space = QStringLiteral("markdown");
+        outline.prompt = [](const QString &) { return QStringLiteral("o"); };
+        ContextCommand model = outline;
+        model.name = QStringLiteral("model");                     // a Relay built-in
+        ContextCommand bare = outline;
+        bare.name = QStringLiteral("help");
+        bare.space.clear();                                        // collides, and has nowhere to go
+        ContextCommand inert;
+        inert.name = QStringLiteral("nothing");                   // neither prompt nor run
+        const QList<ContextCommand> offered =
+            offeredSlashCommands({outline, model, bare, inert}, {QStringLiteral("Model"), QStringLiteral("help")});
+        QCOMPARE(offered.size(), 2);
+        QCOMPARE(offered.at(0).name, QStringLiteral("outline"));
+        QCOMPARE(offered.at(1).name, QStringLiteral("markdown:model"));
+        QCOMPARE(findSlashCommand(offered, QStringLiteral("/outline")), 0);
+        QCOMPARE(findSlashCommand(offered, QStringLiteral("markdown:outline")), 0);   // always reachable
+        QCOMPARE(findSlashCommand(offered, QStringLiteral("/markdown:model")), 1);
+        QCOMPARE(findSlashCommand(offered, QStringLiteral("model")), -1);             // Relay's, not ours
+        QCOMPARE(findSlashCommand(offered, QStringLiteral("/")), -1);
+    }
+
+    void aManifestsCommandsBecomeEditorActions()
+    {
+        const QJsonObject manifest = QJsonDocument::fromJson(R"({ )" R"("schema_version": 2, "id": "relay.markdown", "name": "Markdown", )" R"("activation": {"files": ["*.md", "notes.txt"]}, )" R"("commands": [ )" R"({"name": "outline", "description": "Outline it.", "action": {"kind": "prompt", "prompt": "Outline {file}."}, )" R"("when": {"roles": ["editor"]}}, )" R"({"name": "build", "description": "Build.", "action": {"kind": "tool", "tool": "md_build"}}, )" R"({"name": "shellonly", "description": "x", "action": {"kind": "prompt", "prompt": "y"}, "when": {"roles": ["console"]}}, )" R"({"name": "line", "description": "x", "action": {"kind": "program_line", "line": "ls"}}, )" R"({"name": "Bad", "description": "x", "action": {"kind": "prompt", "prompt": "y"}}, )" R"({"name": "tighten", "description": "Tighten.", "args": [{"name": "focus"}, {"name": "style", "required": true}], )" R"("action": {"kind": "prompt", "prompt": "Tighten {file}."}} )" R"(]} )").object();
+        const ArtifactPlugin plugin = readPluginManifest(manifest, QStringLiteral("bundled"));
+        QVERIFY(plugin.valid());
+        QCOMPARE(plugin.space(), QStringLiteral("markdown"));
+        QStringList names;
+        for (const PluginCommand &c : plugin.commands) names << c.name;
+        QCOMPARE(names, QStringList({QStringLiteral("outline"), QStringLiteral("build"), QStringLiteral("tighten")}));
+        QCOMPARE(plugin.commands.at(2).args, QStringLiteral("[focus] <style>"));
+
+        ArtifactContext context;
+        context.setFile(QStringLiteral("/p/README.md"));
+        context.setPlugin(plugin);
+        QString sent;
+        QVERIFY(context.slashCommands().isEmpty());               // nowhere to send a prompt yet
+        context.sendPrompt = [&sent](const QString &text) { sent = text; };
+        const QList<ContextCommand> slash = context.slashCommands();
+        QCOMPARE(slash.size(), 3);
+        QCOMPARE(slash.at(0).group, QStringLiteral("Markdown"));
+        QCOMPARE(slash.at(0).prompt(QString()), QStringLiteral("Outline /p/README.md."));
+        QCOMPARE(slash.at(1).prompt(QStringLiteral("fast")), QStringLiteral("Run the md_build tool for /p/README.md with: fast"));
+        QCOMPARE(slash.at(2).prompt(QStringLiteral("the intro")), QStringLiteral("Tighten /p/README.md.\n\nthe intro"));
+
+        // The row: the plugin's commands with the first free letter of their name, then the
+        // editor's own Save (s) and Revert (r), which only light up with something to save.
+        context.save = [] { return true; };
+        context.revert = [] { return true; };
+        const QList<Action> row = withUniqueLetters(context.actions());
+        QStringList labels;
+        for (const Action &a : row) labels << a.fullLabel();
+        QCOMPARE(labels, QStringList({QStringLiteral("Outline (o)"), QStringLiteral("Build (b)"),
+                                      QStringLiteral("Tighten (t)"), QStringLiteral("Save (s)"),
+                                      QStringLiteral("Revert (r)")}));
+        QVERIFY(!row.at(3).enabled && !row.at(4).enabled);        // a clean buffer
+        row.at(0).run();
+        QCOMPARE(sent, QStringLiteral("Outline /p/README.md."));
+        QVERIFY(context.placeholder().startsWith(QStringLiteral("Ask about README.md, or / for Markdown commands")));
+    }
+
+    void activationGlobsFollowFnmatch()
+    {
+        QVERIFY(activationMatches(QStringLiteral("*.md"), QStringLiteral("/p/docs/README.md")));
+        QVERIFY(!activationMatches(QStringLiteral("*.md"), QStringLiteral("/p/README.mdx")));
+        QVERIFY(activationMatches(QStringLiteral("*.[ch]"), QStringLiteral("/p/x.h")));
+        QVERIFY(!activationMatches(QStringLiteral("*.[!ch]"), QStringLiteral("/p/x.h")));
+        QVERIFY(activationMatches(QStringLiteral("docs/") + QStringLiteral("*.txt"), QStringLiteral("/p/docs/a.txt"), QStringLiteral("/p")));
+        QVERIFY(!activationMatches(QStringLiteral("docs/") + QStringLiteral("*.txt"), QStringLiteral("/q/docs/a.txt"), QStringLiteral("/p")));
+        QVERIFY(activationMatches(QStringLiteral("*.md"), QStringLiteral("ssh://host/srv/notes.md")));
+    }
+
+    // Discovery, precedence and enablement, against package folders on disk.
+    void theFilesPluginIsFoundByPrecedenceAndEnablement()
+    {
+        QTemporaryDir tmp;
+        QVERIFY(tmp.isValid());
+        const QString root = tmp.path();
+        const auto write = [](const QString &file, const QByteArray &bytes) {
+            QDir().mkpath(QFileInfo(file).absolutePath());
+            QFile out(file);
+            QVERIFY(out.open(QIODevice::WriteOnly));
+            out.write(bytes);
+        };
+        const QByteArray md = R"({"schema_version": 2, "id": "relay.markdown", "name": "Bundled MD", )" R"("activation": {"files": ["*.md"]}, )" R"("commands": [{"name": "outline", "description": "o", "action": {"kind": "prompt", "prompt": "o"}}]} )";
+        write(root + QStringLiteral("/bundled/markdown/plugin.json"), md);
+        write(root + QStringLiteral("/bundled/tex/plugin.json"),
+              R"({"schema_version": 2, "id": "relay.tex", "name": "TeX", "activation": {"files": ["*.tex"]}})");
+        write(root + QStringLiteral("/project/.git/HEAD"), "ref: refs/heads/main\n");
+        write(root + QStringLiteral("/project/README.md"), "# hi\n");
+        PluginSearch search;
+        search.bundled = root + QStringLiteral("/bundled");
+        search.global = root + QStringLiteral("/global");
+        search.state = root + QStringLiteral("/plugins.json");
+
+        const QString file = root + QStringLiteral("/project/README.md");
+        QCOMPARE(pluginForFile(file, search).name, QStringLiteral("Bundled MD"));
+        QVERIFY(!pluginForFile(root + QStringLiteral("/project/notes.txt"), search).valid());
+        QCOMPARE(pluginForFile(QStringLiteral("ssh://host/srv/a.md"), search).id, QStringLiteral("relay.markdown"));
+
+        // A global package of the same id shadows the bundled one.
+        write(root + QStringLiteral("/global/md/plugin.json"),
+              QByteArray(md).replace("Bundled MD", "Global MD"));
+        QCOMPARE(pluginForFile(file, search).name, QStringLiteral("Global MD"));
+
+        // A project package is not offered until it is enabled for the project, and it holds its
+        // id meanwhile — the worker's `discover` keeps the project record and its enablement
+        // says no, so the file has no plugin rather than a shadowed one.
+        write(root + QStringLiteral("/project/.relay/plugins/md/plugin.json"),
+              QByteArray(md).replace("Bundled MD", "Project MD"));
+        QVERIFY(!pluginForFile(file, search).valid());
+        const QString project = QFileInfo(root + QStringLiteral("/project")).canonicalFilePath();
+        const auto state = [&](const QByteArray &origin, bool on) {
+            write(search.state, QJsonDocument(QJsonObject{{QStringLiteral("projects"), QJsonObject{{project,
+                QJsonObject{{QStringLiteral("relay.markdown"), QJsonObject{{QString::fromLatin1(origin),
+                    QJsonObject{{QStringLiteral("enabled"), on}}}}}}}}}}).toJson());
+        };
+        state("project", true);
+        QCOMPARE(pluginForFile(file, search).name, QStringLiteral("Project MD"));
+        // …and one switched off leaves the file with no plugin rather than falling through to a
+        // shadowed package of the same id.
+        state("project", false);
+        QVERIFY(!pluginForFile(file, search).valid());
+    }
+
+    void aLinkToTheOpenFileLandsInTheEditor()
+    {
+        QTemporaryDir tmp;
+        const QString path = tmp.filePath(QStringLiteral("a.md"));
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.close();
+        ArtifactContext context;
+        context.setFile(path);
+        int went = 0;
+        context.goToLine = [&went](int line) { went = line; };
+        relay::links::Target here;
+        here.valid = true;
+        here.kind = relay::links::Kind::Path;
+        here.target = path;
+        here.line = 7;
+        QVERIFY(context.resolveLink(here));
+        QCOMPARE(went, 7);
+        relay::links::Target other = here;
+        other.target = tmp.path();
+        QVERIFY(!context.resolveLink(other));
     }
 };
 

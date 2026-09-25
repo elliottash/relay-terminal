@@ -120,7 +120,8 @@ class BundledManifests(unittest.TestCase):
     def test_every_bundled_plugin_is_valid(self):
         found = tp.discover(None, global_plugins=Path(tempfile.gettempdir()) / "no-such-relay-plugins")
         self.assertEqual(found.invalid, [], [str(i) for r in found.invalid for i in r.issues])
-        self.assertEqual({"relay.tex", "relay.python", "relay.stata", "relay.shell"}, set(found.plugins))
+        self.assertEqual({"relay.tex", "relay.python", "relay.stata", "relay.shell", "relay.markdown"},
+                         set(found.plugins))
         for record in found.plugins.values():
             self.assertEqual("bundled", record.origin)
             self.assertTrue(record.digest.startswith("sha256:"))

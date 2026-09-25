@@ -189,6 +189,44 @@ class BriefTests(unittest.TestCase):
         self.assertIn("On screen now: the search box", spec.brief_text())
 
 
+class ArtifactContextTests(unittest.TestCase):
+    """Card #PBZ4: the agent docked on a file open in the editor."""
+
+    #: The block `ArtifactContext::spec().toJson()` sends, byte for byte as
+    #: tests/agentcontext_test.cpp pins it (`anArtifactContextNamesItsFileAndPlugin`).
+    GUI_BLOCK = {"agent_role": "switchboard", "brief": {"key": "artifact", "title": "README.md agent"},
+                 "file": "/home/dev/project/README.md", "name": "artifact",
+                 "persist": {"key": "file:/home/dev/project/README.md", "scope": "helper"},
+                 "plugin": "relay.markdown", "routing": "agent", "scope": "console", "shell": False,
+                 "surface": "file:/home/dev/project/README.md", "workspace": ""}
+
+    def test_the_guis_block_is_read_with_its_file_and_plugin(self):
+        spec = AC.ContextSpec.from_json(self.GUI_BLOCK)
+        self.assertEqual((spec.name, spec.scope, spec.shell, spec.routing), ("artifact", "console", False, "agent"))
+        self.assertEqual(spec.file, "/home/dev/project/README.md")
+        self.assertEqual(spec.plugin, "relay.markdown")
+        self.assertEqual(spec.to_json()["file"], spec.file)
+        self.assertEqual(AC.ContextSpec.from_json(spec.to_json()), spec)
+
+    def test_file_and_plugin_are_additive(self):
+        # Every other context's block is what it was: no `file` or `plugin` key appears.
+        spec = AC.ContextSpec.from_json({"name": "options"})
+        self.assertNotIn("file", spec.to_json())
+        self.assertNotIn("plugin", spec.to_json())
+        with self.assertRaises(ValueError):
+            AC.ContextSpec.from_json({"name": "artifact", "plugin": "x" * (AC.MAX_PLUGIN + 1)})
+        with self.assertRaises(ValueError):
+            AC.ContextSpec.from_json({"name": "artifact", "file": 7})
+
+    def test_the_brief_names_the_file_and_says_how_edits_land(self):
+        text = AC.ContextSpec.from_json(self.GUI_BLOCK).brief_text()
+        self.assertTrue(text.startswith("[README.md agent]"))
+        self.assertIn("Open file: /home/dev/project/README.md (task plugin relay.markdown)", text)
+        self.assertIn("one undo step", text)
+        self.assertIn("waiting for their review", text)
+        self.assertIn(AC.SAY_WHAT_YOU_ARE_DOING, text)
+
+
 class AskFieldTests(unittest.TestCase):
     def test_surface_is_free_text_of_one_line(self):
         self.assertEqual(AC.validate_surface(None), "")

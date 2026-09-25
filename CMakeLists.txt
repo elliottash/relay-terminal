@@ -509,7 +509,7 @@ target_compile_options(relay-outputlinks PRIVATE ${RELAY_WARNINGS})
 # able to link one without pulling in a window — a `Pane` exists only inside the `relay`
 # executable's translation unit. relay-outputlinks: `Context::resolveLink` takes the same
 # `relay::links::Target` an activated link in the transcript already resolves to.
-add_library(relay-agentcontext STATIC src/AgentContext.cpp src/AgentContext.h)
+add_library(relay-agentcontext STATIC src/AgentContext.cpp src/AgentContext.h src/ArtifactContext.cpp src/ArtifactContext.h)
 target_include_directories(relay-agentcontext PUBLIC src)
 target_link_libraries(relay-agentcontext PUBLIC relay-outputlinks ${RELAY_QT}::Core)
 target_compile_options(relay-agentcontext PRIVATE ${RELAY_WARNINGS})

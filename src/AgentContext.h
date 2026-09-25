@@ -208,10 +208,16 @@ struct ContextSpec {
     // "auto" — a typed line may be a command or a prompt, which is the terminal's routing — or
     // "agent", where everything typed is a prompt. Empty means the console's own default.
     QString routing;
+    // An artifact console's file and the task plugin that file activates (card #PBZ4, protocol
+    // 33, additive): the absolute path — or `ssh://host/path` — of the buffer the agent is docked
+    // on, and the plugin id ("relay.markdown"), empty when none claims it. Both go out only when
+    // set, so every other context's `context` block is byte for byte what it was.
+    QString file;
+    QString plugin;
 
     // The `context` block of `configure`. Always carries `name`, `surface`, `agent_role`,
-    // `workspace`, `scope`, `shell` and `routing`; `persist` and `brief` appear only when they say
-    // something. `screen` and `readonly` are **not** here — they are the turn's, not the
+    // `workspace`, `scope`, `shell` and `routing`; `persist`, `brief`, `file` and `plugin` appear
+    // only when they say something. `screen` and `readonly` are **not** here — they are the turn's, not the
     // context's.
     QJsonObject toJson() const;
     // The inverse, for a test and for anything that reads a spec back off the wire. Unknown keys
@@ -261,6 +267,43 @@ struct TurnRecord {
 };
 
 // ---------------------------------------------------------------------------------------------
+// A slash command a context adds to the console's `/` popup (card #PBZ4, step 2).
+//
+// The popup's own rows are the pane's — the built-ins, the window's aliases, the skills and a
+// guest's catalog (`Pane::updateSlashPopup`) — and they are the same on every surface. What a
+// context adds is what *this* surface can do: an artifact console offers the commands its file's
+// task plugin declares (manifest v2 `commands`, #6FDD), so `/outline` on a Markdown file asks the
+// agent for the outline. They follow every Relay-owned row, grouped under "✦ <group>", and a name
+// Relay already uses is offered in the plugin's namespaced form instead (`/markdown:toc`), so a
+// plugin can never hide a built-in, an alias or a skill.
+struct ContextCommand {
+    QString name;          // without the "/", as the plugin wrote it: "outline"
+    QString args;          // "<topic>" required, "[topic]" optional, "" none — the popup's column
+    QString description;
+    QString group;         // the popup's group label: the plugin's name ("Markdown")
+    QString space;         // the namespace a collision is resolved into: "markdown" → "/markdown:toc"
+    // What it does, exactly one of the two. `prompt` answers the prompt the console sends to its
+    // agent for the argument text typed after the name (a plugin's `prompt` and `tool` actions);
+    // `run` does something itself and sends nothing (Save, Revert).
+    std::function<QString(const QString &args)> prompt;
+    std::function<void(const QString &args)> run;
+
+    // `space:name`, or just the name when the command has no namespace.
+    QString qualifiedName() const { return space.isEmpty() ? name : space + QLatin1Char(':') + name; }
+};
+
+// The commands the popup actually offers, in order, each renamed to what it answers to: its own
+// name, or `space:name` when that name is in `taken` (Relay's rows, compared case-insensitively)
+// or already used earlier in the list. A command with a colliding name and no namespace is
+// dropped rather than offered under a name that would run something else.
+QList<ContextCommand> offeredSlashCommands(const QList<ContextCommand> &commands, const QStringList &taken);
+
+// The index in `offered` of the command `typed` names ("outline" or "markdown:outline", with or
+// without the "/"), or -1. The qualified form always works, so a plugin's command stays
+// reachable by the same words whether or not something shadows its short name.
+int findSlashCommand(const QList<ContextCommand> &offered, const QString &typed);
+
+// ---------------------------------------------------------------------------------------------
 // The behaviour half. One implementation per setting; the host owns it and outlives the console
 // it is handed to.
 class Context {
@@ -277,6 +320,10 @@ class Context {
     // The console puts the list through `withUniqueLetters` and builds the row from it
     // (`Pane::rebuildActionRow`).
     virtual QList<Action> actions() const { return {}; }
+
+    // The `/` commands this surface adds to the popup (see `ContextCommand`). Empty is the common
+    // case; the console merges them after its own rows through `offeredSlashCommands`.
+    virtual QList<ContextCommand> slashCommands() const { return {}; }
 
     // A line the owner submitted in this console, offered to the context **before** the pane
     // routes it. True means "handled, send nothing": the card page's Enter travels as
@@ -333,6 +380,9 @@ struct ConsoleHandle {
     QWidget *widget = nullptr;
     std::function<void()> focusComposer;
     std::function<void(const QString &)> draftInComposer;
+    // Send `text` to this console's agent as a prompt, as if typed and entered: what an action
+    // row button of an artifact console does with a plugin command (card #PBZ4).
+    std::function<void(const QString &)> submitPrompt;
     std::function<QString()> composerText;
     std::function<void(bool)> setCollapsed;
     std::function<bool()> collapsed;

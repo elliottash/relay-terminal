@@ -1,7 +1,8 @@
 ---
 id: PBZ4
 type: work
-status: planned
+status: executing
+assignee: claude-code
 labels: [feature, panes, files, agent-ui, plugins]
 rank: zzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
@@ -34,7 +35,7 @@ Slice 7 of #P2W8 (model row 2; decisions D1, D2, U5). **Wave 2: waits for the ho
 
 ## Tasks
 
-- [ ] ArtifactContext and the file/plugin wire fields <!-- t:5j -->
+- [x] ArtifactContext and the file/plugin wire fields <!-- t:5j -->
 - [ ] Context::slashCommands merged into the / popup <!-- t:ar blocked_by=#6FDD -->
 - [ ] Docked console on Preview and Plan panes (after the hold lifts) <!-- t:m5 blocked_by=5j -->
 - [ ] Agent edits as buffer undo steps with change list and review toggle <!-- t:j2 blocked_by=m5 -->
