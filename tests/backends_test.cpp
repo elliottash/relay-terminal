@@ -132,52 +132,55 @@ private Q_SLOTS:
         relay::TerminalMenuState state = relayEngineState();
         QStringList ids = menuIds(relay::terminalContextMenu(state));
         QVERIFY(!ids.contains(QStringLiteral("openLink")));
-        QVERIFY(!ids.contains(QStringLiteral("openFile")));
         state.link = QStringLiteral("https://example.invalid/x");
         ids = menuIds(relay::terminalContextMenu(state));
         QVERIFY(ids.contains(QStringLiteral("openLink")));
         QVERIFY(ids.contains(QStringLiteral("copyLink")));
-        state.link.clear();
-        state.filePath = QStringLiteral("/tmp/relay/notes.md");
-        const auto items = relay::terminalContextMenu(state);
-        QVERIFY(menuIds(items).contains(QStringLiteral("openFile")));
-        for (const relay::TerminalMenuItem &item : items)
-            if (item.id == QStringLiteral("openFile")) QVERIFY(item.label.contains(QStringLiteral("notes.md")));
+        // A local path under the pointer no longer puts entries in this menu either: a
+        // right-click on one opens that path's own menu instead (#KKYC), so there is nothing
+        // like "openFile" or "navigateHere" left to offer here.
+        QVERIFY(!ids.contains(QStringLiteral("openFile")));
+        QVERIFY(!ids.contains(QStringLiteral("navigateHere")));
     }
 
-    // A folder under the pointer can also move the pane's shell there (#KKYC); a file cannot.
-    void menuOffersNavigateHereOnlyOnAFolder() {
-        relay::TerminalMenuState state = relayEngineState();
-        state.filePath = QStringLiteral("/tmp/relay/notes.md");
-        state.canNavigate = true;
-        QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("navigateHere")));
-        state.filePath = QStringLiteral("/tmp/relay");
-        state.fileIsFolder = true;
-        QVERIFY(enabledOf(relay::terminalContextMenu(state), QStringLiteral("navigateHere")));
-        state.canNavigate = false;   // an agent console with no shell: shown, greyed
-        QVERIFY(menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("navigateHere")));
-        QVERIFY(!enabledOf(relay::terminalContextMenu(state), QStringLiteral("navigateHere")));
+    // The file side of the same scheme (#KKYC): a click menu of its own, teaching the same
+    // chords a folder's menu teaches.
+    void fileClickMenuNamesTheChords() {
+        const auto items = relay::fileClickMenu(true, true);
+        QCOMPARE(menuIds(items), (QStringList{QStringLiteral("open"), QStringLiteral("edit"),
+                                              QStringLiteral("navigate"), QStringLiteral("external"),
+                                              QStringLiteral("copypath")}));
+        QVERIFY(items.at(0).label.endsWith(QStringLiteral("\tClick")));
+        QVERIFY(items.at(1).label == QStringLiteral("Edit"));
+        QVERIFY(items.at(2).label.endsWith(QStringLiteral("\tAlt+click")));
+        QVERIFY(items.at(3).label.endsWith(QStringLiteral("\tShift+click")));
+        QVERIFY(!enabledOf(relay::fileClickMenu(false, true), QStringLiteral("edit")));
+        QVERIFY(!enabledOf(relay::fileClickMenu(true, false), QStringLiteral("navigate")));
     }
 
-    // The owner's scheme for a folder link (#KKYC): click asks, Ctrl opens the explorer, Shift
-    // navigates. A keyboard Enter has nowhere to put a menu, so it opens the explorer.
+    // The owner's scheme for a folder link (#KKYC): a plain click opens the explorer, Ctrl asks
+    // with the menu, Alt navigates and Shift opens externally. A keyboard Ctrl+Enter has nowhere
+    // to put a menu, so it opens the explorer too.
     void folderClickFollowsTheModifiers() {
         using relay::FolderClick;
-        QCOMPARE(relay::folderClickAction(false, false, true), FolderClick::Menu);
-        QCOMPARE(relay::folderClickAction(true, false, true), FolderClick::Explorer);
-        QCOMPARE(relay::folderClickAction(false, true, true), FolderClick::Navigate);
-        QCOMPARE(relay::folderClickAction(true, true, true), FolderClick::Explorer);
-        QCOMPARE(relay::folderClickAction(false, false, false), FolderClick::Explorer);
-        QCOMPARE(relay::folderClickAction(false, true, false), FolderClick::Navigate);
-        QCOMPARE(relay::folderClickAction(true, false, false), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(false, false, false, true), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(true, false, false, true), FolderClick::Menu);
+        QCOMPARE(relay::folderClickAction(false, true, false, true), FolderClick::Navigate);
+        QCOMPARE(relay::folderClickAction(false, false, true, true), FolderClick::External);
+        QCOMPARE(relay::folderClickAction(true, true, false, true), FolderClick::Menu);
+        QCOMPARE(relay::folderClickAction(false, false, false, false), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(true, false, false, false), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(false, true, false, false), FolderClick::Navigate);
+        QCOMPARE(relay::folderClickAction(false, false, true, false), FolderClick::External);
     }
 
     void folderClickMenuNamesBothChoicesAndTheirChords() {
         const auto items = relay::folderClickMenu(true);
         QCOMPARE(menuIds(items), (QStringList{QStringLiteral("explorer"), QStringLiteral("navigate"),
-                                              QStringLiteral("external")}));
-        QVERIFY(items.at(0).label.endsWith(QStringLiteral("\tCtrl+click")));
-        QVERIFY(items.at(1).label.endsWith(QStringLiteral("\tShift+click")));
+                                              QStringLiteral("external"), QStringLiteral("copypath")}));
+        QVERIFY(items.at(0).label.endsWith(QStringLiteral("\tClick")));
+        QVERIFY(items.at(1).label.endsWith(QStringLiteral("\tAlt+click")));
+        QVERIFY(items.at(2).label.endsWith(QStringLiteral("\tShift+click")));
         QVERIFY(enabledOf(items, QStringLiteral("navigate")));
         QVERIFY(!enabledOf(relay::folderClickMenu(false), QStringLiteral("navigate")));
     }
@@ -233,7 +236,7 @@ private Q_SLOTS:
             state.hasTurn = mask & 64;
             state.canTakeControl = mask & 128;
             if (mask & 4) state.link = QStringLiteral("https://example.invalid/");
-            if (mask & 8) state.filePath = QStringLiteral("/tmp/relay/x");
+            if (mask & 8) state.canReadOutput = true;   // the path entries live in their own menus now (#KKYC)
             if (mask & 16) state.cardId = QStringLiteral("K7Q2");
             const auto items = relay::terminalContextMenu(state);
             QVERIFY(!items.isEmpty());

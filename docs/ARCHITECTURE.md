@@ -1633,10 +1633,13 @@ is, so `option:`, `session:`, `#K7Q2`, a path with `:line` and an http(s) URL al
 
 The Relay engine uses it in `engine/view/TerminalView.cpp` for the hover underline and tooltip,
 plain click (only in the active pane, so the click that moves the focus cannot open a file),
-Ctrl+click, the right-click menu ("Open …", "Open in the system editor", "Copy path"; on a card
-"Open #K7Q2 …", "Copy #K7Q2", "#K7Q2 → prompt") and the ordered link list behind
-`Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result: a folder to an explorer pane, a file
-to a preview pane at `line`, a URL to `QDesktopServices`, a card to this tab's Board
+Ctrl/Shift/Alt+click, the right-click menu ("Open …", "Open in the system editor", "Copy path"; on
+a card "Open #K7Q2 …", "Copy #K7Q2", "#K7Q2 → prompt") and the ordered link list behind
+`Ctrl+Shift+L`. `Pane::openOutputTarget` routes the result with one modifier scheme for local
+paths (#KKYC): a plain click opens a folder in an explorer pane and a file in a preview pane at
+`line`, Ctrl+click and a right-click open that path's click menu, Alt+click `cd`s the pane's
+shell to it (a file's folder), and Shift+click hands it to the system; a URL goes to
+`QDesktopServices`, a card to this tab's Board
 (opening the pane first when the tab has none), selected and scrolled into view.
 
 `relay-open` falls back to `xdg-open` when Relay is not reachable.

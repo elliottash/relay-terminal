@@ -54,9 +54,6 @@ struct TerminalMenuState {
     bool canInject = false;          // DisplayInjection: clear-and-reset can be written
     bool canZoom = false;            // the engine can change its font size
     QString link;                    // the URL under the pointer, empty when there is none
-    QString filePath;                // an existing path under the pointer, empty when there is none
-    bool fileIsFolder = false;       // that path is a folder: "Navigate here" is offered (#KKYC)
-    bool canNavigate = false;        // the pane has a shell to `cd`, so "Navigate here" can run
     QString cardId;                  // a `#K7Q2` card reference under the pointer ("K7Q2"), or empty
     QString cardTitle;               // what the board calls that card, when it knows a title
     bool hasTurn = false;            // the pane has a finished agent turn to open
@@ -73,15 +70,24 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state);
 
 // ----- a click on a folder in the output (card #KKYC) --------------------------------------------
 //
-// The owner's scheme: a plain click asks, Ctrl+click opens the explorer, Shift+click navigates the
-// pane's shell there. A keyboard-walked link has no pointer to put a menu at, so its plain Enter
-// opens the explorer, as every folder link did before. Ctrl wins over Shift.
-enum class FolderClick { Menu, Explorer, Navigate };
-FolderClick folderClickAction(bool control, bool shift, bool fromMouse);
+// The owner's scheme (2026-09-25): a plain click opens the explorer, Ctrl+click and a right-click
+// open the context menu, Alt+click navigates the pane's shell there and Shift+click opens the
+// system file manager. A keyboard-walked link has no pointer to put a menu at, so its Ctrl+Enter
+// falls back to the explorer. Ctrl wins over Alt, Alt over Shift.
+enum class FolderClick { Menu, Explorer, Navigate, External };
+FolderClick folderClickAction(bool control, bool alt, bool shift, bool fromMouse);
 
-// The menu a plain click on a folder opens: "explorer", "navigate" (greyed when the pane has no
-// shell to move) and "external". Each label carries its direct chord after a tab, which QMenu
-// draws in its shortcut column, so the menu teaches the modifiers.
+// The menu Ctrl+click (or a right-click) on a folder opens: "explorer", "navigate" (greyed when
+// the pane has no shell to move), "external" and "copypath". Each action label carries its direct
+// chord after a tab, which QMenu draws in its shortcut column, so the menu teaches the modifiers.
 QList<TerminalMenuItem> folderClickMenu(bool canNavigate);
+
+// ----- a click on a file in the output, the same modifiers as a folder's (#KKYC) ------------------
+//
+// A plain click opens it in Relay, Ctrl+click (or a right-click) opens this menu, Alt+click `cd`s
+// the pane's shell to the folder holding it and Shift+click opens it with the default app.
+// "edit" is the editor Ctrl+Enter still opens during a link walk; it is greyed out when the
+// window has none, and "navigate" when the pane has no shell to move.
+QList<TerminalMenuItem> fileClickMenu(bool canEdit, bool canNavigate);
 
 } // namespace relay

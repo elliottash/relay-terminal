@@ -1688,7 +1688,10 @@ void TerminalView::mousePressEvent(QMouseEvent *e)
         Link link;
         int s = 0, en = 0;
         const bool onLink = foldUri.isEmpty() && !onImage && !onMedia && linkAt(pos, &link, &s, &en);
-        if (onLink && (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+        // Ctrl/Shift/Alt+click follows the link at once (card #YZTK; Alt joins for #KKYC, where
+        // the pane routes it as "navigate this pane's shell there"). A click anywhere else falls
+        // through to selection below — Alt away from a link still starts a rectangular selection.
+        if (onLink && (e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier | Qt::AltModifier))) {
             emit linkActivated(link.target, link.line, link.column, e->modifiers());
             return;
         }

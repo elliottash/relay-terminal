@@ -409,6 +409,23 @@ private slots:
         QCOMPARE(links[0][3].value<Qt::KeyboardModifiers>(), Qt::ShiftModifier);
     }
 
+    // Alt+click follows a link too (#KKYC: the pane routes it as "navigate this pane's shell
+    // there"); away from a link it still starts a rectangular selection.
+    void altClickCarriesItsModifier()
+    {
+        QFETCH_GLOBAL(QString, core);
+        Term t(core, QStringLiteral("/bin/cat"));
+        QSignalSpy links(t.view, &TerminalView::linkActivated);
+        t.backend->writeToDisplay("see https://relay.test/x ok\r\n");
+        QVERIFY(t.waitScreen(QStringLiteral("relay.test")));
+        QTest::qWait(60);
+        QTest::mouseClick(t.view, Qt::LeftButton, Qt::AltModifier,
+                          QPoint(2 + 8 * t.view->cellWidth(), 2 + t.view->cellHeight() / 2));
+        QCOMPARE(links.size(), 1);
+        QCOMPARE(links[0][0].toString(), QStringLiteral("https://relay.test/x"));
+        QCOMPARE(links[0][3].value<Qt::KeyboardModifiers>(), Qt::AltModifier);
+    }
+
     void wrappedUrlClick()
     {
         QFETCH_GLOBAL(QString, core);

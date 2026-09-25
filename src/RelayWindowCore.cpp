@@ -289,7 +289,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
                 const int step = id == QStringLiteral("terminal.zoomIn") ? 1
                                : id == QStringLiteral("terminal.zoomOut") ? -1 : 0;
                 relay::auxiliaryZoom::zoom(m_activeLeaf, QApplication::focusWidget(), step);
-            } else if (pane) pane->runTerminalMenuAction(id.mid(9), {}, {}, {});
+            } else if (pane) pane->runTerminalMenuAction(id.mid(9), {}, {});
         }
         else if (id == QStringLiteral("pane.moveLeft")) moveActive(relay::panes::Direction::Left);
         else if (id == QStringLiteral("pane.moveRight")) moveActive(relay::panes::Direction::Right);

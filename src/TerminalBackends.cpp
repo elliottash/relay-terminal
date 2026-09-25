@@ -20,19 +20,34 @@ QString resolveEngineCore(const QString &commandLine, const QString &environment
 QString defaultEngineCore() { return s_defaultCore; }
 void setDefaultEngineCore(const QString &core) { s_defaultCore = core; }
 
-FolderClick folderClickAction(bool control, bool shift, bool fromMouse)
+FolderClick folderClickAction(bool control, bool alt, bool shift, bool fromMouse)
 {
-    if (control) return FolderClick::Explorer;
-    if (shift) return FolderClick::Navigate;
-    return fromMouse ? FolderClick::Menu : FolderClick::Explorer;
+    if (control && fromMouse) return FolderClick::Menu;
+    if (alt) return FolderClick::Navigate;
+    if (shift) return FolderClick::External;
+    return FolderClick::Explorer;
 }
 
 QList<TerminalMenuItem> folderClickMenu(bool canNavigate)
 {
     return {
-        {QStringLiteral("explorer"), QStringLiteral("Open in explorer\tCtrl+click"), true},
-        {QStringLiteral("navigate"), QStringLiteral("Navigate here\tShift+click"), canNavigate},
-        {QStringLiteral("external"), QStringLiteral("Open in file manager"), true},
+        {QStringLiteral("explorer"), QStringLiteral("Open in explorer\tClick"), true},
+        {QStringLiteral("navigate"), QStringLiteral("Navigate here\tAlt+click"), canNavigate},
+        {QStringLiteral("external"), QStringLiteral("Open in file manager\tShift+click"), true},
+        {QStringLiteral("-"), QString(), true},
+        {QStringLiteral("copypath"), QStringLiteral("Copy path"), true},
+    };
+}
+
+QList<TerminalMenuItem> fileClickMenu(bool canEdit, bool canNavigate)
+{
+    return {
+        {QStringLiteral("open"), QStringLiteral("Open\tClick"), true},
+        {QStringLiteral("edit"), QStringLiteral("Edit"), canEdit},
+        {QStringLiteral("navigate"), QStringLiteral("Navigate to its folder\tAlt+click"), canNavigate},
+        {QStringLiteral("external"), QStringLiteral("Open with the default app\tShift+click"), true},
+        {QStringLiteral("-"), QString(), true},
+        {QStringLiteral("copypath"), QStringLiteral("Copy path"), true},
     };
 }
 
@@ -62,16 +77,14 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     add("paste", QStringLiteral("Paste"));
     add("selectAll", QStringLiteral("Select all"));
 
-    if (!state.link.isEmpty() || !state.filePath.isEmpty() || !state.cardId.isEmpty()) {
+    if (!state.link.isEmpty() || !state.cardId.isEmpty()) {
         separate();
         if (!state.link.isEmpty()) {
             add("openLink", QStringLiteral("Open link"));
             add("copyLink", QStringLiteral("Copy link address"));
         }
-        if (!state.filePath.isEmpty())
-            add("openFile", QStringLiteral("Open “%1”").arg(state.filePath.section(QLatin1Char('/'), -1)));
-        if (!state.filePath.isEmpty() && state.fileIsFolder)
-            add("navigateHere", QStringLiteral("Navigate here"), state.canNavigate);
+        // A local path under the pointer no longer adds entries here: a right-click on one opens
+        // that path's own menu instead (#KKYC) — folderClickMenu() or fileClickMenu().
         // A `#K7Q2` reference: the card it names, the reference itself, and the reference in the
         // prompt box — the same three things the Switchboard's own card detail offers (`t`, `y`).
         if (!state.cardId.isEmpty()) {
