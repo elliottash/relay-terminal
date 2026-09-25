@@ -9,7 +9,7 @@ session: 983a6a3c-af99-4377-8b09-3e819936784e
 rank: zzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 verify: {artifact: visual, primary: script, also: [ai-visual, person], human: optional, criteria: 'In the pane header the claimed card''s code sits immediately before the title, reads ''#ID (n)'' when more than one card is claimed, and clicking it lists every claim; the ''[n]'' pane badge is gone.', sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-25-0FBB/], related: [C7PF, R9G7], github: null}
+links: {plans: [], commits: [aa613e6d], evidence: [docs/qa_evidence/2026-09-25-0FBB/], related: [C7PF, R9G7], github: null}
 ---
 # Show pane claims before the title: latest card code, total count, and accessible dropdown
 

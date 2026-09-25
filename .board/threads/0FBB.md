@@ -29,3 +29,6 @@ Implementing the claims chip in the pane header: latest claimed card code before
 
 <!-- relay:entry 20260925T020243Z-1q author=agent kind=event model=claude-fable-5-1 pane=983a6a3c turn=92776ab6493d4adca6ab798cb400383d/427adb1785e74b7e9e7b6906f8deec63 -->
 - ✦ agent moved this card · Executing → Needs verification · Built and shown working: chip before the title with the count, the list on click, the [n] badge gone; three ctest cases pass and the staged Xvfb run's screenshots are in the evidence folder. · evidence docs/qa_evidence/2026-09-25-0FBB/ · implemented_by anthropic/claude-fable-5-1 via claude-code
+
+<!-- relay:entry 20260925T020344Z-47 author=agent kind=event model=claude-fable-5-1 pane=983a6a3c turn=92776ab6493d4adca6ab798cb400383d/427adb1785e74b7e9e7b6906f8deec63 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-25-0FBB/"], … → {"plans": [], "commits": ["aa613e6d"], "evidence": ["docs/qa_evidence/2026-09-25…
