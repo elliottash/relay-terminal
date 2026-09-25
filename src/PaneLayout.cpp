@@ -429,6 +429,26 @@ QString headerMinimumsLine(const QString &pane, int paneWidth, int paneMinimum, 
         .arg(pane).arg(paneWidth).arg(paneMinimum).arg(total).arg(parts.join(QLatin1Char(' ')));
 }
 
+QStringList claimChipCards(const QStringList &turnCards, const QStringList &claimed) {
+    QStringList out;
+    for (const QStringList *list : {&turnCards, &claimed})
+        for (const QString &id : *list)
+            if (!id.isEmpty() && !out.contains(id)) out << id;
+    return out;
+}
+
+QString claimChipText(const QStringList &cards) {
+    if (cards.isEmpty()) return {};
+    return cards.size() == 1 ? QStringLiteral("#") + cards.first()
+                             : QStringLiteral("#%1 (%2)").arg(cards.first()).arg(cards.size());
+}
+
+QString claimChipAccessibleName(const QStringList &cards) {
+    if (cards.isEmpty()) return {};
+    if (cards.size() == 1) return QStringLiteral("Claimed card #%1. Opens the card.").arg(cards.first());
+    return QStringLiteral("Claimed cards: #%1 and %2 more. Opens the list.").arg(cards.first()).arg(cards.size() - 1);
+}
+
 bool layoutLogEnabled() {
     static const bool on = qEnvironmentVariableIsSet("RELAY_LAYOUT_LOG");
     return on;

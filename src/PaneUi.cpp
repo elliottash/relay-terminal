@@ -14,12 +14,6 @@ void Pane::buildUi() {
         m_headerLayout = headerRow;
         headerRow->setContentsMargins(0, 0, 0, 0);
         headerRow->setSpacing(8);
-        // The pane's address badge (#R5TC): a muted `[2]` at the head of the header, shown only
-        // when two panes or more exist — updatePaneBadge() decides, exactly as the subagent badge
-        // decides that zero is not a 0.
-        m_paneBadge = new QLabel; m_paneBadge->setTextFormat(Qt::PlainText);
-        m_paneBadge->setObjectName(QStringLiteral("paneBadge"));
-        m_paneBadge->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         m_titleLabel = new QLabel; m_titleLabel->setTextFormat(Qt::PlainText);
         m_titleLabel->setObjectName(QStringLiteral("paneTitle"));
         // No caret here: the title is dragged far more often than it is renamed, so it inherits
@@ -45,17 +39,30 @@ void Pane::buildUi() {
         m_titleAuto = new QLabel(QStringLiteral("auto"));
         m_titleAuto->setObjectName(QStringLiteral("paneAuto"));
         m_titleAuto->setVisible(false);
-        // The card this pane's agent turn is working (#C7PF): its #id beside the title, from the
-        // moment the Switchboard's Execute hands the card over until the turn ends. A click opens
-        // the card (headerDragEvent, below); a drag still moves the pane, as from anywhere else
-        // in the row. refreshCardChip() decides whether it is up.
-        m_cardChip = new QLabel;
-        m_cardChip->setTextFormat(Qt::PlainText);
+        // The claims chip (#C7PF, #0FBB): the Board cards this pane is working, immediately before
+        // the title — `#K7Q2`, or `#K7Q2 (3)` with the latest first. A click, Space or Enter opens
+        // the one card, or the list when there are several (openClaimsMenu). It is a button of
+        // its own, so Tab reaches it and it is no part of the header's drag handle;
+        // refreshCardChip() decides whether it is up and what it says.
+        class ClaimsChip : public QToolButton {
+        protected:
+            void keyPressEvent(QKeyEvent *event) override {
+                if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) { click(); return; }
+                QToolButton::keyPressEvent(event);
+            }
+        };
+        m_cardChip = new ClaimsChip;
         m_cardChip->setObjectName(QStringLiteral("paneCardChip"));
-        m_cardChip->setAccessibleName(QStringLiteral("Board card being executed"));
+        m_cardChip->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        m_cardChip->setFocusPolicy(Qt::TabFocus);
         m_cardChip->setCursor(Qt::PointingHandCursor);
         m_cardChip->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         m_cardChip->hide();
+        connect(m_cardChip, &QToolButton::clicked, this, [this] {
+            const QStringList ids = cardChipCards();
+            if (ids.size() == 1) { if (onOpenCard) onOpenCard(ids.first()); return; }
+            openClaimsMenu();
+        });
         m_cwdLabel = new QLabel; m_cwdLabel->setTextFormat(Qt::PlainText);
         m_cwdLabel->setObjectName(QStringLiteral("paneCwd"));
         // Clicking the directory line opens it in the explorer pane.
@@ -75,11 +82,10 @@ void Pane::buildUi() {
         m_cwdLabel->installEventFilter(this);
         // Not selectable any more: dragging across the path is how you move the pane now, and a
         // half-selected path is a poor trade for that. The tooltip still has both paths in full.
-        headerRow->addWidget(m_paneBadge, 0);
+        headerRow->addWidget(m_cardChip, 0);
         headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);
         headerRow->addWidget(m_titleAuto, 0);
-        headerRow->addWidget(m_cardChip, 0);
         headerRow->addStretch(1);
         headerRow->addWidget(m_cwdLabel, 0);
         m_headerWidget = header;

@@ -1469,6 +1469,24 @@ const Card *Model::card(const QString &id) const
     return it == m_cards.constEnd() ? nullptr : &it.value();
 }
 
+QStringList Model::claimedBy(const QString &session) const
+{
+    if (session.isEmpty()) return {};
+    QList<const Card *> mine;
+    for (const Card &card : m_cards)
+        if (card.session == session && !card.closed()) mine << &card;
+    // Most recently touched first; a card whose worker sent no `updated` sorts by its creation
+    // date, and equal stamps fall back to the id so the answer is stable between two calls.
+    std::sort(mine.begin(), mine.end(), [](const Card *a, const Card *b) {
+        const QString ta = a->updated.isEmpty() ? a->created : a->updated;
+        const QString tb = b->updated.isEmpty() ? b->created : b->updated;
+        return ta != tb ? ta > tb : a->id < b->id;
+    });
+    QStringList ids;
+    for (const Card *card : std::as_const(mine)) ids << card->id;
+    return ids;
+}
+
 namespace {
 
 // The time a sort keys on: the two updated sorts want the card's own `updated` (falling back to

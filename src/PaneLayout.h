@@ -142,6 +142,19 @@ HeaderFit headerFit(int headerWidth, const HeaderWants &wants);
 // path, one long word) or one that fits `px` whole returns empty and stays on its single line.
 QStringList twoLineTitle(const QString &title, const QFontMetrics &metrics, int px);
 
+// ----- the claims chip before the title (#0FBB) -------------------------------------------------
+//
+// The header names the Board cards this pane is working: the running turn's cards first (the
+// one the prompt's `#id` or the Board's Run handed it, #C7PF), then the cards the pane's agent has
+// claimed, newest claim first, each id once. The chip's text is the first of them, and the count
+// of all of them in parentheses when there is more than one: "#K7Q2", "#K7Q2 (3)". One id says
+// nothing about a count, so it carries none.
+QStringList claimChipCards(const QStringList &turnCards, const QStringList &claimed);
+QString claimChipText(const QStringList &cards);
+// What a screen reader says for the chip: the count spelled out and the latest id, and that it
+// opens the list — "Claimed cards: #K7Q2 and 2 more. Opens the list."
+QString claimChipAccessibleName(const QStringList &cards);
+
 // The edge of a pane that a drop at `local` (a point inside a pane of `size`) belongs to: the
 // nearest edge wins. Dropping just past the divider between two panes therefore names the edge
 // they already share, and the dragged pane keeps its place.

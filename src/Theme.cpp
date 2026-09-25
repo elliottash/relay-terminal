@@ -359,7 +359,12 @@ QLabel#route { color: @accent; font-family: "@mono"; }
 QLabel#paneTitle { color: @muted; font-weight: 600; }
 QLabel#paneTitle[relayActive="true"] { color: @text; }
 QLabel#paneCwd { color: @muted; font-size: 9pt; }
-QLabel#paneCardChip { color: @muted; font-size: 9pt; font-weight: 600; }
+/* The claims chip before the title (#C7PF, #0FBB): as quiet as the directory and no focus mark,
+   but a button — the ring shows where Tab landed, and nothing else changes with focus. */
+QToolButton#paneCardChip { color: @muted; font-size: 9pt; font-weight: 600; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 3px; }
+QToolButton#paneCardChip:hover { color: @text; }
+QToolButton#paneCardChip:focus { border-color: @accentBorder; }
+QToolButton#paneCardChip::menu-indicator { image: none; width: 0; }
 QLabel#paneAuto { color: @muted; font-size: 9pt; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
 QLineEdit#paneTitleEdit { background: @surface; color: @text; border: 1px solid @accentBorder; border-radius: 4px; padding: 1px 6px; }
 

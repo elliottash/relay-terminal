@@ -379,10 +379,11 @@ private Q_SLOTS:
             // both states rather than dimming with the rest of the header.
             QVERIFY2(css.contains(QStringLiteral("QLabel#paneCwd { color: %1; font-size: 9pt; }").arg(TextMuted.name())), id);
             QVERIFY2(!css.contains(QStringLiteral("QLabel#paneCwd[relayActive")), id);
-            // The running card's #id (#C7PF): as quiet as the directory, and not a focus mark either.
-            QVERIFY2(css.contains(QStringLiteral("QLabel#paneCardChip { color: %1; font-size: 9pt; font-weight: 600; }")
+            // The claims chip (#C7PF, #0FBB): as quiet as the directory, and not a focus mark either —
+            // a button now, whose only focus paint is its own ring.
+            QVERIFY2(css.contains(QStringLiteral("QToolButton#paneCardChip { color: %1; font-size: 9pt; font-weight: 600;")
                                       .arg(TextMuted.name())), id);
-            QVERIFY2(!css.contains(QStringLiteral("QLabel#paneCardChip[relayActive")), id);
+            QVERIFY2(!css.contains(QStringLiteral("#paneCardChip[relayActive")), id);
 
             const QString why = QStringLiteral("%1: active outline %2 on %3 is %4:1, and the resting one is %5")
                                     .arg(QString::fromLatin1(id), TextMuted.name(), Background.name())

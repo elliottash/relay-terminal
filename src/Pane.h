@@ -5500,14 +5500,8 @@ private:
                                                     QStringLiteral("the file explorer")));
                 return true;
             }
-            // The card's #id beside the title (#C7PF): a click opens that card in the
-            // Switchboard, the same exchange the prompt box's work chip menu makes. A drag from
-            // it still moves the pane, exactly as a drag from the directory does.
-            if (m_headerPressOn == m_cardChip && m_cardChip && !cardChipCard().isEmpty()
-                && m_cardChip->rect().contains(m_cardChip->mapFromGlobal(mouse->globalPos()))) {
-                if (onOpenCard) onOpenCard(cardChipCard());
-                return true;
-            }
+            // The claims chip before the title (#C7PF, #0FBB) is a button of its own: it takes
+            // the press and opens its card or its list, so it is no part of the drag handle.
             return false;
         }
         case QEvent::KeyPress:
@@ -9702,7 +9696,7 @@ public:
     // backend's shape (handle/title/workspace/busy), `enabled` folds the kill switch and the
     // reverse gate — a turn that arrived from a device is not offered pane_send at all.
     void pushPaneRoster() {
-        if (!m_workerReady) { updatePaneBadge(); return; }
+        if (!m_workerReady) return;
         QJsonArray rows;
         for (const QJsonValue &value : relay::panedir::Directory::instance().roster(m_token)) {
             const QJsonObject row = value.toObject();
@@ -9714,16 +9708,6 @@ public:
         send({{"type", "pane_roster"}, {"panes", rows},
               {"self", relay::paneaddress::label(m_paneHandle)},
               {"enabled", relay::panedir::Directory::instance().enabled() && !m_paneNoHandoffTurn}});
-        updatePaneBadge();
-    }
-
-    // The muted `[2]` at the head of the header: this pane's address, shown only when there are
-    // two panes or more to tell apart — zero others is not a `[1]`, it is no badge at all (the
-    // subagent badge's rule).
-    void updatePaneBadge() {
-        if (!m_paneBadge) return;
-        if (relay::panedir::Directory::instance().size() < 2) { m_paneBadge->clear(); return; }
-        m_paneBadge->setText(QStringLiteral("[%1]").arg(m_paneHandle));
     }
 
     // A note reached this pane (#R5TC). Busy: it rides the notices path and the worker's model
@@ -9841,35 +9825,105 @@ private:
         refreshCardChip();   // every attach path runs through here (#C7PF)
     }
 
-    // ----- header card chip (#C7PF) ------------------------------------------------------------
-    // While this pane's agent turn works a Switchboard card — handed over by the Switchboard's
-    // Execute, attached to a prompt with `#id`, or carried by a steer — the header names it
-    // beside the title and a click opens it. It states what is happening now, so it goes when the
-    // turn ends. A card handed to a pane whose agent is not configured yet (startBoardTask
-    // parks it until then) is named from the moment it arrives.
-    QString cardChipCard() const { return !m_turnCard.isEmpty() ? m_turnCard : m_boardTaskCard; }
+    // ----- header claims chip (#C7PF, #0FBB) ---------------------------------------------------
+    // Immediately before the title the header names the Board cards this pane is working: the
+    // card its running agent turn carries — handed over by the Board's Run, attached to a prompt
+    // with `#id`, or carried by a steer — and every card the pane's agent has claimed
+    // (`board_claim` writes this pane's token into the card, #R9G7). The chip reads `#K7Q2`, or
+    // `#K7Q2 (3)` when there are several, the latest first; a click, Space or Enter opens the one
+    // card, or the list when there are several, and choosing a card opens it in the Board. A
+    // turn's card goes when the turn ends; a claim stays until the card closes or another session
+    // takes it. A card handed to a pane whose agent is not configured yet (startBoardTask parks
+    // it until then) is named from the moment it arrives.
+    QString cardChipCard() const { return cardChipCards().value(0); }
+
+    QStringList cardChipCards() const {
+        const QStringList turn = !m_turnCard.isEmpty() ? m_turnCards : QStringList{m_boardTaskCard};
+        return relay::panes::claimChipCards(turn, m_claimedCards);
+    }
+
+    // A board tool write announces itself with the changed card's *id* alone (board_tools
+    // `_emit_board`, `upserts: ["K7Q2"]`): the rows come back from a `board_refresh`, which the
+    // Board pane's file watcher asks for and a terminal pane never did — so a claim its own agent
+    // had just made never reached its index, and the chip could not name it (#0FBB). The pane
+    // asks for the rows itself now: for the whole board when it never had one, for the change
+    // otherwise. A `board_changed` that already carries rows is applied as it is.
+    void noteBoardWrite(const QJsonObject &event) {
+        bool idsOnly = false;
+        for (const QJsonValue &value : event.value(QStringLiteral("upserts")).toArray())
+            if (value.isString()) { idsOnly = true; break; }
+        if (!idsOnly || !m_configured || !hasBoard()) return;
+        if (!m_cardIndexAsked) { requestCardIndex(); return; }
+        send({{QStringLiteral("type"), QStringLiteral("board_refresh")}});
+    }
+
+    // The claims as the card index knows them now (#0FBB), kept newest claim first: a card that
+    // newly carries this pane's token goes to the front — it was claimed just now — one that
+    // lost it or closed drops out, and the index's own order (most recently updated first) only
+    // orders the cards that were already claimed when the index arrived.
+    void refreshClaims() {
+        const QStringList now = m_cardIndex.claimedBy(m_token);
+        QStringList kept, fresh;
+        for (const QString &id : std::as_const(m_claimedCards)) if (now.contains(id)) kept << id;
+        for (const QString &id : now) if (!kept.contains(id)) fresh << id;
+        const QStringList merged = fresh + kept;
+        if (merged == m_claimedCards) return;
+        m_claimedCards = merged;
+        refreshCardChip();
+    }
 
     void refreshCardChip() {
         if (!m_cardChip) return;
-        const QString id = cardChipCard();
-        if (id.isEmpty()) {
+        const QStringList ids = cardChipCards();
+        if (ids.isEmpty()) {
             m_cardChip->hide();
             updateHeader();   // the row's budget changes with the chip's whole width or absence
             return;
         }
-        m_cardChip->setText(QStringLiteral("#") + id);
-        // Every attached card, ids and titles, in the tooltip; the row itself says only the one.
-        const QStringList ids = !m_turnCard.isEmpty() ? m_turnCards : QStringList{m_boardTaskCard};
+        // A chip that is up asks for the index once: a card the Board's Run handed over was
+        // claimed by another worker, and only the index says which cards this pane holds.
+        if (m_cardIndex.total() == 0) requestCardIndex();
+        m_cardChip->setText(relay::panes::claimChipText(ids));
+        m_cardChip->setAccessibleName(relay::panes::claimChipAccessibleName(ids));
+        // Every card, ids, titles and stages, in the tooltip; the row itself says only the latest.
         QStringList named;
-        for (const QString &cardId : ids) {
-            const relay::board::Card *card = m_cardIndex.card(cardId);
-            named << (card && !card->title.isEmpty() ? QStringLiteral("#%1 — %2").arg(cardId, card->title)
-                                                     : QStringLiteral("#%1").arg(cardId));
-        }
+        for (const QString &cardId : ids) named << claimMenuLabel(cardId);
         m_cardChip->setToolTip(named.join(QLatin1Char('\n'))
-                               + QStringLiteral("\n\nClick to open this card in the Board"));
+                               + (ids.size() == 1 ? QStringLiteral("\n\nClick to open this card in the Board")
+                                                  : QStringLiteral("\n\nClick to list them and open one in the Board")));
         m_cardChip->show();
         updateHeader();
+    }
+
+    // "#K7Q2 · Voice transcription — Executing": the id, the title when the board knows one, and
+    // the stage in words, for the list and the tooltip alike.
+    QString claimMenuLabel(const QString &id) const {
+        const relay::board::Card *card = m_cardIndex.card(id);
+        QString text = QStringLiteral("#") + id;
+        if (card && !card->title.isEmpty()) {
+            const QString title = card->title.size() > 72 ? card->title.left(71).trimmed() + QStringLiteral("…")
+                                                          : card->title;
+            text += QStringLiteral(" · ") + title;
+        }
+        if (card && !card->status.isEmpty()) text += QStringLiteral(" — ") + relay::board::statusTitle(card->status);
+        return text;
+    }
+
+    // The chip's list (#0FBB): one row per card, latest first, and choosing one opens it in the
+    // Board. A QMenu is the accessible choice: arrows move, Enter chooses, Escape closes and
+    // focus goes back to the chip.
+    void openClaimsMenu() {
+        if (!m_cardChip) return;
+        const QStringList ids = cardChipCards();
+        if (ids.isEmpty()) return;
+        auto *menu = new QMenu(m_cardChip);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        for (const QString &id : ids) {
+            QAction *action = menu->addAction(claimMenuLabel(id));
+            connect(action, &QAction::triggered, this, [this, id] { if (onOpenCard) onOpenCard(id); });
+        }
+        menu->popup(m_cardChip->mapToGlobal(QPoint(0, m_cardChip->height())));
+        menu->setActiveAction(menu->actions().first());
     }
 
     // The cards the agent turn starting now carries (#C7PF): the first is the chip's #id, the
@@ -14515,7 +14569,9 @@ private:
         // pane used to drop them, so every card past the first 400 rows of a large board never
         // resolved and its `#id` stayed plain text for ever (#SCN9) — and it notices when a
         // snapshot ends short of its announced total, so the pane can ask for the board again.
+        if (type == QStringLiteral("board_changed")) noteBoardWrite(event);
         if (m_cardIndex.apply(type, event)) {
+            refreshClaims();   // the header's claims chip follows the index (#0FBB)
             if (m_cardIndex.needsRefetch()) {
                 m_cardIndex.clearRefetch();
                 m_cardIndexAsked = false;  // requestCardIndex() would think it already asked
@@ -14547,6 +14603,7 @@ private:
             // again the next time something needs it.
             m_cardIndex.reset({});
             m_cardIndexAsked = false;
+            if (!m_claimedCards.isEmpty()) { m_claimedCards.clear(); refreshCardChip(); }
             return true;
         }
         return false;
@@ -16506,7 +16563,6 @@ private:
     bool m_paneWaking = false;
     bool m_paneWakeTurn = false;   // the running turn was started by a peer's message
     relay::panedir::Note m_paneWakeNote;
-    QLabel *m_paneBadge = nullptr;   // the muted [2] at the head of the header
     // Terminal scrollback across a restart: the file this pane's text is saved in, the lines a
     // restore handed it, and whether they have been replayed (once per pane, at the first prompt).
     QString m_scrollbackId;
@@ -16604,7 +16660,7 @@ private:
     QString m_cwdText;   // the directory line in full; the label shows as much of it as fits
     // Pane title (issue JRWQ): the header line, its in-place editor and the "auto" badge.
     QLabel *m_titleLabel = nullptr, *m_titleAuto = nullptr;
-    QLabel *m_cardChip = nullptr;   // the running turn's #id in the header (#C7PF)
+    QToolButton *m_cardChip = nullptr;   // the claims chip before the title (#C7PF, #0FBB)
     QLineEdit *m_titleEdit = nullptr;
     QHBoxLayout *m_headerLayout = nullptr;
     QWidget *m_headerWidget = nullptr;
@@ -17084,11 +17140,12 @@ private:
     QString m_boardTask, m_boardTaskCard;   // Execute's task, until the agent is configured (#XS6Q)
     int m_backgroundMinRequest = 1;
     // The running agent turn's cards (#C7PF): the first is the header chip's #id, the rest ride
-    // in its tooltip. `m_turnCardAsk` is the request id the turn was sent under and
+    // in its list and tooltip. `m_turnCardAsk` is the request id the turn was sent under and
     // `m_turnCardItem` the queue item the worker made of it, so the agent_finished that ends
     // this turn — and only this turn — takes the chip down.
     QString m_turnCard, m_turnCardAsk, m_turnCardItem;
     QStringList m_turnCards;
+    QStringList m_claimedCards;   // the cards this pane's agent has claimed, newest first (#0FBB)
     void runBoardTask() {
         if (m_boardTask.isEmpty()) return;
         QueueEntry entry;

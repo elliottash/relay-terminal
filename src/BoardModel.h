@@ -426,6 +426,11 @@ public:
     // ---- cards
     const Card *card(const QString &id) const;
     QList<Card> cards(const QString &columnId) const;   // filtered, ordered
+    // The open cards a terminal pane has claimed (#0FBB): every card whose `session` is that
+    // pane's token and that is not closed, most recently updated first. Closed cards keep the
+    // token on disk but are not this pane's work any more, so they are left out. Ignores the
+    // filter: the pane header is not a view of the list.
+    QStringList claimedBy(const QString &session) const;
     // The order the cards inside a section come in (above). `rows()` and `cards()` both follow it.
     void setSort(Sort sort) { m_sort = sort; }
     Sort sort() const { return m_sort; }
@@ -541,6 +546,7 @@ public:
     const Card *card(const QString &id) const { return m_model.card(id); }
     int total() const { return m_model.total(); }
     QList<Card> search(const QString &query, int limit = 20) const { return m_model.search(query, limit); }
+    QStringList claimedBy(const QString &session) const { return m_model.claimedBy(session); }
     void setConfig(const QJsonObject &config) { m_model.setConfig(config); }
     // Reset also drops the snapshot bookkeeping: an empty reset is the project-init switch to
     // another board's rows (#916B), and no batch of the old board is owed any more.

@@ -964,6 +964,22 @@ private Q_SLOTS:
         QCOMPARE(fit.directory, w.directory);
         QVERIFY(fits(w, fit, fullWidth(w)));
     }
+
+    // The claims chip before the title (#0FBB): the running turn's cards first, then the claims,
+    // each id once; "#K7Q2" alone, "#K7Q2 (3)" for several, and a name a screen reader can say.
+    void theClaimsChipNamesTheLatestAndCountsTheRest() {
+        const QString k = QStringLiteral("K7Q2"), m = QStringLiteral("M3XJ"), pp = QStringLiteral("P9AB");
+        QCOMPARE(claimChipCards({}, {}), QStringList());
+        QCOMPARE(claimChipCards({k}, {}), QStringList{k});
+        QCOMPARE(claimChipCards({k}, {m, k, QString()}), (QStringList{k, m}));
+        QCOMPARE(claimChipCards({}, {m, pp}), (QStringList{m, pp}));
+        QCOMPARE(claimChipText({}), QString());
+        QCOMPARE(claimChipText({k}), QStringLiteral("#K7Q2"));
+        QCOMPARE(claimChipText({k, m, pp}), QStringLiteral("#K7Q2 (3)"));
+        QCOMPARE(claimChipAccessibleName({}), QString());
+        QCOMPARE(claimChipAccessibleName({k}), QStringLiteral("Claimed card #K7Q2. Opens the card."));
+        QCOMPARE(claimChipAccessibleName({k, m, pp}), QStringLiteral("Claimed cards: #K7Q2 and 2 more. Opens the list."));
+    }
 };
 
 QTEST_MAIN(PaneLayoutTests)

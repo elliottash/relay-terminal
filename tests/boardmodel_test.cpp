@@ -370,6 +370,7 @@ private slots:
     void searchRanksOpenCardsAndExactIdsFirst();
     void upsertAndRemoveKeepTheBoardInStep();
     void chunkedSnapshotBatchesAllLandInTheIndex();
+    void claimedByListsThisPanesOpenCardsNewestFirst();
     void aSnapshotThatLandsShortAsksForTheBoardOnce();
     void statusTitlesAreHumanReadable();
     void everySectionSaysWhatItIsFor();
@@ -839,6 +840,40 @@ void BoardModelTests::chunkedSnapshotBatchesAllLandInTheIndex()
     QCOMPARE(feed.total(), 4);
     QCOMPARE(feed.card(QStringLiteral("PH0N"))->title, QStringLiteral("PH0N card"));
     QVERIFY(!feed.needsRefetch());
+}
+
+// The pane header's claims chip (#0FBB) asks the index which open cards carry this pane's token.
+void BoardModelTests::claimedByListsThisPanesOpenCardsNewestFirst()
+{
+    auto claimed = [](QJsonObject card, const QString &session, const QString &updated) {
+        card.insert(QStringLiteral("session"), session);
+        card.insert(QStringLiteral("updated"), updated);
+        return card;
+    };
+    const QString me = QStringLiteral("983a6a3c-af99-4377-8b09-3e819936784e");
+    const QString other = QStringLiteral("someone-else");
+    IndexFeed feed;
+    QVERIFY(feed.apply(QStringLiteral("board"), QJsonObject{
+        {"config", config()},
+        {"cards", rows({claimed(row("K7Q2", "executing", "features"), me, QStringLiteral("2026-09-25T01:00:00Z")),
+                        claimed(row("M3XJ", "needs-verification", "bugs"), me, QStringLiteral("2026-09-25T02:00:00Z")),
+                        claimed(row("P9AB", "done", "features"), me, QStringLiteral("2026-09-25T03:00:00Z")),
+                        claimed(row("ZZ11", "executing", "features"), other, QStringLiteral("2026-09-25T04:00:00Z")),
+                        row("Q5QJ", "inbox", "bugs")})},
+        {"cards_total", 5}, {"more", false}}));
+    // Open cards with this pane's token, most recently updated first. The closed one still
+    // carries the token on disk and the other session's card never did: neither is this pane's.
+    QCOMPARE(feed.claimedBy(me), (QStringList{QStringLiteral("M3XJ"), QStringLiteral("K7Q2")}));
+    QCOMPARE(feed.claimedBy(QString()), QStringList());
+    QCOMPARE(feed.claimedBy(QStringLiteral("nobody")), QStringList());
+    // Another session takes K7Q2 over: the board_changed that says so takes it off the list.
+    QVERIFY(feed.apply(QStringLiteral("board_changed"), QJsonObject{
+        {"upserts", rows({claimed(row("K7Q2", "executing", "features"), other, QStringLiteral("2026-09-25T05:00:00Z"))})}}));
+    QCOMPARE(feed.claimedBy(me), QStringList{QStringLiteral("M3XJ")});
+    // And M3XJ closing takes the last one off.
+    QVERIFY(feed.apply(QStringLiteral("board_changed"), QJsonObject{
+        {"upserts", rows({claimed(row("M3XJ", "done", "bugs"), me, QStringLiteral("2026-09-25T06:00:00Z"))})}}));
+    QCOMPARE(feed.claimedBy(me), QStringList());
 }
 
 // A snapshot whose last batch lands short of the announced `cards_total` lost a batch
