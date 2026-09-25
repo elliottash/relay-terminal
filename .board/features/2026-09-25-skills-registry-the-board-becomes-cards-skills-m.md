@@ -1,17 +1,17 @@
 ---
 id: 9FX8
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard, skills, board, qa]
 component: [gui, worker, skills]
 assignee: agent
-implemented_by: glm/glm-5.3
-session: a0e3fa74-1a2a-402b-827a-5f1e2a531191
+implemented_by: anthropic/claude-opus-5-5 via claude-code
+session: c522363d-fa8e-4db1-afcd-a6e58451cd14
 rank: zzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: visual, primary: script, also: [ai-visual, person], human: required, criteria: 'the Board''s three tabs read as one surface; a skill page answers version, profile, cases and staleness at a glance without a QA plan in view', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: 'owner, Relay conversation, 2026-09-24 and 2026-09-25; the Skills registry phase of #1QKM'
-links: {commits: [e5b1a648d096, d138dc638e9e, b48afea250ef], evidence: [], github: null, plans: [], related: [1QKM, SZ1H, HS7V, MSJ0, 95VZ, Y2MP, P7SJ, GSK7]}
+links: {commits: [e5b1a648d096, d138dc638e9e, b48afea250ef, 6feff54f7f97, 488ff0c853f7, 7ea7d8f05fe5, cd1b0fedcde0, ebcd0f879450], evidence: [docs/qa_evidence/2026-09-25-9FX8-skills-tab/], github: null, plans: [], related: [1QKM, SZ1H, HS7V, MSJ0, 95VZ, Y2MP, P7SJ, GSK7]}
 ---
 # Skills registry: the Board becomes Cards | Skills | Memories, Globals gets global skills, and a skill page shows version, profile, cases and staleness
 
@@ -54,6 +54,59 @@ the board should become 3 tabs, cards, skills, memories [...] globals also needs
 - The Skills tab lists the **project** skills (`.relay/skills`, workspace `.claude`/`.codex`/`.warp`) with source, version, cases, pass rate, last verified and stale; a row opens a page with the profile strip, provenance, the last ten cases (ids only when confidential) and the linked cards; Load, Exclude, Refine, Open file and Re-verify work. Global skills are not on the Board tab — Globals' Skills section lists them with the same list and page plus import and update actions (decision 2).
 - The Memories tab shows this board's memory cards and Globals no longer shows them.
 - Failure looks like: a project skill the console can load that the tab does not list, a global skill appearing on the Board tab, a stale flag that disagrees with `cases.stats`, or a QA plan (the verify block) drawn on a skill page.
+
+## Execution Summary
+- **Step 1** (e5b1a648): the `skills_registry` worker request, one row per visible skill with
+  version, profile, `cases.stats`, `last_verified`, `stale_reason`, the last ten cases, linked
+  cards, changelog and the `project` flag.
+- **Step 2** (b48afea2): the Board's Cards | Skills | Memories tabs. Skills lists project rows,
+  and each skill has its own page. Memories shows Expired first, then Active and Suggestions,
+  with Retired and Rejected folded.
+- **Step 3** (7ea7d8f05fe5): the skill list and skill page became one widget,
+  `skills::SkillRegistryView` (`src/SkillRegistryView.*`, library `relay-skillregistry`). The
+  Board's Skills tab shows its project half. **Globals › Skills** (between Aliases and
+  Instructions; stable id 5, the existing ids unchanged) shows the global half. Its toolbar has
+  SkillsDialog's Import from repository… and Check updates, whose dialogs SkillsDialog now calls
+  from the same file. SkillsDialog stays reachable from Actions; #JVEJ retires it (decision 3).
+  Globals lists no project-scoped memory: "All records" is now "All global records", and its
+  intro counts the project memories left out and points to the Board's Memories tab.
+- **Step 4** (7ea7d8f05fe5): the row shows "stale" with the reason in its tooltip, and the page
+  shows it inline. A skill with no rows shows "no cases yet", never stale. The page's
+  **Re-verify** drafts `/skill <name> serve one case of <name> and record it with board_case`
+  into a console and never sends: on the Board, its own console; in Globals, the Sessions pane's.
+  The row's Source column carries the short version.
+- Fixes carried with it: the Linked chips drew twice when the page redrew before a new row was
+  shown; provenance printed "sha256 sha256:…"; a `skills_registry` with `workspace: ""` (a tab
+  with no project) failed with "workspace must be an existing directory".
+- cd1b0fedcde0 took back another pane's test (#E0Y0) that 7ea7d8f05fe5 had landed by mistake
+  with this card's screenshot hooks. ebcd0f879450 landed the hooks alone.
+
+## Tests
+- `PYTHONPATH=backend python3 -m unittest tests.test_skills.RegistryTests tests.test_board_tools.RegistryTests`
+  → 6 OK (adds `test_globals_request_with_an_empty_workspace_is_answered`).
+- `relay-globalspane-tests` on the landed tree → 15 passed, including
+  `skillsSectionListsGlobalSkillsOnlyAndOpensAPage` (mixed payload → only `project: false` rows;
+  a page opens; stale reason; no cases yet; Re-verify drafts and sends nothing; Refine; errors)
+  and `projectMemoriesAreNotListed`.
+- `relay-boardpane-tests` → 19 passed on the step-3 tree, including
+  `theSkillsTabListsProjectSkillsAndOpensAPage` and
+  `theMemoriesTabShowsExpiredFirstAndOpensTheCard`. On main since baaefc87 (#FYEY) the suite
+  aborts earlier, in `longFindingsRemainReadableAndScrollable` (malloc_consolidate). 579c7d5c
+  passes and baaefc87 fails, so the abort is not this card's. The two tab tests pass when run
+  alone on ebcd0f879450.
+- Evidence: `docs/qa_evidence/2026-09-25-9FX8-skills-tab/` (five offscreen screenshots,
+  `tests.txt`, `README.md`).
+
+## Human QA
+- Open a project that has `.relay/skills`, switch Cards → Skills → Memories → Cards. Is the Cards
+  tab exactly the list page you had before, and do the three tabs read as one surface?
+- On Board › Skills, open a skill page. Can you tell version, profile, cases and staleness at a
+  glance, with no QA plan drawn on it? Is a global skill absent from the list?
+- Open Globals (Ctrl+Shift+G) › Skills. Are only global skills listed (no project ones)? Do
+  Import from repository… and Check updates behave as they did in the Skills dialog? Does
+  Re-verify put the draft in the Sessions console without sending it?
+- Globals › All global records and User memory: are this project's memories gone, and your user
+  memories still there?
 
 ## Decisions
 Owner, 2026-09-25 (answers to the four questions in the thread):
