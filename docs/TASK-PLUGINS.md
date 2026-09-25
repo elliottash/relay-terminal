@@ -9,7 +9,7 @@ in one versioned manifest:
 |---|---|
 | `router` | Which language the composer checks a line against, and the chip it shows (`TEX`, `PY`, `STATA`) |
 | `runner` | What runs a runnable line or builds the document: a kernel, an artifact command or a REPL |
-| `tools` | A lazy tool group offered to the pane's agent and to a guest agent in that pane |
+| `tools` | A lazy tool group offered to the pane's agent (and, later, bridged to guests) |
 | `skills` | SKILL.md folders the agent can load while the workspace is active |
 | `panes` | The roles the linked pane group fills and its layout presets |
 | `preview` | The adapter that shows the output, and which files are output |
@@ -19,11 +19,9 @@ A task plugin is not an MCP integration, and Relay never treats a Claude Code or
 `plugin.json` as one: those describe agent extensions for another host. Skills from those tools
 are read through the ordinary skill sources (`docs/ARCHITECTURE.md`, Skills).
 
-The contract and the lifecycle are `backend/relay_core/task_plugins.py` (tests:
-`tests/test_task_plugins.py`); neither starts a process. What an *active* workspace does — its
-router, its runtime and its tools — is `backend/relay_core/workspace_plugins.py` (tests:
-`tests/test_workspace_plugins.py`), on the wire as protocol section 36
-(`docs/AGENT-SESSIONS-PROTOCOL.md`). The panes that show a workspace are #E85D's.
+The code is `backend/relay_core/task_plugins.py`; its tests are `tests/test_task_plugins.py`.
+This wave defines the contract and the lifecycle. It starts no process: wiring the router, the
+runner and the tool group into the worker and the panes is #C0Q8's tasks t:4h and t:9a.
 
 ## Where packages live
 
@@ -41,10 +39,9 @@ package holding a file that links outside itself are refused. The `relay.` id na
 to the bundled plugins: another origin may use a `relay.` id only to override a bundled plugin of
 that id.
 
-Relay ships three: `relay.tex` (latexmk → PDF, `tex_*` tools), `relay.python` (a kernel shared
-by the composer and the agent, `py_*` tools, a Variables pane) and `relay.stata` (the Stata
-console as a REPL until the bridge is chosen — #MEPR decision 2; its two declared tools are
-reported as unavailable until then).
+Relay ships three: `relay.tex` (latexmk → PDF, `tex_*` tools), `relay.python` (an ipykernel
+kernel, `python_*` tools, a Variables pane) and `relay.stata` (the Stata console as a REPL until
+the bridge is chosen — #MEPR decision 2).
 
 ## Why JSON
 
@@ -97,7 +94,6 @@ comments; `description` fields carry the explanation instead.
 | `tools.group` | 1–16 lowercase letters/digits; not one of Relay's own groups or native tool prefixes (`board`, `app`, `run`, `read`, …). |
 | `tools.items` | `{name, description}`; each name is `<group>_<verb>`, at most 64 characters, so it is a valid tool name for every provider. |
 | `tools.lazy` | Optional and only `true`: v1 groups are always fetched on demand through `load_tools`. |
-| (tool code) | A manifest *declares* its tools; Relay offers only the declared names it has code for (`workspace_plugins.RUNTIMES`, keyed by plugin id). A third-party package cannot ship tool code in v1, so its group is listed as unavailable. |
 | `skills` | Package-relative folders, each holding `SKILL.md`. |
 | `panes.roles` | Some of `editor`, `console`, `preview`, `variables`; `console` is required, because the tab's terminal stays in every workspace. |
 | `panes.layouts` | Column weights joined by `:` (`1:1:1`, `2:1`), at most one column per role. `default_layout` must be one of them. |
@@ -177,23 +173,3 @@ error such as an unknown id.
 
 Run `validate` on it, then `list --workspace .` to see it, its origin and what it is missing. If
 it declares a runner or tools, `enable` it for this project after reading what it runs.
-
-## What an active workspace does
-
-`WorkspaceManager` (`workspace_plugins.py`) holds a worker's active workspaces, keyed by a
-workspace id (the pane's own is `pane`), and each owns its runtime:
-
-- **Router.** In a `python` or `stata` workspace the composer's line is checked by
-  `lang_router.classify_line` instead of `bash -n`; `!` (shell), `*` (agent), `/shell`, `/agent`
-  and the natural-language rules keep working, `!!`/`**` hand the character to the program, and
-  the decision's `language` and `target` reach the GUI before submit. A Python/IPython/Stata REPL
-  in the foreground routes the same way with no plugin active. A `tex` workspace routes like Bash.
-- **Runner.** `relay.python` gets one `py_kernel.KernelSession`: ipykernel when this Relay's
-  Python has `jupyter_client` and a kernel spec, otherwise the stdlib server under the user's
-  `python3` — so ipykernel is optional. The composer's `kernel_run` and the agent's `py_run_cell`
-  share it. `relay.tex` gets one `tex_build.TexBuilder` on the document's detected root. The
-  runtime's environment is Relay's minimal set plus the manifest's `runner.env`.
-- **Tools.** The group is loaded with `load_tools` and exists only while that workspace has the
-  plugin active, for the native agent and for a Claude Code or Codex guest alike.
-- **Cleanup.** Deactivating, replacing the plugin, or the worker shutting down closes the
-  runtime. Nothing is shared between two workspace ids.

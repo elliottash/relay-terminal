@@ -15,12 +15,10 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
                         observe_protocol, roles as model_roles, session_protocol, skills, voice)
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
-from relay_core.open_buffers import OpenBuffers
 from relay_core import guest_accounts
 from relay_core import board_chat
 from relay_core import memory_import, openrouter_catalog, provider_limits
 from relay_core import final_summary
-from relay_core import workspace_plugins
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
@@ -107,9 +105,6 @@ def main():
     # already changed is still listed after the pane's model or workspace changes.
     app = app_tools.AppCommands(emit, sessions=lambda: sessions.index(),
                                 agent=lambda: turns.agent)
-    # The files open in the editor of this pane's window, and the round trip that edits them there
-    # (protocol 35, card #F8R7). Outlives every `configure`, like the app catalog.
-    buffers = OpenBuffers(emit)
 
     def turn_emit(obj: dict):
         obj = board.observe(obj)
@@ -119,15 +114,6 @@ def main():
 
     turns = TurnSupervisor(turn_emit)
     subagents.turns = turns
-
-    # Protocol 36 (#C0Q8): this pane's task-plugin workspace — its router, its kernel or TeX
-    # builder, and the tool group its agent may load. Outlives every `configure`: a kernel's state
-    # is the workspace's, not the conversation's.
-    def workspace_changed(workspace_id):
-        if workspace_id == workspace_plugins.DEFAULT_WORKSPACE and turns.agent is not None:
-            turns.agent.plugin_workspace_changed()
-
-    workspaces = workspace_plugins.WorkspaceManager(emit, on_change=workspace_changed)
     board.turns = turns
     # Signal threads (#AQ6X step 7b): a failing check nobody is on is picked up as a subagent of
     # this worker, so the board's half needs the manager. One line rather than a constructor
@@ -255,19 +241,12 @@ def main():
                 cwd = request.get("cwd")
                 if cwd is not None and (not isinstance(cwd, str) or not os.path.isdir(cwd)):
                     cwd = None
-                # Protocol 36: a Python/Stata workspace, or a language REPL in the foreground,
-                # replaces step 5 (`bash -n`) with the language's check; None leaves it to Bash.
-                routed = workspaces.route(request)
-                if routed is not None:
-                    emit({"event": "route", "id": request.get("id"), **routed})
-                    continue
                 # remote: the terminal is at a prompt on this ssh host (card #S5SH); the router then
                 # ignores the local PATH, aliases and cwd.
                 decision = classify(request.get("text", ""), request.get("mode", "auto"), known,
                                     request.get("path", os.environ.get("PATH", os.defpath)), cwd,
                                     remote=request.get("remote"))
-                emit({"event": "route", "id": request.get("id"),
-                      **workspaces.annotate(decision.to_dict(), request)})
+                emit({"event": "route", "id": request.get("id"), **decision.to_dict()})
             elif kind == "configure":
                 if turns.busy:
                     raise ValueError("Stop the active agent turn before changing provider or workspace.")
@@ -452,14 +431,7 @@ def main():
                 # so a console could not answer "why was that turn slow" about a turn of its own;
                 # now there is one agent per worker and it gets them whatever surface it serves.
                 app.bind_agent(agent)
-                buffers.fail_pending()
-                buffers.cancel = agent.cancel_event
-                agent.executor.buffers = buffers
                 activity_tools.ActivityTools.attach(agent, live_info=sessions.live_info)
-                state["workspace"] = workspace
-                agent.plugin_tools = workspace_plugins.PluginTools(workspaces)
-                if agent.plugin_tools.groups():
-                    agent.plugin_workspace_changed()   # a workspace active before this configure
                 subagents.configure(agent_catalog, subagent_factory)
                 subagents.attach(agent)
                 # --- end subagents ---
@@ -841,8 +813,6 @@ def main():
             # --- the agent drives the app (protocol section 30) ---
             elif app.handles(kind):
                 app.dispatch(request)
-            elif buffers.handles(kind):
-                buffers.dispatch(request)
             elif sessions.handles(kind):
                 sessions.handle(kind, request)
             elif observe.handles(kind):
@@ -850,8 +820,6 @@ def main():
             # --- Board (protocol section 17) ---
             elif globals_commands.handles(kind):
                 globals_commands.dispatch(request)
-            elif workspaces.handles(kind):
-                workspaces.dispatch(request, state.get("workspace"))
             elif board.handles(kind):
                 board.dispatch(request)
             elif kind == "shutdown":
@@ -891,8 +859,6 @@ def main():
     if turns.agent is not None:
         guest_harness_provider.detach(turns.agent)
     app.shutdown()       # nothing is left parked on a pane that has gone (protocol 30.3)
-    workspaces.shutdown()   # every kernel and TeX builder this pane started (protocol 36)
-    buffers.fail_pending()
     subagents.shutdown()
     observe.shutdown()
     turns.shutdown(timeout=1)

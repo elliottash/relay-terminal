@@ -375,9 +375,6 @@ class SubagentFactory:
         pane_checklist = getattr(getattr(self.main_agent, "executor", None), "approvals", None)
         if pane_checklist is not None:
             agent.executor.approvals = pane_checklist
-        # The files open in the pane's window (card #F8R7): a subagent's edit to one lands in the
-        # editor as the pane's own would, rather than behind it on disk.
-        agent.executor.buffers = getattr(getattr(self.main_agent, "executor", None), "buffers", None)
         # Its prompt is its own, not the pane's (#GMCF decision 3): `SUBAGENT_SYSTEM`, the
         # workspace line, the skills by name, then the section naming this subagent. Replacing the
         # bound method rather than the message is what makes it survive — `refresh_system_prompt`

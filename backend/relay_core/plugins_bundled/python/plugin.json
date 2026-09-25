@@ -19,14 +19,15 @@
     "env": ["PYTHONPATH", "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "MPLBACKEND"]
   },
   "tools": {
-    "group": "py",
+    "group": "python",
     "items": [
-      {"name": "py_run_cell", "description": "Run code in the workspace's kernel, the same one the user's composer uses; say why in intent."},
-      {"name": "py_interrupt", "description": "Interrupt the running cell."},
-      {"name": "py_restart", "description": "Restart the kernel, clearing its namespace."},
-      {"name": "py_variables", "description": "List the kernel's variables with type, shape and a short preview."},
-      {"name": "py_history", "description": "The session's cells in order, human and agent, with output and errors."},
-      {"name": "py_export", "description": "The session as a runnable # %% script or as JSON."}
+      {"name": "python_run_cell", "description": "Run code in the workspace's kernel, the same one the user's composer uses."},
+      {"name": "python_interrupt", "description": "Interrupt the running cell."},
+      {"name": "python_restart", "description": "Restart the kernel, clearing its namespace."},
+      {"name": "python_get_variables", "description": "List the kernel's variables with type, shape and a short preview."},
+      {"name": "python_describe_dataframe", "description": "Summarise a DataFrame: columns, dtypes, missing values and basic statistics."},
+      {"name": "python_page_dataframe", "description": "Return rows of a DataFrame by offset and count."},
+      {"name": "python_save_figure", "description": "Save the current figure to a file in the workspace."}
     ]
   },
   "skills": ["skills/python-workspace"],
@@ -36,7 +37,7 @@
     "default_layout": "2:1"
   },
   "requires": [
-    {"program": "python3", "alternatives": ["python"], "version_arg": "--version", "install_hint": "install Python 3; ipykernel and jupyter_client are optional (pip install ipykernel jupyter_client) and add IPython syntax"},
+    {"program": "python3", "alternatives": ["python"], "version_arg": "--version", "install_hint": "install Python 3 with the ipykernel package (pip install ipykernel)"},
     {"program": "ipython", "alternatives": ["ipython3"], "optional": true, "install_hint": "pip install ipython"}
   ]
 }

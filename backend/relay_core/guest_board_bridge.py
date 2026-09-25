@@ -28,7 +28,6 @@ from relay_core.board_tools import TOOL_NAMES as BOARD_NAMES, CLEANUP_TOOL_NAMES
 from relay_core.app_tools import TOOL_NAMES as APP_NAMES
 from relay_core.activity_tools import TOOL_NAMES as ACTIVITY_NAMES
 from relay_core.media import TOOL_NAMES as MEDIA_NAMES, TOOL_SPECS as MEDIA_SPECS
-from relay_core.workspace_plugins import LONG_TOOLS as PLUGIN_LONG_TOOLS
 
 BOARD_ALLOW = frozenset(BOARD_NAMES + CLEANUP_TOOL_NAMES + ('search_files',))
 DELEGATION_ALLOW = frozenset(('agent', 'agent_message', 'agent_wait', 'agent_set_model', 'update_todos'))
@@ -49,9 +48,6 @@ WAIT_SECONDS = 10
 LONG_CALL_SECONDS = 86400
 MAX_MESSAGE = 2 * 1024 * 1024
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05')
-# How often the proxy asks whether the offered tools changed (a task-plugin workspace activated
-# or deactivated in the pane, protocol 36), to tell the guest with `notifications/tools/list_changed`.
-LIST_POLL_SECONDS = 2.0
 
 
 def failure(code, message):
@@ -157,21 +153,10 @@ class Bridge:
         specs += CONTEXT_SPECS
         from relay_core.planning import WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC
         specs += [WRITE_PLAN_SPEC, EXIT_PLAN_MODE_SPEC]
-        # Protocol 36 (#C0Q8): the tool group of the pane's task-plugin workspace, offered while
-        # that workspace has the plugin active — the same object gates the native agent's list.
-        plugin_tools = getattr(self.agent, 'plugin_tools', None) if self.agent is not None else None
-        plugin_specs = plugin_tools.specs() if plugin_tools is not None else []
-        allowed = ALLOW | {spec['function']['name'] for spec in plugin_specs}
-        specs = copy.deepcopy(specs + plugin_specs)
+        specs = copy.deepcopy(specs)
         return [{'name': f['name'], 'description': f.get('description', ''),
                  'inputSchema': f['parameters']}
-                for spec in specs for f in [spec['function']] if f['name'] in allowed]
-
-    def tools_version(self):
-        """A digest of the names offered now; it changes when the pane's workspace does."""
-        import hashlib
-        names = sorted(spec['name'] for spec in self.specs())
-        return hashlib.sha256('\n'.join(names).encode()).hexdigest()[:16]
+                for spec in specs for f in [spec['function']] if f['name'] in ALLOW]
 
     def begin(self, cancel):
         with self.lock:
@@ -192,10 +177,6 @@ class Bridge:
                     if len(self.cancelled) < 10000:
                         self.cancelled.add(key)
             return {}
-        if request.get('method') == 'tools/version':
-            # Read-only and outside the lock, so a long cell running in the kernel does not hold
-            # up the proxy's poll.
-            return {'version': self.tools_version()} if not self.closed else failure('unavailable', 'Board bridge is closed.')
         # Capture before waiting for a preceding write: a queued call must not migrate
         # into a replacement turn after Stop or normal completion.
         active = self.active
@@ -252,9 +233,6 @@ class Bridge:
                 # Resolve the deferred group, then use precisely the native policy path.
                 from relay_core import tool_groups
                 group = tool_groups.group_of(name)
-                plugin_tools = getattr(self.agent, 'plugin_tools', None)
-                if not group and plugin_tools is not None:
-                    group = plugin_tools.group_of(name)
                 if group:
                     self.agent.loaded_tool_groups.add(group)
                 # Claude reports its actual model in first-turn init, after Agent.ask
@@ -351,7 +329,7 @@ class Bridge:
 def exchange(capability, method, params=None, key=None):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(LONG_CALL_SECONDS if method == 'tools/call' and isinstance(params, dict)
-                        and params.get('name') in ('tests_run', 'agent', 'agent_wait', *PLUGIN_LONG_TOOLS) else 30)
+                        and params.get('name') in ('tests_run', 'agent', 'agent_wait') else 30)
         sock.connect(capability['socket'])
         message = dict(capability, method=method, params=params, key=key)
         sock.sendall((json.dumps(message) + '\n').encode())
@@ -373,21 +351,6 @@ def proxy(path):
         with output_lock:
             print(json.dumps(response), flush=True)
 
-    stop = threading.Event()
-    watching = []
-
-    def watch_tools():
-        """Tell the guest when the pane's tools change (protocol 36): it re-lists them."""
-        last = None
-        while not stop.wait(LIST_POLL_SECONDS):
-            try:
-                version = exchange(capability, 'tools/version').get('version')
-            except (ValueError, TypeError, OSError):
-                continue
-            if last is not None and version and version != last:
-                write({'jsonrpc': '2.0', 'method': 'notifications/tools/list_changed'})
-            last = version or last
-
     def call(request):
         ident = request['id']
         try:
@@ -403,7 +366,6 @@ def proxy(path):
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
         if not line or len(line) > MAX_MESSAGE:
-            stop.set()
             pool.shutdown(wait=True)
             return
         ident = None
@@ -425,12 +387,8 @@ def proxy(path):
             if method == 'initialize':
                 version = (request.get('params') or {}).get('protocolVersion')
                 result = {'protocolVersion': version if version in VERSIONS else VERSIONS[0],
-                          'capabilities': {'tools': {'listChanged': True}},
+                          'capabilities': {'tools': {}},
                           'serverInfo': {'name': 'relay_board', 'version': '1'}}
-                if not watching:
-                    watching.append(threading.Thread(target=watch_tools, name='relay-board-tools-watch',
-                                                     daemon=True))
-                    watching[0].start()
             elif method == 'ping':
                 result = {}
             elif method == 'tools/list':
