@@ -354,6 +354,100 @@ class ReportTests(Sandbox):
             bridge.close()
 
 
+class BroadInstallRowTests(Sandbox):
+    """Card #27AR: an install row above scratch (`own ~/.cache`, or the sweep pause's /tmp row)
+    hid every scratch row and walk entry beneath it — gc reclaimed nothing and check counted
+    the whole of $HOME as scratch."""
+
+    def test_install_row_above_scratch_hides_nothing_and_counts_once(self):
+        old = time.time() - 48 * 3600
+        row = scratch.new_dir("scratch", "idle work", session="s1", ledger=self.ledger())
+        self.write(Path(row.path) / "big.bin", 4096)
+        stray = self.write(self.walk / "stray" / "x.bin", 2048).parent
+        for path in (Path(row.path), Path(row.path) / "big.bin", stray, stray / "x.bin"):
+            os.utime(path, (old, old))
+        own = self.ledger().append(scratch.Row(
+            id=self.ledger().next_id(), path=str(self.base), cls="install", purpose="broad",
+            created_by={"source": "test"}, created_at="", lifetime="user", state="live"))
+        entries = scratch.report(roots=[self.walk, self.scratch_home], include_loose=False,
+                                 ledger=self.ledger())
+        by_path = {e.path: e for e in entries}
+        self.assertIn(row.path, by_path)                  # the scratch row is still listed
+        self.assertTrue(by_path[row.path].removable)      # and still reclaimable when idle
+        self.assertIn(str(stray), by_path)                # the walk still sees the root
+        self.assertTrue(by_path[str(stray)].removable)
+        broad = by_path[str(self.base)]
+        self.assertFalse(broad.removable)
+        self.assertEqual(broad.ledger_id, own.id)
+        total = sum(e.bytes for e in entries)
+        self.assertLess(total, scratch.measure(self.base)[0] + 1)  # no byte counted twice
+
+    def test_own_refuses_home_temp_and_anything_holding_scratch(self):
+        for broad in (Path.home(), Path(tempfile.gettempdir()), self.base, self.walk):
+            with self.assertRaises(ValueError, msg=str(broad)):
+                scratch.own_path(broad, "too broad", ledger=self.ledger())
+        inner = self.walk / "some-tool"
+        inner.mkdir()
+        self.assertEqual(scratch.own_path(inner, "a tool", ledger=self.ledger()).cls, "install")
+
+
+class RelayOwnedGcTests(Sandbox):
+    """Card #27AR: gc must not take a live pane's runtime dir or a guest's bridge socket dir —
+    both are loose `relay-*` dirs in the temp dir that sit idle for days with nothing open."""
+
+    def test_owner_marked_loose_dir_is_never_removable(self):
+        os.environ.pop("RELAY_SCRATCH_ROOTS", None)
+        old_tempdir = tempfile.tempdir
+        tempfile.tempdir = str(self.base)
+        try:
+            old = time.time() - 72 * 3600
+            pane = self.base / "relay-AbC123"
+            self.write(pane / "state.json", 64)
+            scratch.mark_relay_owned(pane)
+            stray = self.write(self.base / "relay-stray" / "x.bin", 64).parent
+            for path in (pane, pane / "state.json", pane / "owner", stray, stray / "x.bin"):
+                os.utime(path, (old, old))
+            entries = {e.path: e for e in scratch.report(ledger=self.ledger())}
+            self.assertFalse(entries[str(pane)].removable)
+            self.assertEqual(entries[str(pane)].why_kept, "Relay's own runtime dir")
+            self.assertTrue(entries[str(stray)].removable)     # an unmarked one still goes
+            scratch.gc(apply=True, force_idle=True, log=lambda *a, **k: None)
+            self.assertTrue(pane.is_dir())
+            self.assertFalse(stray.exists())
+        finally:
+            tempfile.tempdir = old_tempdir
+
+
+class NestedEntryTests(Sandbox):
+    def test_a_session_dir_is_counted_once_and_kept_while_it_holds_a_kept_row(self):
+        old = time.time() - 48 * 3600
+        row = scratch.new_dir("scratch", "long-lived", session="s9", lifetime="days:7",
+                              ledger=self.ledger())
+        self.write(Path(row.path) / "data.bin", 4096)
+        session_dir = Path(row.path).parent
+        for path in (session_dir, Path(row.path), Path(row.path) / "data.bin"):
+            os.utime(path, (old, old))
+        entries = {e.path: e for e in scratch.report(roots=[scratch.scratch_root()],
+                                                     include_loose=False, ledger=self.ledger())}
+        inner, outer = entries[row.path], entries[str(session_dir)]
+        self.assertFalse(inner.removable)                      # lifetime days:7, idle 2 days
+        self.assertFalse(outer.removable)                      # so the dir holding it stays
+        self.assertIn(row.path, outer.why_kept)
+        self.assertGreaterEqual(inner.bytes, 4096)
+        self.assertLess(outer.bytes, inner.bytes)              # its bytes are counted once
+
+
+class CliTests(Sandbox):
+    def test_bare_relay_scratch_is_the_report(self):
+        # It raised AttributeError ('limit') whenever no verb was given.
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = scratch.main(["--root", str(self.walk)])
+        self.assertIn(code, (0, None))
+        self.assertIn(scratch.main(["--root", str(self.walk), "report", "--limit", "1"]), (0, None))
+
+
 class OwnPathTests(Sandbox):
     """Card #WZ3K: `own_path` is the supported way to say an existing path is an
     application's own state — the answer the sweep's note points at when what it named

@@ -259,15 +259,24 @@ def report(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOU
         active = ScratchLedger() if ledger is None else ledger
         ledger_rows = [r for r in active.records().values() if r.state in ("live", "released")]
     # Nested rows (a per-purpose dir inside its session's TMPDIR row) are covered by the
-    # outermost row; counting both would double every byte.
+    # outermost row; counting both would double every byte. An `install` row is never
+    # reclaimed, so it swallows only other install rows: a broad one (`own ~/.cache`, or the
+    # #27AR sweep pause's /tmp row) once hid every scratch row and walk entry beneath it, gc
+    # reclaimed nothing, and check counted all of $HOME as scratch.
+    def inside(inner: Path, outer: Path) -> bool:
+        return inner == outer or outer in inner.parents
+
     outermost: list[Row] = []
     for row in sorted(ledger_rows, key=lambda r: len(r.path)):
-        if not any(Path(row.path) == Path(o.path) or Path(o.path) in Path(row.path).parents
-                   for o in outermost):
+        if not any(inside(Path(row.path), Path(o.path)) for o in outermost
+                   if o.cls != "install" or row.cls == "install"):
             outermost.append(row)
-    covered = [Path(r.path) for r in ledger_rows]
+    # The walk skips what a row accounts for; an install row at or above a scratch root does
+    # not account for that root's contents (they are scratch, and still reclaimable).
+    covered = [Path(r.path) for r in ledger_rows
+               if r.cls != "install" or not any(inside(root, Path(r.path)) for root in roots)]
     for path, kind in candidates(roots, include_loose):
-        if any(p == path or p in path.parents for p in covered):
+        if any(inside(path, p) for p in covered):
             continue  # the walk only finds what is not in the ledger
         size, newest = measure(path)
         entry = Entry(path=str(path), kind=kind, bytes=size,
@@ -279,6 +288,10 @@ def report(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOU
             entry.why_kept = "ccache evicts it at its max_size"
         elif not _mine(path):
             entry.why_kept = "not owned by this user"
+        elif is_relay_owned(path):
+            # A live pane's runtime dir or a guest's board-bridge socket dir can sit idle for
+            # days, and nothing holds it open; Relay's own crash sweep removes the dead ones.
+            entry.why_kept = "Relay's own runtime dir"
         elif entry.in_use:
             entry.why_kept = "a live process uses it"
         elif entry.idle_hours < idle_hours:
@@ -317,6 +330,20 @@ def report(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOU
             else:
                 entry.removable = True
         entries.append(entry)
+    # A session dir the walk lists holds that session's own ledger rows, and an install row can
+    # hold anything: each byte is counted once, in the innermost entry that lists it, and an
+    # entry that holds a kept one is kept — removing it would end that entry early (a days:7
+    # row inside a session dir idle for a day).
+    listed = [(e, Path(e.path)) for e in entries if e.why_kept != "gone from disk"]
+    measured = {id(e): e.bytes for e, _ in listed}
+    for entry, path in sorted(listed, key=lambda item: -len(item[1].parts)):   # innermost first
+        inner = [(e, q) for e, q in listed if path in q.parents]
+        direct = [e for e, q in inner if not any(o in q.parents for _, o in inner)]
+        entry.bytes = max(0, entry.bytes - sum(measured[id(e)] for e in direct))
+        held = next((e for e, _ in inner if not e.removable), None)
+        if held is not None and entry.removable:
+            entry.removable = False
+            entry.why_kept = "holds %s (%s)" % (held.path, held.why_kept)
     entries.sort(key=lambda e: -e.bytes)
     return entries
 
@@ -351,6 +378,9 @@ def gc(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOURS,
             # The world may have moved since the scan: look once more, cheaply.
             if _used(entry.path, paths_in_use()):
                 log("kept %s: a process started using it" % path)
+                continue
+            if is_relay_owned(path):
+                log("kept %s: Relay's own runtime dir" % path)
                 continue
             if path.is_dir() and not path.is_symlink():
                 shutil.rmtree(path, ignore_errors=True)
@@ -718,6 +748,13 @@ def own_path(path: str | Path, purpose: str = "", *, ledger: ScratchLedger | Non
     resolved = Path(path).expanduser()
     if not (resolved.exists() or resolved.is_symlink()):
         raise ValueError("%s does not exist; `own` records what is already there" % resolved)
+    # Card #27AR: a row this broad would hide every entry beneath it from the post-turn sweep.
+    absolute = Path(os.path.abspath(resolved))
+    broad = {Path(os.path.abspath(p)) for p in (Path.home(), temp_dir(), system_tmp(), Path("/"))}
+    if absolute in broad or any(absolute == r or absolute in r.parents
+                                for r in (Path(os.path.abspath(x)) for x in default_roots())):
+        raise ValueError("%s is too broad to own: it is $HOME, a temp dir, or holds Relay "
+                         "scratch. Own the application's own directory inside it." % absolute)
     ledger = ledger if ledger is not None else ScratchLedger()
     row = ledger.find(str(resolved))
     if row is not None:
@@ -899,6 +936,9 @@ def main(argv=None) -> int:
     parser.add_argument("--idle-hours", type=float, default=DEFAULT_IDLE_HOURS)
     parser.add_argument("--no-loose", action="store_true",
                         help="leave relay-* and tmp* folders in the temp directory out")
+    # Bare `relay-scratch` is the report (the disk-hygiene skill's first step); give it the
+    # report's own defaults, which only the `report` subparser would otherwise set.
+    parser.set_defaults(json=False, limit=25)
     sub = parser.add_subparsers(dest="verb")
     rep = sub.add_parser("report", help="what is there, biggest first")
     rep.add_argument("--json", action="store_true")
