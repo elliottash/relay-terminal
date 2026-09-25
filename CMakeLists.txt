@@ -720,6 +720,7 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-panestate)   # pane_state (relay-terminal-71)
     target_link_libraries(relay PRIVATE relay-remotesettings)   # Options > Remote, the always-on switch (#PH0N)
     target_link_libraries(relay PRIVATE relay-internals)   # the agent internals pane (#QT8C)
+    target_link_libraries(relay PRIVATE relay-programcompletion)   # Program mode command tables (#S976)
     # remote/, rendezvous/ and app/ are the phone-sharing sidecar, its relay and the web client.
     install(DIRECTORY backend shell remote rendezvous app DESTINATION ${CMAKE_INSTALL_DATADIR}/relay
         PATTERN "__pycache__" EXCLUDE PATTERN "*.pyc" EXCLUDE)
