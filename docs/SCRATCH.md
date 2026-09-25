@@ -57,7 +57,9 @@ rows, and orphans. The app's scratch monitor (#SZHQ) shows the same numbers.
   `relay-scratch release <id-or-path>`.
 - `TMPDIR` for every process Relay spawns for a session — the backend's own `run_command`
   children, guest CLIs, and the pane's shell — points at `<scratch home>/<session>/tmp`, which is
-  itself a ledger row. `mktemp`, `mktemp -d` and Python's `tempfile` therefore land somewhere
+  itself a ledger row. `<session>` is the first 12 characters of the session key (a pane token is
+  a 36-char UUID): the full UUID made TMPDIR too long for Unix socket paths under it, and Chrome
+  died with "Socket path too long" in every pane (#H1BS). `mktemp`, `mktemp -d` and Python's `tempfile` therefore land somewhere
   owned and ledgered with zero agent effort.
 
 ## Enforcement, in escalating order

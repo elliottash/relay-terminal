@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -37,6 +38,31 @@ SCREENS_SHOWN = ("[...document.querySelectorAll('.screen')]"
                  ".filter(e => getComputedStyle(e).display !== 'none').length")
 
 
+# Chrome's process singleton listens on $TMPDIR/com.google.Chrome.XXXXXX/SingletonSocket, and a
+# Unix socket path must fit sun_path: 108 bytes on Linux, NUL included. A Relay pane's TMPDIR is
+# its per-session scratch dir (#DVV2), long enough that Chrome dies with "Socket path too long"
+# before it opens a page (#H1BS). 104 leaves a margin under the 107 usable bytes.
+SOCKET_PATH_LIMIT = 104
+_SINGLETON_SUFFIX = "/com.google.Chrome.XXXXXX/SingletonSocket"
+
+
+def _chrome_tmpdir() -> str | None:
+    """A short private TMPDIR for Chrome when the inherited one cannot hold its singleton socket.
+
+    None means the inherited TMPDIR fits and Chrome keeps it. Otherwise a fresh directory under
+    /dev/shm or /tmp, whichever works first; the caller removes it. If neither can be made, None
+    again: today's behaviour, never worse.
+    """
+    if len(tempfile.gettempdir()) + len(_SINGLETON_SUFFIX) <= SOCKET_PATH_LIMIT:
+        return None
+    for parent in ("/dev/shm", "/tmp"):
+        if len(parent) + len("/chrome-XXXXXXXX") + len(_SINGLETON_SUFFIX) > SOCKET_PATH_LIMIT:
+            continue
+        with contextlib.suppress(OSError):
+            return tempfile.mkdtemp(prefix="chrome-", dir=parent)
+    return None
+
+
 def find_chrome() -> str | None:
     for name in CHROME_NAMES:
         path = shutil.which(name)
@@ -61,6 +87,7 @@ class Browser:
         self.process: subprocess.Popen | None = None
         self.socket: ws.WebSocket | None = None
         self.profile: tempfile.TemporaryDirectory | None = None
+        self.tmpdir: str | None = None
         self.port = 0
         self._next_id = 0
         self.console: list[str] = []
@@ -82,8 +109,11 @@ class Browser:
             arguments += ["--use-fake-device-for-media-stream",
                           "--use-fake-ui-for-media-stream"]
         arguments.append("about:blank")
+        # Only the singleton socket needs the short path; the profile stays where it is.
+        self.tmpdir = _chrome_tmpdir()
+        env = {**os.environ, "TMPDIR": self.tmpdir} if self.tmpdir else None
         self.process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL)
+                                        stderr=subprocess.DEVNULL, env=env)
 
         target = None
         for _ in range(200):
@@ -190,6 +220,9 @@ class Browser:
             # Chrome writes to its profile as it exits, so a strict cleanup races it.
             with contextlib.suppress(OSError):
                 self.profile.cleanup()
+        if self.tmpdir:
+            shutil.rmtree(self.tmpdir, ignore_errors=True)
+            self.tmpdir = None
 
 
 def _free_port() -> int:

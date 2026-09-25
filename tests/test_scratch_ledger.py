@@ -464,8 +464,23 @@ class SweepTests(Sandbox):
 
 
 class TmpdirHookTests(Sandbox):
+    def test_session_root_names_a_pane_uuid_by_its_first_12_chars(self):
+        # #H1BS: <scratch home>/<36-char uuid>/tmp left no room under the 108-byte Unix socket
+        # limit for Chrome's $TMPDIR/com.google.Chrome.XXXXXX/SingletonSocket.
+        token = "7dbb2c54-9215-4e1f-a044-52c4f6c7dc1a"
+        self.assertEqual(scratch.session_root(token), scratch.scratch_root() / "7dbb2c54-921")
+        self.assertEqual(scratch.session_root("sess-1").name, "sess-1")
+        self.assertEqual(scratch.session_root("").name, "adhoc")
+        home = Path("/home/elliott/.cache/relay/scratch")   # the measured failing home
+        tmp = home / scratch.session_root(token).name / "tmp"
+        self.assertLessEqual(len(f"{tmp}/com.google.Chrome.e7rpEL/SingletonSocket"), 104)
+
     def test_session_tmpdir_points_inside_session_root_and_is_ledgered(self):
         from relay_core import agent
+        # Run inside a Relay pane, the worker's token would win over the conversation id.
+        token = os.environ.pop("RELAY_SESSION_TOKEN", None)
+        if token is not None:
+            self.addCleanup(os.environ.__setitem__, "RELAY_SESSION_TOKEN", token)
         root = agent.scratch_tmpdir("sess-1", pane="p1", model="m1")
         self.assertEqual(root, scratch.session_root("sess-1") / "tmp")
         self.assertTrue(root.is_dir())

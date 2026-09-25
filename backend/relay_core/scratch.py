@@ -457,9 +457,17 @@ def ledger_path() -> Path:
     return Path(os.environ.get("RELAY_LEDGER") or state_root() / "scratch-ledger.jsonl")
 
 
+# A session root is named by the first 12 characters of the session key (#H1BS): a pane token is a
+# 36-char UUID, and <scratch home>/<uuid>/tmp as TMPDIR left no room under the 108-byte Unix
+# socket limit for what programs put there (Chrome's $TMPDIR/com.google.Chrome.XXXXXX/
+# SingletonSocket). 12 characters of a UUID still tell panes apart. src/AppPaths.h
+# relay::scratchpaths::sessionRoot builds the same name; keep the two in step.
+SESSION_NAME_CHARS = 12
+
+
 def session_root(session: str) -> Path:
     """The session's own subroot of the scratch home (also where its TMPDIR points)."""
-    return scratch_root() / (_safe_name(session) if session else "adhoc")
+    return scratch_root() / (_safe_name(session)[:SESSION_NAME_CHARS] if session else "adhoc")
 
 
 def keep_root(project: str | Path) -> Path:

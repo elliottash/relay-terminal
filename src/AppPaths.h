@@ -118,8 +118,11 @@ inline QString ledgerPath() {
         .filePath(QStringLiteral("relay/scratch-ledger.jsonl"));
 }
 // A session's own subroot — where TMPDIR points for its shells, so mktemp lands somewhere owned.
+// Named by the first 12 characters of the session (#H1BS), as backend/relay_core/scratch.py
+// session_root does: <scratchRoot()>/<36-char pane uuid>/tmp left no room under the 108-byte
+// Unix socket limit for Chrome's singleton socket under TMPDIR.
 inline QString sessionRoot(const QString &session) {
-    return QDir(scratchRoot()).filePath(session);
+    return QDir(scratchRoot()).filePath(session.left(12));
 }
 // Class `keep`: work that must outlive the task, in the project (git-ignored via /.relay/),
 // promoted into the repo on request. It is never scratch, and never in /tmp.
