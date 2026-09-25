@@ -1,11 +1,10 @@
 ---
 id: 4CXY
 type: work
-status: needs-verification
+status: dropped
 labels: [feature, voice]
 assignee: agent
 implemented_by: glm/glm-5.3
-session: 1edbbcab-805e-4302-b23d-914a17f9e4e0
 rank: zzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [ai-visual], human: none, criteria: 'consolecorner passes: the button floats with no layout seat, shares the chips row at the one-line rest height without overlap, sits exactly at the input area''s bottom-right corner once the box grows, stays within the corner column''s footprint so text never runs underneath, and returns to the chips row when cleared. Screenshots in the evidence path show the themed rest and grown states.', sign_off: none, effort: low}
