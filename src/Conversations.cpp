@@ -1168,11 +1168,17 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_tree, &QTreeWidget::itemExpanded, this,
             [rememberGroup](QTreeWidgetItem *item) { rememberGroup(item, true); });
     m_tree->installEventFilter(this);
+    // Double-clicking a row resumes it: the same gesture as Enter, so the mouse and the keyboard
+    // agree on what opening a session means. The preview keeps its own paths (P and the Preview
+    // button) rather than the fastest click. A terminal row has no conversation to reattach, so
+    // its double-click still shows the preview — activate() could only answer it with "use the
+    // preview", which is what the click was asking for.
     connect(m_tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *row) {
-        if (row && !row->data(0, kIdRole).toString().isEmpty()) {
-            if (onPreviewHint) onPreviewHint();
-            openPreview();
-        }
+        if (!row || row->data(0, kIdRole).toString().isEmpty()) return;
+        m_tree->setCurrentItem(row);
+        const QJsonObject item = selectedItem();
+        if (isTerminal(item)) { openPreview(); return; }
+        activate(true);
     });
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint &point) {
@@ -1371,7 +1377,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     box->addWidget(m_confirm);
     box->addWidget(m_emptyRow);
     box->addWidget(m_viewStack, 1);
-    auto *hint = new QLabel(QStringLiteral("Enter resumes · P previews · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
+    auto *hint = new QLabel(QStringLiteral("Enter or double-click resumes · P previews · → a quick look · F2 rename · Ctrl+P pin · Ctrl+F search · Esc closes"));
     hint->setObjectName(QStringLiteral("dialogHint"));
     hint->setWordWrap(true);
     box->addWidget(hint);
@@ -1483,8 +1489,9 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
         if (!m_items.isEmpty()) rebuildTree(selectedId());
     });
     connect(m_tree, &QTreeWidget::currentItemChanged, this, &SessionManager::selectionChanged);
-    // Mouse activation varies by platform (single or double click). Both should only select a
-    // row and show its preview; Enter and the Resume button explicitly open the session.
+    // The mouse's resume gesture is the double-click above; this button is the slow path to the
+    // same thing, so it is where the Enter hint belongs. The preview's slow path is its own
+    // button, wired below.
     connect(m_resume, &QPushButton::clicked, this, [this] {
         if (onResumeHint) onResumeHint();
         activate(true);

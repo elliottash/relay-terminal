@@ -1939,23 +1939,29 @@ private slots:
         QCOMPARE(tree->currentItem(), second);
         QCOMPARE(resumed.size(), 0);
 
+        // Double-click is the mouse's resume gesture (it used to open the preview): the same
+        // thing Enter does, and the preview is left to P and the button.
         QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
-        QCOMPARE(stack->currentWidget(), preview->parentWidget());
-        QCOMPARE(previewHints, 2);
-        QCOMPARE(resumed.size(), 0);
-        QTest::keyClick(preview, Qt::Key_Escape);
+        QCOMPARE(resumed, QStringList{QStringLiteral("b")});
+        QCOMPARE(previews, QStringList{QStringLiteral("b")});
+        QCOMPARE(previewHints, 1);
         QCOMPARE(stack->currentWidget(), tree);
+
         QTest::keyClick(tree, Qt::Key_P);
         QCOMPARE(stack->currentWidget(), preview->parentWidget());
-        QCOMPARE(previewHints, 2);
+        QCOMPARE(previewHints, 1);
+        QTest::keyClick(preview, Qt::Key_Escape);
+        QCOMPARE(stack->currentWidget(), tree);
+        button->click();
+        QCOMPARE(stack->currentWidget(), preview->parentWidget());
         button->click();
         QCOMPARE(stack->currentWidget(), tree);
 
         QTest::keyClick(tree, Qt::Key_Return);
-        QCOMPARE(resumed, QStringList{QStringLiteral("b")});
+        QCOMPARE(resumed, (QStringList{QStringLiteral("b"), QStringLiteral("b")}));
         for (auto *button : manager.findChildren<QPushButton *>())
             if (button->text() == QStringLiteral("Resume")) { button->click(); break; }
-        QCOMPARE(resumed, (QStringList{QStringLiteral("b"), QStringLiteral("b")}));
+        QCOMPARE(resumed, (QStringList{QStringLiteral("b"), QStringLiteral("b"), QStringLiteral("b")}));
     }
 
     void keysReachEveryAction() {
