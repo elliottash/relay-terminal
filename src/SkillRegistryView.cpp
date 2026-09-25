@@ -426,6 +426,7 @@ void SkillRegistryView::ensureLoaded()
 void SkillRegistryView::reload()
 {
     m_requested = true;
+    m_linksFor.clear();   // a reloaded page asks for its reverse links again
     if (send)
         m_request = send({{"type", "skills_registry"}});
     if (!m_arrived)
@@ -457,6 +458,31 @@ bool SkillRegistryView::handleEvent(const QJsonObject &event)
     }
     if (id.isEmpty())
         return false;
+    // The cards that name this skill without a case row (#EE42): `server:` on a card
+    // (`built_by`) and `skill:<name>` in a card's prose (`mentioned_in`), from the board's link
+    // index. Only the newest question is believed, and only for the page still showing.
+    if (type == QStringLiteral("board_links") && id == m_linksRequest) {
+        m_linksRequest.clear();
+        const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+        const QJsonObject item = items.isEmpty() ? QJsonObject() : items.first().toObject();
+        const QString address = item.value(QStringLiteral("address")).toString();
+        QStringList ids;
+        for (const QJsonValue &value : item.value(QStringLiteral("reverse")).toArray()) {
+            const QString from = value.toObject().value(QStringLiteral("from")).toString();
+            if (from.startsWith(QLatin1Char('#')) && !ids.contains(from.mid(1)))
+                ids << from.mid(1);
+        }
+        m_linkedFrom = ids;
+        m_linksFor = address.mid(int(qstrlen("skill:")));
+        const QJsonObject row = rowById(m_selected);
+        if (!row.isEmpty() && row.value(QStringLiteral("name")).toString() == m_linksFor)
+            setLinkedCards(linkedCardIds(row), QStringLiteral("No cards name this skill yet."));
+        return true;
+    }
+    if (type == QStringLiteral("error") && id == m_linksRequest) {
+        m_linksRequest.clear();   // a worker without `board_links`: the ledger's cards only
+        return true;
+    }
     if (type == QStringLiteral("skills_import_preview") && id == m_importRequest) {
         m_importRequest.clear();
         QString status;
@@ -684,13 +710,29 @@ void SkillRegistryView::showSkill(const QString &id)
         item->setText(4, entry.value(QStringLiteral("cost")).toVariant().toString());
         item->setText(5, entry.value(QStringLiteral("input")).toString());
     }
-    // Linked cards (#EA37 (c)): the cards whose ledger rows name this server, until #G9ZD's
-    // `server:` field names them directly.
+    // Linked cards (#EA37 (c)): the cards whose ledger rows name this server, then (#EE42) the
+    // cards whose `server:` or prose names it, which the board's link index answers. Only the
+    // Board asks: Globals' skills are not about one board.
+    setLinkedCards(linkedCardIds(row), QStringLiteral("No cards name this skill yet."));
+    if (m_scope == Scope::Project && send && m_linksFor != skill) {
+        m_linkedFrom.clear();
+        m_linksFor = skill;
+        m_linksRequest = send({{"type", "board_links"}, {"address", QStringLiteral("skill:") + skill}});
+    }
+    m_exclude->setText(excluded ? QStringLiteral("Include") : QStringLiteral("Exclude"));
+}
+
+QStringList SkillRegistryView::linkedCardIds(const QJsonObject &row) const
+{
     QStringList cards;
     for (const QJsonValue &value : row.value(QStringLiteral("cards")).toArray())
-        cards << value.toString();
-    setLinkedCards(cards, QStringLiteral("No cards name this skill yet."));
-    m_exclude->setText(excluded ? QStringLiteral("Include") : QStringLiteral("Exclude"));
+        if (!cards.contains(value.toString()))
+            cards << value.toString();
+    if (m_linksFor == row.value(QStringLiteral("name")).toString())
+        for (const QString &id : m_linkedFrom)
+            if (!cards.contains(id))
+                cards << id;
+    return cards;
 }
 
 void SkillRegistryView::setLinkedCards(const QStringList &ids, const QString &emptyText)
@@ -733,7 +775,7 @@ void SkillRegistryView::setLinkedCards(const QStringList &ids, const QString &em
             });
         } else {
             chip->setFlat(true);
-            chip->setToolTip(QStringLiteral("#%1 is a card on the board whose cases name this skill").arg(id));
+            chip->setToolTip(QStringLiteral("#%1 is a card on the board that names this skill").arg(id));
         }
         row->addWidget(chip);
         if (++shown == 8)   // the panel links; it does not mirror the board

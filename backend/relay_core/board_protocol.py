@@ -1609,8 +1609,15 @@ class BoardCommands:
                 raise ValueError(f"board_links: {raw!r} is not an address (#ID, skill:<id>, "
                                  "case:<id>, run:<id>, <path>@<sha>, a commit or a path).")
             wanted.append(address)
-        index = BL.build(self._need().board)
-        self._link_cache = (self.rev, index)
+        # A page asking about the address it shows (the card page and the skill page ask on
+        # every open) reads the index the filter box keeps for this snapshot: `rev` moves on every
+        # refresh, so it is still rebuilt per refresh, and a card open does not cost the worker a
+        # half-second rebuild. The board-wide question (dangling, or no address) rebuilds.
+        if wanted and not request.get("dangling"):
+            index = self._link_index()
+        else:
+            index = BL.build(self._need().board)
+            self._link_cache = (self.rev, index)
         event = {"event": "board_links", "id": rid, "edges": len(index.edges),
                  "items": [index.query(address) for address in dict.fromkeys(wanted)]}
         if request.get("dangling") or not wanted:

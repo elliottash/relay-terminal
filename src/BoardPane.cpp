@@ -2618,7 +2618,66 @@ public:
     std::function<void()> onDelete;
     std::function<void()> onDeleteHint;      // the Delete button was clicked, not the key
 
+    // `~QWidget` deletes the children while this object's connections are still live, so a
+    // `land.py orphans` ask still running (#FYEY) would emit `finished` from `~QProcess` into the
+    // lambda above, which writes members already destroyed — heap corruption, and every Board
+    // test that opened a card aborted at teardown. Cut it loose first.
+    ~CardDetail() override
+    {
+        if (m_orphansProc) {
+            m_orphansProc->disconnect(this);
+            m_orphansProc->kill();
+            m_orphansProc->waitForFinished(1000);
+        }
+    }
+
     QString cardId() const { return m_id; }
+    // The reverse side of the Linked panel (#EE42, #9FX8): `board_links`'s `reverse` rows for this
+    // card, drawn as a "Linked from" block under Links. Only what the card's own front matter
+    // and `reverse` block have not already named: the cards that mention this one, were
+    // discovered from it or supersede it, and how many case rows name it. An answer about a card
+    // no longer showing is dropped.
+    void setBacklinks(const QString &cardId, const QJsonArray &reverse)
+    {
+        if (cardId.isEmpty() || cardId != m_id)
+            return;
+        static const QList<QPair<QString, QString>> kShown = {
+            {QStringLiteral("mentioned_in"), QStringLiteral("mentioned in")},
+            {QStringLiteral("discovered"), QStringLiteral("discovered")},
+            {QStringLiteral("superseded_by"), QStringLiteral("superseded by")}};
+        QStringList parts;
+        int cases = 0;
+        QSet<QString> seen;
+        for (const auto &[key, label] : kShown) {
+            QStringList ids;
+            for (const QJsonValue &value : reverse) {
+                const QJsonObject row = value.toObject();
+                if (row.value(QStringLiteral("name")).toString() != key)
+                    continue;
+                const QString from = row.value(QStringLiteral("from")).toString();
+                if (!from.startsWith(QLatin1Char('#')))
+                    continue;
+                const QString id = from.mid(1);
+                // Named already — by the Links block above, or by an earlier kind here.
+                if (id == m_id || seen.contains(id)
+                    || m_metaBase.contains(QStringLiteral("\"card:%1\"").arg(id)))
+                    continue;
+                seen.insert(id);
+                ids << QStringLiteral("<a href=\"card:%1\">#%1</a>").arg(id.toHtmlEscaped());
+            }
+            if (ids.size() > 8)   // the panel links; it does not mirror the board
+                ids = ids.mid(0, 8) << QStringLiteral("+%1 more").arg(ids.size() - 8);
+            if (!ids.isEmpty())
+                parts << QStringLiteral("%1 %2").arg(label, ids.join(QStringLiteral(", ")));
+        }
+        for (const QJsonValue &value : reverse)
+            cases += value.toObject().value(QStringLiteral("name")).toString() == QStringLiteral("cases");
+        if (cases > 0)
+            parts << QStringLiteral("%1 case row%2").arg(cases).arg(cases == 1 ? QString() : QStringLiteral("s"));
+        m_backlinks = parts.join(QStringLiteral(" · "));
+        renderMeta();
+    }
+    QString backlinksText() const { return m_backlinks; }
     // The flag the view just wrote (#DPJB), shown at once so the disc turns under the click
     // rather than waiting for the worker's `board_changed`.
     void setPriority(int value) { m_flag->setPriority(value); }
@@ -3312,8 +3371,12 @@ public:
         if (!extra.isEmpty())
             meta += (meta.isEmpty() ? QString() : QStringLiteral("<br>"))
                     + extra.join(QStringLiteral("<br>"));
-        m_meta->setText(meta);
-        m_meta->setVisible(!meta.isEmpty());
+        // A different card drops the last one's reverse links; the same card re-read keeps them
+        // until the `board_links` answer asked for below comes back (#EE42).
+        if (!sameCard)
+            m_backlinks.clear();
+        m_metaBase = meta;
+        renderMeta();
         m_qa = card.value(QStringLiteral("qa")).toObject();
         showVerify();
         m_openFile->setEnabled(!m_path.isEmpty());
@@ -4933,6 +4996,21 @@ private:
         if (!m_findStrip->isHidden() && !m_findEdit->text().isEmpty())
             refreshFind();
     }
+
+    // The meta label is the card's own lines plus the reverse links `board_links` answered
+    // with (#EE42), which arrive after the card and are drawn without re-reading it.
+    void renderMeta()
+    {
+        QString text = m_metaBase;
+        if (!m_backlinks.isEmpty())
+            text += (text.isEmpty() ? QString() : QStringLiteral("<br>"))
+                    + QStringLiteral("<b>Linked from</b><br>%1").arg(m_backlinks);
+        m_meta->setText(text);
+        m_meta->setVisible(!text.isEmpty());
+    }
+
+    QString m_metaBase;    // the meta block as `show()` built it
+    QString m_backlinks;   // the "Linked from" line, empty until `board_links` answers
 
     PriorityFlagButton *m_flag = nullptr;   // the card page's priority flag (#DPJB)
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
@@ -7706,6 +7784,20 @@ QString BoardView::nextRequestId()
     return m_requestPrefix + QString::number(++m_requestSeq);
 }
 
+// The card page's reverse links (#EE42, protocol 19.25): asked after every card read, since a
+// re-read is what follows another card starting to mention this one. The answer lands in
+// `handleEvent`; a worker too old to know the request refuses it and the page draws no
+// "Linked from" block, which is what it drew before.
+void BoardView::requestCardLinks(const QString &cardId)
+{
+    if (cardId.isEmpty())
+        return;
+    m_linksRequest = nextRequestId();
+    send({{QStringLiteral("type"), QStringLiteral("board_links")},
+          {QStringLiteral("id"), m_linksRequest},
+          {QStringLiteral("address"), QStringLiteral("#") + cardId}});
+}
+
 void BoardView::send(QJsonObject message)
 {
     if (!message.contains(QStringLiteral("id")))
@@ -8081,6 +8173,22 @@ void BoardView::handleEvent(const QJsonObject &event)
         rebuild();
         return;
     }
+    // The reverse side of the Linked panels (#EE42): the card page's own question is answered
+    // here, the skill page's by the registry view. Only the newest card question is believed.
+    if (type == QStringLiteral("board_links") && mine) {
+        if (requestId == m_linksRequest) {
+            m_linksRequest.clear();
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            const QJsonObject item = items.isEmpty() ? QJsonObject() : items.first().toObject();
+            const QString address = item.value(QStringLiteral("address")).toString();
+            if (address.startsWith(QLatin1Char('#')))
+                m_detail->setBacklinks(address.mid(1), item.value(QStringLiteral("reverse")).toArray());
+            return;
+        }
+        if (m_skillsPage != nullptr)
+            m_skillsPage->handleEvent(event);
+        return;
+    }
     if (type.startsWith(QStringLiteral("skills")) || type == QStringLiteral("error")) {
         // The Skills tab's rows and the replies to its actions (#9FX8): every skill visible from
         // this workspace, filtered to the project ones by the view (decision 2); Globals' Skills
@@ -8222,6 +8330,7 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (m_cardConsoleHandle.clearTranscript && wasShowing != showing)
             m_cardConsoleHandle.clearTranscript(QStringLiteral("card:") + showing);
         m_detail->show(event);
+        requestCardLinks(showing);
         refreshContexts();   // switch the console's draft key to the card just opened
         watchCardFiles();   // the open card and its thread get a watch each (#N5JJ)
         // Resume card (#FYEY): ask `land.py orphans` when a card page opens — and again when a
@@ -8503,6 +8612,12 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (!m_searchRequest.isEmpty() && requestId == m_searchRequest) {
             m_searchRequest.clear();
             m_searchSupported = false;
+            return;
+        }
+        // The same for `board_links` (#EE42): an older worker's refusal leaves the card page
+        // without its "Linked from" block, as it was before the request existed.
+        if (!m_linksRequest.isEmpty() && requestId == m_linksRequest) {
+            m_linksRequest.clear();
             return;
         }
         // The Check gate (#7BM4): the move was refused because the tests this card names do not

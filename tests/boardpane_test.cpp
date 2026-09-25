@@ -96,6 +96,8 @@ private slots:
     void theMemoriesTabShowsExpiredFirstAndOpensTheCard();
     // The Live strip on the Cards tab (#TBRH).
     void theLiveStripListsThisProjectsPanesAndTheirCards();
+    // The reverse side of the Linked panels, from `board_links` (#EE42).
+    void theLinkedPanelsDrawTheReverseSideFromBoardLinks();
 };
 
 void BoardPaneTests::metadataPageListsChildrenReverseLinksAndCommits()
@@ -1039,4 +1041,85 @@ void BoardPaneTests::theLiveStripListsThisProjectsPanesAndTheirCards()
     pinned.pinSolo(QStringLiteral("K7Q2"));
     pinned.handleEvent(opened({held}));
     QVERIFY(pinned.findChild<QWidget *>(QStringLiteral("boardLiveStrip"))->isHidden());
+}
+
+// The card page and the skill page each ask `board_links` about what they show (#EE42) and
+// draw its reverse side: a card's "Linked from" block names only what its own front matter and
+// `reverse` block did not, and the skill page's chips gain the cards whose `server:` or prose
+// names the skill. An answer to a question the page has moved past is dropped.
+void BoardPaneTests::theLinkedPanelsDrawTheReverseSideFromBoardLinks()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-board-backlinks-test"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("ready")),
+                             row(QStringLiteral("M3XJ"), QStringLiteral("ready")),
+                             row(QStringLiteral("P4ZZ"), QStringLiteral("ready"))}));
+    const auto lastOfType = [&sent](const char *type) {
+        for (auto it = sent.crbegin(); it != sent.crend(); ++it)
+            if (it->value(QStringLiteral("type")).toString() == QLatin1String(type))
+                return *it;
+        return QJsonObject();
+    };
+    view.openCard(QStringLiteral("K7Q2"));
+    QJsonObject answer = cardArrived(QStringLiteral("K7Q2"));
+    answer.insert(QStringLiteral("id"), lastOfType("board_card_get").value(QStringLiteral("id")));
+    answer.insert(QStringLiteral("reverse"), QJsonObject{{"blocks", QJsonArray{QJsonObject{
+        {"id", "M3XJ"}, {"title", "Blocked"}}}}});
+    view.handleEvent(answer);
+    const QJsonObject ask = lastOfType("board_links");
+    QCOMPARE(ask.value(QStringLiteral("address")).toString(), QStringLiteral("#K7Q2"));
+    auto *meta = view.findChild<QLabel *>(QStringLiteral("boardCardMeta"));
+    QVERIFY(meta);
+    QVERIFY(!meta->text().contains(QStringLiteral("Linked from")));   // nothing until it answers
+
+    const QJsonArray reverse{
+        QJsonObject{{"name", "mentioned_in"}, {"from", "#P4ZZ"}, {"relation", "mention"}},
+        QJsonObject{{"name", "mentioned_in"}, {"from", "#M3XJ"}, {"relation", "mention"}},
+        QJsonObject{{"name", "superseded_by"}, {"from", "#Q9RR"}, {"relation", "supersedes"}},
+        QJsonObject{{"name", "cases"}, {"from", "case:c-1"}, {"relation", "card"}}};
+    // A stale answer (another id) is not believed.
+    view.handleEvent(QJsonObject{{"event", "board_links"},
+        {"id", ask.value(QStringLiteral("id")).toString() + QStringLiteral("x")},
+        {"items", QJsonArray{QJsonObject{{"address", "#K7Q2"}, {"reverse", reverse}}}}});
+    QVERIFY(!meta->text().contains(QStringLiteral("Linked from")));
+    view.handleEvent(QJsonObject{{"event", "board_links"}, {"id", ask.value(QStringLiteral("id"))},
+        {"items", QJsonArray{QJsonObject{{"address", "#K7Q2"}, {"reverse", reverse}}}}});
+    const QString text = meta->text();
+    QVERIFY(text.contains(QStringLiteral("Linked from")));
+    QVERIFY(text.contains(QStringLiteral("mentioned in <a href=\"card:P4ZZ\">#P4ZZ</a>")));
+    QVERIFY(text.contains(QStringLiteral("superseded by <a href=\"card:Q9RR\">#Q9RR</a>")));
+    QVERIFY(text.contains(QStringLiteral("1 case row")));
+    QCOMPARE(text.count(QStringLiteral("\"card:M3XJ\"")), 1);   // blocks already named it
+
+    // The skill page: the registry's ledger card, then the cards `board_links` names.
+    view.closeDetail();
+    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabSkills"))->click();
+    QJsonObject skill{{"id", "zz-project-skill"}, {"name", "zz-project-skill"},
+        {"source", "project-relay"}, {"project", true},
+        {"path", QStringLiteral("/home/t/.relay/skills/zz-project-skill/SKILL.md")},
+        {"version", "sha256:abc123"}, {"version_short", "abc123"}, {"description", "a skill"},
+        {"profile", QJsonObject{}}, {"stats", QJsonObject{{"cases", 1}, {"stale", false}}},
+        {"cases", QJsonArray{}}, {"cards", QJsonArray{QStringLiteral("K7Q2")}},
+        {"changelog", QJsonArray{}}, {"profile_warnings", QJsonArray{}}, {"excluded", false}};
+    view.handleEvent(QJsonObject{{"event", "skills_registry"}, {"items", QJsonArray{skill}}});
+    const QJsonObject skillAsk = lastOfType("board_links");
+    QCOMPARE(skillAsk.value(QStringLiteral("address")).toString(),
+             QStringLiteral("skill:zz-project-skill"));
+    auto *linked = view.findChild<QWidget *>(QStringLiteral("boardSkillLinked"));
+    QVERIFY(linked);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);   // replaced chip rows
+    QCOMPARE(linked->findChildren<QPushButton *>(QStringLiteral("boardLinkedChip")).size(), 1);
+    view.handleEvent(QJsonObject{{"event", "board_links"}, {"id", skillAsk.value(QStringLiteral("id"))},
+        {"items", QJsonArray{QJsonObject{{"address", "skill:zz-project-skill"}, {"reverse", QJsonArray{
+            QJsonObject{{"name", "built_by"}, {"from", "#P4ZZ"}, {"relation", "server"}},
+            QJsonObject{{"name", "mentioned_in"}, {"from", "#K7Q2"}, {"relation", "mention"}},
+            QJsonObject{{"name", "cases"}, {"from", "case:c-1"}, {"relation", "server"}}}}}}}});
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);   // the old chip row
+    QStringList chips;
+    for (QPushButton *chip : linked->findChildren<QPushButton *>(QStringLiteral("boardLinkedChip")))
+        chips << chip->text();
+    QCOMPARE(chips.size(), 2);                                  // K7Q2 once, then P4ZZ
+    QVERIFY(chips.at(0).startsWith(QStringLiteral("#K7Q2")));
+    QVERIFY(chips.at(1).startsWith(QStringLiteral("#P4ZZ")));
 }

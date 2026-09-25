@@ -583,6 +583,8 @@ private:
     // Resume. No pane to open writes nothing.
     void resumeCard(const QString &task, const QString &note);
     void send(QJsonObject message);
+    // Ask `board_links` about the card the page just drew (#EE42); the answer is its reverse side.
+    void requestCardLinks(const QString &cardId);
     QString nextRequestId();
     // `canOverride` puts the Check gate's "Override…" on the notice (#7BM4): it is there only
     // for a move the worker refused because the card's `## Tests` do not prove it yet.
@@ -900,6 +902,7 @@ private:
     // the newest request id is believed, so an answer that arrives out of order is dropped.
     QTimer *m_searchTimer = nullptr;
     QString m_searchRequest;        // the request id of the search in flight, or empty
+    QString m_linksRequest;         // the card page's `board_links` question in flight, or empty
     QString m_searchAsked;          // the words that request asks about
     // False once a worker has refused `board_search` — one too old to know it. The filter then
     // matches the row's own fields, which is what it did before the message existed, and the

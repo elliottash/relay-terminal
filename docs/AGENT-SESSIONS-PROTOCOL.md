@@ -4447,8 +4447,16 @@ the stored sequence is the QA revision under test.
 ### 19.24 `board_links`: the computed link index (#EE42, 2026-09-25)
 
 `docs/PROJECT-BOARD-DESIGN.md` §4. Links are stored once, forward; the reverse is computed.
-`backend/relay_core/board_links.py` builds the index from the board's files **on every request**
-and writes it nowhere. Its edges are `{from, relation, to, where}`: `relation` is the name of the
+`backend/relay_core/board_links.py` builds the index from the board's files **on every refresh**
+and writes it nowhere: a question about addresses reads the index kept for the current snapshot
+(`rev`, which every `board_changed` moves — the same one the filter box's link terms read), and a
+board-wide one (`dangling: true`, or no address) rebuilds it. The Board's card page asks about the
+card it draws after every `board_card` and shows the reverse rows its own `reverse` block does not
+already name (`mentioned_in`, `discovered`, `superseded_by`, a count of `cases`) as **Linked
+from**; the Board's skill page asks about `skill:<name>` and adds the cards among the reverse rows
+(`built_by`, `mentioned_in`) to its Linked chips. Globals' skill page does not ask: its skills are
+not one board's. A worker without the request refuses it and both pages draw what they drew
+before. Its edges are `{from, relation, to, where}`: `relation` is the name of the
 field the edge was read from (`parent`, `blocked_by`, `duplicate_of`, `discovered_from`,
 `supersedes`, `links.related`, `links.commits`, `links.evidence`, `links.plans`, `server`,
 `card`), or `mention` for an address in prose; `where` is `front matter`, `body`,

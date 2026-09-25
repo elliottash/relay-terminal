@@ -79,6 +79,8 @@ private:
     void refill();
     void showSkill(const QString &id);
     void setLinkedCards(const QStringList &ids, const QString &emptyText);
+    // The row's ledger cards, then the cards `board_links` says name the skill (#EE42).
+    QStringList linkedCardIds(const QJsonObject &row) const;
     void note(const QString &text);
     void checkUpdates();
     QJsonObject rowById(const QString &id) const;
@@ -98,6 +100,9 @@ private:
                 *m_reverify = nullptr;
     QJsonArray m_items;               // the registry rows, as they arrived
     QString m_selected;               // id of the row whose page is showing
+    QString m_linksRequest;           // the page's `board_links` question in flight (#EE42)
+    QString m_linksFor;               // the skill name `m_linkedFrom` answers for
+    QStringList m_linkedFrom;         // card ids whose `server:` or prose names that skill
     QString m_request, m_importRequest, m_confirmRequest, m_updatesRequest, m_refineRequest;
     bool m_requested = false;         // asked at least once
     bool m_arrived = false;           // an answer came
