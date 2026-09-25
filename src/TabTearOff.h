@@ -1,13 +1,13 @@
 // TabTearOff.h — the geometry of dragging a tab out of its window (#W6ES).
 //
 // A tab label in the window's tab bar already drags: Qt's QTabBar owns the reorder inside
-// the bar. What did not exist is everything past the window edge — grabbing a tab and
-// pulling it into another window did nothing. RelayWindow::tabDrag watches the bar's mouse
-// events and turns a drag that leaves its window into a tab move; these are the two
+// the bar. What did not exist is everything past the tab row — grabbing a tab and pulling
+// it into another window did nothing. RelayWindow::tabDrag watches the bar's mouse
+// events and turns a drag that leaves the tab row into a tab move; these are the two
 // decisions that watching has to make, kept here (style of PaneLayout.h) so they can be
 // tested without a full window:
 //
-//   leavesWindow  — has this press-on-a-tab become a tear-off, or is it still Qt's gesture?
+//   leavesTabRow  — has this press-on-a-tab become a tear-off, or is it still Qt's gesture?
 //   dropWindow    — which window does a release land in, if any?
 //
 // Qt 5.15 / Qt 6.4, QtCore only.
@@ -21,15 +21,16 @@
 
 namespace relay::tabs {
 
-// A press on a tab label leaves its window only once the cursor is past Qt's drag threshold
-// AND outside the window's own geometry — `windowGlobal` is the source window's
-// frameGeometry(): on a native frame the title bar belongs to the window, and a stray drag
-// from the tab bar into the title strip must not tear the tab out. Everything inside the
-// window, however far from the bar, is QTabBar's reorder (or nothing) and stays that way.
-inline bool leavesWindow(const QPoint &pressGlobal, const QPoint &cursorGlobal, const QRect &windowGlobal,
+// A press on a tab label becomes a tear-off once the cursor is past Qt's drag threshold AND
+// outside the tab bar's own rect — `barGlobal` is the bar's global geometry, not the window's.
+// The window cannot be the yardstick: the window being dragged to usually overlaps the source,
+// and a maximized source can never be left at all, so a whole-window test made the gesture a
+// no-op in exactly the layouts people drag tabs in (#W6ES). Every tabbed interface tears a tab
+// out of its strip, and everything still inside the strip stays QTabBar's reorder.
+inline bool leavesTabRow(const QPoint &pressGlobal, const QPoint &cursorGlobal, const QRect &barGlobal,
                          int startDragDistance) {
     return (cursorGlobal - pressGlobal).manhattanLength() > startDragDistance
-        && !windowGlobal.contains(cursorGlobal);
+        && !barGlobal.contains(cursorGlobal);
 }
 
 // Which window a torn-off tab lands in: the one whose geometry holds the release point.

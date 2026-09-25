@@ -7845,16 +7845,24 @@ private:
 
     // ----- dragging a tab out of its window (#W6ES) ---------------------------------------
     // QTabBar already drags a tab label inside the bar (reorder); pulling it further, out of
-    // the window, used to be nothing at all. tabDrag watches the bar's mouse events from the
-    // window's event filter and, once the cursor leaves this window (relay::tabs::leavesWindow),
-    // turns the gesture into a tab move: the whole page — splits included — goes to the Relay
-    // window under the cursor, or to a window of its own on empty space. Every event is passed
+    // the tab row, used to be nothing at all. tabDrag watches the bar's mouse events from the
+    // window's event filter and, once the cursor leaves the tab row (relay::tabs::leavesTabRow —
+    // not the window: the target usually overlaps the source, and a maximized window can never
+    // be left at all, which made the gesture a silent no-op in the common layouts), turns the
+    // gesture into a tab move: the whole page — splits included — goes to the Relay window
+    // under the cursor, or to a window of its own on empty space. Every event is passed
     // on untouched: Qt's internal drag owns the mouse grab for as long as the button is down
     // and its state has to run to its own release, so this only observes.
 
     // The Relay window at a global point, if any: a torn-off tab targets whole windows, not
-    // panes or tab labels.
+    // panes or tab labels. The window the cursor is really over answers first — with
+    // overlapping windows, topLevelWidgets() is in creation order and would name whichever
+    // window happened to be opened first, front or back — with the geometry scan kept as the
+    // fallback for a release on a window's frame, where no widget is found.
     static RelayWindow *relayWindowAt(const QPoint &global) {
+        for (QWidget *w = QApplication::widgetAt(global); w; w = w->parentWidget())
+            if (auto *window = dynamic_cast<RelayWindow *>(w); window && !window->isMinimized())
+                return window;
         for (QWidget *w : QApplication::topLevelWidgets())
             if (auto *window = dynamic_cast<RelayWindow *>(w);
                 window && !window->isMinimized() && window->frameGeometry().contains(global))
@@ -7896,9 +7904,11 @@ private:
                 if (m_dropZone) m_dropZone->hide();
                 return false;
             }
-            if (!relay::tabs::leavesWindow(m_tabDragPressAt, mouse->globalPos(), frameGeometry(),
+            const QTabBar *bar = m_tabs->tabBar();
+            const QRect barGlobal(bar->mapToGlobal(QPoint(0, 0)), bar->size());
+            if (!relay::tabs::leavesTabRow(m_tabDragPressAt, mouse->globalPos(), barGlobal,
                                            QApplication::startDragDistance())) {
-                // Back inside this window: Qt's reorder owns the gesture again, and the window
+                // Back inside the tab row: Qt's reorder owns the gesture again, and the window
                 // under the cursor stops offering a drop.
                 if (m_tabDragTorn) tabDragMove(nullptr, mouse->globalPos());
                 m_tabDragTorn = false;
@@ -8169,6 +8179,11 @@ private:
         }
         updateTitles();
         target->raise(); target->activateWindow();
+        if (m_tabs->count() == 0) {   // its last tab left for another window: the window goes with it,
+            m_confirmedClose = true;   // the way the last tab's cross closes it (and is not remembered)
+            m_skipRemember = true;
+            QTimer::singleShot(0, this, [this] { close(); });
+        }
     }
 
     void moveTabToNewWindow(int index) {

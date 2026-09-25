@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Tab tear-off (#W6ES): the two decisions a tab-label drag past its window has to make —
-// when a press on a tab label has left its window, and which window a release lands in.
+// Tab tear-off (#W6ES): the two decisions a tab-label drag past its tab row has to make —
+// when a press on a tab label has left the tab row, and which window a release lands in.
 // They live in TabTearOff.h so they can be checked here without a full window; the drag
 // itself (watching the bar, highlighting the target, moving the page) is RelayWindow's,
 // wired in RelayWindowCore.cpp's event filter.
 //
 // The window cases run against real QWidgets, because the regression this guards against is
-// a coordinate mistake: the decision is made in global coordinates over frameGeometry(), and
-// a hand-rolled QRect hides exactly the kind of off-by-frame error that would make a tab tear
-// off while it is still over its own title strip.
+// a coordinate mistake: the decision is made in global coordinates over the tab bar's
+// mapToGlobal() rect, and a hand-rolled QRect hides exactly the kind of off-by-frame error
+// that would make a tab tear off while it is still over its own tab row. The bar rect — not
+// the window's frame — is the yardstick because the window a tab is dragged to usually
+// overlaps its source, and a maximized source can never be left at all: measured against the
+// frame, the gesture was a silent no-op in exactly those layouts (#W6ES).
 #include "TabTearOff.h"
 
 #include <QPoint>
 #include <QRect>
+#include <QTabBar>
 #include <QTest>
 #include <QWidget>
 
 using relay::tabs::dropWindow;
-using relay::tabs::leavesWindow;
+using relay::tabs::leavesTabRow;
 
 namespace {
 constexpr int kDragDistance = 10;   // QApplication::startDragDistance() defaults to 10 px
@@ -28,37 +32,41 @@ class TabTearOffTests : public QObject {
 
 private slots:
 
-    void leavesWindowInsideTheWindowItsReorder() {
-        const QRect window(600, 400, 800, 500);
-        const QPoint pressOnTab(1000, 420);   // on the tab bar
-        // However far the tab travels, inside the window it never tears off: Qt's QTabBar owns
-        // that gesture (reorder), and a stray drag from the bar into the content must not rip
-        // the tab out of its page.
-        QVERIFY(!leavesWindow(pressOnTab, QPoint(1005, 425), window, kDragDistance));
-        QVERIFY(!leavesWindow(pressOnTab, QPoint(1380, 880), window, kDragDistance));
-        QVERIFY(!leavesWindow(pressOnTab, QPoint(610, 890), window, kDragDistance));   // far corner
-        // The window's own title strip — above the bar, still inside the geometry — is inside.
-        QVERIFY(!leavesWindow(pressOnTab, QPoint(1000, 405), window, kDragDistance));
+    void insideTheTabRowItsReorder() {
+        const QRect bar(600, 400, 800, 36);   // the tab row of an 800x500 window at (600,400)
+        const QPoint pressOnTab(1000, 418);
+        // However far the tab travels along the row, inside the row it never tears off:
+        // Qt's QTabBar owns that gesture (reorder), and a stray drag across the labels must
+        // not rip the tab out of its page.
+        QVERIFY(!leavesTabRow(pressOnTab, QPoint(1005, 423), bar, kDragDistance));
+        QVERIFY(!leavesTabRow(pressOnTab, QPoint(1380, 410), bar, kDragDistance));  // far right
+        QVERIFY(!leavesTabRow(pressOnTab, QPoint(610, 430), bar, kDragDistance));   // far left
     }
 
-    void leavesWindowOutsideIt() {
-        const QRect window(600, 400, 800, 500);
-        const QPoint pressOnTab(1000, 420);
-        QVERIFY(leavesWindow(pressOnTab, QPoint(400, 410), window, kDragDistance));    // left of it
-        QVERIFY(leavesWindow(pressOnTab, QPoint(1000, 390), window, kDragDistance));   // above it
-        QVERIFY(leavesWindow(pressOnTab, QPoint(1450, 900), window, kDragDistance));   // below it
-        // A pixel past the edge is not yet a tear-off: Qt's own drag threshold still applies.
-        QVERIFY(!leavesWindow(pressOnTab, QPoint(1008, 420), window, kDragDistance));  // far enough left, but only 8 px moved
-        QVERIFY(leavesWindow(pressOnTab, QPoint(1000, 399), window, kDragDistance));   // 21 px moved, 1 px past the top
+    void pastTheRowTearsEvenInsideTheWindow() {
+        const QRect bar(600, 400, 800, 36);
+        const QPoint pressOnTab(1000, 418);
+        // Straight down out of the row and into the source window's own content: this is the
+        // overlapping-windows case — the release can be over another window while the cursor
+        // never once left this one — so the tear-off has to arm here (#W6ES).
+        QVERIFY(leavesTabRow(pressOnTab, QPoint(1000, 460), bar, kDragDistance));
+        QVERIFY(leavesTabRow(pressOnTab, QPoint(1380, 880), bar, kDragDistance));   // deep content
+        QVERIFY(leavesTabRow(pressOnTab, QPoint(1000, 390), bar, kDragDistance));   // above the row
+        // A pixel past the row is not yet a tear-off: Qt's own drag threshold still applies.
+        QVERIFY(!leavesTabRow(pressOnTab, QPoint(1008, 418), bar, kDragDistance));  // 8 px: jitter
+        QVERIFY(leavesTabRow(pressOnTab, QPoint(1000, 447), bar, kDragDistance));   // 29 px, 11 past
     }
 
-    void leavesWindowOnRealWidgets() {
-        QWidget a;
-        a.setGeometry(100, 100, 300, 200);
-        const QRect geometry = a.frameGeometry();   // what the production code passes
-        const QPoint onTab(geometry.left() + 40, geometry.top() + 30);
-        QVERIFY(!leavesWindow(onTab, a.geometry().center(), geometry, kDragDistance));
-        QVERIFY(leavesWindow(onTab, geometry.center() + QPoint(geometry.width(), 0), geometry, kDragDistance));
+    void onRealWidgets() {
+        QWidget window;
+        window.setGeometry(100, 100, 300, 200);
+        QTabBar bar(&window);
+        bar.setGeometry(0, 0, 300, 36);   // the row across the top of the window
+        const QRect barGlobal(bar.mapToGlobal(QPoint(0, 0)), bar.size());   // what production passes
+        const QPoint onTab(barGlobal.left() + 40, barGlobal.top() + 18);
+        QVERIFY(!leavesTabRow(onTab, onTab + QPoint(120, 0), barGlobal, kDragDistance));  // along the row
+        QVERIFY(leavesTabRow(onTab, window.frameGeometry().center(), barGlobal, kDragDistance));  // into content
+        QVERIFY(leavesTabRow(onTab, barGlobal.topLeft() + QPoint(-30, -30), barGlobal, kDragDistance));
     }
 
     void dropWindowFindsTheWindowUnderTheCursor() {
