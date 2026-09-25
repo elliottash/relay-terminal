@@ -541,6 +541,112 @@ class CaseStatisticsTests(unittest.TestCase):
             self.assertIsNone(nowhere['referee']['pass_rate_30'])
 
 
+class RegistryTests(unittest.TestCase):
+    """#9FX8: a registry row is the `skills_list` item plus version, stats for every skill,
+    last_verified, stale_reason, the last case rows, linked cards, changelog and the project flag."""
+
+    def workspace_with_board(self, temp):
+        from relay_core import cases
+        ws = Path(temp) / 'ws'
+        (ws / 'issues').mkdir(parents=True)
+        (ws / 'issues' / 'board.yaml').write_text('version: 1\ntabs: [{id: features, folder: features}]\n')
+        base = ws / '.relay' / 'skills'
+        write(base / 'referee' / 'SKILL.md', '---\nname: referee\ndescription: Referee\nprofile: |\n'
+              '  artifact: text\n  primary: ai-text\n  effort: high\n  rot: high\n---\nBody\n')
+        write(base / 'plain' / 'SKILL.md', '---\nname: plain\ndescription: Plain\n---\nBody\n')
+        outside = Path(temp) / 'global'
+        write(outside / 'demo' / 'SKILL.md', '---\nname: demo\ndescription: Demo\n---\nBody\n')
+        cases.append(ws / 'issues', cases.new_record('referee', served_by='person', verdict='pass',
+                                                     card='K1Q2', input='docs/ref.pdf',
+                                                     when='2026-01-01T10:00:00Z'))
+        cases.append(ws / 'issues', cases.new_record('referee', served_by='openai/gpt-5-6', verdict='fail',
+                                                     card='K1Q2', input='docs/ref2.pdf',
+                                                     when='2026-01-02T10:00:00Z'))
+        cases.append(ws / 'issues', cases.new_record('referee', served_by='openai/gpt-5-6',
+                                                     card='W5N2', input='docs/other.pdf',
+                                                     when='2026-01-03T10:00:00Z'))
+        cases.append(ws / 'issues', cases.new_record('referee', served_by='person', verdict='pass',
+                                                     card='W5N2', input='secret.pdf', confidential=True,
+                                                     when='2026-01-04T10:00:00Z'))
+        return ws, base, outside
+
+    def test_rows_carry_the_registry_fields(self):
+        from relay_core import cases, skill_manage
+        with tempfile.TemporaryDirectory() as temp:
+            ws, base, outside = self.workspace_with_board(temp)
+            rows = {item['name']: item for item in
+                    skill_manage.registry([outside, base], workspace=str(ws))}
+            referee = rows['referee']
+            self.assertEqual(referee['id'], 'referee')
+            self.assertEqual(referee['source'], 'project-relay')
+            self.assertTrue(referee['project'])
+            self.assertEqual(referee['version'], cases.skill_version(base / 'referee' / 'SKILL.md'))
+            self.assertEqual(referee['version_short'], referee['version'][:19])
+            self.assertEqual(referee['rot'], 'high')
+            self.assertEqual(referee['stats']['cases'], 4)          # confidential rows count
+            self.assertEqual(referee['stats']['pass_rate_30'], round(2 / 3, 3))
+            self.assertTrue(referee['stats']['stale'])              # last pass 2026-01-04, rot high: 7 days
+            self.assertIsInstance(referee['cases'], list)         # the payload rows, not the count
+            for key in ('last_served', 'pass_rate_30', 'stale'):
+                self.assertNotIn(key, referee)                     # the rest ride under `stats`
+            self.assertEqual(referee['last_verified'], '2026-01-04T10:00:00Z')
+            self.assertIn('rot high, so 7 days', referee['stale_reason'])
+            self.assertIn('last passed 2026-01-04', referee['stale_reason'])
+            self.assertEqual(referee['cards'], ['W5N2', 'K1Q2'])    # newest serving first
+            shown = referee['cases']
+            self.assertEqual([row['when'][:10] for row in shown],
+                             ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'])
+            confidential = shown[-1]
+            self.assertTrue(confidential['confidential'])
+            self.assertNotIn('input', confidential)                 # confidential rows are ids only
+            self.assertEqual(shown[0]['input'], 'docs/ref.pdf')
+            self.assertEqual(referee['changelog'], [])              # not in a repository
+            # A skill with no profile and no rows: counted zeros, never stale, no cases yet.
+            plain = rows['plain']
+            self.assertEqual(plain['stats'], {'cases': 0, 'last_served': None, 'pass_rate_30': None,
+                                              'stale': False})
+            self.assertEqual((plain['last_verified'], plain['stale_reason'], plain['cases']),
+                             (None, 'no cases yet', []))
+            self.assertEqual(plain['rot'], 'low')
+            # A directory outside the workspace is a global source, not a project one.
+            demo = rows['demo']
+            self.assertEqual(demo['source'], 'custom')
+            self.assertFalse(demo['project'])
+
+    def test_off_workspace_rows_are_ids_only_and_confidential_ones_are_dropped(self):
+        from relay_core import cases, skill_manage
+        with tempfile.TemporaryDirectory() as temp:
+            ws, base, outside = self.workspace_with_board(temp)
+            rows = {item['name']: item for item in
+                    skill_manage.registry([outside, base], workspace=str(ws), own=False)}
+            shown = rows['referee']['cases']
+            self.assertEqual([row['when'][:10] for row in shown],
+                             ['2026-01-01', '2026-01-02', '2026-01-03'])
+            self.assertFalse(any(row['confidential'] for row in shown))
+            for row in shown:
+                self.assertNotIn('input', row)                      # ids only off-workspace
+            self.assertEqual(rows['referee']['stats']['cases'], 4)  # the statistics still count them
+            self.assertEqual(rows['referee']['cards'], ['W5N2', 'K1Q2'])
+
+    def test_changelog_reads_the_manifests_git_history(self):
+        from relay_core import skill_manage
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / 'skills'
+            write(base / 'demo' / 'SKILL.md', '---\nname: demo\ndescription: Demo\n---\nBody\n')
+            rows = skill_manage.registry([base], workspace=temp)
+            self.assertEqual(rows[0]['changelog'], [])              # no repository yet
+            git = ['git', '-C', str(base / 'demo')]
+            env = dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null')
+            subprocess.run(git + ['init', '-q'], check=True, env=env, capture_output=True)
+            subprocess.run(git + ['add', 'SKILL.md'], check=True, env=env, capture_output=True)
+            subprocess.run(git + ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false',
+                                  'commit', '-q', '-m', 'import skill'], check=True, env=env,
+                           capture_output=True)
+            rows = skill_manage.registry([base], workspace=temp)
+            self.assertEqual(len(rows[0]['changelog']), 1)
+            self.assertIn('import skill', rows[0]['changelog'][0])
+
+
 class RealSkillsTest(unittest.TestCase):
     def test_home_skills_index_without_errors(self):
         home = Path.home() / '.warp' / 'skills'

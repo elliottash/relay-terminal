@@ -4051,3 +4051,67 @@ class CaseLedgerTests(BoardToolsTest):
         self.assertNotIn("error", second, second)
         self.assertIn("names no verifier outside the author's lineage", " ".join(second["qa_policy"]))
         self.assertNotIn("AI gating is off", " ".join(second["qa_policy"]))
+
+
+class RegistryTests(BoardToolsTest):
+    """#9FX8: the `skills_registry` request answers with one row per visible skill, and the
+    confidential-row rule follows `own_workspace`: ids on this board's own workspace, dropped
+    off it."""
+
+    def setUp(self):
+        super().setUp()
+        from relay_core import cases
+        self.skill = self.repo / '.relay' / 'skills' / 'referee'
+        self.skill.mkdir(parents=True)
+        (self.skill / 'SKILL.md').write_text(
+            '---\nname: referee\ndescription: Referee\nprofile: |\n  artifact: text\n'
+            '  primary: ai-text\n  rot: high\n---\nBody\n', encoding='utf-8')
+        cases.append(self.root, cases.new_record('referee', served_by='person', verdict='pass',
+                                                 card='K1Q2', input='docs/ref.pdf'))
+        cases.append(self.root, cases.new_record('referee', served_by='person', verdict='pass',
+                                                 card='K1Q2', input='secret.pdf', confidential=True))
+
+    def observe(self, workspace=None):
+        from types import SimpleNamespace
+        from relay_core.observe_protocol import ObserveCommands
+        agent = SimpleNamespace(board=self.tools, executor=SimpleNamespace(skills=None))
+        events = []
+        commands = ObserveCommands(SimpleNamespace(agent=agent, busy=False), events.append)
+        request = {"type": "skills_registry", "id": 7}
+        if workspace is not None:
+            request["workspace"] = workspace
+        commands.handle("skills_registry", request)
+        return [e for e in events if e.get("event") == "skills_registry"][0]
+
+    def test_the_request_answers_one_row_per_skill(self):
+        event = self.observe(workspace=str(self.repo))
+        self.assertEqual(event["id"], 7)
+        self.assertIn("skipped", event)
+        rows = [item for item in event["items"] if item["id"] == "referee"]
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["source"], "project-relay")
+        self.assertTrue(row["project"])
+        self.assertEqual(row["stats"]["cases"], 2)
+        self.assertEqual(row["cards"], ["K1Q2"])
+        self.assertEqual(len(row["cases"]), 2)                     # own workspace: both rows serve
+        self.assertTrue(row["cases"][1]["confidential"])
+        self.assertNotIn("input", row["cases"][1])                 # confidential: ids only
+        self.assertEqual(row["cases"][0]["input"], "docs/ref.pdf")
+        self.assertTrue(row["version"].startswith("sha256:"))
+        self.assertTrue(row["stale_reason"])
+
+    def test_off_the_boards_own_workspace_the_confidential_row_is_dropped(self):
+        with tempfile.TemporaryDirectory() as elsewhere:   # outside the board's repo
+            self.tools = T.BoardTools(
+                self.board, emit=self.events.append, autonomy=self.autonomy,
+                context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5-5", pane="2"),
+                state_path=self.repo / ".relay" / "board-rate.json", pane_token=self.pane_token,
+                workspace=str(elsewhere))
+            event = self.observe(workspace=str(self.repo))
+            row = [item for item in event["items"] if item["id"] == "referee"][0]
+            shown = row["cases"]
+            self.assertEqual(len(shown), 1)
+            self.assertFalse(shown[0]["confidential"])
+            self.assertTrue(all("input" not in case for case in shown))  # ids only off-workspace
+            self.assertEqual(row["stats"]["cases"], 2)                   # statistics still count both

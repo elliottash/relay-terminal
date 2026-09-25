@@ -468,6 +468,17 @@ without touching originals → `skills_refined {items: [{name, path, from}]}`.
 `import_skills_confirm {url, commit, names}` copies the chosen skills to
 `~/.local/share/relay/skill-imports/<repo>@<commit>/` and enables them → `skills_imported {items}`.
 No automatic updates; `skills_check_updates {url}` → `skills_updates {url, current, latest}`.
+`skills_registry {workspace?}` (#9FX8) → `skills_registry {items: [{id, name, description, path,
+source, excluded, refined_from?, profile?, profile_warnings?, shadowed_by?, version, version_short,
+project, rot, stats: {cases, last_served, pass_rate_30, stale}, last_verified, stale_reason,
+cases: [{when, served_by, card?, input?, cost?, signal?, verdict?, confidential}], cards, changelog,
+skipped?}]}` — one row per visible skill with what the registry holds per server: `version` is the
+sha256 of SKILL.md (the ledger's `server_version` string), `last_verified` the newest passing row's
+`when`, `cards` the ids of cards whose ledger rows name this server (newest first, ≤20), `changelog`
+the last ≤5 `git log` lines of the manifest ([] outside a repository) and `project` whether the skill
+lives in the workspace (the Board's Skills tab shows the project ones, Globals the rest). Case rows
+follow the `board_list {cases: true}` rule: a confidential row never carries `input`, and a pane off
+the board's own workspace gets confidential rows dropped and `input` stripped from the rest.
 
 **Skills as `/name`** (2026-09-18). `configured` carries `skill_commands: [{name, description}]`, the skills
 the pane's agent can load (excluded and shadowed ones are not in it); the composer offers each as `/name`

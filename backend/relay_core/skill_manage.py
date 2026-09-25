@@ -13,6 +13,7 @@ Repository content is untrusted: no hooks, no submodules, no symlinks followed o
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import re
@@ -89,13 +90,18 @@ def index_settings(index: SkillIndex | None, workspace=None) -> tuple[list[Path]
     return default_directories(workspace), DEFAULT_EXCLUDE, workspace
 
 
+def _board_root(workspace):
+    """The board directory that governs `workspace` (#95VZ), or None when there is none."""
+    if not workspace:
+        return None
+    from .board_tools import find_board_root      # local: board_tools imports skills
+    return find_board_root(workspace)
+
+
 def _ledger_rows(workspace) -> list[dict]:
     """The case ledger of the board that governs `workspace` (#95VZ), or [] when there is none.
     Confidential rows are included: the statistics count them, they never quote them."""
-    if not workspace:
-        return []
-    from .board_tools import find_board_root      # local: board_tools imports skills
-    root = find_board_root(workspace)
+    root = _board_root(workspace)
     return cases.read(root) if root is not None else []
 
 
@@ -143,6 +149,98 @@ def list_skills(directories, exclude=(), workspace=None) -> list[dict]:
             else:
                 seen[entry.name] = str(manifest)
             items.append(item)
+    return items
+
+
+# ----- registry (#9FX8) ------------------------------------------------------------------------
+CASES_LIMIT = 10      # ledger rows a registry row carries
+CARDS_LIMIT = 20      # linked card ids a registry row carries
+CHANGELOG_LIMIT = 5   # git log lines a registry row carries
+GIT_LOG_TIMEOUT = 10
+
+
+def _changelog(manifest: Path) -> list[str]:
+    """The last few `git log --oneline` lines that touched the manifest, [] outside a repository."""
+    try:
+        done = subprocess.run(["git", "-C", str(manifest.parent), "log", "--oneline",
+                               f"-{CHANGELOG_LIMIT}", "--", manifest.name],
+                              capture_output=True, text=True, timeout=GIT_LOG_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if done.returncode != 0:
+        return []
+    return [line.strip() for line in done.stdout.splitlines() if line.strip()][:CHANGELOG_LIMIT]
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def registry(directories, exclude=(), workspace=None, *, own=True) -> list[dict]:
+    """Every visible skill as a Skills-tab row (#9FX8): the `skills_list` item plus what the
+    registry holds per server.
+
+    Added to each item: `id` (the ledger's `server` key); `version` (the sha256 of SKILL.md, the
+    same string the ledger's `server_version` writes) and `version_short`; `stats` (the four
+    `cases.stats` numbers, for every skill — not only profiled ones — `skills_list`'s bare four
+    ride under it); `rot`; `last_verified` (the newest passing row's `when`); a one-line
+    `stale_reason` that matches `stats.stale`; `cases` (the last CASES_LIMIT ledger rows for the
+    server: a confidential row never carries `input` at all, and when the asking pane is not on
+    this board's own workspace — `own=False` — confidential rows are dropped and `input` is
+    stripped from the rest, the rule `BoardTools.ledger` applies); `cards` (ids of cards whose
+    rows name this server, newest first); `changelog` (the manifest's git history, [] outside a
+    repository); and `project` (the skill lives in this workspace rather than a global source —
+    the Board's Skills tab shows the project ones, Globals the rest, decision 2)."""
+    items = list_skills(directories, exclude, workspace)
+    if not items:
+        return []
+    root = _board_root(workspace)
+    rows = cases.read(root) if root is not None else []
+    home = Path(workspace).resolve() if workspace else None
+    for item in items:
+        for key in ("cases", "last_served", "pass_rate_30", "stale"):    # skills_list's bare four
+            item.pop(key, None)                                         # ride under `stats` here
+        name, manifest = item["name"], Path(item["path"])
+        profile = item.get("profile") or {}
+        item["id"] = name
+        item["stats"] = cases.stats(rows, name, profile)
+        item["version"] = cases.skill_version(manifest)
+        item["version_short"] = item["version"][:19]
+        item["rot"] = str(profile.get("rot") or cases.DEFAULT_ROT).lower()
+        mine = [row for row in rows if row.get("server") == name]
+        passes = sorted((row["when"] for row in mine
+                         if cases._result(row) == "pass" and cases.parse_when(row.get("when"))), key=str)
+        item["last_verified"] = passes[-1] if passes else None
+        cards: list[str] = []
+        for row in reversed(mine):
+            card = row.get("card")
+            if card and card not in cards:
+                cards.append(card)
+        item["cards"] = cards[:CARDS_LIMIT]
+        shown = cases.read(root, server=name, limit=CASES_LIMIT,
+                           include_confidential=own) if root is not None else []
+        if not own:
+            for row in shown:
+                row.pop("input", None)
+        item["cases"] = shown
+        days = cases.ROT_DAYS.get(item["rot"], cases.ROT_DAYS[cases.DEFAULT_ROT])
+        if not mine:
+            reason = "no cases yet"
+        elif not passes:
+            reason = f"{len(mine)} case(s) served, none passed yet"
+        else:
+            gap = (_dt.datetime.now(_dt.timezone.utc) - cases.parse_when(passes[-1])).days
+            reason = f"last passed {passes[-1][:10]}; rot {item['rot']}, so {days} days"
+            if gap > days:
+                reason += f" ({gap} days ago)"
+        item["stale_reason"] = reason
+        item["changelog"] = _changelog(manifest)
+        item["project"] = item["source"].startswith("project-") or (
+            home is not None and _inside(manifest.parent, home))
     return items
 
 

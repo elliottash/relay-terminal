@@ -15,7 +15,7 @@ from .provider import ProviderError
 from .skills import SkillError, SkillIndex, refined_dir
 
 TYPES = {"route_assist", "tool_output_get", "turn_transcript_get", "jobs_list", "job_output_get", "job_stop",
-         "skills_list", "refine_skills",
+         "skills_list", "skills_registry", "refine_skills",
          "import_skills_preview", "import_skills_confirm", "skills_check_updates"}
 
 
@@ -137,6 +137,22 @@ class ObserveCommands:
         items = skill_manage.list_skills(directories, exclude, workspace)
         index = self._index()
         self.emit({"event": "skills", "id": request.get("id"), "items": items,
+                   "skipped": index.skipped[:100] if index is not None else []})
+
+    def _skills_registry(self, request):
+        """The Skills tab's rows (#9FX8): every visible skill with version, profile, ledger
+        statistics, cases, linked cards and staleness. The confidential-row rule is
+        `board_list {cases: true}`'s: confidential rows serve only a pane on this board's own
+        workspace."""
+        directories, exclude, workspace = self._settings(request)
+        tools = getattr(self.turns.agent, "board", None)
+        try:
+            own = tools.own_workspace() if tools is not None else True
+        except OSError:
+            own = True
+        items = skill_manage.registry(directories, exclude, workspace, own=own)
+        index = self._index()
+        self.emit({"event": "skills_registry", "id": request.get("id"), "items": items,
                    "skipped": index.skipped[:100] if index is not None else []})
 
     def _reload_skills(self) -> bool:
