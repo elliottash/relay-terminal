@@ -485,7 +485,7 @@ def commit_details(repo: Path, hashes: Iterable[str], limit: int = 20) -> list:
     `{hash, date, subject, author, signature}` from `git log -1`.  Hashes git cannot resolve
     are skipped; at most `limit` rows."""
     rows: list[dict] = []
-    for raw in list(hashes or [])[:limit]:
+    for raw in list(hashes or [])[-limit:]:
         text = str(raw or "").strip()
         if not text:
             continue

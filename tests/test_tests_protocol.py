@@ -478,6 +478,25 @@ class HistoryTest(TestsProtocolTest):
 
 class CheckTest(TestsProtocolTest):
 
+    def test_card_revision_uses_last_commit_in_oldest_first_sequence(self):
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        for key, value in (("user.email", "t@example.com"), ("user.name", "T")):
+            subprocess.run(["git", "-C", str(self.project), "config", key, value], check=True)
+        hashes = []
+        for day in ("2026-09-01", "2026-09-02"):
+            (self.project / "work.txt").write_text(day, encoding="utf-8")
+            subprocess.run(["git", "-C", str(self.project), "add", "work.txt"], check=True)
+            env = dict(os.environ, GIT_AUTHOR_DATE=f"{day}T12:00:00+0000",
+                       GIT_COMMITTER_DATE=f"{day}T12:00:00+0000")
+            subprocess.run(["git", "-C", str(self.project), "commit", "-qm", f"#{'AAA1'}"],
+                           check=True, env=env)
+            hashes.append(subprocess.check_output(["git", "-C", str(self.project), "rev-parse", "HEAD"],
+                                                  text=True).strip())
+        self.card("AAA1", commits=", ".join(hashes))
+        commits, _since, revision = self.tests.card_revision("AAA1", self.board.card_by_id("AAA1"))
+        self.assertEqual(commits, hashes)
+        self.assertEqual(revision, hashes[-1][:TP.REVISION_CHARS])
+
     def test_a_card_with_no_tests_section_gets_one_clear_sentence(self):
         self.card("AAA1", "No tests named", "needs-verification")
         self.send(type="tests_check", card="AAA1", id="r9")

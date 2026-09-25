@@ -638,4 +638,4 @@ def card_commits(repo, card_id: str, links: dict | None = None, expected: str | 
         except ValueError:
             return 0
     ordered.sort(key=commit_time)
-    return commit_trailers(repo, ordered[:20], expected)
+    return commit_trailers(repo, ordered[-20:], expected)

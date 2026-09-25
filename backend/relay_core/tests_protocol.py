@@ -561,7 +561,8 @@ class TestsCommands:
         commits = [str(row.get("hash") or "") for row in rows[:MAX_COMMITS] if row.get("hash")]
         if not commits:
             return [], "", ""
-        return commits, self._newest_commit_time(commits), commits[0][:REVISION_CHARS]
+        # `card_commits` is oldest first (#MJ76); the last hash is this card's newest revision.
+        return commits, self._newest_commit_time(commits), commits[-1][:REVISION_CHARS]
 
     def _newest_commit_time(self, commits: Sequence[str]) -> str:
         """The newest of these commits' commit times, ISO-8601, or "" when git cannot say.
