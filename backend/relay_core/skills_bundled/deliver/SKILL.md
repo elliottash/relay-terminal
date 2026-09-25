@@ -139,6 +139,11 @@ you when the card has none; the user corrects the proposal, and their correction
   and nothing else, close it. If you cannot fix it, `board_signals {action: "release", reason:
   "gave-up"}`, which files it as a bug card. Leave it unclaimed and Relay starts its own agent
   thread on it after the next fold.
+- **Release your scratch before you report** (card #DVV2): every temp dir you asked for ends with
+  the work — `scratch_release`, or `relay-scratch release <id-or-path>`; a `keep` dir is released
+  by promoting it into the repo (`--promote-to docs/qa_evidence/…`) or dropping it (`--drop`)
+  explicitly, never silently. Say in your final line what you released. A session's `scratch` is
+  reclaimed automatically when it closes, but do not leave it to that when the task is done.
 - When it lands, by tier (policy rule 5), in the same commit as the change:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA

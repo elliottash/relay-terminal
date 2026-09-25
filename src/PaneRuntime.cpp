@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Pane.h"
 #include "PaneChrome.h"   // the remote chip this pane owns (setRemotePersistent, #XQ8F)
+#include "AppPaths.h"     // relay::scratchpaths: this pane's session scratch root (#DVV2)
 #include <QProcess>        // the master keepalive runs detached
 
 bool Pane::restoreAgentPrompt() {
@@ -895,6 +896,14 @@ void Pane::startTerminal(bool cleanShell) {
         // initRestore takes the saved one back for the shells that follow, so a pane restored
         // from a layout still owns the holders named after it.
         shellEnvironment << QStringLiteral("RELAY_PANE_ID=") + scrollbackId();
+        // This pane's own scratch session (#DVV2): TMPDIR puts mktemp in this shell — and in the
+        // guest CLIs typed into it — inside <scratchRoot()>/<token>/tmp, built exactly the way
+        // the backend builds a session's TMPDIR (scratch.session_root(<id>) / "tmp"; this pane's
+        // token also reaches its worker as RELAY_SESSION_TOKEN). Owned and per pane, not /tmp.
+        const QString scratchTmp = QDir(relay::scratchpaths::sessionRoot(m_token))
+                .filePath(QStringLiteral("tmp"));
+        if (QDir().mkpath(scratchTmp))   // a TMPDIR that is not there would break mktemp in the shell
+            shellEnvironment << QStringLiteral("TMPDIR=") + scratchTmp;
         if (isolation::enabled() && isolation::available()) {
             // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
             // command and the shell keeps running; Relay reports the kill from memory.events.
@@ -1454,7 +1463,7 @@ void Pane::launchGuest(const QString &guest, const QStringList &extra, const QSt
             // this one command line. A bridge that failed to start costs nothing: no port, no diffs.
             auto &bridge = relay::guestbridge::Bridge::instance();
             bridge.setDataRoot(m_data);
-            port = bridge.portFor(m_python);
+            port = bridge.portFor(m_python, m_token);
             registerWithBridge();
         }
         const QString directory = cwd.isEmpty() ? m_cwd : cwd;

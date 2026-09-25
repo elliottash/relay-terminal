@@ -385,6 +385,19 @@ def _base(name, args: dict, existed) -> dict:
             return _row("job", f"starting {command}", f"started job: {command}",
                         f"start job: {command}")
         return _row("run", f"running {command}", f"ran {command}", f"run {command}")
+    if name == "scratch_dir":
+        # Card #DVV2: Relay owns agent scratch; this is the agent asking for some.
+        cls = _short(args.get("class"), 10) or "scratch"
+        purpose = _short(args.get("purpose"), 40) or "unspecified"
+        return _row("run", f"asking for {cls} scratch: {purpose}",
+                    f"took {cls} scratch: {purpose}", f"ask for {cls} scratch: {purpose}")
+    if name == "scratch_release":
+        ref = _short(args.get("ref"), 24) or "scratch"
+        running, done, ask = ("promoting", "promoted", "promote") if args.get("promote_to") else (
+            ("dropping", "dropped", "drop") if args.get("drop")
+            else ("releasing", "released", "release"))
+        return _row("edit", f"{running} scratch {ref}", f"{done} scratch {ref}",
+                    f"{ask} scratch {ref}")
     if name == "command_output":
         job = _short(args.get("job_id"), 24) or "job"
         return _row("job", f"reading {job}", f"read {job} output", f"read {job} output")

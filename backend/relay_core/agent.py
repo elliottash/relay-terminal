@@ -5,7 +5,9 @@ import contextlib
 import copy
 import dataclasses
 import json
+import os
 import re
+import tempfile
 import threading
 import time
 import itertools
@@ -31,6 +33,7 @@ from . import prompt_profiles
 from . import tool_groups
 from . import media
 from . import todos as todo_tool
+from . import scratch
 from . import security
 from . import tool_labels
 from .attachments import content_parts as image_content_parts
@@ -625,6 +628,107 @@ def _safe_label(builder, name, *args, **kwargs) -> dict:
         return label
 
 
+# ----- agent scratch (card #DVV2) -----------------------------------------
+# Relay owns the directories an agent works in: the ledger in relay_core/scratch.py records
+# every one, TMPDIR points inside the session's own root, and the write guard below keeps
+# write_file/edit_file from inventing paths Relay does not own.
+
+def scratch_tmpdir(session_id: str, *, pane: str = "", model: str = "") -> Path:
+    """Point TMPDIR at a ledgered directory in this pane's scratch root, so tempfile and
+    mktemp in anything the pane runs land somewhere Relay owns (#DVV2), with zero agent
+    effort. command_env() passes TMPDIR to every job, so subprocesses inherit it.
+
+    The root is keyed by the pane token when the worker knows it (Pane's startWorker exports
+    RELAY_SESSION_TOKEN per process, so the pane's shell, its guest CLIs and this worker's
+    run_command children share one root and one ledger row); the conversation id is the
+    fallback. Lifetime is days:7, not session: a pane outlives its conversations - resetting
+    one must never delete the directory its shell still has as TMPDIR - and there is no
+    reliable worker at-exit hook. Every new conversation re-runs this, so a gc'd dir is
+    recreated on the next turn."""
+    token = os.environ.get("RELAY_SESSION_TOKEN", "").strip()
+    key = token or session_id
+    root = scratch.session_root(key) / "tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    ledger = scratch.ScratchLedger()
+    if ledger.find(str(root)) is None:
+        scratch.new_dir("scratch", f"TMPDIR for {'pane ' + token if token else 'session ' + session_id}",
+                        session=key, pane=pane, model=model, lifetime="days:7",
+                        path=root, ledger=ledger)
+    os.environ["TMPDIR"] = str(root)
+    return root
+
+
+def _scratch_deliverable(name: str) -> bool:
+    """A filename that reads like a report, evidence or a message draft rather than working
+    files: .md documents, `*-msg*.txt`, evidence and draft names (#DVV2)."""
+    lowered = name.lower()
+    return (lowered.endswith(".md") or "-msg" in lowered or "evidence" in lowered
+            or "draft" in lowered)
+
+
+def scratch_write_refusal(path, workspace) -> str | None:
+    """The #DVV2 guard for write_file and edit_file: the refusal when the write would land
+    where Relay does not own files — inside the system temp dir, a new top-level entry
+    directly under the user's home, or a deliverable-looking filename outside the workspace —
+    or None when the write is fine. Writes inside the workspace (including .relay/work/ and
+    .relay/keep/) are always fine, and so is anything inside the scratch roots, TMPDIR
+    included."""
+    try:
+        resolved = Path(path).resolve()
+        root = Path(workspace).resolve()
+    except OSError:
+        return None
+    if resolved.is_relative_to(root) or resolved.is_relative_to(scratch.scratch_root()):
+        return None
+    replacement = ('ask for a directory with scratch_dir (class and a one-line purpose) or run '
+                   'relay-scratch new --class scratch --purpose "..." and write there, '
+                   'or write inside the workspace')
+    # Both temp dirs: TMPDIR may have been repointed at this pane's own scratch root (which
+    # the check above already allows), so the system's /tmp is named by scratch.system_tmp() —
+    # captured at import, before any session repointed TMPDIR — or a hardcoded /tmp write
+    # would slip past the guard.
+    temps = {Path(tempfile.gettempdir()).resolve()}
+    try:
+        temps.add(scratch.system_tmp().resolve())
+    except OSError:
+        pass
+    if any(resolved.is_relative_to(t) for t in temps):
+        return (f"{resolved} is inside the system temp dir. Relay owns agent scratch (#DVV2): "
+                f"{replacement}. Never invent temp paths or write to /tmp.")
+    if resolved.parent == Path.home() and not resolved.exists():
+        return (f"{resolved} would create a new top-level entry directly under your home "
+                f"directory. Relay owns agent scratch (#DVV2): {replacement}. Never create "
+                "new top-level $HOME folders.")
+    if _scratch_deliverable(resolved.name):
+        return (f"{resolved} looks like a deliverable ({resolved.name}) and is outside the "
+                "workspace. Deliverables belong in the project: write inside the workspace. "
+                f"Scratch is for working files, not deliverables: {replacement}.")
+    return None
+
+
+def scratch_sweep_turn(unledgered, swept: bool) -> str | None:
+    """The bound of the #DVV2 post-turn sweep: one prompt per turn. `swept` is whether this
+    turn has already been asked; the second pass returns None and the turn closes."""
+    return None if swept else scratch_sweep_note(unledgered)
+
+
+def scratch_sweep_note(entries) -> str | None:
+    """The #DVV2 post-turn sweep prompt for the agent when unledgered entries appeared in the
+    temp dir or directly under $HOME during the turn. The sweep asks; it never deletes."""
+    entries = list(entries or [])
+    if not entries:
+        return None
+    listed = "\n".join(f"- {entry}" for entry in entries[:10])
+    more = f"\n- … and {len(entries) - 10} more" if len(entries) > 10 else ""
+    return ("These unledgered entries in the temp dir or directly under your home directory "
+            "appeared during your turn:\n"
+            f"{listed}{more}\n"
+            "Relay owns agent scratch (#DVV2): ledger each one (a directory you made: "
+            "scratch_dir, or relay-scratch adopt), move it into the project, or delete it. "
+            "Nothing is deleted for you.")
+
+
+
 class Agent:
     def __init__(self, config: ProviderConfig, workspace: str, emit: Callable[[dict], None],
                  *, provider=None, max_steps: int = DEFAULT_MAX_STEPS, keybindings=None, skills=None,
@@ -866,10 +970,24 @@ class Agent:
         self._reset_prefix_check()
         self.messages = [{"role": "system", "content": self.system_prompt()}]
         self.context_invalidate()
+        # Card #DVV2: this session's scratch root owns TMPDIR for the whole process, so
+        # tempfile/mktemp in anything it runs land somewhere ledgered. Subprocesses inherit
+        # it through command_env(), which passes os.environ minus the RELAY_ knobs.
+        try:
+            scratch_tmpdir(self.session_id, model=self.config.model)
+        except Exception as exc:  # a scratch problem must never stop a session starting
+            logs.event(_log, "scratch_tmpdir_failed", level_name="warning",
+                       session=self.session_id, error=f"{type(exc).__name__}: {exc}"[:200])
 
     def reset_conversation(self) -> None:
         # Commands the old conversation started: no turn of the new one can name them.
         self.executor.shutdown()
+        # Card #DVV2: the old conversation's live scratch is reclaimed with it.
+        try:
+            scratch.end_session(self.session_id)
+        except Exception as exc:
+            logs.event(_log, "scratch_end_session_failed", level_name="warning",
+                       session=self.session_id, error=f"{type(exc).__name__}: {exc}"[:200])
         self._new_session()
         self.announce_requests()
         if self._announce:
@@ -2463,7 +2581,10 @@ class Agent:
                # happened in a sentence of its own, so `app_notes` keeps them and the `done`
                # branch says that much rather than nothing. It was the helper's own wrapper
                # until #AGNT; it belongs to every agent, because every agent has the app tools.
-               "app_notes": []}
+               "app_notes": [],
+               # Card #DVV2: the post-turn scratch sweep has already asked this turn; a
+               # second final message closes the turn with the entries still unledgered.
+               "swept": False}
         self._turn_ctx = ctx
         if self.board is not None:
             # Switchboard write budgets are per turn (design 6.3).
@@ -2509,6 +2630,7 @@ class Agent:
         calls_used = 0
         over_budget_steps = 0
         reminders = 0
+        turn_started = time.time()   # card #DVV2: what the post-turn scratch sweep scans from
         empty_final_retries = 0
         batch = None               # subagents: `agent` calls started for the current response
         pictures = image_attachments(attachments)
@@ -2651,6 +2773,30 @@ class Agent:
                             self._stop_at_limit(record, ctx, steps, calls_used, pattern=monologue)
                             return
                         continue
+                    # Card #DVV2: the post-turn scratch sweep. Unledgered entries that appeared
+                    # in the temp dir or directly under $HOME during this turn are named to the
+                    # agent once, and the turn continues so it can ledger them (scratch_dir,
+                    # relay-scratch adopt), move them into the project or delete them. On the
+                    # second pass the turn closes. The sweep asks; it never deletes anything.
+                    if not ctx.get("swept"):
+                        try:
+                            unledgered = scratch.unledgered_created_since(turn_started)
+                        except Exception as exc:
+                            logs.event(_log, "scratch_sweep_failed", level_name="warning",
+                                       session=self.session_id, turn=turn_id,
+                                       error=f"{type(exc).__name__}: {exc}"[:200])
+                            unledgered = []
+                        note = scratch_sweep_turn(unledgered, ctx["swept"])
+                        if note is not None and steps < self.max_steps:
+                            ctx["swept"] = True
+                            logs.event(_log, "scratch_sweep", session=self.session_id,
+                                       turn=turn_id, entries=len(unledgered))
+                            add({"role": "user", "content": note, "relay_kind": "note"})
+                            continue
+                        if unledgered:
+                            logs.event(_log, "scratch_sweep_skipped", session=self.session_id,
+                                       turn=turn_id, entries=len(unledgered),
+                                       reason="step budget reached")
                     if self.track_requests:
                         self.requests.finish_turn(turn_id, True, self.todos.items)
                     self._end_turn(record, {"event": "done", "turn_id": turn_id,
@@ -4333,10 +4479,48 @@ class Agent:
             self.emit({"event": "plan_written", "path": str(path), "title": prepared.arguments["title"]})
             return {"path": str(path), "written": True}
         if prepared.name in ("write_file", "edit_file") and prepared.path is not None:
+            # Card #DVV2: Relay owns agent scratch — the write may not go to the system temp
+            # dir, a new top-level $HOME entry, or a deliverable outside the workspace. The
+            # ValueError becomes a refused tool result (guidance), not a crash.
+            refusal = scratch_write_refusal(prepared.path, self.executor.workspace.root)
+            if refusal is not None:
+                raise ValueError(refusal)
             old = Workspace.read_bytes(prepared.path) if prepared.existed else None
             self.checkpoints.record_before(turn, prepared.path, old)
             result = self.executor.execute(prepared)
             self.checkpoints.record_after(turn, prepared.path, result["sha256"])
+            return result
+        if prepared.name == "scratch_dir":
+            # Card #DVV2: ask and you shall receive a ledgered directory. created_by carries the
+            # session identity; `card` names the board card the directory serves.
+            row = scratch.new_dir(prepared.arguments["class"], prepared.arguments["purpose"],
+                                  session=self.session_id, model=self.config.model,
+                                  card=prepared.arguments.get("card", ""),
+                                  lifetime=prepared.arguments.get("lifetime"),
+                                  # keep must live in the project: this workspace is it.
+                                  project=str(self.executor.workspace.root)
+                                  if prepared.arguments["class"] == "keep" else None)
+            result = {"path": row.path, "id": row.id, "class": row.cls,
+                      "lifetime": row.lifetime, "state": row.state}
+            if row.cls == "keep":
+                result["note"] = ("keep: promote it into the project with scratch_release "
+                                  "(promote_to) when it is ready, or drop it — it is never "
+                                  "reclaimed silently.")
+            return result
+        if prepared.name == "scratch_release":
+            # Card #DVV2: end a ledgered directory. ValueError from release() is guidance —
+            # a keep row without promote_to or drop, or an install row — and the turn loop
+            # hands its message to the model as the tool result.
+            promote_to = prepared.arguments.get("promote_to")
+            if promote_to is not None:
+                promote_to = str(self.executor.workspace.resolve(promote_to, allow_missing=True))
+            row = scratch.release(prepared.arguments["ref"], promote_to=promote_to,
+                                  drop=prepared.arguments.get("drop", False))
+            result = {"path": row.path, "id": row.id, "class": row.cls, "state": row.state}
+            if row.state == "promoted":
+                result["note"] = "promoted: the tree now lives in the project."
+            elif row.state == "reclaimed":
+                result["note"] = "reclaimed: the directory is gone."
             return result
         if prepared.name == "load_skill":
             # What this turn has in context (#MSJ0): the board's claim and update tools

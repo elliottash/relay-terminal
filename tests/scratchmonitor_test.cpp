@@ -65,6 +65,48 @@ private Q_SLOTS:
     }
     void init() { QSettings().clear(); NotificationCenter::instance().clear(); }
 
+
+    // ----- the ledger (#DVV2) ------------------------------------------------------------------
+
+    void parsesTheLedgerTotalsAndWaitingLists() {
+        // NB: plain R"(...)" raw strings only — moc 5.15 cannot parse the R"x(...)x delimiter
+        // form, and emits an empty moc file that fails at link time with a missing vtable.
+        const QByteArray ledger =
+            R"({"ledger": "/home/u/.local/state/relay/scratch-ledger.jsonl", "live": 3,)"
+            R"( "rows": [],)"
+            R"( "by_class": {"scratch": {"rows": 2, "bytes": 2048}, "keep": {"rows": 1, "bytes": 4096}},)"
+            R"( "by_session": {"tok-42": {"rows": 3, "bytes": 6144}},)"
+            R"( "unpromoted_keep": [{"id": "sc1a2b", "purpose": "draft report", "path": "/p/.relay/work/draft-report-sc1a2b", "size": 4096}],)"
+            R"( "orphans": [{"id": "sc3c4d", "purpose": "adopted: predates the ledger - card DVV2 migration", "path": "/tmp/claude-1000/pf4k", "size": 22000000000}]})";
+        const Ledger parsed = parseLedger(ledger);
+        QVERIFY(parsed.valid);
+        QCOMPARE(parsed.live, 3);
+        QCOMPARE(parsed.byClass.size(), 2);
+        QCOMPARE(parsed.byClass.at(0).name, QStringLiteral("keep"));
+        QCOMPARE(parsed.byClass.at(0).total.bytes, qint64(4096));
+        QCOMPARE(parsed.byClass.at(1).name, QStringLiteral("scratch"));
+        QCOMPARE(parsed.bySession.at(0).name, QStringLiteral("tok-42"));
+        QCOMPARE(parsed.unpromotedKeep.size(), 1);
+        QCOMPARE(parsed.unpromotedKeep.at(0).purpose, QStringLiteral("draft report"));
+        QCOMPARE(parsed.orphans.size(), 1);
+        QCOMPARE(parsed.orphans.at(0).bytes, qint64(22000000000));
+        const QString summary = ledgerSummary(parsed);
+        QVERIFY(summary.contains(QStringLiteral("3 live rows")));
+        QVERIFY(summary.contains(QStringLiteral("keep 1")));
+        QVERIFY(summary.contains(QStringLiteral("unpromoted keep")));
+        QVERIFY(summary.contains(QStringLiteral("relay-scratch release")));
+        QVERIFY(summary.contains(QStringLiteral("orphan")));
+    }
+
+    void anInvalidOrEmptyLedgerSaysNothing() {
+        QVERIFY(!parseLedger("not json\n").valid);
+        QVERIFY(!parseLedger("").valid);
+        // a "rows" array without "live" is an older CLI's output: stand quiet, not broken
+        QVERIFY(!parseLedger(R"({"rows": []})").valid);
+        const Ledger empty;
+        QVERIFY(ledgerSummary(empty).isEmpty());
+    }
+
     // ----- the rules --------------------------------------------------------------------------
 
     void parsesTheVerdictAfterNoise() {

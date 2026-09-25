@@ -79,6 +79,55 @@ inline QString dataRoot() {
 }
 
 
+// Relay owns agent scratch (card #DVV2): three classes with fixed homes — disposable `scratch`
+// under the cache dir, `install` under the data dir, `keep` under <project>/.relay/work/ — and one
+// append-only ledger of every one of them under the state dir. An agent never picks these paths;
+// it asks, and these functions (mirrored by backend/relay_core/scratch.py — the two definitions
+// must not drift; docs/SCRATCH.md is the contract) decide where things live.
+namespace relay::scratchpaths {
+// $<override> wins, then $XDG_<home>, then the XDG default under $HOME; only when $HOME itself is
+// unset does it fall back to Qt's idea of the location, which is the only non-UNIX case that
+// reaches it.
+inline QString xdgBase(const char *override_, const char *xdgHome, const QString &homeDefault,
+                       QStandardPaths::StandardLocation qtFallback) {
+    QString set = qEnvironmentVariable(override_);
+    if (!set.isEmpty()) return QDir(set).absolutePath();
+    set = qEnvironmentVariable(xdgHome);
+    if (!set.isEmpty()) return QDir(set).absolutePath();
+    const QString home = qEnvironmentVariable("HOME");
+    if (!home.isEmpty()) return QDir(home).filePath(homeDefault);
+    return QStandardPaths::writableLocation(qtFallback);
+}
+// Class `scratch`: disposable trees, per session. The cache dir, not /tmp — it survives a reboot
+// mid-task, it is per-user, and cleaners and backup tools already know to skip it.
+inline QString scratchRoot() {
+    return QDir(xdgBase("RELAY_SCRATCH_HOME", "XDG_CACHE_HOME", QStringLiteral(".cache"),
+                        QStandardPaths::GenericCacheLocation))
+        .filePath(QStringLiteral("relay/scratch"));
+}
+// Class `install`: tools an agent installs for the user. Never a new top-level folder in $HOME.
+inline QString toolsRoot() {
+    return QDir(xdgBase("RELAY_TOOLS_HOME", "XDG_DATA_HOME", QStringLiteral(".local/share"),
+                        QStandardPaths::GenericDataLocation))
+        .filePath(QStringLiteral("relay/tools"));
+}
+// The ledger itself: one append-only JSONL row per scratch dir the user owns.
+inline QString ledgerPath() {
+    return QDir(xdgBase("RELAY_STATE_HOME", "XDG_STATE_HOME", QStringLiteral(".local/state"),
+                        QStandardPaths::AppDataLocation))
+        .filePath(QStringLiteral("relay/scratch-ledger.jsonl"));
+}
+// A session's own subroot — where TMPDIR points for its shells, so mktemp lands somewhere owned.
+inline QString sessionRoot(const QString &session) {
+    return QDir(scratchRoot()).filePath(session);
+}
+// Class `keep`: work that must outlive the task, in the project (git-ignored via /.relay/),
+// promoted into the repo on request. It is never scratch, and never in /tmp.
+inline QString keepRoot(const QString &project) {
+    return QDir(project).filePath(QStringLiteral(".relay/work"));
+}
+}  // namespace relay::scratchpaths
+
 // Case-insensitive subsequence score; 0 means no match. Contiguous and earlier matches score higher.
 inline int relayFuzzyScore(const QString &needle, const QString &haystack) {
     if (needle.isEmpty()) return 1;

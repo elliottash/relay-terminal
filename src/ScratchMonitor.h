@@ -6,6 +6,10 @@
 // now and then, off the GUI thread — a full check walks the tree and can take ten seconds — and
 // when the verdict is not ok it posts one entry to the bell with the numbers and, when something is
 // idle enough to go, a "Clean up" button that runs `relay-scratch gc --apply` and says what it freed.
+// Beside the check runs `relay-scratch ledger --json` (#DVV2): the append-only ledger's totals by
+// class and by session, its keep rows that were never promoted, and its orphans — adopted from
+// before the ledger existed and never removed automatically — join the same report. A ledger that
+// is empty, missing or unreadable changes nothing: the check's verdict stands alone.
 //
 // Cadence: the first tick comes a few minutes after launch, then every half hour; a tick runs the
 // check only when the last one, by any Relay process, is at least kCheckIntervalSecs old. The last
@@ -20,6 +24,7 @@
 // without a disk walk, a process or a clock.
 #include <QByteArray>
 #include <QDateTime>
+#include <QList>
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -73,6 +78,38 @@ bool offersCleanup(const Verdict &verdict);
 // `relay-scratch gc --apply` ends with "freed 1.0 GB in 3 entries"; that last non-empty line.
 QString gcSummary(const QByteArray &output);
 
+// What `relay-scratch ledger --json` prints (scratch.ledger_summary, #DVV2): the append-only
+// ledger behind the check — the live rows by class and by session, the keep rows that were never
+// promoted into their project, and the orphans adopted from before the ledger existed.
+struct LedgerTotal {
+    int rows = 0;
+    qint64 bytes = 0;
+};
+struct LedgerBucket {
+    QString name;          // a class ("scratch", "keep", "tools") or a session id
+    LedgerTotal total;
+};
+struct LedgerRow {
+    QString id, purpose, path;
+    qint64 bytes = 0;
+};
+struct Ledger {
+    bool valid = false;    // the JSON parsed and had "live" and "rows"
+    int live = 0;
+    QList<LedgerBucket> byClass, bySession;
+    QList<LedgerRow> unpromotedKeep, orphans;
+};
+
+// The last JSON object line of the output, like parseVerdict; invalid when the CLI is missing,
+// too old to know the verb, or prints garbage — the check's report then stands alone.
+Ledger parseLedger(const QByteArray &output);
+
+// The ledger part of the report: totals by class and by session, and the two lists that wait on
+// the user — unpromoted keep rows (promote them into their project or drop them) and orphans
+// (pre-ledger leftovers, never removed automatically). Empty when there is nothing to say, so a
+// clean ledger leaves a good verdict's notice exactly as short as it was.
+QString ledgerSummary(const Ledger &ledger);
+
 // RELAY_SCRATCH_MONITOR=0/false/off/no turns it off; otherwise the setting decides.
 bool enabled(const QString &envValue, bool settingOn);
 
@@ -96,8 +133,13 @@ public:
 
 private:
     enum class After { Notify, ReportOnCleanup };
+    // The check and the ledger run side by side (`runVerb` starts either); `collect` takes each
+    // one's output, and the report is composed when the second of the two is in — a slow ledger
+    // must not cost the notice its freshness, and a missing one must not cost it the check.
     void runCheck(After after);
-    void finishCheck(const QByteArray &output, After after);
+    void runVerb(QPointer<QProcess> &slot, const QStringList &verbs);
+    void collect(QProcess *process, const QByteArray &output);
+    void finishCheck(const QByteArray &checkOutput, const QByteArray &ledgerOutput, After after);
     void runCleanup();
     static State loadState();
     static void saveState(const State &state);
@@ -105,7 +147,9 @@ private:
     QString m_program;
     QStringList m_args;
     QTimer *m_timer = nullptr;
-    QPointer<QProcess> m_check, m_cleanup;
+    QPointer<QProcess> m_check, m_ledger, m_cleanup;
+    QByteArray m_checkOutput, m_ledgerOutput;  // whichever of the pair has finished
+    After m_after = After::Notify;             // what the check in flight is for
     QString m_noteId;          // the entry this process posted, amended by the clean-up
     QString m_cleanupSummary;  // "freed …", shown with the check that follows it
 };

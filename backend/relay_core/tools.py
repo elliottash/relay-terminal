@@ -304,6 +304,10 @@ def model_result(name: str, result) -> dict:
                             "the pattern, path or glob to see them."}
     return result
 
+# Card #DVV2: the lifetimes scratch rows understand (see relay_core/scratch.py). Checked at
+# prepare time so a bad lifetime is refused before any directory is made.
+SCRATCH_LIFETIME_RE = re.compile(r"^(task|session|until-promoted|user|days:\d+)$")
+
 TOOLS = [
     spec("run_command", "Run a non-interactive Bash command in the chosen workspace, or with host on the ssh host the Relay context names. NOT an OS sandbox. Does not share interactive shell variables or aliases. "
          "Waits up to timeout_seconds (default 30, at most 1800) for the command to finish. A command still running then is NOT killed: "
@@ -329,6 +333,32 @@ TOOLS = [
           "new_string": {"type": "string", "description": "The text to put in its place; empty deletes the old text."},
           "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match; default false."}},
          ["path", "old_string", "new_string"]),
+    spec("scratch_dir",
+         "Ask for a working directory instead of inventing a path (#DVV2): Relay creates it under a root "
+         "it owns, records it in the scratch ledger, and returns the path. Never invent temp paths, never "
+         "write to /tmp, and never create a new top-level folder under $HOME — ask for scratch instead. "
+         "class=scratch (default) is task working space reclaimed at session end; class=keep must live in "
+         "the project and be promoted into it later (scratch_release with promote_to) or dropped; "
+         "class=install is a persistent tool install root only the user removes.",
+         {"class": {"type": "string", "enum": ["scratch", "keep", "install"],
+                    "description": "scratch (default), keep, or install"},
+          "purpose": {"type": "string", "description": "One line: what this directory is for."},
+          "card": {"type": "string", "description": "Board card this directory serves, if any."},
+          "lifetime": {"type": "string",
+                       "description": "task | session | days:N | until-promoted | user; "
+                                      "default follows the class (scratch: session, keep: until-promoted, install: user)."}},
+         ["purpose"]),
+    spec("scratch_release",
+         "End a ledgered scratch directory (#DVV2): ref is the row id scratch_dir returned, or its path. "
+         "scratch is reclaimed (deleted safely). keep must be promoted into the project first "
+         "(promote_to: a path inside it — the tree is moved there and the row marked promoted) or "
+         "explicitly dropped with drop; it is never silently deleted. install is refused: the user "
+         "removes those. A refusal here is guidance, not a failure.",
+         {"ref": {"type": "string", "description": "Row id or path of the directory to end."},
+          "promote_to": {"type": "string",
+                         "description": "keep only: move the tree to this path in the project first."},
+          "drop": {"type": "boolean", "description": "keep only: delete it explicitly instead of promoting."}},
+         ["ref"]),
 ]
 
 # `host` (card #S5SH): offered only while the user's terminal is logged into a host over ssh (the
@@ -634,6 +664,35 @@ class ToolExecutor:
             payload, preview = self.terminal.prepare(args)
             self._approval(name, payload, subject=payload["command"])
             return Prepared(name, payload, preview)
+        if name == "scratch_dir":
+            cls = args.get("class", "scratch")
+            if cls not in ("scratch", "keep", "install"):
+                raise ValueError("class must be scratch, keep or install.")
+            purpose = self._text(args, "purpose", maximum=300)
+            if not purpose.strip() or "\n" in purpose:
+                raise ValueError("purpose must be one non-empty line.")
+            card = args.get("card", "")
+            if card is not None and not isinstance(card, str):
+                raise ValueError("card must be text.")
+            lifetime = args.get("lifetime")
+            if lifetime is not None and (not isinstance(lifetime, str)
+                                         or not SCRATCH_LIFETIME_RE.match(lifetime.strip())):
+                raise ValueError("lifetime must be task, session, days:N, until-promoted or user.")
+            args.update(purpose=purpose, card=(card or "").strip())
+            args["class"] = cls
+            if lifetime is not None:
+                args["lifetime"] = lifetime.strip()
+            return Prepared(name, args, f"SCRATCH DIR ({cls})\n\n{purpose}")
+        if name == "scratch_release":
+            ref = self._text(args, "ref", maximum=4096)
+            promote_to = args.get("promote_to")
+            if promote_to is not None and not isinstance(promote_to, str):
+                raise ValueError("promote_to must be text.")
+            drop = args.get("drop", False)
+            if not isinstance(drop, bool):
+                raise ValueError("drop must be true or false.")
+            args.update(ref=ref, drop=drop)
+            return Prepared(name, args, f"SCRATCH RELEASE\n\n{ref}")
         if name == "ask_user":
             if not self.can_ask:
                 raise ValueError("ask_user is not available here: you cannot reach the user.")

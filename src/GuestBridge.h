@@ -125,12 +125,15 @@ public:
     // The loopback port a claude's command line should carry, or 0 for "inject nothing". The
     // first call starts the sidecar and waits for its ready line; every later call is a field read
     // — unless the sidecar was stopped as idle (`guestLeft`), in which case it starts again.
-    int portFor(const QString &python) {
+    // `session` says whose scratch the sidecar works under (its TMPDIR, #DVV2): the calling pane
+    // passes its own token, so the sidecar shares the dir that pane's shell builds
+    // (PaneRuntime::startTerminal) — see `start` for the formula.
+    int portFor(const QString &python, const QString &session = QString()) {
         s_started = true;   // asked for: from here on a closing pane has something to say goodbye to
         m_idle.stop();      // a launch is under way: not idle
         if (running()) return m_port;
         if (m_failed) return 0;
-        start(python);
+        start(python, session);
         return m_port;
     }
 
@@ -260,7 +263,7 @@ private:
         m_port = 0;
     }
 
-    void start(const QString &python) {
+    void start(const QString &python, const QString &session = QString()) {
         const QString interpreter = python.isEmpty()
                                         ? relayPython()
                                         : python;
@@ -282,6 +285,21 @@ private:
             QStringLiteral("serve"), QStringLiteral("--state-dir"), m_stateDir,
             QStringLiteral("--relay-version"), QString::fromLatin1(RELAY_VERSION)};
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        // The sidecar is itself an agent process, so its temporary files belong in scratch Relay
+        // owns and the ledger can see (#DVV2): TMPDIR = <scratchRoot()>/<session>/tmp, the same
+        // formula the backend builds a session's scratch root — and its TMPDIR row — with
+        // (relay::scratchpaths / backend/relay_core/scratch.py session_root). A sidecar serves
+        // every pane and has no session id of its own, so the pane that asked for the port passes
+        // its token: the same token that pane's shell builds its TMPDIR from
+        // (PaneRuntime::startTerminal), so the two share one dir. If no pane is behind the call
+        // (no session), the bridge gets a session named after itself rather than an unowned /tmp.
+        const QString scratchTmp = QDir(relay::scratchpaths::sessionRoot(
+            session.isEmpty() ? QStringLiteral("guest-bridge") : session))
+                .filePath(QStringLiteral("tmp"));
+        if (QDir().mkpath(scratchTmp))
+            environment.insert(QStringLiteral("TMPDIR"), scratchTmp);
+        else
+            relay::log::error(QStringLiteral("guest_bridge_tmpdir_failed path=%1").arg(scratchTmp));
         // The sidecar is `relay_core.guest_bridge`, which lives in the tree's backend/ (or the
         // install's copy of it); the pane's own RELAY_DATA_DIR is what names that root. The data
         // root itself goes on the path too, because the sidecar's WebSocket *is* `remote/ws.py`

@@ -10280,6 +10280,11 @@ private:
         // Passed per process rather than with qputenv, which would leak between panes.
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         environment.insert(QStringLiteral("RELAY_PANE_ID"), paneLogId());
+        // This pane's token, per process (never qputenv, which leaks between panes): the
+        // worker keys its scratch (#DVV2) on it, so the pane's shell, its guest CLIs and the
+        // worker's own run_command children share one ledgered TMPDIR under
+        // relay::scratchpaths::sessionRoot(m_token).
+        environment.insert(QStringLiteral("RELAY_SESSION_TOKEN"), m_token);
         environment.insert(QStringLiteral("RELAY_LOG_LEVEL"), relay::log::levelName(relay::log::level()));
         // Programs the agent starts — tmux, Chrome — move themselves into their own app.slice
         // scopes over the session bus (StartTransientUnit), escaping this pane's memory cap

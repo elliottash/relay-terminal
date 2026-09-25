@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""relay-scratch: what agent scratch takes on disk, and reclaiming it (card #SZHQ).
+"""relay-scratch: what agent scratch takes on disk, and reclaiming it (cards #SZHQ, #DVV2).
 
   relay-scratch               report, biggest first
   relay-scratch gc            what gc would remove (dry run)
   relay-scratch gc --apply    remove idle entries no live process uses
   relay-scratch check         exit 1 with one line when over budget or low on space
+  relay-scratch new           allocate a ledgered scratch dir (--class scratch|keep|install,
+                              --purpose "...", --card, --lifetime, --project for keep)
+  relay-scratch release REF   end a ledgered dir: reclaim (scratch), --promote-to into the
+                              project (keep) or --drop; install is refused
+  relay-scratch adopt         ledger the pre-ledger backlog as orphans (dry run; --apply writes)
+  relay-scratch ledger        the ledger by class and session (--json for machine reading)
 
+Agents get the same thing in-band: the scratch_dir and scratch_release tools (card #DVV2).
 The logic lives in backend/relay_core/scratch.py, which the app's own monitor also uses.
 """
 import sys
