@@ -316,7 +316,7 @@ class RemoteFileToolTests(unittest.TestCase):
                           "[BatchMode=yes]", "[-o]", "[ProxyCommand=false]", "[-o]", "[ConnectTimeout=10]", "[-T]", "[filly]", "[--]"])
         # A relative path: the script is run in the remote shell's directory, inside `sh -c`.
         self.assertIn(f"[cd {self.home} || exit 1\nsh -c '", printed)
-        self.assertIn('cat -- "$p" | head -c 131073', printed)
+        self.assertIn('cat -- "$p" | head -c 8388609', printed)   # MAX_LARGE_FILE + 1 (card #XG2G)
         self.assertNotIn("exit 78", printed)   # a read is not fenced to the remote home
 
     def test_an_absolute_path_needs_no_cd(self):
@@ -376,6 +376,21 @@ class RemoteFileToolTests(unittest.TestCase):
             self.call("read_file", path="link.md")
         with self.assertRaisesRegex(ValueError, "Only regular files"):
             self.call("read_file", path="sub")
+
+    def test_a_big_remote_file_reads_by_range_and_edits(self):
+        # Card #XG2G: the whole read above stays refused; a range and an edit do not need the cap.
+        text = "".join(f"row {n} = {n * 7};\n" for n in range(1, 40001))
+        (self.home / "big.txt").write_text(text)
+        self.assertGreater(len(text), 500 * 1024)
+        with self.assertRaisesRegex(ValueError, "128 KiB.*from_line/to_line"):
+            self.call("read_file", path="big.txt")
+        ranged = self.call("read_file", path="big.txt", from_line=30000, to_line=30001)
+        self.assertEqual(ranged["content"], "row 30000 = 210000;\nrow 30001 = 210007;\n")
+        self.assertEqual((ranged["total_lines"], ranged["host"]), (40000, "filly"))
+        result = self.call("edit_file", path="big.txt", old_string="row 30000 = 210000;",
+                           new_string="row 30000 = 0;")
+        self.assertEqual(result["replacements"], 1)
+        self.assertEqual((self.home / "big.txt").read_text(), text.replace("row 30000 = 210000;", "row 30000 = 0;"))
 
     def test_list_directory_has_the_local_shape(self):
         (self.home / "a.txt").write_text("a")

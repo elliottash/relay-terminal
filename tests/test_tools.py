@@ -233,6 +233,63 @@ class ToolTests(unittest.TestCase):
                 with self.assertRaises((ValueError, FileNotFoundError)):
                     self.tools.prepare('edit_file', {'path': path, 'old_string': 'root', 'new_string': 'relay'})
 
+    # ----- files past the 128 KiB whole-read limit (card #XG2G) -------------------------
+    def big_file(self):
+        """~500 KiB of numbered lines, the size class of src/Pane.h."""
+        path = self.root / 'big.h'
+        path.write_text(''.join(f'    int value_{n} = compute({n});\n' for n in range(1, 16001)))
+        path.chmod(0o640)
+        self.assertGreater(path.stat().st_size, 500 * 1024)
+        return path
+
+    def test_edit_file_works_on_a_file_past_128_kib(self):
+        path = self.big_file()
+        before = path.read_text()
+        prepared = self.tools.prepare('edit_file', {'path': 'big.h', 'old_string': 'value_9000 = compute(9000);',
+                                                    'new_string': 'value_9000 = compute(9001);'})
+        self.assertIn('-    int value_9000 = compute(9000);', prepared.preview)
+        self.assertLess(len(prepared.preview), 2000)                 # the diff, not the file
+        result = self.tools.execute(prepared)
+        self.assertEqual(result['replacements'], 1)
+        self.assertEqual(path.read_text(), before.replace('compute(9000);', 'compute(9001);'))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+
+    def test_a_whole_read_of_a_big_file_is_refused_and_names_the_range(self):
+        self.big_file()
+        with self.assertRaisesRegex(ValueError, '128 KiB.*from_line/to_line'):
+            self.tools.execute(self.tools.prepare('read_file', {'path': 'big.h'}))
+        result = self.tools.execute(self.tools.prepare('read_file', {'path': 'big.h', 'from_line': 12000,
+                                                                     'to_line': 12002}))
+        self.assertEqual(result['content'], ''.join(f'    int value_{n} = compute({n});\n' for n in (12000, 12001, 12002)))
+        self.assertEqual(result['total_lines'], 16000)
+
+    def test_files_past_8_mib_are_still_refused(self):
+        (self.root / 'huge.txt').write_bytes(b'x' * (8 * 1024 * 1024 + 1))
+        with self.assertRaisesRegex(ValueError, '8 MiB'):
+            self.tools.prepare('edit_file', {'path': 'huge.txt', 'old_string': 'x', 'new_string': 'y'})
+        with self.assertRaisesRegex(ValueError, '8 MiB'):
+            self.tools.execute(self.tools.prepare('read_file', {'path': 'huge.txt', 'from_line': 1, 'to_line': 1}))
+
+    def test_a_missed_edit_names_the_line_and_column_it_diverges_at(self):
+        self.big_file()
+        # The #234Z miss: one extra ')' in a line otherwise copied exactly.
+        old = '    int value_7000 = compute(7000);\n    int value_7001 = compute(7001));\n'
+        with self.assertRaises(ValueError) as caught:
+            self.tools.prepare('edit_file', {'path': 'big.h', 'old_string': old, 'new_string': 'x'})
+        message = str(caught.exception)
+        self.assertIn('old_string was not found in the file', message)
+        self.assertIn('line 7001, column 35: the file has ";\\n', message)
+        self.assertIn('old_string (its line 2) has ");\\n"', message)
+        # A difference before the anchor line is found walking back from it: indentation.
+        old = '\tint value_50 = compute(50);\n    int value_51_is_the_longest_line = compute(51);\n'
+        (self.root / 'small.h').write_text('    int value_50 = compute(50);\n    int value_51_is_the_longest_line = compute(51);\n')
+        with self.assertRaisesRegex(ValueError, r'line 1, column 4: the file has " int value_50.* has "\\tint'):
+            self.tools.prepare('edit_file', {'path': 'small.h', 'old_string': old, 'new_string': 'x'})
+        # Nothing to anchor on: today's message, no position.
+        with self.assertRaises(ValueError) as caught:
+            self.tools.prepare('edit_file', {'path': 'big.h', 'old_string': 'no such text anywhere', 'new_string': 'x'})
+        self.assertNotIn('closest match', str(caught.exception))
+
     def test_cancel_before_edit(self):
         path = self.root / 'code.txt'; path.write_text('alpha\n')
         prepared = self.tools.prepare('edit_file', {'path': 'code.txt', 'old_string': 'alpha', 'new_string': 'omega'})

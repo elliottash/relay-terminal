@@ -50,6 +50,12 @@ MAX_OUTPUT = 32768
 MODEL_RESULT_CHARS = 12_000
 COMMAND_HEAD_CHARS = 4_000    # a command's errors are at its end: the tail gets two thirds
 FILE_HEAD_CHARS = 8_000       # a file's imports and definitions are at its start: the head does
+# Card #XG2G: a whole-file read stops at MAX_FILE, but a ranged read_file and an edit_file only need
+# the file in memory, not in a preview, so they work up to this (src/Pane.h is ~1 MB).
+MAX_LARGE_FILE = 8 * 1024 * 1024
+WHOLE_READ_REFUSAL = ("File exceeds the 128 KiB preview/read limit for a whole-file read. Read it in parts "
+                      "with from_line/to_line; edit_file works on it as it is.")
+LARGE_FILE_REFUSAL = "File exceeds the 8 MiB limit of Relay's file tools."
 # run_command's timeout is how long the call waits before handing a still-running command back as
 # a job (relay_core/jobs.py), no longer when the command is killed. A request outside the range is
 # clamped, never refused: refusing cost a turn and printed an error for a harmless mistake.
@@ -321,14 +327,15 @@ TOOLS = [
           "background": {"type": "boolean", "description": "Start it and return after a moment with its job_id and first output, for servers and watchers."}},
          ["command"]),
     spec("read_file", "Read a UTF-8 text file inside the workspace. A long file comes back as its head and tail "
-         "with total_lines; read the rest with from_line/to_line.",
+         "with total_lines; read the rest with from_line/to_line. A whole-file read stops at 128 KiB; "
+         "with from_line/to_line a file up to 8 MiB can be read.",
          {"path": {"type": "string"}, "from_line": {"type": "integer", "minimum": 1},
           "to_line": {"type": "integer", "minimum": 1}}, ["path"]),
     spec("list_directory", "List at most 200 entries in a workspace directory.",
          {"path": {"type": "string"}}, ["path"]),
     spec("write_file", "Create a new UTF-8 file, or replace an existing one in full. To change part of a file that already exists, use edit_file instead: it does not resend the whole file. The diff is shown to the user. Fails if the file changes while the write is prepared.",
          {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
-    spec("edit_file", "Change an existing UTF-8 file by replacing an exact string. Preferred over write_file for editing a file you have read. old_string must match the file byte for byte, including whitespace and indentation, and must appear exactly once unless replace_all is true: include enough surrounding lines to make it unique. The diff is shown to the user. Fails if the file changes while the edit is prepared.",
+    spec("edit_file", "Change an existing UTF-8 file by replacing an exact string. Preferred over write_file for editing a file you have read. old_string must match the file byte for byte, including whitespace and indentation, and must appear exactly once unless replace_all is true: include enough surrounding lines to make it unique. The diff is shown to the user. Fails if the file changes while the edit is prepared. Works on files up to 8 MiB.",
          {"path": {"type": "string"}, "old_string": {"type": "string", "description": "The exact text to replace, copied from the file."},
           "new_string": {"type": "string", "description": "The text to put in its place; empty deletes the old text."},
           "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match; default false."}},
@@ -486,17 +493,19 @@ class Workspace:
         return resolved
 
     @staticmethod
-    def read_bytes(path: Path) -> bytes:
+    def read_bytes(path: Path, limit: int = MAX_LARGE_FILE) -> bytes:
+        """A regular UTF-8 text file of at most `limit` bytes. A whole-file read_file holds itself
+        to MAX_FILE in _read_result; edits and ranged reads need only this (card #XG2G)."""
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as handle:
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError("Only regular files are supported.")
-            if info.st_size > MAX_FILE:
-                raise ValueError("File exceeds the 128 KiB preview/read limit.")
-            data = handle.read(MAX_FILE + 1)
-        if len(data) > MAX_FILE or b"\x00" in data:
+            if info.st_size > limit:
+                raise ValueError(LARGE_FILE_REFUSAL if limit >= MAX_LARGE_FILE else WHOLE_READ_REFUSAL)
+            data = handle.read(limit + 1)
+        if len(data) > limit or b"\x00" in data:
             raise ValueError("File is too large or binary.")
         data.decode("utf-8")
         return data
@@ -890,9 +899,10 @@ class ToolExecutor:
         return remote_files.output(proc, session, path, wrong_type=wrong_type)
 
     def _remote_read(self, session: dict, path: str) -> bytes:
-        """A remote file's text, refused for the same reasons the local read refuses it."""
+        """A remote file's text, refused for the same reasons the local read refuses it. Read up to
+        MAX_LARGE_FILE, so a ranged read works; a whole read is held to MAX_FILE in _read_result."""
         data = self._remote_run(session, remote_files.read_script(
-            path, session.get("cwd") or None, cap=MAX_FILE + 1), path)
+            path, session.get("cwd") or None, cap=MAX_LARGE_FILE + 1), path)
         return _as_text(data)
 
     def _remote_before(self, session: dict, path: str) -> tuple[bytes, bool]:
@@ -900,7 +910,7 @@ class ToolExecutor:
 
         Contained like the write it belongs to, so a write outside the remote home is refused by the
         first call rather than after reading the file it may not touch."""
-        script = remote_files.read_script(path, session.get("cwd") or None, cap=MAX_FILE + 1, optional=True,
+        script = remote_files.read_script(path, session.get("cwd") or None, cap=MAX_LARGE_FILE + 1, optional=True,
                                           contain=True)
         cwd = session.get("cwd") or None
         if self.cancel.is_set():
@@ -956,14 +966,14 @@ class ToolExecutor:
         text = old.decode("utf-8")
         found = text.count(old_string)
         if found == 0:
-            raise ValueError("old_string was not found in the file. Read the file again and copy the exact text, "
-                             "including whitespace and indentation.")
+            raise ValueError("old_string was not found in the file. " + _closest_mismatch(text, old_string)
+                             + "Read the file again and copy the exact text, including whitespace and indentation.")
         if found > 1 and not replace_all:
             raise ValueError(f"old_string occurs {found} times in the file. Add surrounding lines so it matches "
                              f"once, or set replace_all: true to change all {found}.")
         content = text.replace(old_string, new_string) if replace_all else text.replace(old_string, new_string, 1)
-        if len(content.encode("utf-8")) > MAX_FILE:
-            raise ValueError("The edited file would exceed the 128 KiB limit.")
+        if len(content.encode("utf-8")) > MAX_LARGE_FILE:
+            raise ValueError("The edited file would exceed the 8 MiB limit of Relay's file tools.")
         return content, found if replace_all else 1
 
     def execute(self, prepared: Prepared) -> dict:
@@ -1119,13 +1129,17 @@ class ToolExecutor:
 
     def _read_result(self, args: dict, data: bytes, *, host: str | None = None) -> dict:
         """read_file's result: the whole file for the user, and for the model either the lines
-        asked for or, past MODEL_RESULT_CHARS, the head and tail and how to read the rest."""
+        asked for or, past MODEL_RESULT_CHARS, the head and tail and how to read the rest. Only a
+        whole-file read is held to MAX_FILE; a range of a bigger file is read (card #XG2G)."""
+        ranged = "from_line" in args or "to_line" in args
+        if not ranged and len(data) > MAX_FILE:
+            raise ValueError(WHOLE_READ_REFUSAL)
         text = data.decode("utf-8")
         result = ToolResult({"path": args["path"], "content": text, "sha256": hashlib.sha256(data).hexdigest()})
         if host:
             result["host"] = host
         lines = split_lines(text)
-        if "from_line" in args or "to_line" in args:
+        if ranged:
             chosen = line_range(lines, args.get("from_line", 1), args.get("to_line"), MODEL_RESULT_CHARS)
             result.update(chosen)
             result["content"] = result.pop("output")
@@ -1191,11 +1205,52 @@ def command_env() -> dict:
     return env
 
 
+def _closest_mismatch(text: str, old_string: str) -> str:
+    """Where a missed edit_file old_string first stops matching the file (card #XG2G), so the retry
+    is one step: its longest line that does occur anchors it, the match is grown back and forward
+    from there, and the first differing character is named by line and column. Empty when no line
+    of old_string is distinctive enough to anchor on."""
+    keys = sorted({line.strip() for line in old_string.split("\n") if len(line.strip()) >= 8}, key=len, reverse=True)
+    best = None
+    for key in keys[:8]:
+        at_old, at_file, seen = old_string.find(key), text.find(key), 0
+        while at_file != -1 and seen < 50:
+            back = 0
+            while back < at_old and at_file - back > 0 and text[at_file - back - 1] == old_string[at_old - back - 1]:
+                back += 1
+            ahead = at_old + len(key)
+            end = at_file + len(key)
+            forward = 0
+            while (ahead + forward < len(old_string) and end + forward < len(text)
+                   and text[end + forward] == old_string[ahead + forward]):
+                forward += 1
+            if back < at_old:
+                where = (at_file - back - 1, at_old - back - 1)
+            else:
+                where = (end + forward, ahead + forward)
+            if best is None or back + forward > best[0]:
+                best = (back + forward, *where)
+            seen += 1
+            at_file = text.find(key, at_file + 1)
+        if best is not None:
+            break
+    if best is None:
+        return ""
+    _, in_file, in_old = best
+    line = text.count("\n", 0, in_file) + 1
+    column = in_file - (text.rfind("\n", 0, in_file) + 1) + 1
+    old_line = old_string.count("\n", 0, in_old) + 1
+    has = json.dumps(text[in_file:in_file + 30]) if in_file < len(text) else "the end of the file"
+    wants = json.dumps(old_string[in_old:in_old + 30])
+    return (f"The closest match first differs at line {line}, column {column}: the file has {has} where "
+            f"old_string (its line {old_line}) has {wants}. ")
+
+
 def _as_text(data: bytes) -> bytes:
     """A file read from an ssh host, refused for the same reasons Workspace.read_bytes refuses a
     local one: too big, binary, or not UTF-8."""
-    if len(data) > MAX_FILE:
-        raise ValueError("File exceeds the 128 KiB preview/read limit.")
+    if len(data) > MAX_LARGE_FILE:
+        raise ValueError(LARGE_FILE_REFUSAL)
     if b"\x00" in data:
         raise ValueError("File is too large or binary.")
     try:

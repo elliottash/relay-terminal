@@ -155,6 +155,19 @@ class ExecutorBounds(unittest.TestCase):
         small = self.run_tool("read_file", path="big.txt", to_line=2)
         self.assertEqual(small["content"], "line 1\nline 2\n")
 
+    def test_a_range_of_a_file_past_128_kib_is_exact_and_bounded(self):
+        # Card #XG2G: a ranged read of a ~500 KiB file returns exactly those lines, and a range too
+        # big for the model's context stops at MODEL_RESULT_CHARS with where to go on.
+        text = "".join(f"line {n} " + "y" * 20 + "\n" for n in range(1, 18001))
+        (self.root / "big.txt").write_text(text)
+        self.assertGreater(len(text), 500 * 1024)
+        ranged = self.run_tool("read_file", path="big.txt", from_line=17001, to_line=17003)
+        self.assertEqual(ranged["content"], "".join(f"line {n} " + "y" * 20 + "\n" for n in (17001, 17002, 17003)))
+        wide = self.run_tool("read_file", path="big.txt", from_line=1, to_line=18000)
+        self.assertLessEqual(len(json.dumps(model_result("read_file", wide))), MODEL_JSON_CAP)
+        self.assertEqual(wide["content"], text[:len(wide["content"])])
+        self.assertLess(wide["next_from_line"], 18000)
+
     def test_search_matches_are_cut_for_the_model(self):
         result = {"matches": [f"src/a.py:{n}: " + "x" * 190 for n in range(80)], "count": 80,
                   "truncated": False, "files_scanned": 3}
