@@ -3103,6 +3103,21 @@ QJsonArray FilePreview::openBuffers(const QWidget *window) {
 void FilePreview::answerBufferRequestIn(const QWidget *window, const QJsonObject &request,
                                         const std::function<void(const QJsonObject &)> &reply) {
     const QString path = request.value(QStringLiteral("path")).toString();
+    // Every console of a tab hears every event of the tab's one worker, so a patch its agent sends
+    // reaches this window once per console (#PBZ4). The first answers; the rest are the same
+    // request again — same id, same text, within moments — and are dropped, or a change held for
+    // review would wait on the bar twice. Two workers minting the same id for the same text in
+    // the same five seconds is not a case that exists.
+    if (request.value(QStringLiteral("op")).toString() == QStringLiteral("patch")) {
+        static QHash<QByteArray, qint64> recent;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        for (auto it = recent.begin(); it != recent.end();) it = now - it.value() > 5000 ? recent.erase(it) : std::next(it);
+        const QByteArray key = QCryptographicHash::hash(
+            (request.value(QStringLiteral("id")).toString() + QChar(0x1f) + path + QChar(0x1f)
+             + request.value(QStringLiteral("content")).toString()).toUtf8(), QCryptographicHash::Sha1);
+        if (recent.contains(key)) return;
+        recent.insert(key, now);
+    }
     for (FilePreview *preview : livePreviewList()) {
         if (window && preview->window() != window) continue;
         if (preview->openBufferEntry().value(QStringLiteral("path")).toString() != path || path.isEmpty()) continue;

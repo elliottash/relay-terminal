@@ -445,6 +445,15 @@ private slots:
         QCOMPARE(preview.applyHeldAgentChanges(), 1);
         QCOMPARE(preview.text(), QStringLiteral("one\nTWO\nthree\nfour\nmy five\n"));
         QCOMPARE(preview.heldAgentChanges(), 0);
+        // The same request heard by a second console of the tab is not held a second time.
+        QJsonObject twice = request(sha256("one\nTWO\nthree\nfour\nmy five\n"), QStringLiteral("one\nTWO\nthree\nfour\nmy five\nsix\n"));
+        twice.insert(QStringLiteral("id"), QStringLiteral("br-dup"));
+        int answers = 0;
+        for (int console = 0; console < 2; ++console)
+            FilePreview::answerBufferRequestIn(nullptr, twice, [&](const QJsonObject &) { ++answers; });
+        QCOMPARE(answers, 1);
+        QCOMPARE(preview.heldAgentChanges(), 1);
+        preview.discardHeldAgentChanges();
         // Discard drops it, and the setting is remembered for this folder's next pane.
         QVERIFY(patch(preview, sha256(kBase), QStringLiteral("zero\n")).value(QStringLiteral("applied")) == QStringLiteral("held"));
         preview.discardHeldAgentChanges();
