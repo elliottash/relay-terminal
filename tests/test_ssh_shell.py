@@ -613,7 +613,8 @@ class RemoteScriptTests(unittest.TestCase):
                                      "precmd_functions+=(user_hook)\n")
         env = dict(self.env, ZDOTDIR=str(zdot))
         env.pop("PS1")
-        s = PtyShell(["zsh", "-i"], env)
+        # -d skips host-wide zshrc/compinit; this test supplies its own ZDOTDIR.
+        s = PtyShell(["zsh", "-d", "-i"], env)
         self.addCleanup(s.close)
         s.run("setopt nounset")
         out = s.run(typed_line(2))
@@ -665,7 +666,7 @@ class RemoteScriptTests(unittest.TestCase):
         (zdot / ".zshrc").write_text(f"PS1='RP> '\nHISTFILE={self.home}/zhist\n")
         os.chmod(self.home, 0o755)  # the remote side is this machine, but reached as a login
         s = PtyShell([ssh, "-t", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
-                      "localhost", f"ZDOTDIR={zdot} zsh -i"], self.env)
+                      "localhost", f"ZDOTDIR={zdot} zsh -d -i"], self.env)
         self.addCleanup(s.close)
         out = s.run(typed_line(3))
         self.assertIn(b"\x1b[3A\r\x1b[J", out)
@@ -712,7 +713,7 @@ class RemoteScriptTests(unittest.TestCase):
         (zdot / ".zshrc").write_text("PS1='RP> '\n")
         env = dict(self.env, ZDOTDIR=str(zdot), TMUX=f"{self.home}/no-such-tmux,1,0")
         env.pop("PS1")
-        s = PtyShell(["zsh", "-i"], env)
+        s = PtyShell(["zsh", "-d", "-i"], env)
         self.addCleanup(s.close)
         out = s.run(typed_line(2))
         self.assertIn(dcs(b"133;A") + b"RP> \r\n\r\n" + dcs(b"133;B"), out)

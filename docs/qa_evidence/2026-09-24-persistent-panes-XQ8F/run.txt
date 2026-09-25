@@ -1,0 +1,7 @@
+profile=/tmp/relay-xq8f-profile-soErCL
+binary=/tmp/claude-1000/land/verify-slots/relay-terminal-1006c7a3-0/build/relay
+first=relay-807d16c6
+second=relay-04682a88
+first-cwd=/tmp
+second-cwd=/tmp
+program-after-restart=top

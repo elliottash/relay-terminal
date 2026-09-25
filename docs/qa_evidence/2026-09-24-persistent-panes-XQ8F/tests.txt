@@ -1,0 +1,41 @@
+UTC 2026-09-25 01:22:07
+$ ctest --test-dir build -R ... --output-on-failure
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start  16: keymap
+1/5 Test  #16: keymap ...........................   Passed    0.12 sec
+    Start  63: backends
+2/5 Test  #63: backends .........................   Passed    0.01 sec
+    Start  76: remotesession
+3/5 Test  #76: remotesession ....................   Passed    0.02 sec
+    Start  78: sshconfig
+4/5 Test  #78: sshconfig ........................   Passed    0.01 sec
+    Start 106: relay-engine-tests
+5/5 Test #106: relay-engine-tests ...............   Passed   32.67 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Label Time Summary:
+engine    =  32.67 sec*proc (1 test)
+
+Total Test time (real) =  32.83 sec
+$ python3 tests/test_ssh_shell.py
+.........................................
+----------------------------------------------------------------------
+Ran 41 tests in 6.243s
+
+OK
+$ python3 tests/test_remote_marks.py
+test_bash_marks_stay_bare_without_relay_m (__main__.RemoteMarksTest.test_bash_marks_stay_bare_without_relay_m) ... ok
+test_bash_wraps_marks_in_osc52_under_relay_m (__main__.RemoteMarksTest.test_bash_wraps_marks_in_osc52_under_relay_m) ... ok
+test_mosh_delivers_osc52_and_drops_osc133 (__main__.RemoteMarksTest.test_mosh_delivers_osc52_and_drops_osc133)
+End to end: a real mosh login forwards OSC 52 to the client and drops OSC 133. ... ok
+test_typed_line_carries_relay_m_inside_the_payload (__main__.RemoteMarksTest.test_typed_line_carries_relay_m_inside_the_payload) ... ok
+test_zsh_marks_stay_bare_without_relay_m (__main__.RemoteMarksTest.test_zsh_marks_stay_bare_without_relay_m) ... ok
+test_zsh_wraps_marks_in_osc52_under_relay_m (__main__.RemoteMarksTest.test_zsh_wraps_marks_in_osc52_under_relay_m) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 8.321s
+
+OK
+PASS: all selected checks
