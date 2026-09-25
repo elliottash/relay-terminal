@@ -44,6 +44,20 @@ class LogFileTests(unittest.TestCase):
     def text(self, name='worker.log'):
         return (self.dir / name).read_text(encoding='utf-8')
 
+    def test_routing_draws_from_a_test_go_only_to_a_private_data_directory(self):
+        """A test writes draws under its own XDG_DATA_HOME, never into the real profile's file."""
+        with mock.patch.dict(os.environ, {'RELAY_LOG_LEVEL': 'info'}):
+            logs.routing_draw({'surface': 'probe'})
+        self.assertIn('"surface":"probe"', self.text(logs.ROUTING_DRAWS))
+        fake_home = Path(self.temp.name) / 'home'
+        with mock.patch.dict(os.environ, {'XDG_DATA_HOME': str(fake_home / '.local/share'),
+                                          'RELAY_LOG_ORIGIN': 'test', 'RELAY_LOG_LEVEL': 'info'}), \
+                mock.patch.object(Path, 'home', return_value=fake_home):
+            logs.routing_draw({'surface': 'leak'})
+            os.environ.pop('XDG_DATA_HOME')
+            logs.routing_draw({'surface': 'leak'})
+        self.assertFalse((fake_home / '.local/share/relay/logs' / logs.ROUTING_DRAWS).exists())
+
     def test_a_fatal_signal_leaves_a_python_traceback(self):
         """A worker that dies of SIGSEGV writes its stacks to worker-faults.log.
 

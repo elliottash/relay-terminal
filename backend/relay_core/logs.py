@@ -328,10 +328,13 @@ def routing_draw(record: dict) -> None:
     names and quota numbers only — never prompts. Logging `off` writes nothing."""
     if level() == "off":
         return
-    # A unit test that did not isolate itself (scripts/test.sh does, with origin=test and its own
-    # data directory) must not put synthetic draws into the live file an evaluation reads.
-    if "unittest" in sys.modules and os.environ.get("RELAY_LOG_ORIGIN") != "test":
-        return
+    # A test must not put synthetic draws into the live file an evaluation reads. Origin=test alone
+    # is not isolation: on 2026-09-24 a run exported it without its own data directory and wrote
+    # twelve draws into the real profile. A test process writes only under a private XDG_DATA_HOME.
+    if "unittest" in sys.modules or os.environ.get("RELAY_LOG_ORIGIN") == "test":
+        data_home = os.environ.get("XDG_DATA_HOME", "")
+        if not data_home or Path(data_home).expanduser().resolve() == (Path.home() / ".local/share").resolve():
+            return
     line = {"v": 1, "ts": round(time.time(), 3), "component": "worker",
             "pane": _state.get("pane") or os.environ.get("RELAY_PANE_ID") or "", **context(), **record}
     try:
