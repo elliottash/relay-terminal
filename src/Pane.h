@@ -5377,8 +5377,15 @@ private:
             // A middle click closes the pane — the tab bar's gesture, offered on a header too.
             // Only watched here: it acts on the release, and never while renaming, when middle
             // click is the paste into the title being edited.
+            // Nothing on the header accepts a middle press, so Qt re-sends it up the parents — to
+            // this pane and past it — and each arrival passes through here. Those later arrivals
+            // are the same press, not a new one elsewhere, and must not clear the mark (#5Z6N).
             if (mouse->button() == Qt::MiddleButton) {
-                m_headerMiddlePressed = onHeader(object) && !(m_titleEdit && m_titleEdit->isVisible());
+                auto *widget = qobject_cast<QWidget *>(object);
+                if (onHeader(object))
+                    m_headerMiddlePressed = !(m_titleEdit && m_titleEdit->isVisible());
+                else if (!(widget && m_headerWidget && widget->isAncestorOf(m_headerWidget)))
+                    m_headerMiddlePressed = false;
                 return false;
             }
             if (mouse->button() != Qt::LeftButton || !onHeader(object)) return false;

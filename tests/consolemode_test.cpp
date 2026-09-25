@@ -29,6 +29,7 @@
 #include <QTemporaryDir>
 #include <QJsonObject>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QLabel>
 #include <QLayout>
 #include <QPlainTextEdit>
@@ -163,6 +164,40 @@ void aTerminalPaneIsUnchanged()
     CHECK(row != nullptr);
     CHECK(!row->isVisibleTo(&pane));
     }
+
+    // A middle click on a pane's header closes it (#5Z6N). Nothing on the header takes a middle
+    // press, so Qt carries it on up to the pane and its window; that must not undo the header's
+    // claim on it, and a middle click on the terminal below closes nothing.
+void aMiddleClickOnTheHeaderClosesThePane()
+{
+    QWidget window;
+    window.resize(900, 600);
+    auto *pane = new Pane(home->path(), home->path(), true);
+    pane->setParent(&window);
+    pane->setGeometry(0, 0, 900, 600);
+    window.show();
+    QApplication::processEvents();
+    int closes = 0;
+    pane->onHeaderClose = [&closes] { ++closes; };
+    QWidget *header = pane->headerWidget();
+    CHECK(header != nullptr && header->isVisible());
+    if (!header) return;
+    auto *title = header->findChild<QLabel *>();
+    QWidget *target = title && title->isVisible() ? title : header;
+    const auto click = [](QWidget *widget) {
+        const QPoint at = widget->rect().center();
+        const QPoint global = widget->mapToGlobal(at);
+        QMouseEvent press(QEvent::MouseButtonPress, at, global, Qt::MiddleButton, Qt::MiddleButton, Qt::NoModifier);
+        QApplication::sendEvent(widget, &press);
+        QMouseEvent release(QEvent::MouseButtonRelease, at, global, Qt::MiddleButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(widget, &release);
+    };
+    click(target);
+    CHECK_EQ(closes, 1);
+    closes = 0;
+    click(pane);
+    CHECK_EQ(closes, 0);
+}
 
     // The row above the box is the context's, left to right, each button wearing its letter, and
     // a letter two actions claim is refused rather than answered twice (#PBX1).
@@ -1767,6 +1802,7 @@ int main(int argc, char **argv)
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
     cases::aTerminalPaneIsUnchanged();
+    cases::aMiddleClickOnTheHeaderClosesThePane();
     cases::relayingStatusSitsOutsideEveryPromptFrame();
     cases::theActionRowIsBuiltFromTheContext();
     cases::aChangedContextRebuildsTheRow();
