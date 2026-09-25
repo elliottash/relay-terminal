@@ -728,7 +728,8 @@ class Selection(LandCase):
         out = self.land("commit", "alice", "-m", "x", "--exclude-hunk", "f.txt:9", expect=1)
         self.assertIn("no hunk 9", out.stderr)
         out = self.land("commit", "alice", "-m", "x", "--exclude-hunk", "f.txt", expect=1)
-        self.assertIn("<path>:<hunks>", out.stderr)
+        self.assertIn("name the hunks positionally", out.stderr)
+        self.assertIn("--by", out.stderr)
         out = self.land("commit", "alice", "-m", "x", "--only-hunk", "f.txt:1",
                         "--exclude-hunk", "f.txt:1", expect=1)
         self.assertIn("pick one form per path", out.stderr)
@@ -1576,6 +1577,347 @@ class Safety(LandCase):
         source = LAND.read_text(encoding="utf-8")
         self.assertNotIn("os.environ[\"GIT_INDEX_FILE\"]", source)
         self.assertIn("GIT_ENV_STRIP", source)
+
+
+class UncommittedStatus(LandCase):
+    def test_status_lists_auto_and_manual_sessions_of_a_token(self):
+        self.land("begin", "manual", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        self.land("begin", "auto-claim", "big.txt", "--auto",
+                  env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        edit_line(self.repo / "big.txt", 9, "NINE")
+        edit_line(self.repo / "big.txt", 40, "FORTY")
+        out = self.land("status", "--token", "tok-a", "--json")
+        payload = json.loads(out.stdout)
+        self.assertEqual(payload["token"], "tok-a")
+        self.assertEqual(sorted(s["session"] for s in payload["sessions"]),
+                         ["auto-claim", "manual"])
+        by_name = {s["session"]: s for s in payload["sessions"]}
+        self.assertTrue(by_name["auto-claim"]["auto"])
+        self.assertFalse(by_name["manual"]["auto"])
+        self.assertEqual(by_name["manual"]["claims"],
+                         [{"path": "f.txt", "hunks": 1, "snapshot_age_minutes": 0.0}])
+        self.assertEqual(by_name["auto-claim"]["claims"][0]["path"], "big.txt")
+        self.assertEqual(by_name["auto-claim"]["claims"][0]["hunks"], 2)
+        self.assertEqual(payload["uncommitted"], 3)
+        # Readable text says the same things.
+        text = self.land("status", "--token", "tok-a").stdout
+        self.assertIn("manual", text)
+        self.assertIn("(auto)", text)
+        self.assertIn("3 uncommitted hunk(s)", text)
+
+    def test_status_of_a_token_with_nothing_prints_an_empty_list(self):
+        self.land("begin", "mine", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        out = self.land("status", "--token", "tok-other", "--json")
+        self.assertEqual(json.loads(out.stdout),
+                         {"token": "tok-other", "sessions": [], "uncommitted": 0})
+        self.assertEqual(self.land("status", "--token", "tok-other", expect=0).returncode, 0)
+
+    def test_status_counts_a_base_path_and_skips_other_repos(self):
+        self.land("begin", "mine", "f.txt", "--base", "HEAD",
+                  env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 1, "ONE")
+        payload = json.loads(self.land("status", "--token", "tok-a", "--json").stdout)
+        self.assertEqual(payload["sessions"][0]["claims"][0]["hunks"], 1)
+        self.assertEqual(payload["uncommitted"], 1)
+
+
+class BoardSync(LandCase):
+    def write_board_file(self, rel=".board/features/x.md", text="# x\n"):
+        write(self.repo / rel, text)
+        return rel
+
+    def test_lands_board_paths_whole_without_a_begin(self):
+        rel = self.write_board_file(".board/threads/ab12.md", "hello\n")
+        out = self.land("board-sync", "tok-a", "-m", "#AB12 thread", rel)
+        sha = out.stdout.strip().splitlines()[-1]
+        self.assertEqual(self.tip_text(rel), "hello\n")
+        self.assertIn("#AB12 thread",
+                      git(self.repo, "log", "-1", "--format=%B", sha).stdout)
+        self.assertNotIn("materialised", out.stdout)   # no build gate, ever
+
+    def test_needs_no_claim_and_leaves_claims_untouched(self):
+        self.land("begin", "mine", "f.txt")
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        registry_before = (self.land_root / "registry.json").read_text(encoding="utf-8")
+        self.write_board_file()
+        self.land("board-sync", "tok-a", "-m", "board", ".board/features/x.md")
+        self.assertEqual((self.land_root / "registry.json").read_text(encoding="utf-8"),
+                         registry_before)
+        self.assertIn("f.txt", self.porcelain())       # the claim's edit is still uncommitted
+
+    def test_refuses_a_non_board_path_and_the_intake_files(self):
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        out = self.land("board-sync", "tok-a", "-m", "x", "f.txt", expect=1)
+        self.assertIn("only paths under .board/", out.stderr)
+        out = self.land("board-sync", "tok-a", "-m", "x", ".board/bug_intake.txt", expect=1)
+        self.assertIn("never lands", out.stderr)
+        self.assertEqual(self.tip(), self.tip())       # nothing moved
+
+    def test_says_nothing_to_land_when_the_paths_match_the_tip(self):
+        rel = self.write_board_file()
+        first = self.land("board-sync", "tok-a", "-m", "board", rel)
+        self.assertNotIn("nothing to land", first.stdout)
+        out = self.land("board-sync", "tok-a", "-m", "board", rel)
+        self.assertIn("nothing to land", out.stdout)
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.count("\n"), 1)    # just the nothing-to-land line
+
+    def test_never_runs_the_verify_build_for_cxx_looking_paths(self):
+        slots = self.land_root / "verify-slots"
+        self.write_board_file(".board/features/patch.cpp", "int main() { return 0; }\n")
+        out = self.land("board-sync", "tok-a", "-m", "board", ".board/features/patch.cpp")
+        self.assertNotIn("materialised", out.stdout)
+        self.assertFalse(slots.exists(),
+                         "board-sync must never touch a verify slot: %s exists" % slots)
+        self.assertIn("int main", self.tip_text(".board/features/patch.cpp"))
+
+    def test_lands_whole_even_when_the_tip_has_an_older_version(self):
+        rel = ".board/features/y.md"
+        self.write_board_file(rel, "old\n")
+        self.land("board-sync", "tok-a", "-m", "board", rel)
+        write(self.repo / rel, "old\nnew\n")
+        self.land("board-sync", "tok-a", "-m", "board", rel)
+        self.assertEqual(self.tip_text(rel), "old\nnew\n")
+
+    def test_prints_the_new_sha_and_exits_zero(self):
+        rel = self.write_board_file()
+        out = self.land("board-sync", "tok-a", "-m", "board", rel)
+        self.assertEqual(self.tip_text(rel), "# x\n")
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout.strip(), self.tip())
+
+
+class CancelledOwner(LandCase):
+    def marker(self, owner="thread-1"):
+        markers = self.land_root / "cancelled"
+        markers.mkdir(parents=True, exist_ok=True)
+        path = markers / owner
+        path.write_text(json.dumps({"thread": owner, "at": int(time.time()),
+                                    "by": "pane-x"}) + "\n", encoding="utf-8")
+        return path
+
+    def test_begin_records_owner_and_card(self):
+        self.land("begin", "mine", "f.txt", "--owner", "thread-1", "--card", "#FYEY",
+                  env={"RELAY_SESSION_TOKEN": "tok-a"})
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        entry = registry["sessions"]["mine"]
+        self.assertEqual(entry["owner"], "thread-1")
+        self.assertEqual(entry["card"], "#FYEY")
+        who = self.land("who").stdout
+        self.assertIn("card #FYEY", who)
+        self.assertIn("owner thread-1", who)
+
+    def test_a_cancelled_marker_refuses_commit_and_try(self):
+        self.land("begin", "mine", "f.txt", "--owner", "thread-1")
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        self.marker("thread-1")
+        out = self.land("commit", "mine", "-m", "x", expect=1)
+        self.assertIn("cancelled", out.stderr)
+        self.assertEqual(self.tip_text("f.txt"), TEN_LINES)
+        out = self.land("try", "mine", expect=1)
+        self.assertIn("cancelled", out.stderr)
+
+    def test_without_a_marker_commit_behaves_as_before(self):
+        self.land("begin", "mine", "f.txt", "--owner", "thread-1")
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        out = self.land("commit", "mine", "-m", "x")
+        self.assertIn("FIRST", self.tip_text("f.txt"))
+
+
+class Reap(LandCase):
+    def test_reap_keeps_a_dirty_session_notes_its_card_and_abandons_a_clean_one(self):
+        self.land("begin", "dirty", "f.txt", "--card", "#FYEY",
+                  env={"RELAY_SESSION_TOKEN": "tok-a"})
+        self.land("begin", "clean", "big.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        self.land("begin", "other", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-b"})
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        edit_line(self.repo / "f.txt", 10, "TENTH")
+        out = self.land("reap", "--token", "tok-a", "--card", "#FYEY")
+        self.assertIn("kept dirty", out.stdout)
+        self.assertIn("1 abandoned for token tok-a", out.stdout)
+        self.assertIn("abandoned", out.stdout)
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        self.assertNotIn("clean", registry["sessions"])
+        self.assertFalse((self.land_root / "clean").exists())
+        self.assertIn("reaped", registry["sessions"]["dirty"])
+        meta = json.loads((self.land_root / "dirty" / "meta.json").read_text(encoding="utf-8"))
+        self.assertIn("reaped", meta)
+        # Another token's session is untouched.
+        self.assertIn("other", registry["sessions"])
+        self.assertNotIn("reaped", registry["sessions"]["other"])
+        # The card thread got the note, in the take-foreign format.
+        thread = (self.repo / ".board/threads/FYEY.md").read_text(encoding="utf-8")
+        self.assertIn("<!-- relay:entry ", thread)
+        self.assertIn("author=land.py kind=note", thread)
+        self.assertIn("2 hunk(s) uncommitted in f.txt", thread)
+        self.assertIn("resume with `land.py orphans`", thread)
+
+    def test_reap_finds_the_card_in_contact_when_none_is_given(self):
+        self.land("begin", "dirty", "f.txt",
+                  env={"RELAY_SESSION_TOKEN": "tok-a"})
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        registry["sessions"]["dirty"]["contact"] = "subagent x, card #234Z"
+        (self.land_root / "registry.json").write_text(
+            json.dumps(registry), encoding="utf-8")
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        self.land("reap", "--token", "tok-a")
+        thread = (self.repo / ".board/threads/234Z.md").read_text(encoding="utf-8")
+        self.assertIn("1 hunk(s) uncommitted", thread)
+
+    def test_reap_never_touches_another_token_and_exits_zero_on_nothing(self):
+        self.land("begin", "mine", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        out = self.land("reap", "--token", "tok-other")
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("0 session(s) kept", out.stdout)
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        self.assertIn("mine", registry["sessions"])
+        self.assertNotIn("reaped", registry["sessions"]["mine"])
+
+    def test_reap_is_not_keyed_on_idle_time(self):
+        # A session of the token is reaped however fresh it is: no IDLE_HOURS wait, and a
+        # clean one is abandoned however fresh it is -- `gc`, not `reap`, keys on idle time.
+        self.land("begin", "dirty", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        self.land("begin", "fresh-and-clean", "big.txt",
+                  env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        out = self.land("reap", "--token", "tok-a")
+        self.assertIn("1 session(s) kept, 1 abandoned", out.stdout)
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        self.assertIn("reaped", registry["sessions"]["dirty"])
+        self.assertNotIn("fresh-and-clean", registry["sessions"])
+
+
+class Orphans(LandCase):
+    def make_orphan(self, session="dirty", card="#FYEY", token="tok-a", owner=None):
+        args = ["begin", session, "f.txt"]
+        if card:
+            args += ["--card", card]
+        if owner:
+            args += ["--owner", owner]
+        self.land(*args, env={"RELAY_SESSION_TOKEN": token})
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        self.land("reap", "--token", token, "--card", card or "#0000")
+
+    def test_orphans_groups_reaped_and_stale_sessions_by_card(self):
+        self.make_orphan("dirty", card="#FYEY")
+        # A stale session with no card at all.
+        self.land("begin", "stale", "big.txt")
+        edit_line(self.repo / "big.txt", 9, "NINE")
+        self.age_session("stale", 48)
+        out = self.land("orphans")
+        self.assertIn("#FYEY", out.stdout)
+        self.assertIn("dirty", out.stdout)
+        self.assertIn("no card", out.stdout)
+        self.assertIn("stale", out.stdout)
+        self.assertIn("f.txt (1 hunk(s), snapshot", out.stdout)
+        # A reaped session that landed since is not an orphan.
+        payload = json.loads(self.land("orphans", "--json").stdout)
+        cards = {g["card"]: g for g in payload["cards"]}
+        self.assertEqual(cards["#FYEY"]["sessions"][0]["session"], "dirty")
+        self.assertEqual(cards["#FYEY"]["sessions"][0]["token"], "tok-a")
+        self.assertEqual(cards["#FYEY"]["sessions"][0]["claims"][0]["path"], "f.txt")
+        self.assertEqual(cards["#FYEY"]["sessions"][0]["claims"][0]["hunks"], 1)
+        self.assertEqual(cards[""]["sessions"][0]["session"], "stale")
+        self.assertEqual(sorted(cards), ["", "#FYEY"])
+
+    def test_orphans_shows_owner_and_pane(self):
+        self.make_orphan("dirty", card="#FYEY", owner="thread-9")
+        payload = json.loads(self.land("orphans", "--json").stdout)
+        session = payload["cards"][0]["sessions"][0]
+        self.assertEqual(session["owner"], "thread-9")
+
+    def test_orphans_with_nothing_reports_quietly(self):
+        out = self.land("orphans")
+        self.assertIn("no orphaned uncommitted work", out.stdout)
+        self.assertEqual(json.loads(self.land("orphans", "--json").stdout), {"cards": []})
+
+    def test_who_and_doctor_fold_reaped_sessions_into_one_line(self):
+        self.make_orphan("dirty", card="#FYEY")
+        who = self.land("who").stdout
+        self.assertIn("1 reaped session(s) with uncommitted hunks", who)
+        self.assertNotIn("dirty —", who)
+        doctor = self.land("doctor", expect=2).stdout
+        self.assertIn("1 reaped session(s) with uncommitted hunks", doctor)
+
+
+class ByHunks(LandCase):
+    def journal_edit(self, line_number, pane, card, token="tok-a"):
+        before = self.repo.joinpath("f.txt").read_bytes()
+        edit_line(self.repo / "f.txt", line_number, "JOURNALED %d" % line_number)
+        after = self.repo.joinpath("f.txt").read_bytes()
+        self.journal_write(token, "f.txt", before, after, pane=pane, card=card)
+        # Rewind the working copy to the pre-edit state; the session re-applies both edits
+        # below, so the journal describes work that is in the tree but not yet committed.
+        self.repo.joinpath("f.txt").write_bytes(before)
+
+    def second_edit(self):
+        """A second, unrelated edit: an appended line, far enough from line 3 that the
+        working copy holds two separate hunks and the journal hunk's number has moved."""
+        with (self.repo / "f.txt").open("a", encoding="utf-8") as fh:
+            fh.write("ALICE APPENDED\n")
+
+    def test_only_hunk_by_pane_selects_through_a_shift(self):
+        self.journal_edit(3, pane="3f4a20ad", card="#234Z")
+        self.land("begin", "alice", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 3, "JOURNALED 3")
+        self.second_edit()
+        out = self.land("commit", "alice", "-m", "x", "--only-hunk", "f.txt",
+                        "--by", "3f4a20ad")
+        tip = self.tip_text("f.txt")
+        self.assertIn("JOURNALED 3", tip)
+        self.assertNotIn("ALICE APPENDED", tip)
+        self.assertIn("ALICE APPENDED", (self.repo / "f.txt").read_text(encoding="utf-8"))
+
+    def test_only_hunk_by_card_selects_the_same_hunks(self):
+        self.journal_edit(3, pane="3f4a20ad", card="#234Z")
+        self.land("begin", "alice", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 3, "JOURNALED 3")
+        self.second_edit()
+        self.land("commit", "alice", "-m", "x", "--only-hunk", "f.txt",
+                  "--by", "#234Z")
+        tip = self.tip_text("f.txt")
+        self.assertIn("JOURNALED 3", tip)
+        self.assertNotIn("ALICE APPENDED", tip)
+
+    def test_exclude_hunk_by_pane_lands_everything_else(self):
+        self.journal_edit(3, pane="3f4a20ad", card="#234Z")
+        self.land("begin", "alice", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 3, "JOURNALED 3")
+        self.second_edit()
+        self.land("commit", "alice", "-m", "x", "--exclude-hunk", "f.txt",
+                  "--by", "3f4a20ad")
+        tip = self.tip_text("f.txt")
+        self.assertNotIn("JOURNALED 3", tip)
+        self.assertIn("ALICE APPENDED", tip)
+
+    def test_positional_numbers_still_mean_positions(self):
+        self.journal_edit(3, pane="3f4a20ad", card="#234Z")
+        self.land("begin", "alice", "f.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "f.txt", 3, "JOURNALED 3")
+        self.second_edit()
+        # Two hunks now: line 3 is hunk 1, the appended line is hunk 2. Take only hunk 2
+        # positionally.
+        self.land("commit", "alice", "-m", "x", "--only-hunk", "f.txt:2")
+        tip = self.tip_text("f.txt")
+        self.assertNotIn("JOURNALED 3", tip)
+        self.assertIn("ALICE APPENDED", tip)
+
+    def test_refuses_when_no_journal_covers_the_path(self):
+        self.land("begin", "alice", "big.txt", env={"RELAY_SESSION_TOKEN": "tok-a"})
+        edit_line(self.repo / "big.txt", 9, "NINE")
+        out = self.land("commit", "alice", "-m", "x", "--only-hunk", "big.txt",
+                        "--by", "3f4a20ad", expect=1)
+        self.assertIn("no authorship journal covers big.txt", out.stderr)
+        self.assertIn("positionally", out.stderr)
+
+    def test_a_bare_path_without_by_refuses_with_the_fallback_hint(self):
+        self.land("begin", "alice", "f.txt")
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        out = self.land("commit", "alice", "-m", "x", "--only-hunk", "f.txt", expect=1)
+        self.assertIn("--by", out.stderr)
+        self.assertIn("positionally", out.stderr)
 
 
 if __name__ == "__main__":

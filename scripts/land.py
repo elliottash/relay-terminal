@@ -62,6 +62,28 @@ work as its own and landed half of it. So:
 them (`begin --contact <name>`). `repair <sha> --paths ...` lands a commit that takes back
 what `<sha>` did to those paths, keeping whatever landed on them afterwards.
 
+Uncommitted work must not pile up unseen and must not die with its pane (card #FYEY). One
+measure everywhere: a session holds `len(path_hunks(snapshot, working copy))` hunks per
+claimed path, 0 when the file matches its snapshot.
+
+  * `status --token <token> [--json]` prints what one pane (its RELAY_SESSION_TOKEN, auto and manual
+    sessions alike) still holds. The backend refuses to move a pane while the total is above
+    zero.
+  * `reap --token <token>` runs when the pane closes: a session with uncommitted hunks is
+    stamped `reaped` and its card's thread gets a note saying what is waiting and how to
+    resume; a clean one is abandoned. `orphans [--json]` lists the reaped and stale sessions
+    that still hold hunks, grouped by card, for the GUI's Resume card action; `who` and
+    `doctor` fold them into one line instead of listing each.
+  * `begin --owner <thread> --card <#ID>` records them in the registry (`who` shows them).
+    When the owner thread's stop wrote a cancelled marker under the land root, `commit` and
+    `try` refuse: nobody is there to answer a review.
+  * `board-sync <token> -m <message> <paths...>` lands the whole working copy of .board/
+    paths straight onto the branch — no `begin`, no build gate, no review hold, no claim
+    touched — for the backend's end-of-turn board writes.
+  * `--only-hunk`/`--exclude-hunk` take a bare path together with `--by <pane-id|#ID>`: the
+    selection becomes the hunks the authorship journal attributes to that pane or card, so
+    another session's concurrent edit elsewhere in the file does not shift your numbers.
+
 What it refuses to do, and why:
 
   * It never commits from the shared index, and never runs `git add` there. The shared index
@@ -1009,6 +1031,10 @@ def cmd_begin(args, log):
         meta["token"] = token
     if args.auto:
         meta["auto"] = True
+    if args.card:
+        meta["card"] = args.card
+    if args.owner:
+        meta["owner"] = args.owner
 
     # An auto claim under our own RELAY_SESSION_TOKEN is this pane's tool-made claim (the
     # backend begins one before a pane's first tool write of a path). Beginning by hand over
@@ -1076,6 +1102,10 @@ def cmd_begin(args, log):
             entry["token"] = token
         if args.auto:
             entry["auto"] = True
+        if args.card:
+            entry["card"] = args.card
+        if args.owner:
+            entry["owner"] = args.owner
         claims = set(entry.get("claims") or [])
         claims.update(paths)
         entry["claims"] = sorted(claims)
@@ -1800,8 +1830,11 @@ def session_selection(repo, session, meta, args, log):
 
     Everything between a session's meta and its merge attempts: --whole joins the claimed
     set, --paths narrows it, intake files and *.orig drop out with a log line, and the
-    --exclude-hunk/--only-hunk/--take-foreign selections are validated. Raises the same
-    Fail refusals commit raises. Returns (claimed, paths, whole, excludes, onlys, takes).
+    --exclude-hunk/--only-hunk/--take-foreign selections are validated -- `--by <pane id or
+    #card>` turns a bare `PATH` into the journal-matched hunks at tree time. Raises the same
+    Fail refusals commit raises. Returns (claimed, paths, whole, excludes, onlys, takes,
+    excludes_bare, onlys_bare) -- the `_bare` sets hold the paths whose numbers come from
+    `--by` and are only resolved once their hunks exist.
     """
     claimed = dict(meta.get("paths") or {})
     whole = [norm_path(repo, p) for p in (args.whole or [])]
@@ -1829,13 +1862,28 @@ def session_selection(repo, session, meta, args, log):
     if not paths:
         raise Fail("nothing to commit")
 
-    excludes = parse_selection(repo, args.exclude_hunk, "--exclude-hunk")
-    onlys = parse_selection(repo, args.only_hunk, "--only-hunk")
-    both = sorted(set(excludes) & set(onlys))
+    def split_selection(values, flag):
+        """`{path: numbers}` for PATH:N values, plus the bare PATHs left for --by."""
+        numbered, bare = [], []
+        for value in values or []:
+            spec = str(value).strip()
+            (numbered if ":" in spec else bare).append(spec)
+        return parse_selection(repo, numbered, flag), \
+            sorted(set(norm_path(repo, spec) for spec in bare))
+
+    excludes, excludes_bare = split_selection(args.exclude_hunk, "--exclude-hunk")
+    onlys, onlys_bare = split_selection(args.only_hunk, "--only-hunk")
+    bare = sorted(set(excludes_bare) | set(onlys_bare))
+    by = getattr(args, "by", None)
+    if bare and not by:
+        raise Fail("%s: name the hunks positionally (%s:%s) or give --by <pane id or #card> "
+                   "to pick them from the authorship journal"
+                   % (", ".join(bare), bare[0], "1,2"))
+    both = sorted((set(excludes) | set(excludes_bare)) & (set(onlys) | set(onlys_bare)))
     if both:
         raise Fail("--exclude-hunk and --only-hunk both name %s; pick one form per path"
                    % ", ".join(both))
-    for path in sorted(set(excludes) | set(onlys)):
+    for path in sorted(set(excludes) | set(onlys) | set(bare)):
         if path not in paths:
             raise Fail("%s is not one of this commit's paths (%s)" % (path, ", ".join(paths)))
         if path in whole:
@@ -1854,7 +1902,7 @@ def session_selection(repo, session, meta, args, log):
         if path in onlys and not takes[path] <= onlys[path]:
             raise Fail("--only-hunk already leaves %s:%s out, so --take-foreign cannot land "
                        "it" % (path, ",".join(str(n) for n in sorted(takes[path] - onlys[path]))))
-    return claimed, paths, whole, excludes, onlys, takes
+    return (claimed, paths, whole, excludes, onlys, takes, excludes_bare, onlys_bare)
 
 
 def session_tree(repo, root, session, meta, args, tip, log=None, selection=None):
@@ -1870,7 +1918,7 @@ def session_tree(repo, root, session, meta, args, tip, log=None, selection=None)
         log = lambda message: print(message, file=sys.stderr)
     if selection is None:
         selection = session_selection(repo, session, meta, args, log)
-    claimed, paths, whole, excludes, onlys, takes = selection
+    (claimed, paths, whole, excludes, onlys, takes, excludes_bare, onlys_bare) = selection
     branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
     plans, infos, conflicts = {}, {}, []
     for path in paths:
@@ -1891,6 +1939,17 @@ def session_tree(repo, root, session, meta, args, tip, log=None, selection=None)
             working = work_bytes(repo, path)
             info.snapshot = snapshot_bytes(root, session, path, record)
             info.hunks = path_hunks(info.snapshot, working)
+            if path in onlys_bare or path in excludes_bare:
+                # `--only-hunk PATH --by <pane|#card>`: the hunks whose removed+added
+                # blocks the authorship journal attributes to that pane or card, wherever
+                # they sit now -- numbering may have moved under a concurrent edit.
+                flag = "--only-hunk" if path in onlys_bare else "--exclude-hunk"
+                if path in onlys_bare:
+                    onlys[path] = set(journal_hunk_numbers(
+                        root, repo, path, getattr(args, "by", None), info.hunks, flag))
+                else:
+                    excludes[path] = set(journal_hunk_numbers(
+                        root, repo, path, getattr(args, "by", None), info.hunks, flag))
             if not info.hunks and path not in whole:
                 # Two sessions were caught by this: a file edited BEFORE `begin` snapshots as
                 # already-edited, so there is nothing to land and the silence looked like success.
@@ -1963,10 +2022,25 @@ def session_tree(repo, root, session, meta, args, tip, log=None, selection=None)
     return plans, infos, conflicts
 
 
+def refused_cancelled(root, meta, session):
+    """A session whose owner thread was stopped has a cancelled marker under
+    `<root>/cancelled/`; the backend wrote it, and `commit`/`try` refuse to land its
+    hunks -- they may be half of an edit the thread never finished."""
+    owner = meta.get("owner")
+    if not owner:
+        return
+    marker = Path(root) / "cancelled" / str(owner)
+    if marker.exists():
+        raise Fail("session %s's owner thread %s was cancelled (marker %s); refusing to "
+                   "land its hunks -- begin a new session, or delete the marker if the "
+                   "thread is really alive" % (session, owner, marker))
+
+
 def cmd_commit(args, log):
     repo = repo_root()
     root = Path(args.root)
     meta = read_meta(root, args.session)
+    refused_cancelled(root, meta, args.session)
     auto_gc(root, log)
     branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
     if Path(meta.get("repo", repo)) != Path(repo):
@@ -1975,7 +2049,7 @@ def cmd_commit(args, log):
 
     message = read_message(args.message)
     selection = session_selection(repo, args.session, meta, args, log)
-    claimed, paths, whole, excludes, onlys, takes = selection
+    (claimed, paths, whole, excludes, onlys, takes, excludes_bare, onlys_bare) = selection
 
     warn_overlaps(root, args.session, paths, log)
 
@@ -2187,6 +2261,7 @@ def cmd_try(args, log):
     if args.commit and args.tree:
         raise Fail("--commit and --tree are two ways to name one revision; give one", code=1)
     meta = read_meta(root, args.session)
+    refused_cancelled(root, meta, args.session)
     auto_gc(root, log)
     branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
     if Path(meta.get("repo", repo)) != Path(repo):
@@ -2658,7 +2733,7 @@ def cmd_doctor(args, log):
         log("untracked *.orig files: %s (report only; never committed)" % ", ".join(orig))
 
     for name, entry in sorted(registered_sessions(Path(args.root)).items()):
-        if not is_idle(entry):
+        if entry.get("reaped") or not is_idle(entry):
             continue
         findings += 1
         log("stale land session: %s has not run a land.py command for %s (claims: %s). It is "
@@ -2666,6 +2741,11 @@ def cmd_doctor(args, log):
             "the working tree."
             % (name, human_age(session_idle_minutes(entry)),
                ", ".join(entry.get("claims") or []) or "none", name))
+
+    holding = reaped_holding(repo, Path(args.root))
+    if holding:
+        findings += 1
+        log("%d reaped session(s) with uncommitted hunks; see `land.py orphans`" % len(holding))
 
     if not findings:
         log("clean: nothing staged from an older commit, and nothing else to report")
@@ -2702,17 +2782,32 @@ def cmd_who(args, log):
         log("no land sessions under %s" % root)
         return 0
     log("land sessions under %s:" % root)
+    try:
+        holding = set(reaped_holding(repo_root(), root))
+    except Fail:
+        holding = set()             # not in a checkout: nothing to fold, list everything
+    reaped = 0
     for name, entry in sorted(sessions.items()):
+        if name in holding:
+            reaped += 1
+            continue
         idle = session_idle_minutes(entry)
         state = "STALE, idle %s (ignored for contest detection)" % human_age(idle) \
             if is_idle(entry) else "idle %s" % human_age(idle)
-        log("%s — %s, contact: %s" % (name, state, entry.get("contact") or "none given"))
+        extra = ""
+        if entry.get("card"):
+            extra += ", card %s" % entry["card"]
+        if entry.get("owner"):
+            extra += ", owner %s" % entry["owner"]
+        log("%s — %s, contact: %s%s" % (name, state, entry.get("contact") or "none given", extra))
         claims = entry.get("claims") or []
         for path in claims[:WHO_PATHS]:
             log("    %s  snapshot %s old" % (path, human_age(claim_age(root, name, path))))
         if len(claims) > WHO_PATHS:
             log("    ... and %d more (%s/%s/meta.json has them all)"
                 % (len(claims) - WHO_PATHS, root, name))
+    if reaped:
+        log("%d reaped session(s) with uncommitted hunks; see `land.py orphans`" % reaped)
     slots = root / "verify-slots"
     log("disk: %s holds %s, of which verify build slots %s (at most %d per repository; "
         "`land.py gc` reclaims stale sessions)"
@@ -2874,6 +2969,352 @@ def cmd_hook(args, log):
     return 0
 
 
+# ------------------------------------------------- uncommitted work (card #FYEY)
+
+def reaped_holding(repo, root):
+    """Registry names of `reaped` sessions of `repo` that still hold uncommitted hunks --
+    exactly the sessions `orphans` lists, in name order. `who` and `doctor` fold them
+    into one line instead of listing each."""
+    out = []
+    for name, entry in sorted(registered_sessions(root).items()):
+        if not entry.get("reaped") or entry.get("repo") != str(repo):
+            continue
+        if any(hunks for _path, hunks, _age in session_hunks(repo, root, name, entry)):
+            out.append(name)
+    return out
+
+
+def session_hunks(repo, root, name, entry):
+    """Per-claim hunk counts for one registry entry: [(path, hunks, age_minutes)].
+
+    The same measure everywhere on this card: len(path_hunks(snapshot, working copy)) per
+    claimed path -- 0 when the file matches its snapshot, a whole-file hunk when it was
+    deleted or is new -- and the snapshot's age in minutes next to it.
+    """
+    try:
+        meta = read_meta(root, name)
+    except Fail:
+        meta = {}
+    paths_meta = meta.get("paths") or {}
+    out = []
+    for path in sorted(entry.get("claims") or []):
+        record = paths_meta.get(path) or {}
+        snapshot = None
+        try:
+            snapshot = snapshot_bytes(root, name, path, record)
+        except (Fail, OSError):
+            pass
+        hunks = len(path_hunks(snapshot, work_bytes(repo, path)))
+        out.append((path, hunks, age_minutes(record.get("at"))))
+    return out
+
+
+def uncommitted_total(claims):
+    return sum(claim["hunks"] for claim in claims)
+
+
+def repo_of(entry):
+    """The repo a registry entry was begun in, or None when it names none."""
+    repo = entry.get("repo")
+    return Path(str(repo)) if repo else None
+
+
+def reap_card_id(entry, args):
+    """The card a reap note goes to: --card, else a #ID in the session's contact, else none."""
+    if getattr(args, "card", None):
+        return args.card
+    entry_card = entry.get("card")
+    if entry_card:
+        return entry_card
+    found = CARD_REF_RE.search(entry.get("contact") or "")
+    return "#%s" % found.group(1) if found else ""
+
+
+def journal_blocks(root, repo, path, by):
+    """The hunk blocks -- (removed lines, added lines) tuples -- the authorship journal
+    attributes to pane id or card `by` on `path`, and how many journal lines cover the
+    path at all (any author). The same matcher FOREIGN attribution uses: every journal is
+    read, only lines naming this repo and path newer than IDLE_HOURS are considered, and
+    only lines whose before/after blobs both read and are text (a null `before` is a new
+    file: the empty pre-image)."""
+    blocks, covered, matched = set(), 0, 0
+    authors_dir = Path(root) / "authors"
+    try:
+        names = sorted(authors_dir.iterdir())
+    except OSError:
+        return blocks, covered, matched
+    cutoff = time.time() - IDLE_HOURS * 3600
+    for name in names:
+        if not name.name.endswith(".jsonl"):
+            continue
+        token = name.name[: -len(".jsonl")].split(".")[0]
+        if not token:
+            continue
+        for entry in read_journal(root, token):
+            if entry.get("repo") != str(repo) or entry.get("path") != path:
+                continue
+            covered += 1
+            try:
+                when = float(entry.get("ts") or 0)
+            except (TypeError, ValueError):
+                continue
+            if when < cutoff:
+                continue
+            if by.startswith("#"):
+                if (entry.get("card") or "") != by:
+                    continue
+            elif (entry.get("pane") or "").strip() != by:
+                continue
+            before = b"" if entry.get("before") is None else journal_blob(root, entry.get("before"))
+            after = journal_blob(root, entry.get("after"))
+            if before is None or after is None or is_binary(before) or is_binary(after):
+                continue
+            matched += 1
+            for hunk in split_hunks(lines_of(before), lines_of(after)):
+                blocks.add(hunk_blocks(hunk))
+    return blocks, covered, matched
+
+
+def journal_hunk_numbers(root, repo, path, by, hunks, flag):
+    """Which of `hunks` (1-based) match the journal blocks of `by`. Refuses when no journal
+    covers the path at all, or none covers it by `by`: positional numbers are the fallback."""
+    blocks, covered, matched = journal_blocks(root, repo, path, by)
+    if not covered:
+        raise Fail("no authorship journal covers %s, so --by %s has nothing to match; name "
+                   "the hunks positionally instead (%s %s:N)"
+                   % (path, by, flag, path))
+    if not matched:
+        raise Fail("no journal entry by %s covers %s, so --by %s has nothing to match; name "
+                   "the hunks positionally instead (%s %s:N)"
+                   % (by, path, by, flag, path))
+    return [number for number, hunk in enumerate(hunks, 1) if hunk_blocks(hunk) in blocks]
+
+
+def thread_note(repo, card, note, log):
+    """Append one `author=land.py kind=note` entry to a card's thread, in the format
+    note_taken_on_card uses for --take-foreign. Best effort: the reap itself is done."""
+    card_id = str(card or "").lstrip("#").strip()
+    if not card_id:
+        return
+    try:
+        thread = Path(repo) / ".board" / "threads" / ("%s.md" % card_id)
+        thread.parent.mkdir(parents=True, exist_ok=True)
+        stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        suffix = hashlib.sha256(("%s %s" % (stamp, note)).encode("utf-8")).hexdigest()[:2]
+        prefix = "\n" if thread.exists() and thread.stat().st_size else ""
+        with thread.open("a", encoding="utf-8") as fh:
+            fh.write("%s<!-- relay:entry %s-%s author=land.py kind=note -->\n%s\n"
+                     % (prefix, stamp, suffix, note))
+    except Exception as exc:
+        log("cards: could not note #%s (%s)" % (card_id, exc))
+
+
+def contact_pane(contact):
+    """The pane id in a `pane <id>` contact line (how the backend writes auto claims)."""
+    # No "<" + "(" in this file, ever: the Safety test greps for process substitution.
+    text = contact or ""
+    start = text.find("pane <")
+    if start < 0:
+        return ""
+    end = text.find(">", start + 6)
+    return text[start + 6:end] if end > start else ""
+
+
+def session_pane(entry, meta):
+    """The pane id a session belongs to: its owner thread, else a `pane <id>` contact."""
+    owner = (meta or {}).get("owner") or entry.get("owner")
+    if owner:
+        return owner
+    return contact_pane(entry.get("contact")) or "unknown"
+
+
+def cmd_status(args, log):
+    """Every session registered with this token, and what it still holds uncommitted.
+
+    stdout: one JSON object `{"token", "sessions": [{"session", "auto", "card",
+    "claims": [{"path", "hunks", "snapshot_age_minutes"}]}], "uncommitted"}` when --json,
+    the same as readable text otherwise. Exits 0 even when the token holds nothing.
+    """
+    repo = repo_root()
+    root = Path(args.root)
+    sessions = []
+    for name in sorted(registered_sessions(root)):
+        entry = registered_sessions(root)[name]
+        if entry.get("token") != args.token or repo_of(entry) != Path(repo):
+            continue
+        claims = [{"path": path, "hunks": hunks,
+                   "snapshot_age_minutes": round(age, 1) if age is not None else 0.0}
+                  for path, hunks, age in session_hunks(repo, root, name, entry)]
+        sessions.append({"session": name, "auto": bool(entry.get("auto")),
+                         "card": entry.get("card") or "", "claims": claims})
+    payload = {"token": args.token, "sessions": sessions,
+               "uncommitted": sum(uncommitted_total(s["claims"]) for s in sessions)}
+    if args.json:
+        print(json.dumps(payload))
+        return 0
+    log("token %s, %d uncommitted hunk(s)" % (args.token, payload["uncommitted"]))
+    for session in sessions:
+        log("  %s%s%s" % (session["session"], " (auto)" if session["auto"] else "",
+                          " %s" % session["card"] if session["card"] else ""))
+        for claim in session["claims"]:
+            log("    %s: %d hunk(s), snapshot %s"
+                % (claim["path"], claim["hunks"], human_age(claim["snapshot_age_minutes"])))
+    return 0
+
+
+def cmd_board_sync(args, log):
+    """Land the whole working copy of `.board/` paths, with no build gate and no session.
+
+    The pane's own board writes: cards are per-file and threads append-only, so `--whole`
+    semantics are right and there is nothing to hold for review. No `begin` is needed and no
+    claim is created or disturbed. Prints the new sha (or `nothing to land` when every path
+    already matches the tip) and exits 0.
+    """
+    repo = repo_root()
+    root = Path(args.root)
+    branch = args.branch or DEFAULT_BRANCH
+    paths = []
+    for given in args.paths:
+        path = norm_path(repo, given)
+        if excluded(path):
+            raise Fail("board-sync never lands %s (intake file or *.orig)" % path)
+        if path != ".board" and not path.startswith(".board/"):
+            raise Fail("board-sync lands only paths under .board/: %s is not" % path)
+        if path not in paths:
+            paths.append(path)
+    message = read_message(args.message)
+    last_error = None
+    for attempt in range(1, SWAP_ATTEMPTS + 1):
+        tip = branch_tip(repo, branch)
+        entries = {}
+        for path in paths:
+            working = work_bytes(repo, path)
+            if working == rev_bytes(repo, tip, path):
+                continue            # already on the tip: nothing to land for this path
+            mode = work_mode(repo, path) or "100644"
+            entries[path] = (hash_blob(repo, working) if working is not None else None,
+                             mode, working is None)
+        if not entries:
+            log("nothing to land")
+            return 0
+        tree = build_tree(repo, tip, entries)
+        new = build_commit(repo, tip, entries, message, tree=tree)
+        touched = [line for line in git_out(repo, "diff", "--no-renames", "--name-only",
+                                            tip, new).splitlines() if line]
+        if sorted(touched) != sorted(entries):
+            raise Fail("name gate failed: the commit would touch %s but board-sync's paths "
+                       "are %s. Nothing was landed."
+                       % (sorted(touched), sorted(entries)), code=3)
+        swap = git(repo, "update-ref", "refs/heads/%s" % branch, new, tip, check=False)
+        if swap.returncode != 0:
+            last_error = swap.stderr.strip()
+            log("%s moved under attempt %d (was %s); retrying against the new tip"
+                % (branch, attempt, tip[:12]))
+            continue
+        log_line(root, "%s %s -> %s (board-sync %s) [%s]"
+                 % (branch, tip[:12], new[:12], args.token, " ".join(sorted(entries))))
+        set_shared_index(repo, branch, entries, log)
+        print(new)
+        return 0
+    raise Fail("%s moved under every one of the %d attempts (last: %s). Nothing was landed; "
+               "run board-sync again." % (branch, SWAP_ATTEMPTS, last_error or "swap refused"),
+               code=3)
+
+
+def cmd_reap(args, log):
+    """Split a token's sessions into the dirty (kept, noted, `reaped`-stamped) and the clean
+    (abandoned: snapshots and registry entry dropped). Never keyed on idle time, and it
+    never touches another token's sessions."""
+    repo = repo_root()
+    root = Path(args.root)
+    kept, abandoned = [], []
+    for name in sorted(registered_sessions(root)):
+        entry = registered_sessions(root)[name]
+        if entry.get("token") != args.token or repo_of(entry) != Path(repo):
+            continue
+        dirty = [(path, hunks, age)
+                 for path, hunks, age in session_hunks(repo, root, name, entry) if hunks]
+        if not dirty:
+            shutil.rmtree(session_dir(root, name), ignore_errors=True)
+
+            def drop(data, name=name):
+                data["sessions"].pop(name, None)
+            edit_registry(root, drop)
+            abandoned.append(name)
+            log_line(root, "reap: abandoned %s (clean)" % name)
+            continue
+        stamp = now()
+        try:
+            meta = read_meta(root, name)
+        except Fail:
+            meta = {}
+        meta["reaped"] = stamp
+        write_meta(root, name, meta)
+
+        def mark(data, stamp=stamp, name=name):
+            entry = data["sessions"].get(name)
+            if entry:
+                entry["reaped"] = stamp
+        edit_registry(root, mark)
+        paths = ", ".join(path for path, _hunks, _age in dirty)
+        age = max((age for _path, _hunks, age in dirty if age is not None), default=0.0)
+        card = reap_card_id(entry, args)
+        note = ("%d hunk(s) uncommitted in %s (snapshot %s), pane %s; resume with "
+                "`land.py orphans`"
+                % (sum(hunks for _path, hunks, _age in dirty), paths, human_age(age),
+                   session_pane(entry, meta)))
+        if card:
+            thread_note(repo, card, note, log)
+        log("reap: kept %s (%s)" % (name, note))
+        kept.append(name)
+    log("reap: %d session(s) kept, %d abandoned for token %s"
+        % (len(kept), len(abandoned), args.token))
+    return 0
+
+
+def cmd_orphans(args, log):
+    """Reaped or stale sessions that still hold uncommitted hunks, grouped by card.
+
+    Pane liveness is not visible to land.py, so `reaped or stale` is the whole rule: a kept
+    session shows up here until its hunks land or its claims drop.
+    """
+    repo = repo_root()
+    root = Path(args.root)
+    groups = {}
+    for name in sorted(registered_sessions(root)):
+        entry = registered_sessions(root)[name]
+        if repo_of(entry) != Path(repo):
+            continue
+        if not (entry.get("reaped") or is_idle(entry)):
+            continue
+        claims = [{"path": path, "hunks": hunks,
+                   "snapshot_age_minutes": round(age, 1) if age is not None else 0.0}
+                  for path, hunks, age in session_hunks(repo, root, name, entry) if hunks]
+        if not claims:
+            continue
+        card = reap_card_id(entry, argparse.Namespace(card=None))
+        groups.setdefault(card, []).append({
+            "session": name, "token": entry.get("token") or "",
+            "pane": contact_pane(entry.get("contact")) or entry.get("owner") or "",
+            "owner": entry.get("owner") or "", "claims": claims})
+    payload = {"cards": [{"card": card, "sessions": groups[card]} for card in groups]}
+    if args.json:
+        print(json.dumps(payload))
+        return 0
+    if not payload["cards"]:
+        log("no orphaned uncommitted work")
+        return 0
+    for group in payload["cards"]:
+        log(group["card"] or "no card")
+        for session in group["sessions"]:
+            label = " %s" % session["pane"] if session["pane"] else ""
+            log("  %s%s (token %s)" % (session["session"], label, session["token"] or "none"))
+            for claim in session["claims"]:
+                log("    %s (%d hunk(s), snapshot %s)"
+                    % (claim["path"], claim["hunks"], human_age(claim["snapshot_age_minutes"])))
+    return 0
+
+
 # --------------------------------------------------------------------------- CLI
 
 EPILOG = """\
@@ -2900,9 +3341,15 @@ and a digest and exits 4 without landing anything. Then either
   commit mysession -m "..." --confirm DIGEST                 land all of it
   commit mysession -m "..." --exclude-hunk src/Pane.h:2,5-7  leave those hunks out
   commit mysession -m "..." --only-hunk src/Pane.h:1,3       land only those hunks
+  commit mysession -m "..." --only-hunk src/Pane.h --by 3f4a20ad
+                                       land the hunks the authorship journal attributes to
+                                       that pane (or card, --by #234Z)
 
 Hunks left out are neither committed nor touched: they stay in the working tree and a later
-commit picks them up. Either selection flag prints a new digest. The digest covers the tip and
+commit picks them up. A bare path with --by <pane-id|#ID> selects by authorship -- the same
+matcher that names FOREIGN hunks, over the journals under <root>/authors -- instead of by
+position, so another session's concurrent edit elsewhere in the file cannot shift your
+numbers; a numbered selection keeps its positional meaning. Either selection flag prints a new digest. The digest covers the tip and
 the exact bytes of every path, so a working-tree edit, a different selection or main moving
 makes it stop matching, and you are asked again.
 
@@ -3020,6 +3467,31 @@ nothing and touches nothing, and leaves the slot's tree in place for inspection.
       them afterwards, then point the shared index at it. The working tree is never touched,
       so verify a repair on `git archive <new sha>`, never in the checkout.
 
+uncommitted work and the end of a pane
+
+A pane's uncommitted hunks are counted the same way everywhere: len(path_hunks(snapshot,
+working copy)) per claimed path. `status --token <token> [--json]` prints what one pane still holds
+(auto and manual sessions of its RELAY_SESSION_TOKEN, with the total) -- the backend refuses
+to move a pane while the total is above zero. `begin --card #ID --owner <thread>` records
+them in the registry (`who` shows them); when the owner's stop wrote a cancelled marker,
+`commit` and `try` refuse. When the pane closes, the backend runs detached:
+
+  python3 scripts/land.py reap --token <token>
+      a session with uncommitted hunks is stamped `reaped` and its card thread gets a note
+      (what is waiting, snapshot age, `resume with land.py orphans`); a clean session is
+      abandoned. Never keyed on idle time; exit 0 either way.
+
+  python3 scripts/land.py orphans [--json]
+      the reaped and stale sessions that still hold hunks, grouped by card -- the resume
+      list behind the GUI's Resume card action. `who` and `doctor` fold those sessions into
+      one line instead of listing each.
+
+  python3 scripts/land.py board-sync <token> -m "board: <pane> <turn>" <paths...>
+      land the whole working copy of .board/ paths straight onto the branch for the
+      backend's end-of-turn board writes: no `begin`, no build gate, no review hold, no
+      card links, no claim created or disturbed. Prints the new sha, or `nothing to land`
+      when the paths already match the tip.
+
 exit codes: 0 fine, 1 usage or environment error, 2 doctor found something, 3 conflict or a
 swap that could not be completed, 4 held for review, 5 the exact tree does not build, 6 a
 `try --tests` run failed. Nothing was changed on 3, 4, 5 or 6.
@@ -3054,6 +3526,13 @@ def build_parser():
                             "before a pane's first tool write of a path); a later manual "
                             "`begin` from a process with the same RELAY_SESSION_TOKEN "
                             "adopts its snapshot")
+    begin.add_argument("--card", default=None, metavar="#ID",
+                       help="the board card this session works on, e.g. #234Z; shown by "
+                            "`who` and used to group `orphans` and `reap` notes")
+    begin.add_argument("--owner", default=None, metavar="THREAD",
+                       help="the thread id that owns this pane; when its stop wrote a "
+                            "cancelled marker, `commit` and `try` refuse until a live "
+                            "owner takes the session over")
     begin.set_defaults(func=cmd_begin)
 
     commit = subs.add_parser("commit", help="land your hunks on the branch")
@@ -3078,6 +3557,11 @@ def build_parser():
                         help="land a FOREIGN hunk (another pane's edit, named in the held "
                              "review) on purpose; the commit message records whose edit it "
                              "was (repeatable, same parser as --only-hunk)")
+    commit.add_argument("--by", default=None, metavar="PANE|#ID",
+                        help="with --only-hunk/--exclude-hunk, a bare PATH selects the "
+                             "hunks the authorship journal attributes to that pane id or "
+                             "card (e.g. --only-hunk src/Pane.h --by 3f4a20ad); a numbered "
+                             "selection keeps its positional meaning")
     commit.add_argument("--stale-minutes", type=float, default=DEFAULT_STALE_MINUTES,
                         help="hold a path whose snapshot is older than this (default %d)"
                              % DEFAULT_STALE_MINUTES)
@@ -3129,12 +3613,69 @@ def build_parser():
                          help="try without these hunks (repeatable, as in commit)")
     try_cmd.add_argument("--only-hunk", action="append", default=None, metavar="PATH:N",
                          help="try with only these hunks (repeatable, as in commit)")
+    try_cmd.add_argument("--by", default=None, metavar="PANE|#ID",
+                         help="with --only-hunk/--exclude-hunk, a bare PATH selects the "
+                              "hunks the authorship journal attributes to that pane id or "
+                              "card (as in commit)")
     try_cmd.add_argument("--stale-minutes", type=float, default=DEFAULT_STALE_MINUTES,
                          help="as in commit (default %d)" % DEFAULT_STALE_MINUTES)
     try_cmd.set_defaults(func=cmd_try, take_foreign=None)
 
     who = subs.add_parser("who", help="live sessions, their paths, ages and contacts")
     who.set_defaults(func=cmd_who)
+
+    status_cmd = subs.add_parser(
+        "status", help="one pane's sessions, their uncommitted hunks and the total",
+        description="Every session registered with one pane's token (auto and manual): "
+                    "its claims and how many hunks each still holds against its snapshot, "
+                    "plus the total over all of them. The pane-move gate refuses to move "
+                    "a pane while the total is above zero. Exits 0 with the report either "
+                    "way; exit 1 on an error.")
+    status_cmd.add_argument("--token", required=True, metavar="TOKEN",
+                            help="the pane's RELAY_SESSION_TOKEN")
+    status_cmd.add_argument("--json", action="store_true",
+                            help="print one JSON object instead of readable text")
+    status_cmd.set_defaults(func=cmd_status)
+
+    board_sync = subs.add_parser(
+        "board-sync", help="land the working copy of .board/ paths whole, no gate",
+        description="Land the entire working copy of .board/ paths straight onto the "
+                    "branch: no `begin` needed, no build gate, no review hold, no "
+                    "contested or stale check, no card links, no claim touched. For the "
+                    "backend's end-of-turn board writes. Prints the new sha, or "
+                    "`nothing to land` when the paths already match the tip.")
+    board_sync.add_argument("token", metavar="TOKEN",
+                            help="the pane's RELAY_SESSION_TOKEN, for the landing log")
+    board_sync.add_argument("-m", "--message", required=True,
+                            help="the commit message")
+    board_sync.add_argument("paths", nargs="+", metavar="PATH",
+                            help="repo-relative paths, all under .board/ (the intake "
+                                 "files are refused)")
+    board_sync.add_argument("--branch", default=DEFAULT_BRANCH)
+    board_sync.set_defaults(func=cmd_board_sync)
+
+    reap_cmd = subs.add_parser(
+        "reap", help="note a pane's uncommitted work, free its clean sessions",
+        description="For every session of one pane's token: a session with uncommitted "
+                    "hunks is stamped `reaped` and its card's thread gets a note saying "
+                    "what is waiting and how to resume (`land.py orphans`); a clean "
+                    "session is abandoned. Never keyed on idle time. The backend runs "
+                    "this detached when a pane closes or a worker exits.")
+    reap_cmd.add_argument("--token", required=True, metavar="TOKEN",
+                          help="the pane's RELAY_SESSION_TOKEN")
+    reap_cmd.add_argument("--card", default=None, metavar="#ID",
+                          help="the card to note on when the session itself names none "
+                               "(--card at begin, else a #ID in its contact)")
+    reap_cmd.set_defaults(func=cmd_reap)
+
+    orphans_cmd = subs.add_parser(
+        "orphans", help="reaped or stale sessions still holding uncommitted hunks",
+        description="Every session that was reaped or went stale and still has "
+                    "uncommitted hunks, grouped by card — the resume list behind the "
+                    "GUI's Resume card action.")
+    orphans_cmd.add_argument("--json", action="store_true",
+                             help="print one JSON object instead of readable text")
+    orphans_cmd.set_defaults(func=cmd_orphans)
 
     gc = subs.add_parser("gc", help="reclaim stale sessions and old verify builds "
                                     "(runs by itself at most hourly)")

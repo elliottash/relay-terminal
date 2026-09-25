@@ -108,6 +108,14 @@ What it refuses to do, and why each refusal is an incident from the list above:
 claimed, and `abandon <me>` drops the snapshots (never the working tree). `--help` is written for a
 session that has not read this file.
 
+Uncommitted work is watched and rescued, not forgotten (card #FYEY): `status --token <t> [--json]`
+prints what every session of a token still holds; `board-sync <token> -m <message> .board/...`
+lands `.board/` writes whole — no build gate, no session, no claim touched; `reap --token <t>` keeps
+a dying pane's dirty sessions (stamped `reaped`, its card's thread noted) and abandons the clean
+ones; `orphans [--json]` lists the reaped and stale sessions that still hold hunks, grouped by card,
+and `who`/`doctor` fold those into one line. `begin --owner <thread> --card <#ID>` records both; a
+cancelled marker for the owner thread makes `commit` and `try` refuse.
+
 ### Contested hunks, and the two-step commit
 
 A snapshot tells your hunks from someone else's only for as long as nobody else edits that file
@@ -155,6 +163,12 @@ picks them up. Either selection flag prints a new digest. The digest covers the 
 bytes of every path, so an edit in the tree, a different selection or `main` moving makes it stop
 matching and you are asked again. Uncontested, fresh paths still land in one step.
 
+A selection can also be by authorship: a bare path together with `--by <pane-id|#ID>` takes the
+hunks the authorship journal (`<land root>/authors/<token>.jsonl`) attributes to that pane or card
+— the same matcher that names FOREIGN hunks — so another session's concurrent edit elsewhere in the
+file cannot shift your numbers. A numbered selection keeps its positional meaning. When no journal
+covers the path the command refuses and says to name the hunks positionally.
+
 `begin --contact <name>` records how to reach you — a land-session name is not an address — and it
 is shown in every claim warning. `python3 scripts/land.py who` lists the live sessions, what they
 claim, how old their snapshots are and their contacts. A session that has run no land.py command
@@ -187,7 +201,8 @@ So when the paths being landed include C++ or build files (`src/`, `engine/`, `t
 into a build slot, `~/.local/state/relay/land/verify-slots/<repo>-<n>/src`, builds it in `.../build`,
 and performs the compare-and-swap only if that exits 0. Otherwise it prints the first compiler
 errors, lands nothing and exits 5. Only files whose blob changed are rewritten, so a slot stays
-incremental whoever used it last. There are `RELAY_LAND_VERIFY_SLOTS` slots (default 2) shared by
+incremental whoever used it last. The slot count is `verify_slots()`: `RELAY_LAND_VERIFY_SLOTS`
+pins it, otherwise it is sized from the machine's free disk and memory, at most 4. They are shared by
 every session and each is locked for a whole build: until card #SZHQ every session kept its own
 verify build forever, and on 2026-09-24 that was 255 of them and 153 GB. A slot is the tool's own
 check, not a workspace: nobody edits there. `land.py gc` (which also runs by itself at most hourly)
