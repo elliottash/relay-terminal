@@ -704,6 +704,7 @@ void Pane::handle(const QJsonObject &event) {
             }
             const relay::toollabel::Label label = relay::toollabel::fromEvent(event);
             const QString diff = event.value(QStringLiteral("diff")).toString();
+            const QString displayTime = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
             m_toolLines = 0; m_toolPartialLine = false;
             m_liveCall.clear();
             if (m_agentBusy) tickTurnClock();   // between calls, the busy line says "thinking" again (#4E13)
@@ -714,12 +715,12 @@ void Pane::handle(const QJsonObject &event) {
                 tickTurnClock();
             }
             if (m_internals) {
-                internalsToolResult(event, call, turn, label, diff);   // the pane's row, and the ledger's (#QT8C)
+                internalsToolResult(event, call, turn, label, diff, displayTime);   // the pane's row, and the ledger's (#QT8C)
             } else if (!shellIdleAtPrompt()) {
                 // Deferred: the finished line, as plain text. It carries no anchor, because a line
                 // replayed by flushInline() cannot be rewritten and nothing would fold under it.
                 ensureLineStart();
-                printInline(QStringLiteral("▸ ") + label.line() + QLatin1Char('\n'),
+                printInline(QStringLiteral("▸ ") + label.line() + QStringLiteral(" · ") + displayTime + QLatin1Char('\n'),
                             label.failed() && !label.refused ? Ink::Error : Ink::Tool);
             } else {
                 beginBlock(relay::gaps::Block::Call);   // already Call after its start: no gap (#5AWD)

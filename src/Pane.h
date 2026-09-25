@@ -6906,7 +6906,8 @@ private:
     // the record its fold will need, exactly as the live tool_result path keeps it. A run of reads
     // is one row that grows, anchored to its first call, and the ledger rewrites it in place.
     void internalsToolResult(const QJsonObject &event, const QString &call, const QString &turn,
-                             const relay::toollabel::Label &label, const QString &diff) {
+                             const relay::toollabel::Label &label, const QString &diff,
+                             const QString &displayTime) {
         internalsBeginTurn(turn);
         if (m_internals) m_internals->toolResult(event);
         const bool mergeable = label.hasMerge && !label.failed();
@@ -6920,8 +6921,8 @@ private:
         }
         const bool merged = m_internalsRun.count() > 1;
         const int cells = callLineCells();
-        const relay::calllines::Row row = merged ? relay::calllines::mergedRow(m_internalsRun, cells)
-                                                 : relay::calllines::finishedRow(label, cells);
+        const relay::calllines::Row row = merged ? relay::calllines::mergedRow(m_internalsRun, cells, displayTime)
+                                                 : relay::calllines::finishedRow(label, cells, displayTime);
         relay::calllines::Step step;
         step.callId = merged ? m_internalsFirstCall : call;
         step.extra = merged ? m_internalsRun.count() : 0;
