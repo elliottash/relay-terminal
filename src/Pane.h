@@ -8335,6 +8335,7 @@ private:
         const QString dir = QDir::tempPath() + QStringLiteral("/relay-tool-output-") + m_token.left(8);
         QDir().mkpath(dir);
         QFile::setPermissions(dir, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        relay::runtimedirs::markOwned(dir);   // Relay's own: the post-turn scratch sweep skips it (#27AR)
         QString safe = event.value(QStringLiteral("call_id")).toString();
         safe.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.-]")), QStringLiteral("_"));
         const QString path = dir + QLatin1Char('/') + (name.isEmpty() ? QStringLiteral("tool") : name) + QLatin1Char('-') + safe.left(40)
