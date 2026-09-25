@@ -7,7 +7,8 @@ address. No key, no account, nothing leaves the machine. Card `#24XJ`; code in
 
 ## Use one
 
-In the GUI, **Models › Sources** shows saved local models with status, Test and Refresh. Its
+In the GUI, **Models › Sources** puts local models above hosted providers and shows saved endpoints
+with status, Test and Refresh. If no pane agent is running yet, start one and press **Reload**. Its
 **Set up a local model with the helper agent** button drafts the `local-model-setup` skill request
 in the Models helper; you decide when to send it. **More local settings** opens **Options › Local
 models** for discovery, address entry, removal and compatibility controls. There, *Find servers*
