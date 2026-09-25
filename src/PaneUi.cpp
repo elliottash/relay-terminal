@@ -14,6 +14,12 @@ void Pane::buildUi() {
         m_headerLayout = headerRow;
         headerRow->setContentsMargins(0, 0, 0, 0);
         headerRow->setSpacing(8);
+        // The pane's address badge (#R5TC): a muted `[2]` at the head of the header, shown only
+        // when two panes or more exist — updatePaneBadge() decides, exactly as the subagent badge
+        // decides that zero is not a 0.
+        m_paneBadge = new QLabel; m_paneBadge->setTextFormat(Qt::PlainText);
+        m_paneBadge->setObjectName(QStringLiteral("paneBadge"));
+        m_paneBadge->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         m_titleLabel = new QLabel; m_titleLabel->setTextFormat(Qt::PlainText);
         m_titleLabel->setObjectName(QStringLiteral("paneTitle"));
         // No caret here: the title is dragged far more often than it is renamed, so it inherits
@@ -69,6 +75,7 @@ void Pane::buildUi() {
         m_cwdLabel->installEventFilter(this);
         // Not selectable any more: dragging across the path is how you move the pane now, and a
         // half-selected path is a poor trade for that. The tooltip still has both paths in full.
+        headerRow->addWidget(m_paneBadge, 0);
         headerRow->addWidget(m_titleLabel, 0);
         headerRow->addWidget(m_titleEdit, 1);
         headerRow->addWidget(m_titleAuto, 0);

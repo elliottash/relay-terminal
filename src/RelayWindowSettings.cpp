@@ -606,6 +606,15 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             alsoBoardWorkers(firstToken);
             agent.rows << firstToken;
         }
+        // Cross-pane messaging (#R5TC, protocol 37): the off switch. The palette's
+        // "Stop cross-pane messaging" flips this too, and directory.send() re-reads it on every
+        // send, so a flipped switch is effective on the very next one.
+        agent.rows << toggleRow(QStringLiteral("agent/cross_pane"),
+                                QStringLiteral("Let panes message each other"),
+                                QStringLiteral("One pane's agent can send a message to another pane of this "
+                                               "Relay (pane_list and pane_send). Off, no further send is "
+                                               "accepted and turns started by a message are stopped."),
+                                true);
         sections << agent;
 
         // ----- Security (card #3KB7) -------------------------------------------------------

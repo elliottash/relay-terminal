@@ -16,6 +16,44 @@ void Pane::handle(const QJsonObject &event) {
                 sendProgramState();
             });
         if (handleBoardEvent(type, event)) return;   // Switchboard (protocol 17)
+        // --- cross-pane messaging (#R5TC, protocol 37) ------------------------------------------
+        // The worker's agent sent a pane_send: answer with the directory's acceptance verdict —
+        // never "read" — including the roster so the model can correct a stale handle itself.
+        // The reverse gate (§8.3): a turn that arrived from a device is not offered the tools, and
+        // a send that slips through anyway is refused here rather than laundered onward.
+        if (type == QStringLiteral("pane_message")) {
+            QJsonObject reply{{"type", "pane_message_result"}, {"id", event.value(QStringLiteral("id"))}};
+            if (m_paneNoHandoffTurn) {
+                reply.insert(QStringLiteral("ok"), false);
+                reply.insert(QStringLiteral("code"), QStringLiteral("not_supported"));
+                reply.insert(QStringLiteral("message"),
+                             QStringLiteral("this turn was started from a paired device or a guest, "
+                                            "which may not address other panes"));
+            } else {
+                const relay::panedir::Result result = relay::panedir::Directory::instance().send(
+                    m_token, event.value(QStringLiteral("to")).toString(),
+                    event.value(QStringLiteral("text")).toString(),
+                    event.value(QStringLiteral("notify_when_idle")).toBool(),
+                    event.value(QStringLiteral("may_wake")).toBool(true));
+                const QJsonObject verdict = result.toJson();
+                for (auto it = verdict.constBegin(); it != verdict.constEnd(); ++it)
+                    reply.insert(it.key(), it.value());
+            }
+            reply.insert(QStringLiteral("panes"), relay::panedir::Directory::instance().roster(m_token));
+            send(reply);
+            return;
+        }
+        // A note this pane's worker took (busy or held delivery): its ✦ line in the scrollback.
+        if (type == QStringLiteral("peer_line")) {
+            const QString from = event.value(QStringLiteral("from")).toString();
+            const QString title = event.value(QStringLiteral("from_title")).toString();
+            const QString text = event.value(QStringLiteral("text")).toString();
+            printPeerLine((event.value(QStringLiteral("held")).toBool()
+                               ? QStringLiteral("%1 pane %2 (%3) says · %4 · waiting for this pane's next turn")
+                               : QStringLiteral("%1 pane %2 (%3) says · %4"))
+                              .arg(QString(QChar(0x2726)), from, title, text));
+            return;
+        }
         if (m_subagents.handle(event)) return;
         // --- end subagents UI ---
         if (m_jobs.handle(event)) return;   // the jobs list; reset/ready are observed and passed on
@@ -39,6 +77,7 @@ void Pane::handle(const QJsonObject &event) {
                 send(m_lastConfigure);
             }
             send({{"type", "presets"}});
+            pushPaneRoster();   // the worker exists now: it can learn the other panes (#R5TC)
             // Protocol 34 (#MEMS): Claude Code and Codex memories are offered when Relay starts,
             // not at this pane's first configure, which a guest ranked first defers to its first prompt.
             send({{"type", "memory_import"}, {"enabled", QSettings().value(QStringLiteral("memory/import_guests"), true).toBool()}});
@@ -114,6 +153,7 @@ void Pane::handle(const QJsonObject &event) {
             m_tierSummary = event.value(QStringLiteral("tiers")).toObject();
             if (onRolesResolved) onRolesResolved();
             m_agentRole = event.value(QStringLiteral("agent_role")).toString(QStringLiteral("main"));
+            pushPaneRoster();   // an agent is set up: this pane can now take a wake (#R5TC)
             // Protocol 33: the worker echoes the context block back, which is how a console
             // confirms that the surface it is drawn on was understood — the role it settled on,
             // the tool scope it named, the store it chose. The role is read from it when the
@@ -406,6 +446,7 @@ void Pane::handle(const QJsonObject &event) {
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
             m_idleRecap.stop(); m_idleSince.invalidate();   // a running turn is not idle work to recap
+            relay::panedir::Directory::instance().rosterChanged();   // busy now: peers' pane_list sees it (#R5TC)
             m_shareFailed = m_shareFinished = false;   // the pane is in use again; the last turn is history
             startTurnClock();
             m_currentItem = event.value(QStringLiteral("id")).toString();
@@ -470,7 +511,15 @@ void Pane::handle(const QJsonObject &event) {
             m_runCommands.clear();
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
-            if (!m_agentBusy) { stopTurnClock(); m_idleTip.start(); }
+            if (!m_agentBusy) {
+                stopTurnClock(); m_idleTip.start();
+                // Idle now (#R5TC): fire notify_when_idle subscriptions, tell the other panes, and
+                // end the device-turn gate — the next person turn may message anyone again.
+                m_paneNoHandoffTurn = false;
+                m_paneWakeTurn = false;
+                relay::panedir::Directory::instance().wentIdle(m_token);
+                relay::panedir::Directory::instance().rosterChanged();
+            }
             // Status glyphs (#XM0T): the window reads these to show done / failed / needs you
             // until the user has looked at the pane.
             ++m_finishSerial; m_lastOutcome = outcome;
@@ -791,7 +840,12 @@ void Pane::handle(const QJsonObject &event) {
             }
             // Route errors do not cancel a concurrent agent turn.
             m_agentBusy = event.value(QStringLiteral("agent_busy")).toBool(false);
-            if (!m_agentBusy) stopTurnClock();
+            if (!m_agentBusy) {
+                stopTurnClock();
+                m_paneNoHandoffTurn = false;   // the gate dies with the turn (#R5TC)
+                m_paneWakeTurn = false;
+                relay::panedir::Directory::instance().rosterChanged();
+            }
             // A guest that could not start (29.3): the pane stays on the model it had, rather than
             // on a row whose harness never came up. `m_presetBeforeGuest` is set on the way in and
             // cleared the moment the guest reports itself configured.

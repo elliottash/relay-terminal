@@ -66,6 +66,7 @@
 #include "AgentInternalsView.h"   // the reasoning and the tool calls in a pane beside this one (#QT8C)
 #include "InternalsLedger.h"      // …and what that pane took, for the terminal to print when it closes
 #include "Logging.h"
+#include "PaneDirectory.h"   // the pane directory: p<n> addresses, delivery (#R5TC)
 #include "GuestBridge.h"   // the Claude IDE bridge: the env a claude pane gets, and its diff answers
 #include "GlobalsPane.h"   // a memory suggestion's transcript line reads its tool result the Globals way (#MEMS)
 #include "TerminalBackends.h"
@@ -556,6 +557,8 @@ public:
         // agent entry: it *is* that report, a prompt Relay wrote, shown and queued like a fix.
         bool handoff = false;
         bool noHandoff = false;   // a prompt from a paired device never gets the tool
+        bool paneWake = false;     // the turn a peer's message started (#R5TC)
+        relay::panedir::Note paneNote;   // ...and the delivery hop that started it
         // Who asked for it, when that is not the person at this desk: a guest's display name, or
         // empty. Never the guest id — the row is read by people (card #W5N2's owner, 2026-09-18).
         QString author;
@@ -655,6 +658,10 @@ public:
         // The saved scrollback is filed under the pane's token unless a restore hands it the id
         // its saved text already has (initRestore).
         m_scrollbackId = m_token;
+        // Cross-pane addressing (#R5TC, protocol 37): this pane's `p<n>` is minted here, once.
+        // The number is retired when the pane closes and never handed out again, so a stale
+        // "pane 2" is refused `closed` instead of naming whatever pane was split second.
+        m_paneHandle = relay::panedir::Directory::instance().add(m_token, paneDirectoryHooks());
         // The console learns what it is about before anything is built, so `buildUi` draws the
         // action row this context asks for and the very first `configure` carries its block.
         setContext(context ? context : &m_terminalContext);
@@ -739,6 +746,9 @@ public:
 
     ~Pane() override {
         m_closing = true;
+        // Retire the address before anything else goes (#R5TC): a send in flight while this
+        // pane closes is refused with the roster, not delivered into a dying hook.
+        relay::panedir::Directory::instance().remove(m_token);
         // The context outlives an embedded pane -- the host owns it -- so the callback it holds
         // on our behalf goes before we do, or its next `changed()` writes through a dead pointer.
         if (m_context) m_context->onChanged = nullptr;
@@ -1880,6 +1890,12 @@ public:
         if (text.isEmpty()) { status(QStringLiteral("Type a prompt first; Ctrl+Enter interrupts the agent with it.")); return; }
         submitAgent(text, true, QString(), QStringLiteral("interrupt"));
     }
+    // The kill switch (#R5TC §10): stop this pane's turn if a peer's message started it.
+    // Every turn its own person started is left alone.
+    void stopWokenTurn() {
+        if (m_paneWakeTurn && m_agentBusy) stopAgent();
+    }
+
     void stopAgent() {
         // The surface says which turn Esc is for: a card's runs on that card's own supervisor,
         // so an untagged `cancel` from a card console stopped the *tab's* turn (#CTRN).
@@ -9639,6 +9655,115 @@ private:
 
     // A ✦ start or finish line that is also a terminal hyperlink (OSC 8) to relay://subagent/<pane>/<id>:
     // a click opens the subagent's tab, like the strip row. Printed plain while a program runs.
+public:
+    // ----- cross-pane messaging (#R5TC, protocol 37) -------------------------------------------
+    // The roster push is public: the window's directory sink calls it on every pane (#R5TC).
+    static constexpr int kWakeBudget = 20;   // wakes since the person last typed here (§3)
+
+    // A ✦ peer line, printSubagentLine's sibling: printed when another pane's message reaches
+    // this pane. No hyperlink: text carries handles, links carry tokens, and only the directory
+    // holds the sender's token.
+    void printPeerLine(const QString &line) {
+        beginBlock(relay::gaps::Block::Call);   // peer lines sit with the tool rows (#5AWD)
+        if (!shellIdleAtPrompt()) { printInline(line + '\n', Ink::Note); return; }
+        QByteArray out = takeWrapped() + closeProseRun();
+        if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
+        if (!m_atLineStart) out += "\r\n";
+        out += inkCode(Ink::Note) + sanitize(line).toUtf8() + "\x1b[0m\r\n";
+        m_atLineStart = true;
+        writeTerminal(out);
+    }
+
+    // The hooks the directory reads. Live lambdas, so the roster is current whenever it is read;
+    // the only state the directory keeps is the handle and the idle subscriptions.
+    relay::panedir::PaneHooks paneDirectoryHooks() {
+        relay::panedir::PaneHooks hooks;
+        hooks.title = [this] { return m_title; };
+        hooks.workspace = [this] { return m_workspace; };
+        hooks.busy = [this] { return m_agentBusy || m_configuring || !m_entries.isEmpty(); };
+        hooks.configured = [this] { return m_configured && m_guest.isEmpty(); };
+        hooks.guestInFront = [this] { return !m_guest.isEmpty(); };
+        hooks.deliver = [this](const relay::panedir::Note &note) { return deliverPaneNote(note); };
+        return hooks;
+    }
+
+    // Push the roster to this pane's worker: the directory the model addresses. Rows take the
+    // backend's shape (handle/title/workspace/busy), `enabled` folds the kill switch and the
+    // reverse gate — a turn that arrived from a device is not offered pane_send at all.
+    void pushPaneRoster() {
+        if (!m_workerReady) { updatePaneBadge(); return; }
+        QJsonArray rows;
+        for (const QJsonValue &value : relay::panedir::Directory::instance().roster(m_token)) {
+            const QJsonObject row = value.toObject();
+            rows.append(QJsonObject{{"handle", row.value(QStringLiteral("pane"))},
+                                    {"title", row.value(QStringLiteral("title"))},
+                                    {"workspace", row.value(QStringLiteral("workspace"))},
+                                    {"busy", row.value(QStringLiteral("state")) == QStringLiteral("busy")}});
+        }
+        send({{"type", "pane_roster"}, {"panes", rows},
+              {"self", relay::paneaddress::label(m_paneHandle)},
+              {"enabled", relay::panedir::Directory::instance().enabled() && !m_paneNoHandoffTurn}});
+        updatePaneBadge();
+    }
+
+    // The muted `[2]` at the head of the header: this pane's address, shown only when there are
+    // two panes or more to tell apart — zero others is not a `[1]`, it is no badge at all (the
+    // subagent badge's rule).
+    void updatePaneBadge() {
+        if (!m_paneBadge) return;
+        if (relay::panedir::Directory::instance().size() < 2) { m_paneBadge->clear(); return; }
+        m_paneBadge->setText(QStringLiteral("[%1]").arg(m_paneHandle));
+    }
+
+    // A note reached this pane (#R5TC). Busy: it rides the notices path and the worker's model
+    // reads it at its next step boundary. Idle: it starts a turn, with nobody approving it — the
+    // owner's decision, 2026-09-19 — unless the sender's turn was itself a wake (a chain of wakes
+    // is length one by construction) or this pane's wake budget is spent, in which case the note
+    // is delivered and held for the next turn, and the refusal says so.
+    QString deliverPaneNote(const relay::panedir::Note &note) {
+        const QString from = relay::paneaddress::label(note.from);
+        const QString first = note.text.section('\n', 0, 0).left(120);
+        if (note.idle) {
+            // notify_when_idle: one ✦ line and one notice; there is nothing to answer.
+            printPeerLine(QStringLiteral("✦ pane %1 (%2) is idle now").arg(from, note.fromTitle));
+            send({{"type", "pane_note"}, {"from", from}, {"from_title", note.fromTitle},
+                  {"from_workspace", note.fromWorkspace},
+                  {"text", QStringLiteral("pane %1 (%2) is idle now").arg(from, note.fromTitle)},
+                  {"held", true}});
+            return relay::panedir::kDelivered;
+        }
+        const bool awake = !m_agentBusy && m_entries.isEmpty() && !m_configuring;
+        if (note.mayWake && awake) {
+            if (m_paneWakes >= kWakeBudget) {
+                send({{"type", "pane_note"}, {"from", from}, {"from_title", note.fromTitle},
+                      {"from_workspace", note.fromWorkspace}, {"text", note.text},
+                      {"held", true}});
+                return relay::panedir::kNoWake;
+            }
+            ++m_paneWakes;
+            printPeerLine(QStringLiteral("✦ pane %1 (%2) says · %3").arg(from, note.fromTitle, first));
+            m_paneWaking = true; m_paneWakeNote = note;
+            submitAgent(note.text, false, QStringLiteral("pane %1 (%2)").arg(from, note.fromTitle));
+            m_paneWaking = false;
+            return relay::panedir::kWoke;
+        }
+        // Busy, or the wake was withheld: the note rides the notices path. One that arrives with
+        // no turn running survives to the next one — the worker's inbox drains lazily.
+        send({{"type", "pane_note"}, {"from", from}, {"from_title", note.fromTitle},
+              {"from_workspace", note.fromWorkspace}, {"text", note.text},
+              {"held", !note.mayWake || !awake}});
+        return note.mayWake ? relay::panedir::kDelivered : relay::panedir::kNoWake;
+    }
+
+    // security/unattended_full_tools (#3KB7's Security section): a woken turn gets the full tool
+    // set — including run_in_terminal — by default (owner, 2026-09-19: "i think unattended turns
+    // get the full set -- make that an option that is on by default"). Turned off, the entry's
+    // noHandoff predicate applies: the same gate that already keeps a phone's prompt off the shell.
+    bool unattendedFullTools() const {
+        return QSettings().value(QStringLiteral("security/unattended_full_tools"), true).toBool();
+    }
+
+private:
     void printSubagentLine(const QString &line, const QString &id) {
         beginBlock(relay::gaps::Block::Call);   // subagent lines sit with the tool rows (#5AWD)
         if (id.isEmpty() || !shellIdleAtPrompt()) { printInline(line + '\n', Ink::Note); return; }
@@ -12541,6 +12666,8 @@ private:
             // evidence that somebody is still asking, so this pane's agent may send prompts to
             // other panes again and the chain that reached it is over.
             if (onPersonPrompt) onPersonPrompt();
+            // The wake budget resets with the person (#R5TC §3): a wake is not them returning.
+            m_paneWakes = 0;
         }
         // Trigger (1) of "Initialize a project and create a Board here?": the first prompt
         // sent to the agent in a pane standing in a git repository that has no board (19.12). The
@@ -12548,7 +12675,7 @@ private:
         // raised on the next turn of the event loop and a yes takes effect for the turn after, as
         // a deferred `set_board`. A line typed on a phone or by a guest never raises it: a remote
         // participant cannot answer a question about a folder on this machine.
-        if (!m_remoteSubmit) {
+        if (!m_remoteSubmit && !m_paneWaking) {
             QPointer<Pane> guard(this);
             QTimer::singleShot(0, this, [guard] {
                 if (guard) guard->askProjectInit(relay::projectinit::Trigger::AgentWork);
@@ -12571,7 +12698,7 @@ private:
         QueueEntry entry;
         entry.agent = true; entry.text = text; entry.why = why; entry.attachments = attachmentsFor(text);
         entry.shellText = shellText;
-        entry.noHandoff = m_remoteSubmit;
+        entry.noHandoff = m_remoteSubmit || (m_paneWaking && !unattendedFullTools());
         if (!m_remoteSubmit && hasShell()) entry.terminalSnapshot = terminalOverride.isEmpty() ? terminalSnapshot() : terminalOverride;
         // #XCXD: an explicit attachment or override rides the entry pinned; an automatic
         // selection is not kept — it resolves from live records when the turn actually starts
@@ -12581,7 +12708,13 @@ private:
                               && (!terminalOverride.isEmpty() || !m_terminalAttachment.isEmpty());
         if (!entry.contextPinned) entry.terminalSnapshot = {};
         m_terminalAttachment = {}; m_terminalRemoved = false;
-        if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
+        if (m_paneWaking) {
+            // The wake's row names the sender (#R5TC): "p1 · Release notes", the shape a phone's
+            // prompt gets (submitRemote). The tool set is unattendedFullTools() above.
+            entry.paneWake = true; entry.paneNote = m_paneWakeNote;
+            entry.author = QStringLiteral("%1 · %2").arg(relay::paneaddress::label(m_paneWakeNote.from),
+                    m_paneWakeNote.fromTitle.isEmpty() ? QStringLiteral("a pane") : m_paneWakeNote.fromTitle);
+        } else if (m_remoteSubmit) entry.author = m_remoteAuthor;   // a guest's name on their row
         entry.cards = cardsFor(text);   // Switchboard: `#K7Q2` in the prompt (protocol 17.6)
         for (const QJsonValue &card : entry.cards) noteWorkCard(card.toObject().value(QStringLiteral("id")).toString());
         // The user finished editing before the cancel acknowledgement arrived (#7Z08).
@@ -12807,6 +12940,23 @@ private:
         prompt.handoff = entry.agent && entry.handoff;
         if (!entry.fix) { m_subagents.clearFinished(); m_jobs.clearFinished(); }   // finished rows linger until a new user turn
         QJsonObject request{{"type", "ask"}, {"text", entry.text}, {"when", when}};
+        m_paneWakeTurn = entry.paneWake;   // the kill switch reads this (#R5TC §10)
+        if (entry.paneWake) {
+            // The delivery hop rides the ask and the worker builds the whole frame from it
+            // (relay_core/panes.py): the sender writes none of the text the receiver's model reads.
+            request.insert(QStringLiteral("pane_note"), QJsonObject{
+                {"from", relay::paneaddress::label(entry.paneNote.from)},
+                {"from_title", entry.paneNote.fromTitle},
+                {"from_workspace", entry.paneNote.fromWorkspace},
+                {"text", entry.paneNote.text}});
+        }
+        if (entry.noHandoff) {
+            // The reverse gate (#R5TC §8.3): this turn came from a device, a guest or a cautious
+            // owner, so its agent is not offered pane_send either. The flag stays for the whole
+            // turn and the roster below tells the worker; pane_message is also refused below it.
+            m_paneNoHandoffTurn = true;
+            pushPaneRoster();
+        }
         // Which console asked, and what it had on screen (#AGNT step 3, protocol 33). A terminal
         // pane sets `surface` and nothing else: what the agent may see here — the directory, the
         // foreground program, the program-control grant — is the `context` object built below,
@@ -16304,6 +16454,15 @@ private:
     // worker's own preset row and which only a pre-preset "custom" install reads back.
 
     QString m_data, m_python, m_workspace, m_cwd, m_token, m_apiKey;
+    // Cross-pane messaging (#R5TC, protocol 37): this pane's address, its wake budget, and the
+    // state the reverse gate reads.
+    int m_paneHandle = 0;
+    int m_paneWakes = 0;
+    bool m_paneNoHandoffTurn = false;
+    bool m_paneWaking = false;
+    bool m_paneWakeTurn = false;   // the running turn was started by a peer's message
+    relay::panedir::Note m_paneWakeNote;
+    QLabel *m_paneBadge = nullptr;   // the muted [2] at the head of the header
     // Terminal scrollback across a restart: the file this pane's text is saved in, the lines a
     // restore handed it, and whether they have been replayed (once per pane, at the first prompt).
     QString m_scrollbackId;

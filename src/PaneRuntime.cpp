@@ -578,6 +578,11 @@ void Pane::connectWorker() {
         });
         connect(&m_worker, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this](int code, QProcess::ExitStatus exit) {
             m_workerReady = false; m_configured = false; m_configuring = false; m_agentBusy = false;
+            // The worker is gone (#R5TC): no roster to push, no device gate to hold, and the
+            // pane looks idle to the directory — it cannot take a note until it restarts.
+            m_paneNoHandoffTurn = false;
+            relay::panedir::Directory::instance().wentIdle(m_token);
+            relay::panedir::Directory::instance().rosterChanged();
             // A `route` that was in flight will never be answered. Left behind, m_pendingSubmit
             // is a one-submission guard that no reply can ever release, so every later terminal
             // submit in this pane is dropped in silence — the worst version of the bug the local

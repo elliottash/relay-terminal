@@ -21,7 +21,10 @@
 #include <QSet>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <functional>
+
+#include "PaneAddress.h"
 
 namespace relay::panedir {
 
@@ -102,7 +105,14 @@ public:
     // The kill switch (Options `agent/cross_pane`, the palette's Stop cross-pane messaging). The
     // window sets it from the setting at startup and whenever it changes.
     bool enabled() const { return m_enabled; }
-    void setEnabled(bool on) { m_enabled = on; }
+    void setEnabled(bool on);
+
+    // The roster changed: a pane joined or closed, a busy flag or a title flipped, the switch
+    // moved. The sink is called once, 250 ms later at the earliest, because every pane pushes the
+    // whole roster to its worker and a split that renames nothing must not wake five sockets.
+    void rosterChanged();
+    void setRosterSink(std::function<void()> sink) { m_rosterSink = std::move(sink); }
+
 
     // Peer text may not forge Relay's own lines: control characters other than newline and tab
     // are dropped, and so are bidi overrides. At most 16 KB is kept.
@@ -118,6 +128,8 @@ private:
     QHash<int, QString> m_byHandle;             // live handle -> token
     QSet<int> m_retired;                        // handles of closed panes
     QHash<QString, QList<Subscription>> m_idleWatchers;   // subject token -> watchers
+    std::function<void()> m_rosterSink;        // the window's, called coalesced
+    QTimer *m_rosterTimer = nullptr;           // 250 ms of quiet, then one push
     bool m_enabled = true;
 
     QJsonObject row(const Entry &entry) const;

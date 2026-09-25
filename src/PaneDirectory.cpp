@@ -4,6 +4,8 @@
 #include "Logging.h"
 #include "PaneAddress.h"
 
+#include <QSettings>
+
 #include <algorithm>
 
 namespace relay::panedir {
@@ -41,6 +43,7 @@ int Directory::add(const QString &token, PaneHooks hooks) {
     entry.hooks = std::move(hooks);
     m_panes.insert(token, entry);
     m_byHandle.insert(entry.handle, token);
+    rosterChanged();
     return entry.handle;
 }
 
@@ -55,6 +58,27 @@ void Directory::remove(const QString &token) {
         watchers.erase(std::remove_if(watchers.begin(), watchers.end(),
                                       [&](const Subscription &s) { return s.watcher == token; }),
                        watchers.end());
+    rosterChanged();
+}
+
+void Directory::setEnabled(bool on) {
+    if (m_enabled == on) return;
+    m_enabled = on;
+    rosterChanged();
+}
+
+void Directory::rosterChanged() {
+    // One push per 250 ms of quiet (card #R5TC task t:b3): add/remove/busy/title all funnel here,
+    // and the sink walks every pane and sends each worker the whole roster.
+    if (!m_rosterTimer) {
+        m_rosterTimer = new QTimer;
+        m_rosterTimer->setSingleShot(true);
+        m_rosterTimer->setInterval(250);
+        QObject::connect(m_rosterTimer, &QTimer::timeout, m_rosterTimer, [this] {
+            if (m_rosterSink) m_rosterSink();
+        });
+    }
+    m_rosterTimer->start();
 }
 
 int Directory::handleOf(const QString &token) const {
@@ -124,6 +148,14 @@ Result Directory::send(const QString &fromToken, const QString &to, const QStrin
     const QString fromWs = call(sender.hooks.workspace);
     const QString body = printable(text);
     const int bytes = int(body.toUtf8().size());
+    // The kill switch is read here as well as cached (#R5TC §10): a flipped option takes effect
+    // on the next send even before the palette action's setEnabled lands.
+    if (!QSettings().value(QStringLiteral("agent/cross_pane"), true).toBool()) {
+        result.ok = false;
+        result.code = QStringLiteral("disabled");
+        result.message = QStringLiteral("cross-pane messaging is switched off for this Relay");
+        return result;
+    }
     auto refuse = [&](const QString &code, const QString &message, const QString &toToken = QString(),
                       const QString &toWs = QString()) {
         result.ok = false;

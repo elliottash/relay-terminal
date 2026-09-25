@@ -452,6 +452,17 @@ public:
         // a page reset, an agent — so every worker is sent the catalog again (#FEJQ, §30.2: the
         // block carries current values, and nothing is cached across a refresh).
         relay::SettingsWatch::instance().listen(this, [this] { sendAppCatalog(); });
+        // Cross-pane messaging (#R5TC, protocol 37): every pane registers in the process-wide
+        // directory; when the roster settles (250 ms of quiet) each pane pushes it to its worker,
+        // so every agent can pane_list the others. The whole-process sweep is paneWithSession's
+        // shape: several windows share one directory.
+        relay::panedir::Directory::instance().setEnabled(
+            QSettings().value(QStringLiteral("agent/cross_pane"), true).toBool());
+        relay::panedir::Directory::instance().setRosterSink([] {
+            for (QWidget *top : QApplication::topLevelWidgets())
+                if (auto *w = dynamic_cast<RelayWindow *>(top))
+                    for (Pane *pane : w->allPanes()) pane->pushPaneRoster();
+        });
         Keymap::instance().listen(this, [this] {
             for (Pane *pane : allPanes()) pane->sendKeybindings();
             sendHelperKeybindings();   // the tab's helper reads and writes the same keys (#GMCF)
