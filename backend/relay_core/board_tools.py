@@ -213,7 +213,9 @@ TOOL_SPECS = [
           "cases": {"type": "boolean",
                     "description": "true lists the board's case ledger (cases.jsonl) instead of "
                                    "cards: the last `limit` rows, newest last, each with server, "
-                                   "served_by, cost, signal and verdict. Filter with server / card."},
+                                   "served_by, cost, signal and verdict. Filter with server / card. "
+                                   "A `server: deliver` row whose ceremony_steps outnumber its "
+                                   "implementation_steps carries flag: ceremony>implementation."},
           "server": {"type": "string", "description": "With cases: only rows served by this skill id, "
                                                       "program path or 'person'."},
           "card": {"type": "string", "description": "With cases: only rows about this card."}},
@@ -345,7 +347,14 @@ TOOL_SPECS = [
           "resolution": {"type": "string", "enum": list(B.RESOLUTIONS),
                          "description": "Why a card closes, on a move to done or dropped."},
           "duplicate_of": {"type": "string",
-                           "description": "The card this one duplicates (implies resolution duplicate)."}},
+                           "description": "The card this one duplicates (implies resolution duplicate)."},
+          "sections": {"type": "object",
+                       "description": "Landing sections written in the same write as the move — "
+                                      "{heading: text}, e.g. {\"Execution Summary\": \"...\", "
+                                      "\"Tests\": \"...\"}. Replace semantics; not `## Issue`, "
+                                      "`## QA checklist` or `## Verdict` (board_update_card "
+                                      "writes those). Use it so landing is one call, not a "
+                                      "board_update_card per section."}},
          ["id", "reason"]),
     spec("board_import_items",
          "Create Board cards from tracking the project already has — a TODO.md, a backlog/ "
@@ -454,7 +463,10 @@ TOOL_SPECS = [
          "(then you run its stage.sh instead of staging a second one), where the evidence goes, "
          "and the rule that the expected result is sealed in expected.md and never written on the "
          "card. Do that work in this turn and write `## Try it` with board_update_card. It is "
-         "refused during a Board cleanup, which has no machine of its own to stage on.",
+         "refused during a Board cleanup, which has no machine of its own to stage on, and "
+         "refused unless the card's verify block names a person (verify.primary: person or "
+         "verify.human: required) — staging costs a build and a turn, so the card has to ask "
+         "for it. The Board's Try it button is a person acting and is not gated.",
          {"card": _ID_ARG}, ["card"]),
     spec("board_case",
          "Log one served case to the board's case ledger (cases.jsonl) when a person did the work "
@@ -2897,7 +2909,7 @@ class BoardTools:
 
     def _move(self, args: dict) -> dict:
         allowed = {"id", "status", "section", "tab", "before", "after", "reason", "evidence",
-                   "implemented_by", "resolution", "duplicate_of"}
+                   "implemented_by", "resolution", "duplicate_of", "sections"}
         if set(args) - allowed:
             raise BoardToolError(f"board_move_card takes {', '.join(sorted(allowed))}.")
         card_id = normalize_id(args.get("id"))
@@ -3042,6 +3054,31 @@ class BoardTools:
         elif section_arg is not None:
             card.set("section", section_arg)
 
+        # One-write close-out (#ZB9M): `sections` carries the landing sections (`## Execution
+        # Summary`, `## Tests`) in the same card write as the move, so landing is one call
+        # instead of a board_update_card for each section. Written through the same
+        # `_write_section` path board_update_card uses; replace semantics, like the move's.
+        sections = args.get("sections")
+        written_sections: list[str] = []
+        if sections is not None:
+            if not isinstance(sections, dict) or not sections:
+                raise BoardToolError("sections must be an object of {heading: text}, "
+                                     "e.g. {\"Execution Summary\": \"...\", \"Tests\": \"...\"}.")
+            for heading_raw, text_raw in sections.items():
+                heading = _one_line(heading_raw, "heading", 120)
+                if heading.strip().lower() in B.ISSUE_HEADINGS:
+                    heading = B.ISSUE_HEADING
+                if (heading.strip().lower() not in AGENT_SECTIONS
+                        or heading.strip().lower() in ("qa checklist", "verdict")):
+                    raise BoardToolError(
+                        f"sections cannot write `## {heading}` — the user's own sections and the "
+                        "verifier's `## QA checklist`/`## Verdict` are not the mover's to write. "
+                        "Use board_update_card for anything else.", code="board_refused")
+                text = _without_own_heading(_text(text_raw, "text", MAX_SECTION), heading)
+                card.body = _write_section(card.body, heading, text, replace=True)
+                card.dirty = True
+                written_sections.append(heading)
+
         closing = self._close_reason(card, old_status, status, args)
 
         card.set("status", status)
@@ -3076,6 +3113,8 @@ class BoardTools:
             parts.append("reordered")
         if released:
             parts.append(f"session {released[:8]} released")
+        if written_sections:
+            parts.append("wrote " + ", ".join(f"`## {h}`" for h in written_sections))
         if closing:
             parts.append(closing)
         summary = ", ".join(parts) or "unchanged"
@@ -3100,14 +3139,77 @@ class BoardTools:
                                         input=f"card #{card.id}",
                                         signal={"mode": _primary_mode(card),
                                                 "result": "pass" if status == "done" else "fail"})
+        # Ceremony metering (#ZB9M): landing a work card also appends a `server: deliver` row
+        # counting the board writes around it against the commits that did the work, so
+        # `board_list {cases: true}` can flag ceremony-heavy deliveries.  Crude by design;
+        # it measures, it judges nothing.
+        ceremony = None
+        if (card.type == "work" and status != old_status
+                and status in ("done", "needs-verification", *QA_STATUSES)):
+            ceremony = self.record_case(
+                server="deliver", card=card.id, input=f"card #{card.id}",
+                signal={"ceremony_steps": self._ceremony_steps(card),
+                        "implementation_steps": self._implementation_steps(card)})
         return {"id": card.id, "status": status, "section": new_section or None, "tab": tab,
                 "rank": card.rank,
                 "path": str(card.path.relative_to(self.board.repo)),
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
                 "write_id": write_id, "summary": summary,
                 **({"case": case["id"]} if case else {}),
+                **({"ceremony_case": ceremony["id"]} if ceremony else {}),
                 **({"qa_policy": qa_note} if qa_note else {}),
                 **({"land_warning": land_note} if land_note else {})}
+
+    def _ceremony_steps(self, card: B.Card) -> int:
+        """The card's board-write thread events, plus land.py calls when the shared land root
+        has a session record for the card (#ZB9M).  A `begin` and a `commit` per session is
+        the floor; the count is a proxy, not an audit."""
+        steps = 0
+        with contextlib.suppress(OSError):
+            steps += sum(1 for e in self.board.thread(card.id, private=card.private)
+                         if e.kind == "event")
+        return steps + self._land_calls_for(card.id)
+
+    def _land_calls_for(self, card_id: str) -> int:
+        land_root = Path(os.environ.get("RELAY_LAND_ROOT") or "") if os.environ.get(
+            "RELAY_LAND_ROOT") else Path(
+            os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "relay" / "land"
+        calls = 0
+        try:
+            for meta_path in land_root.glob("*/meta.json"):
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if str(meta.get("card") or "").lstrip("#").upper() == card_id:
+                    calls += 2  # a session is at least one begin and one commit
+        except OSError:
+            return 0
+        return calls
+
+    def _implementation_steps(self, card: B.Card) -> int:
+        """Commits in `links.commits` that touch code — anything outside `.board/` and
+        `docs/qa_evidence/`.  A commit that cannot be inspected counts anyway."""
+        commits = (card.front.get("links") or {}).get("commits") or []
+        count = 0
+        for sha in commits:
+            if not isinstance(sha, str):
+                continue
+            paths = None
+            try:
+                out = subprocess.run(["git", "show", "--name-only", "--format=", sha],
+                                     cwd=self.board.repo, capture_output=True, text=True,
+                                     timeout=15)
+                if out.returncode == 0:
+                    paths = [line.strip() for line in out.stdout.splitlines() if line.strip()]
+            except (OSError, subprocess.SubprocessError):
+                paths = None
+            if paths is None:
+                count += 1
+                continue
+            if any(not p.startswith((".board/", "docs/qa_evidence/")) for p in paths) or not paths:
+                count += 1
+        return count
 
     def _close_reason(self, card: B.Card, old_status: str, status: str, args: dict) -> str:
         """Set or clear the close reason for a move (#MJ76), returning the words the thread
@@ -3536,12 +3638,24 @@ class BoardTools:
 
         The thread gains a `progress` entry, so a person watching the card sees that a Try it was
         prepared and by whom, exactly as a claim or a check does.
+
+        Staging costs a build and a turn, so the tool stages only when the card itself says a
+        person verifies it (card #ZB9M): `verify.primary: person`, or `verify.human: required`.
+        Anything else is refused — the Board's Try it *button* is a person acting and is not
+        gated.
         """
         if set(args) - {"card"}:
             raise BoardToolError("board_try takes card.")
         from . import tryit_protocol as TI
         card_id = normalize_id(args.get("card"), "card")
         card = self._card(card_id)
+        verify = B.verify_block(card) or {}
+        if str(verify.get("primary") or "") != "person" and verify.get("human") != "required":
+            raise BoardToolError(
+                "board_try stages only when the card's verify block names a person "
+                "(`verify.primary: person` or `verify.human: required`); this card's does not. "
+                "The Board's Try it button is unaffected.",
+                code="board_refused", requires="person_verify")
         prompt = TI.tryit_prompt(self, card_id, TI.evidence_dir_for(self.board.repo, card_id))
         staged = TI.verify_staging(self.board.repo, card_id, card.body)
         self._append(card, f"- ✦ {self.context.actor} is preparing Try it for this card"
@@ -3707,7 +3821,19 @@ class BoardTools:
             raise BoardToolError("server must be a skill id, a program path, or 'person'.")
         card = normalize_id(args["card"], "card") if args.get("card") else None
         rows = self.ledger(server=server.strip() if server else None, card=card)
-        return {"cases": rows[-limit:], "total": len(rows), "truncated": len(rows) > limit,
+        # Ceremony flag (#ZB9M): a `server: deliver` row whose ceremony count outnumbers its
+        # implementation count is the measurement saying the delivery cost more ceremony than
+        # the change was worth.
+        listed = []
+        for row in rows[-limit:]:
+            signal = row.get("signal") or {}
+            ceremony = signal.get("ceremony_steps")
+            implementation = signal.get("implementation_steps")
+            if (isinstance(ceremony, int) and isinstance(implementation, int)
+                    and ceremony > implementation):
+                row = {**row, "flag": "ceremony>implementation"}
+            listed.append(row)
+        return {"cases": listed, "total": len(rows), "truncated": len(rows) > limit,
                 "path": str(CASES.ledger_path(self.board.root).relative_to(self.board.repo)),
                 "confidential_hidden": not self.own_workspace()}
 

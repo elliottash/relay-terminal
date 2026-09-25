@@ -718,6 +718,33 @@ class MoveTests(BoardToolsTest):
         self.assertIn("reason", self.tools.run(
             "board_move_card", {"id": self.card_id, "status": "ready"})["error"])
 
+    def test_sections_land_with_the_move_in_one_write(self):
+        # Card #ZB9M: the close-out was five board writes (summary, tests, evidence, move);
+        # `sections` carries the landing sections in the same card write as the move.
+        before = len(self.board.thread(self.card_id))
+        result = self.tools.run("board_move_card", {
+            "id": self.card_id, "status": "needs-verification", "reason": "landed",
+            "evidence": "docs/qa_evidence/2026-09-24-zb9m/",
+            "sections": {"Execution Summary": "Cut the ceremony around landing.",
+                         "Tests": "pytest -q tests/test_board_tools.py -k move"}})
+        self.assertNotIn("error", result, result)
+        card = self.board.card_by_id(self.card_id)
+        self.assertIn("## Execution Summary\nCut the ceremony around landing.", card.body)
+        self.assertIn("## Tests\npytest -q tests/test_board_tools.py -k move", card.body)
+        # One thread entry for the whole landing, and it names the sections it wrote.
+        entries = self.board.thread(self.card_id)[before:]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("wrote `## Execution Summary`, `## Tests`", entries[-1].text)
+        self.assertEqual([str(p) for p in self.board.check() if p.code != "missing_verify"], [])
+
+    def test_sections_refuse_the_sections_that_are_not_the_movers_to_write(self):
+        refused = self.tools.run("board_move_card", {
+            "id": self.card_id, "status": "needs-verification", "reason": "landed",
+            "sections": {"Verdict": "pass"}})
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "inbox")
+        self.assertNotIn("## Verdict", self.board.card_by_id(self.card_id).body)
+
     def test_a_qa_lane_needs_evidence_and_an_implementer(self):
         # A worker that cannot name itself (a guest writing through the bridge): only then is the
         # agent's own `implemented_by` argument asked for, and only then can it be missing.
@@ -810,6 +837,50 @@ class MoveTests(BoardToolsTest):
         result = self.tools.run("board_move_card", {"id": self.card_id, "before": other,
                                                     "reason": "nope"})
         self.assertIn("not a card in the", result["error"])
+
+
+# ------------------------------------------------------------------ Try it staging gate (#ZB9M)
+
+class TryItGateTests(BoardToolsTest):
+    """Card #ZB9M: staging a Try it costs a build and a turn, so `board_try` runs only for a
+    card whose verify block says a person verifies it — the Board's Try it button is a person
+    acting and goes straight through."""
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+
+    def _set_verify(self, primary, human="none"):
+        verify = {"artifact": "code", "primary": primary, "human": human, "effort": "low",
+                  "stakes": "rework", "blast": "capability"}
+        if human == "required":
+            verify["criteria"] = "the person runs the staged check and says it passes"
+        result = self.tools.run("board_update_card", {
+            "id": self.card_id, "base_hash": B.file_hash(self.board.card_by_id(self.card_id).path),
+            "fields": {"verify": verify}})
+        self.assertNotIn("error", result, result)
+
+    def test_it_refuses_a_card_whose_verify_block_names_no_person(self):
+        self._set_verify("script")
+        refused = self.tools.run("board_try", {"card": self.card_id})
+        self.assertEqual(refused["code"], "board_refused")
+        self.assertIn("names a person", refused["error"])
+
+    def test_it_stages_when_the_verify_block_names_a_person(self):
+        self._set_verify("person")
+        with unittest.mock.patch("relay_core.tryit_protocol.tryit_prompt",
+                                 return_value="the brief") as prompt:
+            result = self.tools.run("board_try", {"card": self.card_id})
+        self.assertNotIn("error", result, result)
+        self.assertEqual(result["text"], "the brief")
+        prompt.assert_called_once()
+
+    def test_it_stages_when_the_verify_block_requires_a_human(self):
+        self._set_verify("script", human="required")
+        with unittest.mock.patch("relay_core.tryit_protocol.tryit_prompt",
+                                 return_value="the brief"):
+            result = self.tools.run("board_try", {"card": self.card_id})
+        self.assertNotIn("error", result, result)
 
 
 # ------------------------------------------------------- the QA signature and the verifier
@@ -4067,8 +4138,12 @@ class CaseLedgerTests(BoardToolsTest):
     def test_a_move_to_done_is_a_pass_and_back_a_stage_is_a_fail(self):
         self.tools.run("board_claim", {"id": self.card_id})
         self.update(append_section={"heading": "Execution Summary", "text": "built"})
-        self.move("needs-verification", evidence="docs/qa_evidence/x/")
-        self.assertEqual(self.rows(), [])                   # not a verdict
+        landed = self.move("needs-verification", evidence="docs/qa_evidence/x/")
+        self.assertNotIn("error", landed, landed)
+        # Landing meters ceremony (#ZB9M): a pending `deliver` row with the counts, never a
+        # verdict — the verdict rows carry a signal mode, the ceremony rows the counts.
+        self.assertIn("ceremony_case", landed)
+        self.assertEqual([r for r in self.rows() if "ceremony_steps" not in r["signal"]], [])
         back = self.move("executing")
         self.assertNotIn("error", back, back)
         self.assertEqual(self.rows()[-1]["verdict"]["result"], "fail")
@@ -4080,9 +4155,39 @@ class CaseLedgerTests(BoardToolsTest):
         done = self.move("done")
         self.assertNotIn("error", done, done)
         self.assertIn("case", done)
-        results = [r["verdict"]["result"] for r in self.rows(card=self.card_id)]
+        results = [r["verdict"]["result"] for r in self.rows(card=self.card_id)
+                   if "ceremony_steps" not in r["signal"]]
         self.assertEqual(results, ["fail", "pass", "pass"])
         self.assertEqual(self.rows()[-1]["served_by"], "owner")
+
+    def test_landing_meters_ceremony_against_implementation(self):
+        # Card #ZB9M: every landing appends a `server: deliver` row counting the card's
+        # board-write thread events against its recorded commits, and `board_list {cases: true}`
+        # flags the rows where ceremony outnumbers implementation.
+        import os
+
+        self.tools.run("board_claim", {"id": self.card_id})
+        self.update(append_section={"heading": "Execution Summary", "text": "built"})
+        with tempfile.TemporaryDirectory() as empty_land_root:
+            with unittest.mock.patch.dict(os.environ, {"RELAY_LAND_ROOT": empty_land_root}):
+                landed = self.move("needs-verification", evidence="docs/qa_evidence/x/")
+        self.assertIn("ceremony_case", landed)
+        (row,) = self.rows(server="deliver")
+        self.assertEqual(row["card"], self.card_id)
+        # No commits in `links.commits`, and the card's own thread has board-write events.
+        self.assertEqual(row["signal"]["implementation_steps"], 0)
+        self.assertGreater(row["signal"]["ceremony_steps"], 0)
+        self.assertEqual(row["verdict"]["result"], "pending")
+        listed = self.tools.run("board_list", {"cases": True})
+        self.assertEqual([r.get("flag") for r in listed["cases"]],
+                         ["ceremony>implementation"])
+        # A delivery whose commits outnumber its board writes carries no flag.
+        self.tools.run("board_case", {"server": "deliver", "card": self.card_id,
+                                      "signal": {"ceremony_steps": 1,
+                                                 "implementation_steps": 3}})
+        listed = self.tools.run("board_list", {"cases": True})
+        self.assertEqual([r.get("flag") for r in listed["cases"]],
+                         ["ceremony>implementation", None])
 
     def test_board_list_cases_filters_by_server_and_card_and_hides_confidential_rows_elsewhere(self):
         self.tools.run("board_case", {"server": "referee-report", "input": "EJ-1", "card": self.card_id})

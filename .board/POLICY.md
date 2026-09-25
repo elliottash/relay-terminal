@@ -25,7 +25,8 @@ Board rules (`board_*` writes the repository's `issues/` tracker):
    Each unfinished request gets or updates its card; one card per request,
    never for your steps (`update_todos`). *Small*: done and verified this turn; no card, the
    commit is the record. *Medium*: more than a turn or two files, no decision, proved by a test.
-   *Large*: needs a plan, a user decision or UI changes. Before medium/large work: find or create
+   *Large*: needs a plan, a user decision, or adds or rearranges UI — visible-text-only edits
+   are *medium*. Before medium/large work: find or create
    the card, `board_claim` it, load **`deliver`**. `/deliver` makes work large; "just do it"
    makes it small.
 2. **Summarize, then quote.** `## Issue` opens with your `summary`; the user's words follow as
@@ -80,7 +81,10 @@ Decide before anything else, and say the tier in one word in your reply when it 
 |---|---|---|
 | **Small** | finished in this turn, verified by you (built, a test run, or seen working), no design choice, no question for the user | no card; the commit is the record; steps 1 and 5 still apply (do not redo done work, `#ID` only if a card already exists) |
 | **Medium** | more than one turn or more than two files, but no decision needed and a test proves it | steps 1–3, then work; at landing **you** move it to `done` (step 5) |
-| **Large** | needs a plan, a decision from the user, or changes UI (needs eyes) | all six steps; lands in `needs-verification` for a verifier |
+| **Large** | needs a plan, a decision from the user, or adds or rearranges UI (needs eyes) | all six steps; lands in `needs-verification` for a verifier |
+
+"Needs eyes" means new or rearranged UI. Visible text inside an existing control is not a UI
+change, and keyboard or other behaviour a script test can prove is **Medium**.
 
 `/deliver <request>` makes it large whatever its size. "Just do it" or "no card" from the user
 makes it small. When in doubt between small and medium, small: a card nobody needed is noise,
@@ -199,12 +203,16 @@ you when the card has none; the user corrects the proposal, and their correction
   claimed paths before `board_move_card` moves the card to `needs-verification` or `done` — the
   land gate refuses the move while your pane's land session still holds uncommitted hunks, and
   the refusal names the files, so commit them and repeat the move.
-- When it lands, by tier (policy rule 5), in the same commit as the change:
+- When it lands, by tier (policy rule 5), in the same commit as the change. Text evidence — the
+  test's output — goes in that commit's message or the card's `## Tests`; `docs/qa_evidence/`
+  is only for artifacts that are not text (screenshots, recordings). Never a second commit for
+  evidence:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
-  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and
-    `## Execution Summary` and `## Tests` in the body. **Write no `## QA checklist`**: that
+  - **Large:** one `board_move_card` to `needs-verification` with the evidence path that carries
+    `sections` for `## Execution Summary` and `## Tests` — the move writes them in the same card
+    write, so landing is one call, not one per section. **Write no `## QA checklist`**: that
     section is the verifying session's record of what it checked against your `## Done means`,
     and a checklist written by the pane that did the work is a list of criteria the work already
     meets. A separate session verifies — recommended on a different model family, which is a
@@ -365,9 +373,12 @@ Set `status:` and put the file where that status belongs (`needs-qa-llm` → `ne
 `needs_labels/`, `needs-ab` → `needs_ab/`, `deferred` → `deferred/`, `done` → `done/`, `dropped`
 → `done/`; every other status stays in the tab folder). Landing work means the status
 `needs-verification`, the evidence path in `links.evidence` and the tests in `## Tests` — in the
-same commit as the change (rule 5), and no `## QA checklist`: that section is the verifier's
-record of what it checked, and you are not the verifier. Nothing is ever deleted: a card is
-closed by moving it to `done` or `dropped` (both in `done/`) with the reason in the thread.
+same commit as the change (rule 5). Text evidence (test output) rides in the commit message or
+`## Tests`; only artifacts that are not text (screenshots, recordings) get a `docs/qa_evidence/`
+folder, and evidence never gets a second commit. Write no `## QA checklist`: that section is the
+verifier's record of what it checked, and you are not the verifier. Nothing is ever deleted: a
+card is closed by moving it to `done` or `dropped` (both in `done/`) with the reason in the
+thread.
 
 ### Signals — the faults the machine is tracking
 

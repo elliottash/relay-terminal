@@ -35,7 +35,10 @@ Decide before anything else, and say the tier in one word in your reply when it 
 |---|---|---|
 | **Small** | finished in this turn, verified by you (built, a test run, or seen working), no design choice, no question for the user | no card; the commit is the record; steps 1 and 5 still apply (do not redo done work, `#ID` only if a card already exists) |
 | **Medium** | more than one turn or more than two files, but no decision needed and a test proves it | steps 1–3, then work; at landing **you** move it to `done` (step 5) |
-| **Large** | needs a plan, a decision from the user, or changes UI (needs eyes) | all six steps; lands in `needs-verification` for a verifier |
+| **Large** | needs a plan, a decision from the user, or adds or rearranges UI (needs eyes) | all six steps; lands in `needs-verification` for a verifier |
+
+"Needs eyes" means new or rearranged UI. Visible text inside an existing control is not a UI
+change, and keyboard or other behaviour a script test can prove is **Medium**.
 
 `/deliver <request>` makes it large whatever its size. "Just do it" or "no card" from the user
 makes it small. When in doubt between small and medium, small: a card nobody needed is noise,
@@ -154,12 +157,16 @@ you when the card has none; the user corrects the proposal, and their correction
   claimed paths before `board_move_card` moves the card to `needs-verification` or `done` — the
   land gate refuses the move while your pane's land session still holds uncommitted hunks, and
   the refusal names the files, so commit them and repeat the move.
-- When it lands, by tier (policy rule 5), in the same commit as the change:
+- When it lands, by tier (policy rule 5), in the same commit as the change. Text evidence — the
+  test's output — goes in that commit's message or the card's `## Tests`; `docs/qa_evidence/`
+  is only for artifacts that are not text (screenshots, recordings). Never a second commit for
+  evidence:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA
     checklist, no verifier: the user can reopen it.
-  - **Large:** `board_move_card` to `needs-verification` with the evidence path, and
-    `## Execution Summary` and `## Tests` in the body. **Write no `## QA checklist`**: that
+  - **Large:** one `board_move_card` to `needs-verification` with the evidence path that carries
+    `sections` for `## Execution Summary` and `## Tests` — the move writes them in the same card
+    write, so landing is one call, not one per section. **Write no `## QA checklist`**: that
     section is the verifying session's record of what it checked against your `## Done means`,
     and a checklist written by the pane that did the work is a list of criteria the work already
     meets. A separate session verifies — recommended on a different model family, which is a

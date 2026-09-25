@@ -199,7 +199,11 @@ def _verdict(value, default_who: str) -> dict:
 
 
 def _signal(value) -> dict:
-    """`{mode, result}`: the verify primary mode that produced the signal and what it said."""
+    """`{mode, result}`: the verify primary mode that produced the signal and what it said.
+
+    A `server: deliver` ceremony row (#ZB9M) instead carries `{ceremony_steps,
+    implementation_steps}`: the board-write count around the card's landing against the
+    commits that did the work, so `board_list {cases: true}` can flag ceremony-heavy cards."""
     if value is None:
         return {}
     if isinstance(value, str):
@@ -213,6 +217,13 @@ def _signal(value) -> dict:
     result = _ref(value.get("result"), "signal.result")
     if result:
         out["result"] = result.lower()
+    for key in ("ceremony_steps", "implementation_steps"):
+        count = value.get(key)
+        if count is None:
+            continue
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise CaseError(f"signal.{key} must be a non-negative integer.")
+        out[key] = count
     return out
 
 

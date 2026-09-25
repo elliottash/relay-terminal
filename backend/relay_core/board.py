@@ -2932,7 +2932,11 @@ def _appendix(board: "Board") -> str:
                            "; every other status stays in the tab folder). Landing work means "
                            "the status `needs-verification`, the evidence path in `links.evidence` "
                            "and the tests in `## Tests` — in the same commit as the change (rule "
-                           "5), and no `## QA checklist`: that section is the verifier's record of "
+                           "5). Text evidence (test output) rides in the commit message or "
+                           "`## Tests`; only artifacts that are not text (screenshots, "
+                           "recordings) get a `docs/qa_evidence/` folder, and evidence never gets "
+                           "a second commit. Write no `## QA checklist`: that section is the "
+                           "verifier's record of "
                            "what it checked, and you are not the verifier. Nothing is ever "
                            "deleted: a card is closed by moving it to `done` or `dropped` (both in "
                            "`done/`) with the reason in the thread.", indent="")

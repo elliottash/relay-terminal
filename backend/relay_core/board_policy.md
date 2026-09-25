@@ -39,7 +39,8 @@ Board rules (`board_*` writes the repository's `issues/` tracker):
    Each unfinished request gets or updates its card; one card per request,
    never for your steps (`update_todos`). *Small*: done and verified this turn; no card, the
    commit is the record. *Medium*: more than a turn or two files, no decision, proved by a test.
-   *Large*: needs a plan, a user decision or UI changes. Before medium/large work: find or create
+   *Large*: needs a plan, a user decision, or adds or rearranges UI — visible-text-only edits
+   are *medium*. Before medium/large work: find or create
    the card, `board_claim` it, load **`deliver`**. `/deliver` makes work large; "just do it"
    makes it small.
 2. **Summarize, then quote.** `## Issue` opens with your `summary`; the user's words follow as
