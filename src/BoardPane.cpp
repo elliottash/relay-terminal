@@ -10209,7 +10209,8 @@ QJsonObject relay::BoardView::drive(const QJsonObject &request)
     }
     // Only uniquely named, visible Board controls. No terminal or agent console text input.
     const QSet<QString> fields{QStringLiteral("boardFilter"), QStringLiteral("boardCardTitleEdit"),
-        QStringLiteral("boardIssueEditor"), QStringLiteral("boardTestsEditor"), QStringLiteral("boardQuickAdd")};
+        QStringLiteral("boardIssueEditor"), QStringLiteral("boardTestsEditor"), QStringLiteral("boardQuickAdd"),
+        QStringLiteral("boardCardFind")};   // the card page's find strip (#9NBZ)
     if (op == QLatin1String("type") && !fields.contains(name)) return fail("not_a_named_box");
     QList<QWidget *> matches;
     for (QWidget *widget : findChildren<QWidget *>(name))
