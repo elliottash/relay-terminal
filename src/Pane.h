@@ -11528,6 +11528,11 @@ private:
     // Short, stable id for this pane in relay.log and the worker's worker.log.
     QString paneLogId() const { return m_token.left(8); }
 
+    // How long a busy turn may hear nothing from the worker at all before the pane ends it
+    // (card #1BGS). Generous on purpose: compaction of a huge context is quiet for many minutes,
+    // and #YJG7's long retry ladders still emit provider_retry events as they go.
+    static constexpr qint64 kStuckTurnSilenceMs = 2 * 3600 * 1000;
+
     // One line per protocol event. Types, ids and counts only: `delta`, `tool_output` and
     // `thinking_delta` carry the model's text and the shell's output, so they are never logged.
     void logEvent(const QString &type, const QJsonObject &event) {
@@ -11584,6 +11589,28 @@ private:
     void tickTurnClock() {
         m_paneState.changed();   // pane_state (relay-terminal-71)
         if (!m_agentBusy) { stopTurnClock(); return; }
+        // A busy state reached without an `agent_started` (an error or pane_state event that
+        // carried agent_busy) must not read an unstopped, never-started timer: start it, so the
+        // line counts from now instead of printing an undefined number.
+        if (!m_turnElapsed.isValid()) m_turnElapsed.start();
+        // Card #1BGS: a turn whose worker stopped reporting (a model switch landing during
+        // compaction was the seen case) left the pane busy forever and the clock climbed for
+        // days. A turn that is genuinely alive emits events — steps, retries, compaction notes —
+        // so hours of total silence with nothing to wait on is a lost turn: end it here. An open
+        // ask or a wait on background work is a real, potentially long wait, not a lost worker.
+        const qint64 silentMs = m_lastAgentEvent.isValid() ? m_lastAgentEvent.elapsed() : 0;
+        if (silentMs > kStuckTurnSilenceMs) {
+            const QString waitingNow = relay::panestatus::waitingLine(waitingFacts(), -1).trimmed();
+            if (m_ask.open() || !waitingNow.isEmpty()) return;   // legitimately waiting on someone
+            relay::log::error(QStringLiteral("stuck_turn pane=%1 silent_ms=%2").arg(paneLogId()).arg(silentMs));
+            m_agentBusy = false;
+            stopTurnClock();
+            ensureLineStart();
+            printInline(QStringLiteral("⚠ The agent stopped reporting; after %1 hours of silence the pane is idle again.\n")
+                            .arg(kStuckTurnSilenceMs / 3600000), Ink::Note);
+            status(QStringLiteral("Ready"));
+            return;
+        }
         const qint64 seconds = m_turnElapsed.elapsed() / 1000;
         const QString stop = Keymap::instance().shortcutText(QStringLiteral("agent.stop"));
         const QString stopWord = stop.isEmpty() ? QStringLiteral("Esc") : stop;
@@ -17621,6 +17648,7 @@ private:
     // above the prompt box (m_busyLine) rather than a label in the strip under it.
     QTimer *m_turnClock = nullptr;
     QElapsedTimer m_turnElapsed;
+    QElapsedTimer m_lastAgentEvent;       // last worker event of any kind, for the stuck-turn watchdog (#1BGS)
     QString m_turnClockText;              // the turn's line, for pane_state's clock (relay-terminal-71)
     PaneBusyLine *m_busyLine = nullptr;   // the "Relaying · …" line above the prompt (#4E13, #HQ2B, #RR0G, #R3YN)
     QToolButton *m_busyAction = nullptr;  // Take over / Take control beside that line (card #H2KQ; the top-right bubble is retired)

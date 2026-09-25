@@ -4,6 +4,7 @@
 
 void Pane::handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
+        m_lastAgentEvent.restart();   // any event is a sign of life, for the stuck-turn watchdog (#1BGS)
         trackRecallEvent(type, event);
         logEvent(type, event);
         noteModelSwitchEvent(type, event);   // the queued and steered `/model` rows (#7QH0)
@@ -878,6 +879,8 @@ void Pane::handle(const QJsonObject &event) {
                 m_paneNoHandoffTurn = false;   // the gate dies with the turn (#R5TC)
                 m_paneWakeTurn = false;
                 relay::panedir::Directory::instance().rosterChanged();
+            } else if (!wasBusy && !m_turnElapsed.isValid()) {
+                startTurnClock();   // busy again without an agent_started: count from now (#1BGS)
             }
             // A guest that could not start (29.3): the pane stays on the model it had, rather than
             // on a row whose harness never came up. `m_presetBeforeGuest` is set on the way in and
