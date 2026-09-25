@@ -127,7 +127,7 @@ BUILTINS = [
         "out loud that you could not fix it. "
         "Never claim a test passes unless a successful run of it proves so. "
         "Stay inside the fault: a second problem you notice is not yours to fix in this run.",
-        SUBAGENT_TOOLS, "inherit", None, 12),
+        SUBAGENT_TOOLS, "inherit", None, MAX_STEPS),
 ]
 
 

@@ -953,6 +953,11 @@ class LimitReportingTests(Base):
     def test_general_definition_follows_the_pane_backstop(self):
         self.assertEqual(AgentDefinition('general', 'General-purpose agent').max_steps, 500)
 
+    def test_every_builtin_definition_follows_the_pane_backstop(self):
+        # Owner, 2026-09-24 (#VTJR): no subagent keeps a 12-step budget, `signal` included.
+        from relay_core.agents_defs import BUILTINS
+        self.assertEqual({d.name: d.max_steps for d in BUILTINS}, {'general': 500, 'signal': 500})
+
     def test_spawn_warnings_reach_the_tool_reply(self):
         reply = self.manager.run_tool('agent', {'description': 'w', 'prompt': 'hi', 'background': True,
                                                 'model': 'no-such-model'}, 'c3', None, threading.Event())
