@@ -303,7 +303,7 @@ target_compile_options(relay-backends PRIVATE ${RELAY_WARNINGS})
 # clamping and directory fallbacks. Plain QtCore so the rules can be tested without a window.
 # src/ClosedStack.* is the recently-closed list (state/closed.json): same directory, same node
 # shapes, same atomic write, so it lives in the same library.
-add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h src/ClosedStack.cpp src/ClosedStack.h)
+add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h src/ClosedStack.cpp src/ClosedStack.h src/TextJournal.cpp src/TextJournal.h)
 # engine/ is on the include path for relay::ProseBlock / FoldLine alone (a declaration -- the
 # engine is not linked in): the prose trailer the scrollback files carry is typed in those
 # terms (#MTCS). src/ is already PUBLIC below for WordWrap.h, which TerminalBackend.h includes.
@@ -989,6 +989,11 @@ if(BUILD_TESTING)
     target_link_libraries(relay-windowstate-tests PRIVATE relay-windowstate relay-terminal-engine ${RELAY_QT}::Test)
     add_test(NAME windowstate COMMAND relay-windowstate-tests)
     set_tests_properties(windowstate PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # The pane text journal (card #HEY7); the engine's serializer is what its round trip is held to.
+    add_executable(relay-textjournal-tests tests/textjournal_test.cpp)
+    target_link_libraries(relay-textjournal-tests PRIVATE relay-windowstate relay-terminal-engine ${RELAY_QT}::Test)
+    add_test(NAME textjournal COMMAND relay-textjournal-tests)
+    set_tests_properties(textjournal PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-closedstack-tests tests/closedstack_test.cpp)
     add_executable(relay-activepaneclose-tests tests/activepaneclose_test.cpp)
     target_include_directories(relay-activepaneclose-tests PRIVATE src)
