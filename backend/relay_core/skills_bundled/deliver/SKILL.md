@@ -144,6 +144,16 @@ you when the card has none; the user corrects the proposal, and their correction
   by promoting it into the repo (`--promote-to docs/qa_evidence/…`) or dropping it (`--drop`)
   explicitly, never silently. Say in your final line what you released. A session's `scratch` is
   reclaimed automatically when it closes, but do not leave it to that when the task is done.
+- **Build and test your own tree** (card #76QW): after `land.py begin`, build and test through
+  `python3 scripts/land.py try <me> [--tests <regex>]` — Relay pane agents have the same thing
+  as the `land_try` tool — which compiles tip plus your claimed hunks in your own verify slot,
+  so another session's half-written edit can break neither your build nor your test run. Not
+  the shared `build/`, which every other session is compiling into; that one stays for work
+  you have not claimed (unclaimed or tree-wide builds, and the shared `build/relay`).
+- **Land your claims before the move** (card #FYEY): `python3 scripts/land.py commit <me>` your
+  claimed paths before `board_move_card` moves the card to `needs-verification` or `done` — the
+  land gate refuses the move while your pane's land session still holds uncommitted hunks, and
+  the refusal names the files, so commit them and repeat the move.
 - When it lands, by tier (policy rule 5), in the same commit as the change:
   - **Medium:** `board_move_card` to `done` with a one-line reason naming the test that proves it,
     the commits in `links.commits`, and the test's path or command as the evidence line. No QA

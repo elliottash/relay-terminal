@@ -4220,7 +4220,12 @@ policy makes — nothing else is a stage.
   three fixed lines — `tests: passed|failed|missing evidence (revision …)`,
   `simulation: played|not applicable|could not stage (evidence …)` and `staged: <that directory>`.
   The path is fixed because **Try it** (#JNYN) reopens what the verifier staged rather than
-  staging it again, and only stages on its own when Verify never ran.
+  staging it again, and only stages on its own when Verify never ran. The `stage.sh` it writes
+  resolves the binary on its first line the way a Try-it turn does (card #76QW): the card's
+  landed commit built by `land.py try --commit <sha> --print-binary` (newest of `links.commits`;
+  a warm verify slot makes that incremental, a cold one builds the whole tree and takes
+  minutes), else `build/relay` of the checkout — never a shared binary that predates the card's
+  changes — with the record saying which of the two was used.
 - **Agents move cards within their authority, and stop at a person's judgement.** The implementer
   moves its card to `needs-verification`, the verifier on to a QA lane or back a stage. A card
   whose `## Human QA` holds a numbered question with no indented `Answer:` line under it is not

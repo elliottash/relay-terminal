@@ -54,6 +54,7 @@ import datetime
 import os
 import re
 import shlex
+import subprocess
 import sys
 import tempfile
 import threading
@@ -673,7 +674,16 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
         evidence = str(Path(out).relative_to(repo))
     except ValueError:                                      # pragma: no cover - outside the repo
         evidence = str(out)
-    binary = _app_binary(repo)
+    # The card's newest landed commit decides the binary (card #76QW): `links.commits` is sorted
+    # oldest first, so the last entry is the revision to build. `land.py try` may spend minutes
+    # on a cold verify slot — `tryit_prompt` runs in the worker thread of the Try it turn.
+    commits = (B.card_links(card).get("commits") if card is not None else None) or []
+    commit = commits[-1] if commits else None
+    binary = _app_binary(repo, commit)
+    shared = _app_binary(repo)
+    origin = (f"the card's landed commit {commit}, built by "
+              f"`land.py try --commit {commit} --print-binary`"
+              if commit and binary != shared else "`build/relay` of this checkout")
     staged = verify_staging(repo, card_id, card.body if card is not None else "")
     head = ["[Board Try it]",
             f"Card: #{card_id} — {card.title if card is not None else ''}",
@@ -684,7 +694,7 @@ def tryit_prompt(tools, card_id: str, out: Path) -> str:
             f"Sealed expected result: {evidence}/{EXPECTED_FILE}",
             f"Staging script to write if you have to stage it yourself: {evidence}/{STAGE_SCRIPT}",
             f"Stage fixtures under: {_run_dir()}",
-            f"The app's binary, unless the card names another: {binary}"
+            f"The app's binary, unless the card names another — {origin}: {binary}"
             + ("" if binary.is_file() else "  (not built here — build it, or say so and stop)"),
             f"Today: {datetime.date.today().isoformat()}",
             ""]
@@ -715,7 +725,18 @@ def _stage_command(path: str) -> str:
     return shlex.quote(interpreter or "bash") + " " + shlex.quote(path)
 
 
-def _app_binary(repo: Path) -> Path:
+def _app_binary(repo: Path, commit: str | None = None) -> Path:
+    """The app binary a Try-it turn drives — never a stale one (card #76QW).
+
+    With the card's landed `commit`, the binary is that revision built by
+    `scripts/land.py try tryit --commit <sha> --print-binary` — the tree the card actually
+    changed, not whatever `build/` happens to contain today. Only without a commit, or when
+    that build cannot be produced, does the turn fall back to the per-platform candidates,
+    i.e. `build/relay` of this checkout.
+    """
+    built = _land_try_binary(repo, commit)
+    if built is not None:
+        return built
     if not WINDOWS and sys.platform == "darwin":
         candidates = [repo / "build" / "Relay.app" / "Contents" / "MacOS" / "relay",
                       repo / "build" / "relay.app" / "Contents" / "MacOS" / "relay",
@@ -731,6 +752,34 @@ def _app_binary(repo: Path) -> Path:
     # The private interpreter is <install>/runtime/python/python.exe.
     candidates.append(Path(sys.executable).parent.parent.parent / "bin" / "relay.exe")
     return next((path for path in candidates if path.is_file()), candidates[0])
+
+
+def _land_try_binary(repo: Path, commit: str | None) -> Path | None:
+    """The binary `land.py try` builds for `commit`, or None when there is none to serve.
+
+    A warm verify slot makes this incremental; a cold one builds the whole tree, so the
+    timeout is minutes (the exit codes are 5 build failed, 6 tests failed — this asks for no
+    tests). Any failure — no `scripts/land.py`, no git history for the sha, a build that
+    fails — returns None and the caller falls back to the shared build rather than serving a
+    stale binary without saying so.
+    """
+    if not commit or not (repo / "scripts" / "land.py").is_file():
+        return None
+    try:
+        run = subprocess.run([sys.executable, "scripts/land.py", "try", "tryit",
+                              "--commit", commit, "--print-binary"],
+                             cwd=repo, capture_output=True, text=True, timeout=1800)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if run.returncode != 0:
+        return None
+    lines = [line.strip() for line in run.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    path = Path(lines[-1]).expanduser()
+    if not path.is_absolute():
+        path = repo / path
+    return path if path.is_file() else None
 
 
 def _platform_brief() -> str:

@@ -18,7 +18,10 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 - **Build:** `scripts/relay-build`, never `cmake --build` by hand: it locks `build/`
   against the other sessions and stamps the objects it made back to the build's start, so a
   header edited while a compile was running is recompiled instead of silently missed
-  (`CLAUDE.md`, "Build through `scripts/relay-build`"). Read `docs/BUILDING.md` before any
+  (`CLAUDE.md`, "Build through `scripts/relay-build`"). Once a session has `begin`-claimed its
+  paths, it builds and tests its own change through `python3 scripts/land.py try <me>
+  [--tests <regex>]` — tip plus its hunks in its own verify slot, so no other session's edit can
+  break it. Read `docs/BUILDING.md` before any
   developer, package or release build; it is the canonical Linux, Windows and macOS build map.
 - **Tests:** do not run the full test suites unless the owner asks. Run targeted tests for the
   code you changed instead — a single `ctest --test-dir build -R <name>` case, or one

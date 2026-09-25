@@ -245,6 +245,16 @@ It does three things:
   recompiles it — which is what make would have done if compiling were instantaneous. Everything
   gets the *same* timestamp, so no binary looks older than the objects it was linked from.
 
+Once a session has `begin`-claimed its paths, its own change has a better tool than the shared
+tree: `python3 scripts/land.py try <me> [--tests <regex>]` builds exactly what its
+`land.py commit` would land — tip plus its own claimed hunks — in a warm verify slot under
+`~/.local/state/relay/land/verify-slots/` and runs the named ctest cases there, so another
+session's half-written edit can break neither its build nor its test run (card #76QW). That cost
+is real: the verify session behind #234Z lost roughly 40% of its window to other people's edits
+around `build/` — a test build broken by a half-written `Pane.h`, debug prints stripped mid-run —
+and its tests passed first time on the landed tree. `scripts/relay-build` stays the tool for
+unclaimed or tree-wide builds, and for the shared `build/relay` that Try-it and manual runs use.
+
 With `ccache` installed, every Relay configure (`build/`, `build-fast/`, the verify slots)
 compiles through one shared cache in `~/.cache/relay/ccache` (card #V52P,
 `cmake/CompilerCache.cmake`; `docs/BUILDING.md` has the switches), so a header state one session's

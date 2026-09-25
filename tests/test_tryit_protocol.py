@@ -6,9 +6,11 @@ Card #JNYN.  No model and no network: the Try it turn is faked exactly the way
 submitted, and the test then plays the turn's events back through `observe`, doing by hand
 whatever the model would have done to the card in between.
 """
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from relay_core import board as B
 from relay_core import board_protocol as P
@@ -202,7 +204,8 @@ class RunTests(TryItTest):
         self.start()
         self.agent_tools.run("board_comment", {
             "id": self.card, "kind": "note",
-            "text": "Try it could not be staged: build/relay is not built on this machine."})
+            "text": "Try it could not be staged: `land.py try --commit` could not build the card's "
+                    "commit, and build/relay is not built on this machine."})
         done = self.tryit_events(self.finish(text="I could not stage it."))[-1]
         self.assertEqual(done["state"], "finished")
         self.assertFalse(done["section_written"])
@@ -240,7 +243,8 @@ class RunTests(TryItTest):
         self.start()
         self.agent_tools.run("board_comment", {
             "id": self.card, "kind": "note",
-            "text": "Try it could not be staged: build/relay is not built on this machine."})
+            "text": "Try it could not be staged: `land.py try --commit` could not build the card's "
+                    "commit, and build/relay is not built on this machine."})
         self.tryit_events(self.finish(outcome="error", text=""))
         notes = [e for e in self.board.thread(self.card) if e.kind == "note"]
         self.assertEqual(len(notes), 1)
@@ -338,6 +342,45 @@ class ReuseTests(TryItTest):
         started = self.tryit_events(self.start())[0]
         self.assertFalse(started["reusing"])
         self.assertIn(f"no {TI.STAGE_SCRIPT} in it", self.turns.submitted[-1]["prompt"])
+
+    def test_with_a_landed_commit_the_binary_comes_from_land_py_try(self):
+        # Card #76QW: a Try-it turn never serves a stale shared binary. When the card has
+        # landed commits, the binary is the newest one built by `land.py try --commit` in its
+        # own verify slot; `build/relay` is only the fallback the turn names.
+        slot = self.repo / "land" / "verify-slots" / "tryit" / "bin" / "relay"
+        slot.parent.mkdir(parents=True)
+        slot.write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.repo / "scripts").mkdir()
+        (self.repo / "scripts" / "land.py").write_text("# stub for the guard\n",
+                                                       encoding="utf-8")
+        sha = "0123456789ab"
+        card = self.board.card_by_id(self.card)
+        card.set("links", {**(card.front.get("links") or {}), "commits": [sha]})
+        self.board.save(card)
+        ran = []
+
+        def fake_land_try(argv, **kw):
+            ran.append((argv, kw))
+            return mock.Mock(returncode=0, stdout=f"{slot}\n", stderr="")
+
+        with mock.patch("relay_core.tryit_protocol.subprocess.run", fake_land_try):
+            self.assertEqual(TI._app_binary(self.repo, sha), slot)
+            prompt = TI.tryit_prompt(self.commands.tools, self.card, self.evidence())
+        self.assertEqual(ran[0][0],
+                         [sys.executable, "scripts/land.py", "try", "tryit",
+                          "--commit", sha, "--print-binary"])
+        self.assertEqual(ran[0][1]["cwd"], self.repo)
+        self.assertGreaterEqual(ran[0][1]["timeout"], 1800)  # a cold slot builds the tree
+        self.assertIn(f"`land.py try --commit {sha} --print-binary`", prompt)
+        self.assertIn(str(slot), prompt)
+
+    def test_without_a_landed_commit_nothing_shells_out(self):
+        self.start()
+        with mock.patch("relay_core.tryit_protocol.subprocess.run",
+                        side_effect=AssertionError(
+                            "nothing builds when the card has no commits")):
+            self.assertEqual(TI._app_binary(self.repo), self.repo / "build" / "relay")
+            TI.tryit_prompt(self.commands.tools, self.card, self.evidence())
 
 
 # ------------------------------------------------------------------ try_answer: the person's turn

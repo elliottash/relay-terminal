@@ -88,7 +88,11 @@ The fixture is **disposable and rerunnable**, and it is not the owner's working 
   the eight cards are already there. A person put in front of an empty fixture has to build the
   situation themselves, which is the work you were meant to do.
 - Where the card is about the app, name the binary: the one the card names if it names one,
-  otherwise `build/relay` of this checkout. Say which, with its path, in the section.
+  otherwise the card's landed commit built by `land.py try --commit <sha> --print-binary` (the
+  newest of `links.commits`; a warm slot makes that incremental, a cold slot builds the whole
+  tree and takes minutes), else `build/relay` of this checkout as the fallback — never a stale
+  shared binary that predates the card. Say which of the two was used, with its path, in the
+  section, and have `stage.sh` resolve the binary the same way on its first line.
 - Write the whole staging as one script, **`<evidence dir>/stage.sh`**, that takes no arguments,
   needs no model and no network, and can be run twice. It creates the fixture and prints the one
   line that opens it. The person runs that script, or presses the button that runs it.
