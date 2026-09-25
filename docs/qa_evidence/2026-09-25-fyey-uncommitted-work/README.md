@@ -46,3 +46,26 @@ while holding hunks. `who` lists this session with its card; no reaped sessions 
 - `board-sync`, `reap` and the cancelled-marker refusal are exercised by the new test
   classes (`BoardSync`, `Reap`, `CancelledOwner`, `Orphans`, `ByHunks`,
   `UncommittedStatus`) rather than against live panes: no pane was reaped for real.
+
+## Whole-card check on a clean export (parent session, 2026-09-25)
+
+Commits: `78f1f80d` (pinned backend store, launch from the pin with RELAY_BUILD_ID, backend_rev in
+pane info, Reload backend, reap call sites), `12ca8565` (land gate in `_move`, per-turn board-sync,
+subagent stop kills its jobs and writes the cancelled marker, `agent_stop` tool, `/issues` ignored),
+`baaefc87` (Resume card action on the card page from `land.py orphans --json`), `88d73823`
+(land.py: `status`, `board-sync`, `reap`, `orphans`, `begin --owner/--card`, `--by`, cancelled-owner
+refusal, `who`/`doctor` fold reaped sessions), `0dfb46a4` (this evidence).
+
+Run on `git archive 4947ff81` in a scratch directory, never in the checkout:
+
+```
+PYTHONPATH=backend python3 -m pytest tests/test_land.py -q
+146 passed in 28.77s
+PYTHONPATH=backend python3 -m pytest tests/test_board_tools.py tests/test_subagents.py tests/test_agent.py tests/test_board_turns.py tests/test_guest_delegation.py -q
+470 passed in 21.26s
+PYTHONPATH=backend python3 tests/test_worker_backend_rev.py
+OK
+```
+
+C++: `ctest --test-dir build -R runtimedirs` (17 checks) and `-R boardresume` passed in the
+implementing sessions, and every commit's exact tree built in a land.py verify slot before its swap.
