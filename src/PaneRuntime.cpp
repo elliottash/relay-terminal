@@ -332,7 +332,10 @@ bool Pane::handleObservabilityEvent(const QString &type, const QJsonObject &even
             ensureLineStart();
             const QString turn = event.value(QStringLiteral("turn_id")).toString();
             const QString label = QStringLiteral("✦ thought for %1 s").arg(std::max<qint64>(1, (ms + 500) / 1000));
-            if (turn.isEmpty()) printInline(label + '\n', Ink::Note);
+            if (turn.isEmpty()) {
+                beginBlock(relay::gaps::Block::Call);   // the ✦ line sits with the tool rows (#TJBC)
+                printInline(label + '\n', Ink::Note);
+            }
             else printTurnLink(label, turn);   // the turn pane shows the reasoning in full
             return true;
         }

@@ -6271,7 +6271,7 @@ private:
     // overpaints with ▸ or ▾, the convention every tool row uses (#TK9C).
     void printThinkingAnchor() {
         endCallRun();   // a held tool-call row ends before the anchor starts its own (#TK9C)
-        beginBlock(relay::gaps::Block::Agent);   // the fold is the reply's first block (#5AWD)
+        beginBlock(relay::gaps::Block::Call);   // reasoning is machinery: it sits with the tool rows, not the prose (#TJBC)
         QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";
@@ -6673,9 +6673,9 @@ private:
     // further down the class; a parameter type needs it declared first.)
     using Ink = relay::InlineInk;
     void printAnchoredRow(const QString &anchor, const QString &title, const QString &rest, Ink ink) {
-        // A reprinted reasoning row is the agent's own block; a call row sits with the tool rows
-        // (#5AWD). Both follow the rule above them, which is a Header, so neither opens a gap.
-        beginBlock(ink == Ink::Note ? relay::gaps::Block::Agent : relay::gaps::Block::Call);
+        // A reprinted reasoning row sits with the tool rows, not the prose (#TJBC); either way the
+        // rule above them is a Header, which opens no gap.
+        beginBlock(relay::gaps::Block::Call);
         QByteArray out = takeWrapped() + closeProseRun();
         if (!m_inlineOpen) { out += "\r\x1b[2K"; m_inlineOpen = true; m_atLineStart = true; holdShellResize(true); }
         if (!m_atLineStart) out += "\r\n";

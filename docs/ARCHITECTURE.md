@@ -1232,7 +1232,9 @@ engine writes them into its parser.
 - Tool calls print one line each; see "Tool-call lines" below.
 - **One blank line between blocks of different kinds** (#5AWD): the user's ✦ line, the
   `▸ model` header, the agent's prose and the ▸ tool rows are the kinds (`relay::gaps::Block`,
-  `src/TranscriptGaps.h`, tested headless). `Pane::beginBlock` prints the gap before a block
+  `src/TranscriptGaps.h`, tested headless). A thinking fold counts as a call row (#TJBC), so
+  reasoning and tool rows form one single-spaced block and only the agent's prose is set off.
+  `Pane::beginBlock` prints the gap before a block
   whose kind differs from the last one printed — never before the first, never between two of
   the same kind (a run of tool rows stays single-spaced), never right after the header, which
   sits on top of what follows it — and a ✦ line is set off from the previous turn even across

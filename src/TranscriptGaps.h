@@ -10,6 +10,9 @@
 // recap read as content types too (owner, 2026-09-19: "in between agent messages, user messages,
 // or tool calls, there should be a blank line"): the link is set off from the prose above it,
 // and the recap from whatever printed before it.
+// Reasoning is machinery, not a message (owner, 2026-09-20, #TJBC): a thinking fold counts as a
+// call row, so thoughts and tool rows form one single-spaced block and only the agent's prose is
+// set off by blank lines on either side.
 //
 // The pane keeps the kind of the last block it printed and asks this before starting the next.
 // Nothing here writes anything; the pane does, and tests/transcriptgaps_test.cpp checks the rule
@@ -20,8 +23,8 @@ enum class Block {
     None,     // nothing printed yet, or the screen was cleared
     User,     // a ✦ line the user typed (a prompt, a steer, an answer)
     Header,   // the turn's "▸ model" line, or a "── request ──" separator
-    Agent,    // the agent's prose, and its thinking fold
-    Call,     // a ▸ tool-call row, a subagent line, a turn-limit line, the ✦ N tool calls link
+    Agent,    // the agent's prose
+    Call,     // a ▸ tool-call row, a thinking fold, a subagent line, a turn-limit line, the ✦ N tool calls link
     Recap,    // a "Recap ·" header and the summary, Next · and Open · lines under it
 };
 

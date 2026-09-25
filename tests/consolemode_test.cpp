@@ -1820,12 +1820,57 @@ void openingActivityReplaysCompletedTurnsWithoutReprintingThem()
     CHECK_EQ(reopened.toolRowCount(), 1);
     console.detachInternals(&reopened);
 }
+// #TJBC: reasoning is machinery, not a message. The thinking fold sits with the tool rows in one
+// single-spaced block, and exactly one blank line separates that block from the agent's prose on
+// either side.
+void thinkingRowsSitWithToolRowsAndApartFromProse()
+{
+    StubContext context;
+    context.workspace = home->path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.deliverWorkerEvent({{"event", "configured"}, {"model", "test"}});
+    console.deliverWorkerEvent({{"event", "agent_started"}, {"id", "t1"}});
+    console.deliverWorkerEvent({{"event", "thinking_delta"}, {"turn_id", "t1"}, {"text", "considering the request"}});
+    console.deliverWorkerEvent({{"event", "thinking_done"}, {"turn_id", "t1"}, {"chars", 22}, {"elapsed_ms", 1000}});
+    const QJsonObject pytest{{"kind", "run"}, {"running", "running pytest"}, {"title", "ran pytest"}};
+    console.deliverWorkerEvent({{"event", "tool_started"}, {"call_id", "c1"}, {"turn_id", "t1"}, {"tool", "run_command"}, {"label", pytest}});
+    console.deliverWorkerEvent({{"event", "tool_result"}, {"call_id", "c1"}, {"turn_id", "t1"}, {"label", pytest},
+                                {"result", QJsonObject{{"exit_code", 0}}}});
+    console.deliverWorkerEvent({{"event", "delta"}, {"text", "The tests pass.\n"}});
+    const QJsonObject ctest{{"kind", "run"}, {"running", "running ctest"}, {"title", "ran ctest"}};
+    console.deliverWorkerEvent({{"event", "tool_started"}, {"call_id", "c2"}, {"turn_id", "t1"}, {"tool", "run_command"}, {"label", ctest}});
+    console.deliverWorkerEvent({{"event", "tool_result"}, {"call_id", "c2"}, {"turn_id", "t1"}, {"label", ctest},
+                                {"result", QJsonObject{{"exit_code", 0}}}});
+    console.deliverWorkerEvent({{"event", "turn_summary"}, {"turn_id", "t1"}, {"elapsed_ms", 2000},
+                                {"tools", QJsonArray{QJsonObject{{"call_id", "c1"}, {"name", "run_command"},
+                                                                  {"ok", true}, {"label", pytest}},
+                                                     QJsonObject{{"call_id", "c2"}, {"name", "run_command"},
+                                                                  {"ok", true}, {"label", ctest}}}}});
+    const QString text = console.paneTextLines(2000).join('\n');
+    if (qEnvironmentVariableIsSet("RELAY_SPACING_DUMP")) std::fprintf(stderr, "%s\n", qPrintable(text));
+    const QString capture = qEnvironmentVariable("RELAY_SPACING_CAPTURE");
+    if (!capture.isEmpty()) {
+        console.resize(1000, 620);
+        console.show();
+        QCoreApplication::processEvents();
+        CHECK(console.grab().save(capture));
+    }
+    // The fold row and the tool row are one single-spaced block, in both orders.
+    CHECK(text.contains(QStringLiteral("✦ thought for 1 s\n▸ ran pytest")));
+    CHECK(!text.contains(QStringLiteral("✦ thought for 1 s\n\n")));
+    // Prose is set off by exactly one blank line on both sides.
+    CHECK(text.contains(QStringLiteral("▸ ran pytest\n\nThe tests pass.")));
+    CHECK(text.contains(QStringLiteral("The tests pass.\n\n▸ ran ctest")));
+    // The turn's link row stays with the last tool row (unchanged #5AWD behaviour).
+    CHECK(text.contains(QStringLiteral("▸ ran ctest\n✦ 2 tool calls · 2 s")));
+}
 }  // namespace cases
 
 #include "xcxd_queue_cases.h"
 #include "xcxd_ui_cases.h"
 #include "xcxd_review_cases.h"
 #include "xcxd_context_cases.h"
+#include "modelqueue_cases.h"
 #include "h2kq_cases.h"
 #include "234z_cases.h"
 #include "recall_prompt_cases.h"
@@ -1902,6 +1947,7 @@ int main(int argc, char **argv)
     }
 
     cases::aContextWithoutAShellStartsNoProgram();
+    cases::thinkingRowsSitWithToolRowsAndApartFromProse();
     cases::recallPromptCases();
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
