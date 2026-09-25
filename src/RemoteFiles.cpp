@@ -172,19 +172,6 @@ QString saveScript(const QString &path, const FileStat &expected)
         .arg(statInto(QStringLiteral("s"), QStringLiteral("\"$p\"")));
 }
 
-QString statScript(const QString &path)
-{
-    return QStringLiteral(
-               "p=%1\n"
-               "if [ ! -e \"$p\" ]; then exit %2; fi\n"
-               "%3 || exit %4\n"
-               "echo \"$s\"\n")
-        .arg(shellQuote(path))
-        .arg(int(MissingStatus))
-        .arg(statInto(QStringLiteral("s"), QStringLiteral("\"$p\"")))
-        .arg(int(NoStatStatus));
-}
-
 QString probeScript(const QStringList &paths)
 {
     // One line of output per path, in order: a folder, a file (anything else that exists), or
@@ -415,22 +402,13 @@ QString RemoteFile::controlPath() const
 
 void RemoteFile::fetch(const QString &path)
 {
-    if (path != m_path) m_fetched = {};
     m_path = path;
-    m_checking = false;
+    m_fetched = {};
     run(fetchScript(path), {}, false, false);
-}
-
-void RemoteFile::check()
-{
-    m_checking = true;
-    if (m_path.isEmpty()) { fail(QStringLiteral("There is no file to check.")); return; }
-    run(statScript(m_path), {}, false, false);
 }
 
 void RemoteFile::save(const QByteArray &content, bool force)
 {
-    m_checking = false;
     if (m_path.isEmpty()) { fail(QStringLiteral("There is no file to save.")); return; }
     m_pending = content;
     run(saveScript(m_path, force ? FileStat() : m_fetched), content, true, force);
@@ -502,13 +480,6 @@ void RemoteFile::finish(int code, bool crashed)
     process->deleteLater();
     if (crashed) { fail(QStringLiteral("The connection to %1 ended before the file did.").arg(m_host)); return; }
 
-    if (m_checking) {
-        if (code == MissingStatus) { if (onChecked) onChecked(FileStat(), QString()); return; }
-        const FileStat now = parseStat(out.trimmed());
-        if (code != OkStatus || !now.ok) { fail(statusMessage(code == OkStatus ? int(NoStatStatus) : code, m_host, m_path, err)); return; }
-        if (onChecked) onChecked(now, QString());
-        return;
-    }
     if (code == ChangedStatus) {
         const FileStat now = parseStat(out.trimmed());
         fail(conflictMessage(m_host, m_path, m_fetched, now), conflictOf(m_fetched, now), now);
@@ -534,10 +505,6 @@ void RemoteFile::finish(int code, bool crashed)
 
 void RemoteFile::fail(const QString &message, Conflict conflict, const FileStat &now)
 {
-    if (m_checking) {
-        if (onChecked) onChecked(FileStat(), message.isEmpty() ? QStringLiteral("failed") : message);
-        return;
-    }
     if (onFailed) onFailed(message, conflict, now);
 }
 

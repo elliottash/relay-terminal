@@ -5,10 +5,7 @@
 // real QFileSystemWatcher, so every wait is a QTRY on what the pane shows.
 #include "FilePanes.h"
 
-#include <QCryptographicHash>
 #include <QDir>
-#include <QJsonArray>
-#include <QJsonObject>
 #include <QFile>
 #include <QLabel>
 #include <QPlainTextEdit>
@@ -287,120 +284,6 @@ private:
     QTemporaryDir m_dir;
     QString m_path;
     int m_counter = 0;
-
-private slots:
-    // ----- agent writes through the open buffer (#F8R7, protocol 35) ---------------------------
-
-    void aPatchToACleanBufferIsAppliedAndSavedAsOneUndoStep() {
-        FilePreview preview;
-        QVERIFY(preview.open(m_path));
-        preview.startEditing();
-        const QJsonObject entry = preview.openBufferEntry();
-        QCOMPARE(entry.value(QStringLiteral("path")).toString(), m_path);
-        QCOMPARE(entry.value(QStringLiteral("sha256")).toString(), sha256(kBase));
-        QVERIFY(!entry.value(QStringLiteral("dirty")).toBool());
-        QVERIFY(FilePreview::openBuffers(nullptr).contains(entry));
-
-        const QJsonObject result = patch(preview, sha256(kBase), QStringLiteral("one\nTWO\nthree\nfour\nfive\n"));
-        QVERIFY(result.value(QStringLiteral("ok")).toBool());
-        QCOMPARE(result.value(QStringLiteral("applied")).toString(), QStringLiteral("exact"));
-        QVERIFY(result.value(QStringLiteral("saved")).toBool());
-        QCOMPARE(readAll(m_path), QByteArray("one\nTWO\nthree\nfour\nfive\n"));
-        QCOMPARE(preview.agentChanges().size(), 1);
-        QCOMPARE(preview.agentChanges().last().turnId, QStringLiteral("turn-1"));
-        QCOMPARE(preview.agentChanges().last().firstLine, 2);
-        // Taking it back is saved back too.
-        QVERIFY(preview.undoAgentChange());
-        QCOMPARE(preview.text(), QString::fromUtf8(kBase));
-        QCOMPARE(readAll(m_path), kBase);
-    }
-
-    void aPatchMergesAroundUnsavedTypingAndLeavesItUnsaved() {
-        FilePreview preview;
-        QVERIFY(preview.open(m_path));
-        preview.startEditing();
-        typeAt(editorOf(preview), 0, QStringLiteral("my "));
-        QVERIFY(preview.openBufferEntry().value(QStringLiteral("dirty")).toBool());
-
-        // Worked out against the disk's text, which is the loaded base.
-        const QJsonObject result = patch(preview, sha256(kBase), QStringLiteral("one\ntwo\nthree\nfour\nFIVE\n"));
-        QVERIFY(result.value(QStringLiteral("ok")).toBool());
-        QCOMPARE(result.value(QStringLiteral("applied")).toString(), QStringLiteral("merged"));
-        QVERIFY(!result.value(QStringLiteral("saved")).toBool());
-        QCOMPARE(preview.text(), QStringLiteral("my one\ntwo\nthree\nfour\nFIVE\n"));
-        QCOMPARE(readAll(m_path), kBase);   // the user's save takes both
-        editorOf(preview)->document()->undo();
-        QCOMPARE(preview.text(), QStringLiteral("my one\ntwo\nthree\nfour\nfive\n"));
-    }
-
-    void anOverlappingPatchIsAConflictAndChangesNothing() {
-        FilePreview preview;
-        QVERIFY(preview.open(m_path));
-        preview.startEditing();
-        typeAt(editorOf(preview), 1, QStringLiteral("my "));
-        const QString before = preview.text();
-        const QJsonObject result = patch(preview, sha256(kBase), QStringLiteral("one\nTWO\nthree\nfour\nfive\n"));
-        QVERIFY(!result.value(QStringLiteral("ok")).toBool());
-        QCOMPARE(result.value(QStringLiteral("error")).toString(), QStringLiteral("conflict"));
-        const QJsonObject region = result.value(QStringLiteral("conflicts")).toArray().first().toObject();
-        QVERIFY(region.value(QStringLiteral("buffer")).toString().contains(QStringLiteral("my two")));
-        QCOMPARE(preview.text(), before);
-        QVERIFY(preview.agentChanges().isEmpty());
-    }
-
-    void aPatchAgainstUnknownTextIsStaleButAnUniqueEditStillApplies() {
-        FilePreview preview;
-        QVERIFY(preview.open(m_path));
-        preview.startEditing();
-        const QString unknown = sha256("something else entirely\n");
-        QCOMPARE(patch(preview, unknown, QStringLiteral("x\n")).value(QStringLiteral("error")).toString(),
-                 QStringLiteral("stale"));
-        QJsonObject edit = request(unknown, QStringLiteral("one\ntwo\nTHREE\nfour\nfive\n"));
-        edit.insert(QStringLiteral("tool"), QStringLiteral("edit_file"));
-        edit.insert(QStringLiteral("old_string"), QStringLiteral("three"));
-        edit.insert(QStringLiteral("new_string"), QStringLiteral("THREE"));
-        QJsonObject result;
-        preview.answerBufferRequest(edit, [&](const QJsonObject &r) { result = r; });
-        QVERIFY(result.value(QStringLiteral("ok")).toBool());
-        QCOMPARE(preview.text(), QStringLiteral("one\ntwo\nTHREE\nfour\nfive\n"));
-    }
-
-    void aReadAnswersTheBufferAndAnUnknownPathIsNotOpen() {
-        FilePreview preview;
-        QVERIFY(preview.open(m_path));
-        preview.startEditing();
-        typeAt(editorOf(preview), 0, QStringLiteral("my "));
-        QJsonObject result;
-        FilePreview::answerBufferRequestIn(nullptr, QJsonObject{{QStringLiteral("id"), QStringLiteral("br-1")},
-                                                                {QStringLiteral("op"), QStringLiteral("read")},
-                                                                {QStringLiteral("path"), m_path}},
-                                           [&](const QJsonObject &r) { result = r; });
-        QCOMPARE(result.value(QStringLiteral("type")).toString(), QStringLiteral("buffer_result"));
-        QCOMPARE(result.value(QStringLiteral("id")).toString(), QStringLiteral("br-1"));
-        QCOMPARE(result.value(QStringLiteral("text")).toString(), QStringLiteral("my one\ntwo\nthree\nfour\nfive\n"));
-        QVERIFY(result.value(QStringLiteral("dirty")).toBool());
-        FilePreview::answerBufferRequestIn(nullptr, QJsonObject{{QStringLiteral("op"), QStringLiteral("read")},
-                                                                {QStringLiteral("path"), m_dir.filePath(QStringLiteral("nobody.txt"))}},
-                                           [&](const QJsonObject &r) { result = r; });
-        QCOMPARE(result.value(QStringLiteral("error")).toString(), QStringLiteral("not_open"));
-    }
-
-private:
-    static QString sha256(const QByteArray &bytes) {
-        return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
-    }
-    QJsonObject request(const QString &base, const QString &content) const {
-        return QJsonObject{{QStringLiteral("id"), QStringLiteral("br-1")}, {QStringLiteral("op"), QStringLiteral("patch")},
-                           {QStringLiteral("path"), m_path}, {QStringLiteral("tool"), QStringLiteral("write_file")},
-                           {QStringLiteral("base_sha256"), base}, {QStringLiteral("content"), content},
-                           {QStringLiteral("intent"), QStringLiteral("Write notes")},
-                           {QStringLiteral("turn_id"), QStringLiteral("turn-1")}, {QStringLiteral("model"), QStringLiteral("m")}};
-    }
-    QJsonObject patch(FilePreview &preview, const QString &base, const QString &content) const {
-        QJsonObject result;
-        preview.answerBufferRequest(request(base, content), [&](const QJsonObject &r) { result = r; });
-        return result;
-    }
 };
 
 QTEST_MAIN(FileSyncTests)

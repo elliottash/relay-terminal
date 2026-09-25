@@ -2,9 +2,6 @@
 #pragma once
 // Plain-Qt folder explorer and file preview widgets. No KDE dependencies are required, so these
 // are the portable path for macOS and Windows later. KSyntaxHighlighting and Qt PDF are optional.
-#include <QDateTime>
-#include <QJsonArray>
-#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -19,7 +16,6 @@
 #include "TextMerge.h"     // revisions, base snapshots and the three-way merge (#F8R7)
 
 class QAbstractItemModel;
-class QObject;
 class QFileSystemModel;
 class QFileSystemWatcher;
 class QHBoxLayout;
@@ -202,16 +198,6 @@ private:
 // does not overlap its edits as one undoable step, and stops at the conflict bar when it does.
 // A file removed from disk leaves the buffer as it was. Saving checks the disk against the base
 // first and asks (Merge / Overwrite / Reload) rather than write over a change nobody has seen.
-//
-// A file on a host gets the same contract (#F8R7, task cb): its base is the fetched bytes and the
-// host's stat, a save the host refuses because the file moved goes to the same Merge / Overwrite /
-// Reload bar, the pane polls the host's stat while it is on screen and reconciles a change as a
-// local one is, and nothing that fails over the connection touches the buffer.
-//
-// An agent's write to a file open here comes through the pane rather than behind it on disk
-// (#F8R7, task v5; docs/AGENT-SESSIONS-PROTOCOL.md §35): answerBufferRequest() applies it to the
-// buffer as one undo step, merges it around unsaved edits, and refuses an overlap with the lines
-// in question. A buffer that was clean is saved at once; one with unsaved edits stays unsaved.
 class FilePreview : public QWidget {
 public:
     enum class Kind { None, Text, Markdown, Image, Pdf, Docx, Info };
@@ -303,41 +289,6 @@ public:
     enum class Resolution { Merge, KeepMine, TakeDisk };
     bool resolveConflict(Resolution how);
 
-    // ----- agent edits to the open buffer (#F8R7, protocol §35) ------------------------------
-    // One `buffer_request` from an agent's worker. `read` answers the buffer's text; `patch`
-    // applies the agent's text — exactly when the buffer is the text it was worked out against,
-    // three-way merged when the buffer has unsaved edits elsewhere, refused as `conflict` (with
-    // the lines as they are in the buffer) when they overlap and as `stale` when the base is
-    // unknown. `reply` gets the `buffer_result`, exactly once: at once, except for a file on a
-    // host whose buffer was clean, which is answered when the save to the host has landed.
-    void answerBufferRequest(const QJsonObject &request, const std::function<void(const QJsonObject &)> &reply);
-    // This pane's entry in `open_buffers` ({path, sha256, dirty}), or an empty object when it
-    // holds no text an agent's write could be applied to.
-    QJsonObject openBufferEntry() const;
-    struct AgentChange {
-        QString intent, turnId, model;
-        QDateTime at;
-        int firstLine = 0, lastLine = 0;   // 1-based, in the buffer as it was right after
-        QString applied;                   // "exact" or "merged"
-        bool saved = false;
-    };
-    // The agent's changes to this buffer since the file was opened, oldest first.
-    QVector<AgentChange> agentChanges() const;
-    // Take the newest agent change back out: the undo step itself while nothing has been typed
-    // since, otherwise its inverse merged around what has. A change that had been saved is saved
-    // back. False when there is none, or when later edits overlap it.
-    bool undoAgentChange();
-
-    // Every open FilePreview, and the `open_buffers` list for the ones in `window`.
-    static QList<FilePreview *> livePreviews();
-    static QJsonArray openBuffers(const QWidget *window);
-    // The request answered by the preview in `window` holding its path, or `not_open`.
-    static void answerBufferRequestIn(const QWidget *window, const QJsonObject &request,
-                                      const std::function<void(const QJsonObject &)> &reply);
-    // `changed` runs (coalesced) whenever any window's `open_buffers` list may have changed,
-    // until `context` is destroyed.
-    static void onOpenBuffersChanged(QObject *context, std::function<void()> changed);
-
     std::function<void(const QString &)> onTitleChanged;
     // A link to a local file or folder was clicked in the rendered Markdown. The preview never
     // follows it itself (issue S1JP): the host opens a pane for it and this one keeps its file.
@@ -394,17 +345,6 @@ private:
     void showConflict(ConflictMode mode, int overlaps = 0);
     void hideConflict();
     void showDeleted();
-    // ----- the same for a file on a host (#F8R7, task cb) -----------------------------------
-    void checkRemote();                       // ask the host for the stat; changed → fetch and reconcile
-    void remoteRefreshed(const QByteArray &content, bool forSave);
-    void saveRemote(bool force = false);      // the buffer to the host, remembering what was sent
-    bool writeOut();                          // writeBuffer() locally, saveRemote() for a host's file
-    // ----- agent edits (#F8R7, task v5) --------------------------------------------------------
-    bool patchable() const;
-    void noteAgentChange(const QString &before, const QString &after, const QJsonObject &request,
-                         const QString &applied, bool saved);
-    void showAgentBar();
-    void notifyOpenBuffers();
 
     QString m_path, m_notice;
     Kind m_kind = Kind::None;

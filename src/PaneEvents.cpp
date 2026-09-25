@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Pane.h"
-#include "FilePanes.h"   // open_buffers and buffer_request (#F8R7)
 
 void Pane::handle(const QJsonObject &event) {
         const QString type = event.value(QStringLiteral("event")).toString();
@@ -137,15 +136,6 @@ void Pane::handle(const QJsonObject &event) {
         } else if (type == QStringLiteral("configured")) {
             m_configured = true; m_configuring = false;
             syncTerminalContext();
-            // The files open in this window's editors (#F8R7, protocol 35), now and whenever that list
-            // changes, so an agent's write to one goes through the editor rather than behind it.
-            if (!property("relayOpenBuffers").toBool()) {
-                setProperty("relayOpenBuffers", true);
-                relay::FilePreview::onOpenBuffersChanged(this, [this] {
-                    if (m_configured) send(QJsonObject{{"type", "open_buffers"}, {"files", relay::FilePreview::openBuffers(window())}});
-                });
-            }
-            send(QJsonObject{{"type", "open_buffers"}, {"files", relay::FilePreview::openBuffers(window())}});
             m_configureAutoRetried = false;
             m_model = event.value(QStringLiteral("model")).toString();
             m_skillCount = event.value(QStringLiteral("skills")).toInt();
@@ -358,13 +348,6 @@ void Pane::handle(const QJsonObject &event) {
             // helper worker is answered the same way from its own pipe (RelayWindow::boardWorker),
             // which is why building the answer is `appcommands::answerFor` and not two copies.
             send(relay::appcommands::answerFor(event, onAppCommand));
-        } else if (type == QStringLiteral("buffer_request")) {
-            // An agent's read of, or write to, a file open in this window's editor (#F8R7, protocol
-            // 35): the editor answers, at once or — a save to an ssh host — once that has landed.
-            QPointer<Pane> self(this);
-            relay::FilePreview::answerBufferRequestIn(window(), event, [self](const QJsonObject &result) {
-                if (self) self->send(result);
-            });
         } else if (type == QStringLiteral("keybindings_updated")) {
         } else if (type == QStringLiteral("custom_provider_saved") || type == QStringLiteral("custom_provider_deleted")) {
             const QString error = event.value(QStringLiteral("error")).toString();
