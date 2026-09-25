@@ -143,6 +143,12 @@ private Q_SLOTS:
         QCOMPARE(passwordChip(QString()), QStringLiteral("password for the program"));
     }
 
+    void invalidTerminalLineOffersACommandWithoutSendingIt() {
+        QCOMPARE(invalidTerminalLine(QStringLiteral("command not found"), QStringLiteral("git")),
+                 QStringLiteral("✗ command not found · did you mean git?\n"));
+        QCOMPARE(invalidTerminalLine({}, {}), QStringLiteral("✗ not a valid command\n"));
+    }
+
     // ----- the password itself --------------------------------------------------------------
     void takeHandsTheLineOverOnceAndWipesIt() {
         Secret secret;

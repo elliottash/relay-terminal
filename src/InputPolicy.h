@@ -118,6 +118,8 @@ bool retainable(LineTarget target, bool secret);
 
 // "sent to apt" — the status line shown after a line went to the running program.
 QString sentToProgram(const QString &program);
+// Inline refusal for a Terminal-mode line the router rejected before execution.
+QString invalidTerminalLine(const QString &reason, const QString &suggestion);
 // "password for sudo" — the chip beside the masked prompt box.
 QString passwordChip(const QString &program);
 

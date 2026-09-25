@@ -105,6 +105,12 @@ QString sentToProgram(const QString &program) {
     return QStringLiteral("Sent to %1").arg(program.isEmpty() ? QStringLiteral("the program") : program);
 }
 
+QString invalidTerminalLine(const QString &reason, const QString &suggestion) {
+    QString line = QStringLiteral("✗ %1").arg(reason.isEmpty() ? QStringLiteral("not a valid command") : reason);
+    if (!suggestion.isEmpty()) line += QStringLiteral(" · did you mean %1?").arg(suggestion);
+    return line + QLatin1Char('\n');
+}
+
 QString passwordChip(const QString &program) {
     return QStringLiteral("password for %1").arg(program.isEmpty() ? QStringLiteral("the program") : program);
 }
