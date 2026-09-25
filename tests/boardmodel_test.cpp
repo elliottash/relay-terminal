@@ -1803,14 +1803,16 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
                              row("N4YK", "inbox", "features", "j"),
                              row("DN01", "done", "features")}));
 
-    // One box per section the model has, in order. Done is where the dropped cards fold, so
-    // Verified and Done are the two boxes that start off.
+    // One box per section the model has, in order. Done is where the dropped cards fold, and
+    // since 2026-09-25 its section is named for both ("Done/Dropped", owner: "change done in the
+    // list to done/dropped"), so Verified and Done/Dropped are the two boxes that start off.
+    QCOMPARE(view.model().sectionTitle(QStringLiteral("done")), QStringLiteral("Done/Dropped"));
     const QList<QCheckBox *> boxes = view.findChildren<QCheckBox *>(
         QStringLiteral("boardSectionCheck"));
     QCOMPARE(boxes.size(), sectionIds(view.model()).size());
     for (QCheckBox *box : boxes) {
         const bool closedStage = box->text() == QStringLiteral("VERIFIED")
-                              || box->text() == QStringLiteral("DONE");
+                              || box->text() == QStringLiteral("DONE/DROPPED");
         QVERIFY2(box->isChecked() == !closedStage, qPrintable(box->text()));
     }
 

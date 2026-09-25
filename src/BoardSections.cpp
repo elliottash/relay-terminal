@@ -178,9 +178,14 @@ SectionPlan SectionPlan::from(const Model &model)
         row.id = section.id;
         row.name = titles.value(section.id);
         // `Column::title` is already the board's own name where it has one; the fallback is what
-        // the row goes back to when the name is cleared.
-        row.fallbackName = section.id == verifiedSection() ? QStringLiteral("Verified")
-                                                           : statusTitle(section.id);
+        // the row goes back to when the name is cleared. Done's fallback names dropped too, as
+        // its section title does (Model::sectionTitle).
+        if (section.id == verifiedSection())
+            row.fallbackName = QStringLiteral("Verified");
+        else if (section.id == doneSection())
+            row.fallbackName = QStringLiteral("Done/Dropped");
+        else
+            row.fallbackName = statusTitle(section.id);
         row.statuses = section.statuses;
         row.configured = plan.m_columns.contains(section.id);
         // Verified is `done` plus a signature and collects no status of its own; Done is where a

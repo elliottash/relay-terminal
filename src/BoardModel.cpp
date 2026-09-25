@@ -1449,7 +1449,13 @@ QString Model::sectionTitle(const QString &id) const
     const QString own = m_columnTitles.value(id);
     if (!own.isEmpty())
         return own;
-    return id == verifiedSection() ? QStringLiteral("Verified") : statusTitle(id);
+    if (id == verifiedSection())
+        return QStringLiteral("Verified");
+    // Done is where dropped cards list too (owner, 2026-09-25: "change done in the list to
+    // done/dropped"), so the section names both — a card's own stage still reads Done or Dropped.
+    if (id == doneSection())
+        return QStringLiteral("Done/Dropped");
+    return statusTitle(id);
 }
 
 QStringList Model::statusChoices() const
