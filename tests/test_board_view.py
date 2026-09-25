@@ -1331,6 +1331,91 @@ class BoardViewTests(unittest.TestCase):
 
         self.drive(main())
 
+    def test_a_discuss_the_desktop_never_takes_gives_its_words_back(self):
+        """Card #7PEC. Send emptied the box at once, and the words came back only on a refusal. A
+        socket iOS has killed without closing takes the send and answers nothing, so a Discuss
+        typed on the phone was gone from the phone and never reached the desktop: no thread entry,
+        no audit line, no draft. Now an idle card's ask that is not taken in time, or any ask
+        caught by a link drop, gives its words back; a late acceptance takes them away again."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await self.open_card(browser)
+                box = "document.querySelector('.rb-reply-text').value"
+                line = "document.querySelector('.rb-card-line').textContent"
+
+                # Unanswered: the words come back and a line says why.
+                await browser.evaluate("window.relayBoardAskWaitMs = 300")
+                await self.pick(browser, "discuss")
+                await self.typing(browser, "straddle the title across the columns")
+                await browser.evaluate("document.querySelector('.rb-reply-send').click()")
+                self.assertEqual(await browser.evaluate(box), "")
+                await browser.wait_for(f"{box} === 'straddle the title across the columns'", timeout=10)
+                self.assertIn("has not taken that", await browser.evaluate(line))
+                self.assertTrue(await browser.evaluate("document.querySelector('.rb-stop').hidden"))
+
+                # It arrived after all: the question lands with that rid, and the box empties again.
+                rid = (await self.last_request(browser, "board_ask"))["rid"]
+                landed = {"event": "board_thread_appended", "card_id": CARD_ID, "author": "owner",
+                          "kind": "comment", "mode": "discuss", "entry_id": "20260925T150000Z-aa",
+                          "text": "straddle the title across the columns"}
+                await browser.evaluate(f"window.fakeRrp.board({rid}, {js(landed)})")
+                await browser.wait_for(f"{box} === ''")
+                self.assertIn("reached your desktop after all", await browser.evaluate(line))
+
+                # The turn it started answers, and the card is idle again.
+                answer = {"event": "board_thread_appended", "card_id": CARD_ID, "author": "agent",
+                          "kind": "comment", "text": "Noted.", "turn_id": "t-7", "mode": "discuss"}
+                await browser.evaluate(f"window.fakeRrp.board(null, {js(answer)})")
+                await browser.wait_for("document.querySelector('.rb-stop').hidden")
+
+                # A link drop before the desktop takes it gives the words back at once.
+                await browser.evaluate("delete window.relayBoardAskWaitMs")
+                await self.typing(browser, "and highlight the matched terms")
+                await browser.evaluate("document.querySelector('.rb-reply-send').click()")
+                self.assertEqual(await browser.evaluate(box), "")
+                await browser.evaluate("window.fakeRrp.drop()")
+                await browser.wait_for(f"{box} === 'and highlight the matched terms'")
+                self.assertIn("link dropped", await browser.evaluate(line))
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
+    def test_an_unsent_draft_survives_the_page_being_reloaded(self):
+        """Card #7PEC. Drafts lived in a Map, and iOS unloads a backgrounded Home Screen app at
+        will: half a reply was lost with the page. They are kept per card in localStorage now, and
+        sending one removes it."""
+        async def main():
+            browser = Browser()
+            await browser.start()
+            try:
+                await self.start(browser)
+                await self.open_board(browser)
+                await self.open_card(browser)
+                await self.typing(browser, "exact title matches go first")
+
+                await self.start(browser)          # the page is gone and comes back
+                await self.open_board(browser)
+                await self.open_card(browser)
+                self.assertEqual(await browser.evaluate("document.querySelector('.rb-reply-text').value"),
+                                 "exact title matches go first")
+
+                await self.pick(browser, "discuss")
+                await browser.evaluate("document.querySelector('.rb-reply-send').click()")
+                sent = await self.last_request(browser, "board_ask")
+                self.assertEqual(sent["request"]["text"], "exact title matches go first")
+                self.assertIsNone(await browser.evaluate("localStorage.getItem('relay-board-drafts')"))
+                self.clean(browser)
+            finally:
+                await browser.stop()
+
+        self.drive(main())
+
     def test_a_change_to_the_open_card_while_it_is_being_read_is_read_again(self):
         """Card #RCN8: `board_changed` for the open card was dropped while a `board_card_get` was
         in flight, and the read that answered carried the card as it was *before* the change, so

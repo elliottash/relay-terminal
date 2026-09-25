@@ -188,6 +188,57 @@ function timeText(date, now = Date.now()) {
 
 const clockText = (millis) => new Date(millis).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 
+// What was typed on a card and not sent, by card id, kept in localStorage (card #7PEC). In memory
+// only, a draft died with the page, and iOS unloads a backgrounded Home Screen app whenever it
+// likes: the words were gone with no trace on the desktop, because they had never reached it.
+// Every write saves; an empty draft is not kept, and the newest fifty are.
+const DRAFTS_KEY = 'relay-board-drafts';
+const DRAFTS_KEPT = 50;
+
+class Drafts extends Map {
+  constructor() {
+    super();
+    try {
+      const stored = JSON.parse(localStorage.getItem(DRAFTS_KEY) || 'null');
+      if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+        for (const [id, text] of Object.entries(stored)) {
+          if (typeof text === 'string' && text.trim()) super.set(str(id), text);
+        }
+      }
+    } catch { /* a browser without storage keeps drafts for this page only */ }
+  }
+
+  set(id, text) {
+    super.delete(id);             // re-inserted, so the newest drafts are the ones kept
+    super.set(id, text);
+    this.save();
+    return this;
+  }
+
+  delete(id) {
+    const had = super.delete(id);
+    if (had) this.save();
+    return had;
+  }
+
+  save() {
+    try {
+      const kept = [...this].filter(([, text]) => str(text).trim()).slice(-DRAFTS_KEPT);
+      if (kept.length) localStorage.setItem(DRAFTS_KEY, JSON.stringify(Object.fromEntries(kept)));
+      else localStorage.removeItem(DRAFTS_KEY);
+    } catch { /* fine: the draft is still in memory */ }
+  }
+}
+
+// How long a Discuss or Plan on an idle card may go unacknowledged before its words come back
+// (card #7PEC). The desktop writes the question onto the thread as the turn starts, which on an
+// idle card is at once; a socket iOS has quietly killed takes the send and never answers, and the
+// box had already been emptied. On a card that is working the ask queues on the desktop and
+// nothing comes back until its turn, so only the link dropping gives those words back.
+// `globalThis.relayBoardAskWaitMs` lets a test say it in less than twenty seconds.
+const ASK_WAIT_MS = 20000;
+const askWaitMs = () => (Number(globalThis.relayBoardAskWaitMs) > 0 ? Number(globalThis.relayBoardAskWaitMs) : ASK_WAIT_MS);
+
 // ---- the view -----------------------------------------------------------------------------------
 
 export function mountBoard(options) {
@@ -230,7 +281,7 @@ export function mountBoard(options) {
   let wantCard = '';            // a card a notification asked for, before the board was usable
   let cardAsked = 0;            // the rid of the `board_card_get` in flight
   let cardStale = '';           // a card that changed while that read was on the wire
-  const drafts = new Map();     // card id -> what was typed and not sent
+  const drafts = new Drafts();  // card id -> what was typed and not sent, kept across reloads
   const queuedEntries = new Map();  // rid -> {card, text} : comments waiting for the link
   let sheet = null;
   const lineTimers = new WeakMap();
@@ -841,6 +892,7 @@ export function mountBoard(options) {
             const before = replyBox.value;
             replyBox.value = `${before}${before && !before.endsWith('\n') ? '\n' : ''}${choice.number}. `;
             growReply();
+            drafts.set(openId, replyBox.value);
             replyBox.focus();
             replyBox.setSelectionRange(replyBox.value.length, replyBox.value.length);
           });
@@ -1067,8 +1119,10 @@ export function mountBoard(options) {
     // Return lands long before a promise settles. A second Send used to re-enter with the box
     // already emptied by `clearReply` and send `board_resume`, or an accepted empty `board_ask`
     // (card #RCN8). A refusal below puts the lamp out again.
+    const idle = !busy.has(id);
     busy.set(id, mode);
     request({ type: 'board_ask', id, text, mode }, { text, mode })
+      .then(({ rid }) => { if (idle) setTimeout(() => giveBack(rid, 'wait'), askWaitMs()); })
       .catch((error) => {
         busy.delete(id);
         restoreReply(id, text);
@@ -1090,8 +1144,35 @@ export function mountBoard(options) {
   function restoreReply(id, text) {
     if (!text) return;
     if (id === openId) {
-      if (!replyBox.value.trim()) { replyBox.value = text; growReply(); }
+      if (!replyBox.value.trim()) { replyBox.value = text; growReply(); drafts.set(id, text); }
     } else if (!str(drafts.get(id)).trim()) drafts.set(id, text);
+  }
+
+  // A Discuss or Plan the desktop never took gives its words back (card #7PEC): after
+  // `askWaitMs()` on an idle card, or when the link drops. The box had been emptied on Send, and a
+  // socket iOS has killed without closing takes the send and answers nothing, so the words were
+  // simply gone — on the phone and on the desktop alike. If the ask turns out to have arrived after
+  // all, `takeBack` empties the box again.
+  function giveBack(rid, why) {
+    const note = asked.get(rid);
+    if (!note || note.type !== 'board_ask' || note.accepted || note.givenBack) return;
+    note.givenBack = true;
+    busy.delete(note.card);
+    restoreReply(note.card, str(note.text));
+    const words = note.text ? ' Your words are back in the box;' : '';
+    sayAbout(note.card, why === 'link'
+      ? `The link dropped before your desktop took that.${words} check the thread before sending again.`
+      : `Your desktop has not taken that.${words} check the thread before sending again.`,
+    { error: true, keep: true });
+    if (note.card === openId) paintCard();
+    paintList();
+  }
+
+  function takeBack(note) {
+    const text = str(note.text);
+    if (text && note.card === openId && replyBox.value === text) clearReply(note.card);
+    else if (text && drafts.get(note.card) === text) drafts.delete(note.card);
+    sayAbout(note.card, 'It reached your desktop after all.');
   }
 
   // The desktop's own rule for Run (src/BoardPane.cpp `execute()`): a card with neither a
@@ -1397,7 +1478,7 @@ export function mountBoard(options) {
       // Appended, never replacing: whatever was already typed is still the person's.
       const before = target.value;
       target.value = before + (!before || /\s$/.test(before) ? '' : ' ') + text;
-      if (target === replyBox) growReply();
+      if (target === replyBox) { growReply(); if (openId) drafts.set(openId, replyBox.value); }
       target.focus();
     } else if (openId) {
       drafts.set(openId, `${str(drafts.get(openId))} ${text}`.trim());
@@ -1504,7 +1585,11 @@ export function mountBoard(options) {
         const owner = str(event.author) !== 'agent';
         // The question landing on the thread is the ask being accepted: from here the words are
         // on the card, and a turn that fails later must not put them back in the box.
-        if (rid && asked.has(rid)) asked.get(rid).accepted = true;
+        if (rid && asked.has(rid)) {
+          const note = asked.get(rid);
+          note.accepted = true;
+          if (note.givenBack) { note.givenBack = false; takeBack(note); }
+        }
         if (cardId && owner && str(event.mode)) busy.set(cardId, str(event.mode));
         if (cardId && !owner) busy.delete(cardId);
         if (cardId === openId && card) {
@@ -1717,7 +1802,10 @@ export function mountBoard(options) {
 
   function onLink() {
     paintOffline();
-    if (!online()) { openAsked = false; cardAsked = 0; cardStale = ''; }
+    if (!online()) {
+      openAsked = false; cardAsked = 0; cardStale = '';
+      for (const rid of [...asked.keys()]) giveBack(rid, 'link');
+    }
     if (visible && !loaded) paintList();
   }
 
@@ -1736,7 +1824,7 @@ export function mountBoard(options) {
     busy.clear();
     asked.clear();
     queuedEntries.clear();
-    drafts.clear();
+    // `drafts` stays: they are the person's words, not the desktop's state (card #7PEC).
     config = null;
     loaded = false;
     openAsked = false;
@@ -1771,7 +1859,7 @@ export function mountBoard(options) {
   });
   replyStop.addEventListener('click', stopTurn);
   replyMic.addEventListener('click', () => toggleVoice(replyBox, replyMic, null));
-  replyBox.addEventListener('input', growReply);
+  replyBox.addEventListener('input', () => { growReply(); if (openId) drafts.set(openId, replyBox.value); });
   // The keyboard takes most of the screen: what is left above the box should be the end of the
   // thread — the thing being answered — not the card's title. Again once the keyboard has
   // finished arriving, which is when the strip gets its final height.
