@@ -8,9 +8,9 @@ implemented_by: glm/glm-5.3
 session: ce44ed66-7d52-4aa0-a9ee-d710378e9082
 rank: zzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
-verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'Sessions'' top: the search field on a row of its own with its ?, active-filter chips under it, then a buttons row (Project, Model, Sort ▾, More ▾, subagent switch); title/id/copy on one spanning line, no ID line; Board has no label chips row; suites green.', sign_off: none, effort: medium, stakes: nuisance}
+verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'Sessions'' top: the search field on a row of its own with its ?, active-filter chips under it, then a buttons row (Project, Model, Sort ▾, More ▾, Open, subagent switch); Open ticked leaves only open conversations, unticked restores the list; title/id/copy on one spanning line, no ID line; Board has no label chips row; suites green.', sign_off: none, effort: medium, stakes: nuisance}
 source: Relay pane, 2026-09-24
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/, docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/], related: [MXMG, P7SJ], github: null}
+links: {github: null, commits: [], evidence: [docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/, docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/, docs/qa_evidence/2026-09-25-1q5v-open-checkbox/], plans: [], related: [MXMG, P7SJ]}
 ---
 # Streamline the filter bars: fold Sessions' filters into search, drop the Board's label chips row
 
@@ -52,6 +52,7 @@ What is there today (2026-09-24, code reading):
 - The session title line spans the other columns; the session id and a copy button follow on that same line; the separate "ID: xxx" line is gone.
 - The Board's label chips row is gone; the section checkboxes stay; `label:` in the filter field still filters (that behaviour is unchanged).
 - `ctest -R conversations` and the board pane suites pass; screenshots of both tops in the evidence folder.
+- An **Open** checkbox sits on the buttons row beside Subagent threads (owner, 2026-09-25): always visible, unchecked at first, uncheckable. Ticked, the list holds only the conversations a pane has open right now — sessions, signal threads and subagent threads by their own open key; unticked, the full list is back.
 
 ## Execution Summary
 Implemented 2026-09-24, all three of the owner's agreements plus the title/id ask.
@@ -65,9 +66,12 @@ Implemented 2026-09-24, all three of the owner's agreements plus the title/id as
 
 2026-09-24 correction (the owner's words on the thread): the one-row top broke the page. The search field now owns the top row with its `?`, and Project, Model, Sort ▾, More ▾ and the subagent switch sit on a second row below; the two hidden page buttons (Recently closed, Background) moved to that buttons row so nothing can appear beside the field again (`fc6cc067`, evidence `docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/`). `ConversationsTest::searchSitsOnItsOwnRow` pins the geometry: every button below the field's row, the `?` in it, the buttons sharing one row.
 
+2026-09-25: an **Open** checkbox (`sessionsOpen`) on the buttons row beside Subagent threads — always visible, unchecked at first, off unless asked for like threads, no chip and untouched by clearFilters for the same reason. Ticked it narrows `rebuildTree` to conversations whose open key (`openSessionKey`, guests `source:id`) is in `m_openSessions` — sessions, signal threads and subagent threads by their own key; the worker is not asked again, and `setOpenSessions`'s rebuild keeps the list live while it is on (`ac0456a5`, evidence `docs/qa_evidence/2026-09-25-1q5v-open-checkbox/`). `ConversationsTest::openCheckboxNarrowsToOpenConversations` pins it.
+
 ## Tests
 - `ctest -R 'conversations|boardpane|boardmodel|boardfilter|boardsections|closedlist'` — 100% passed, 0 failed (includes the rewritten `sessionsDropdownsRespondToMouseChoices`, `headerClickSortsByThatColumn`, `filtersSendTheirOwnFieldsAndClear`, `chipsFollowTheParsedQueryAndTakeItBack`).
 - `scripts/relay-build --target relay` — green.
 - Evidence shots in `docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/` (sessions-list, sessions-tokens, by-date, by-project, board-top + report).
 - Not runnable here: `boardworkspace`, `boardexecute` — another session's in-flight refactor breaks them independently of this change (see Execution Summary).
 - 2026-09-24 correction: `ctest -R conversations` green including the new `searchSitsOnItsOwnRow`; `QT_QPA_PLATFORM=offscreen ./build/relay-conversations-tests searchSitsOnItsOwnRow` PASS; land.py's verify slot built the exact landed tree (`--target relay`). Evidence: `docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/` (sessions-first.png + report).
+- 2026-09-25 Open checkbox: `ctest -R conversations` green including the new `openCheckboxNarrowsToOpenConversations`; `QT_QPA_PLATFORM=offscreen ./build/relay-conversations-tests openCheckboxNarrowsToOpenConversations` PASS; land.py's verify slot built the exact landed tree. Evidence: `docs/qa_evidence/2026-09-25-1q5v-open-checkbox/` (sessions-first.png + report).
