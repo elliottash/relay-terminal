@@ -1158,6 +1158,13 @@ void Pane::requestRoute(bool submit, const QString &overrideMode) {
             if (!m_prefixMode.isEmpty()) clearPrefixMode(true);
             return;
         }
+        // PROGRAM mode never asks the router (protocol 36.2): its line goes to the program or
+        // nowhere. The worker's router knows only auto/shell/agent, so a preview sent with
+        // "program" came back as an "Unknown input mode." toast on every keystroke (#S976).
+        if (mode == QStringLiteral("program")) {
+            if (submit) status(QStringLiteral("No program is reading input here · the line stays in the box"));
+            return;
+        }
         // The alias name typed on its own. It needs the resolved mode, so it sits after the mode
         // is worked out and after a waiting program has had its line (issue G8DK).
         if (submit && tryRunAliasTyped(m_editor->toPlainText(), mode)) {

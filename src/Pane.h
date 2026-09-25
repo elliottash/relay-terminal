@@ -16111,13 +16111,16 @@ private:
         for (int pid : std::as_const(pids)) {
             QFile syscallFile(QStringLiteral("/proc/%1/syscall").arg(pid));
             if (!syscallFile.open(QIODevice::ReadOnly)) continue;
-            const QList<QByteArray> parts = syscallFile.readAll().simplified().split(' ');
-            if (parts.size() < 2) continue;
-            bool ok = false;
-            if (parts[0].toLong(&ok) != SYS_read || !ok) continue;
-            const long fd = parts[1].toLong(&ok, 0);
-            if (!ok || fd < 0) continue;
-            if (QFileInfo(QStringLiteral("/proc/%1/fd/%2").arg(pid).arg(fd)).symLinkTarget() == tty) return true;
+            // read() on the tty, or a line editor's pselect6/epoll wait on it (#S976).
+            const QString dir = QStringLiteral("/proc/%1/").arg(pid);
+            const auto isTerminal = [&dir, &tty](long fd) {
+                return QFileInfo(dir + QStringLiteral("fd/") + QString::number(fd)).symLinkTarget() == tty;
+            };
+            const auto epollWatches = [&dir](long epfd) {
+                QFile fdinfo(dir + QStringLiteral("fdinfo/") + QString::number(epfd));
+                return fdinfo.open(QIODevice::ReadOnly) ? relay::input::epollWatchedFds(fdinfo.readAll()) : QList<long>{};
+            };
+            if (relay::input::waitsOnTerminal(syscallFile.readAll(), isTerminal, epollWatches)) return true;
         }
         return false;
 #endif

@@ -1439,7 +1439,9 @@ free.
 
 **Program mode** (card #S976). A line editor at its prompt — `python3`, `psql`, `sqlite3`, `node`
 — reads raw keys, so the rules above never see it asking (`relay::input::lineEditorWaiting`: a
-program running, not alt-screen, `TerminalMode::Raw`, blocked in `read()`). The fourth input mode,
+program running, not alt-screen, `TerminalMode::Raw`, waiting on the tty — readline blocks in
+`pselect6` on fd 0 and node's libuv in `epoll_pwait` over a reopened tty fd, never in `read()`, so
+`relay::input::waitsOnTerminal` reads those too). The fourth input mode,
 `program`, is for it: the busy row beside Take control offers **Type into it from here**, the
 waiting hint names it, the mode chip's menu and the palette's Input mode submenu list it
 (`input.modeProgram`, unbound), and Ctrl+I's cycle includes it after `agent` while a program is

@@ -7,7 +7,11 @@
 // tested without a shell. See issues/changes/needs_qa_llm/2026-09-17-terminal-not-directly-typable.md.
 #pragma once
 
+#include <QByteArray>
+#include <QList>
 #include <QString>
+
+#include <functional>
 
 namespace relay::input {
 
@@ -29,7 +33,7 @@ enum class LineTarget {
 struct State {
     TerminalMode mode = TerminalMode::Unknown;
     bool programRunning = false;   // a foreground process group other than the pane's shell
-    bool programReading = false;   // a process of it is blocked in read() on the terminal
+    bool programReading = false;   // a process of it is waiting on the terminal (waitsOnTerminal)
     bool altScreen = false;        // full-screen program: only native input types into it
     bool native = false;           // the user took control; the prompt box is hidden
     // What the screen-text classifier (src/ScreenPrompt.h) makes of the last rows. Both are
@@ -57,6 +61,20 @@ bool secretPrompt(const State &state);
 bool lineRequested(const State &state);
 // A Readline-style foreground program is waiting for a line in raw terminal mode.
 bool lineEditorWaiting(const State &state);
+
+// Whether a process blocked in the system call its /proc/<pid>/syscall line names ("nr arg0 arg1
+// … sp pc", arguments in hex; "running" when it is not blocked) is waiting for the pane's
+// terminal. `isTerminal(fd)` says whether that fd of the process is the terminal, and
+// `epollWatches(epfd)` lists what an epoll instance watches (epollWatchedFds over
+// /proc/<pid>/fdinfo/<epfd>). read() on the terminal is the canonical-mode case; a line editor
+// never blocks there: readline (python3, psql, sqlite3) waits in pselect6 on fd 0 and node's
+// libuv in epoll_pwait over a reopened tty fd, so without these a REPL at its prompt was never
+// "reading" and Program mode was never offered (#S976). poll/ppoll keep their fds in the
+// process's memory and are not read. Always false off Linux.
+bool waitsOnTerminal(const QByteArray &syscallLine, const std::function<bool(long fd)> &isTerminal,
+                     const std::function<QList<long>(long epfd)> &epollWatches);
+// The fds an epoll instance watches: the `tfd:` fields of its /proc/<pid>/fdinfo text.
+QList<long> epollWatchedFds(const QByteArray &fdinfo);
 
 // The rule for a line submitted from the prompt box. `mode` is the pane's routing mode
 // ("auto", "shell", "agent" or "program"); an agent submission is never diverted.

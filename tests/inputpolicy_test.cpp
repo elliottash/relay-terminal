@@ -3,6 +3,10 @@
 // when the pane offers "Take control", what may be kept, and how a password is wiped.
 #include "InputPolicy.h"
 
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
+
 #include <QTest>
 
 using namespace relay::input;
@@ -387,6 +391,42 @@ private Q_SLOTS:
         QVERIFY(clipped.contains(QStringLiteral("The end of what it printed")));
         QCOMPARE(clipped.count(QStringLiteral("```")), 4);
         QVERIFY(handoffReport(QStringLiteral("true"), 0, QString()).contains(QStringLiteral("printed nothing")));
+    }
+    void aLineEditorAtItsPromptWaitsOnTheTerminal() {
+#ifndef __linux__
+        QSKIP("the /proc syscall line is Linux-only");
+#else
+        using namespace relay::input;
+        // fd 0 and fd 26 are the pane's terminal; 5 is a socket.
+        const auto isTerminal = [](long fd) { return fd == 0 || fd == 26; };
+        const auto watches = [](long epfd) { return epfd == 17 ? QList<long>{20, 18, 26} : QList<long>{5}; };
+        const auto line = [](long number, const char *rest) {
+            return QByteArray::number(qlonglong(number)) + ' ' + rest;
+        };
+        // cat, `read -p`: read() on the terminal, as before.
+        QVERIFY(waitsOnTerminal(line(SYS_read, "0x0 0xffffd000 0x1 0x0 0x0 0x0 0xffff 0xaaaa"), isTerminal, watches));
+        QVERIFY(!waitsOnTerminal(line(SYS_read, "0x5 0xffffd000 0x1 0x0 0x0 0x0 0xffff 0xaaaa"), isTerminal, watches));
+        // python3 -q and sqlite3 at their prompts, measured 2026-09-25: pselect6 with nfds 1.
+        QVERIFY(waitsOnTerminal(line(SYS_pselect6, "0x1 0xfffff2f97880 0x0 0x0 0x0 0x0 0xffff 0xaaaa"), isTerminal, watches));
+        // A select over fds that do not include the terminal, and one too wide to scan.
+        QVERIFY(!waitsOnTerminal(line(SYS_pselect6, "0x0 0x0 0x0 0x0 0x0 0x0 0xffff 0xaaaa"), [](long) { return false; }, watches));
+        QVERIFY(!waitsOnTerminal(line(SYS_pselect6, "0x40 0x0 0x0 0x0 0x0 0x0 0xffff 0xaaaa"), isTerminal, watches));
+        // node at its prompt: epoll_pwait on an instance that watches the reopened tty (fd 26).
+        QVERIFY(waitsOnTerminal(line(SYS_epoll_pwait, "0x11 0xffffc6d2b118 0x400 0xffffffff 0x0 0x8 0xffff 0xaaaa"), isTerminal, watches));
+        // A server's event loop over sockets only.
+        QVERIFY(!waitsOnTerminal(line(SYS_epoll_pwait, "0x3 0xffffc6d2b118 0x400 0xffffffff 0x0 0x8 0xffff 0xaaaa"), isTerminal, watches));
+        // Not blocked, or blocked somewhere unrelated (nanosleep of `sleep 60`).
+        QVERIFY(!waitsOnTerminal("running", isTerminal, watches));
+        QVERIFY(!waitsOnTerminal(line(SYS_nanosleep, "0x0 0x0 0x0 0x0 0x0 0x0 0xffff 0xaaaa"), isTerminal, watches));
+        QVERIFY(!waitsOnTerminal(QByteArray(), isTerminal, watches));
+#endif
+    }
+    void epollWatchedFdsReadsTheTfdLines() {
+        const QByteArray fdinfo = "pos:\t0\nflags:\t02000002\nmnt_id:\t16\nino:\t1057\n"
+                                  "tfd:       26 events:       19 data:               1a  pos:0 ino:1d dev:1a\n"
+                                  "tfd:       20 events:       19 data:               14  pos:0 ino:6c0 dev:e\n";
+        QCOMPARE(relay::input::epollWatchedFds(fdinfo), (QList<long>{26, 20}));
+        QVERIFY(relay::input::epollWatchedFds("pos:\t0\n").isEmpty());
     }
 };
 

@@ -5,6 +5,10 @@
 
 #include <algorithm>
 
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
+
 namespace relay::input {
 
 bool secretPrompt(const State &state) {
@@ -23,6 +27,60 @@ bool lineRequested(const State &state) {
 bool lineEditorWaiting(const State &state) {
     return state.programRunning && !state.altScreen && state.mode == TerminalMode::Raw
         && state.programReading;
+}
+
+bool waitsOnTerminal(const QByteArray &syscallLine, const std::function<bool(long fd)> &isTerminal,
+                     const std::function<QList<long>(long epfd)> &epollWatches) {
+#ifndef __linux__
+    Q_UNUSED(syscallLine); Q_UNUSED(isTerminal); Q_UNUSED(epollWatches);
+    return false;
+#else
+    const QList<QByteArray> parts = syscallLine.simplified().split(' ');
+    if (parts.size() < 2) return false;   // "running", or nothing readable
+    bool ok = false;
+    const long number = parts[0].toLong(&ok);
+    if (!ok) return false;
+    const long first = parts[1].toLong(&ok, 0);
+    if (!ok || first < 0) return false;
+    if (number == SYS_read) return isTerminal(first);
+    bool selects = number == SYS_pselect6;
+#ifdef SYS_select
+    selects = selects || number == SYS_select;
+#endif
+    if (selects) {
+        // The first argument is nfds, one past the highest fd in the sets; readline passes 1.
+        // Only the sets' bounds are known, so any terminal fd below it counts, and a wide
+        // select is not scanned at all.
+        if (first > 16) return false;
+        for (long fd = 0; fd < first; ++fd)
+            if (isTerminal(fd)) return true;
+        return false;
+    }
+    bool epolls = number == SYS_epoll_pwait;
+#ifdef SYS_epoll_wait
+    epolls = epolls || number == SYS_epoll_wait;
+#endif
+#ifdef SYS_epoll_pwait2
+    epolls = epolls || number == SYS_epoll_pwait2;
+#endif
+    if (epolls) {
+        const QList<long> watched = epollWatches(first);
+        return std::any_of(watched.cbegin(), watched.cend(), [&isTerminal](long fd) { return isTerminal(fd); });
+    }
+    return false;
+#endif
+}
+
+QList<long> epollWatchedFds(const QByteArray &fdinfo) {
+    QList<long> fds;
+    for (const QByteArray &line : fdinfo.split('\n')) {
+        if (!line.startsWith("tfd:")) continue;
+        bool ok = false;
+        const long fd = line.mid(4).simplified().split(' ').value(0).toLong(&ok);
+        if (ok && fd >= 0) fds.append(fd);
+        if (fds.size() >= 64) break;
+    }
+    return fds;
 }
 
 TypeRefusal agentTypeRefusal(const State &state, bool delegated) {
