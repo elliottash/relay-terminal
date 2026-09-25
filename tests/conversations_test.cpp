@@ -1914,6 +1914,36 @@ private slots:
                  "the buttons still share one row among themselves");
     }
 
+    void openCheckboxNarrowsToOpenConversations() {
+        // Owner, 2026-09-25: an Open checkbox beside Subagent threads, always visible and
+        // uncheckable — checked, the list holds only the conversations a pane has open.
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.show();
+        auto *open = manager.findChild<QCheckBox *>(QStringLiteral("sessionsOpen"));
+        auto *search = manager.findChild<QLineEdit *>(QStringLiteral("sessionsSearch"));
+        QVERIFY(open);
+        QVERIFY(!open->isChecked());
+        QVERIFY(open->isVisible());
+        QVERIFY2(open->y() >= search->y() + search->height(), "the Open box sits on the buttons row");
+        const QString a(32, QLatin1Char('a')), b(32, QLatin1Char('b'));
+        auto session = [](const QString &id, const QString &title) {
+            return QJsonObject{{QStringLiteral("session_id"), id}, {QStringLiteral("source"), QStringLiteral("agent")},
+                               {QStringLiteral("title"), title}, {QStringLiteral("project"), QStringLiteral("relay")},
+                               {QStringLiteral("updated"), 1.0e9}, {QStringLiteral("turns"), 3}};
+        };
+        manager.setResults({{QStringLiteral("items"), QJsonArray{session(a, QStringLiteral("Alpha one")),
+                                                                 session(b, QStringLiteral("Beta two"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 2);
+        manager.setOpenSessions({a});
+        open->setChecked(true);
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 1);  // rebuilds delete rows: re-read, never hold one
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(0), QStringLiteral("Alpha one"));
+        open->setChecked(false);  // the owner's "can be unchecked"
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 2);
+    }
+
     // ----- guest sessions, protocol 26.7 ------------------------------------------------------
 
     void guestRowsCarryTheToolsOwnResumeCommand() {

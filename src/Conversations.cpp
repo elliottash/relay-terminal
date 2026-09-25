@@ -981,6 +981,13 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_threads->setObjectName(QStringLiteral("sessionsThreads"));
     m_threads->setChecked(false);
     m_threads->setToolTip(QStringLiteral("Also list and search every subagent thread, under the session that started it"));
+    // Owner, 2026-09-25: an Open checkbox beside it, always visible and uncheckable — the
+    // "open" badge as a filter, off unless asked for like threads. Open-ness is live window
+    // state the worker does not know, so it narrows the list here rather than in the query.
+    m_open = new QCheckBox(QStringLiteral("Open"));
+    m_open->setObjectName(QStringLiteral("sessionsOpen"));
+    m_open->setChecked(false);
+    m_open->setToolTip(QStringLiteral("Only the conversations a pane holds open right now"));
 
     m_tree = new QTreeWidget;
     m_tree->setObjectName(QStringLiteral("sessionsTree"));
@@ -1222,6 +1229,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     filterRow->addWidget(m_model);
     filterRow->addWidget(m_sortButton);
     filterRow->addWidget(m_filters);
+    filterRow->addWidget(m_open);
     filterRow->addWidget(m_threads);
     filterRow->addStretch(1);
     box->addLayout(searchRow);
@@ -1336,6 +1344,9 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_threads, &QCheckBox::toggled, this, [this](bool on) {
         m_tree->headerItem()->setText(0, on ? QStringLiteral("Session / subagent thread") : QStringLiteral("Session"));
         requery();
+    });
+    connect(m_open, &QCheckBox::toggled, this, [this] {
+        if (!m_items.isEmpty()) rebuildTree(selectedId());
     });
     connect(m_tree, &QTreeWidget::currentItemChanged, this, &SessionManager::selectionChanged);
     // Mouse activation varies by platform (single or double click). Both should only select a
@@ -2120,6 +2131,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     for (const auto &value : std::as_const(m_items)) {
         const QJsonObject item = value.toObject();
         if (isThread(item)) continue;
+        if (m_open->isChecked() && !m_openSessions.contains(openSessionKey(item))) continue;
         ++sessions;
         matches += item.value(QStringLiteral("match_count")).toInt();
         QTreeWidgetItem *parent = nullptr;
@@ -2134,6 +2146,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     for (const auto &value : std::as_const(m_items)) {
         const QJsonObject item = value.toObject();
         if (!isSignalThread(item)) continue;
+        if (m_open->isChecked() && !m_openSessions.contains(openSessionKey(item))) continue;
         ++threads;
         matches += item.value(QStringLiteral("match_count")).toInt();
         QTreeWidgetItem *parent = grouping == QLatin1String("date")
@@ -2150,9 +2163,12 @@ void SessionManager::rebuildTree(const QString &keep) {
     // asks for threads, because a signal thread is listed whatever the box says.
     QList<QJsonObject> pending;
     if (m_threads->isChecked())
-        for (const auto &value : std::as_const(m_items))
-            if (isThread(value.toObject()) && !isSignalThread(value.toObject()))
-                pending << value.toObject();
+        for (const auto &value : std::as_const(m_items)) {
+            const QJsonObject item = value.toObject();
+            if (isThread(item) && !isSignalThread(item)
+                && (!m_open->isChecked() || m_openSessions.contains(openSessionKey(item))))
+                pending << item;
+        }
     // Under one owner, threads read in the order they were started (a1 before a2), like the
     // owner's history does; the sessions themselves stay newest first.
     std::stable_sort(pending.begin(), pending.end(), [](const QJsonObject &a, const QJsonObject &b) {

@@ -400,6 +400,7 @@ private:
               *m_sort = nullptr, *m_branch = nullptr, *m_group = nullptr, *m_projectFilter = nullptr;
     QList<QPair<QString, QString>> m_knownProjects;   // {name, folder}, for the "Project" chooser
     QCheckBox *m_threads = nullptr;
+    QCheckBox *m_open = nullptr;
     QToolButton *m_help = nullptr, *m_filters = nullptr;
     QMenu *m_filterMenu = nullptr;
     QToolButton *m_sortButton = nullptr;   // Sort ▾: grouping and sort, the view choices (#1Q5V)
