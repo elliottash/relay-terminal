@@ -65,6 +65,24 @@ private Q_SLOTS:
         QVERIFY(!lineRequested(shellPrompt()));
     }
 
+    void rawLineEditorNeedsAReaderAndNoAlternateScreen() {
+        State repl = shellPrompt();
+        repl.programRunning = true;
+        repl.programReading = true;
+        QVERIFY(lineEditorWaiting(repl));
+        QCOMPARE(targetFor(repl, QStringLiteral("program")), LineTarget::Program);
+        QCOMPARE(targetFor(repl, QStringLiteral("auto")), LineTarget::Shell);
+        repl.programReading = false;
+        QVERIFY(!lineEditorWaiting(repl));
+        QCOMPARE(targetFor(repl, QStringLiteral("program")), LineTarget::Program);
+        repl.altScreen = true;
+        QVERIFY(!lineEditorWaiting(repl));
+        QCOMPARE(targetFor(repl, QStringLiteral("program")), LineTarget::Shell);
+        repl.altScreen = false;
+        repl.programRunning = false;
+        QCOMPARE(targetFor(repl, QStringLiteral("program")), LineTarget::Shell);
+    }
+
     // ----- where a submitted line goes ---------------------------------------------------
     void linesGoToTheShellUnlessAProgramIsReading() {
         QCOMPARE(targetFor(shellPrompt(), QStringLiteral("auto")), LineTarget::Shell);

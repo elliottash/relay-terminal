@@ -20,6 +20,11 @@ bool lineRequested(const State &state) {
         && (state.programReading || state.screenAsking);
 }
 
+bool lineEditorWaiting(const State &state) {
+    return state.programRunning && !state.altScreen && state.mode == TerminalMode::Raw
+        && state.programReading;
+}
+
 TypeRefusal agentTypeRefusal(const State &state, bool delegated) {
     if (state.native) return TypeRefusal::UserInControl;
     // A masked prompt outranks every other reason, so the agent is always told the true one:
@@ -65,6 +70,8 @@ LineTarget targetFor(const State &state, const QString &mode) {
     if (mode == QStringLiteral("agent")) return LineTarget::Agent;
     // Native input means the user types into the terminal directly; nothing is submitted here.
     if (state.native) return LineTarget::Shell;
+    if (mode == QStringLiteral("program") && state.programRunning && !state.altScreen)
+        return LineTarget::Program;
     if (secretPrompt(state) || lineRequested(state)) return LineTarget::Program;
     return LineTarget::Shell;
 }

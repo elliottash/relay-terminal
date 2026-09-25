@@ -55,9 +55,11 @@ bool secretPrompt(const State &state);
 // An ordinary program waiting for a line (`apt`'s `[Y/n]`): canonical input with echo on,
 // and a process of the command blocked reading the terminal.
 bool lineRequested(const State &state);
+// A Readline-style foreground program is waiting for a line in raw terminal mode.
+bool lineEditorWaiting(const State &state);
 
 // The rule for a line submitted from the prompt box. `mode` is the pane's routing mode
-// ("auto", "shell" or "agent"); an agent submission is never diverted to a program.
+// ("auto", "shell", "agent" or "program"); an agent submission is never diverted.
 LineTarget targetFor(const State &state, const QString &mode);
 
 // ----- a submitted line while the agent worker is not up ---------------------------------------
