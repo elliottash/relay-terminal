@@ -113,10 +113,10 @@ void Pane::buildUi() {
         auto *routeRow = new QHBoxLayout;
         // The strip under the prompt box (owner design, 2026-09-17): directory, Switchboard and
         // tasks on the left, context left / model / microphone on the right, each in a Warp-style
-        // chip. Where the line goes is not in the strip: the mode chip sits in the prompt box's
-        // top-right corner (owner, 2026-09-17), on the text it routes, with the `!` / `*` and
-        // password chips that qualify it. The corner is a column of its own, so text wraps before
-        // it rather than running underneath.
+        // chip. Where the line goes is not in the strip: the mode chip sits at the right end of
+        // the "Relaying · …" row just above the prompt box (owner, 2026-09-25; it was the box's
+        // top-right corner from 2026-09-17), with the `!` / `*` and password chips that qualify
+        // it, so the prompt text has the box's full width.
         auto *corner = new QHBoxLayout;
         corner->setContentsMargins(0, 0, 0, 0);
         corner->setSpacing(6);
@@ -256,11 +256,6 @@ void Pane::buildUi() {
         inputColumn->setContentsMargins(0, 0, 0, 0);
         inputColumn->addWidget(m_editor);
         inputRow->addLayout(inputColumn, 1);
-        auto *cornerColumn = new QVBoxLayout;
-        cornerColumn->setContentsMargins(0, 0, 0, 0);
-        cornerColumn->addLayout(corner);
-        cornerColumn->addStretch(1);
-        inputRow->addLayout(cornerColumn);
         // The "Relaying · …" line (cards #4E13, #HQ2B, #RR0G, #R3YN): agent work in the agent's
         // violet, saying what
         // it is doing right now ("Relaying · reading src/Pane.h… · 12 s · Esc stops"), a terminal
@@ -429,6 +424,10 @@ void Pane::buildUi() {
             focusInput();
         });
         busyRowLayout->addWidget(m_programInputAction, 0, Qt::AlignVCenter);
+        // The mode chip and its qualifiers, right-aligned in this row (owner, 2026-09-25). The
+        // stretch-0 spacer only takes the room while the busy line (stretch 1) is hidden.
+        busyRowLayout->addStretch(0);
+        busyRowLayout->addLayout(corner);
         layout->addWidget(busyRow);
         layout->addWidget(composer);
         setupSubagentsUi(layout);   // subagents UI: running-agents list beneath the composer

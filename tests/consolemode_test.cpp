@@ -836,6 +836,16 @@ void relayingStatusSitsOutsideEveryPromptFrame()
     CHECK(busyRow != nullptr && busyRow->parentWidget() == &console);
     CHECK(!composer->isAncestorOf(lineWidget));
     CHECK(console.layout()->indexOf(busyRow) < console.layout()->indexOf(composer));
+    // Owner, 2026-09-25: the mode chip sits at the right of that row, not in the prompt box's
+    // corner, so the prompt text has the box's whole width.
+    QToolButton *modeChip = nullptr;
+    for (auto *button : console.findChildren<QToolButton *>(QStringLiteral("stripChip")))
+        if (button->menu() && button->toolTip().startsWith(QStringLiteral("Where this line goes"))) modeChip = button;
+    CHECK(modeChip != nullptr);
+    if (modeChip) {
+        CHECK(modeChip->parentWidget() == busyRow);
+        CHECK(!composer->isAncestorOf(modeChip));
+    }
 
     const QString normalPlaceholder = editor->placeholderText();
     console.deliverWorkerEvent(QJsonObject{{"event", "subagent_started"}, {"id", "a1"},
