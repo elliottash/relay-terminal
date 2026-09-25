@@ -502,6 +502,71 @@ void BoardPaneTests::theCardPagesFlagClicksThroughToBoardPriority()
     QCOMPARE(prioritySent(), -1);
 }
 
+// The labels editor (#E0Y0): × takes one label off the card, + opens a one-line field that
+// saves the whole list on Enter and nothing on Esc; the label word itself still only copies.
+void BoardPaneTests::theCardPagesLabelsEditInPlace()
+{
+    relay::BoardView a(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    a.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    a.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    a.setCollapsedSections(QJsonArray{});
+    a.selectCard(QStringLiteral("K7Q2"));
+    a.openSelected();
+    QJsonObject answer = cardArrived(QStringLiteral("K7Q2"));
+    answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")).toString());
+    answer.insert(QStringLiteral("front"),
+                  QJsonObject{{QStringLiteral("labels"), QJsonArray{QStringLiteral("bug"),
+                                                                    QStringLiteral("voice")}}});
+    a.handleEvent(answer);
+    QVERIFY(a.detailOpen());
+
+    QLabel *meta = a.findChild<QLabel *>(QStringLiteral("boardCardMeta"));
+    QVERIFY(meta);
+    QVERIFY(meta->text().contains(QStringLiteral("tagx:bug")));
+    QVERIFY(meta->text().contains(QStringLiteral("tagadd:")));
+
+    // × writes the list without the clicked label, through the hash-checked board_update
+    // the title saves with.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tagx:bug")));
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_update"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value(QStringLiteral("base_hash")).toString(), QStringLiteral("h1"));
+    const QJsonArray rest = sent.last().value(QStringLiteral("patch")).toObject()
+                                .value(QStringLiteral("fields")).toObject()
+                                .value(QStringLiteral("labels")).toArray();
+    QCOMPARE(rest.size(), 1);
+    QCOMPARE(rest.first().toString(), QStringLiteral("voice"));
+
+    // + opens the field pre-filled with the card's labels; Enter saves the edited list.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tagadd:")));
+    QLineEdit *edit = a.findChild<QLineEdit *>(QStringLiteral("boardCardLabelEdit"));
+    QVERIFY(edit);
+    QVERIFY(!edit->isHidden());
+    QCOMPARE(edit->text(), QStringLiteral("bug, voice"));
+    edit->setText(QStringLiteral("voice, remote"));
+    QTest::keyClick(edit, Qt::Key_Return);
+    const QJsonArray saved = sent.last().value(QStringLiteral("patch")).toObject()
+                                 .value(QStringLiteral("fields")).toObject()
+                                 .value(QStringLiteral("labels")).toArray();
+    QCOMPARE(saved.size(), 2);
+    QCOMPARE(saved.first().toString(), QStringLiteral("voice"));
+    QCOMPARE(saved.last().toString(), QStringLiteral("remote"));
+    QVERIFY(edit->isHidden());
+
+    // Esc closes the field and writes nothing.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tagadd:")));
+    QVERIFY(!edit->isHidden());
+    const int before = sent.size();
+    QTest::keyClick(edit, Qt::Key_Escape);
+    QVERIFY(edit->isHidden());
+    QCOMPARE(sent.size(), before);
+
+    // The plain label link is still only the board filter term (#3ZAP), not an edit.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tag:voice")));
+    QCOMPARE(sent.size(), before);
+}
+
 void BoardPaneTests::doneButtonAndKeyOfferUndo()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -776,6 +841,12 @@ void BoardPaneTests::namedDriverUsesControlsAndRefusesUnavailableTargets()
 void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
 {
     relay::BoardView view(QStringLiteral("/tmp/relay-skills-tab-test"));
+    // #9FX8 evidence: RELAY_SHOT_DIR set writes the tab and the skill page (the pattern above).
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+    if (!shotDir.isEmpty()) {
+        view.resize(1000, 760);
+        view.show();
+    }
     view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
     auto *tabs = view.findChild<QWidget *>(QStringLiteral("boardPageTabs"));
     QVERIFY(tabs);
@@ -853,12 +924,20 @@ void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
     auto *linked = view.findChild<QWidget *>(QStringLiteral("boardSkillLinked"));
     QVERIFY(linked);
     QVERIFY(linked->findChild<QPushButton *>() != nullptr);
+    if (!shotDir.isEmpty()) {
+        QTest::qWait(50);   // the layout settles before the grab
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-skills-tab.png")));
+    }
 
     // The stale skill's page says stale and why.
     list->topLevelItem(staleRow)->setSelected(true);
     list->setCurrentItem(list->topLevelItem(staleRow));
     QVERIFY(stats->text().contains(QStringLiteral("<b>stale</b>")));
     QVERIFY(stats->text().contains(QStringLiteral("last passed 2026-08-01")));
+    if (!shotDir.isEmpty()) {
+        QTest::qWait(50);   // the layout settles before the grab
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-skill-page-stale.png")));
+    }
 
     // The choice rides navigation state: a restored pane lands back on Skills.
     QCOMPARE(view.navigationState().value(QStringLiteral("page")).toInt(), 1);
@@ -873,6 +952,11 @@ void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
 void BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
 {
     relay::BoardView view(QStringLiteral("/tmp/relay-memories-tab-test"));
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");   // #9FX8 evidence
+    if (!shotDir.isEmpty()) {
+        view.resize(1000, 600);
+        view.show();
+    }
     const QJsonObject expiredMemory{{"id", "TM1A"}, {"title", "expired memory"},
         {"type", "memory"}, {"status", "active"}, {"rank", "i"},
         {"path", "issues/memory/tm1a-expired-memory.md"}, {"name", "expired memory"},
@@ -908,6 +992,10 @@ void BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
                 .contains(QStringLiteral("paths moved 2026-09-20")));
     auto *count = view.findChild<QLabel *>(QStringLiteral("boardMemoryCount"));
     QVERIFY(count->text().contains(QStringLiteral("1 expired")));
+    if (!shotDir.isEmpty()) {
+        QTest::qWait(50);   // the layout settles before the grab
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-memories-tab.png")));
+    }
 
     // Opening a memory goes to the ordinary card page, solo — a memory is a card, `#ID` and all.
     QList<QJsonObject> sent;

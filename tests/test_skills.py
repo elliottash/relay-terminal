@@ -646,6 +646,20 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(len(rows[0]['changelog']), 1)
             self.assertIn('import skill', rows[0]['changelog'][0])
 
+    def test_globals_request_with_an_empty_workspace_is_answered(self):
+        # Globals › Skills asks from a tab with no project, so `workspace` arrives as "" — that
+        # means none (the defaults answer), not an invalid directory (#9FX8 step 3).
+        from types import SimpleNamespace
+        from relay_core.observe_protocol import ObserveCommands
+        events = []
+        commands = ObserveCommands(SimpleNamespace(agent=None, busy=False), events.append)
+        commands.handle('skills_registry', {'id': 'globals-1', 'workspace': ''})
+        self.assertEqual(events[-1]['event'], 'skills_registry')
+        self.assertEqual(events[-1]['id'], 'globals-1')
+        self.assertIsInstance(events[-1]['items'], list)
+        with self.assertRaises(ValueError):
+            commands.handle('skills_registry', {'id': 'globals-2', 'workspace': '/no/such/dir'})
+
 
 class RealSkillsTest(unittest.TestCase):
     def test_home_skills_index_without_errors(self):

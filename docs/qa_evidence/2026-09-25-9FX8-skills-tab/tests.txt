@@ -1,0 +1,48 @@
+#9FX8 steps 3-4 — commands and results (2026-09-25)
+
+All C++ runs are on the exact tree `land.py commit` lands (tip plus this session's hunks only),
+built in a verify slot by `python3 scripts/land.py try 9fx8-s3 ...`; the shared build/ holds other
+sessions' uncommitted code and was not used.
+
+$ python3 scripts/land.py try 9fx8-s3 --only-hunk <mine in src/BoardPane.{cpp,h}> --tests '^(globalspane|boardpane)$'
+verify: the exact tree builds          (target relay, then the two test targets)
+    Start 47: globalspane
+1/2 Test #47: globalspane ......................   Passed
+    Start 93: boardpane
+2/2 Test #93: boardpane ........................   Passed
+100% tests passed, 0 tests failed out of 2
+
+$ relay-globalspane-tests     (QT_QPA_PLATFORM=offscreen, isolated XDG_CONFIG_HOME, RELAY_SHOT_DIR set)
+PASS   : GlobalsPaneTest::skillsSectionListsGlobalSkillsOnlyAndOpensAPage()
+PASS   : GlobalsPaneTest::projectMemoriesAreNotListed()
+Totals: 15 passed, 0 failed, 0 skipped, 0 blacklisted
+
+$ relay-boardpane-tests       (same environment)
+PASS   : BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
+PASS   : BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
+Totals: 19 passed, 0 failed, 0 skipped, 0 blacklisted
+
+$ PYTHONPATH=backend python3 -m unittest -v tests.test_skills.RegistryTests tests.test_board_tools.RegistryTests
+test_changelog_reads_the_manifests_git_history ... ok
+test_globals_request_with_an_empty_workspace_is_answered ... ok
+test_off_workspace_rows_are_ids_only_and_confidential_ones_are_dropped ... ok
+test_rows_carry_the_registry_fields ... ok
+test_off_the_boards_own_workspace_the_confidential_row_is_dropped ... ok
+test_the_request_answers_one_row_per_skill ... ok
+Ran 6 tests — OK
+
+What the new cases check:
+- skillsSectionListsGlobalSkillsOnlyAndOpensAPage: Skills sits between Aliases and Instructions;
+  nothing is asked until the section is shown, then one skills_registry; a reply under another
+  id is ignored; of a mixed payload only project:false rows are listed; "no cases yet" for a
+  skill with no rows, "stale" plus its reason (row tooltip and page); one Linked chip row however
+  often the page is redrawn; provenance prints the version once; Import/Check updates in the
+  toolbar; Re-verify hidden without a console, and with one it drafts
+  "/skill zz-user serve one case of zz-user and record it with board_case" and sends nothing;
+  Refine sends refine_skills and its reply re-requests the registry; an error for the view's own
+  request is shown on the page.
+- projectMemoriesAreNotListed: a memory with memory_scope other than user appears in neither
+  User memory nor All global records; unscoped (user) memories and aliases still do; the intro
+  says "1 project-scoped memory is not listed here".
+- test_globals_request_with_an_empty_workspace_is_answered: Globals' request with workspace ""
+  gets a skills_registry reply instead of "workspace must be an existing directory".

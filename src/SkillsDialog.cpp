@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SkillsDialog.h"
+#include "SkillRegistryView.h"
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
@@ -32,13 +33,9 @@ QString tilde(const QString &path) {
     return path.startsWith(home + '/') ? QStringLiteral("~") + path.mid(home.size()) : path;
 }
 
-// Imported skills live in <imports>/<repo>@<commit>/<name>/SKILL.md next to .relay-import.json,
-// which records the repository URL.
-QString importUrl(const QString &skillPath) {
-    QFile manifest(QFileInfo(skillPath).dir().absoluteFilePath(QStringLiteral("../.relay-import.json")));
-    if (!manifest.open(QIODevice::ReadOnly) || manifest.size() > 65536) return {};
-    return QJsonDocument::fromJson(manifest.readAll()).object().value(QStringLiteral("url")).toString();
-}
+// Imported skills record their repository beside them; the lookup is the registry view's, so
+// the dialog and Globals › Skills ask the same question the same way (#9FX8).
+using skills::importUrl;
 }  // namespace
 
 SkillsDialog::SkillsDialog(QWidget *parent) : QDialog(parent) {
@@ -129,11 +126,7 @@ void SkillsDialog::handleEvent(const QJsonObject &event) {
         m_note = text;
         refresh();
     } else if (type == QStringLiteral("skills_updates")) {
-        const QString current = event.value(QStringLiteral("current")).toString(), latest = event.value(QStringLiteral("latest")).toString();
-        const QString url = event.value(QStringLiteral("url")).toString();
-        if (latest.isEmpty()) m_status->setText(QStringLiteral("Could not check %1.").arg(url));
-        else if (!event.value(QStringLiteral("update_available")).toBool(current != latest)) m_status->setText(QStringLiteral("%1 is up to date (%2).").arg(url, current.left(10)));
-        else m_status->setText(QStringLiteral("%1: pinned %2, latest %3. Import again to review and update.").arg(url, current.left(10), latest.left(10)));
+        m_status->setText(skills::updatesText(event));
     }
 }
 
@@ -194,76 +187,17 @@ QStringList SkillsDialog::excludedNames() const {
 }
 
 void SkillsDialog::importFromRepository() {
-    QDialog ask(this);
-    ask.setWindowTitle(QStringLiteral("Import skills"));
-    auto *form = new QFormLayout(&ask);
-    auto *url = new QLineEdit; url->setObjectName(QStringLiteral("importUrl"));
-    url->setPlaceholderText(QStringLiteral("https://github.com/org/skills"));
-    auto *ref = new QLineEdit; ref->setPlaceholderText(QStringLiteral("default branch"));
-    form->addRow(QStringLiteral("Repository URL"), url);
-    form->addRow(QStringLiteral("Branch, tag or commit"), ref);
-    form->addRow(new QLabel(QStringLiteral("Relay clones it into a temporary folder and shows the skills for review. Nothing is enabled until you confirm.")));
-    auto *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    box->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Preview"));
-    form->addRow(box);
-    connect(box, &QDialogButtonBox::accepted, &ask, &QDialog::accept);
-    connect(box, &QDialogButtonBox::rejected, &ask, &QDialog::reject);
-    if (ask.exec() != QDialog::Accepted || url->text().trimmed().isEmpty()) return;
-    QJsonObject request{{"type", "import_skills_preview"}, {"url", url->text().trimmed()}};
-    if (!ref->text().trimmed().isEmpty()) request.insert(QStringLiteral("ref"), ref->text().trimmed());
-    m_status->setText(QStringLiteral("Cloning %1…").arg(url->text().trimmed()));
+    const QJsonObject request = skills::askImport(this);
+    if (request.isEmpty()) return;
+    m_status->setText(QStringLiteral("Cloning %1…").arg(request.value(QStringLiteral("url")).toString()));
     if (send) send(request);
 }
 
 void SkillsDialog::showImportPreview(const QJsonObject &event) {
-    const QString url = event.value(QStringLiteral("url")).toString();
-    const QString commit = event.value(QStringLiteral("commit")).toString();
-    const auto items = event.value(QStringLiteral("items")).toArray();
-    const auto skippedItems = event.value(QStringLiteral("skipped")).toArray();
-    if (!event.value(QStringLiteral("error")).toString().isEmpty() || items.isEmpty()) {
-        m_status->setText(QStringLiteral("Import preview: %1").arg(event.value(QStringLiteral("error")).toString(QStringLiteral("no skills found in ") + url)));
-        return;
-    }
-    QDialog review(this);
-    review.setObjectName(QStringLiteral("skillsImportReview"));
-    review.setWindowTitle(QStringLiteral("Review skills to import"));
-    review.resize(760, 460);
-    auto *layout = new QVBoxLayout(&review);
-    auto *head = new QLabel(QStringLiteral("%1 @ %2%3\nCheck the skills to import. Expand a skill to see its files; skills can include scripts the agent may run.%4")
-                                .arg(url, commit.left(12), event.value(QStringLiteral("ref")).toString().isEmpty() ? QString() : QStringLiteral(" (") + event.value(QStringLiteral("ref")).toString() + ')',
-                                     skippedItems.isEmpty() ? QString() : QStringLiteral("\n%1 folder(s) skipped (symlinks, missing descriptions or duplicates).").arg(skippedItems.size())));
-    head->setWordWrap(true);
-    layout->addWidget(head);
-    auto *tree = new QTreeWidget;
-    tree->setHeaderLabels({QStringLiteral("Skill"), QStringLiteral("Description")});
-    tree->setColumnWidth(0, 260);
-    for (const auto &value : items) {
-        const QJsonObject skill = value.toObject();
-        auto *row = new QTreeWidgetItem(tree);
-        row->setText(0, skill.value(QStringLiteral("name")).toString());
-        row->setText(1, skill.value(QStringLiteral("description")).toString());
-        row->setToolTip(1, skill.value(QStringLiteral("description")).toString());
-        row->setFlags(row->flags() | Qt::ItemIsUserCheckable);
-        row->setCheckState(0, Qt::Checked);
-        for (const auto &file : skill.value(QStringLiteral("files")).toArray()) {
-            auto *child = new QTreeWidgetItem(row);
-            child->setText(0, file.isObject() ? file.toObject().value(QStringLiteral("path")).toString() : file.toString());
-            child->setFlags(Qt::ItemIsEnabled);
-        }
-    }
-    layout->addWidget(tree, 1);
-    auto *box = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    box->button(QDialogButtonBox::Ok)->setText(QStringLiteral("Import checked"));
-    layout->addWidget(box);
-    connect(box, &QDialogButtonBox::accepted, &review, &QDialog::accept);
-    connect(box, &QDialogButtonBox::rejected, &review, &QDialog::reject);
-    if (review.exec() != QDialog::Accepted) { m_status->setText(QStringLiteral("Import cancelled.")); return; }
-    QStringList names;
-    for (int i = 0; i < tree->topLevelItemCount(); ++i)
-        if (tree->topLevelItem(i)->checkState(0) == Qt::Checked) names << tree->topLevelItem(i)->text(0);
-    if (names.isEmpty()) { m_status->setText(QStringLiteral("Nothing selected to import.")); return; }
-    m_status->setText(QStringLiteral("Importing %1 skill(s)…").arg(names.size()));
-    if (send) send({{"type", "import_skills_confirm"}, {"url", url}, {"commit", commit}, {"names", QJsonArray::fromStringList(names)}});
+    QString status;
+    const QJsonObject confirm = skills::reviewImport(this, event, &status);
+    m_status->setText(status);
+    if (!confirm.isEmpty() && send) send(confirm);
 }
 
 void SkillsDialog::checkUpdates() {

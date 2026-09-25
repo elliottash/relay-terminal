@@ -6072,489 +6072,40 @@ void BoardView::applyPage()
         m_keys->hide();
     }
     if (chromeUsable && !detailUp && m_page == Page::Skills)
-        requestSkillsRegistry();    // the first time the tab is seen; a no-op afterwards
+        m_skillsPage->ensureLoaded();   // the first time the tab is seen; a no-op afterwards
     if (chromeUsable && !detailUp && m_page == Page::Memories)
         refillMemories();           // re-read the model's memory cards on every rebuild
 }
 
-namespace {
-
-QJsonObject skillRowById(const QJsonArray &items, const QString &id)
-{
-    for (const QJsonValue &value : items) {
-        const QJsonObject row = value.toObject();
-        if (row.value(QStringLiteral("id")).toString() == id)
-            return row;
-    }
-    return {};
-}
-
-// A path under the user's home is shown tilde-first, as the rest of the app does.
-QString tildeHome(const QString &path)
-{
-    const QString home = QDir::homePath();
-    return path.startsWith(home) ? QStringLiteral("~") + path.mid(home.length()) : path;
-}
-
-// `pass_rate_30` is a 0–1 share or null (nothing decided yet); the list and the page must say
-// the same thing, so this is one function for both.
-QString passRateText(const QJsonObject &stats)
-{
-    const QJsonValue rate = stats.value(QStringLiteral("pass_rate_30"));
-    if (rate.isNull() || rate.isUndefined())
-        return QStringLiteral("—");
-    return QStringLiteral("%1%").arg(qRound(rate.toDouble() * 100));
-}
-
-// The exclusion list SkillsDialog's caller keeps in QSettings — the Board's tab reads the same
-// two keys, so a skill excluded in one surface is excluded in both (the plan: "Exclude /
-// Include (today's exclusion list)").
-QStringList excludedSkillNames()
-{
-    return QSettings().value(QStringLiteral("skills/exclude")).toStringList();
-}
-
-}  // namespace
-
-void BoardView::requestSkillsRegistry()
-{
-    if (m_skillsRequested)
-        return;
-    m_skillsRequested = true;
-    m_skillRequest = nextRequestId();
-    send({{QStringLiteral("type"), QStringLiteral("skills_registry")},
-          {QStringLiteral("id"), m_skillRequest}});
-    if (m_skillCount != nullptr && m_skillItems.isEmpty())
-        m_skillCount->setText(QStringLiteral("Loading…"));
-}
-
-void BoardView::refillSkills()
-{
-    if (m_skillList == nullptr)
-        return;
-    const QString keep = m_skillSelected;
-    QSignalBlocker block(m_skillList);   // non-const: refill re-selects and unblocks on purpose
-    m_skillList->clear();
-    const QString filter = m_skillFilter->text().trimmed();
-    const QBrush dim = palette().color(QPalette::Disabled, QPalette::Text);
-    int shown = 0, projectTotal = 0, excludedCount = 0;
-    for (const QJsonValue &value : m_skillItems) {
-        const QJsonObject row = value.toObject();
-        // The owner's decision 2: the Board's tab lists project skills only — `.relay/skills`
-        // and the workspace's .claude/.codex/.warp rows carry `project: true`; the global ones
-        // belong to Globals' Skills section and are filtered out here, never worker-side.
-        if (!row.value(QStringLiteral("project")).toBool())
-            continue;
-        ++projectTotal;
-        const QString name = row.value(QStringLiteral("name")).toString();
-        const bool excluded = excludedSkillNames().contains(name);
-        if (excluded)
-            ++excludedCount;
-        const QString haystack = QStringList{name,
-                                             row.value(QStringLiteral("id")).toString(),
-                                             row.value(QStringLiteral("description")).toString(),
-                                             row.value(QStringLiteral("source")).toString()}
-                                         .join(QLatin1Char(' '));
-        if (!filter.isEmpty() && !haystack.contains(filter, Qt::CaseInsensitive))
-            continue;
-        const QJsonObject stats = row.value(QStringLiteral("stats")).toObject();
-        auto *item = new QTreeWidgetItem(m_skillList);
-        item->setText(0, name + (excluded ? QStringLiteral("  (excluded)") : QString()));
-        item->setText(1, row.value(QStringLiteral("source")).toString());
-        item->setText(2, QString::number(stats.value(QStringLiteral("cases")).toInt()));
-        item->setText(3, passRateText(stats));
-        const QString lastVerified = row.value(QStringLiteral("last_verified")).toString();
-        item->setText(4, lastVerified.isEmpty() ? QStringLiteral("never") : lastVerified);
-        const bool stale = stats.value(QStringLiteral("stale")).toBool();
-        item->setText(5, stale ? QStringLiteral("stale") : QString());
-        item->setToolTip(0, row.value(QStringLiteral("description")).toString());
-        item->setToolTip(5, row.value(QStringLiteral("stale_reason")).toString());
-        item->setData(0, Qt::UserRole, row.value(QStringLiteral("id")).toString());
-        if (excluded) {
-            QFont font = item->font(0);
-            font.setItalic(true);
-            item->setFont(0, font);
-            item->setForeground(0, dim);
-        }
-        ++shown;
-    }
-    if (m_skillsRequested)   // arrived; "Loading…" no longer applies
-        m_skillCount->setText(
-            QStringLiteral("%1 skill%2 · %3 excluded")
-                .arg(shown)
-                .arg(shown == 1 ? QString() : QStringLiteral("s"))
-                .arg(excludedCount));
-    // The selection survives a refresh when the row is still there.
-    QTreeWidgetItem *restore = nullptr;
-    if (!keep.isEmpty()) {
-        for (int i = 0; i < m_skillList->topLevelItemCount(); ++i) {
-            if (m_skillList->topLevelItem(i)->data(0, Qt::UserRole).toString() == keep) {
-                restore = m_skillList->topLevelItem(i);
-                break;
-            }
-        }
-    }
-    if (restore == nullptr && shown > 0 && m_skillSelected.isEmpty())
-        restore = m_skillList->topLevelItem(0);
-    if (restore != nullptr) {
-        block.unblock();
-        m_skillList->setCurrentItem(restore);
-        showSkill(restore->data(0, Qt::UserRole).toString());
-    } else if (!m_skillSelected.isEmpty()) {
-        showSkill(QString());
-    }
-}
-
-void BoardView::showSkill(const QString &id)
-{
-    m_skillSelected = id;
-    const QJsonObject row = skillRowById(m_skillItems, id);
-    if (row.isEmpty()) {
-        m_skillTitle->setText(QStringLiteral("Select a skill"));
-        m_skillTrigger->clear();
-        m_skillProfile->clear();
-        m_skillProvenance->clear();
-        m_skillStats->clear();
-        m_skillCases->clear();
-        setLinkedCards(m_skillLinked, QStringList(), QStringLiteral("No skill selected."));
-        m_skillExcludeButton->setEnabled(false);
-        return;
-    }
-    m_skillExcludeButton->setEnabled(true);
-    const QString name = row.value(QStringLiteral("name")).toString();
-    const bool excluded = excludedSkillNames().contains(name);
-    m_skillTitle->setText(QStringLiteral("<b>%1</b> <span style=\"opacity:0.6\">%2 · %3</span>%4")
-                              .arg(name.toHtmlEscaped(),
-                                   row.value(QStringLiteral("version_short")).toString(),
-                                   row.value(QStringLiteral("source")).toString(),
-                                   excluded ? QStringLiteral(" <span style=\"opacity:0.6\">excluded</span>")
-                                            : QString()));
-    m_skillTrigger->setText(row.value(QStringLiteral("description")).toString());
-    // The profile strip: the same words the card's Verify strip uses, one line, and nothing
-    // invented — a key the SKILL.md does not declare simply does not appear.
-    const QJsonObject profile = row.value(QStringLiteral("profile")).toObject();
-    static const char *const kProfileKeys[] = {"artifact", "primary", "human", "effort",
-                                               "stakes",   "rot",     "money", "confidential"};
-    QStringList strip;
-    for (const char *key : kProfileKeys) {
-        const QJsonValue value = profile.value(QLatin1String(key));
-        if (value.isUndefined() || value.isNull())
-            continue;
-        const QString text = value.isBool() ? (value.toBool() ? QStringLiteral("yes")
-                                                              : QStringLiteral("no"))
-                                            : value.toVariant().toString();
-        strip << QStringLiteral("%1 %2").arg(QLatin1String(key), text);
-    }
-    const QJsonArray warnings = row.value(QStringLiteral("profile_warnings")).toArray();
-    if (!warnings.isEmpty())
-        strip << QStringLiteral("%1 warning%2").arg(warnings.size()).arg(warnings.size() == 1 ? QString() : QStringLiteral("s"));
-    m_skillProfile->setText(strip.isEmpty() ? QStringLiteral("No profile yet.")
-                                            : strip.join(QStringLiteral("  ·  ")));
-    // Provenance: where it lives, what its bytes are, what changed — all from the registry row.
-    QStringList provenance;
-    provenance << tildeHome(row.value(QStringLiteral("path")).toString());
-    const QString version = row.value(QStringLiteral("version")).toString();
-    if (!version.isEmpty())
-        provenance << QStringLiteral("sha256 %1").arg(version);
-    const QJsonArray changelog = row.value(QStringLiteral("changelog")).toArray();
-    for (const QJsonValue &line : changelog)
-        provenance << line.toString();
-    m_skillProvenance->setText(provenance.join(QStringLiteral("\n")));
-    // Stats and staleness, reason attached: the row, this page and the list's Stale column all
-    // read the same `stats`, so they cannot disagree.
-    const QJsonObject stats = row.value(QStringLiteral("stats")).toObject();
-    QStringList statLine;
-    statLine << QStringLiteral("cases %1").arg(stats.value(QStringLiteral("cases")).toInt());
-    statLine << QStringLiteral("pass %1").arg(passRateText(stats));
-    const QString lastServed = stats.value(QStringLiteral("last_served")).toString();
-    statLine << QStringLiteral("last served %1")
-                    .arg(lastServed.isEmpty() ? QStringLiteral("never") : lastServed);
-    const QString lastVerified = row.value(QStringLiteral("last_verified")).toString();
-    statLine << QStringLiteral("last verified %1")
-                    .arg(lastVerified.isEmpty() ? QStringLiteral("never") : lastVerified);
-    if (stats.value(QStringLiteral("stale")).toBool()) {
-        const QString reason = row.value(QStringLiteral("stale_reason")).toString();
-        statLine << QStringLiteral("<b>stale</b>%1")
-                        .arg(reason.isEmpty() ? QString()
-                                              : QStringLiteral(" — %1").arg(reason.toHtmlEscaped()));
-    } else if (stats.value(QStringLiteral("cases")).toInt() == 0) {
-        // The ledger's rule: no rows, nothing to have gone off.
-        statLine << QStringLiteral("no cases yet");
-    }
-    m_skillStats->setTextFormat(Qt::RichText);
-    m_skillStats->setText(statLine.join(QStringLiteral("  ·  ")));
-    // Cases: the last ten, newest first, as the ledger allowed this workspace to see them —
-    // confidential rows are ids-only and off-workspace inputs are already stripped worker-side.
-    m_skillCases->clear();
-    for (const QJsonValue &value : row.value(QStringLiteral("cases")).toArray()) {
-        const QJsonObject entry = value.toObject();
-        auto *item = new QTreeWidgetItem(m_skillCases);
-        item->setText(0, entry.value(QStringLiteral("when")).toString());
-        item->setText(1, entry.value(QStringLiteral("served_by")).toString());
-        item->setText(2, entry.value(QStringLiteral("signal")).toString());
-        item->setText(3, entry.value(QStringLiteral("verdict")).toString());
-        item->setText(4, entry.value(QStringLiteral("cost")).toVariant().toString());
-        item->setText(5, entry.value(QStringLiteral("input")).toString());
-    }
-    // Linked cards (#EA37 (c)): the cards whose ledger rows name this server, until #G9ZD's
-    // `server:` field names them directly.
-    QStringList cards;
-    for (const QJsonValue &value : row.value(QStringLiteral("cards")).toArray())
-        cards << value.toString();
-    setLinkedCards(m_skillLinked, cards, QStringLiteral("No cards name this skill yet."));
-    m_skillExcludeButton->setText(excluded ? QStringLiteral("Include")
-                                           : QStringLiteral("Exclude"));
-}
-
 void BoardView::buildSkillsPage(QVBoxLayout *layout)
 {
-    m_skillsPage = new QWidget(this);
-    m_skillsPage->setObjectName(QStringLiteral("boardSkillsPage"));
+    // The list and the skill page are the registry view Globals › Skills also shows (#9FX8 step
+    // 3): project rows here (decision 2), the global ones there, one page for both. The pane
+    // gives it the worker, the console under the cards list and the card page.
+    m_skillsPage = new skills::SkillRegistryView(skills::SkillRegistryView::Scope::Project,
+                                                 QStringLiteral("board"), this);
     m_skillsPage->hide();
-    auto *column = new QVBoxLayout(m_skillsPage);
-    column->setContentsMargins(0, 6, 0, 0);
-    column->setSpacing(4);
-
-    auto *tools = new QWidget(m_skillsPage);
-    auto *toolRow = new QHBoxLayout(tools);
-    toolRow->setContentsMargins(0, 0, 0, 0);
-    toolRow->setSpacing(6);
-    m_skillCount = new QLabel(tools);
-    m_skillCount->setObjectName(QStringLiteral("boardSkillCount"));
-    m_skillCount->setText(QStringLiteral("Skills"));
-    m_skillFilter = new QLineEdit(tools);
-    m_skillFilter->setObjectName(QStringLiteral("boardSkillFilter"));
-    m_skillFilter->setPlaceholderText(QStringLiteral("Filter skills"));
-    m_skillFilter->setClearButtonEnabled(true);
-    m_skillRefresh = new QToolButton(tools);
-    m_skillRefresh->setObjectName(QStringLiteral("boardSkillRefresh"));
-    m_skillRefresh->setText(QStringLiteral("Refresh"));
-    m_skillRefresh->setToolTip(QStringLiteral("Ask the worker for the registry again — versions, cases and staleness are recomputed"));
-    toolRow->addWidget(m_skillCount);
-    toolRow->addWidget(m_skillFilter, 1);
-    toolRow->addWidget(m_skillRefresh);
-    column->addWidget(tools);
-
-    auto *split = new QSplitter(Qt::Vertical, m_skillsPage);
-    split->setObjectName(QStringLiteral("boardSkillSplitter"));
-    split->setChildrenCollapsible(false);
-    m_skillList = new QTreeWidget(split);
-    m_skillList->setObjectName(QStringLiteral("boardSkillList"));
-    m_skillList->setHeaderLabels({QStringLiteral("Skill"), QStringLiteral("Source"),
-                                  QStringLiteral("Cases"), QStringLiteral("Pass"),
-                                  QStringLiteral("Last verified"), QStringLiteral("Stale")});
-    m_skillList->setRootIsDecorated(false);
-    m_skillList->setUniformRowHeights(true);
-    m_skillList->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_skillList->setColumnWidth(0, 240);
-
-    auto *detail = new QWidget(split);
-    detail->setObjectName(QStringLiteral("boardSkillDetail"));
-    auto *detailColumn = new QVBoxLayout(detail);
-    detailColumn->setContentsMargins(0, 6, 0, 0);
-    detailColumn->setSpacing(4);
-    m_skillTitle = new QLabel(detail);
-    m_skillTitle->setObjectName(QStringLiteral("boardSkillTitle"));
-    m_skillTitle->setTextFormat(Qt::RichText);
-    m_skillTitle->setWordWrap(true);
-    m_skillTrigger = new QLabel(detail);
-    m_skillTrigger->setObjectName(QStringLiteral("boardSkillTrigger"));
-    m_skillTrigger->setWordWrap(true);
-    m_skillProfile = new QLabel(detail);
-    m_skillProfile->setObjectName(QStringLiteral("boardSkillProfile"));
-    m_skillProfile->setWordWrap(true);
-    m_skillProvenance = new QLabel(detail);
-    m_skillProvenance->setObjectName(QStringLiteral("boardSkillProvenance"));
-    m_skillProvenance->setWordWrap(true);
-    m_skillProvenance->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_skillStats = new QLabel(detail);
-    m_skillStats->setObjectName(QStringLiteral("boardSkillStats"));
-    m_skillStats->setWordWrap(true);
-    auto *casesLabel = new QLabel(QStringLiteral("Cases"), detail);
-    casesLabel->setObjectName(QStringLiteral("boardSkillCasesLabel"));
-    m_skillCases = new QTreeWidget(detail);
-    m_skillCases->setObjectName(QStringLiteral("boardSkillCases"));
-    m_skillCases->setHeaderLabels({QStringLiteral("When"), QStringLiteral("Served by"),
-                                   QStringLiteral("Signal"), QStringLiteral("Verdict"),
-                                   QStringLiteral("Cost"), QStringLiteral("Input")});
-    m_skillCases->setRootIsDecorated(false);
-    m_skillCases->setUniformRowHeights(true);
-    m_skillCases->setMaximumHeight(150);
-    detailColumn->addWidget(m_skillTitle);
-    detailColumn->addWidget(m_skillTrigger);
-    detailColumn->addWidget(m_skillProfile);
-    detailColumn->addWidget(m_skillProvenance);
-    detailColumn->addWidget(m_skillStats);
-    detailColumn->addWidget(casesLabel);
-    detailColumn->addWidget(m_skillCases);
-    buildLinkedPanel(detail, detailColumn, QStringLiteral("Linked"));
-
-    m_skillActions = new QWidget(detail);
-    m_skillActions->setObjectName(QStringLiteral("boardSkillActions"));
-    auto *actionRow = new QHBoxLayout(m_skillActions);
-    actionRow->setContentsMargins(0, 4, 0, 0);
-    actionRow->setSpacing(6);
-    auto *load = new QPushButton(QStringLiteral("Load"), m_skillActions);
-    load->setObjectName(QStringLiteral("boardSkillLoad"));
-    load->setToolTip(QStringLiteral("Draft the skill's name into the console's composer — a draft, never a send"));
-    m_skillExcludeButton = new QPushButton(m_skillActions);
-    m_skillExcludeButton->setObjectName(QStringLiteral("boardSkillExclude"));
-    m_skillExcludeButton->setToolTip(QStringLiteral("Add this skill to, or remove it from, the exclusion list SkillsDialog manages"));
-    auto *refine = new QPushButton(QStringLiteral("Refine"), m_skillActions);
-    refine->setObjectName(QStringLiteral("boardSkillRefine"));
-    refine->setToolTip(QStringLiteral("Start a session that improves this skill from its own history"));
-    auto *openFile = new QPushButton(QStringLiteral("Open file"), m_skillActions);
-    openFile->setObjectName(QStringLiteral("boardSkillOpen"));
-    openFile->setToolTip(QStringLiteral("Open the SKILL.md in an editor"));
-    actionRow->addWidget(load);
-    actionRow->addWidget(m_skillExcludeButton);
-    actionRow->addWidget(refine);
-    actionRow->addWidget(openFile);
-    actionRow->addStretch(1);
-    detailColumn->addWidget(m_skillActions);
-
-    split->addWidget(m_skillList);
-    split->addWidget(detail);
-    split->setStretchFactor(0, 2);
-    split->setStretchFactor(1, 3);
-    column->addWidget(split, 1);
-    layout->addWidget(m_skillsPage, 1);
-
-    connect(m_skillFilter, &QLineEdit::textChanged, this, [this] { refillSkills(); });
-    connect(m_skillRefresh, &QToolButton::clicked, this, [this] {
-        m_skillsRequested = false;
-        requestSkillsRegistry();
-    });
-    connect(m_skillList, &QTreeWidget::itemSelectionChanged, this, [this] {
-        QTreeWidgetItem *item = m_skillList->currentItem();
-        showSkill(item == nullptr ? QString() : item->data(0, Qt::UserRole).toString());
-    });
-    connect(load, &QPushButton::clicked, this, [this] {
-        const QString name = skillRowById(m_skillItems, m_skillSelected)
-                                 .value(QStringLiteral("name")).toString();
-        if (name.isEmpty())
-            return;
-        // The composer lives under the cards list, so the draft lands where it is seen — the
-        // tab switches to Cards with the skill's name ready for the request around it.
+    m_skillsPage->send = [this](const QJsonObject &request) {
+        QJsonObject message = request;
+        const QString id = nextRequestId();
+        message.insert(QStringLiteral("id"), id);
+        send(message);
+        return id;
+    };
+    // Load and Re-verify draft into the console, which lives under the cards list — so the tab
+    // switches to Cards and the draft lands where it is seen. A draft, never a send.
+    m_skillsPage->draft = [this](const QString &text) {
         setPage(Page::Cards);
-        draftForAgent(name + QLatin1Char(' '));
-    });
-    connect(m_skillExcludeButton, &QPushButton::clicked, this, [this] {
-        const QString name = skillRowById(m_skillItems, m_skillSelected)
-                                 .value(QStringLiteral("name")).toString();
-        if (!name.isEmpty())
-            toggleSkillExcluded(name, !excludedSkillNames().contains(name));
-    });
-    connect(refine, &QPushButton::clicked, this, [this] {
-        const QString name = skillRowById(m_skillItems, m_skillSelected)
-                                 .value(QStringLiteral("name")).toString();
-        if (!name.isEmpty())
-            refineSkill(name);
-    });
-    connect(openFile, &QPushButton::clicked, this, [this] {
-        const QString path = skillRowById(m_skillItems, m_skillSelected)
-                                 .value(QStringLiteral("path")).toString();
-        if (!path.isEmpty())
-            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-    });
-}
-
-void BoardView::toggleSkillExcluded(const QString &name, bool excluded)
-{
-    if (name.isEmpty())
-        return;
-    QStringList names = excludedSkillNames();
-    names.removeAll(name);
-    if (excluded)
-        names << name;
-    names.removeDuplicates();
-    names.sort();
-    // The two keys SkillsDialog's caller writes, kept in step: the list sessions apply and the
-    // joined copy the settings page shows.
-    QSettings settings;
-    settings.setValue(QStringLiteral("skills/exclude"), names);
-    if (names.isEmpty())
-        settings.remove(QStringLiteral("skills/exclude_text"));
-    else
-        settings.setValue(QStringLiteral("skills/exclude_text"), names.join(QStringLiteral(", ")));
-    toast(excluded ? QStringLiteral("%1 excluded — new sessions skip it").arg(name)
-                   : QStringLiteral("%1 included").arg(name));
-    refillSkills();
-}
-
-void BoardView::refineSkill(const QString &name)
-{
-    if (name.isEmpty())
-        return;
-    send({{QStringLiteral("type"), QStringLiteral("refine_skills")},
-          {QStringLiteral("id"), nextRequestId()},
-          {QStringLiteral("names"), QJsonArray{name}}});
-    toast(QStringLiteral("Refining %1…").arg(name));
-}
-
-// The Linked panel the skill page draws (#EA37 (c)): one chip per card the registry names,
-// opening the card page on click. The card page's own links live in its existing Links row.
-void BoardView::buildLinkedPanel(QWidget *parent, QVBoxLayout *layout, const QString &title)
-{
-    m_skillLinked = new QWidget(parent);
-    m_skillLinked->setObjectName(QStringLiteral("boardSkillLinked"));
-    auto *column = new QVBoxLayout(m_skillLinked);
-    column->setContentsMargins(0, 0, 0, 0);
-    column->setSpacing(2);
-    auto *head = new QLabel(title, m_skillLinked);
-    head->setObjectName(QStringLiteral("boardSkillLinkedHead"));
-    column->addWidget(head);
-    m_skillLinkedLayout = new QVBoxLayout;
-    m_skillLinkedLayout->setContentsMargins(0, 0, 0, 0);
-    m_skillLinkedLayout->setSpacing(2);
-    column->addLayout(m_skillLinkedLayout);
-    m_skillLinkedEmpty = new QLabel(QStringLiteral("No skill selected."), m_skillLinked);
-    m_skillLinkedEmpty->setWordWrap(true);
-    m_skillLinkedLayout->addWidget(m_skillLinkedEmpty);
-    layout->addWidget(m_skillLinked);
-}
-
-void BoardView::setLinkedCards(QWidget *host, const QStringList &ids, const QString &emptyText)
-{
-    if (host != m_skillLinked || m_skillLinkedLayout == nullptr)
-        return;
-    while (!m_skillLinkedLayout->isEmpty()) {
-        QLayoutItem *item = m_skillLinkedLayout->takeAt(0);
-        if (QWidget *widget = item->widget())
-            widget->deleteLater();
-        delete item;
-    }
-    if (ids.isEmpty()) {
-        m_skillLinkedEmpty = new QLabel(emptyText, m_skillLinked);
-        m_skillLinkedEmpty->setWordWrap(true);
-        m_skillLinkedLayout->addWidget(m_skillLinkedEmpty);
-        return;
-    }
-    auto *chips = new QWidget(m_skillLinked);
-    chips->setObjectName(QStringLiteral("boardLinkedChips"));
-    auto *row = new QHBoxLayout(chips);
-    row->setContentsMargins(0, 0, 0, 0);
-    row->setSpacing(4);
-    int shown = 0;
-    for (const QString &id : ids) {
+        draftForAgent(text);
+    };
+    m_skillsPage->openCard = [this](const QString &id) { openCardSolo(id); };
+    m_skillsPage->cardTitle = [this](const QString &id) {
         const board::Card *card = m_model.card(id);
-        // A card this board does not know (a ledger row from elsewhere, or one closed and
-        // dropped from the model) links anyway: the card page says "(missing)" for it.
-        const QString text = card != nullptr
-                                 ? QStringLiteral("#%1 %2").arg(id, card->title)
-                                 : QStringLiteral("#%1").arg(id);
-        auto *chip = new QPushButton(text, chips);
-        chip->setObjectName(QStringLiteral("boardLinkedChip"));
-        chip->setCursor(Qt::PointingHandCursor);
-        chip->setToolTip(QStringLiteral("Open #%1 on the card page").arg(id));
-        const QString target = id;
-        connect(chip, &QPushButton::clicked, this, [this, target] { openCardSolo(target); });
-        row->addWidget(chip);
-        if (++shown == 8)   // the panel links; it does not mirror the board
-            break;
-    }
-    row->addStretch(1);
-    m_skillLinkedLayout->addWidget(chips);
+        return card != nullptr ? card->title : QString();
+    };
+    m_skillsPage->toast = [this](const QString &text) { toast(text); };
+    m_skillsPage->syncActions();
+    layout->addWidget(m_skillsPage, 1);
 }
 
 // ------------------------------------------------------ the Memories page (#9FX8 step 2)
@@ -8530,24 +8081,15 @@ void BoardView::handleEvent(const QJsonObject &event)
         rebuild();
         return;
     }
-    if (type == QStringLiteral("skills_registry")) {
-        // The Skills tab's rows (#9FX8): every skill visible from this workspace, with its
-        // registry row. The tab filters to project ones (decision 2); Globals' Skills section
-        // (#9FX8 step 3) reads the same rows for the global ones, so nothing is filtered
-        // worker-side. A reply to another pane's request is another prefix and never lands here.
-        if (!m_skillRequest.isEmpty() && !requestId.isEmpty() && requestId != m_skillRequest)
+    if (type.startsWith(QStringLiteral("skills")) || type == QStringLiteral("error")) {
+        // The Skills tab's rows and the replies to its actions (#9FX8): every skill visible from
+        // this workspace, filtered to the project ones by the view (decision 2); Globals' Skills
+        // section reads the same rows for the global ones. An `error` the view did not ask for
+        // falls through to the handlers below.
+        if (m_skillsPage != nullptr && m_skillsPage->handleEvent(event))
             return;
-        m_skillItems = event.value(QStringLiteral("items")).toArray();
-        refillSkills();
-        return;
-    }
-    if (type == QStringLiteral("skills_refined")) {
-        // A Refine from this page (or a SkillsDialog elsewhere): re-read the registry so the
-        // version and profile reflect the refined manifest.
-        m_skillsRequested = false;
-        requestSkillsRegistry();
-        showNotice(QStringLiteral("Skill refined"), false);
-        return;
+        if (type != QStringLiteral("error"))
+            return;
     }
     if (type == QStringLiteral("board")) {
         m_open = true;

@@ -13,7 +13,10 @@ class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
+class QSplitter;
 class QToolButton;
+
+namespace relay::skills { class SkillRegistryView; }
 
 namespace relay::globals {
 // What a finished `app_user_memory` call with action `suggest` asks of the transcript (#MEMS):
@@ -82,6 +85,9 @@ public:
     explicit GlobalsPane(QWidget *parent = nullptr);
     std::function<void(const QJsonObject &)> onRequest;
     std::function<void()> onInterview;
+    // Globals › Skills' Load and Re-verify put their text in a console's composer (#9FX8 step 4):
+    // the host hands in where. Without one the skill page shows neither button.
+    void setDraftTarget(std::function<void(const QString &)> draft);
     void handleEvent(const QJsonObject &event);
     void refresh();
     // A transcript's Keep or No (#MEMS): every Globals pane on screen, in every window, stops
@@ -107,6 +113,10 @@ private:
     void decide(bool keep);
     void rebuildRejected();
     void updateSectionLabel();
+    // The section control's rows carry a stable id (`kUserMemory…kSkills`) as item data, so a
+    // row can sit where it reads best without renumbering the ones before it.
+    int section() const;
+    void setSection(int section);
     QLineEdit *m_search;
     QComboBox *m_section;
     QLabel *m_intro;
@@ -127,6 +137,10 @@ private:
     QToolButton *m_rejectedToggle;
     QListWidget *m_rejectedList;
     QWidget *m_detail;
+    QSplitter *m_split;
+    QPushButton *m_reload;
+    relay::skills::SkillRegistryView *m_skills;   // Globals › Skills (#9FX8): the global half
+    int m_projectMemories = 0;   // project-scoped memory rows not listed here (Board › Memories)
     QJsonArray m_records, m_pending, m_rejected;
     QJsonObject m_record;
     QString m_workspace, m_original, m_selected, m_listRequest, m_getRequest, m_writeRequest, m_suggestRequest;

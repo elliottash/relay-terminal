@@ -74,6 +74,14 @@ target_compile_options(relay-editor PRIVATE ${RELAY_WARNINGS})
 # FIFO and its own model box had nothing left to be. `tests/helpermodelbox_test.cpp` went with
 # them; `relay-modelrows`, the one row builder both boxes drew from, stays and is the pane's.
 
+# The skills registry's list and skill page (#9FX8): one widget the Board's Skills tab (project
+# skills) and Globals › Skills (every other source) both show, plus the import and update dialogs
+# SkillsDialog shares with it. Callback-only, so neither host's library drags in the other.
+add_library(relay-skillregistry STATIC src/SkillRegistryView.cpp src/SkillRegistryView.h)
+target_include_directories(relay-skillregistry PUBLIC src)
+target_link_libraries(relay-skillregistry PUBLIC ${RELAY_QT}::Widgets)
+target_compile_options(relay-skillregistry PRIVATE ${RELAY_WARNINGS})
+
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
 # BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
@@ -101,7 +109,7 @@ target_link_libraries(relay-board PUBLIC relay-sourcedir)
 # line (protocol 23). Both came in through relay-helperchat until card #AGNT step 9 retired it.
 # relay-modelcatalog: a card comment records the model id its turn ran on; the page names the
 # model (card #MDL1, rule 1), through the same `nameOf` as everywhere else.
-target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog relay-panestatus ${RELAY_QT}::Widgets)
+target_link_libraries(relay-board PUBLIC relay-editor relay-toollabel relay-projects relay-notifications relay-agentcontext relay-modelcatalog relay-panestatus relay-skillregistry ${RELAY_QT}::Widgets)
 # The switchboard's worker is pinned from the working tree like any pane's (#FYEY).
 target_link_libraries(relay-board PRIVATE relay-runtimedirs)
 target_compile_options(relay-board PRIVATE ${RELAY_WARNINGS})
@@ -375,7 +383,7 @@ target_link_libraries(relay-projectspane PUBLIC relay-projectpicker ${RELAY_QT}:
 target_compile_options(relay-projectspane PRIVATE ${RELAY_WARNINGS})
 add_library(relay-globalspane STATIC src/GlobalsPane.cpp src/GlobalsPane.h)
 target_include_directories(relay-globalspane PUBLIC src)
-target_link_libraries(relay-globalspane PUBLIC ${RELAY_QT}::Widgets)
+target_link_libraries(relay-globalspane PUBLIC relay-skillregistry ${RELAY_QT}::Widgets)
 target_compile_options(relay-globalspane PRIVATE ${RELAY_WARNINGS})
 
 

@@ -23,6 +23,7 @@
 #include "BoardSections.h"
 #include "BoardSignals.h"   // signals: the machine's own faults as rows this list draws (#AQ6X)
 #include "AgentContext.h"    // what the agent on this surface is about (#AGNT steps 2, 6)
+#include "SkillRegistryView.h"   // the Skills tab's list and page, shared with Globals (#9FX8)
 
 class QComboBox;
 class QCheckBox;
@@ -458,25 +459,17 @@ private:
     // fetch happens on the first switch to Skills, never at pane open: a board nobody inspects
     // skills on pays for none.
     void buildPageTabs(QVBoxLayout *layout);
+    // The Skills page is `skills::SkillRegistryView` (#9FX8 step 3), the same list and skill page
+    // Globals › Skills shows for the global half; this only wires it to the pane's worker,
+    // console and card page.
     void buildSkillsPage(QVBoxLayout *layout);
     void buildMemoriesPage(QVBoxLayout *layout);
     void setPage(Page page);
     void applyPage();
-    void requestSkillsRegistry();
-    void refillSkills();
-    void showSkill(const QString &id);
     void refillMemories();
     void openMemory(const QString &id);
     void retireMemory();
     void reverifyMemory();
-    // The skill page's actions. Exclude/Include and Refine go through the same settings write and
-    // the same `refine_skills` request SkillsDialog uses, so the two surfaces cannot disagree.
-    void toggleSkillExcluded(const QString &name, bool excluded);
-    void refineSkill(const QString &name);
-    // The Linked panel the card page and the skill page share (#EA37 (c)): chips for the
-    // front-matter links and the `#ID` mentions, each opening the card it names.
-    void buildLinkedPanel(QWidget *host, QVBoxLayout *layout, const QString &title);
-    void setLinkedCards(QWidget *host, const QStringList &ids, const QString &emptyText);
     // The Switchboard agent's area, pinned under the list and deliberately outside the splitter
     // (see the comment where it is built). Three things live in it, top to bottom: the Check
     // findings, the survey offer — both **board** widgets, because they are lists to act on and
@@ -774,31 +767,14 @@ private:
     bool m_quickAddTabTouched = false, m_quickAddLabelsTouched = false;
 
     // ---- the three object tabs' state (#9FX8 step 2); the `Page` enum and `kPageDefs` sit with
-    // the methods, above, where the declarations can name them. The Skills page holds the
-    // registry rows that arrived (`m_skillItems`) and which one its page is showing; the
-    // Memories page reads the model's own memory cards, so it keeps nothing but the selection.
+    // the methods, above, where the declarations can name them. The Skills page keeps its own
+    // registry rows and selection; the Memories page reads the model's own memory cards, so it
+    // keeps nothing but the selection.
     Page m_page = Page::Cards;
     QWidget *m_pageTabs = nullptr;      // the segmented row, top of the pane
     QButtonGroup *m_pageGroup = nullptr;
-    // The Skills page (`m_skillsPage`), a vertical list over a detail.
-    QWidget *m_skillsPage = nullptr;
-    QWidget *m_skillDetail = nullptr;   // the selected skill's page, below the list
-    QLineEdit *m_skillFilter = nullptr;
-    QLabel *m_skillCount = nullptr;
-    QTreeWidget *m_skillList = nullptr;
-    QToolButton *m_skillRefresh = nullptr;
-    QLabel *m_skillTitle = nullptr, *m_skillTrigger = nullptr, *m_skillProfile = nullptr,
-           *m_skillProvenance = nullptr, *m_skillStats = nullptr;
-    QWidget *m_skillLinked = nullptr;   // the Linked panel (#EA37 (c)): cards that name it
-    QVBoxLayout *m_skillLinkedLayout = nullptr;
-    QLabel *m_skillLinkedEmpty = nullptr;
-    QTreeWidget *m_skillCases = nullptr;
-    QWidget *m_skillActions = nullptr;
-    QPushButton *m_skillExcludeButton = nullptr;   // "Exclude"/"Include", retitled per row
-    QJsonArray m_skillItems;            // the registry rows, as they arrived
-    QString m_skillSelected;            // id of the row whose page is showing
-    QString m_skillRequest;             // the id the last skills_registry went out under
-    bool m_skillsRequested = false;     // asked at least once this worker's life
+    // The Skills page, `boardSkillsPage`: the registry list over the skill page (#9FX8 step 3).
+    skills::SkillRegistryView *m_skillsPage = nullptr;
     // The Memories page (`m_memoriesPage`): the memory cards from the model's own rows.
     QWidget *m_memoriesPage = nullptr;
     QTreeWidget *m_memoryList = nullptr;

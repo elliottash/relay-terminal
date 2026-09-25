@@ -2825,7 +2825,7 @@ templates in `docs/skills-examples/` are the worked profiles.
 Every case a profiled skill serves is one row in the board's `cases.jsonl` (#95VZ,
 `backend/relay_core/cases.py`, protocol 19.22), and each `skills_list` item with a profile carries
 its `cases`, `last_served`, `pass_rate_30` and `stale` computed from those rows — agent-facing
-numbers the Skills list may read; the GUI draws nothing for them yet.
+numbers the registry view below draws on the Board's Skills tab and in Globals › Skills.
 
 GUI: `src/SkillsDialog.*` (non-modal, from `/skills`, the palette or Agent options) lists
 `skills_list` items with a checkbox per skill (unchecked names go to QSettings `skills/exclude`,
@@ -2835,6 +2835,16 @@ sent in `configure.skills.exclude` for new sessions), "overridden" for `shadowed
 `import_skills_confirm` with the checked names. Check for updates reads the repository URL from
 the imported skill's `../.relay-import.json` and sends `skills_check_updates`. Dialog requests
 use ids `skills-N` so worker `error` events route to the dialog's status line.
+
+The registry (#1QKM §5, card #9FX8) is one widget on two surfaces: `skills::SkillRegistryView`
+(`src/SkillRegistryView.*`, library `relay-skillregistry`) draws the `skills_registry` rows as a
+list over a skill page — profile strip, provenance, stats with the stale reason ("no cases yet",
+never stale, for a skill with no rows), the last cases, linked cards, and Load / Re-verify (a
+console draft, never a send) / Exclude / Refine / Open file. The Board's Skills tab is its project
+half (`project: true`); **Globals › Skills** is the global half — every other source — with
+SkillsDialog's import-from-repository and Check-updates actions in its toolbar, whose dialogs
+`SkillsDialog` now calls from the same file. Globals lists no project-scoped memory: project
+memories are the Board's Memories tab, user memories Globals'.
 
 ### Queue and interrupt
 

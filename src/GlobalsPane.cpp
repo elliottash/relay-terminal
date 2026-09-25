@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GlobalsPane.h"
+#include "SkillRegistryView.h"
 #include <QApplication>
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -16,8 +17,10 @@
 
 namespace relay::globals {
 namespace {
-// The section control's rows. Suggestions comes last so the older rows keep their places.
-constexpr int kUserMemory = 0, kAliases = 1, kInstructions = 2, kAll = 3, kSuggestions = 4;
+// The section control's rows, by id (the item data). The ids never change, so Suggestions and
+// Skills took new numbers rather than the older rows' places; Skills is *shown* between Aliases
+// and Instructions (#9FX8 step 3) because that is where it reads best.
+constexpr int kUserMemory = 0, kAliases = 1, kInstructions = 2, kAll = 3, kSuggestions = 4, kSkills = 5;
 QString sourceWord(const QString &source) {
     if (source == QLatin1String("claude")) return QObject::tr("imported from Claude Code");
     if (source == QLatin1String("codex")) return QObject::tr("imported from Codex");
@@ -32,7 +35,14 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     layout->setContentsMargins(8, 8, 8, 8);
     m_section = new QComboBox;
     m_section->setObjectName("globalsSection");
-    m_section->addItems({tr("User memory"), tr("Aliases"), tr("Instructions"), tr("All records"), tr("Suggestions")});
+    // "All global records": user memories, aliases and instruction sources. A project's own
+    // memories are that project's Board › Memories, never here (the owner's boundary, #Y2MP,
+    // #P7SJ, #9FX8).
+    const std::pair<QString, int> sections[] = {{tr("User memory"), kUserMemory}, {tr("Aliases"), kAliases},
+                                                {tr("Skills"), kSkills}, {tr("Instructions"), kInstructions},
+                                                {tr("All global records"), kAll}, {tr("Suggestions"), kSuggestions}};
+    for (const auto &[label, id] : sections)
+        m_section->addItem(label, id);
     layout->addWidget(m_section);
     m_intro = new QLabel(tr("What Relay knows about you · saved facts and preferences across projects. "
         "Review or edit a memory below, or let the helper interview you. "
@@ -53,7 +63,7 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     m_review = new QPushButton;
     m_review->setObjectName("globalsReview");
     m_review->setToolTip(tr("Facts agents or imports proposed. Nothing is remembered until you keep it."));
-    auto *reload = new QPushButton(tr("Refresh"));
+    auto *reload = m_reload = new QPushButton(tr("Refresh"));
     m_newMemory->setObjectName("globalsNewMemory");
     m_newAlias->setObjectName("globalsNewAlias");
     reload->setObjectName("globalsRefresh");
@@ -61,7 +71,7 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     actions->addWidget(m_review);
     actions->addStretch(); actions->addWidget(reload);
     layout->addLayout(actions);
-    auto *split = new QSplitter(Qt::Vertical);
+    auto *split = m_split = new QSplitter(Qt::Vertical);
     m_list = new QListWidget;
     m_list->setObjectName("globalsList");
     m_list->setMinimumHeight(70);
@@ -117,6 +127,14 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     split->addWidget(detail);
     split->setStretchFactor(0, 1); split->setStretchFactor(1, 2);
     layout->addWidget(split, 1);
+    // Globals › Skills (#9FX8 step 3): the registry view the Board's Skills tab shows, over the
+    // global rows — every source that is not the project's — with SkillsDialog's import and
+    // update actions in its toolbar. It asks the tab's worker through the same `onRequest`.
+    m_skills = new relay::skills::SkillRegistryView(relay::skills::SkillRegistryView::Scope::Global,
+                                                    QStringLiteral("globals"));
+    m_skills->send = [this](const QJsonObject &body) { return request(body); };
+    m_skills->hide();
+    layout->addWidget(m_skills, 1);
     m_notice = new QLabel;
     m_notice->setObjectName("globalsNotice");
     m_notice->setTextFormat(Qt::PlainText);
@@ -125,9 +143,10 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     connect(m_search, &QLineEdit::textChanged, this, [this] { rebuild(); });
     connect(m_section, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this] {
         m_getRequest.clear();
-        m_notice->setText(m_section->currentIndex() == kSuggestions && m_pending.isEmpty() ? tr("No suggestions waiting.") : QString());
+        m_notice->setText(section() == kSuggestions && m_pending.isEmpty() ? tr("No suggestions waiting.") : QString());
         display({});
         rebuild(); updateButtons();
+        if (section() == kSkills) m_skills->ensureLoaded();   // asked the first time it is shown
     });
     connect(m_interview, &QPushButton::clicked, this, [this] {
         if (protectDraft()) return;
@@ -135,7 +154,7 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
         else m_notice->setText(tr("The helper is not available in this view."));
     });
     connect(m_list, &QListWidget::currentRowChanged, this, [this] { selectRecord(); });
-    connect(m_review, &QPushButton::clicked, this, [this] { m_section->setCurrentIndex(kSuggestions); });
+    connect(m_review, &QPushButton::clicked, this, [this] { setSection(kSuggestions); });
     connect(m_rejectedToggle, &QToolButton::toggled, this, [this](bool open) {
         m_rejectedToggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
         updateButtons();
@@ -177,6 +196,12 @@ QString GlobalsPane::request(QJsonObject body) {
     if (onRequest) onRequest(body);
     return id;
 }
+int GlobalsPane::section() const { return m_section->currentData().toInt(); }
+void GlobalsPane::setSection(int section) { m_section->setCurrentIndex(m_section->findData(section)); }
+void GlobalsPane::setDraftTarget(std::function<void(const QString &)> draft) {
+    m_skills->draft = std::move(draft);
+    m_skills->syncActions();
+}
 QString GlobalsPane::identity(const QJsonObject &record) const {
     return record.value("kind").toString() + ":" + record.value("key").toString();
 }
@@ -205,7 +230,7 @@ void GlobalsPane::showSuggestion(const QString &id) {
     m_selected = id.isEmpty() ? QString() : QStringLiteral("suggestion:") + id;
     {
         const QSignalBlocker blocker(m_section);
-        m_section->setCurrentIndex(kSuggestions);
+        setSection(kSuggestions);
     }
     m_getRequest.clear();
     m_record = {};
@@ -237,7 +262,7 @@ void GlobalsPane::rebuildRejected() {
     m_rejectedToggle->setText(tr("Rejected (%1)").arg(m_rejected.size()));
 }
 void GlobalsPane::updateSectionLabel() {
-    m_section->setItemText(kSuggestions, m_pending.isEmpty() ? tr("Suggestions") : tr("Suggestions (%1)").arg(m_pending.size()));
+    m_section->setItemText(m_section->findData(kSuggestions), m_pending.isEmpty() ? tr("Suggestions") : tr("Suggestions (%1)").arg(m_pending.size()));
     m_review->setText(m_pending.size() == 1 ? tr("Review 1 suggestion") : tr("Review %1 suggestions").arg(m_pending.size()));
 }
 void GlobalsPane::refresh() {
@@ -259,7 +284,7 @@ void GlobalsPane::rebuild() {
     const QSignalBlocker blocker(m_list);
     m_list->clear();
     const QString query = m_search->text().trimmed();
-    if (m_section->currentIndex() == kSuggestions) {
+    if (section() == kSuggestions) {
         for (const auto &value : m_pending) {
             auto suggestion = value.toObject();
             suggestion.insert("kind", "suggestion");
@@ -276,13 +301,18 @@ void GlobalsPane::rebuild() {
         }
         return;
     }
+    m_projectMemories = 0;
     for (const auto &value : m_records) {
         const auto record = value.toObject();
         const QString title = record.value("title").toString(record.value("key").toString());
         const QString kind = record.value("kind").toString();
         const QString status = record.value("status").toString();
-        const int section = m_section->currentIndex();
-        if (section == kUserMemory && (kind != "memory" || record.value("memory_scope").toString("user") != "user")) continue;
+        const int section = this->section();
+        // Project memories leave Globals (#9FX8, the owner's boundary): a memory that is not
+        // user-scoped belongs to a project's Board › Memories, so no section here lists it.
+        if (kind == "memory" && record.value("memory_scope").toString("user") != "user") { ++m_projectMemories; continue; }
+        if (section == kUserMemory && kind != "memory") continue;
+        if (section == kSkills) continue;
         if (section == kAliases && kind != "alias") continue;
         if (section == kInstructions && kind != "instruction") continue;
         const QString label = title + " · " + kind + (status.isEmpty() ? QString() : " · " + status)
@@ -324,7 +354,7 @@ void GlobalsPane::display(const QJsonObject &record) {
     m_editor->setPlainText(m_original);
     m_selected = identity(record);
     if (record.isEmpty()) {
-        m_source->setText(m_section->currentIndex() == kSuggestions ? tr("Select a suggestion to keep, edit or reject it.")
+        m_source->setText(section() == kSuggestions ? tr("Select a suggestion to keep, edit or reject it.")
                                                                     : tr("Select a record to inspect or edit its source."));
         updateButtons();
         return;
@@ -355,7 +385,7 @@ void GlobalsPane::display(const QJsonObject &record) {
 }
 void GlobalsPane::newRecord(const QString &kind) {
     if (protectDraft()) return;
-    m_section->setCurrentIndex(kind == "memory" ? kUserMemory : kAliases);
+    setSection(kind == "memory" ? kUserMemory : kAliases);
     m_getRequest.clear();
     display({{"kind", kind}, {"scope", "global"}});
     const QString text = kind == "memory"
@@ -368,18 +398,34 @@ void GlobalsPane::newRecord(const QString &kind) {
 }
 void GlobalsPane::updateButtons() {
     const bool ready = m_writeRequest.isEmpty() && !m_loading;
-    const int section = m_section->currentIndex();
+    const int section = this->section();
     const bool suggestions = section == kSuggestions;
+    // Globals › Skills is the registry view in place of the records list and its editor: the
+    // search box, Refresh and the record actions belong to records, the view has its own.
+    const bool skills = section == kSkills;
+    m_skills->setVisible(skills);
+    m_split->setVisible(!skills);
+    m_search->setVisible(!skills);
+    m_reload->setVisible(!skills);
     m_section->setEnabled(ready && !m_dirty);
     m_interview->setEnabled(ready && !m_dirty);
     m_newMemory->setVisible(section == kUserMemory || section == kAll);
     m_newAlias->setVisible(section == kAliases || section == kAll);
     m_interview->setVisible(section == kUserMemory);
     m_review->setVisible(section == kUserMemory && !m_pending.isEmpty());
-    m_intro->setVisible(section == kUserMemory || suggestions);
+    m_intro->setVisible(section == kUserMemory || suggestions || skills || section == kAll);
+    const QString projectNote = m_projectMemories == 0 ? QString()
+        : m_projectMemories == 1 ? tr(" 1 project-scoped memory is not listed here.")
+        : tr(" %1 project-scoped memories are not listed here.").arg(m_projectMemories);
     m_intro->setText(suggestions
         ? tr("Facts agents learned or imported from Claude Code and Codex. Nothing is remembered until you keep it. "
              "No is remembered too: the same fact is not suggested again.")
+        : skills
+        ? tr("Global skills: the ones every project can load, from Relay's global folder, ~/.claude, ~/.codex, ~/.warp "
+             "and the bundles. A project's own skills are on its Board › Skills.")
+        : section == kAll
+        ? tr("Your user memories, aliases and instruction sources. A project's memories are on its Board › Memories.")
+              + projectNote
         : tr("What Relay knows about you · saved facts and preferences across projects. "
              "Review or edit a memory below, or let the helper interview you. "
              "Applicable memories are sent to the model you choose. Retire stops future loading; it keeps the file and history."));
@@ -405,10 +451,14 @@ void GlobalsPane::updateButtons() {
 void GlobalsPane::handleEvent(const QJsonObject &event) {
     const QString type = event.value("event").toString(event.value("type").toString());
     const QString id = event.value("id").toString();
+    // The Skills section's registry rows and the replies to its import, update and refine
+    // requests; everything else on the tab's worker is the records'.
+    if ((type.startsWith("skills") || type == "error") && m_skills->handleEvent(event)) return;
     if (type == "globals_state" && id == m_listRequest && !id.isEmpty()) {
         m_listRequest.clear();
         m_records = event.value("records").toArray();
         rebuild();
+        updateButtons();   // the intro counts the project memories rebuild() left out
         QStringList problems;
         for (const auto &problem : event.value("problems").toArray()) {
             if (problem.isString()) problems << problem.toString();
@@ -419,9 +469,9 @@ void GlobalsPane::handleEvent(const QJsonObject &event) {
             }
         }
         if (!problems.isEmpty()) m_notice->setText(problems.join("\n"));
-        else if (!m_dirty && !m_loading && m_writeRequest.isEmpty() && m_section->currentIndex() != kSuggestions)
+        else if (!m_dirty && !m_loading && m_writeRequest.isEmpty() && section() != kSuggestions && section() != kSkills)
             m_notice->setText(m_list->count() == 0 ?
-                (m_section->currentIndex() == kUserMemory ? tr("No matching user memories. Add a memory or choose Interview me to begin.")
+                (section() == kUserMemory ? tr("No matching user memories. Add a memory or choose Interview me to begin.")
                                                : tr("No matching records.")) : QString());
         // Refresh the selected source only when there is no draft to overwrite. A fresh hash
         // lets Cancel + Refresh recover naturally after an external-write conflict.
@@ -444,7 +494,7 @@ void GlobalsPane::handleEvent(const QJsonObject &event) {
         m_rejected = event.value("rejected").toArray();
         updateSectionLabel();
         rebuildRejected();
-        if (m_section->currentIndex() == kSuggestions) {
+        if (section() == kSuggestions) {
             rebuild();
             if (suggesting() && !m_dirty && m_writeRequest.isEmpty()) {
                 // Decided elsewhere (the transcript's Keep or No): the editor lets it go.
@@ -477,7 +527,7 @@ void GlobalsPane::handleEvent(const QJsonObject &event) {
         m_notice->setText(tr("Saved.")); refresh();
     } else if (type == "globals_error" && !id.isEmpty()
                && (id == m_getRequest || id == m_writeRequest || id == m_listRequest || id == m_suggestRequest)) {
-        if (id == m_suggestRequest) { m_suggestRequest.clear(); if (m_section->currentIndex() != kSuggestions) return; }
+        if (id == m_suggestRequest) { m_suggestRequest.clear(); if (section() != kSuggestions) return; }
         if (id == m_getRequest) { m_getRequest.clear(); m_loading = false; m_selected = identity(m_record); rebuild(); }
         if (id == m_writeRequest) m_writeRequest.clear();
         if (id == m_listRequest) m_listRequest.clear();

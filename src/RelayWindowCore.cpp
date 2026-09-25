@@ -544,6 +544,17 @@ ToolPane *RelayWindow::createSessionsPane(const QString &cwd) {
                 if (sessionsGuard->onHelperHint) sessionsGuard->onHelperHint();
             }
         };
+        // Globals › Skills' Load and Re-verify (#9FX8 step 4) draft into this pane's console, the
+        // same one Interview me asks in: a draft for the person to send, never a send.
+        globals->setDraftTarget([sessionsGuard](const QString &text) {
+            if (!sessionsGuard) return;
+            sessionsGuard->focusHelper();
+            QTimer::singleShot(0, sessionsGuard, [sessionsGuard, text] {
+                if (!sessionsGuard) return;
+                const auto &console = sessionsGuard->agentConsole();
+                if (console.draftInComposer) console.draftInComposer(text);
+            });
+        });
         // What is open and what was closed is the window's knowledge, not the list's: it is pushed
         // in here, and again whenever the recently-closed list changes, so the "open" and
         // "closed 5 min ago" tags on the rows stay true (card #R6J0).

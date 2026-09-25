@@ -124,7 +124,9 @@ class ObserveCommands:
         return agent.executor.skills if agent is not None else None
 
     def _settings(self, request):
-        workspace = request.get("workspace")
+        # An empty workspace means none (Globals asks from a tab with no project, #9FX8), not an
+        # invalid one: the agent's own workspace, or the defaults, answer it.
+        workspace = request.get("workspace") or None
         if workspace is not None and (not isinstance(workspace, str) or not os.path.isdir(workspace)):
             raise ValueError("workspace must be an existing directory.")
         agent = self.turns.agent
