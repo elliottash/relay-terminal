@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: low}
 source: 'pane 1, 2026-09-25, follow-up to #2M26'
-links: {plans: [], commits: [], evidence: [], related: [2M26], github: null}
+links: {plans: [], commits: [e7ce0f13b8c2], evidence: [], related: [2M26], github: null}
 ---
 # /init creates RELAY.md as the default agent guidance and points the other instruction files at it
 
