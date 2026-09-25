@@ -1,0 +1,2 @@
+agent scratch takes 200.0 MB (budget 102.4 MB). 200.0 MB can be reclaimed: relay-scratch gc --apply
+exit 1

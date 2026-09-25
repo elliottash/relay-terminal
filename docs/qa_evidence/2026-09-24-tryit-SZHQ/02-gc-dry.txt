@@ -1,0 +1,3 @@
+would remove 200.0 MB  /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/task-huge  idle 30h  (claude-session)
+would remove 12 KB  /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/session-gone  idle 30h  (claude-session)
+would free (dry run; --apply removes) 200.0 MB in 2 entries

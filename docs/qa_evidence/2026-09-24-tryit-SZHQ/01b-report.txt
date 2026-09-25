@@ -1,0 +1,4 @@
+ 200.0 MB      30h  claude-session  gc  /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/task-huge
+    12 KB      30h  claude-session  gc  /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/session-gone
+     8 KB       0h  claude-session      /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/session-live  (a live process uses it)
+total 200.0 MB in 3 entries; 200.0 MB reclaimable with `relay-scratch gc --apply`

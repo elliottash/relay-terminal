@@ -1,0 +1,3 @@
+removed 200.0 MB  /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/task-huge  idle 30h  (claude-session)
+removed 12 KB  /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo/session-gone  idle 30h  (claude-session)
+freed 200.0 MB in 2 entries

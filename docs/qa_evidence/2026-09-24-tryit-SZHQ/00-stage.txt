@@ -1,0 +1,12 @@
+
+Staged: three agent session trees under /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo
+  task-huge      200 MB, idle 30 h   -> should be reclaimed
+  session-gone     4 KB, idle 30 h   -> should be reclaimed
+  session-live     8 KB, in use now  -> must survive (a live process sits in it)
+Budget forced to 0.1 GB so the situation is already over it.
+
+Run, in order (each takes the two exported variables):
+  /home/elliott/repos/relay-terminal/scripts/relay-scratch check      ; echo "exit $?"
+  /home/elliott/repos/relay-terminal/scripts/relay-scratch gc                     # dry run
+  /home/elliott/repos/relay-terminal/scripts/relay-scratch gc --apply
+  ls /tmp/claude-1000/tryit/szhq/scratch/claude-1000/-home-user-demo
