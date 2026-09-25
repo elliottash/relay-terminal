@@ -10847,6 +10847,12 @@ public:
     void toast(const QString &text, int milliseconds = 1600) override {
         enqueueToast({text, milliseconds, QString(), 0, 0});
     }
+    // A board write's toast ("◆ #K7Q2 · created card …") names its card, so it is a link too:
+    // while one is up the label takes the mouse, and a click opens that card in the Board —
+    // the same destination a `#K7Q2` link in the output has.
+    void toastCard(const QString &id, const QString &text, int milliseconds = 1600) {
+        enqueueToast({text, milliseconds, QString(), 0, 0, id});
+    }
 
     // The toast sits at the terminal host's bottom-right corner. Re-anchored while it is up so a
     // composer that grows under it (the fix loop's agent transcript) neither strands nor buries it.
@@ -10867,6 +10873,7 @@ private:
         int milliseconds = 1600;
         QString hintId;          // a shortcut hint: gated again and counted when it appears
         int hintLimit = 0, hintCooldown = 0;
+        QString cardId;          // a board write's toast: the card it names, and a click opens it
     };
     static constexpr int kToastMinMs = 1500;           // each toast's least time up while others wait
     static constexpr int kHintCooldownSeconds = 600;   // ShortcutHints::shouldShow's default
@@ -10885,14 +10892,19 @@ private:
             m_toast = new QLabel(this);
             m_toast->setObjectName(QStringLiteral("toast"));
             m_toast->setAttribute(Qt::WA_TransparentForMouseEvents);
+            m_toast->installEventFilter(this);   // a board toast's click opens its card (Pane::eventFilter)
             m_toastTimer.setSingleShot(true);
             connect(&m_toastTimer, &QTimer::timeout, this, [this] { showNextToast(); });
         }
         // The same words again, straight after themselves: one toast, up for the longer time.
+        // The same words about a different card are not the same toast.
         if (!m_toastQueue.isEmpty()) {
             PendingToast &last = m_toastQueue.last();
-            if (last.text == next.text) { last.milliseconds = std::max(last.milliseconds, next.milliseconds); return; }
-        } else if (toastUp() && m_toast->text() == next.text) {
+            if (last.text == next.text && last.cardId == next.cardId) {
+                last.milliseconds = std::max(last.milliseconds, next.milliseconds);
+                return;
+            }
+        } else if (toastUp() && m_toast->text() == next.text && m_toastCardId == next.cardId) {
             const int shown = int(m_toastShown.elapsed());
             if (next.milliseconds > m_toastTimer.remainingTime()) {
                 m_toastMs = shown + next.milliseconds;
@@ -10923,6 +10935,13 @@ private:
                 hints.recordShown(next.hintId);
             }
             m_toastHintId = next.hintId;
+            m_toastCardId = next.cardId;
+            // A card toast is a link; every other toast stays out of the terminal's way.
+            m_toast->setAttribute(Qt::WA_TransparentForMouseEvents, next.cardId.isEmpty());
+            m_toast->setCursor(next.cardId.isEmpty() ? Qt::ArrowCursor : Qt::PointingHandCursor);
+            m_toast->setToolTip(next.cardId.isEmpty()
+                                    ? QString()
+                                    : QStringLiteral("Open #%1 in the Board").arg(next.cardId));
             m_toast->setText(next.text);
             m_toast->adjustSize();
             m_toast->show();
@@ -10934,7 +10953,21 @@ private:
             return;
         }
         m_toastHintId.clear();
-        if (m_toast) m_toast->hide();
+        m_toastCardId.clear();
+        m_toastMousePress = false;
+        if (m_toast) {
+            m_toast->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            m_toast->setToolTip(QString());
+            m_toast->hide();
+        }
+    }
+
+    // The toast was clicked: it goes away now, not when its timer runs out, and whatever was
+    // queued behind it comes up in its turn.
+    void dismissToast() {
+        m_toastMousePress = false;
+        m_toastTimer.stop();
+        showNextToast();
     }
 public:
 private:
@@ -14653,7 +14686,7 @@ private:
         noteWorkCard(id);
         const QString line = QStringLiteral("◆ #%1 · %2").arg(id, summary);
         status(line);
-        toast(line, 4000);
+        toastCard(id, line, 4000);
     }
 
     void placeAtPopup() {
@@ -17005,6 +17038,8 @@ private:
     bool m_askPlaceholderShown = false;   // an ask, not background work, owns the placeholder now
     QList<PendingToast> m_toastQueue;     // toasts waiting behind the one up
     QString m_toastHintId;                // the hint the toast up is, if it is one
+    QString m_toastCardId;                // the card the toast up names, when it is a board write
+    bool m_toastMousePress = false;       // a press landed on that toast: the release is a click
     QElapsedTimer m_toastShown;
     int m_toastMs = 0;
     QTimer m_escTimer;

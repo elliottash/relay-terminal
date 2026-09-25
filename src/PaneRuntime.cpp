@@ -77,6 +77,19 @@ bool Pane::eventFilter(QObject *object, QEvent *event) {
         // floating overlays (placeQueueStrip and friends in resizeEvent).
         if (object == m_terminalHost && event->type() == QEvent::Resize && m_toast && m_toast->isVisible())
             placeToast();
+        // A board-write toast ("◆ #K7Q2 · created card …") is itself a link: a press and the
+        // release that lands back on the label open the card it names — the context gets first
+        // refusal, exactly as a `#K7Q2` link in the output does — and the click replaces the
+        // timer. Every other toast stays transparent to the mouse (showNextToast sets that).
+        if (object == m_toast && !m_toastCardId.isEmpty()) {
+            if (event->type() == QEvent::MouseButtonPress) { m_toastMousePress = true; return true; }
+            if (event->type() == QEvent::MouseButtonRelease && m_toastMousePress) {
+                const QString id = m_toastCardId;
+                dismissToast();
+                openOutputTarget(relay::links::cardTarget(id), -1, false);
+                return true;
+            }
+        }
         if ((event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate) && object == window())
             noteWindowActivation(event->type() == QEvent::WindowActivate);
         // Minimised or restored: whether anyone can see this pane is what the shell poll's rate is

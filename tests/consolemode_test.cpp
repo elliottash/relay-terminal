@@ -669,6 +669,57 @@ void theContextGetsFirstRefusalOnLocalLinkKinds()
     }
 
 
+// ----- a board-write toast is a link to its card (#XC75) ----------------------------------------
+//
+// The toast that names a board write ("◆ #K7Q2 · created card …") is the one thing on screen
+// that says a card just changed, and until #XC75 it was the one thing about a card that could
+// not be clicked. The toast carries its card's id now: while one is up the label takes the
+// mouse (every other toast stays transparent to it), and a click opens the card exactly the
+// way a `#K7Q2` link in the output does — context first, then onOpenCard — and dismisses the
+// toast: the click is the acknowledgement.
+void aBoardToastClickOpensItsCard()
+{
+    StubContext context;
+    context.workspace = home->path();
+    context.swallow = false;
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    console.deliverWorkerEvent({{"event", "ready"}});
+    QStringList opened;
+    console.onOpenCard = [&opened](const QString &id) { opened << QStringLiteral("card ") + id; };
+
+    // A board write, as the worker's Switchboard events carry it (protocol 17.5).
+    console.deliverWorkerEvent({{"event", "board_activity"},
+                                {"id", "K7Q2"},
+                                {"summary", "created card \"Clickable toast\""}});
+    QLabel *toast = console.findChild<QLabel *>(QStringLiteral("toast"));
+    CHECK(toast);
+    CHECK(toast->text().contains(QStringLiteral("#K7Q2")));
+    CHECK(!toast->testAttribute(Qt::WA_TransparentForMouseEvents));   // the toast is a link
+    CHECK(toast->cursor().shape() == Qt::PointingHandCursor);
+    CHECK(opened.isEmpty());
+
+    // A press and a release that land on the label open the card, and the click stands in for
+    // the timer: the toast is down and out of the terminal's way again.
+    const QPointF centre = QRectF(toast->rect()).center();
+    QMouseEvent press(QEvent::MouseButtonPress, centre, toast->mapToGlobal(centre.toPoint()),
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QMouseEvent release(QEvent::MouseButtonRelease, centre, toast->mapToGlobal(centre.toPoint()),
+                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QApplication::sendEvent(toast, &press);
+    QApplication::sendEvent(toast, &release);
+    CHECK_EQ(opened, QStringList({QStringLiteral("card K7Q2")}));
+    CHECK(toast->isHidden());
+    CHECK(toast->testAttribute(Qt::WA_TransparentForMouseEvents));
+
+    // An ordinary toast never takes the mouse, so a click there falls through to the terminal.
+    console.toast(QStringLiteral("Copied 12 characters"));
+    CHECK(toast->testAttribute(Qt::WA_TransparentForMouseEvents));
+    QApplication::sendEvent(toast, &press);
+    QApplication::sendEvent(toast, &release);
+    CHECK_EQ(opened.size(), 1);   // no second open from a toast that is not a link
+    }
+
+
 // ----- the §12 queue strip reads the worker's queue (card #CTRN) --------------------------------
 //
 // A pane holds its own prompts back client-side and sends one `ask` at a time, so until this card
@@ -1825,6 +1876,7 @@ int main(int argc, char **argv)
     cases::theHostsHandlesWork();
     cases::aConsoleIsAnOrdinaryChildOfItsHost();
     cases::theContextGetsFirstRefusalOnLocalLinkKinds();
+    cases::aBoardToastClickOpensItsCard();
     cases::shiftClickOnALocalPathOpensItExternally();
     cases::ctrlClickEditsTheActualFile();
     cases::aQueueChangedForThisSurfaceDrawsRowsTheConsoleNeverSubmitted();
