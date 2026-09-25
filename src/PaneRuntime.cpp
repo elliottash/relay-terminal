@@ -967,6 +967,7 @@ void Pane::startTerminal(bool cleanShell) {
             // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
             // command and the shell keeps running; Relay reports the kill from memory.events.
             // isolation/shell_oom_policy=stop ends the whole pane shell instead (restart banner).
+            isolation::ensureTotalCeiling();   // #ZPWT: panes are generous; the slice bounds their sum
             m_shellUnit = QStringLiteral("relay-pane-%1-shell-%2").arg(m_token.left(8)).arg(++m_shellGeneration);
             const QString tool = QStandardPaths::findExecutable(QStringLiteral("systemd-run"));
             started = m_backend->startProgram(tool, isolation::wrap(m_shellUnit,

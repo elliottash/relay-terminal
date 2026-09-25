@@ -26,7 +26,9 @@ import atexit
 import base64
 import json
 import os
+import re
 import selectors
+import shutil
 import signal
 import subprocess
 import threading
@@ -66,6 +68,11 @@ class Job:
     live: Callable[[str], None] | None = None
     # The ssh host it runs on over the user's connection (card #S5SH); None for a local command.
     host: str | None = None
+    # The per-run memory bound this job asked for (card #WBDX), None for a plain run_command.
+    memory_max: str | None = None
+    # scope_oom_kills() when the job started: a SIGKILL exit plus a higher count now is the
+    # kernel's memory kill of this job (#ZPWT), not an ordinary kill.
+    oom_kills: int | None = None
 
     @property
     def total(self) -> int:
@@ -90,6 +97,81 @@ def _kill_group(process: subprocess.Popen) -> None:
                 process.wait(timeout=TERM_GRACE)
             except subprocess.TimeoutExpired:
                 pass
+
+
+def raise_oom_score_adj(value: int) -> None:
+    """Raise this process's oom_score_adj to `value` — raise-only, never lower, mirroring
+    backend/worker.py's prefer_as_oom_victim rule (a child of a context already at 1000 keeps it).
+    Card #ZPWT: run_command children run at 1000 so the memcg OOM killer picks the command, not
+    the worker (500) that owns the conversation. Raw os.* calls only: this also runs in Popen's
+    preexec_fn, after fork, where allocation is off-limits."""
+    try:
+        fd = os.open("/proc/self/oom_score_adj", os.O_RDONLY)
+        try:
+            current = int(os.read(fd, 16).strip() or b"0")
+        finally:
+            os.close(fd)
+        if current >= value:
+            return
+        fd = os.open("/proc/self/oom_score_adj", os.O_WRONLY)
+        try:
+            os.write(fd, str(value).encode("ascii"))
+        finally:
+            os.close(fd)
+    except (OSError, ValueError):
+        pass
+
+
+def _prefer_child_oom_victim() -> None:
+    """preexec hook for run_command children (#ZPWT). Not Windows: no preexec_fn there."""
+    raise_oom_score_adj(1000)
+
+
+def scope_oom_kills() -> int | None:
+    """The oom_kill count of the cgroup this process is in — an isolated pane's agent scope — or
+    None when unreadable (cgroup v1, no systemd). Compared around a job (#ZPWT) to tell a memory
+    kill from any other SIGKILL in its result."""
+    try:
+        with open("/proc/self/cgroup") as f:
+            line = f.read().strip().splitlines()[-1]
+        path = line.split("::", 1)[1] if "::" in line else ""
+        if not path:
+            return None
+        with open(f"/sys/fs/cgroup{path}/memory.events") as f:
+            for row in f:
+                if row.startswith("oom_kill "):
+                    return int(row.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+_MEMORY_SIZE = re.compile(r"^(?:\d+[KMGT]?|infinity)$")
+
+
+def is_memory_size(size: str) -> bool:
+    """True when `size` is a MemoryMax a caller may pass: 8G, 512M, 4T or infinity."""
+    return bool(_MEMORY_SIZE.match(str(size).strip()))
+
+
+def scoped_argv(argv: list[str], memory_max: str) -> list[str]:
+    """`argv` run by systemd-run in a scope of its own under app-relay.slice with
+    MemoryMax=`memory_max` (card #WBDX): a job that knows its size asks for that bound instead of
+    dying at the pane cap, and stays inside the slice ceiling that bounds all panes together.
+    `--scope` execs in place, so the job keeps its pipes, its pid and its process group, and
+    OOMPolicy=continue keeps a breach of the bound to this one process. sd-bus reaches the user
+    manager without DBUS_SESSION_BUS_ADDRESS through $XDG_RUNTIME_DIR/bus (#ZPWT step 0 proved
+    it), so nothing the pane had removed is needed back."""
+    size = str(memory_max).strip()
+    if not _MEMORY_SIZE.match(size):
+        raise ValueError(f"memory_max {memory_max!r} is not a size: use 8G, 512M, 4T or infinity.")
+    if os.name == "nt":
+        raise ValueError("memory_max is not supported on Windows.")
+    exe = shutil.which("systemd-run")
+    if not exe:
+        raise ValueError("memory_max needs systemd-run, which this machine does not have.")
+    return [exe, "--user", "--scope", "--quiet", "--collect", "--slice=app-relay.slice",
+            "-p", f"MemoryMax={size}", "-p", "OOMPolicy=continue", "--"] + argv
 
 
 def shell_argv(command: str, env: dict) -> list[str]:
@@ -159,9 +241,15 @@ class JobTable:
         _TABLES.add(self)
 
     def start(self, command: str, cwd, env: dict, *, argv: list[str] | None = None,
-              host: str | None = None) -> Job:
+              host: str | None = None, memory_max: str | None = None) -> Job:
         """Run `command` with bash, or run `argv` (ssh to `host`, card #S5SH) and keep `command` as
-        the job's name. Either way it is one process group, stopped and read the same."""
+        the job's name. Either way it is one process group, stopped and read the same.
+
+        `memory_max` (card #WBDX, local commands only) runs this one command in a scope of its own
+        under app-relay.slice with that MemoryMax: a job that knows its size asks for the bound it
+        needs instead of dying at the pane's cap. Every local child also raises its own
+        oom_score_adj to 1000 (#ZPWT), so when a memory limit is hit the kernel kills the command
+        and not the worker that owns this conversation."""
         with self._lock:
             running = sum(1 for job in self._jobs.values() if job.running)
             if running >= MAX_RUNNING:
@@ -174,15 +262,23 @@ class JobTable:
                 kept += max(len(old.buffer), JOB_OVERHEAD)
                 if kept > KEEP_FINISHED_BYTES:
                     del self._jobs[old.id]
-        process = subprocess.Popen(argv or shell_argv(command, env),
+        if memory_max and host:
+            raise ValueError("memory_max bounds local commands; an ssh job's memory is the remote "
+                             "host's to manage.")
+        argv = list(argv or shell_argv(command, env))
+        if memory_max:
+            argv = scoped_argv(argv, memory_max)
+        process = subprocess.Popen(argv,
                                    cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    start_new_session=os.name != "nt", bufsize=0,
+                                   preexec_fn=_prefer_child_oom_victim if os.name != "nt" else None,
                                    creationflags=0x08000004 if os.name == "nt" else 0)
         if os.name == "nt":
             from .windows_jobs import attach
             attach(process)
-        job = Job(job_id, command, process, time.monotonic(), host=host)
+        job = Job(job_id, command, process, time.monotonic(), host=host, memory_max=memory_max)
+        job.oom_kills = scope_oom_kills()
         with self._lock:
             self._jobs[job_id] = job
         threading.Thread(target=self._pump, args=(job,), name=f"relay-{job_id}", daemon=True).start()

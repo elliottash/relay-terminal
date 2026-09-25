@@ -105,17 +105,50 @@ inline QString sized(qulonglong bytes) {
     return QString::number(std::max<qulonglong>(1, (bytes + (1ULL << 29)) >> 30)) + QStringLiteral("G");
 }
 
-// Agent worker: clamp(RAM/16, 2G, 8G) — a long conversation plus the builds it runs needs
-// multi-GB, while a small machine keeps a 2G floor.
-inline QString agentDefault() {
-    const qulonglong ram = memInfo("MemTotal");
-    return ram ? sized(std::min(8ULL << 30, std::max(2ULL << 30, ram / 16))) : QStringLiteral("2G");
+// The byte-count formulas are pure functions of the RAM so tests can check them against synthetic
+// machine sizes (#ZPWT). The shape of each, and why:
+//
+// Agent worker: RAM/2, 2G floor — the worker itself is small, but the builds and data jobs it runs
+// are not; a model training run or a big link should fit in one pane. Panes no longer police the
+// machine together: app-relay.slice (totalDefaultBytes below) is what bounds their sum, so a pane
+// cap can be generous without N panes promising the machine N times over.
+inline qulonglong agentDefaultBytes(qulonglong ram) { return std::max(2ULL << 30, ram / 2); }
+
+// Pane shell: 3·RAM/4, 4G floor — shells run whatever the user runs, so they get the most.
+inline qulonglong shellDefaultBytes(qulonglong ram) { return std::max(4ULL << 30, ram * 3 / 4); }
+
+// All of Relay's panes together: RAM minus a reserve of max(8G, RAM/10) for the desktop and
+// everything outside Relay, but never below half the machine, so a small laptop keeps a workable
+// ceiling rather than a zero one (RAM 8G: reserve would clamp it to 0 without this).
+inline qulonglong totalDefaultBytes(qulonglong ram) {
+    const qulonglong reserve = std::max(8ULL << 30, ram / 10);
+    return std::max(ram - std::min(reserve, ram / 2), ram / 2);
 }
 
-// Pane shell: clamp(RAM/2, 4G, 16G) — shells run whatever the user runs, so they get more.
+// Escapees (the tmux/Chrome drop-ins, card #Y4RX): the pre-#ZPWT agent formula,
+// clamp(RAM/16, 2G, 8G). Their scopes are app.slice siblings, not members of app-relay.slice, so
+// this cap is the only machine-wide bound on them — it stays tight even though agent panes
+// themselves loosened (#ZPWT planning note: it must not follow agentDefault to RAM/2).
+inline qulonglong escapeeDefaultBytes(qulonglong ram) { return std::min(8ULL << 30, std::max(2ULL << 30, ram / 16)); }
+
+inline QString agentDefault() {
+    const qulonglong ram = memInfo("MemTotal");
+    return ram ? sized(agentDefaultBytes(ram)) : QStringLiteral("2G");
+}
+
 inline QString shellDefault() {
     const qulonglong ram = memInfo("MemTotal");
-    return ram ? sized(std::min(16ULL << 30, std::max(4ULL << 30, ram / 2))) : QStringLiteral("8G");
+    return ram ? sized(shellDefaultBytes(ram)) : QStringLiteral("8G");
+}
+
+inline QString totalDefault() {
+    const qulonglong ram = memInfo("MemTotal");
+    return ram ? sized(totalDefaultBytes(ram)) : QStringLiteral("infinity");
+}
+
+inline QString escapeeDefault() {
+    const qulonglong ram = memInfo("MemTotal");
+    return ram ? sized(escapeeDefaultBytes(ram)) : QStringLiteral("2G");
 }
 
 // Swap caps: a slice of total swap, floored so a kill still comes quickly.
@@ -128,6 +161,8 @@ inline QString shellSwapDefault() {
     const qulonglong swap = memInfo("SwapTotal");
     return swap ? sized(std::min(4ULL << 30, std::max(1ULL << 30, swap / 4))) : QStringLiteral("2G");
 }
+
+inline QString escapeeSwapDefault() { return agentSwapDefault(); }
 
 // A systemd size such as "8G", "512M" or "infinity"; anything else falls back to the default.
 inline QString memory(const char *key, const QString &fallback) {
@@ -161,9 +196,13 @@ inline QString fractionOf(const QString &size, int percent) {
     return bytes ? sized(bytes * percent / 100) : size;
 }
 
-// Arguments that run `command` inside the named scope.
+// Arguments that run `command` inside the named scope. Every pane scope sits in app-relay.slice
+// (#ZPWT): per-pane caps are generous now, and this slice is the ceiling that keeps their sum from
+// taking the machine. A breach of the slice kills the single worst process in it (OOMPolicy=continue
+// everywhere; tool children carry oom_score_adj 1000), never Relay's own cgroup or a whole pane.
 inline QStringList wrap(const QString &unit, const QStringList &properties, const QStringList &command) {
-    QStringList args{QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--quiet"), QStringLiteral("--unit=") + unit};
+    QStringList args{QStringLiteral("--user"), QStringLiteral("--scope"), QStringLiteral("--quiet"),
+                     QStringLiteral("--slice=app-relay.slice"), QStringLiteral("--unit=") + unit};
     for (const QString &property : properties) args << QStringLiteral("-p") << property;
     args << QStringLiteral("--") << command;
     return args;
@@ -197,5 +236,34 @@ inline long oomKills(int pid) {
     return -1;
 }
 
-}  // namespace isolation
+// Set the app-relay.slice ceiling (#ZPWT). `set-property --runtime` keeps the limit in the
+// manager's runtime state — the step-0 gate probe showed the drop-ins live under
+// /run/user/<uid>/systemd/user.control and nothing persists past the login — and it creates the
+// slice if it is absent. Best-effort and fire-and-forget: a pane scope that starts before the
+// property lands is still bounded by its own MemoryMax meanwhile, and a failed call leaves every
+// pane individually capped, which is the pre-#ZPWT behaviour. `applyTotalCeiling` is the honest
+// call (the Options row uses it, so a change applies at once); the pane-start sites use the
+// once-per-process wrapper below it.
+inline void applyTotalCeiling() {
+    if (!enabled() || !available()) return;
+    const QString total = memory("isolation/total_memory_max", totalDefault());
+    const QString systemctl = QStandardPaths::findExecutable(QStringLiteral("systemctl"));
+    if (systemctl.isEmpty()) return;
+    if (total == QLatin1String("infinity")) {   // take the ceiling off again
+        QProcess::startDetached(systemctl, {QStringLiteral("--user"), QStringLiteral("revert"),
+                                            QStringLiteral("app-relay.slice")});
+        return;
+    }
+    QProcess::startDetached(systemctl, {QStringLiteral("--user"), QStringLiteral("set-property"),
+                                        QStringLiteral("--runtime"), QStringLiteral("app-relay.slice"),
+                                        QStringLiteral("MemoryMax=") + total});
+}
 
+inline void ensureTotalCeiling() {
+    static bool done = false;   // once per process; a settings change needs the row or a restart
+    if (done || !enabled() || !available()) return;
+    done = true;
+    applyTotalCeiling();
+}
+
+}  // namespace isolation

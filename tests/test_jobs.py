@@ -2,6 +2,7 @@
 """run_command jobs: a command outlives its timeout, is read and stopped by id, and ends with its
 conversation (relay_core/jobs.py)."""
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -141,6 +142,22 @@ class JobToolTests(unittest.TestCase):
             self.tools.prepare("command_output", {"job_id": "job-99"})
         with self.assertRaises(ValueError):
             self.tools.prepare("stop_command", {"job_id": "job-1", "force": True})
+
+    # Card #WBDX: run_command's per-run memory bound.
+    def test_memory_max_is_normalized_and_refused_when_not_a_size(self):
+        self.assertEqual(self.tools.prepare("run_command", {"command": "true", "memory_max": " 64G "}).arguments["memory_max"], "64G")
+        self.assertNotIn("memory_max", self.tools.prepare("run_command", {"command": "true"}).arguments)
+        with self.assertRaises(ValueError):
+            self.tools.prepare("run_command", {"command": "true", "memory_max": "banana"})
+        with self.assertRaises(ValueError):
+            self.tools.prepare("run_command", {"command": "true", "memory_max": "8GB"})
+
+    @unittest.skipUnless(shutil.which("systemd-run") and Path(f"/run/user/{os.getuid()}/bus").exists(),
+                         "needs a systemd user session")
+    def test_memory_max_runs_the_command_in_its_own_scope(self):
+        result = self.run_tool("run_command", command="cat /proc/self/cgroup", memory_max="1G")
+        self.assertEqual(result.get("exit_code"), 0)
+        self.assertIn("app-relay.slice", result.get("output", ""))
 
     def test_long_output_keeps_the_newest(self):
         result = self.run_tool("run_command", command="head -c 100000 /dev/zero | tr '\\0' x; echo; echo LAST")

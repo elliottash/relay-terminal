@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 from .keybindings import KeybindingCatalog
+from . import jobs
 from .program_input import ProgramControl
 from .questions import Questions
 from .panes import PaneMessaging
@@ -326,11 +327,14 @@ TOOLS = [
          "the result has still_running: true, a job_id and the output so far; read more with command_output (it can wait) and end it with stop_command. "
          "Set timeout_seconds to the time a long build or test suite needs; do not ask the user how long it takes. For a server or watcher that should keep running, set background: true and stop it when done. "
          "There is no tty and stdin is closed, so a command that prompts, needs sudo or logs in somewhere fails instead of waiting: hand that one to run_in_terminal when the tool is offered. "
-         "A recursive search or listing (grep -r, rg, find, du, ls -R) whose root is the home directory, / or a directory above the home is refused because it would take minutes: give it a narrower path.",
+         "A recursive search or listing (grep -r, rg, find, du, ls -R) whose root is the home directory, / or a directory above the home is refused because it would take minutes: give it a narrower path. "
+         "memory_max (a size like 8G, 512M, 4T or infinity, local commands only, card #WBDX) runs this one command in a cgroup scope of its own with that MemoryMax, inside the app-relay.slice ceiling that bounds all of Relay's panes together — "
+         "a job that knows its size, such as a model training run, asks for the bound it needs instead of dying at the pane's cap. Everything a command spawns is in that scope; an over-limit process is killed alone, and its result says why.",
          {"command": {"type": "string"}, "cwd": {"type": "string", "description": "Workspace-relative directory; default '.'"},
           "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT,
                               "description": "Seconds to wait before handing a still-running command back as a job; default 30."},
-          "background": {"type": "boolean", "description": "Start it and return after a moment with its job_id and first output, for servers and watchers."}},
+          "background": {"type": "boolean", "description": "Start it and return after a moment with its job_id and first output, for servers and watchers."},
+          "memory_max": {"type": "string", "description": "A size like 8G, 512M, 4T or infinity: run this one command in its own scope with that MemoryMax instead of the pane's cap (local commands only)."}},
          ["command"]),
     spec("read_file", "Read a UTF-8 text file inside the workspace. A long file comes back as its head and tail "
          "with total_lines; read the rest with from_line/to_line. A whole-file read stops at 128 KiB; "
@@ -749,7 +753,7 @@ class ToolExecutor:
                 prepared.update({"from_line": lines[0], "to_line": lines[1]})
                 shown += f"\nLines: {lines[0]}-{lines[1] or 'end'}"
             return Prepared(name, prepared, shown)
-        allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background", "host"},
+        allowed = {"run_command": {"command", "cwd", "timeout_seconds", "background", "host", "memory_max"},
                    "read_file": {"path", "host", "from_line", "to_line"}, "list_directory": {"path", "host"},
                    "write_file": {"path", "content", "host"},
                    "edit_file": {"path", "old_string", "new_string", "replace_all", "host"}}
@@ -775,7 +779,19 @@ class ToolExecutor:
             args["background"] = background
             timeout = clamp_seconds(args.get("timeout_seconds", DEFAULT_WAIT), DEFAULT_WAIT, 1, MAX_WAIT)
             args["timeout_seconds"] = timeout
+            # Card #WBDX: a per-run memory bound, refused here so no preview shows a job that
+            # cannot start. Normalized to the stripped string jobs.scoped_argv expects.
+            memory_max = args.get("memory_max")
+            if memory_max is None:
+                args.pop("memory_max", None)
+            else:
+                memory_max = str(memory_max).strip()
+                if not jobs.is_memory_size(memory_max):
+                    raise ValueError(f"memory_max {memory_max!r} is not a size: use 8G, 512M, 4T or infinity.")
+                args["memory_max"] = memory_max
             wait = "Background" if background else f"Waits: {timeout}s, then continues as a job"
+            if memory_max:
+                wait += f"\nMemory bound: {memory_max}, in its own scope"
             if host:
                 return self._prepare_remote(args, command, host, wait, approved=approved)
             args["cwd"] = args.get("cwd") or self.default_cwd
@@ -1142,11 +1158,16 @@ class ToolExecutor:
             # since prepare, and a path may have become a symlink.
             if rule := security.denied_command(self.policy, args["command"]):
                 raise ValueError(security.refusal(rule))
+            memory_max = args.get("memory_max")
+            if memory_max is not None:
+                memory_max = str(memory_max).strip()
             # Card #K2FV: the checklist may have changed while the ask sat unanswered; the
             # capabilities approved at prepare are not asked for again (Prepared.approved).
-            self._approval("run_command", args, subject=args["command"], already=prepared.approved)
+            subject = args["command"] + (f"  [memory_max={memory_max}]" if memory_max else "")
+            self._approval("run_command", args, subject=subject, already=prepared.approved)
             cwd = self.workspace.resolve(args.get("cwd", "."))
-            return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False))
+            return self._run(args["command"], cwd, args["timeout_seconds"], args.get("background", False),
+                             memory_max=memory_max)
         if name == "command_output":
             job = self.jobs.get(args["job_id"])
             if "from_line" in args:
@@ -1217,10 +1238,12 @@ class ToolExecutor:
         return result
 
     def _run(self, command: str, cwd: Path, timeout: int, background: bool = False, *,
-             argv: list[str] | None = None, host: str | None = None) -> dict:
+             argv: list[str] | None = None, host: str | None = None,
+             memory_max: str | None = None) -> dict:
         """Start `command` as a job and wait for it. `argv`/`host`: the same job, run as ssh over
-        the user's connection (card #S5SH); everything else — env, waiting, output — is shared."""
-        job = self.jobs.start(command, cwd, command_env(), argv=argv, host=host)
+        the user's connection (card #S5SH); everything else — env, waiting, output — is shared.
+        `memory_max` (card #WBDX, local only): the job runs in its own scope with that bound."""
+        job = self.jobs.start(command, cwd, command_env(), argv=argv, host=host, memory_max=memory_max)
         # A background job still gets a moment: a server that fails at once says so in this result.
         return self._await(job, BACKGROUND_GLANCE if background else timeout)
 
@@ -1319,6 +1342,20 @@ class ToolExecutor:
             elif job.host and job.exit_code == 255:
                 result["note"] = (f"ssh exited 255: the connection to {job.host} failed or closed, so the "
                                   "command may not have run. The user's ssh session may have ended; ask them.")
+            elif job.exit_code == -9:
+                # #ZPWT: SIGKILL plus a rise in the pane scope's oom_kill counter is the kernel's
+                # memory kill of this command; a memory_max job (its own scope) is read the same
+                # way against the bound it asked for. Anything else stays a bare SIGKILL.
+                kills = jobs.scope_oom_kills()
+                if job.memory_max:
+                    result["killed_for_memory"] = True
+                    result["note"] = (f"exit code -9 (SIGKILL): this command ran in its own scope with "
+                                      f"memory_max={job.memory_max}, and was killed for passing that bound.")
+                elif kills is not None and job.oom_kills is not None and kills > job.oom_kills:
+                    result["killed_for_memory"] = True
+                    result["note"] = ("exit code -9 (SIGKILL): the kernel killed this command for memory — "
+                                      "it passed the pane's cap. Run it again with run_command memory_max "
+                                      "(a size like 64G) for a bound that fits.")
         text = data.decode("utf-8", "replace")
         if sent_length(text) > MODEL_RESULT_CHARS:
             # Card #0C0V: the model's copy is the head and tail of everything it had not read yet,

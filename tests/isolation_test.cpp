@@ -125,6 +125,34 @@ private slots:
         QCOMPARE(result.value(QStringLiteral("runs")), QStringLiteral("0"));
     }
 
+    // #ZPWT: the per-pane and slice formulas as pure functions of the RAM, checked against
+    // synthetic machine sizes (the string defaults read the real /proc/meminfo). Integer division
+    // is part of the contract: sizes land on whole GiB strings either way.
+    void scaledDefaultsFollowTheMachine() {
+        const qulonglong GiB = 1ULL << 30;
+        // Agent: RAM/2 with a 2G floor.
+        QCOMPARE(isolation::agentDefaultBytes(122 * GiB), 61 * GiB);
+        QCOMPARE(isolation::agentDefaultBytes(4 * GiB), 2 * GiB);
+        QCOMPARE(isolation::agentDefaultBytes(2 * GiB), 2 * GiB);
+        // Shell: 3·RAM/4 with a 4G floor.
+        QCOMPARE(isolation::shellDefaultBytes(120 * GiB), 90 * GiB);
+        QCOMPARE(isolation::shellDefaultBytes(8 * GiB), 6 * GiB);
+        QCOMPARE(isolation::shellDefaultBytes(4 * GiB), 4 * GiB);
+        // All panes together: RAM − max(8G, RAM/10), never below half the machine (an 8G laptop
+        // keeps half of it rather than zero). RAM/10 truncates at bytes: 122 GiB keeps 109.8 GiB,
+        // which sized() rounds up to the "110G" the Options row shows.
+        QCOMPARE(isolation::totalDefaultBytes(122 * GiB), 122 * GiB - 122 * GiB / 10);
+        QCOMPARE(isolation::sized(isolation::totalDefaultBytes(122 * GiB)), QStringLiteral("110G"));
+        QCOMPARE(isolation::totalDefaultBytes(120 * GiB), 108 * GiB);
+        QCOMPARE(isolation::totalDefaultBytes(8 * GiB), 4 * GiB);
+        // Escapees keep the pre-#ZPWT agent formula: clamp(RAM/16, 2G, 8G), tight on purpose
+        // (122 GiB → 7.625 GiB, sized to "8G").
+        QCOMPARE(isolation::escapeeDefaultBytes(122 * GiB), 122 * GiB / 16);
+        QCOMPARE(isolation::sized(isolation::escapeeDefaultBytes(122 * GiB)), QStringLiteral("8G"));
+        QCOMPARE(isolation::escapeeDefaultBytes(200 * GiB), 8 * GiB);
+        QCOMPARE(isolation::escapeeDefaultBytes(16 * GiB), 2 * GiB);
+    }
+
 private:
     QTemporaryDir m_root;
 };

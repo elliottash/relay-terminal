@@ -10696,8 +10696,11 @@ private:
         environment.insert(QStringLiteral("RELAY_LOG_LEVEL"), relay::log::levelName(relay::log::level()));
         // Programs the agent starts — tmux, Chrome — move themselves into their own app.slice
         // scopes over the session bus (StartTransientUnit), escaping this pane's memory cap
-        // (card #Y4RX). Without a session bus address they stay in the pane scope; the worker
-        // itself does not use D-Bus, and agent-run systemd-run --user is not supported anyway.
+        // (card #Y4RX). Without a session bus address they stay in the pane scope. The worker
+        // itself does not use D-Bus; its run_command children still can, for a requested
+        // memory_max, because sd-bus falls back to $XDG_RUNTIME_DIR/bus without the variable
+        // (#ZPWT step 0 proved this) — the address stays removed regardless, so programs the
+        // agent starts keep inheriting this pane's cap.
         if (isolation::enabled() && isolation::available())
             environment.remove(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"));
         m_worker.setProcessEnvironment(environment);
@@ -10705,12 +10708,20 @@ private:
                              .arg(paneLogId()).arg(m_workspace.isEmpty() ? 0 : 1));
         m_agentUnit.clear();
         if (isolation::enabled() && isolation::available()) {
+            isolation::ensureTotalCeiling();
             m_agentUnit = QStringLiteral("relay-pane-%1-agent-%2").arg(m_token.left(8)).arg(++m_agentGeneration);
+            // OOMPolicy=continue (#ZPWT): a command over the pane cap is killed by the kernel as a
+            // single process — the run_command child, whose oom_score_adj is 1000 (backend/relay_core/
+            // jobs.py) against the worker's 500 — and this pane's banner (PaneRuntime.cpp, agent
+            // worker stopped) still covers the worker itself dying. stop killed the whole agent
+            // conversation with the job.
+            const QString agentMax = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
             m_worker.setProgram(QStandardPaths::findExecutable(QStringLiteral("systemd-run")));
-            m_worker.setArguments(isolation::wrap(m_agentUnit, {QStringLiteral("MemoryMax=") + isolation::memory("isolation/agent_memory_max", isolation::agentDefault()),
+            m_worker.setArguments(isolation::wrap(m_agentUnit, {QStringLiteral("MemoryMax=") + agentMax,
+                                                                QStringLiteral("MemoryHigh=") + isolation::fractionOf(agentMax, 80),
                                                                 QStringLiteral("MemorySwapMax=") + isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault()),
                                                                 QStringLiteral("TimeoutStopSec=5"),
-                                                                QStringLiteral("OOMPolicy=stop")}, command));
+                                                                QStringLiteral("OOMPolicy=continue")}, command));
         } else {
             m_worker.setProgram(command.first());
             m_worker.setArguments(command.mid(1));

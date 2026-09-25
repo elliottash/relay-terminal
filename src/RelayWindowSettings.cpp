@@ -716,10 +716,12 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
                                                   "runs — copy for you, and lets anything else that reaches the "
                                                   "screen replace what you are about to paste. Reading your "
                                                   "clipboard is never allowed and has no switch."), false);
-        // Per-pane isolation (src/Isolation.h), moved here from Terminal (card #3KB7): the caps
-        // scale with the machine (agent RAM/16 clamped to 2–8G, shell RAM/2 clamped to 4–16G),
-        // and these rows write the same [isolation] keys relay.conf takes, so a manual edit and
-        // this page agree.
+        // Per-pane isolation (src/Isolation.h), moved here from Terminal (card #3KB7). Card #ZPWT:
+        // the caps scale with the machine (agent RAM/2 with a 2G floor, shell 3·RAM/4 with a 4G
+        // floor) and every pane scope sits in app-relay.slice, capped at RAM minus a reserve of
+        // max(8G, RAM/10) and never below half the machine — that slice is what keeps several
+        // generous panes from promising the machine to each of them. These rows write the same
+        // [isolation] keys relay.conf takes, so a manual edit and this page agree.
         // Unattended turns (#R5TC): a pane woken by another pane's message runs with nobody at
         // the pane, so it can reach what a phone's prompt cannot — run_in_terminal hands a command
         // to this machine's real interactive shell (sudo, device logins, ssh to a host the user is
@@ -742,20 +744,22 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             const QString current = QSettings().value(QStringLiteral("isolation/agent_memory_max"), QStringLiteral("auto")).toString();   // unset is "auto", so a fresh install shows no ↺
             relay::SettingRow row = choiceRow(QStringLiteral("option:agent_memory_max"),
                                               QStringLiteral("Agent memory limit"),
-                                              QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it"),
-                                              {QStringLiteral("auto"), QStringLiteral("2G"), QStringLiteral("4G"), QStringLiteral("8G"),
-                                               QStringLiteral("16G"), QStringLiteral("infinity")},
+                                              QStringLiteral("Per pane, for the agent worker and the commands it runs; the next agent starts under it. "
+                                                             "A command past it is killed alone and its result says why (#ZPWT)"),
+                                              {QStringLiteral("auto"), QStringLiteral("8G"), QStringLiteral("16G"), QStringLiteral("32G"),
+                                               QStringLiteral("64G"), QStringLiteral("96G"), QStringLiteral("infinity")},
                                               {QStringLiteral("Auto — %1 on this machine").arg(isolation::agentDefault()),
-                                               QStringLiteral("2 GiB"), QStringLiteral("4 GiB"), QStringLiteral("8 GiB"),
-                                               QStringLiteral("16 GiB"), QStringLiteral("No limit")},
+                                               QStringLiteral("8 GiB"), QStringLiteral("16 GiB"), QStringLiteral("32 GiB"),
+                                               QStringLiteral("64 GiB"), QStringLiteral("96 GiB"), QStringLiteral("No limit")},
                                               current, QStringLiteral("auto"), [](const QString &value) {
                 if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/agent_memory_max"));
                 else QSettings().setValue(QStringLiteral("isolation/agent_memory_max"), value);
-                // Card #Y4RX: the escapee cap below is this same limit, so rewrite its drop-ins.
+                // Card #Y4RX: rewrite the escapee drop-ins while the opt-in is on, from the escapee
+                // cap's own tight keys (#ZPWT) — it no longer follows this row's value.
                 if (QSettings().value(QStringLiteral("isolation/cap_escapees"), false).toBool()) {
                     escapees::install(escapees::userConfigRoot(),
-                                      {isolation::memory("isolation/agent_memory_max", isolation::agentDefault()),
-                                       isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault())});
+                                      {isolation::memory("isolation/escapee_memory_max", isolation::escapeeDefault()),
+                                       isolation::memory("isolation/escapee_swap_max", isolation::escapeeSwapDefault())});
                     escapees::reload();
                 }
             });
@@ -767,16 +771,38 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             relay::SettingRow row = choiceRow(QStringLiteral("option:shell_memory_max"),
                                               QStringLiteral("Shell memory limit"),
                                               QStringLiteral("Per pane, for the shell you type in; new panes start under it"),
-                                              {QStringLiteral("auto"), QStringLiteral("4G"), QStringLiteral("8G"), QStringLiteral("16G"),
-                                               QStringLiteral("32G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("auto"), QStringLiteral("8G"), QStringLiteral("16G"), QStringLiteral("32G"),
+                                               QStringLiteral("64G"), QStringLiteral("96G"), QStringLiteral("infinity")},
                                               {QStringLiteral("Auto — %1 on this machine").arg(isolation::shellDefault()),
-                                               QStringLiteral("4 GiB"), QStringLiteral("8 GiB"), QStringLiteral("16 GiB"),
-                                               QStringLiteral("32 GiB"), QStringLiteral("No limit")},
+                                               QStringLiteral("8 GiB"), QStringLiteral("16 GiB"), QStringLiteral("32 GiB"),
+                                               QStringLiteral("64 GiB"), QStringLiteral("96 GiB"), QStringLiteral("No limit")},
                                               current, QStringLiteral("auto"), [](const QString &value) {
                 if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/shell_memory_max"));
                 else QSettings().setValue(QStringLiteral("isolation/shell_memory_max"), value);
             });
             row.aliases = QStringLiteral("oom memory isolation shell limit kill");
+            security.rows << row;
+        }
+        {
+            // #ZPWT: the panes are individually generous, so this slice is the ceiling that keeps
+            // their sum survivable. A breach kills the single worst process across all panes, never
+            // the Relay window or a whole pane. Setting it here applies at once (new processes
+            // only); panes started before a change keep the slice they had.
+            const QString current = QSettings().value(QStringLiteral("isolation/total_memory_max"), QStringLiteral("auto")).toString();
+            relay::SettingRow row = choiceRow(QStringLiteral("option:total_memory_max"),
+                                              QStringLiteral("Relay total memory limit"),
+                                              QStringLiteral("All of Relay's panes together (app-relay.slice); everything outside Relay keeps the rest of the machine"),
+                                              {QStringLiteral("auto"), QStringLiteral("32G"), QStringLiteral("64G"),
+                                               QStringLiteral("96G"), QStringLiteral("128G"), QStringLiteral("infinity")},
+                                              {QStringLiteral("Auto — %1 on this machine").arg(isolation::totalDefault()),
+                                               QStringLiteral("32 GiB"), QStringLiteral("64 GiB"), QStringLiteral("96 GiB"),
+                                               QStringLiteral("128 GiB"), QStringLiteral("No limit")},
+                                              current, QStringLiteral("auto"), [](const QString &value) {
+                if (value == QStringLiteral("auto")) QSettings().remove(QStringLiteral("isolation/total_memory_max"));
+                else QSettings().setValue(QStringLiteral("isolation/total_memory_max"), value);
+                isolation::applyTotalCeiling();
+            });
+            row.aliases = QStringLiteral("oom memory isolation total slice ceiling machine");
             security.rows << row;
         }
         // The hole per-pane limits cannot close, and the owner's opt-in mitigation (card #Y4RX).
@@ -797,18 +823,19 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
             security.rows << info;
         }
         {
-            const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
-            const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
+            const QString cap = isolation::memory("isolation/escapee_memory_max", isolation::escapeeDefault());
+            const QString swap = isolation::memory("isolation/escapee_swap_max", isolation::escapeeSwapDefault());
             relay::SettingRow row = toggleRow(QStringLiteral("isolation/cap_escapees"),
                                               QStringLiteral("Cap programs that leave their pane (tmux, Chrome)"),
                                               QStringLiteral("Off by default. Writes systemd user drop-ins that cap those two at "
                                                              "%1 of memory and %2 of swap — machine-wide for them, not per pane: "
                                                              "every tmux server and Chrome app scope on this machine, whether "
-                                                             "Relay started it or not").arg(cap, swap),
+                                                             "Relay started it or not. A tight cap of its own (#ZPWT): it does not "
+                                                             "follow the generous pane limits above").arg(cap, swap),
                                               false, [this](bool on) {
                 // Read now, not when the row was built: the limit above may have changed since.
-                const QString cap = isolation::memory("isolation/agent_memory_max", isolation::agentDefault());
-                const QString swap = isolation::memory("isolation/agent_swap_max", isolation::agentSwapDefault());
+                const QString cap = isolation::memory("isolation/escapee_memory_max", isolation::escapeeDefault());
+                const QString swap = isolation::memory("isolation/escapee_swap_max", isolation::escapeeSwapDefault());
                 const QString root = escapees::userConfigRoot();
                 QStringList skipped;
                 const QStringList touched = on ? escapees::install(root, {cap, swap}, &skipped)

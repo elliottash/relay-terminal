@@ -3234,17 +3234,33 @@ panel that returns to the prompt, JetBrains' and VS Code's action list kept apar
 ## 13. Per-pane isolation
 
 `namespace isolation` in `src/Isolation.h`, probed once with `systemd-run --user --scope -- true`.
+Two layers since #ZPWT (2026-09-25): every pane scope sits in one parent slice, `app-relay.slice`,
+which is the ceiling that keeps several panes' sums survivable; each pane scope keeps its own
+generous cap, and every kill is **process-level** — a breach takes out the single worst process,
+never a whole pane, an agent conversation, or Relay's own cgroup.
 
 | Unit | Properties (defaults) |
 |---|---|
-| `relay-pane-<token8>-shell-<n>.scope` | `MemoryMax=8G`, `MemoryHigh=6G`, `MemorySwapMax=2G`, `KillSignal=SIGHUP`, `TimeoutStopSec=5`, `OOMPolicy=continue` |
-| `relay-pane-<token8>-agent-<n>.scope` | `MemoryMax=2G`, `MemorySwapMax=512M`, `TimeoutStopSec=5`, `OOMPolicy=stop` |
+| `app-relay.slice` (all panes together) | `MemoryMax=110G` on a 122G machine: RAM − max(8G, RAM/10), floored at RAM/2; set once per process by `isolation::ensureTotalCeiling()` via `systemctl --user set-property --runtime` (nothing persists past the login; the Options row calls `applyTotalCeiling()` to apply a change at once) |
+| `relay-pane-<token8>-shell-<n>.scope` | `MemoryMax=91G` on a 122G machine (3·RAM/4, 4G floor), `MemoryHigh` at 80% of it, `MemorySwapMax=2G`, `KillSignal=SIGHUP`, `TimeoutStopSec=5`, `OOMPolicy=continue` |
+| `relay-pane-<token8>-agent-<n>.scope` | `MemoryMax=61G` on a 122G machine (RAM/2, 2G floor), `MemoryHigh` at 80% of it, `MemorySwapMax=512M`, `TimeoutStopSec=5`, `OOMPolicy=continue` (#ZPWT; was `stop`, which ended the whole agent conversation with the job) |
+
+A per-pane breach kills one process because every scope runs `OOMPolicy=continue` and the
+`run_command` children an agent starts carry `oom_score_adj` 1000 (`backend/relay_core/jobs.py`,
+`_prefer_child_oom_victim`, raise-only) against the worker's 500 (`backend/worker.py`), so the
+kernel's pick is the command, and the tool result reports `killed_for_memory` with the pane cap
+and the fix (`memory_max`). A slice-level breach — panes together past `app-relay.slice` — kills
+the single worst process *across all panes*, which by the same scores is a command and not a
+worker. A worker that dies anyway (itself the fat process) still gets the restart banner.
 
 `--scope` execs in place, so the PIDs Relay tracks are Bash's and Python's own. Settings in
 `relay.conf` `[isolation]`: `enabled`, `shell_memory_max`, `shell_memory_high`, `shell_swap_max`,
-`shell_oom_policy` (`continue` or `stop`), `agent_memory_max`, `agent_swap_max`. Invalid sizes
-fall back to defaults. Without a systemd user manager, panes start unisolated and the status
-bar says so once.
+`shell_oom_policy` (`continue` or `stop`), `agent_memory_max`, `agent_swap_max`,
+`total_memory_max` (the slice ceiling; `infinity` reverts it), and the escapee pair below.
+Invalid sizes fall back to defaults. Without a systemd user manager, panes start unisolated and
+the status bar says so once. `run_command`'s `memory_max` argument (card #WBDX) runs one command
+in a scope of its own under `app-relay.slice` with that bound — a job that knows its size, such
+as a model training run, asks for what it needs instead of dying at the pane cap.
 
 **Programs that leave their pane, and what can be done about it (card #Y4RX, 2026-09-19).** Two
 programs are not in any pane's scope, however the pane started them: **tmux** moves its server into
@@ -3262,8 +3278,9 @@ What Relay offers is an opt-in mitigation, **off by default**: Options › Termi
 that leave their pane (tmux, Chrome)" writes systemd user drop-ins on the two unit-name *prefixes* —
 `~/.config/systemd/user/tmux-spawn-.scope.d/relay.conf` and
 `~/.config/systemd/user/app-com.google.Chrome-.scope.d/relay.conf` — setting `MemoryMax=` and
-`MemorySwapMax=` to the same values a pane's agent gets (`isolation/agent_memory_max`,
-`isolation/agent_swap_max`, so "Auto" is the RAM-derived default), then runs `systemctl --user
+`MemorySwapMax=` to their own tight cap (`isolation/escapee_memory_max`, `isolation/escapee_swap_max`;
+"Auto" keeps the pre-#ZPWT agent formula clamp(RAM/16, 2–8G), so it does not follow the pane limits
+above), then runs `systemctl --user
 daemon-reload`. A truncated-prefix drop-in is systemd's own documented mechanism: `man systemd.unit`
 specifies that for a dashed unit name `foo-bar-baz.service` the directories `foo-bar-.service.d/`
 and `foo-.service.d/` are searched too, which is why one file covers every uuid and every pid.
