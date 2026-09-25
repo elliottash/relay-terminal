@@ -37,3 +37,6 @@ Released (2cb87486) · the pane closed
 
 <!-- relay:entry 20260925T011947Z-r9 author=agent kind=event model=claude-opus-5-5 pane=64de364c turn=d7865438e5d344cabec7eded6da91d02/0975cf32d00b42b18c7df188b4539a1e -->
 - ✦ agent moved this card · Executing → Needs verification · GUI half salvaged and finished (2e6ad863, 16763f52, 63a1f5c5, 902cbc16) on top of the landed backend; gate builds and ctest/unittest pass. The live two-pane run is left to Try it. · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260925T012243Z-81 author=agent kind=evidence model=claude-opus-5-5 pane=64de364c turn=d7865438e5d344cabec7eded6da91d02/1c517e5feb8f4b189580c19cc1eddee3 -->
+8e5606ef adds the Options › Security "Unattended turns get the full tool set" row (security/unattended_full_tools). 2e6ad863 missed it, although its message listed it; the salvage subagent a2 caught the gap. The land gate built the exact tree and the `settings` ctest passed.
