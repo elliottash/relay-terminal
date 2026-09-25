@@ -52,7 +52,9 @@ class RemoteRouterTests(unittest.TestCase):
     def test_sentences_go_to_the_agent(self):
         for text in ["why is the disk full on this box", "continue", "ok", "yes", "Sounds good",
                      "yeah, do it", "don't restart it", "disk is full on this box", "nginx running?",
-                     "the build is broken", "thanks", "explain the last error", "can you check the logs"]:
+                     "the build is broken", "thanks", "explain the last error", "can you check the logs",
+                     # #1ZNS's sentence after a non-English command name: punctuation still wins (#VJX7)
+                     "claude has usage rests now, so we should track them"]:
             with self.subTest(text=text):
                 self.assertEqual(self.route(text).route, "agent")
 

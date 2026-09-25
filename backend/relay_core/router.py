@@ -653,6 +653,22 @@ def _clears_non_english_bar(score: int, reasons: list[str]) -> bool:
     return any(SIGNAL_WORDS.get(word, 0) >= 2 for word in reasons)
 
 
+def _remote_assist_signals(trimmed: str) -> tuple[int, list[str], str | None]:
+    """assist_signals() for a line typed at an ssh prompt (card #VJX7).
+
+    Remotely nothing can check whether "a", "b" or "pods" name files on the host, and an
+    invocation silently sent to the agent is a no-op the user has to notice. So after a
+    non-English command name only sentence punctuation or a trailing "?" counts as evidence of a
+    sentence: articles, pronouns, lead-ins and word count alone leave "cp a b" and "kubectl get
+    pods in the namespace" typed on the host, as they were before #1ZNS.
+    """
+    score, reasons, first = assist_signals(trimmed, local_files=False)
+    if score and first not in ENGLISH_COMMANDS \
+            and "punctuation" not in reasons and "trailing ?" not in reasons:
+        return 0, [], first
+    return score, reasons, first
+
+
 def _assist_why(first: str, signals: list[str]) -> str:
     """The one-line reason runnable input is being second-guessed as a sentence."""
     detail = f" ({', '.join(signals[:4])})"
@@ -1097,7 +1113,7 @@ def _classify_remote(text: str, trimmed: str, forced: str | None, host: str) -> 
     typed = f"typed on {host}"
     prose = _remote_prose(trimmed)
     signal = bool(prose) or trimmed in LOOP_ONLY or bool(NATURAL.match(trimmed)) \
-        or assist_signals(trimmed, local_files=False)[0] >= ASSIST_THRESHOLD
+        or _remote_assist_signals(trimmed)[0] >= ASSIST_THRESHOLD
     if forced == "agent":
         return Decision("agent", text, f"Explicit agent destination; nothing is typed on {host}.",
                         agent_signal=signal, remote_host=host)
@@ -1121,7 +1137,7 @@ def _classify_remote(text: str, trimmed: str, forced: str | None, host: str) -> 
                             assist_reason=why, remote_host=host)
         return Decision("agent", text, "Natural-language request. Sent only after you submit.",
                         agent_signal=True, remote_host=host)
-    score, signals, first = assist_signals(trimmed, local_files=False)
+    score, signals, first = _remote_assist_signals(trimmed)
     if score >= ASSIST_THRESHOLD:
         guess = "shell" if first in LITERAL_TEXT else "agent"
         why = _assist_why(first, signals)

@@ -1,0 +1,5 @@
+'cp a b'                                                     route=shell needs_assist=False
+'gti status'                                                 route=shell needs_assist=False
+'kubectl get pods in the namespace'                          route=shell needs_assist=False
+'make the tests pass'                                        route=agent needs_assist=True
+'claude has usage rests now, so we should track them'        route=agent needs_assist=True
