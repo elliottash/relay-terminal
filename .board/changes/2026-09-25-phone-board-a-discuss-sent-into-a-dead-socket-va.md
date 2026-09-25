@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [person], human: optional, criteria: 'on the phone, type a Discuss, background the app until the link drops, come back: the words are back in the box', sign_off: none, effort: low}
 source: pane 7dbb2c54 (guest Claude Code), 2026-09-25; owner said "yes" to filing and fixing
-links: {plans: [], commits: [], evidence: [tests/test_board_view.py], related: [RCN8, SWPH], github: null}
+links: {plans: [], commits: [5a42c8b1], evidence: [tests/test_board_view.py], related: [RCN8, SWPH, H1BS], github: null}
 ---
 # Phone Board: a Discuss sent into a dead socket vanishes, and unsent drafts die with the page
 

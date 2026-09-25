@@ -20,3 +20,6 @@ Keep a Discuss/Plan's words until the desktop accepts it (restore on timeout / l
 
 <!-- relay:entry 20260925T145802Z-r6 author=agent kind=event model=claude-opus-5-5 pane=7dbb2c54 turn=3cd14271ffc645a7b2f70dba2081b68e/33919fb41b56487bb4ecb7edcdc55c29 -->
 - ✦ agent moved this card · Executing → Needs verification · Unaccepted Discuss/Plan words come back (timeout on an idle card, or link drop) and drafts persist in localStorage; tests.test_board_view 36/36, both new tests fail on HEAD. · evidence tests/test_board_view.py · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260925T145811Z-ek author=agent kind=event model=claude-opus-5-5 pane=7dbb2c54 turn=3cd14271ffc645a7b2f70dba2081b68e/33919fb41b56487bb4ecb7edcdc55c29 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["tests/test_board_view.py"], "related"… → {"plans": [], "commits": ["5a42c8b1"], "evidence": ["tests/test_board_view.py"],…
