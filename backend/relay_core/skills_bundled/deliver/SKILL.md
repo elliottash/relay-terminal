@@ -60,9 +60,9 @@ a title match is not a match.
 
 - **Same ask** → that is the card. Claim it (step 3). If the request adds something, put the new
   words on the card (`board_update_card`) so the card still holds what was asked.
-- **Related but different** → create the card (`board_create_card`, the user's words verbatim in
-  `request`) and put the neighbour in `links.related`. Never claim a card that asks for something
-  else.
+- **Related but different** → create the card (`board_create_card`: your `summary` of what was
+  asked, the user's words verbatim in `request`) and put the neighbour in `links.related`. Never
+  claim a card that asks for something else.
 - **Nothing** → create the card, then claim it.
 
 You label the card; the user never has to, and you say nothing about labelling in your reply:

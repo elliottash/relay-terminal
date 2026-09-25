@@ -1,0 +1,36 @@
+#EMWF targeted suite — 2026-09-25, working tree at land time
+
+Command:
+  PYTHONPATH=backend python3 -m unittest \
+    tests.test_board_tools tests.test_board tests.test_system_prompt \
+    tests.test_board_protocol tests.test_guest_board_bridge
+
+Result:
+  Ran 708 tests in 28.0s
+  FAILED (failures=2) — both pre-existing at git HEAD 2f848bec, reproduced on a
+  clean copy of HEAD's board.py, board_tools.py, board_policy.md and tools.py:
+
+  1. tests.test_system_prompt.SizeTests.test_the_prompt_and_the_tools_stay_within_their_budgets
+     "system prompt grew to 7153 bytes" (budget 6656) — identical number at HEAD;
+     untouched by #EMWF (the boardless prompt does not include the policy block).
+     Filed as #K54A.
+
+  2. tests.test_guest_board_bridge.BridgeTests.test_native_catalog_parity_and_relay_policy_dispatch
+     "Items in the first set but not the second: 'scratch_dir', 'scratch_release'"
+     — red at HEAD too. Filed as #G19V.
+
+Everything #EMWF touches is green, including:
+  - tests.test_board_tools.CreateTests.test_a_summary_opens_the_issue_with_the_request_quoted_and_attributed
+  - tests.test_board_tools.CreateTests.test_the_quote_links_the_session_it_came_from
+  - tests.test_board_tools.CreateTests.test_a_summary_without_a_request_writes_no_quote_block
+  - tests.test_board_tools.CreateTests.test_creating_with_neither_a_summary_nor_a_request_is_refused
+  - tests.test_board_tools.CreateTests.test_a_card_lands_in_the_tab_folder_with_the_request_verbatim (legacy form)
+  - tests.test_board.IssueSectionTests (four new new_card cases)
+  - tests.test_system_prompt.SizeTests.test_the_board_policy_block_stays_tiered
+    (green again: the block is 2977 bytes + header, under the 3 KiB budget; it was
+    3208 at HEAD, already over)
+  - tests.test_board.PolicyFileTests.test_this_repositorys_own_policy_is_a_fresh_regeneration
+    (both .board/POLICY.md and issues/POLICY.md regenerated)
+
+Live check: card #M58P was created through the real BoardTools with
+context.session_id set — its body is sample-card.md in this folder.

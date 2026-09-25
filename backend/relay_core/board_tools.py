@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import contextlib
 import difflib
+import getpass
 from . import filelock as fcntl
 import json
 import os
@@ -118,7 +119,8 @@ IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status
 #: Sections an agent writes freely: the card body schema, one section per workflow stage
 #: (2026-09-20, #Z4HR; `board.CARD_SECTIONS`).  Anything else in a card body is owner text: it
 #: may still be rewritten (decision 12.3) but the old and new text go into the thread.
-#: `Issue` is the owner's own words and stays owner text, so a rewrite of it is always logged.
+#: `Issue` opens with the agent's summary but holds the owner's quoted words (#EMWF), so it stays
+#: owner text and a rewrite of it is always logged.
 #: `tests` is what proves the card, one invocation per line (#7BM4, protocol 31):
 #: `tests_check` reads it, the Test suites pane links a test back to the cards that name it.
 AGENT_SECTIONS = frozenset(B.CARD_SECTIONS) - {"issue"}
@@ -216,17 +218,24 @@ TOOL_SPECS = [
                              "description": "How many of the newest thread entries to return (default 20)."}},
          ["id"]),
     spec("board_create_card",
-         "Create a card for a request that is not finished within this turn. `request` must be the "
-         "user's own words, verbatim; the title is yours. Search with board_list first: a request "
-         "that already has a card updates that one. A fuzzy duplicate check can refuse the create "
-         "and return possible_duplicates; repeat the call with not_duplicate_of to override it.",
+         "Create a card for a request that is not finished within this turn. `summary` is your "
+         "description of what was asked; `request`, when the card quotes the user, is their own "
+         "words verbatim — the card writes them as an attributed quote linked to the session they "
+         "came from. Search with board_list first: a request that already has a card updates that "
+         "one. A fuzzy duplicate check can refuse the create and return possible_duplicates; "
+         "repeat the call with not_duplicate_of to override it.",
          {"tab": {"type": "string", "description": "Tab id from board.yaml (features, bugs, design, marketing, planning)."},
           "status": {"type": "string", "description": "inbox for raw capture, discussing when you need an answer, planned when agreed."},
           "section": {"type": "string", "description": "Park the new card in this manual section (a "
                                                     "column that collects nothing) instead of its "
                                                     "status's own."},
           "title": {"type": "string", "description": "One line, your words; becomes the card's `# ` heading."},
-          "request": {"type": "string", "description": "The user's words verbatim. Do not paraphrase or tidy them."},
+          "summary": {"type": "string", "description": "What was asked, in your words: the descriptive "
+                                                      "summary that opens `## Issue` (one to three "
+                                                      "sentences, not a restatement of the quote)."},
+          "request": {"type": "string", "description": "The user's own words, verbatim. Do not paraphrase "
+                                                      "or tidy them. Omit when the card quotes no one "
+                                                      "(a fault you noticed)."},
           "type": {"type": "string", "enum": list(B.CARD_TYPES), "description": "work (default), memory or alias."},
           # Policy rule 12 until v5 (#GMCF): the rule is read exactly when a card is being
           # created, so it is stated here rather than on every turn's system prompt.
@@ -241,7 +250,7 @@ TOOL_SPECS = [
           "related": {"type": "array", "items": {"type": "string"}, "description": "Ids of related cards."},
           "not_duplicate_of": {"type": "array", "items": {"type": "string"},
                                "description": "Ids the duplicate check flagged that you have checked and rejected."}},
-         ["tab", "status", "title", "request"]),
+         ["tab", "status", "title", "summary"]),
     spec("board_update_card",
          "Change a card's front matter fields or its body sections. `base_hash` is board_read's `hash`; "
          "the write is refused if the file changed meanwhile. id, type, status, rank, created, "
@@ -2303,16 +2312,27 @@ class BoardTools:
         return self.board.append_thread(card.id, text, author=self.context.actor, kind=kind,
                                         private=card.private, **self.context.attrs(), **attrs)
 
+    def _quote_user(self) -> str:
+        """Who a quoted request is attributed to: the OS user, shown by name (#EMWF)."""
+        try:
+            return getpass.getuser() or OWNER_ACTOR
+        except Exception:
+            return OWNER_ACTOR
+
     def _create(self, args: dict) -> dict:
-        allowed = {"tab", "status", "section", "title", "request", "type", "labels", "source",
-                   "related", "not_duplicate_of"}
+        allowed = {"tab", "status", "section", "title", "request", "summary", "type", "labels",
+                   "source", "related", "not_duplicate_of"}
         if set(args) - allowed:
             raise BoardToolError(f"board_create_card takes {', '.join(sorted(allowed))}.")
         card_type = args.get("type") or "work"
         if card_type not in B.CARD_TYPES:
             raise BoardToolError(f"type must be one of {', '.join(B.CARD_TYPES)}.")
         title = _one_line(args.get("title"), "title", MAX_TITLE)
-        request = _text(args.get("request"), "request", MAX_REQUEST)
+        summary = _maybe_text(args.get("summary"), "summary", MAX_REQUEST)
+        request = _maybe_text(args.get("request"), "request", MAX_REQUEST)
+        if not (summary or request):
+            raise BoardToolError("pass summary (what was asked, in your words) and, when the card "
+                                 "quotes the user, their words verbatim in request.")
         status = str(args.get("status") or "").strip().lower()
         if status not in B.STATUS_FOLDER[card_type]:
             raise BoardToolError(f"unknown {card_type} status {args.get('status')!r}; use one of "
@@ -2327,7 +2347,8 @@ class BoardTools:
 
         cards = self.board.cards()
         excused = {normalize_id(r, "not_duplicate_of") for r in _string_list(args.get("not_duplicate_of"), "not_duplicate_of")}
-        duplicates = self.duplicates(title, request, cards, excused) if self.duplicate_check else []
+        duplicates = (self.duplicates(title, request or summary, cards, excused)
+                      if self.duplicate_check else [])
         if duplicates:
             raise BoardToolError(
                 "This looks like a card that already exists. Read it and update it instead, or repeat "
@@ -2336,6 +2357,8 @@ class BoardTools:
 
         taken = [c.id for c in cards if c.id]
         card = B.new_card(card_type, title, status, card_id=B.new_id(taken), request=request,
+                          summary=summary, quote_user=self._quote_user(),
+                          quote_session=self.context.session_id or None,
                           rank=self.board.next_rank([c for c in cards if c.status == status]),
                           labels=labels or None, source=args.get("source") or None)
         if related:
@@ -4151,6 +4174,11 @@ def _text(value, what: str, maximum: int) -> str:
     if len(value) > maximum:
         raise BoardToolError(f"{what} must be at most {maximum} characters.")
     return value.replace("\r\n", "\n").rstrip()
+
+
+def _maybe_text(value, what: str, maximum: int) -> str | None:
+    """`_text` for an optional argument: absent or blank is `None`, never a refusal."""
+    return _text(value, what, maximum) if isinstance(value, str) and value.strip() else None
 
 
 #: A section id: the same shape as a tab id, because both name a thing in `board.yaml`.

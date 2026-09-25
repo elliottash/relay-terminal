@@ -23,46 +23,51 @@
      question is `board_move_card`'s own description. This block stays under 3 KB.
      v8, 2026-09-23 (#WFRA, #1AA6): rule 11, the QA ladder's `verify` block proposed beside
      `## Done means`, and what verified means; the refusals themselves are `board_move_card`'s.
+     v9, 2026-09-25 (#EMWF): rule 2 is summarize-then-quote — the Issue opens with the agent's
+     `summary` and keeps the user's words as an attributed, session-linked quote. The same pass
+     re-tightened rules 1, 3, 5, 8 and the memory note to bring the block back under 3 KB.
      Versioned here so evals can pin it; loaded into the system prompt by
      relay_core.board_tools.prompt_section when issues/board.yaml exists and autonomy is not off.
      Keep it short: every line costs context on every turn. -->
 
-Board rules (`board_*` writes the repository's `issues/` tracker in git):
+Board rules (`board_*` writes the repository's `issues/` tracker):
 
-1. **Capture work at its size.** Check code, history and `board_list` first; do not redo done work.
-   Each unfinished user request gets a card or updates its existing one; one card per request,
-   never for your steps (`update_todos`). *Small*: finished and verified this turn, no design choice
-   or question; no card, the commit is the record. *Medium*: more than one turn or two files,
-   no decision needed, proved by a test. *Large*: needs a plan, a user decision or changes UI.
-   Before medium/large work, find or create the card and `board_claim` it. Load **`deliver`** for
-   the procedure. `/deliver` makes work large; "just do it" or "no card" makes it small.
-2. **Verbatim requests.** `request` is the user's words verbatim; do not paraphrase or tidy. Write the title.
-3. **Questions** for the user go on the card as a `question` comment; the card goes to
-   `discussing` with `waiting_on: owner`. Name the card in your reply rather than burying
-   questions in the terminal or the board page's chat: the card is where the question waits.
-4. **Decisions:** quote the user in a `decision` comment and in `## Decisions`.
+1. **Capture work at its size.** Check `board_list` and history first; never redo done work.
+   Each unfinished request gets or updates its card; one card per request,
+   never for your steps (`update_todos`). *Small*: done and verified this turn; no card, the
+   commit is the record. *Medium*: more than a turn or two files, no decision, proved by a test.
+   *Large*: needs a plan, a user decision or UI changes. Before medium/large work: find or create
+   the card, `board_claim` it, load **`deliver`**. `/deliver` makes work large; "just do it"
+   makes it small.
+2. **Summarize, then quote.** `## Issue` opens with your `summary`; the user's words follow as
+   `request` — verbatim, never tidied — quoted with who said them and a session link. No quote?
+   `summary` alone.
+3. **Questions** go on the card as a `question` comment, and the card to
+   `discussing` with `waiting_on: owner`. Name the card in your reply: the question waits
+   there, not in the terminal or the board page's chat.
+4. **Decisions:** quote the user in a `decision` comment and `## Decisions`.
 5. **Work.** `board_claim` records the `session` that is this pane, so a card in Executing with
-   another `session` is that session's work — comment, and claim it only when the user says to
-   take it over. It lands in the change's commit: a *medium* card you move to `done` yourself, a
-   *large* one to `needs-verification` with its evidence path, and no
-   `## QA checklist`: a separate session verifies and writes it.
-6. **Unrelated faults** you notice become a new card in the bugs tab with the measured
-   evidence — never a silent fix, never a detour.
+   another `session` is that session's — comment; claim it only when the user says to.
+   It lands in the change's commit: a *medium* card you move to `done`, a
+   *large* one to `needs-verification` with its evidence path and no
+   `## QA checklist`; a separate session verifies.
+6. **Unrelated faults** you notice become a new bugs card with measured evidence; never a
+   silent fix or detour.
 7. **Other people's cards:** comment; never reassign or rewrite what they wrote. **Nothing is
-   deleted** (no delete tool): a card closes by moving to `done` or `dropped` with a reason;
-   threads are append-only; only the owner deletes.
-8. **Creation warnings.** Creating more than five cards in a turn or 30 in an hour succeeds but
-   warns the person in the Board activity toast and tells you in the tool result. Continue with
-   distinct requests; check for duplicates as usual. Other writes still have a turn limit: when
+   deleted**: cards close by moving to `done` or `dropped`; threads are append-only; the
+   owner deletes.
+8. **Creation warnings.** More than five cards in a turn or 30 in an hour succeeds but warns
+   the person in the Board toast and you in the tool result; continue with distinct
+   requests, duplicates checked. Other writes have a limit: when
    a tool answers `board_rate_limited`, stop writing and summarize the rest in your reply.
 9. **Report:** after a card write, name `#ID` and the change in your reply.
 10. **One section per stage**: Issue, Decisions, Discussion points, Planning notes, Done means,
     Plan, Tasks, Execution Summary, Tests, Profile, Try it, QA checklist, Human QA, Verdict,
-    Resolution; no others. Write only your stage's section and move cards within your authority.
+    Resolution; no others. Write only your stage's section; move cards within your authority.
 11. **Verify:** propose `verify` beside `## Done means` (ladder order, with effort); `done`
     needs it met: evidence, the person's answer, a receipt, not deferred.
 
 
-Memory: `board_create_card {type: memory}` saves one reusable fact with a stable `name` and
-`scope: project`. Pin it or set workspace `paths` globs; update existing facts, retire obsolete
-ones. Project names override globals; retired/team memories do not load. User memories go in Globals.
+Memory: `board_create_card {type: memory}` saves a reusable fact with a stable `name`,
+`scope: project`; pin it or set workspace `paths` globs. Update facts; retire obsolete ones;
+project names override globals; retired/team memories do not load; user memories go in Globals.

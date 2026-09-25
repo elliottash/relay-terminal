@@ -1917,10 +1917,33 @@ def card_filename(title: str, when: datetime | None = None) -> str:
     return f"{when.strftime('%Y-%m-%d')}-{slug}.md"
 
 
+def issue_quote(request: str, *, user: str | None = None, session: str | None = None,
+                when: str | None = None) -> str:
+    """The user's own words as an attributed quote block under an Issue summary (#EMWF).
+
+    `## Issue` opens with the filing agent's summary; the request it captures stays verbatim in a
+    `>` block that says who said it and links the conversation it came from — `session:<id>`, which
+    the Board card page and the terminal both open. The scaffold writes it, not the agent, so no
+    filing session paraphrases the quote or drops the attribution.
+    """
+    lines = "\n".join((f"> {line}" if line else ">") for line in request.strip().splitlines())
+    attribution = ([user] if user else []) \
+        + ([f"[session:{session}](relay://session/{session})"] if session else []) \
+        + [when or datetime.now().strftime("%Y-%m-%d")]
+    return f"{lines}\n> — " + " · ".join(attribution)
+
+
 def new_card(card_type: str, title: str, status: str, *, card_id: str | None = None,
-             rank: str | None = None, request: str | None = None, created: str | None = None,
-             private: bool = False, **fields) -> Card:
-    """Build a card in canonical form (not written to disk)."""
+             rank: str | None = None, request: str | None = None, summary: str | None = None,
+             quote_user: str | None = None, quote_session: str | None = None,
+             created: str | None = None, private: bool = False, **fields) -> Card:
+    """Build a card in canonical form (not written to disk).
+
+    `summary` plus `request` is the #EMWF Issue: the filing agent's summary first, then the user's
+    words as an attributed quote. `request` alone is the pre-#EMWF body — still what callers that
+    quote nobody write (imports, intake, split excerpts, old-prompt guests) — and `summary` alone
+    is a card that quotes no one, such as a fault an agent noticed.
+    """
     if card_type not in CARD_TYPES:
         raise BoardError(f"unknown card type {card_type!r}")
     if status not in STATUS_FOLDER[card_type]:
@@ -1933,7 +1956,12 @@ def new_card(card_type: str, title: str, status: str, *, card_id: str | None = N
     front["created"] = created or datetime.now().strftime("%Y-%m-%d")
     front.setdefault("links", {"plans": [], "commits": [], "evidence": [], "related": [], "github": None})
     body = f"# {title}\n"
-    if request:
+    if summary and request:
+        quote = issue_quote(request, user=quote_user, session=quote_session, when=front["created"])
+        body += f"\n## {ISSUE_HEADING}\n{summary.rstrip()}\n\n{quote}\n"
+    elif summary:
+        body += f"\n## {ISSUE_HEADING}\n{summary.rstrip()}\n"
+    elif request:
         body += f"\n## {ISSUE_HEADING}\n{request.rstrip()}\n"
     card = Card(front=front, body=body, dirty=True)
     return card
@@ -2631,7 +2659,9 @@ links: {{plans: [], commits: [], evidence: [], related: [], github: null}}
 # A title of your own
 
 ## Issue
-the user's words, verbatim
+your summary of what was asked, in your own words
+> the user's words, verbatim
+> — elliott · [session:9f2c4a1de8b3f607c2ad5e91b4d8f3a6](relay://session/9f2c4a1de8b3f607c2ad5e91b4d8f3a6) · 2026-09-25
 ```
 
 {id_bullet}
@@ -2640,8 +2670,10 @@ the user's words, verbatim
   is the middle and anything the column is not using will do.
 - `created` is today's date, single-quoted as in the example; `source` says where the request
   came from.
-- `## Issue` is the user's request **verbatim** (rule 2). The `# ` title is yours, and there is
-  exactly one of them.
+- `## Issue` opens with your summary of what was asked; the user's own words follow as a `>`
+  quote, kept verbatim, attributed with who said them and a `session:` link to the conversation
+  they came from (rule 2). A card that quotes no one has the summary alone. The `# ` title is
+  yours, and there is exactly one of them.
 - `{folder}/BOARD.md` is stale the moment you write the file: regenerate it (below), or leave it
   to Relay.
 

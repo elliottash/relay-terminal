@@ -4,6 +4,7 @@
 Every test works in a temporary board; nothing here reads the repository's own `issues/` tree,
 calls a model or touches the network or the keyring.
 """
+import getpass
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -210,6 +211,35 @@ class CreateTests(BoardToolsTest):
         self.assertEqual(card.title, "Voice transcription mode")
         self.assertTrue(B.valid_id(card.id))
         self.assertTrue(B.valid_rank(card.rank))
+
+    def test_a_summary_opens_the_issue_with_the_request_quoted_and_attributed(self):
+        # #EMWF: the Issue opens with the filing agent's summary; the request stays
+        # verbatim in a `>` block that names who said it.
+        card_id = self.create(summary="File cards with a descriptive Issue, keeping the quote.",
+                              request="add voice transcribe mode")
+        body = self.board.card_by_id(card_id).body
+        self.assertIn("## Issue\nFile cards with a descriptive Issue, keeping the quote.\n\n"
+                      "> add voice transcribe mode\n"
+                      f"> — {getpass.getuser()} · ", body)
+
+    def test_the_quote_links_the_session_it_came_from(self):
+        session = "0f3ac2de91b4e8a6c0d5f17392ab4e76"
+        self.tools.context.session_id = session
+        card_id = self.create(summary="Descriptive summary.", request="add voice transcribe mode")
+        body = self.board.card_by_id(card_id).body
+        self.assertIn(f"[session:{session}](relay://session/{session})", body)
+
+    def test_a_summary_without_a_request_writes_no_quote_block(self):
+        card_id = self.create(summary="A fault the agent noticed: the watcher flags the harness home.",
+                              request=None)
+        body = self.board.card_by_id(card_id).body
+        self.assertIn("## Issue\nA fault the agent noticed: the watcher flags the harness home.\n", body)
+        self.assertNotIn("\n> ", body)
+
+    def test_creating_with_neither_a_summary_nor_a_request_is_refused(self):
+        result = self.tools.run("board_create_card", {"tab": "features", "status": "inbox",
+                                                     "title": "Voice transcription mode"})
+        self.assertIn("error", result)
 
     def test_creation_appends_a_thread_event_naming_the_actor_model_pane_and_turn(self):
         card_id = self.create()

@@ -431,6 +431,33 @@ class IssueSectionTests(TempBoardTest):
         self.assertIn("## Issue\nadd voice transcribe mode", card.body)
         self.assertNotIn("## Request", card.body)
 
+    def test_a_summary_opens_the_issue_and_the_request_is_an_attributed_quote(self):
+        # #EMWF: the Issue opens with the filing agent's summary; the user's words stay
+        # verbatim, quoted with who said them and a greppable link to the session.
+        session = "0f3ac2de91b4e8a6c0d5f17392ab4e76"
+        card = B.new_card("work", "Voice mode", "inbox", card_id="K7Q2",
+                          summary="Transcribe voice notes in the composer.",
+                          request="add voice transcribe mode",
+                          quote_user="elliott", quote_session=session)
+        self.assertIn("## Issue\nTranscribe voice notes in the composer.\n\n"
+                      "> add voice transcribe mode\n"
+                      f"> — elliott · [session:{session}](relay://session/{session}) · ", card.body)
+
+    def test_a_quote_without_a_session_names_the_user_and_the_day_only(self):
+        card = B.new_card("work", "Voice mode", "inbox", summary="S.",
+                          request="add voice transcribe mode", quote_user="elliott")
+        self.assertIn("> add voice transcribe mode\n> — elliott · 20", card.body)
+        self.assertNotIn("session:", card.body)
+
+    def test_a_summary_without_a_request_writes_no_quote(self):
+        card = B.new_card("work", "Voice mode", "inbox", summary="A fault noticed by the agent.")
+        self.assertIn("## Issue\nA fault noticed by the agent.\n", card.body)
+        self.assertNotIn("\n> ", card.body)
+
+    def test_a_multiline_request_is_quoted_line_by_line(self):
+        card = B.new_card("work", "Voice mode", "inbox", summary="S.", request="first\n\nsecond")
+        self.assertIn("> first\n>\n> second\n> — ", card.body)
+
     def test_an_older_card_keeps_its_request_heading_and_is_still_read(self):
         # Nothing rewrites the cards that are already filed; they are read as they are.
         body = "# Voice mode\n\n## Request\nadd voice transcribe mode\n"
