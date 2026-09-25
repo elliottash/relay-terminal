@@ -720,17 +720,22 @@ bool hasContent(const QStringList &lines, const QStringList &marks) {
 }
 
 int turnStart(const QStringList &lines, const QString &prompt) {
-    static const QString marker = QStringLiteral("✦ ");   // the ✦ a turn's first line wears
+    static const QString marker = QStringLiteral("✦ ");   // scrollback saved with the old glyph
     const QString first = prompt.section(QLatin1Char('\n'), 0, 0).trimmed();
     if (first.isEmpty()) return -1;
     for (int i = lines.size() - 1; i >= 0; --i) {
-        const QString plain = stripSgr(lines.at(i));
-        if (!plain.startsWith(marker)) continue;
+        QString plain = stripSgr(lines.at(i));
+        const bool marked = plain.startsWith(marker);
+        if (marked) plain = plain.mid(marker.size());
         // The printed line is the prompt cut at the pane's width, so it is a prefix of it — and
-        // the pane's other ✦ lines ("✦ the command finished …") are not, which is what keeps them
-        // from being mistaken for a turn.
-        const QString shown = plain.mid(marker.size()).trimmed();
-        if (!shown.isEmpty() && first.startsWith(shown)) return i;
+        // the pane's other lines ("✦ the command finished …", lines of the agent's own prose) are
+        // not, which is what keeps them from being mistaken for a turn.
+        const QString shown = plain.trimmed();
+        if (shown.isEmpty() || !first.startsWith(shown)) continue;
+        // An unmarked short prefix could be a line of the agent's own prose ("ok", "Continue");
+        // take it only when it is the whole first line or long enough that the width cut it.
+        if (!marked && shown.size() < first.size() && shown.size() < 20) continue;
+        return i;
     }
     return -1;
 }

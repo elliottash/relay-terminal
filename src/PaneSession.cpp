@@ -62,7 +62,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
                     ensureLineStart();
                     // Delivered here, not queued: no "at the next tool call" suffix, which only
                     // belongs on a row still waiting in the strip.
-                    printInline(QStringLiteral("✦ ") + steer.text + QLatin1Char('\n'), Ink::UserAgent);
+                    printInline(steer.text + QLatin1Char('\n'), Ink::UserAgent);
                     printAttachmentThumbnails(steer.text);   // #1MGS
                     forgetSteer(i);
                     if (steer.withdraw) {

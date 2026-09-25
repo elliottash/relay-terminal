@@ -825,19 +825,29 @@ private slots:
         QCOMPARE(lines, once);
     }
 
-    // What a rewind undid starts at the turn's own first line — the ✦ the pane printed the prompt
-    // behind — and the pane's other ✦ lines are not turns.
+    // What a rewind undid starts at the turn's own first line — the prompt itself, as the pane
+    // printed it — and the pane's other lines are not turns.
     void turnStartFindsThePromptLine() {
-        const QStringList lines{QStringLiteral("✦ first question"),
+        const QStringList lines{QStringLiteral("first question"),
                                 QStringLiteral("an answer"),
                                 QStringLiteral("✦ the command finished · its result went to the agent"),
                                 QStringLiteral("▸ ran pytest"),
-                                QStringLiteral("✦ second question"),
+                                QStringLiteral("second question"),
                                 QStringLiteral("another answer")};
         QCOMPARE(st::turnStart(lines, QStringLiteral("second question")), 4);
         QCOMPARE(st::turnStart(lines, QStringLiteral("first question")), 0);
         // A multi-line prompt is anchored by its first line, which is all the pane printed there.
         QCOMPARE(st::turnStart(lines, QStringLiteral("second question\nand more of it")), 4);
+        // Scrollback saved while prompts still wore the "✦ " glyph still anchors.
+        QCOMPARE(st::turnStart({QStringLiteral("✦ first question"), QStringLiteral("an answer"),
+                                QStringLiteral("✦ second question")},
+                               QStringLiteral("second question")),
+                 2);
+        // A short line that merely starts like the prompt is the agent's own prose, not a turn.
+        QCOMPARE(st::turnStart({QStringLiteral("second question"), QStringLiteral("an answer"),
+                                QStringLiteral("second")},
+                               QStringLiteral("second question")),
+                 0);
         // Not in the text: scrolled away, or sent from a client with no terminal.
         QCOMPARE(st::turnStart(lines, QStringLiteral("never asked")), -1);
         QCOMPARE(st::turnStart(lines, QString()), -1);
@@ -848,13 +858,13 @@ private slots:
     // asked twice is rewound at its latest telling, not its first.
     void turnStartTakesTheWrappedAndLatestLine() {
         const QString prompt = QStringLiteral("rewrite the parser so that it stops on the first bad token");
-        const QStringList lines{QStringLiteral("✦ rewrite the parser so that it"),
+        const QStringList lines{QStringLiteral("rewrite the parser so that it"),
                                 QStringLiteral("a first attempt"),
-                                QStringLiteral("✦ rewrite the parser so that it"),
+                                QStringLiteral("rewrite the parser so that it"),
                                 QStringLiteral("a second attempt")};
         QCOMPARE(st::turnStart(lines, prompt), 2);
         // A line longer than the prompt is some other output, not this turn.
-        QCOMPARE(st::turnStart({QStringLiteral("✦ rewrite the parser so that it stops on the first bad token and more")},
+        QCOMPARE(st::turnStart({QStringLiteral("rewrite the parser so that it stops on the first bad token and more")},
                                prompt),
                  -1);
     }

@@ -490,7 +490,7 @@ void Pane::handle(const QJsonObject &event) {
                 printInline(QStringLiteral("✦ the command finished · its result went to the agent\n"), Ink::Note);
             } else if (!prompt.fix && !prompt.text.isEmpty()) {
                 ensureLineStart();
-                printInline(QStringLiteral("✦ ") + prompt.text + '\n', Ink::UserAgent);
+                printInline(prompt.text + '\n', Ink::UserAgent);
                 printAttachmentThumbnails(prompt.text);   // #1MGS
                 if (!prompt.why.isEmpty()) printInline(prompt.why + '\n', Ink::Note);
             }

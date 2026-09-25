@@ -25,13 +25,13 @@ class TranscriptReplayTest : public QObject {
     Q_OBJECT
 
 private slots:
-    // A turn as the pane would have printed it: the ✦ prompt, the reply, one ▸ row per call.
+    // A turn as the pane would have printed it: the prompt, the reply, one ▸ row per call.
     void aTurnLooksLikeALiveTurn() {
         const QJsonArray items{entry(1, QStringLiteral("prompt"), QStringLiteral("add a test")),
                                entry(1, QStringLiteral("tool_call"), QStringLiteral("read src/Pane.h")),
                                entry(1, QStringLiteral("reply"), QStringLiteral("Done."))};
         const QVector<Row> rows = render(items, 400);
-        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("✦ add a test"), QStringLiteral("▸ read src/Pane.h"),
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("add a test"), QStringLiteral("▸ read src/Pane.h"),
                                              QStringLiteral("Done.")}));
         QCOMPARE(rows.at(0).kind, Line::Prompt);
         QCOMPARE(rows.at(1).kind, Line::Call);
@@ -48,7 +48,7 @@ private slots:
                                entry(1, QStringLiteral("summary"), QStringLiteral("not a message")),
                                entry(1, QStringLiteral("reply"), QStringLiteral("green"))};
         QCOMPARE(textsOf(render(items, 400)),
-                 (QStringList{QStringLiteral("✦ run it"), QStringLiteral("▸ run pytest"), QStringLiteral("green")}));
+                 (QStringList{QStringLiteral("run it"), QStringLiteral("▸ run pytest"), QStringLiteral("green")}));
     }
 
     // Turns are separated by the blank line a live conversation leaves, and never opened or
@@ -59,16 +59,16 @@ private slots:
                                entry(2, QStringLiteral("prompt"), QStringLiteral("two")),
                                entry(2, QStringLiteral("reply"), QStringLiteral("second"))};
         QCOMPARE(textsOf(render(items, 400)),
-                 (QStringList{QStringLiteral("✦ one"), QStringLiteral("first"), QString(),
-                              QStringLiteral("✦ two"), QStringLiteral("second")}));
+                 (QStringList{QStringLiteral("one"), QStringLiteral("first"), QString(),
+                              QStringLiteral("two"), QStringLiteral("second")}));
     }
 
-    // A multi-line prompt keeps its lines; only the first wears the ✦, as the live line does.
-    void aMultiLinePromptWearsOneMarker() {
+    // A multi-line prompt keeps its lines; the live line wears no glyph, and neither does this.
+    void aMultiLinePromptKeepsItsLines() {
         const QJsonArray items{entry(1, QStringLiteral("prompt"), QStringLiteral("first line\nsecond line")),
                                entry(1, QStringLiteral("reply"), QStringLiteral("a\nb"))};
         const QVector<Row> rows = render(items, 400);
-        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("✦ first line"), QStringLiteral("second line"),
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("first line"), QStringLiteral("second line"),
                                              QStringLiteral("a"), QStringLiteral("b")}));
         QCOMPARE(rows.at(1).kind, Line::Prompt);
     }
@@ -116,14 +116,16 @@ private slots:
                                entry(3, QStringLiteral("prompt"), QStringLiteral("three")),
                                entry(3, QStringLiteral("reply"), QStringLiteral("third"))};
         QCOMPARE(textsOf(render(items, 400, 2)),
-                 (QStringList{QStringLiteral("✦ one"), QStringLiteral("first")}));
+                 (QStringList{QStringLiteral("one"), QStringLiteral("first")}));
         QCOMPARE(render(items, 400, 0).size(), 0);   // nothing is before the first turn
         QCOMPARE(render(items, 400, 1).size(), 0);
     }
 
-    // The first ✦ row the saved text still holds names the turn its window starts at: the row is
-    // cut at the pane's width, so the prompt's first line has to start with the row, not the other
-    // way round, and the row may carry the ink and the OSC 8 link of the line it was saved with.
+    // The first prompt row the saved text still holds names the turn its window starts at: the row
+    // is cut at the pane's width, so the prompt's first line has to start with the row, not the
+    // other way round, and the row may carry the ink and the OSC 8 link of the line it was saved
+    // with. Windows saved while prompts still wore the "✦ " glyph match the same way with the
+    // glyph stripped.
     void coveredFromMatchesTheFirstPromptRow() {
         const QJsonArray items{entry(0, QStringLiteral("prompt"), QStringLiteral("verify image generation")),
                                entry(0, QStringLiteral("reply"), QStringLiteral("starting")),
@@ -135,12 +137,17 @@ private slots:
         const QStringList saved{QStringLiteral("the implementer. Next is the desktop again"),
                                 QStringLiteral("st a loc"),
                                 QStringLiteral("al gateway"),
-                                QStringLiteral("\x1b[38;5;15m✦ \x1b]8;;relay://pane/1\x1b\\Continue\x1b]8;;\x1b\\\x1b[0m"),
+                                QStringLiteral("\x1b[38;5;15m\x1b]8;;relay://pane/1\x1b\\Continue\x1b]8;;\x1b\\\x1b[0m"),
                                 QStringLiteral("done")};
         QCOMPARE(coveredFrom(saved, items), 2);
+        // The same window as an older pane saved it, prompt row and all, still matches.
+        const QStringList marked{QStringLiteral("\x1b[38;5;15m✦ \x1b]8;;relay://pane/1\x1b\\Continue\x1b]8;;\x1b\\\x1b[0m"),
+                                 QStringLiteral("done")};
+        QCOMPARE(coveredFrom(marked, items), 2);
         // A row cut at the pane's width matches the full prompt line it came from.
-        const QStringList cut{QStringLiteral("✦ yes, help me update the ga")};
-        QCOMPARE(coveredFrom(cut, items), 1);
+        QCOMPARE(coveredFrom(QStringList{QStringLiteral("yes, help me update the ga")}, items), 1);
+        // A short line that merely starts like the prompt is the agent's own prose, not a turn.
+        QCOMPARE(coveredFrom(QStringList{QStringLiteral("yes, help me")}, items), -1);
         // No prompt or reply anchor: the caller must draw the whole transcript, as a restored
         // pane with only a recap would otherwise show none of its earlier turns.
         QCOMPARE(coveredFrom(QStringList{QStringLiteral("only a reply's tail")}, items), -1);
@@ -157,8 +164,8 @@ private slots:
         const int covered = coveredFrom(saved, items);
         QCOMPARE(covered, -1);
         const auto rows = render(items, 400, covered);
-        QVERIFY(textsOf(rows).contains(QStringLiteral("✦ fix the board error")));
-        QVERIFY(textsOf(rows).contains(QStringLiteral("✦ continue")));
+        QVERIFY(textsOf(rows).contains(QStringLiteral("fix the board error")));
+        QVERIFY(textsOf(rows).contains(QStringLiteral("continue")));
     }
 
     // A window deep enough to have lost its turn's ✦ row — measured: the window opened at a
@@ -197,6 +204,8 @@ private slots:
                                entry(1, QStringLiteral("reply"), QStringLiteral("first pass")),
                                entry(2, QStringLiteral("prompt"), QStringLiteral("Continue")),
                                entry(2, QStringLiteral("reply"), QStringLiteral("second pass"))};
+        QCOMPARE(coveredFrom(QStringList{QStringLiteral("Continue")}, items), 2);
+        // …and the same row as an older pane saved it, with the glyph it wore then.
         QCOMPARE(coveredFrom(QStringList{QStringLiteral("✦ Continue")}, items), 2);
     }
 };

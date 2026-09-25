@@ -11,7 +11,7 @@
 // codex guest alike, because conv_index.py indexes all three into the same table.
 //
 // This turns those entries into the lines a live turn prints, so the fallback reads like the
-// thing it stands in for rather than like a log dump: the user's prompt behind its ✦, the reply
+// thing it stands in for rather than like a log dump: the user's prompt, the reply
 // as prose, one ▸ row per tool call. Tool output is left out — it is the bulk of a transcript and
 // the least of it, and a resumed pane is not a place to re-read it.
 //
@@ -29,7 +29,7 @@ namespace relay::transcriptreplay {
 
 // What a row is, so the caller can ink it like the live line it stands for.
 enum class Line {
-    Prompt,   // what the user sent to the agent (a live turn's ✦ line)
+    Prompt,   // what the user sent to the agent (a live turn's first line)
     Reply,    // the agent's prose
     Call,     // one tool call, the ▸ row
     Note,     // Relay's own chrome: the turn separator
@@ -81,12 +81,8 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn 
         }
         const bool prompt = kind != QLatin1String("reply");
         const QStringList lines = text.split(QLatin1Char('\n'));
-        for (int i = 0; i < lines.size(); ++i) {
-            // The ✦ marks the prompt, once, the way the live line does; its later lines are the
-            // same ink but carry no second marker.
-            rows.append({prompt ? Line::Prompt : Line::Reply,
-                         prompt && i == 0 ? QStringLiteral("✦ ") + lines.at(i) : lines.at(i), turn});
-        }
+        for (const QString &line : lines)
+            rows.append({prompt ? Line::Prompt : Line::Reply, line, turn});
     }
     // Trailing and leading blanks are the separator, not content.
     while (!rows.isEmpty() && rows.constLast().text.isEmpty()) rows.removeLast();
@@ -101,17 +97,20 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn 
 // above it. -1 when the window's relationship to the transcript is not known: the caller prints
 // the whole transcript so a recap-only saved file cannot hide the conversation.
 //
-// The precise signal is the first ✦ row the saved text still holds: a turn's prompt, matched
+// The precise signal is the first prompt row the saved text still holds: a turn's prompt, matched
 // against the transcript's prompt items the way relay::sessiontext::turnStart matches one for a
 // rewind — the row is cut at the pane's width, so the prompt's first line has to start with the
-// row, not the other way round. Everything the file holds is that turn and later. The same prompt
+// row, not the other way round. Windows saved while prompts still carried the "✦ " glyph match
+// the same way with the glyph stripped first. Everything the file holds is that turn and later.
+// The same prompt
 // text can open more than one turn ("Continue" opened two of the turns in the conversation this
 // was measured on); the *last* such turn is the one whose boundary the row is, because the first
 // would answer "turn A" for turn B's identical row and drop every turn between them from the fill
 // for good, where the last can only duplicate one.
 //
-// A window deep enough to lose even its turn's ✦ row — measured: the window opened at a turn's
-// recap, its `✦ Continue` six hundred lines further up — has no prompt row to match. Replies
+// A window deep enough to lose even its turn's prompt row — measured: the window opened at a
+// turn's recap, its `Continue` prompt six hundred lines further up — has no prompt row to match.
+// Replies
 // carry it then: the pane prints an agent reply as wrapped prose rows, and a reply's opening,
 // with every space and wrap taken out, is a substring of the window read the same way — wrapping
 // breaks lines at spaces and mid-word both, and removing the whitespace of each side joins the
@@ -121,7 +120,7 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn 
 // boundary — the fill over-covers a turn the window already holds, a cosmetic repeat, and never
 // drops one.
 inline int coveredFrom(const QStringList &savedLines, const QJsonArray &items) {
-    struct Anchor { QString text; int turn; };
+    struct Anchor { QString text; int turn; bool prompt; };
     QVector<Anchor> anchors;   // prompts and replies, oldest first: the items arrive that way
     static const QString marker = QStringLiteral("✦ ");
     QStringList plain;         // the window, stripped of its ink once
@@ -144,25 +143,37 @@ inline int coveredFrom(const QStringList &savedLines, const QJsonArray &items) {
         const QString first = item.value(QStringLiteral("text")).toString()
                                   .section(QLatin1Char('\n'), 0, 0).trimmed();
         if (first.isEmpty()) continue;
-        anchors.append({kind == QLatin1String("prompt") ? marker + first : first,
-                        item.value(QStringLiteral("turn")).toInt()});
+        anchors.append({first, item.value(QStringLiteral("turn")).toInt(),
+                        kind == QLatin1String("prompt")});
     }
     if (anchors.isEmpty() || joined.isEmpty()) return -1;
-    // Precise first: the topmost ✦ row that is a prompt's first line.
-    for (const QString &line : plain) {
-        if (!line.startsWith(marker)) continue;
-        const QString shown = line.mid(marker.size()).trimmed();
+    // Precise first: the topmost prompt row — a line that is a prompt's first line, cut at the
+    // pane's width. Windows saved while prompts still carried the "✦ " glyph match the same way
+    // with the glyph stripped first; the *newest* matching anchor wins, so two turns beginning
+    // with the same line ("continue" twice) mean the later one and the window over-covers by
+    // exactly the turn it answered, which is what the anchor is for.
+    for (const QString &raw : plain) {
+        QString line = raw;
+        const bool marked = line.startsWith(marker);
+        if (marked) line = line.mid(marker.size());
+        const QString shown = line.trimmed();
         if (shown.isEmpty()) continue;
         int matched = -1;
-        for (const Anchor &anchor : anchors)
-            if (anchor.text.startsWith(marker) && anchor.text.mid(marker.size()).startsWith(shown))
-                matched = anchor.turn;
+        for (const Anchor &anchor : anchors) {
+            if (!anchor.prompt || !anchor.text.startsWith(shown)) continue;
+            // A marked row is a prompt by its glyph. An unmarked one only starts like the
+            // prompt, so a short one could be a line of the agent's own prose ("ok",
+            // "Continue"): take it when it is the whole first line or long enough that the
+            // pane's width cut it.
+            if (!marked && shown.size() < anchor.text.size() && shown.size() < 20) continue;
+            matched = anchor.turn;
+        }
         if (matched >= 0) return matched;
     }
     // No prompt row survived: the newest turn a reply dates.
     int newest = -1;
     for (const Anchor &anchor : anchors) {
-        if (anchor.text.startsWith(marker)) continue;
+        if (anchor.prompt) continue;
         QString squeezed;   // the reply's opening, wrapped the way the window would wrap it
         for (const QChar &c : anchor.text)
             if (!c.isSpace()) squeezed.append(c);

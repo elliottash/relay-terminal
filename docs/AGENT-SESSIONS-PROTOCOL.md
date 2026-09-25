@@ -6246,7 +6246,7 @@ hand the ask every line before anything was routed, which is the one thing the d
 done. A device that cannot ask the router (`route: false`, or the worker is not up) can only reach
 the agent, so its line is the ask's, and so is a `when: "steer"` line, which its sender has already
 aimed at the agent. The answer is attributed to whoever typed it: the echo under the ask reads
-`✦ <header>: <answer> · from <name>`.
+`<header>: <answer> · from <name>`.
 
 ### 27.4 What the user sees (GUI, card #4E13)
 
@@ -7297,7 +7297,7 @@ there is no sensible default for "put this prompt somewhere", so an unnamed one 
   pane and the first line of the text (30.6). A pre-fill sitting in a composer announces itself; a
   send does not, which is why it must.
 - **A sent prompt is attributed where it lands.** The receiving pane prints it as any prompt —
-  `✦ <text>` — with *"sent by the agent in “<pane>”"* beneath it, the line the queue entry's `why`
+  `<text>` in the agent ink — with *"sent by the agent in “<pane>”"* beneath it, the line the queue entry's `why`
   carries. A line the person never typed is never shown as one they did.
 - **A pre-fill never overwrites a draft.** A composer with anything in it answers `busy`: what the
   person has typed and not yet sent is in no file and no history, so it is the one thing in a pane

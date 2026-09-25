@@ -3,7 +3,7 @@
 
 // Blank lines between the kinds of thing the terminal transcript prints (#5AWD).
 //
-// A turn's transcript is a sequence of blocks: the user's ✦ line, the "▸ model" header, the
+// A turn's transcript is a sequence of blocks: the user's prompt line, the "▸ model" header, the
 // agent's prose, the ▸ tool-call rows, the "✦ N tool calls" link that sums a run of them up, and
 // a "Recap ·" block. The owner asked for a blank line between content types — prose and tool
 // calls, one user message and the next — and none inside a run of tool calls. The link and the
@@ -21,7 +21,7 @@ namespace relay::gaps {
 
 enum class Block {
     None,     // nothing printed yet, or the screen was cleared
-    User,     // a ✦ line the user typed (a prompt, a steer, an answer)
+    User,     // a line the user typed (a prompt, a steer, an answer)
     Header,   // the turn's "▸ model" line, or a "── request ──" separator
     Agent,    // the agent's prose
     Call,     // a ▸ tool-call row, a thinking fold, a subagent line, a turn-limit line, the ✦ N tool calls link

@@ -49,7 +49,7 @@ function terminalStandIn() {
   const pre = el('pre', 'demo-terminal');
   pre.append(el('span', 'demo-prompt', 'elliott@spark ~/relay-terminal$ '), el('span', '', 'ctest\n'));
   pre.append(el('span', 'demo-dim', '100% tests passed, 0 tests failed out of 44\n\n'));
-  pre.append(el('span', 'demo-prompt', 'elliott@spark ~/relay-terminal$ '), el('span', 'demo-agent', '✦ please plan this out\n'));
+  pre.append(el('span', 'demo-prompt', 'elliott@spark ~/relay-terminal$ '), el('span', 'demo-agent', 'please plan this out\n'));
   pre.append(el('span', 'demo-dim', '✦ thought for 20 s  (Ctrl+click)\n'));
   return pre;
 }
