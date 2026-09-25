@@ -7,6 +7,7 @@ real one does.
 """
 
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -97,16 +98,40 @@ class LandCase(unittest.TestCase):
 
     # -- driving the script ------------------------------------------------
 
-    def land(self, *args, expect=0, cwd=None):
+    def land(self, *args, expect=0, cwd=None, env=None):
         proc = subprocess.run(
             [sys.executable, str(LAND), "--root", str(self.land_root), *args],
-            cwd=str(cwd or self.repo), env=clean_env(),
+            cwd=str(cwd or self.repo), env=clean_env(**(env or {})),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if expect is not None:
             self.assertEqual(proc.returncode, expect,
                              "exit %d\nstdout:\n%s\nstderr:\n%s"
                              % (proc.returncode, proc.stdout, proc.stderr))
         return proc
+
+    def journal_write(self, token, path, before, after, pane, card="", ts=None,
+                      turn_id="t-0001"):
+        """Fabricate one authorship-journal line the way the backend's tool hook does (#WNKN):
+        both byte images as blobs under the land root, one JSON object appended to
+        authors/<token>.jsonl. Returns the line."""
+        blobs = self.land_root / "blobs"
+        blobs.mkdir(parents=True, exist_ok=True)
+
+        def blob(data):
+            sha = hashlib.sha256(data).hexdigest()
+            (blobs / sha).write_bytes(data)
+            return sha
+
+        line = {"ts": time.time() if ts is None else ts,
+                "repo": str(self.repo), "path": path,
+                "before": None if before is None else blob(before),
+                "after": None if after is None else blob(after),
+                "pane": pane, "token": token, "card": card, "turn_id": turn_id}
+        authors = self.land_root / "authors"
+        authors.mkdir(parents=True, exist_ok=True)
+        with (authors / ("%s.jsonl" % token)).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line) + "\n")
+        return line
 
     # -- a second session, landing the way land.py does --------------------
 
@@ -736,6 +761,171 @@ class Selection(LandCase):
         self.assertNotIn("SOMEONE", landed)
 
 
+class Foreign(LandCase):
+    """#WNKN: a held hunk that another pane's authorship journal claims is FOREIGN — named in
+    the review, kept out of --confirm, landed only via --take-foreign. The #6CSN/#234Z replay:
+    #234Z claimed Pane.h first and edited it after #6CSN began; #6CSN's review called every
+    hunk contested, its --confirm landed #234Z's edit as its own."""
+
+    TOKEN_A = "11111111-1111-4111-8111-111111111111"
+    TOKEN_B = "22222222-2222-4222-8222-222222222222"
+
+    def setUp(self):
+        super().setUp()
+        # The card thread a --take-foreign note lands in (decision 4).
+        (self.repo / ".board" / "threads").mkdir(parents=True, exist_ok=True)
+
+    def env(self, token):
+        return {"RELAY_SESSION_TOKEN": token, "RELAY_PANE_ID": token[:8]}
+
+    def replay(self):
+        """The #6CSN/#234Z shape: session a begins first, session mine begins second, and
+        only then does a's pane edit line 5 (journaled under a's token); mine edits line 40.
+        Every hunk of mine's commit is contested (a began first), and a's hunk is FOREIGN.
+        Returns mine's held commit output."""
+        self.land("begin", "a", "big.txt", env=self.env(self.TOKEN_A))
+        self.land("begin", "mine", "big.txt", env=self.env(self.TOKEN_B))
+        self.journal_write(self.TOKEN_A, "big.txt", MANY_LINES.encode(),
+                           MANY_LINES.replace("l 5\n", "234Z BUSY\n").encode(),
+                           pane="3f4a20ad", card="#234Z", ts=time.time() - 600)
+        edit_line(self.repo / "big.txt", 5, "234Z BUSY")
+        edit_line(self.repo / "big.txt", 40, "MINE")
+        return self.land("commit", "mine", "-m", "#WNKN mine", expect=4)
+
+    def test_the_replayed_hunk_is_named_foreign_and_confirm_keeps_it_out(self):
+        held = self.replay()
+        self.assertIn("FOREIGN — pane 3f4a20ad (#234Z) edited this region", held.stdout)
+        when = datetime.datetime.fromtimestamp(time.time() - 600).strftime("%H:%M")
+        self.assertIn("at %s" % when, held.stdout)
+        self.assertIn("1 FOREIGN", held.stdout)
+        self.assertIn("--take-foreign big.txt:1", held.stdout)
+        out = self.land("commit", "mine", "-m", "#WNKN mine", "--confirm", self.digest(held))
+        # Only mine's hunk landed; the foreign edit stays in the working tree, off main.
+        self.assertIn("MINE", self.tip_text("big.txt"))
+        self.assertNotIn("234Z BUSY", self.tip_text("big.txt"))
+        self.assertIn("234Z BUSY", (self.repo / "big.txt").read_text(encoding="utf-8"))
+        self.assertIn("left uncommitted in the working tree", out.stdout)
+        self.assertIn("FOREIGN — pane 3f4a20ad", out.stdout)
+
+    def test_the_pane_that_wrote_the_hunk_still_lands_it_after_mine(self):
+        held = self.replay()
+        self.land("commit", "mine", "-m", "#WNKN mine", "--confirm", self.digest(held))
+        # Session a still holds its own hunk: it is contested (mine claims the path now),
+        # not foreign to a, whose own journal names it.
+        again = self.land("commit", "a", "-m", "#WNKN theirs", "--only-hunk", "big.txt:1",
+                          expect=4)
+        self.assertNotIn("FOREIGN", again.stdout)
+        self.assertIn("CONTESTED", again.stdout)
+        self.land("commit", "a", "-m", "#WNKN theirs", "--only-hunk", "big.txt:1",
+                  "--confirm", self.digest(again))
+        landed = self.tip_text("big.txt")
+        self.assertIn("234Z BUSY", landed)
+        self.assertIn("MINE", landed)
+
+    def test_take_foreign_lands_both_hunks_records_the_trailer_and_notes_the_card(self):
+        held = self.replay()
+        # Hunk 2 is mine's own edit, not a foreign one.
+        self.land("commit", "mine", "-m", "#WNKN", "--take-foreign", "big.txt:2", expect=1)
+        # The digest covers the takes: the plain digest names a tree without the foreign hunk.
+        self.land("commit", "mine", "-m", "#WNKN", "--take-foreign", "big.txt:1",
+                  "--confirm", self.digest(held), expect=4)
+        chosen = self.land("commit", "mine", "-m", "#WNKN", "--take-foreign", "big.txt:1",
+                           expect=4)
+        self.assertIn("yours to land (--take-foreign)", chosen.stdout)
+        out = self.land("commit", "mine", "-m", "#WNKN", "--take-foreign", "big.txt:1",
+                        "--confirm", self.digest(chosen))
+        landed = self.tip_text("big.txt")
+        self.assertIn("MINE", landed)
+        self.assertIn("234Z BUSY", landed)
+        message = git(self.repo, "log", "-1", "--format=%B").stdout
+        self.assertIn("Relay-take-foreign: big.txt:1 from pane 3f4a20ad", message)
+        note = (self.repo / ".board" / "threads" / "234Z.md").read_text(encoding="utf-8")
+        self.assertIn("author=land.py kind=note", note)
+        self.assertIn("big.txt:1", note)
+        self.assertIn("3f4a20ad", note)
+        # The card note is written in the working tree, not committed (decision 4).
+        self.assertIn(".board", self.porcelain())
+        self.assertNotIn("big.txt", self.porcelain())     # both hunks landed; none left over
+
+    def test_begin_adopts_the_pane_auto_claim_under_the_same_token(self):
+        token = self.TOKEN_B
+        begun = self.land("begin", token, "f.txt", "--auto", "--contact", "pane 22222222",
+                          env=self.env(token))
+        self.assertIn("f.txt", begun.stdout)
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        self.assertTrue(registry["sessions"][token].get("auto"))
+        self.assertEqual(registry["sessions"][token].get("token"), token)
+        self.assertTrue(json.loads((self.land_root / token / "meta.json").read_text())
+                        .get("auto"))
+        # The pane's tool write, after the auto claim and before any manual begin.
+        edit_line(self.repo / "f.txt", 3, "PRE-BEGIN EDIT")
+        out = self.land("begin", "mine", "f.txt", env=self.env(token))
+        self.assertIn("adopted", out.stdout)
+        self.assertIn(token, out.stdout)
+        self.assertNotIn("will not land", out.stdout)          # adoption, not the warning
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        self.assertNotIn(token, registry["sessions"])          # the claim is mine now
+        self.assertEqual(registry["sessions"]["mine"].get("token"), token)
+        meta = json.loads((self.land_root / "mine" / "meta.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["paths"]["f.txt"].get("adopted_from"), token)
+        edit_line(self.repo / "f.txt", 7, "MINE TOO")
+        self.land("commit", "mine", "-m", "#WNKN adopt")
+        # The edit made before the manual begin landed from the adopted snapshot.
+        landed = self.tip_text("f.txt")
+        self.assertIn("PRE-BEGIN EDIT", landed)
+        self.assertIn("MINE TOO", landed)
+        self.assertNotIn(token, self.land("who").stdout)
+
+    def test_begin_warns_when_your_own_journal_shows_an_earlier_edit(self):
+        when = time.time() - 1800
+        self.journal_write(self.TOKEN_B, "f.txt", TEN_LINES.encode(),
+                           TEN_LINES.replace("line 4\n", "OWN EARLIER\n").encode(),
+                           pane="22222222", ts=when)
+        edit_line(self.repo / "f.txt", 4, "OWN EARLIER")     # the pane's tool write
+        out = self.land("begin", "mine", "f.txt", env=self.env(self.TOKEN_B))
+        clock = datetime.datetime.fromtimestamp(when).strftime("%H:%M")
+        self.assertIn("you edited this at %s" % clock, out.stdout)
+        self.assertIn("--base main", out.stdout)
+        self.assertIn("those edits will not land from this snapshot", out.stdout)
+        # No journal lines for this path: no warning.
+        edit_line(self.repo / "big.txt", 2, "FRESH")
+        out = self.land("begin", "mine", "big.txt", env=self.env(self.TOKEN_B))
+        self.assertNotIn("you edited this at", out.stdout)
+        # No token in this process: no journal to consult, no warning.
+        out = self.land("begin", "noenv", "f.txt", env={"RELAY_SESSION_TOKEN": ""})
+        self.assertNotIn("you edited this at", out.stdout)
+
+    def test_your_own_journal_never_makes_your_hunks_foreign(self):
+        self.land("begin", "a", "f.txt")
+        self.land("begin", "mine", "f.txt", env=self.env(self.TOKEN_B))
+        edit_line(self.repo / "f.txt", 2, "MINE")
+        self.journal_write(self.TOKEN_B, "f.txt", TEN_LINES.encode(),
+                           TEN_LINES.replace("line 2\n", "MINE\n").encode(),
+                           pane="22222222", ts=time.time() - 30)
+        held = self.land("commit", "mine", "-m", "#WNKN own", expect=4)
+        self.assertNotIn("FOREIGN", held.stdout)
+        self.assertIn("CONTESTED", held.stdout)
+        self.land("commit", "mine", "-m", "#WNKN own", "--confirm", self.digest(held))
+        self.assertIn("MINE", self.tip_text("f.txt"))
+
+    def test_a_journal_pointing_at_missing_blobs_attributes_nothing(self):
+        self.land("begin", "a", "big.txt")
+        self.land("begin", "mine", "big.txt")
+        self.journal_write(self.TOKEN_A, "big.txt", MANY_LINES.encode(),
+                           MANY_LINES.replace("l 5\n", "OTHER PANE\n").encode(),
+                           pane="3f4a20ad", card="#234Z")
+        edit_line(self.repo / "big.txt", 5, "OTHER PANE")
+        edit_line(self.repo / "big.txt", 40, "MINE")
+        for blob in (self.land_root / "blobs").iterdir():
+            blob.unlink()
+        held = self.land("commit", "mine", "-m", "#WNKN", expect=4)
+        self.assertNotIn("FOREIGN", held.stdout)
+        self.assertIn("CONTESTED", held.stdout)
+        # Exactly today's behaviour: confirm lands everything held.
+        self.land("commit", "mine", "-m", "#WNKN", "--confirm", self.digest(held))
+        self.assertIn("OTHER PANE", self.tip_text("big.txt"))
+
+
 class Who(LandCase):
     def test_who_lists_sessions_paths_ages_and_contacts(self):
         self.land("begin", "alice", "--contact", "think-cap", "f.txt")
@@ -1114,6 +1304,28 @@ class Gc(LandCase):
         self.age_session("stale", 20)                      # stale for contest, not for gc
         self.land("gc")
         self.assertTrue((self.land_root / "stale" / "snap" / "f.txt").exists())
+
+    def test_gc_drops_old_journal_lines_and_blobs_and_keeps_fresh_ones(self):
+        token = "cafe0000-0000-4000-8000-000000000000"
+        four_days_ago = time.time() - 4 * 86400
+        old = self.journal_write(token, "f.txt", TEN_LINES.encode(),
+                                 TEN_LINES.replace("line 3\n", "OLD EDIT\n").encode(),
+                                 pane="cafe0000", ts=four_days_ago)
+        fresh = self.journal_write(token, "big.txt", MANY_LINES.encode(),
+                                   MANY_LINES.replace("l 3\n", "FRESH EDIT\n").encode(),
+                                   pane="cafe0000", ts=time.time() - 60)
+        for sha in (old["before"], old["after"]):
+            os.utime(str(self.land_root / "blobs" / sha), (four_days_ago, four_days_ago))
+        out = self.land("gc")
+        self.assertIn("authorship journal line", out.stdout)
+        journal = (self.land_root / "authors" / ("%s.jsonl" % token)).read_text(
+            encoding="utf-8")
+        self.assertNotIn("f.txt", journal)                 # the old line is gone
+        self.assertIn("big.txt", journal)                  # the fresh one stays
+        self.assertFalse((self.land_root / "blobs" / old["before"]).exists())
+        self.assertFalse((self.land_root / "blobs" / old["after"]).exists())
+        self.assertTrue((self.land_root / "blobs" / fresh["before"]).exists())
+        self.assertTrue((self.land_root / "blobs" / fresh["after"]).exists())
 
     def test_gc_removes_an_old_per_session_verify_build_and_keeps_a_fresh_one(self):
         self.land("begin", "old", "f.txt")

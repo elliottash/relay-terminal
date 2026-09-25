@@ -37,6 +37,21 @@ work as its own and landed half of it. So:
     `--exclude-hunk <path>:<n>` (repeatable) to leave hunks out of the commit; excluded hunks
     stay uncommitted in the working tree and land with a later commit.
 
+  * Every tool write is also journalled per session token by the backend (under the land
+    root, `authors/<token>.jsonl` with both byte images in `blobs/`). At your commit a held
+    hunk whose removed+added lines are exactly the change another pane's journal recorded is
+    that pane's, not yours: **FOREIGN**. The review names the pane, its card and the time;
+    `--confirm` leaves FOREIGN hunks uncommitted in the working tree, and
+    `--take-foreign <path>:<n>` (repeatable) is how you land one on purpose — the commit
+    message records where it came from. On 2026-09-24 session #6CSN confirmed a review whose
+    every hunk was contested and thereby landed #234Z's edit of `Pane.h` as its own; this is
+    the fix.
+
+  * `begin` also adopts: when the backend has already begun an auto claim for your own
+    RELAY_SESSION_TOKEN on a path (it does so before a pane's first tool write of that path),
+    a manual `begin` on the same path takes the pane's earlier snapshot and timestamp, so the
+    edits made before the manual begin still land from it.
+
   * Before the swap, a landing that touches C++ or build files builds the EXACT tree it would
     put on the branch, in its own directory under the session's snapshots. Never the working
     tree: that holds every session's uncommitted code, so it can compile while the tree being
@@ -81,6 +96,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _USER_DIR = "claude-%d" % os.getuid() if hasattr(os, "getuid") else "claude"
@@ -491,6 +507,140 @@ def content_digest(tip, plans):
     return digest.hexdigest()[:12]
 
 
+# ------------------------------------------------------------------ authorship journal
+#
+# The backend journals every tool write under <land root>/authors/<token>.jsonl, one JSON
+# object per line (ts, repo, path, before/after blob shas, pane, token, card, turn_id), with
+# the raw bytes of each side in <land root>/blobs/<sha256>. Reading that journal at commit is
+# what separates a merely contested hunk from a FOREIGN one: a hunk whose removed and added
+# lines are exactly the change another pane recorded is that pane's edit, not yours — the
+# case #6CSN could not see and landed as its own. land.py only reads this journal (and gc
+# prunes it); a journal that is missing, malformed, or points at an unreadable blob
+# attributes nothing, and the hunk stays CONTESTED exactly as before.
+
+
+def my_token():
+    """The RELAY_SESSION_TOKEN of the process running land.py, when it has one."""
+    return os.environ.get("RELAY_SESSION_TOKEN", "")
+
+
+def journal_files(root, token):
+    """<token>.jsonl plus its rotations <token>.1.jsonl, <token>.2.jsonl, ..."""
+    folder = Path(root) / "authors"
+    out = [folder / (token + ".jsonl")]
+    for number in range(1, 10):
+        out.append(folder / ("%s.%d.jsonl" % (token, number)))
+    return [path for path in out if path.exists()]
+
+
+def read_journal(root, token):
+    """Parsed journal entries for one token; malformed or unreadable lines are skipped."""
+    entries = []
+    for path in journal_files(root, token):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for raw in text.splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                entries.append(entry)
+    return entries
+
+
+def journal_blob(root, sha):
+    """The raw bytes of one journal blob, or None when it is missing or unreadable."""
+    if not isinstance(sha, str) or not sha:
+        return None
+    try:
+        return (Path(root) / "blobs" / sha).read_bytes()
+    except OSError:
+        return None
+
+
+def hunk_blocks(hunk):
+    """A hunk's content identity: the removed and added lines (with their context), not
+    where they sit, so the same edit at a different offset still matches."""
+    return (tuple(hunk.base), tuple(hunk.new))
+
+
+def foreign_hunks(root, repo, path, mine):
+    """{hunk blocks: journal entry} for the edits other panes' journals say they made here.
+
+    Every journal whose token is not in `mine` is read; only lines naming this repo and path
+    newer than IDLE_HOURS are considered, and only lines whose before/after blobs both read
+    (a null `before` is a new file: the empty pre-image). When several lines match the same
+    hunk the newest wins. `mine` is the set of tokens that are this session's own (the
+    RELAY_SESSION_TOKEN of the process and the token the session recorded at begin): your
+    own journal must never make your own hunks foreign.
+    """
+    found = {}
+    try:
+        names = sorted((Path(root) / "authors").iterdir())
+    except OSError:
+        return found
+    cutoff = time.time() - IDLE_HOURS * 3600
+    for name in names:
+        if not name.name.endswith(".jsonl"):
+            continue
+        token = name.name[: -len(".jsonl")].split(".")[0]
+        if not token or token in mine:
+            continue
+        for entry in read_journal(root, token):
+            if entry.get("repo") != str(repo) or entry.get("path") != path:
+                continue
+            try:
+                when = float(entry.get("ts") or 0)
+            except (TypeError, ValueError):
+                continue
+            if when < cutoff:
+                continue
+            before = b"" if entry.get("before") is None else journal_blob(root, entry.get("before"))
+            after = journal_blob(root, entry.get("after"))
+            if before is None or after is None or is_binary(before) or is_binary(after):
+                continue
+            for hunk in split_hunks(lines_of(before), lines_of(after)):
+                best = found.get(hunk_blocks(hunk))
+                if best is None or when > float(best.get("ts") or 0):
+                    found[hunk_blocks(hunk)] = entry
+    return found
+
+
+def latest_own_edit(root, repo, path, token):
+    """The newest entry of this token's journal for repo+path, or None."""
+    best = None
+    for entry in read_journal(root, token):
+        if entry.get("repo") != str(repo) or entry.get("path") != path:
+            continue
+        try:
+            when = float(entry.get("ts") or 0)
+        except (TypeError, ValueError):
+            continue
+        if best is None or when > best[0]:
+            best = (when, entry)
+    return best
+
+
+def foreign_mark(entry):
+    """How a review names the pane behind a FOREIGN hunk."""
+    card = (entry.get("card") or "").strip()
+    try:
+        when = " at %s" % _dt.datetime.fromtimestamp(float(entry.get("ts") or 0)).strftime("%H:%M")
+    except (TypeError, ValueError, OSError, OverflowError):
+        when = ""
+    return "FOREIGN — pane %s%s edited this region%s" % (
+        (entry.get("pane") or "another pane").strip() or "another pane",
+        " (%s)" % card if card else "",
+        when,
+    )
+
+
 # --------------------------------------------------------------------------- registry
 
 def registry_file(root):
@@ -772,6 +922,47 @@ def install_hook(repo, log, force=False):
 
 # --------------------------------------------------------------------------- begin
 
+def find_auto_claim(root, repo, token, path, skip):
+    """The live auto session with this pane token that claims `path`, oldest begin first."""
+    for name, entry in claimants(root, skip, path):
+        if not token or entry.get("token") != token or not entry.get("auto"):
+            continue
+        if entry.get("repo") == str(repo):
+            return name, entry
+    return None
+
+
+def merge_auto_claim(root, name, path):
+    """Fold an auto-claimed path into the session that just began over it.
+
+    The path leaves the auto session's claims — it is the same pane's claim now, under a
+    session with a human driving it — and an auto session with nothing left to claim is
+    dropped whole.
+    """
+    def mutate(data):
+        entry = data["sessions"].get(name)
+        if not entry:
+            return
+        claims = set(entry.get("claims") or [])
+        claims.discard(path)
+        if claims:
+            entry["claims"] = sorted(claims)
+            entry["updated"] = now()
+        else:
+            del data["sessions"][name]
+    edit_registry(root, mutate)
+    try:
+        meta = read_meta(root, name)
+    except (Fail, ValueError):
+        return
+    if path in (meta.get("paths") or {}):
+        del meta["paths"][path]
+    if meta.get("paths"):
+        write_meta(root, name, meta)
+    else:
+        shutil.rmtree(session_dir(root, name), ignore_errors=True)
+
+
 def cmd_begin(args, log):
     repo = repo_root()
     root = Path(args.root)
@@ -812,14 +1003,64 @@ def cmd_begin(args, log):
     meta["updated"] = now()
     if args.contact:
         meta["contact"] = args.contact
+    token = my_token()
+    if token:
+        meta["token"] = token
+    if args.auto:
+        meta["auto"] = True
+
+    # An auto claim under our own RELAY_SESSION_TOKEN is this pane's tool-made claim (the
+    # backend begins one before a pane's first tool write of a path). Beginning by hand over
+    # it adopts the pane's earlier snapshot and timestamp instead of snapshotting the
+    # now-edited working copy, so the edits the pane made before this begin still land from
+    # it. The claim then belongs to this session: the path leaves the auto session, and an
+    # auto session left with no claims is dropped.
+    adopted = {}
+    if token and not base_rev:
+        for path in paths:
+            found = find_auto_claim(root, repo, token, path, skip=args.session)
+            if found is None:
+                continue
+            name, _entry = found
+            try:
+                theirs = ((read_meta(root, name).get("paths") or {}).get(path)) or {}
+            except (Fail, ValueError):
+                theirs = {}
+            if not theirs:
+                continue                # no readable record of its snapshot: adopt nothing
+            snap = snapshot_bytes(root, name, path, theirs)
+            if snap is None and theirs.get("existed"):
+                continue                # its snapshot is gone: fall back to snapshotting afresh
+            merge_auto_claim(root, name, path)
+            take_snapshot(repo, root, args.session, path, meta, tip, content=snap)
+            meta["paths"][path]["adopted_from"] = name
+            if "tracked_at_begin" in theirs:
+                meta["paths"][path]["tracked_at_begin"] = theirs["tracked_at_begin"]
+            if theirs.get("at"):
+                meta["paths"][path]["at"] = theirs["at"]
+            adopted[path] = name
 
     # Who already holds these paths, read before our own claim goes into the registry.
     holders = {path: claimants(root, args.session, path) for path in paths}
 
     for path in paths:
+        if path in adopted:
+            continue
         content = rev_bytes(repo, base_rev, path) if base_rev else _MISSING
         take_snapshot(repo, root, args.session, path, meta, tip, content=content,
                       base_rev=base_rev)
+        # Nothing was adopted here, so the snapshot we just took is of a working copy this
+        # pane may already have edited through its tools. Its own journal is the only
+        # witness: warn when it says so, because those edits predate the snapshot and will
+        # never land from it.
+        if token and not base_rev:
+            mine = latest_own_edit(root, repo, path, token)
+            if mine is not None and work_bytes(repo, path) != rev_bytes(repo, tip, path):
+                when = _dt.datetime.fromtimestamp(mine[0]).strftime("%H:%M")
+                log("warning: %s: you edited this at %s; those edits will not land from this "
+                    "snapshot (it was taken after them); use `begin --base main` — here: "
+                    "`begin %s --base main %s` — to land them too" % (path, when,
+                                                                     args.session, path))
     write_meta(root, args.session, meta)
 
     def mutate(data):
@@ -830,6 +1071,10 @@ def cmd_begin(args, log):
         entry.setdefault("started", meta["started"])
         if args.contact:
             entry["contact"] = args.contact
+        if token:
+            entry["token"] = token
+        if args.auto:
+            entry["auto"] = True
         claims = set(entry.get("claims") or [])
         claims.update(paths)
         entry["claims"] = sorted(claims)
@@ -849,6 +1094,9 @@ def cmd_begin(args, log):
         record = meta["paths"][path]
         if base_rev:
             state = "snapshot from %s" % base_rev[:12]
+        elif path in adopted:
+            state = ("adopted this pane's auto claim from session %s (its snapshot and "
+                     "timestamp; edits made before this begin still land)" % adopted[path])
         else:
             state = "new file" if not record["existed"] else (
                 "snapshot taken" if record["tracked_at_begin"]
@@ -958,6 +1206,8 @@ class PathInfo:
         self.selected = set()
         self.excluded = set()
         self.contested = set()
+        self.foreign = {}          # hunk number -> the journal entry behind it
+        self.taken = set()         # hunk numbers landed on purpose with --take-foreign
         self.holders = []
         self.age = None
         self.stale = False
@@ -971,6 +1221,9 @@ class PathInfo:
         why = []
         if self.contested:
             why.append("%d of %d hunks contested" % (len(self.contested), len(self.hunks)))
+        if self.foreign:
+            why.append("%d of %d hunks FOREIGN (another pane's edit; lands only with "
+                       "--take-foreign)" % (len(self.foreign), len(self.hunks)))
         if self.stale:
             why.append("snapshot %s old" % human_age(self.age))
         if self.from_base:
@@ -988,6 +1241,8 @@ class PathInfo:
             bits.append("%d left out" % len(self.excluded))
         if self.contested:
             bits.append("%d CONTESTED" % len(self.contested))
+        if self.foreign:
+            bits.append("%d FOREIGN" % len(self.foreign))
         if self.from_base:
             bits.append("snapshot from %s" % self.from_base[:12])
         if self.holders:
@@ -1010,17 +1265,29 @@ def print_review(log, root, branch, infos, plans, held, digest, unselected=()):
         # large landing only prints the bodies that need reading.
         bodies = len(info.hunks) <= MAX_HUNK_BODIES
         for number, hunk in enumerate(info.hunks, 1):
-            marks = ["CONTESTED" if number in info.contested else "yours"]
-            if number not in info.selected:
-                marks.append("LEFT OUT by --exclude-hunk/--only-hunk")
+            if number in info.foreign:
+                marks = [foreign_mark(info.foreign[number])]
+                if number in info.taken:
+                    marks.append("yours to land (--take-foreign)")
+                elif number not in info.selected:
+                    marks.append("held back: a FOREIGN hunk lands only with --take-foreign")
+            else:
+                marks = ["CONTESTED" if number in info.contested else "yours"]
+                if number not in info.selected:
+                    marks.append("LEFT OUT by --exclude-hunk/--only-hunk")
             log("  hunk %d of %d  +%d -%d  %s  %s"
                 % (number, len(info.hunks), hunk.plus, hunk.minus, hunk.header(),
                    ", ".join(marks)))
-            if bodies or number in info.contested or number not in info.selected:
+            if (bodies or number in info.contested or number in info.foreign
+                    or number not in info.selected):
                 sys.stdout.write("".join("    " + line for line in hunk.body()))
         if not bodies:
-            log("  (%d hunks, so only the contested and left-out ones are printed in full; "
-                "`--dry-run` prints the whole merged diff)" % len(info.hunks))
+            log("  (%d hunks, so only the contested, FOREIGN and left-out ones are printed "
+                "in full; `--dry-run` prints the whole merged diff)" % len(info.hunks))
+        if info.foreign and not info.taken:
+            log("  FOREIGN hunks are another pane's edits sitting in your working tree; "
+                "--confirm does not land them. To land one on purpose: --take-foreign "
+                "%s:%s" % (info.path, ",".join(str(n) for n in sorted(info.foreign))))
     log("")
     log("what it would land (digest %s):" % digest)
     for path in sorted(plans):
@@ -1041,8 +1308,12 @@ def print_review(log, root, branch, infos, plans, held, digest, unselected=()):
     log("  leave hunks out: --exclude-hunk <path>:<n>[,<n>-<m>]   (repeatable)")
     log("  or keep a few:   --only-hunk <path>:<n>[,<n>-<m>]      (those hunks of that")
     log("                     one path only — other paths land whole, as listed above)")
+    log("  take a foreign:  --take-foreign <path>:<n>[,<n>-<m>]   (another pane's hunk, named")
+    log("                     above; landed on purpose, and the commit message records whose")
+    log("                     edit it was)")
     log("Hunks left out are neither committed nor touched: they stay in the working tree and a "
-        "later commit picks them up. Either flag prints a new digest.")
+        "later commit picks them up. A foreign hunk (another pane's, named above) is left out "
+        "by --confirm until you take it. Any of these flags prints a new digest.")
     log("The digest covers the tip of %s and the exact bytes of every path, so an edit in the "
         "working tree, a different selection, or %s moving makes it stop matching and you are "
         "asked again." % (branch, branch))
@@ -1412,6 +1683,19 @@ def cmd_commit(args, log):
         if path in whole:
             raise Fail("%s is a --whole path: it has no snapshot, so it has no numbered hunks"
                        % path)
+    takes = parse_selection(repo, args.take_foreign, "--take-foreign")
+    for path in sorted(takes):
+        if path not in paths:
+            raise Fail("%s is not one of this commit's paths (%s)" % (path, ", ".join(paths)))
+        if path in whole:
+            raise Fail("%s is a --whole path: it has no snapshot, so it has no numbered hunks"
+                       % path)
+        if path in excludes and takes[path] & excludes[path]:
+            raise Fail("--exclude-hunk and --take-foreign both name %s:%s; pick one"
+                       % (path, ",".join(str(n) for n in sorted(takes[path] & excludes[path]))))
+        if path in onlys and not takes[path] <= onlys[path]:
+            raise Fail("--only-hunk already leaves %s:%s out, so --take-foreign cannot land "
+                       "it" % (path, ",".join(str(n) for n in sorted(takes[path] - onlys[path]))))
 
     warn_overlaps(root, args.session, paths, log)
 
@@ -1457,6 +1741,34 @@ def cmd_commit(args, log):
                 info.contested = contested_hunks(root, args.session, path, info.snapshot,
                                                  info.hunks, info.holders,
                                                  forced=bool(info.from_base))
+                # FOREIGN: a held hunk whose removed+added lines are exactly the change
+                # another pane's authorship journal recorded for this path is that pane's
+                # edit sitting in your working tree (#6CSN confirmed such a review and
+                # landed #234Z's hunk as its own). Only held paths need it — an
+                # uncontested path has no review to read past. No journal, an unreadable
+                # blob, or no match, and the hunk stays merely CONTESTED, as today.
+                if info.contested or info.stale or info.from_base:
+                    mine = {t for t in (my_token(), meta.get("token")) if t}
+                    found = foreign_hunks(root, repo, path, mine)
+                    for number, hunk in enumerate(info.hunks, 1):
+                        entry = found.get(hunk_blocks(hunk))
+                        if entry is not None:
+                            info.foreign[number] = entry
+                info.taken = (takes.get(path) or set()) & set(info.foreign)
+                stray_takes = sorted((takes.get(path) or set()) - set(info.foreign))
+                if stray_takes:
+                    raise Fail("--take-foreign %s:%s — hunk %s of %s is not FOREIGN right now "
+                               "(yours, or merely contested, or the numbering moved). Run "
+                               "commit again without --take-foreign to see the hunks numbered."
+                               % (path, ",".join(str(n) for n in stray_takes),
+                                  ",".join(str(n) for n in stray_takes), path))
+                if info.foreign:
+                    # A FOREIGN hunk is somebody else's edit: --confirm leaves it in the
+                    # working tree. Leaving it out rides the --exclude-hunk machinery, so
+                    # the digest, the merge and the snapshot left behind all treat it as
+                    # "still to land later".
+                    info.selected -= set(info.foreign) - info.taken
+                    info.excluded = numbers - info.selected
                 if info.excluded:
                     if not info.selected:
                         continue          # every hunk left out: this path is not in the commit
@@ -1513,11 +1825,11 @@ def cmd_commit(args, log):
             return 0
 
         if args.no_verify and held:
-            raise Fail("--no-verify is refused while anything is contested or stale (%s). "
-                       "Those are exactly the landings that broke the build on 2026-09-19: "
-                       "the working tree compiled because the other session's other half was "
-                       "sitting in it, and the tree that went onto the branch did not."
-                       % ", ".join(held))
+            raise Fail("--no-verify is refused while anything is contested, FOREIGN or "
+                       "stale (%s). Those are exactly the landings that broke the build on "
+                       "2026-09-19: the working tree compiled because the other session's "
+                       "other half was sitting in it, and the tree that went onto the "
+                       "branch did not." % ", ".join(held))
         if args.confirm and args.confirm != digest:
             print_review(log, root, branch, infos, plans, held, digest, unselected)
             raise Fail("--confirm %s does not match this commit's digest %s. Something that "
@@ -1568,7 +1880,17 @@ def cmd_commit(args, log):
                                % (branch, step), code=5)
                 verified = cxx
 
-        new = build_commit(repo, tip, entries, message, tree=tree)
+        taken_notes = [(path, number, infos[path].foreign[number])
+                       for path in sorted(infos) for number in sorted(infos[path].taken)]
+        commit_message = message
+        if taken_notes:
+            # One trailer per taken hunk: the commit message says whose edit it carries.
+            commit_message = "%s\n\n%s" % (
+                message.rstrip("\n"),
+                "\n".join("Relay-take-foreign: %s:%d from pane %s"
+                          % (path, number, (entry.get("pane") or "unknown pane").strip())
+                          for path, number, entry in taken_notes))
+        new = build_commit(repo, tip, entries, commit_message, tree=tree)
         touched = [line for line in git_out(repo, "diff", "--no-renames", "--name-only", tip, new).splitlines()
                    if line]
         if sorted(touched) != sorted(entries):
@@ -1605,6 +1927,10 @@ def cmd_commit(args, log):
                 kept.add(path)
                 log("  %s: %d hunk(s) left uncommitted in the working tree; a later commit "
                     "picks them up" % (path, len(info.excluded)))
+                for number in sorted(set(info.foreign) & info.excluded):
+                    log("    hunk %d %s; it stays in the working tree until its pane lands "
+                        "it, or you take it with --take-foreign %s:%d"
+                        % (number, foreign_mark(info.foreign[number]), path, number))
             take_snapshot(repo, root, args.session, path, meta, new, content=content,
                           base_rev=base_rev)
         meta["updated"] = now()
@@ -1621,9 +1947,11 @@ def cmd_commit(args, log):
 
         if not getattr(args, "no_cards", False):
             try:
-                append_commit_to_cards(repo, new, message, log)
+                append_commit_to_cards(repo, new, commit_message, log)
             except Exception as exc:  # the commit already landed; card bookkeeping is best effort
                 log("cards: could not record %s (%s)" % (new[:12], exc))
+        for path, number, entry in taken_notes:
+            note_taken_on_card(repo, path, number, entry, new, args.session, log)
 
         print(new)
         return 0
@@ -1638,6 +1966,32 @@ def cmd_commit(args, log):
 # QA's "newest hash" is its last entry. The card file is written in the working tree *after* the
 # swap and is not part of the commit it records; it lands with the session's next commit.
 CARD_REF_RE = re.compile(r"#([0-9A-HJKMNP-TV-Z]{4})(?![0-9A-Za-z])")
+
+
+def note_taken_on_card(repo, path, number, entry, sha, session, log):
+    """Landing a FOREIGN hunk with --take-foreign (decision 4 of #WNKN) leaves a note on that
+    hunk's card thread, so the pane that wrote the edit sees where it went. Written in the
+    working tree after the swap, like the card links, and never a failure of the commit."""
+    card = str(entry.get("card") or "").lstrip("#").strip()
+    if not card:
+        return
+    try:
+        thread = Path(repo) / ".board" / "threads" / ("%s.md" % card)
+        thread.parent.mkdir(parents=True, exist_ok=True)
+        stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        suffix = hashlib.sha256(("%s %s %d" % (stamp, path, number))
+                                .encode("utf-8")).hexdigest()[:2]
+        note = ("hunk %s:%d (pane %s's edit) landed by session %s in commit %s via land.py "
+                "--take-foreign" % (path, number, (entry.get("pane") or "unknown pane").strip(),
+                                    session, sha[:12]))
+        with thread.open("a", encoding="utf-8") as fh:
+            if thread.stat().st_size:
+                fh.write("\n")
+            fh.write("<!-- relay:entry %s-%s author=land.py kind=note -->\n%s\n"
+                     % (stamp, suffix, note))
+        log("cards: noted the take on #%s" % card)
+    except Exception as exc:  # noqa: BLE001 - the commit already landed
+        log("cards: could not note the take on #%s (%s)" % (card, exc))
 
 
 def append_commit_to_cards(repo, sha, message, log):
@@ -1764,7 +2118,9 @@ def collect_garbage(root, log, dry_run=False, quiet=False):
 
     - a pre-#SZHQ `<session>/verify` directory nobody has written for LEGACY_VERIFY_MINUTES;
     - a session idle longer than GC_DAYS: its directory and its registry entry;
-    - a session directory with no meta.json and no registry entry (a crashed `begin`).
+    - a session directory with no meta.json and no registry entry (a crashed `begin`);
+    - authorship journal lines older than GC_DAYS, and blobs of that age that no
+      surviving line names (attributions that old can no longer be claimed by anyone).
     Live sessions' snapshots are never touched, and neither is the working tree.
     """
     root = Path(root)
@@ -1775,7 +2131,7 @@ def collect_garbage(root, log, dry_run=False, quiet=False):
     cutoff = _dt.datetime.now().timestamp() - LEGACY_VERIFY_MINUTES * 60
     for directory in sorted(p for p in root.iterdir() if p.is_dir()):
         name = directory.name
-        if name == "verify-slots" or name.startswith("."):
+        if name in ("verify-slots", "authors", "blobs") or name.startswith("."):
             continue
         entry = registry.get(name)
         idle = session_idle_minutes(entry) if isinstance(entry, dict) else None
@@ -1793,7 +2149,63 @@ def collect_garbage(root, log, dry_run=False, quiet=False):
                                             else legacy) < cutoff:
             doomed.append((legacy, "per-session verify build (now pooled)", None))
 
+    # The authorship journal ages with the sessions it can still attribute. Lines older
+    # than GC_DAYS are dropped (a journal file left with none is unlinked), and a blob of
+    # that age goes unless some surviving line still names it.
     freed = 0
+    old_lines = 0
+    files = []           # blobs to remove as single files
+    if (root / "authors").is_dir():
+        old = _dt.datetime.now().timestamp() - GC_DAYS * 86400
+        needed = set()
+        for journal in sorted((root / "authors").glob("*.jsonl")):
+            try:
+                raw_lines = journal.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            kept, dropped = [], 0
+            for raw in raw_lines:
+                try:
+                    entry = json.loads(raw)
+                    when = float(entry.get("ts") or 0)
+                except (ValueError, AttributeError):
+                    kept.append(raw)          # unreadable lines are not ours to judge
+                    continue
+                if when < old:
+                    dropped += 1
+                else:
+                    kept.append(raw)
+                    needed.add(entry.get("before"))
+                    needed.add(entry.get("after"))
+            if not dropped:
+                continue
+            try:
+                was = journal.stat().st_size
+            except OSError:
+                continue
+            old_lines += dropped
+            if not quiet or dry_run:
+                log("gc: %s %d old authorship journal line%s from %s"
+                    % ("would prune" if dry_run else "pruned", dropped,
+                       "" if dropped == 1 else "s", journal))
+            if not dry_run:
+                if kept:
+                    journal.write_text("\n".join(kept) + "\n", encoding="utf-8")
+                    freed += was - sum(len(raw) + 1 for raw in kept)
+                else:
+                    journal.unlink(missing_ok=True)
+                    freed += was
+        if (root / "blobs").is_dir():
+            for blob in sorted((root / "blobs").glob("*")):
+                if blob.name in needed:
+                    continue
+                try:
+                    if _dt.datetime.now().timestamp() - blob.stat().st_mtime < GC_DAYS * 86400:
+                        continue
+                except OSError:
+                    continue
+                files.append((blob, "old authorship blob"))
+
     for path, why, name in doomed:
         size = tree_bytes(path)
         freed += size
@@ -1802,16 +2214,30 @@ def collect_garbage(root, log, dry_run=False, quiet=False):
                                         path, why, human_bytes(size)))
         if not dry_run:
             shutil.rmtree(str(path), ignore_errors=True)
+    for path, why in files:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        freed += size
+        if not quiet or dry_run:
+            log("gc: %s %s (%s, %s)" % ("would remove" if dry_run else "removed",
+                                        path, why, human_bytes(size)))
+        if not dry_run:
+            try:
+                path.unlink()
+            except OSError:
+                pass
     names = [name for _, _, name in doomed if name]
     if names and not dry_run:
         def mutate(data):
             for name in names:
                 data["sessions"].pop(name, None)
         edit_registry(root, mutate)
-    if doomed and quiet and not dry_run:
+    if (doomed or files) and quiet and not dry_run:
         log("gc: reclaimed %s from %d stale land director%s under %s"
             % (human_bytes(freed), len(doomed), "y" if len(doomed) == 1 else "ies", root))
-    return len(doomed), freed
+    return len(doomed) + len(files) + old_lines, freed
 
 
 def auto_gc(root, log):
@@ -2150,6 +2576,33 @@ commit picks them up. Either selection flag prints a new digest. The digest cove
 the exact bytes of every path, so a working-tree edit, a different selection or main moving
 makes it stop matching, and you are asked again.
 
+foreign hunks
+
+Every tool write is also journalled, per session token, under the land root
+(authors/<token>.jsonl, both byte images in blobs/). At your commit, a held hunk whose
+removed and added lines are exactly the change another pane's journal recorded for that path
+is FOREIGN: the review names the pane, its card and the time, because that hunk is not yours
+-- on 2026-09-24 session #6CSN confirmed a review whose every hunk was contested and thereby
+landed #234Z's edit as its own. --confirm leaves FOREIGN hunks in the working tree (they land
+when their pane commits, or with a later commit of yours once that pane is gone), and
+
+  commit mysession -m "..." --take-foreign src/Pane.h:2   land that pane's hunk on purpose
+
+lands one deliberately: the commit message records whose edit it was, and a note goes to that
+hunk's card thread. --no-verify stays refused while any FOREIGN hunk is held.
+
+auto-begin and the pane token
+
+Before a pane's first tool write of a path, the backend claims it with
+`begin <RELAY_SESSION_TOKEN> <path> --auto --contact "pane <id>"`, so the pane's edits are
+snapshotted from before the first keystroke. A manual `begin` on that same path from a
+process with the same RELAY_SESSION_TOKEN adopts the claim: its earlier snapshot and
+timestamp become yours, the edits made before your begin still land, and the auto claim is
+gone (if you never begin manually, commit that token session instead). Without a claim to
+adopt, `begin` warns when your own journal says you edited the path before claiming it: that
+edit predates the snapshot and will not land from it -- `begin --base main` is the way to
+land it.
+
   -m accepts either the message text or the path to a file holding it.
   --paths p...       land only some of the session's paths.
   --whole p          commit the entire working copy of a path you never ran `begin` on.
@@ -2172,8 +2625,9 @@ incremental whoever used it last. Landed .py files are byte-compiled the same wa
 disk
 
 `gc` reclaims what nobody will read again: sessions idle longer than RELAY_LAND_GC_DAYS (default
-3) and pre-#SZHQ per-session verify builds. It runs by itself at most once an hour from begin,
-commit, who and doctor; `gc --dry-run` says what it would take. `who` prints the root's size.
+3), pre-#SZHQ per-session verify builds, and authorship journal lines and blobs that old. It
+runs by itself at most once an hour from begin, commit, who and doctor; `gc --dry-run` says
+what it would take. `who` prints the root's size.
 
 The working tree is deliberately not what gets built: it holds every session's uncommitted
 code, so it can compile while the tree you are landing cannot. That is how a green build of
@@ -2229,6 +2683,11 @@ def build_parser():
                             "working copy (for a file you edited before claiming it)")
     begin.add_argument("--from-head", action="store_true",
                        help="shorthand for --base <the current tip of the branch>")
+    begin.add_argument("--auto", action="store_true",
+                       help="record this claim as the pane's own (the backend begins one "
+                            "before a pane's first tool write of a path); a later manual "
+                            "`begin` from a process with the same RELAY_SESSION_TOKEN "
+                            "adopts its snapshot")
     begin.set_defaults(func=cmd_begin)
 
     commit = subs.add_parser("commit", help="land your hunks on the branch")
@@ -2248,6 +2707,11 @@ def build_parser():
     commit.add_argument("--only-hunk", action="append", default=None, metavar="PATH:N",
                         help="land only these hunks of that path and leave the rest out "
                              "(repeatable, accumulating)")
+    commit.add_argument("--take-foreign", dest="take_foreign", action="append", default=None,
+                        metavar="PATH:N",
+                        help="land a FOREIGN hunk (another pane's edit, named in the held "
+                             "review) on purpose; the commit message records whose edit it "
+                             "was (repeatable, same parser as --only-hunk)")
     commit.add_argument("--stale-minutes", type=float, default=DEFAULT_STALE_MINUTES,
                         help="hold a path whose snapshot is older than this (default %d)"
                              % DEFAULT_STALE_MINUTES)
@@ -2260,7 +2724,8 @@ def build_parser():
                                                                   "relay"),
                         help="the cmake target the default verify builds (default relay)")
     commit.add_argument("--no-verify", action="store_true",
-                        help="skip the build gate; refused when any path is contested or stale")
+                        help="skip the build gate; refused when any path is contested, "
+                             "FOREIGN or stale")
     commit.set_defaults(func=cmd_commit)
 
     who = subs.add_parser("who", help="live sessions, their paths, ages and contacts")

@@ -124,6 +124,21 @@ else appeared afterwards and is **contested**. At *your* commit, a path claimed 
 began before you has *every* hunk contested — you hold no marker for them, so nothing in the file
 can say who typed what.
 
+Contested is not the end of the story: on 2026-09-24 session #6CSN confirmed a review whose every
+hunk was contested and thereby landed #234Z's edit of `Pane.h` as its own. The backend now
+journals every tool write per session token (under the land root, `authors/<token>.jsonl` with
+both byte images in `blobs/`), and at your commit a held hunk whose removed and added lines are
+exactly the change another pane's journal recorded is **FOREIGN**: the review names the pane, its
+card and the time. `--confirm` does *not* land FOREIGN hunks — they stay in the working tree and a
+later commit (yours, once that pane is gone, or theirs) picks them up. To land one on purpose:
+
+```
+commit <me> -m "..." --take-foreign src/Pane.h:2       land another pane's hunk deliberately
+```
+
+records whose edit it was in the commit message and leaves a note on that hunk's card thread.
+Your own token's journal never marks your hunks foreign.
+
 `commit` always prints a per-path stat (hunks, +/- lines, snapshot age, who else holds the path).
 When a path has contested hunks, or its snapshot is older than 15 minutes (`--stale-minutes`), it
 does **not** land: it prints the numbered hunks with the contested ones marked, plus a digest of
@@ -144,6 +159,15 @@ matching and you are asked again. Uncontested, fresh paths still land in one ste
 is shown in every claim warning. `python3 scripts/land.py who` lists the live sessions, what they
 claim, how old their snapshots are and their contacts. A session that has run no land.py command
 for 12 hours is stale: `who` and `doctor` say so, and it stops contesting anything.
+
+The backend also claims paths for your pane itself, with `begin <RELAY_SESSION_TOKEN> <path> --auto
+--contact "pane <id>"`, before the pane's first tool write of that path — so a snapshot exists from
+before the first keystroke. A manual `begin` on the same path from a process with the same
+`RELAY_SESSION_TOKEN` **adopts** that claim: the pane's earlier snapshot and timestamp become
+yours, the edits made before your begin still land from it, and the auto claim is gone (commit the
+token session instead if you never begin manually). Without a claim to adopt, `begin` warns when
+your own journal says you edited the path before claiming it: that edit predates the snapshot and
+will not land from it — `begin --base main` is the way to land it.
 
 `begin --base <rev>`, or `--from-head`, snapshots that revision's version of each path instead of
 the working copy — for a file you had already edited before claiming it. **This is the supported
