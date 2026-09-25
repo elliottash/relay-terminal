@@ -642,7 +642,8 @@ public:
     // none means a terminal pane, which is every pane written before this card.
     Pane(const QString &workspace, const QString &cwd, bool cleanShell,
          const QString &engineCore = relay::defaultEngineCore(),
-         relay::agent::Context *context = nullptr)
+         relay::agent::Context *context = nullptr,
+         const QJsonObject &restoreSpec = QJsonObject())
         : m_workspace(workspace), m_cwd(cwd.isEmpty() ? workspace : cwd), m_cleanShell(cleanShell) {
         setProperty("paneTabKeysReserved", true); // Console completion and Shift+Tab Plan own these keys.
         m_engineCore = engineCore;
@@ -681,6 +682,12 @@ public:
         // transcript.
         if (hasShell()) startWorker();
         else QTimer::singleShot(0, this, [this] { if (!sharesWorker()) startWorker(); });
+        // A pane restoring a local holder line (#87HB) must know it before its shell starts:
+        // startTerminal would otherwise run the pane under the holder directly, and the
+        // re-attach line belongs at the pane's first prompt, after the restored scrollback.
+        const QString restoredLocalLogin = restoreSpec.value(QStringLiteral("local_login")).toString();
+        if (!restoredLocalLogin.isEmpty() && restoredLocalLogin.size() <= 4096)
+            m_localLoginRestore = restoredLocalLogin;
         startTerminal(cleanShell);
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
         connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });
@@ -1307,6 +1314,11 @@ public:
         // hand-edited layout grew past reason is ignored rather than typed.
         const QString remoteLogin = spec.value(QStringLiteral("remote_login")).toString();
         if (remoteLogin.size() <= 4096) m_remoteLoginRestore = remoteLogin;
+        // The local holder's re-attach line (#87HB) restores the same way: the pane's own shell
+        // stays bare until its first prompt, so the scrollback and the queue are back before the
+        // session's screen takes the pane over (runRestoredRemoteLogin, PaneRuntime.cpp).
+        const QString localLogin = spec.value(QStringLiteral("local_login")).toString();
+        if (localLogin.size() <= 4096) m_localLoginRestore = localLogin;
         // The terminal text this pane had when Relay was last quit (src/WindowState.h). The pane
         // keeps the saved id, so the same file is rewritten instead of one per restart, and the
         // lines are replayed once the restarted shell reports its first prompt.
@@ -1332,6 +1344,22 @@ public:
     // first prompt. Plain text: see the note in src/WindowState.h on why the colours do not come
     // back with it.
     QString scrollbackId() const { return m_scrollbackId; }
+    // The holder session this pane's shell runs in (#87HB): read from the pane's live
+    // foreground argv - the holder script, or the tmux client it execs - so a pane the
+    // re-attach line brought back answers as truly as one started under the holder.
+    QString localHolderSession() const {
+        return m_backend ? relay::ssh::holderSession(foregroundArgv()) : QString();
+    }
+    // The line a layout leaf saves as local_login, and a restored pane runs at its first
+    // prompt: the holder script, the session name, and the pane's directory for the case
+    // the session is gone and the line has to create it again. Empty when this pane's
+    // shell is not under the local holder.
+    QString localHolderLine() const {
+        const QString session = localHolderSession();
+        if (session.isEmpty()) return QString();
+        return QStringLiteral("/bin/sh ") + relay::ssh::shellQuote(m_data + QStringLiteral("/shell/remote-holder.sh"))
+            + QLatin1Char(' ') + session + QLatin1Char(' ') + relay::ssh::shellQuote(m_cwd);
+    }
     // The file this pane's prompt-box Up/Down history lives in, under the same id (owner report,
     // 2026-09-19: "i want pane histories for up/down"). Empty only without a data location.
     QString promptHistoryPath() const { return relay::prompthistory::pathFor(m_scrollbackId); }
@@ -3890,6 +3918,7 @@ public:
         // besides this one to share the space out to.
         state.canEqualize = hasPaneSiblings && hasPaneSiblings();
         state.remoteHost = relay::panestatus::remoteHost(remoteCommandLine());   // "New pane on <host>" (#S5SH)
+        state.localSession = localHolderSession();   // "Close and end this pane's session" (#87HB)
         if (m_backend) {
             state.hasSelection = !m_backend->selectedText().isEmpty();
             int line = -1, column = -1;
@@ -16939,6 +16968,7 @@ private:
     // The holder session this pane restores into, and the master under a mosh login (#XQ8F): see
     // runRestoredRemoteLogin()/updateMasterKeepalive() in PaneRuntime.cpp.
     QString m_remoteLoginRestore;   // the spec's remote_login, run once at the shell's first prompt
+    QString m_localLoginRestore;    // the spec's local_login line, run the same way (#87HB)
     bool m_remoteLoginRan = false;  // and never again, not even after a later shell restart
     QTimer m_masterKeepalive;       // mosh only: ssh's own session keeps its master open
     // prompt-box-only input: masked prompt box at a password prompt, and the take-control button

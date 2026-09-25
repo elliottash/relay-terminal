@@ -327,6 +327,20 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
         terminal.rows << toggleRow(QStringLiteral("terminal/shell_integration"),
                                    QStringLiteral("Shell integration (OSC 7/133)"),
                                    QStringLiteral("Directory and prompt marks; applies to new panes"), false);
+        // The local half of persistence (#87HB): a pane's shell runs inside the same holder a
+        // remote pane's does (src/PaneRuntime.cpp startTerminal), so it survives Relay quitting
+        // or crashing and a restarted pane re-attaches. Read at pane start, so it applies to
+        // new panes; panes under memory isolation keep their plain shell either way.
+        {
+            relay::SettingRow row = toggleRow(QStringLiteral("terminal/persistLocal"),
+                                              QStringLiteral("Persistent local panes"),
+                                              QStringLiteral("A pane's shell runs in a session that outlives Relay, so a "
+                                                             "restart brings it back with what it was running; applies "
+                                                             "to new panes"),
+                                              true);
+            row.aliases = QStringLiteral("persistent local tmux session holder survive restart");
+            terminal.rows << row;
+        }
         // SSH sessions (#S5SH, docs/SSH-AND-MOSH.md): the wrapper is set up when a pane's shell
         // starts, so the mode applies to new panes; the host lists are read at each login.
         terminal.rows << headingRow(QStringLiteral("SSH"));

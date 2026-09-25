@@ -243,7 +243,7 @@ private:
         // teaching it.
         add("ssh.connect", "tab", "Connect to host…: a new tab running ssh to a host from ~/.ssh/config or a recent one", {});
         // The holder sessions every pane's ssh now lands in (#XQ8F): one place to reattach or end one.
-        add("ssh.remoteSessions", "tab", "Remote sessions on this host…: the persistent sessions on this pane's host — reattach one in a new tab, or end it", {});
+        add("ssh.remoteSessions", "tab", "Persistent sessions…: the holder sessions this pane can reach — on its host over ssh, or on this machine — reattach one in a new tab, or end it", {});
         // Ctrl+E, not Ctrl+P: one-handed (owner, 2026-09-17). Ctrl+D is left alone because it is
         // end-of-input for a running program. Ctrl+Shift+E is the twin that programs cannot swallow.
         // One key is now the whole of "new pane": it makes one on the right, and Left, Up or Down
@@ -267,7 +267,7 @@ private:
         add("pane.close", "pane", "Close pane, then tab, then window", {QStringLiteral("Ctrl+W"), QStringLiteral("Ctrl+Shift+W")});
         // Closing a remote pane leaves its holder session running by design (#XQ8F); this is the
         // door out for the work that is done.
-        add("pane.closeEndRemote", "pane", "Close pane and end its remote session", {});
+        add("pane.closeEndRemote", "pane", "Close pane and end its holder session, remote or local", {});
         add("pane.moveToBackground", "pane", "Move the running agent to background", {QStringLiteral("Ctrl+Alt+B")});
         add("pane.runInBackground", "pane", "Run in background: send the prompt, or move a live agent there", {QStringLiteral("Ctrl+Alt+Return"), QStringLiteral("Ctrl+Alt+Enter")});
         add("pane.brighten", "pane", "Brighten pane", {QStringLiteral("Alt++"), QStringLiteral("Alt+="), QStringLiteral("Alt+Shift+=")});

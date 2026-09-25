@@ -16,6 +16,22 @@ if [[ -z ${RELAY_RUNTIME_DIR:-} || -z ${RELAY_SHELL_EVENT:-} || -z ${RELAY_SESSI
     return
 fi
 
+# Relay may run this shell inside its local session holder (#87HB): a tmux server that
+# outlives the window, so a pane can re-attach to its shell after Relay restarts. The
+# holder's session shell is started with RELAY_HOLDER=1 in its environment. tmux
+# parses and drops the OSC sequences it does not know, so there every mark below is
+# wrapped in its DCS passthrough and tmux unwraps it to the pane (the #S5SH shape; the
+# holder's conf sets allow-passthrough on). Everywhere else — a bare pane shell, or a
+# tmux of the user's own — the wrap is empty and each printf is byte-for-byte what it
+# always was. 7772 keeps a single form: a BEL terminator, which the engine reads
+# exactly like the ST one and which needs no ESC doubling inside the passthrough wrap.
+__relay_tmux_e=
+__relay_tmux_f=
+if [[ -n ${TMUX:-} && ${RELAY_HOLDER:-0} == 1 ]]; then
+    __relay_tmux_e='\033Ptmux;\033'
+    __relay_tmux_f='\033\\'
+fi
+
 # Each Relay pane starts in its own directory (new tab, split, or restored pane).
 if [[ -n ${RELAY_START_DIR:-} && -d $RELAY_START_DIR ]]; then
     builtin cd -- "$RELAY_START_DIR" || :
@@ -449,16 +465,16 @@ if [[ -n $(trap -p DEBUG) ]]; then
     # or enabling composer control. Older Bash has no safe pre-execution fallback.
     if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4) )); then
         __relay_unavailable_start() {
-            printf '\033]777;notify;relay-command;%s;;%s\007' "$RELAY_SESSION_TOKEN" \
+            printf "${__relay_tmux_e}"'\033]777;notify;relay-command;%s;;%s\007'"${__relay_tmux_f}" "$RELAY_SESSION_TOKEN" \
                 "$(printf %s "$PWD" | base64 | tr -d '\n')"
         }
         __relay_unavailable_prompt() {
             local command_status=$?
             if [[ ${__relay_unavailable_ran:-0} == 1 ]]; then
-                printf '\033]133;D;%s\007' "$command_status"
+                printf "${__relay_tmux_e}"'\033]133;D;%s\007'"${__relay_tmux_f}" "$command_status"
             fi
             __relay_unavailable_ran=1
-            printf '\033]133;A\007'
+            printf "${__relay_tmux_e}"'\033]133;A\007'"${__relay_tmux_f}"
             return "$command_status"
         }
         PS0='$(__relay_unavailable_start)'${PS0-}
@@ -547,7 +563,7 @@ __relay_mark_typed_rows() {
     (( up >= 1 )) || return 0
     printf '\033[%dA' "$up"
     for (( i = 1; i <= up; i++ )); do
-        printf '\033]7772;shell\033\\'
+        printf "${__relay_tmux_e}"'\033]7772;shell\007'"${__relay_tmux_f}"
         (( i < up )) && printf '\033[B'
     done
     printf '\033[B'
@@ -557,7 +573,7 @@ __relay_prompt_begin() {
     __relay_status=$?
     __relay_in_prompt=1
     if [[ -n ${__relay_command_active+set} ]]; then
-        printf '\033]133;D;%s\007' "$__relay_status"
+        printf "${__relay_tmux_e}"'\033]133;D;%s\007'"${__relay_tmux_f}" "$__relay_status"
     fi
     unset __relay_command_active
     __relay_accept_count=0
@@ -568,7 +584,7 @@ __relay_prompt_begin() {
 
 __relay_prompt_end() {
     compgen -A alias -A function | __relay_event ready "$__relay_status"
-    printf '\033]133;A\007'
+    printf "${__relay_tmux_e}"'\033]133;A\007'"${__relay_tmux_f}"
     __relay_at_prompt=1
     __relay_in_prompt=0
 }
@@ -596,7 +612,7 @@ __relay_load() {
     # Bash has printed pending job notifications before entering this binding. Repair the
     # upper gap now, just before Readline echoes the command; late output can consume PS1's
     # original gap. The terminal adds nothing when a blank row is already there.
-    printf '\033]7772;input-gap\033\\'
+    printf "${__relay_tmux_e}"'\033]7772;input-gap\007'"${__relay_tmux_f}"
     __relay_event loaded 0 < /dev/null
 }
 

@@ -62,6 +62,7 @@ struct TerminalMenuState {
     bool canClosePane = true;
     bool canEqualize = false;        // the tab holds another pane, so "Equalize pane sizes" moves something
     QString remoteHost;              // the host of the ssh/mosh session in the pane, or empty (#S5SH)
+    QString localSession;            // the local holder session this pane's shell runs in, or empty (#87HB)
 };
 
 // The entries for one right-click, in order, with separators as items whose id is "-". Never

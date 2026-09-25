@@ -92,9 +92,16 @@ QString rerunCommand(const QStringList &argv, QString *host = nullptr);
 // shape the running process shows them in — ssh's single final word, mosh's words after `--`, or
 // mosh-client's `-#` line, where the whole command was joined with spaces and the script's quotes
 // are literal characters — so a pane's argv alone says which holder it is in, whatever transport
-// carried it. Empty when the argv carries no holder command.
+// carried it. Empty when the argv carries no holder command. A pane under the local holder
+// (#87HB) is one too: its foreground is the holder script itself or the tmux client it execs.
 QString holderSession(const QStringList &argv);
 QString holderCwd(const QStringList &argv);
+
+// The holder session a local pane names for itself (#87HB): "relay-" plus the first eight
+// safe characters of its stable scrollback id, the same reduction the ssh wrapper applies to
+// RELAY_PANE_ID on a host. Empty when the id has no safe characters — such a pane never
+// runs under the local holder.
+QString localHolderName(const QString &scrollbackId);
 
 // One session on a host's holder server (`tmux -L relay`), as listSessionsCommand reports it.
 struct RemoteSession {

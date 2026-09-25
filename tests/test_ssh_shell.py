@@ -1050,6 +1050,167 @@ class HolderTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0)
                 temp.cleanup()
 
+    # The local half of #87HB. A local pane's shell runs through the same holder, invoked as
+    # `/bin/sh remote-holder.sh <session> <cwd> <command>`: the script is not executable where
+    # Relay keeps it, and <command> is what a NEW session runs instead of the login shell -
+    # Relay's integration bash with the pane's environment (src/PaneRuntime.cpp startTerminal).
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_local_holder_runs_the_session_command(self):
+        tmux = shutil.which("tmux")
+        tag = os.getpid()
+        sock = session = f"relay-local-{tag}"
+        temp = tempfile.TemporaryDirectory(prefix="relay-local-")
+        self.addCleanup(temp.cleanup)
+        home = temp.name
+        start = Path(temp.name) / "start"
+        start.mkdir()
+        env = self.holder_env(home, sock)
+        first_marker = Path(temp.name) / "first"
+        second_marker = Path(temp.name) / "second"
+        # exec sleep keeps the session alive, as the interactive integration shell does.
+        command = f"RELAY_HOLDER=1 sh -c 'pwd > {first_marker}; env >> {first_marker}; exec sleep 60'"
+        argv = ["/bin/sh", str(HOLDER), session, str(start), command]
+
+        def call(*args):
+            return subprocess.run([tmux, "-L", sock, *args], capture_output=True,
+                                  text=True, env=env, timeout=10)
+
+        pane = PtyProcess(argv, env)
+        try:
+            deadline = time.monotonic() + 10
+            while not first_marker.exists():
+                if time.monotonic() > deadline:
+                    self.fail(f"the session command never ran: {call('list-sessions').stderr}\n{pane.read()!r}")
+                time.sleep(0.1)
+            self.assertTrue(call("list-sessions").stdout.startswith(session + ": "))
+            text = first_marker.read_text()
+            self.assertIn(str(start), text)            # the -c start directory was honoured
+            self.assertIn("RELAY_HOLDER_SOCK=", text)   # the session shell keeps the client environment
+            self.assertIn("RELAY_HOLDER=1\n", text)    # and the command's own environment
+            # A second holder run with a different session command attaches (-A -D) and does
+            # NOT run it: the session exists, so its command is ignored. That is the whole of
+            # re-attaching - what the first command left running is still there.
+            pane2 = PtyProcess(["/bin/sh", str(HOLDER), session, str(start),
+                                f"sh -c 'echo x > {second_marker}; exec sleep 60'"], env)
+            try:
+                pane.proc.wait(timeout=5)               # the first client was detached, not killed
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and not second_marker.exists():
+                    time.sleep(0.1)
+                self.assertFalse(second_marker.exists())
+            finally:
+                pane2.close()
+        finally:
+            pane.close()
+            self.kill_holder(tmux, sock)
+
+    # Without a multiplexer the local invocation still lands in a shell, with the explanatory
+    # line - and the session command does not run, because there is no session to run it in.
+    def test_local_holder_fallback_without_tmux(self):
+        script = HOLDER
+        temp = tempfile.TemporaryDirectory(prefix="relay-local-fb-")
+        self.addCleanup(temp.cleanup)
+        home = Path(temp.name) / "home"
+        start = Path(temp.name) / "start"
+        bin_ = Path(temp.name) / "bin"
+        for d in (home, start, bin_):
+            d.mkdir()
+        shutil.copy(shutil.which("hostname"), bin_ / "hostname")   # the one command the fallback runs
+        marker = Path(temp.name) / "marker"
+        result = subprocess.run(
+            ["/bin/sh", str(script), "relay-fb", str(start),
+             f"sh -c 'echo x > {marker}'"],
+            input="\n", capture_output=True, text=True, timeout=15,
+            env={"PATH": str(bin_), "HOME": str(home), "TERM": "xterm-256color",
+                 "SHELL": "/bin/sh"},
+        )
+        self.assertTrue(result.stdout.startswith("relay: "), result.stdout)
+        self.assertIn("has neither tmux nor screen, so this session will not persist",
+                      result.stdout.splitlines()[0])
+        self.assertFalse(marker.exists())
+        self.assertEqual(result.returncode, 0)
+
+    # The pane's shell under the local holder is integration.bash with RELAY_HOLDER=1: it wraps
+    # its marks in tmux's DCS passthrough and tmux unwraps them to the pane. With RELAY_HOLDER=0
+    # the same shell under the same tmux emits its marks raw, and tmux drops them: the gate is
+    # what keeps a user's own tmux running today's behaviour.
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_local_holder_marks_reach_the_pane(self):
+        tmux = shutil.which("tmux")
+        for holder_flag in ("1", "0"):
+            with self.subTest(holder=holder_flag):
+                tag = os.getpid()
+                sock = session = f"relay-marks-{holder_flag}-{tag}"
+                temp = tempfile.TemporaryDirectory(prefix="relay-marks-")
+                home = temp.name
+                env = self.holder_env(home, sock)
+                runtime = Path(temp.name) / "runtime"
+                runtime.mkdir()
+                shell_dir = ROOT / "shell"
+                command = (f"RELAY_HOLDER={holder_flag} RELAY_RUNTIME_DIR={runtime} "
+                           f"RELAY_SHELL_EVENT={runtime}/events RELAY_SESSION_TOKEN=relay-mark-test "
+                           f"/bin/bash --noprofile --rcfile {shell_dir}/integration.bash -i")
+                pane = PtyProcess(["/bin/sh", str(HOLDER), session, str(home), command], env)
+                try:
+                    deadline = time.monotonic() + 15
+                    out = b""
+                    while time.monotonic() < deadline:
+                        out += pane.read(0.3)
+                        if b"133;A" in out or b"133;D" in out:
+                            break
+                    if holder_flag == "1":
+                        self.assertIn(osc(b"133;A"), out)   # unwrapped by tmux to the pane
+                    else:
+                        self.assertNotIn(osc(b"133;A"), out)   # raw marks die inside tmux
+                finally:
+                    pane.close()
+                    self.kill_holder(tmux, sock)
+                temp.cleanup()
+
+    # The restore shape: the holder client dies with the pane, the session and what it runs
+    # live on, and the saved local_login line - the same invocation without the session
+    # command - typed into a fresh shell brings the screen back. That is the line a pane
+    # saves (RelayWindow.h serializeNode) and runs at its first prompt after a restart
+    # (PaneRuntime.cpp runRestoredRemoteLogin).
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_local_holder_restore_line_reattaches(self):
+        tmux = shutil.which("tmux")
+        tag = os.getpid()
+        sock = session = f"relay-restore-{tag}"
+        temp = tempfile.TemporaryDirectory(prefix="relay-restore-")
+        self.addCleanup(temp.cleanup)
+        home = temp.name
+        env = self.holder_env(home, sock)
+        command = "sh -c 'echo RELAY_SESSION_MARKER; exec sleep 60'"
+        first = PtyProcess(["/bin/sh", str(HOLDER), session, "/tmp", command], env)
+        try:
+            deadline = time.monotonic() + 10
+            while True:
+                listing = subprocess.run([tmux, "-L", sock, "list-sessions"], capture_output=True,
+                                         text=True, env=env, timeout=10)
+                if listing.returncode == 0 and f"{session}: " in listing.stdout:
+                    break
+                if time.monotonic() > deadline:
+                    self.fail(f"the holder never made the session: {listing.stderr}\n{first.read()!r}")
+                time.sleep(0.1)
+            first.close()   # the pane's process dies with the pane; the session must not
+            listing = subprocess.run([tmux, "-L", sock, "list-sessions"], capture_output=True,
+                                     text=True, env=env, timeout=10)
+            self.assertIn(f"{session}: ", listing.stdout)
+            # A fresh shell - the restored pane's own shell - runs the saved line at its first
+            # prompt: sh, the script, the session, the directory. The tmux client it starts
+            # takes the pane over and redraws the session's screen.
+            shell = PtyShell(["/bin/bash", "--noprofile", "--norc", "-i"],
+                             {**env, "PS1": "RP> ", "HISTFILE": f"{home}/hist"})
+            try:
+                line = f"/bin/sh {HOLDER} {session} /tmp"
+                os.write(shell.master, line.encode() + b"\r")
+                shell.read(lambda: b"RELAY_SESSION_MARKER" in shell.output, timeout=10)
+            finally:
+                shell.close()
+        finally:
+            first.close()
+            self.kill_holder(tmux, sock)
 
 if __name__ == "__main__":
     unittest.main()

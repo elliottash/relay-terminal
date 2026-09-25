@@ -904,6 +904,47 @@ void Pane::startTerminal(bool cleanShell) {
                 .filePath(QStringLiteral("tmp"));
         if (QDir().mkpath(scratchTmp))   // a TMPDIR that is not there would break mktemp in the shell
             shellEnvironment << QStringLiteral("TMPDIR=") + scratchTmp;
+        // The local half of #87HB: with persistent local panes on, the pane's shell runs inside
+        // the same holder a remote pane's does - a tmux session named after the pane's stable
+        // scrollback id on Relay's own socket, so quitting or crashing Relay leaves the shell and
+        // whatever it is running alive, and a restarted pane re-attaches to it. The session's
+        // shell is the integration bash this pane would have run anyway, with this pane's
+        // environment on the session command line: one tmux server serves every pane, so a new
+        // session must not inherit whichever pane's client happened to start the server.
+        // RELAY_HOLDER is what makes shell/integration.bash wrap its marks in tmux's DCS
+        // passthrough, and the holder's conf turns allow-passthrough on. Memory isolation keeps
+        // a pane's shell inside a unit that dies with it, which a server that outlives the pane
+        // would defeat, so an isolated pane runs exactly as before - and so does a pane
+        // restoring a local_login line, which re-attaches at the pane's first prompt instead
+        // (initRestore), so the restored scrollback replays before the session's screen. The
+        // holder script is not executable where Relay keeps it, so it runs through sh; it execs
+        // tmux, which replaces the argv the pane shows.
+        const QString holderSession = relay::ssh::localHolderName(scrollbackId());
+        const bool underLocalHolder = !holderSession.isEmpty() && m_localLoginRestore.isEmpty()
+            && QSettings().value(QStringLiteral("terminal/persistLocal"), true).toBool()
+            && !(isolation::enabled() && isolation::available());
+        QStringList sessionProgram = shell;
+        if (underLocalHolder) {
+            QStringList assignments;
+            const auto quoted = [&assignments](const QString &entry) {
+                assignments << entry.section(QLatin1Char('='), 0, 0) + QLatin1Char('=')
+                    + relay::ssh::shellQuote(entry.mid(entry.indexOf(QLatin1Char('=')) + 1));
+            };
+            for (const QString &entry : std::as_const(shellEnvironment)) quoted(entry);
+            // The process-wide RELAY_* words a shell needs, from this pane's own Relay: the tmux
+            // server's environment is the first client's, which is another pane's.
+            const QProcessEnvironment system = QProcessEnvironment::systemEnvironment();
+            for (const char *name : {"RELAY_SESSION_TOKEN", "RELAY_RUNTIME_DIR", "RELAY_SHELL_EVENT",
+                                     "RELAY_SHELL_INTEGRATION", "RELAY_CLEAN_SHELL", "RELAY_SSH_NEVER"}) {
+                const QString value = system.value(QLatin1String(name));
+                if (!value.isEmpty()) quoted(QLatin1String(name) + QLatin1Char('=') + value);
+            }
+            quoted(QStringLiteral("RELAY_HOLDER=1"));
+            QStringList words = assignments;
+            for (const QString &word : shell) words << relay::ssh::shellQuote(word);
+            sessionProgram = QStringList{QStringLiteral("/bin/sh"),
+                m_data + QStringLiteral("/shell/remote-holder.sh"), holderSession, m_cwd, words.join(QLatin1Char(' '))};
+        }
         if (isolation::enabled() && isolation::available()) {
             // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
             // command and the shell keeps running; Relay reports the kill from memory.events.
@@ -925,7 +966,8 @@ void Pane::startTerminal(bool cleanShell) {
                 s_isolationNoticeShown = true;
                 QTimer::singleShot(1500, this, [this] { status(QStringLiteral("Per-pane memory isolation is unavailable (no systemd user session); panes run unisolated.")); });
             }
-            started = m_backend->startProgram(shell.first(), shell.mid(1), m_cwd, shellEnvironment);
+            started = m_backend->startProgram(sessionProgram.first(), sessionProgram.mid(1), m_cwd,
+                shellEnvironment);
         }
         if (!started) throw std::runtime_error("The pane's shell could not be started.");
         m_oomKills = -1;
@@ -2275,6 +2317,18 @@ void Pane::pollShell() {
 // shell bridge writes the state pollShell reads here), and the flag keeps a shell restarted
 // later from running the line a second time into whatever the person is doing by then.
 void Pane::runRestoredRemoteLogin() {
+    // The local holder's line (#87HB) runs through the same door: the pane's own shell is at
+    // its first prompt, the restored scrollback and queue are already in place, and the line's
+    // holder attaches the pane to the session that outlived the quit.
+    if (m_remoteLoginRestore.isEmpty() && !m_localLoginRestore.isEmpty() && !m_remoteLoginRan) {
+        m_remoteLoginRan = true;   // one restored line per pane, remote or local
+        const QString localLine = m_localLoginRestore;
+        m_localLoginRestore.clear();
+        relay::log::info(QStringLiteral("local_login_restored pane=%1 line=%2")
+                             .arg(paneLogId(), localLine));
+        queueCommand(localLine);
+        return;
+    }
     if (m_remoteLoginRestore.isEmpty() || m_remoteLoginRan) return;
     m_remoteLoginRan = true;
     relay::log::info(QStringLiteral("remote_login_restored pane=%1 line=%2")

@@ -2863,6 +2863,29 @@ private:
             closePane(pane, true);
             return;
         }
+        if (login.host.isEmpty()) {
+            // A local holder pane (#87HB): its session lives on Relay's own tmux socket on this
+            // machine, so the kill runs here - the same command, no ssh around it - and the pane
+            // still closes only once the kill is confirmed.
+            auto *local = new QProcess(this);
+            local->setProgram(QStringLiteral("/bin/sh"));
+            local->setArguments({QStringLiteral("-c"), relay::ssh::killSessionCommand(session)});
+            QTimer::singleShot(10000, local, [local] { local->kill(); });
+            QPointer<Pane> localGuard(pane);
+            connect(local, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+                    [this, local, localGuard, session](int code, QProcess::ExitStatus status) {
+                        if (code == 0 && status == QProcess::NormalExit) {
+                            if (localGuard) closePane(localGuard, true);
+                        } else {
+                            notice(QStringLiteral("Could not end %1 on this machine; its pane remains open.")
+                                       .arg(session));
+                        }
+                        local->deleteLater();
+                    });
+            relay::log::info(QStringLiteral("closeEndLocal session=%1").arg(session));
+            local->start();
+            return;
+        }
         if (!login.reachable) {
             notice(QStringLiteral("Cannot reach %1 over the shared connection; %2 is still running there.")
                        .arg(login.host, session));
@@ -2886,34 +2909,53 @@ private:
         process->start();
     }
 
-    // ssh.remoteSessions. The holder sessions on this pane's host, listed over the shared
-    // connection: Enter (or a double-click) attaches to one in a new tab, End terminates it.
+    // ssh.remoteSessions. The holder sessions this pane can reach, listed and ended without a
+    // terminal: on the host over the shared connection (#XQ8F), or - for a pane on this machine -
+    // on Relay's own socket, the local holder of #87HB, so leftover relay-* sessions are visible
+    // and killable here too. Enter (or a double-click) attaches to one in a new tab; End
+    // terminates it. The same dialog serves both; only the commands differ.
     void openRemoteSessions() {
         Pane *pane = m_active;
         if (!pane) return;
         const HostLogin login = hostLoginOf(pane);
         const QString host = login.host;
-        if (!login.reachable) {
-            notice(host.isEmpty() ? QStringLiteral("This pane is not on a host over a shared connection.")
-                                  : QStringLiteral("Cannot reach %1 over the shared connection, so its sessions "
-                                                   "cannot be listed.").arg(host));
+        const bool local = host.isEmpty();   // no shared connection: this pane's sessions are Relay's own
+        if (!local && !login.reachable) {
+            notice(QStringLiteral("Cannot reach %1 over the shared connection, so its sessions "
+                                  "cannot be listed.").arg(host));
             return;
         }
+        const QString where = local ? QStringLiteral("this machine") : host;
 
         QDialog dialog(this);
         dialog.setObjectName(QStringLiteral("remoteSessionPicker"));
-        dialog.setWindowTitle(QStringLiteral("Remote sessions on %1").arg(host));
+        dialog.setWindowTitle(local ? QStringLiteral("Local persistent sessions")
+                                    : QStringLiteral("Remote sessions on %1").arg(host));
         dialog.resize(600, 380);
         auto *layout = new QVBoxLayout(&dialog);
         auto *list = new QListWidget(&dialog);
         layout->addWidget(list, 1);
-        auto *empty = new QLabel(QStringLiteral("Reading the sessions on %1…").arg(host), &dialog);
+        auto *empty = new QLabel(QStringLiteral("Reading the sessions on %1…").arg(where), &dialog);
         empty->setWordWrap(true);
         layout->addWidget(empty);
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
         auto *endButton = buttons->addButton(QStringLiteral("End session"), QDialogButtonBox::ActionRole);
         endButton->setEnabled(false);
         layout->addWidget(buttons);
+
+        // Every list, kill and attach runs the same holder commands; locally they go to this
+        // machine's own socket through sh rather than over the shared connection.
+        const auto runHolderCommand = [this, local, &login](const QString &command) {
+            auto *process = new QProcess(this);
+            if (local) {
+                process->setProgram(QStringLiteral("/bin/sh"));
+                process->setArguments({QStringLiteral("-c"), command});
+            } else {
+                process->setProgram(QStringLiteral("ssh"));
+                process->setArguments(hostControlArgs(login, command));
+            }
+            return process;
+        };
 
         const auto fill = [&](const QList<relay::ssh::RemoteSession> &sessions) {
             list->clear();
@@ -2927,14 +2969,12 @@ private:
                     list);
                 row->setData(Qt::UserRole, session.name);
             }
-            empty->setText(sessions.isEmpty() ? QStringLiteral("No persistent sessions on %1.").arg(host) : QString());
+            empty->setText(sessions.isEmpty() ? QStringLiteral("No persistent sessions on %1.").arg(where) : QString());
             empty->setVisible(sessions.isEmpty());
             endButton->setEnabled(list->currentItem() != nullptr);
         };
         const auto readSessions = [&](const auto &then) {
-            auto *process = new QProcess(this);
-            process->setProgram(QStringLiteral("ssh"));
-            process->setArguments(hostControlArgs(login, relay::ssh::listSessionsCommand()));
+            auto *process = runHolderCommand(relay::ssh::listSessionsCommand());
             QTimer::singleShot(10000, process, [process] { process->kill(); });
             connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process, &QObject::deleteLater);
             connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), &dialog,
@@ -2948,23 +2988,28 @@ private:
             QListWidgetItem *row = list->currentItem();
             if (!row) return;
             const QString session = row->data(Qt::UserRole).toString();
-            auto *process = new QProcess(this);
-            process->setProgram(QStringLiteral("ssh"));
-            process->setArguments(hostControlArgs(login, relay::ssh::killSessionCommand(session)));
+            auto *process = runHolderCommand(relay::ssh::killSessionCommand(session));
             QTimer::singleShot(10000, process, [process] { process->kill(); });
             connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), process, &QObject::deleteLater);
             connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), &dialog,
                     [&readSessions, &fill] { readSessions(fill); });  // the next decision is from a fresh list
-            relay::log::info(QStringLiteral("remoteSessions end host=%1 session=%2").arg(host, session));
+            relay::log::info(QStringLiteral("remoteSessions end %1 session=%2").arg(where, session));
             process->start();
         };
         const auto reattach = [&] {
             QListWidgetItem *row = list->currentItem();
             if (!row) return;
             const QString session = row->data(Qt::UserRole).toString();
+            // A local session re-attaches through the holder script itself, as a restored pane's
+            // local_login line does (#87HB); a host session re-attaches through ssh (#XQ8F).
+            const QString line = local
+                ? QStringLiteral("/bin/sh ")
+                    + relay::ssh::shellQuote(dataRoot() + QStringLiteral("/shell/remote-holder.sh"))
+                    + QLatin1Char(' ') + session
+                : relay::ssh::reattachCommand(host, session);
             if (addTab(paneNode(activeCwd()), m_tabs->currentIndex() + 1) && m_active) {
                 startNewTabTheme(m_tabs->currentWidget());
-                m_active->queueCommand(relay::ssh::reattachCommand(host, session));
+                m_active->queueCommand(line);
             }
             dialog.accept();
         };
@@ -5993,6 +6038,12 @@ private:
                                 holder.isEmpty() ? login
                                     : QStringLiteral("RELAY_SSH_SESSION=") + relay::ssh::shellQuote(holder)
                                           + QLatin1Char(' ') + login);
+                // The local twin (#87HB): a pane whose shell runs under the local holder saves
+                // its re-attach line, and a restarted pane runs it at the first prompt
+                // (Pane::initRestore, runRestoredRemoteLogin). rerunCommand reads this pane's
+                // tmux client as no ssh login, so the two leaves never both appear.
+                if (const QString localLine = pane->localHolderLine(); !localLine.isEmpty())
+                    leaf.insert(QStringLiteral("local_login"), localLine);
             }
             if (const QJsonArray queue = pane->queueForRestore(); !queue.isEmpty())
                 leaf.insert(QStringLiteral("queue"), queue);

@@ -99,6 +99,9 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
     // Closing a pane on a host leaves its session running there (#XQ8F); this ends it too.
     if (!state.remoteHost.isEmpty())
         add("closeEndRemote", QStringLiteral("Close and end the remote session"), state.canClosePane);
+    else if (!state.localSession.isEmpty())
+        // The local twin (#87HB): closing leaves the holder session running by design, this ends it.
+        add("closeEndRemote", QStringLiteral("Close and end this pane's session"), state.canClosePane);
 
     while (!items.isEmpty() && items.last().isSeparator())
         items.removeLast();

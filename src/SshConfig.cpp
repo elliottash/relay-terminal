@@ -224,6 +224,42 @@ struct HolderWords {
     QString cwd;
 };
 
+HolderWords localHolderWords(const QStringList &argv) {
+    // The local holder of #87HB runs the script through sh as the pane's own program —
+    // `/bin/sh <shell>/remote-holder.sh <session> <cwd> [command]` until the script execs
+    // tmux, whose client is then the pane's foreground: `tmux -L relay -f ... new-session
+    // -A -D -s <session> -c <cwd> [command]`. A tmux of the user's own never carries
+    // Relay's socket, so it never reads as a holder.
+    static const QRegularExpression sessionName(QStringLiteral("^[A-Za-z0-9_-]{1,80}$"));
+    const QString program = argv.isEmpty() ? QString() : argv.first();
+    for (int i = 0; i + 2 < argv.size(); ++i) {
+        const bool shell = argv.at(i) == QLatin1String("sh") || argv.at(i).endsWith(QLatin1String("/sh"));
+        if (!shell || !argv.at(i + 1).endsWith(QLatin1String("/remote-holder.sh")))
+            continue;
+        if (!sessionName.match(argv.at(i + 2)).hasMatch()) return {};
+        HolderWords found;
+        found.session = argv.at(i + 2);
+        if (argv.size() > i + 3) found.cwd = argv.at(i + 3);
+        return found;
+    }
+    if (program.endsWith(QLatin1String("/tmux"))) {
+        bool relaySocket = false;
+        HolderWords found;
+        for (int i = 1; i < argv.size(); ++i) {
+            if (argv.at(i) == QLatin1String("-L") && i + 1 < argv.size()
+                && argv.at(i + 1).startsWith(QLatin1String("relay")))
+                relaySocket = true;
+            if ((argv.at(i) == QLatin1String("-s") || argv.at(i) == QLatin1String("-t")) && i + 1 < argv.size()
+                && sessionName.match(argv.at(i + 1)).hasMatch())
+                found.session = argv.at(i + 1);
+            if (argv.at(i) == QLatin1String("-c") && i + 1 < argv.size())
+                found.cwd = argv.at(i + 1);
+        }
+        if (relaySocket && !found.session.isEmpty()) return found;
+    }
+    return {};
+}
+
 HolderWords holderWords(const QStringList &argv) {
     // mosh-client keeps the original mosh line inside its -# argument; the IP and port that follow
     // in argv are no part of it and must not read as the cwd.
@@ -535,11 +571,33 @@ QString rerunCommand(const QStringList &argv, QString *host) {
 }
 
 QString holderSession(const QStringList &argv) {
+    // A pane under the local holder (#87HB) is one too: its foreground is the holder
+    // script or the tmux client it execs, not an ssh with the script embedded.
+    const HolderWords local = localHolderWords(argv);
+    if (!local.session.isEmpty()) return local.session;
     return holderWords(argv).session;
 }
 
 QString holderCwd(const QStringList &argv) {
+    const HolderWords local = localHolderWords(argv);
+    if (!local.session.isEmpty()) return local.cwd;
     return holderWords(argv).cwd;
+}
+
+QString localHolderName(const QString &scrollbackId) {
+    // The same reduction the ssh wrapper applies to RELAY_PANE_ID on a host
+    // (shell/integration.bash): "relay-" plus the first eight safe characters of the
+    // pane's stable scrollback id, so the session a pane names is the one a restarted
+    // Relay looks for. An id with no safe characters names no session at all.
+    QString safe;
+    for (const QChar &c : scrollbackId) {
+        const char ch = c.toLatin1();
+        const bool safeChar = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+            || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+        if (safeChar) safe += c;
+        if (safe.size() >= 8) break;
+    }
+    return safe.isEmpty() ? QString() : QStringLiteral("relay-") + safe;
 }
 
 QString killSessionCommand(const QString &session) {

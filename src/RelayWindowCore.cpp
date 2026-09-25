@@ -811,7 +811,9 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         // --engine-core / RELAY_ENGINE_CORE. A session saved before KonsolePart was retired may
         // still carry an "engine" key; it is ignored, and every pane gets Relay's engine.
         const QString core = spec.value(QStringLiteral("engine_core")).toString(relay::defaultEngineCore());
-        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell(), core);
+        // The saved spec rides along (#87HB): a pane restoring a local_login line has to know it
+        // before its shell starts, and the constructor runs startTerminal before initRestore.
+        auto *pane = new Pane(workspace, cwd, m_manager->cleanShell(), core, nullptr, spec);
         // Model roles (protocol 13): panes opened after the first one default to the Flash agent.
         // A layout saved before 2026-09-18 calls that role "fast"; it is read as "flash" and saved
         // back under the new name (Pane::canonicalRole).
