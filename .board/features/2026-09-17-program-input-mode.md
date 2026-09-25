@@ -1,16 +1,17 @@
 ---
 id: S976
 type: work
-status: planned
-labels: [feature]
+status: executing
+labels: [feature, panes, agent-ui]
 component: [gui, worker]
 milestone: desktop-alpha
 workstream: agent
+assignee: s976-program
 rank: zzs9
 created: '2026-09-17'
 acceptance: typing into a running program from the prompt box works, with completion for at least one program's commands, and Terminal mode never starts an agent turn on a typo
-source: '`issues/feature_intake.txt`, 2026-09-17: "in terminal mode, is it better to be able to type non-commands and they will just go through? ... it would be great if you could type commands and they will just go into the claude command box. or should we have an alternative input mode for that? i guess that would be best, so you could for example have autocomplete for claude / codex commands."'
 verify: {artifact: code, primary: script, also: [ai-visual], human: required, criteria: 'with python3, psql and sqlite3 at their prompts in a Relay pane, typing in the prompt box in Program mode reaches the program (no Take control), Tab offers that program''s completions, the chip reads PROGRAM; a typo in Terminal mode starts no agent turn', sign_off: none, effort: medium, stakes: rework, blast: capability}
+source: '`issues/feature_intake.txt`, 2026-09-17: "in terminal mode, is it better to be able to type non-commands and they will just go through? ... it would be great if you could type commands and they will just go into the claude command box. or should we have an alternative input mode for that? i guess that would be best, so you could for example have autocomplete for claude / codex commands."'
 links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
 # A program input mode: type into the running program, with its own completions
@@ -74,3 +75,17 @@ Proposal to work through:
 - `scripts/relay-build --target relay-programcompletion-tests && ctest --test-dir build -R programcompletion`.
 - `ctest --test-dir build -R 'keymap|completion|slashcommands'`; `PYTHONPATH=backend python3 -m unittest tests.test_lang_router tests.test_router`.
 - `scripts/relay-build --check "PROGRAM ·"` then in the app: start `python3`, `psql` (or `sqlite3 :memory:`) and `node` in a pane; press Ctrl+I to PROGRAM, type `print(1)` / `\dt` / `.tables`, Enter — output appears, no Take control, nothing in shell history; Tab on `\d` lists psql commands. Exit the program: chip returns to the previous mode. Terminal mode, `gti status` Enter: ✗ line "did you mean git", no `⟳ asking the agent` line, text kept. Screenshots to `docs/qa_evidence/<date>-program-input-mode/`.
+
+## Decisions
+Slice 2 of #P2W8 (owner 2026-09-25: "go big and build the whole thing ... then delegate to subagents"). The plan's six owner questions are settled by #P2W8's decisions: **Q1** Program mode is offered automatically while a program is at its prompt and left when it exits; **Q2** Auto sends to a REPL by itself only where the language router can tell code from prose (Python/IPython/Stata via `lang_router`), never for psql/sqlite3/node; **Q3** completion tables: python/ipython (keywords, builtins, `%` magics) first because the Python console (#83YV) needs them, then psql and sqlite3; **Q4** ✗ + "did you mean", nothing runs, the fix loop for a command that ran and failed is untouched; **Q5** this card owns the GUI Program destination (steps 1–5) and `dispatch`; #33G0/#83YV add block delivery and interrupt on top; **Q6** as written. Steps 1–8 of the plan stand. Do not touch `backend/relay_core/workspace_plugins.py` or `backend/worker.py` (another session's uncommitted work): the GUI sends `foreground_program` per protocol 36 and acts on `program`/`incomplete`, and a worker that does not answer them behaves as today.
+
+## Tasks
+
+- [x] Policy: lineEditorWaiting and targetFor(program) with tests (0ccf9604) <!-- t:h3 -->
+- [ ] Delivery to raw-mode programs — written in the working tree, uncommitted <!-- t:yk s=in-progress blocked_by=h3 -->
+- [ ] Fourth mode PROGRAM · <name> — written in the working tree, uncommitted <!-- t:8r s=in-progress blocked_by=h3 -->
+- [ ] Offer it: 'Type into it from here' beside Take control and in the waiting hint <!-- t:fa blocked_by=8r -->
+- [ ] route carries foreground_program; dispatch handles program/incomplete — written in the working tree, uncommitted <!-- t:qd s=in-progress blocked_by=yk -->
+- [x] ProgramCompletion library and tests (python/ipython, psql, sqlite3, node) (c45d3fab, GUI link 4646a7e6) <!-- t:gm -->
+- [x] Terminal-mode typo: ✗ did you mean, no agent turn (48e86790) <!-- t:4k -->
+- [ ] Docs and live evidence <!-- t:db blocked_by=fa,qd,gm,4k -->
