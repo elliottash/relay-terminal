@@ -1,0 +1,1 @@
+This isolated backend sample uses invented account names and quota figures. It writes under a fresh /tmp directory and makes no network call; it does not show a real Relay pane or prove that a live account refresh has occurred. The implementation evidence for #JX8Z separately records the read-only live poll and targeted tests.

@@ -1,0 +1,1 @@
+The command prints two distinct timestamped JSON records keyed by preset, each with a source, weekly raw window, reset time and banked reset fields. It prints a private sample file path. No token or prompt appears. In the live system, the latest record at or before a routing draw's timestamp can be joined on the candidate key prefix before `|`.

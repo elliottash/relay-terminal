@@ -26,3 +26,12 @@ Trace quota event flow, record timestamped usage snapshots, restore fresh Claude
 
 <!-- relay:entry 20260925T042743Z-n1 author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["docs/qa_evidence/2026-09-25-JX8Z/evid… → {"plans": [], "commits": ["2041b744207f725e781c4b05ed1cec8c7a009f30"], "evidence…
+
+<!-- relay:entry 20260925T042807Z-fz author=agent kind=progress model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent is preparing Try it for this card
+
+<!-- relay:entry 20260925T042852Z-c4 author=agent kind=event model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+- ✦ agent updated this card · replaced `## Try it`
+
+<!-- relay:entry 20260925T042856Z-pj author=agent kind=evidence model=gpt-6-sol pane=323e184d turn=90b3725007bf4d71860a6b377e948a26/e345059eb21548afa844df3ebcdc0df4 -->
+Try it staged at docs/qa_evidence/2026-09-25-tryit-JX8Z. I ran stage.sh in a disposable profile and saw two timestamped JSON records with distinct preset keys, raw weekly usage/reset fields, source, and banked reset fields. The captured output is 01-backend.txt; no live profile or reset was used.

@@ -43,3 +43,12 @@ manual: `docs/qa_evidence/2026-09-25-JX8Z/evidence.md`
 
 ## Execution Summary
 Added `usage-states.jsonl` logging at the worker's `usage_limits` boundary, with whitelisted raw windows, timestamps, preset/account identifiers, source, status and optional banked reset fields. Added read-only Claude/Codex polling every 15 minutes for signed-in Relay accounts; incoming snapshots refresh preset rows. A new-pane draw can load a recent recorded state before its worker has reported, while a newer `presets` update no longer loses to an older pane cache. Evidence: `docs/qa_evidence/2026-09-25-JX8Z/evidence.md`.
+
+## Try it
+`docs/qa_evidence/2026-09-25-tryit-JX8Z/stage.sh`
+
+Inspect the two sample usage records the command prints. They use invented accounts and write to a disposable folder; compare the fields with what you expect to need when evaluating routing choices.
+
+Question (about 1 minute): Would these fields be sufficient for the model evaluation you have in mind?
+
+Expected: docs/qa_evidence/2026-09-25-tryit-JX8Z/expected.md (sealed until you answer)
