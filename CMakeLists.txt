@@ -192,6 +192,15 @@ target_include_directories(relay-settingscache PUBLIC src)
 target_link_libraries(relay-settingscache PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-settingscache PRIVATE ${RELAY_WARNINGS})
 
+# Card #05J2: the versioned settings bundle (export, merge/plan, staged apply) shared by
+# the Options "Export settings…"/"Import settings…" dialogs, the palette and the
+# `relay --export-settings` / `relay --import-settings` CLI paths. QtCore + Gui only, so
+# relay-settings-export-tests can run it headless.
+add_library(relay-settingsexport STATIC src/SettingsExport.cpp src/SettingsExport.h)
+target_include_directories(relay-settingsexport PUBLIC src)
+target_link_libraries(relay-settingsexport PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Gui)
+target_compile_options(relay-settingsexport PRIVATE ${RELAY_WARNINGS})
+
 add_library(relay-settings STATIC src/SettingsPane.cpp src/SettingsPane.h)
 target_include_directories(relay-settings PUBLIC src)
 # relay-agentcontext: Options and Actions each supply a context for the console the window embeds
@@ -687,6 +696,8 @@ if(RELAY_BUILD_APP)
         # The Sharing pane's window side (#SMDX): opening it, the scope catalogue, publishing before a link.
         src/RelayWindowSharing.cpp
         src/RelayWindow.cpp src/RelayWindowModels.cpp src/RelayWindowSettings.cpp src/RelayWindowCore.cpp
+        # Options / palette "Export settings…" and "Import settings…" (#05J2) over relay-settingsexport.
+        src/SettingsTransferDialog.cpp src/SettingsTransferDialog.h
         # The artifact workspace's window side (#E85D): presets, membership, the status strip.
         src/RelayWindowWorkspace.cpp
         src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h src/Pane.h src/ApprovalsPane.h
@@ -712,6 +723,8 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-artifactworkspace)
     target_link_libraries(relay PRIVATE relay-hints relay-modelsettings relay-modelcatalog relay-modelrows relay-modelpicker relay-modelspane relay-filterpopup relay-settings relay-outputlinks relay-markdown relay-highlight relay-editor relay-prompthistory relay-filepanes relay-subagents relay-requests relay-conversations relay-projectpicker relay-completion relay-fileindex relay-backends relay-windowstate relay-runtimedirs relay-input relay-notifications relay-panes relay-queuenav relay-queuesubmit relay-logging relay-voice relay-speech relay-images relay-titles relay-panestatus relay-paneusage relay-remotesession relay-remotefiles relay-sshconfig relay-terminal-engine relay-screen relay-slash relay-board relay-aliases relay-calllines relay-diffview relay-sharing relay-remotepane ${RELAY_QT}::Network)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
+    # Export/import settings bundle (#05J2) and the dialogs over it.
+    target_link_libraries(relay PRIVATE relay-settingsexport)
     target_link_libraries(relay PRIVATE relay-actionpalette)
     target_link_libraries(relay PRIVATE relay-scratchmonitor)   # agent scratch on the bell (#SZHQ)
     # No RELAY_SOURCE_DIR here: relay-sourcedir holds it (#V52P).
@@ -885,6 +898,13 @@ if(BUILD_TESTING)
     target_link_libraries(relay-keymap-tests PRIVATE relay-voice ${RELAY_QT}::Gui ${RELAY_QT}::Test)
     add_test(NAME keymap COMMAND relay-keymap-tests)
     set_tests_properties(keymap PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    # Card #05J2: the settings bundle — allow-listed export, per-key merge rules,
+    # conflict planning, staged apply with a timestamped backup, and validation of
+    # models, shortcuts and local endpoints. Each case isolates XDG_CONFIG_HOME.
+    add_executable(relay-settings-export-tests tests/settingsexport_test.cpp)
+    target_link_libraries(relay-settings-export-tests PRIVATE relay-settingsexport ${RELAY_QT}::Test)
+    add_test(NAME settings-export COMMAND relay-settings-export-tests)
+    set_tests_properties(settings-export PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-filepanes-tests tests/filepanes_test.cpp)
     target_link_libraries(relay-filepanes-tests PRIVATE relay-filepanes ${RELAY_QT}::Test)
     target_compile_definitions(relay-filepanes-tests PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -1105,6 +1125,12 @@ if(BUILD_TESTING)
     add_executable(relay-panestate-tests tests/panestate_test.cpp)
     target_link_libraries(relay-panestate-tests PRIVATE relay-panestate ${RELAY_QT}::Test)
     add_test(NAME panestate COMMAND relay-panestate-tests)
+    # #265N: the quit path's graceful sidecar shutdown (stop → stdin EOF → bounded wait), another
+    # relay-consolemode-tests filter driven with a stub sidecar through the RELAY_REMOTE_DIR root
+    # ensureSidecar already honours. Registered here, beside its siblings' target, so the
+    # console-mode block above stays untouched.
+    add_test(NAME remoteshutdown COMMAND relay-consolemode-tests --remote-shutdown-only)
+    set_tests_properties(remoteshutdown PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-escapees-tests tests/escapeecaps_test.cpp)
     target_link_libraries(relay-escapees-tests PRIVATE relay-escapees ${RELAY_QT}::Test)
     add_test(NAME escapees COMMAND relay-escapees-tests)
