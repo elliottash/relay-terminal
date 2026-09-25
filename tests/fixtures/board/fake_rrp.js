@@ -9,8 +9,8 @@
 //
 //   ?features=panes,agent,board   what `welcome` offers (default: no `board`)
 //   ?capability=full|agent|view   this device's level (default: full)
-export { b64, un64, fingerprint, storedValue, storeValue, dropValue, saveDevice, loadGuest,
-  saveGuest, forgetGuest } from './rrp-real.js';
+export { b64, un64, fingerprint, storedValue, storeValue, dropValue, pairedHint, saveDevice,
+  loadGuest, saveGuest, forgetGuest } from './rrp-real.js';
 
 const params = new URLSearchParams(location.search);
 const FEATURES = (params.get('features') || 'panes,agent,compose,pane_state').split(',').filter(Boolean);
