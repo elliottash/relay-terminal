@@ -368,7 +368,7 @@ class ProtocolHandlerTests(unittest.TestCase):
         self.rec.wait(lambda e: e['event'] == 'agent_finished' and e['id'] == self.rec.of('queued')[-1]['id'])
         sent = fresh.provider.requests[-1][0]
         self.assertEqual(fresh.mode, 'build')
-        self.assertTrue(sent[-1]['content'].startswith(f'Execute the plan in {plan}'))
+        self.assertTrue(sent[-1]['content'].startswith(f'Run the plan in {plan}:'))  # wording since #BGRN
         self.assertIn('edited by user', sent[-1]['content'])
         self.assertEqual(len([m for m in sent if m['role'] == 'user']), 1)
 
