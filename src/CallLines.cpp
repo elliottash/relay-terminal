@@ -137,15 +137,18 @@ Row finishedRow(const toollabel::Label &label, int cells) {
     return out;
 }
 
-Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines) {
+Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines, const QString &since) {
     Row out;
     const QString head = !label.running.isEmpty() ? label.running
                        : !label.title.isEmpty()   ? label.title
                                                   : QStringLiteral("running");
     out.title = head + QStringLiteral("…");
+    QStringList pieces;
     if (liveLines > 0)
-        out.rest = QStringLiteral(" · %1 %2").arg(toollabel::thousands(liveLines),
-                                                  liveLines == 1 ? QStringLiteral("line") : QStringLiteral("lines"));
+        pieces << QStringLiteral("%1 %2").arg(toollabel::thousands(liveLines),
+                                              liveLines == 1 ? QStringLiteral("line") : QStringLiteral("lines"));
+    if (!since.isEmpty()) pieces << QStringLiteral("since %1").arg(since);
+    if (!pieces.isEmpty()) out.rest = QStringLiteral(" · ") + pieces.join(QStringLiteral(" · "));
     cut(out, cells);
     return out;
 }
@@ -236,7 +239,8 @@ Step LineCursor::start(const QString &call, const toollabel::Label &label) {
     dropRun();
     step.newRow = true;
     step.hold = true;               // the result rewrites this row in place
-    step.row = runningRow(label, m_cells);
+    m_rowStart = QDateTime::currentDateTime();
+    step.row = runningRow(label, m_cells, 0, m_rowStart.toString(QStringLiteral("HH:mm:ss")));
     step.call = call;
     step.callId = call;
     m_started = call;
@@ -251,7 +255,8 @@ Step LineCursor::live(const QString &call, const toollabel::Label &label, qint64
     if (!m_held || m_dirty || m_runRow || m_started != call || call.isEmpty()) { step.nothing = true; return step; }
     step.rewrite = true;
     step.hold = true;
-    step.row = runningRow(label, cells > 0 ? cells : m_cells, lines);
+    step.row = runningRow(label, cells > 0 ? cells : m_cells, lines,
+                          m_rowStart.toString(QStringLiteral("HH:mm:ss")));
     step.call = call;
     step.callId = call;
     return step;

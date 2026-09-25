@@ -245,6 +245,16 @@ private slots:
         QCOMPARE(row.rest, QStringLiteral(" · 4,100 lines"));
     }
 
+    // The start stamp (#R1): appended to the right of the running row, kept across the live
+    // rewrites, and absent when the caller passes none.
+    void runningRowShowsStartStamp() {
+        QCOMPARE(runningRow(pytest(), 0, 0, QStringLiteral("14:32:05")).rest,
+                 QStringLiteral(" · since 14:32:05"));
+        QCOMPARE(runningRow(pytest(), 0, 4100, QStringLiteral("14:32:05")).rest,
+                 QStringLiteral(" · 4,100 lines · since 14:32:05"));
+        QVERIFY(runningRow(pytest(), 0).rest.isEmpty());
+    }
+
     // The two shapes a live tool_output takes (protocol 23.10, card #PPR4): the text, or the
     // counts the worker made from that same text when the GUI asked it to keep the text off the
     // wire. The row's counter must not be able to tell them apart — which is the whole claim the
@@ -320,8 +330,21 @@ private slots:
         QVERIFY(!cursor.holding());
     }
 
-    void anythingPrintedBetweenForcesANewRow() {
+    // The cursor stamps each running row with when it started and keeps that stamp across the
+    // live rewrites of the same row.
+    void runningRowKeepsItsStartStampAcrossRewrites() {
         LineCursor cursor;
+        cursor.setCells(0);
+        const Step started = cursor.start(QStringLiteral("c1"), pytest());
+        QVERIFY(started.row.rest.contains(QStringLiteral("since ")));
+        const QString stamp = started.row.rest.section(QStringLiteral("since "), 1);
+
+        const Step live = cursor.live(QStringLiteral("c1"), pytest(), 500, 0);
+        QVERIFY(live.rewrite);
+        QCOMPARE(live.row.rest, QStringLiteral(" · 500 lines · since %1").arg(stamp));
+    }
+
+    void anythingPrintedBetweenForcesANewRow() {        LineCursor cursor;
         cursor.start(QStringLiteral("c1"), pytest());
         const Step interrupted = cursor.other();
         QVERIFY(interrupted.endRun);    // the running row is finished where it stands
@@ -406,7 +429,8 @@ private slots:
         const Step tick = cursor.live(QStringLiteral("c1"), pytest(), 120, 0);
         QVERIFY(tick.rewrite);
         QVERIFY(tick.hold);
-        QCOMPARE(tick.row.rest, QStringLiteral(" · 120 lines"));
+        QCOMPARE(tick.row.rest.section(QStringLiteral(" · since "), 0, 0),
+                 QStringLiteral(" · 120 lines"));   // the "since HH:mm:ss" stamp follows
         QVERIFY(cursor.live(QStringLiteral("c2"), pytest(), 3, 0).nothing);
         cursor.other();
         QVERIFY(cursor.live(QStringLiteral("c1"), pytest(), 9, 0).nothing);

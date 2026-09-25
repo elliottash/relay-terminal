@@ -24,6 +24,7 @@
 #include "ToolLabel.h"
 
 #include <QColor>
+#include <QDateTime>
 #include <QJsonObject>
 #include <QString>
 #include <QVector>
@@ -81,8 +82,10 @@ struct Row {
 // placeholder and any trailing hint); zero or less means "do not cut".
 Row finishedRow(const toollabel::Label &label, int cells);
 // The row while the call runs. `liveLines` above zero appends the live counter the streaming
-// output feeds ("running pytest… · 120 lines").
-Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines = 0);
+// output feeds ("running pytest… · 120 lines"); a non-empty `since` appends the start timestamp
+// the caller stamps the row with ("… · since 14:32:05").
+Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines = 0,
+               const QString &since = {});
 // A merged run's row: "read 6 files · 4,100 lines".
 Row mergedRow(const toollabel::MergeRun &run, int cells);
 
@@ -190,6 +193,7 @@ private:
     bool m_held = false;        // a row is on screen with no newline
     bool m_dirty = false;       // something else printed since the row was drawn
     bool m_runRow = false;      // the held row belongs to a run, not to one started call
+    QDateTime m_rowStart;       // when the held running row appeared: its "since HH:mm:ss" stamp
     int m_cells = 0;
 };
 
