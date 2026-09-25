@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""relay-scratch: what agent scratch takes on disk, and reclaiming it (card #SZHQ).
+
+  relay-scratch               report, biggest first
+  relay-scratch gc            what gc would remove (dry run)
+  relay-scratch gc --apply    remove idle entries no live process uses
+  relay-scratch check         exit 1 with one line when over budget or low on space
+
+The logic lives in backend/relay_core/scratch.py, which the app's own monitor also uses.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from relay_core import scratch  # noqa: E402
+
+sys.exit(scratch.main())
