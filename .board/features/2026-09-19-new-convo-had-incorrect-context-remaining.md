@@ -2,6 +2,7 @@
 id: 5PY9
 type: work
 status: needs-verification
+labels: [bug, gui]
 assignee: agent
 implemented_by: glm/glm-5.3
 priority: 2

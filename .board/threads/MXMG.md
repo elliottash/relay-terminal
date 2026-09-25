@@ -31,3 +31,6 @@ Closing out: implementation is built and green; landing it in needs-verification
 
 <!-- relay:entry 20260924T210048Z-s0 author=agent kind=event model=glm-5.3 pane=c0052f54 turn=5532d784a41d404cab8a924c899be217/ef343c8205ed48d6b8a19e7cce170b3d -->
 - ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260924T210605Z-4g author=agent kind=event model=glm-5.3 pane=c0052f54 turn=5532d784a41d404cab8a924c899be217/ef343c8205ed48d6b8a19e7cce170b3d -->
+- ✦ agent moved this card · Executing → Needs verification · Implemented 1-3 and 6, built green through the land gate (a605fe5e); waiting on the visual pass and the owner. · evidence docs/qa_evidence/2026-09-24-mxmg-board-vs-sessions/ · implemented_by glm/glm-5.3

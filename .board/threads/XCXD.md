@@ -128,3 +128,6 @@ Owner, on the restarted build (screenshot of a busy agent, nothing queued): "rem
 
 <!-- relay:entry 20260924T203612Z-fh author=agent kind=event model=claude-opus-5-5 pane=a09e2416 turn=7981f7d11da94ab9873fe3a28c7b0258/f041e69c2d1a49b29ea4772fd2f78a43 -->
 - ✦ agent moved this card · Executing → Needs verification · Landed c299337b + dd70fb61: independent queues, stable repeated Enter, Esc/Alt+Esc, turn-start context, and the owner's strip cleanup; four queue ctests and the build gate pass. · evidence docs/qa_evidence/2026-09-24-XCXD/ · implemented_by anthropic/claude-opus-5-5 via claude-code
+
+<!-- relay:entry 20260924T233002Z-bw author=agent kind=decision model=glm-5.3 pane=90bc5aa9 turn=7981f7d11da94ab9873fe3a28c7b0258/c4cbe82285d04e23af1ca7c04b388b59 -->
+Owner, 2026-09-24 (follow-up while verifying): "i dont want the queue to say agent: N or terminal: N, where n is the number in the queue. its obvious from looking at the queue." Landed as 1bbf9f00: no lane-name/count labels; a lane header exists only when it has something to do — a paused lane's bare "paused" word and Resume, or the agent lane's Clear. Regression case added to h2kqCases (`h2kqQueueLabelCases`).

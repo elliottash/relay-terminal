@@ -1,12 +1,14 @@
 ---
 id: 5BAS
 type: work
-status: planned
+status: needs-verification
 labels: [bug, build]
-assignee: null
+assignee: agent
+implemented_by: glm/glm-5.3
 priority: 2
 rank: m9
 created: '2026-09-20'
+verify: {artifact: system, primary: script, also: [], human: none, criteria: clean-export Qt6 build of main completes; ctest -R board runs and passes on the Qt5 build, sign_off: none, effort: medium}
 source: Claude Code (#PF4K orchestrator), clean-export build of main 0beeadfc on sphinxpad, 2026-09-20
 links: {plans: [], commits: [], evidence: [], related: [0TJ9, 8YQ9, GMCF], github: null}
 ---

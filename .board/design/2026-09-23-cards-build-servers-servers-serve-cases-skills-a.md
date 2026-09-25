@@ -4,6 +4,7 @@ type: work
 status: discussing
 labels: [feature, switchboard, board, qa, skills]
 waiting_on: owner
+priority: 2
 rank: zzzzzzzzzzzzzzzzzw
 created: '2026-09-23'
 source: owner, Relay conversation, 2026-09-23
@@ -168,3 +169,5 @@ Three cautions from the economics that the design should keep: the human signal 
 - 2026-09-23, owner: a case served by a person counts and belongs in the same record as program- and skill-served cases ("think about a doctor or lawyer using relay to help with their case work").
 - 2026-09-23, owner: there is no single rule for whether a failed case files a card automatically.
 - 2026-09-23, owner: "yes, document it, and lets build all the functionality, and we can experiment with how to phase in complexity without overwhelming the user." The QA ladder is documented on #BX7B; the build is phased there as #WFRA → #1AA6 → #MSJ0 → #C3Q2 → #95VZ → the QA pane (#BX7B) → a Skills registry. This card stays the design record.
+- 2026-09-24, owner: "the board should become 3 tabs, cards, skills, memories". Project skills and project memories belong in the Board alongside work cards.
+- 2026-09-24, owner: "globals also needs global skills". Globals should show global skills; project memories should stay on their project's Board ("globals is showing local memories. local memories go in teh board").

@@ -145,3 +145,11 @@ Try-it staged (docs/qa_evidence/2026-09-23-tryit-ESDF/): ten cards across every 
 
 <!-- relay:entry 20260924T014249Z-nm author=agent kind=event model=glm-5.3 pane=14fa86b4 turn=1b45923f4b294c9dabb41703777946fe/3cc26db7afe34bd9aea51fc167d28700 -->
 - ✦ agent updated this card · links: {"plans": [], "commits": ["dc5b457f6189602f1012e8cb13b764b16256492c", "3303f02a0… → {"commits": ["dc5b457f6189602f1012e8cb13b764b16256492c", "3303f02a0951367fbb2ae3…
+
+<!-- relay:entry 20260925T002256Z-te author=agent kind=evidence model=glm-5.3 pane=fe70deb7 turn=d4ac1059cca7496e8f91f4ca018f8394/589010dae14345fcbf936f3e253fc051 -->
+Re-verified at today's tip (main 0fc83778, 2026-09-24), since later commits had moved the tree since the card landed:
+
+- Desktop: `scripts/relay-build --target relay-board-tests relay-boardfilter-tests relay-boardpane-tests`, then `ctest --test-dir build -R '^(board|boardfilter|boardpane)$'` → **3/3 passed** (board includes the Flat-list and Stage-header toggle tests from dc5b457f).
+- Phone: the whole `tests/test_board_view` suite was red at tip — 29/34 failures — but the cause is *not* this card: 14d7f422 (#SAW4, landed after #ESDF) added the `pairedHint` import to app/app.js without updating tests/fixtures/board/fake_rrp.js, so the app died at module load in every browser test. Filed as #N7RJ, fixed in 0fc83778 (one name in the fixture's re-export list). After that fix the suite is **34/34 OK in 24s**, including this card's five phone tests (Recent view, stage chips, Stages↔Recent return, saved choice, filter).
+
+So both Done-means test paths are green again at tip; no #ESDF code needed to change. The card stays here in needs-verification with its staged Try it (docs/qa_evidence/2026-09-24-esdf-try-it/).

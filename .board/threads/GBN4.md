@@ -114,3 +114,23 @@ Verifying whether the four scenarios now pass since #GPF7 landed; fixing the exc
 
 <!-- relay:entry 20260924T204015Z-qb author=agent kind=progress model=kimi-k3 pane=e6f7dd8d turn=198f044065dd47079fe9509e50f12651/3f827c9465694ac589d554e838521647 -->
 Paused on owner request before running any code. No changes made yet; card stays claimed by this pane pending resume.
+
+<!-- relay:entry 20260924T204835Z-ka author=owner kind=event pane=e6f7dd8d -->
+Released (e6f7dd8d) · the pane closed
+
+<!-- relay:entry 20260924T205452Z-1b author=agent kind=event model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 -->
+- ✦ agent claimed this card · session 857ae200
+
+<!-- relay:entry 20260924T205452Z-9q author=agent kind=progress model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 pane_token=857ae200-ed0f-46b2-85d4-1c9065bb0a08 -->
+Claimed (857ae200) · working on it from a terminal pane
+
+Resuming: running the single bridge test on current main first, per the plan.
+
+<!-- relay:entry 20260924T210041Z-kz author=agent kind=evidence model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 -->
+Clean export of HEAD (235befc4, /tmp/gbn4-verify-EboW): the four scenarios in the card plus the full verify list — test_guest_board_bridge, test_board_tools, test_guest_memory, 360 tests — all pass, so the revocation bug itself was already fixed by #GPF7. The plan's remaining gap was real though: the inner exception reached the pane as only its type ("harness failed (RuntimeError)"). Fixed in f984f1b1: the ProviderError now carries str(exc), and the test asserts the pane's error event contains the guest's own words ('guest failed after write'). 23/23 bridge tests pass in the checkout.
+
+<!-- relay:entry 20260924T210103Z-v6 author=agent kind=event model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 -->
+- ✦ agent updated this card · replaced `## Execution Summary`
+
+<!-- relay:entry 20260924T210118Z-28 author=agent kind=event model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 -->
+- ✦ agent moved this card · Executing → Needs verification · Core bug already fixed by #GPF7 (verified on clean export of 235befc4, 360 tests green); error-visibility gap fixed in f984f1b1 with test assertion. Evidence on the card. · implemented_by kimi/kimi-k3

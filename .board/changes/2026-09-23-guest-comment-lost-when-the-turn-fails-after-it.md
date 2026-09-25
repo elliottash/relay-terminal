@@ -1,11 +1,11 @@
 ---
 id: GBN4
 type: work
-status: executing
+status: needs-verification
 labels: [bug, guests, switchboard]
 assignee: agent
 implemented_by: kimi/kimi-k3
-session: e6f7dd8d-deb3-4a1a-a2d9-44b3577064f1
+session: 857ae200-ed0f-46b2-85d4-1c9065bb0a08
 rank: m
 created: '2026-09-23'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
@@ -56,3 +56,8 @@ Failure shows as: the comment missing from the thread, a wrong or missing `model
 **Risks:** the only behaviour change contemplated is in the bridge dispatch or provider start path, both covered by the `test_guest_board_bridge` module; the prompt-assembly and handover-brief code (`#1V4F`) is not to be touched. No owner decision remains — #GPF7 settled the instructions-channel question.
 
 **Verify:** the single unittest; then the whole `tests.test_guest_board_bridge` module, `tests.test_board_tools`, and `tests.test_guest_memory` (the suspect commits were #MEMS's). All with `PYTHONPATH=backend python3 -m unittest …`.
+
+## Execution Summary
+The revocation bug itself was already fixed by #GPF7: on a clean export of HEAD (235befc4) the named test and the full verify list (test_guest_board_bridge, test_board_tools, test_guest_memory — 360 tests) all pass.
+
+The plan's step 4 gap was real and is fixed in f984f1b1: `HarnessProvider.complete()`'s generic catch dropped the inner exception's text, so a guest dying after its board write surfaced only "harness failed (RuntimeError)". The ProviderError now carries `str(exc)`, and the test asserts the pane's error event contains the guest's own words ('guest failed after write'). 23/23 bridge tests pass after the change.

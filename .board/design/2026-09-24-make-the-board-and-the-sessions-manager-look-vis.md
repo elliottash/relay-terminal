@@ -1,7 +1,7 @@
 ---
 id: MXMG
 type: work
-status: executing
+status: needs-verification
 labels: [feature, design, switchboard, sessions, ui]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
 verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'The two panes are distinguishable in a screenshot at a glance: different selection/header hue, different row shapes, different typography, stronger bands.', sign_off: none, effort: medium, stakes: nuisance}
 source: Claude Code guest pane, 2026-09-24
-links: {plans: [], commits: [], evidence: [], related: [SPBN, P7SJ], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-mxmg-board-vs-sessions/], related: [SPBN, P7SJ], github: null}
 ---
 # Make the Board and the Sessions manager look visually distinct
 

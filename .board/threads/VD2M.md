@@ -23,3 +23,57 @@ C. Structured integration through `zellij action` / a WASM plugin + `zellij pipe
 1. Which tiers do you want? Recommendation: A now (it is small and fixes real conflicts), B next, C deferred.
 2. For B, should the persistence layer be zellij only, or zellij or tmux, whichever the host has? Recommendation: whichever the host has, preferring zellij, with no install on the host.
 3. Should Relay's Alt+arrow pane focus give way to zellij (and tmux) when one of them owns the pane? Recommendation: yes, keep Ctrl+Alt+arrows as Relay's fallback there.
+
+<!-- relay:entry 20260924T214255Z-m4 author=agent kind=decision model=kimi-k3 pane=a5e3e378 turn=ff5289b78ec24f1b99f57162e21ff33a/7ddc5da964e74a86b2c7c47763470447 -->
+Owner, 2026-09-24, answering the three questions verbatim: "1 A and B yes / 2 yes / 3 i agree, but shift+alt+arrows for relay". Meaning: tiers A and B are approved (C stays deferred); the persistence layer is zellij or tmux, whichever the host has; and when a program owns the pane's keyboard, Alt+arrows go to the program (so zellij/tmux get their focus keys) while Shift+Alt+arrows become Relay's pane navigation fallback.
+
+<!-- relay:entry 20260924T214255Z-m5 author=agent kind=event model=kimi-k3 pane=a5e3e378 turn=ff5289b78ec24f1b99f57162e21ff33a/7ddc5da964e74a86b2c7c47763470447 -->
+- ✦ agent updated this card · appended to `## Decisions`; verify defaulted from skill deliver
+
+<!-- relay:entry 20260924T214318Z-4g author=agent kind=event model=kimi-k3 pane=a5e3e378 turn=ff5289b78ec24f1b99f57162e21ff33a/7ddc5da964e74a86b2c7c47763470447 -->
+- ✦ agent updated this card · verify: {"artifact": "code", "primary": "script", "also": [], "human": "none", "sign_off… → {"artifact": "code", "primary": "script", "also": ["ai-text"], "human": "optiona…; appended to `## Done means`
+
+<!-- relay:entry 20260924T214327Z-qg author=agent kind=event model=kimi-k3 pane=a5e3e378 turn=ff5289b78ec24f1b99f57162e21ff33a/7ddc5da964e74a86b2c7c47763470447 -->
+- ✦ agent claimed this card · assignee agent, Discussing → Executing, implemented_by kimi/kimi-k3, session a5e3e378
+
+<!-- relay:entry 20260924T214327Z-w0 author=agent kind=progress model=kimi-k3 pane=a5e3e378 turn=ff5289b78ec24f1b99f57162e21ff33a/7ddc5da964e74a86b2c7c47763470447 pane_token=a5e3e378-525d-4383-a6ad-a17507924ee9 -->
+Claimed (a5e3e378) · working on it from a terminal pane
+
+Decisions recorded. First step: install zellij locally and verify empirically whether it passes OSC 133/7 through (determines the integration-script design), then tier A (screen classifier prefix, keymap give-way, $ZELLIJ detection), then tier B (persistent mosh+multiplexer palette entry).
+
+<!-- relay:entry 20260924T214745Z-fr author=owner kind=event pane=a5e3e378 -->
+Released (a5e3e378) · the pane closed
+
+<!-- relay:entry 20260924T215051Z-2d author=agent kind=event model=glm-5.3 pane=133ad9fd turn=ff5289b78ec24f1b99f57162e21ff33a/d733b0316c694e96896f02bd4987f1ff -->
+- ✦ agent claimed this card · implemented_by glm/glm-5.3, session 133ad9fd
+
+<!-- relay:entry 20260924T215051Z-xv author=agent kind=progress model=glm-5.3 pane=133ad9fd turn=ff5289b78ec24f1b99f57162e21ff33a/d733b0316c694e96896f02bd4987f1ff pane_token=133ad9fd-4106-45fd-aeb8-7f3860f41b90 -->
+Claimed (133ad9fd) · working on it from a terminal pane
+
+Re-claiming in the new pane session (the previous pane was closed mid-verification; the card was released). Resuming: finish the zellij passthrough probe, then tiers A and B.
+
+<!-- relay:entry 20260924T215102Z-58 author=owner kind=event pane=133ad9fd -->
+Released (133ad9fd) · the pane closed
+
+<!-- relay:entry 20260924T220648Z-72 author=agent kind=event model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
+- ✦ agent claimed this card · session 8c549c94
+
+<!-- relay:entry 20260924T220648Z-73 author=agent kind=progress model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f pane_token=8c549c94-8513-4d49-be07-82c38d276ed9 -->
+Claimed (8c549c94) · working on it from a terminal pane
+
+Re-claiming after another pane restart. Resuming the zellij passthrough probe (as a background job this time so the pane stays responsive), then tiers A and B.
+
+<!-- relay:entry 20260924T220909Z-tv author=agent kind=event model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
+- ✦ agent updated this card · appended to `## Plan`
+
+<!-- relay:entry 20260924T222334Z-2h author=agent kind=event model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
+- ✦ agent updated this card · appended to `## Execution Summary`
+
+<!-- relay:entry 20260924T222341Z-wm author=agent kind=event model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
+- ✦ agent updated this card · appended to `## Tests`
+
+<!-- relay:entry 20260924T222344Z-1s author=agent kind=event model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
+- ✦ agent moved this card · Executing → Needs verification · Tiers A and B implemented, committed (0afa8dd1) and tested (ctest screen/keymap/sshconfig green, tests/test_zellij.py 2/2 against real zellij 0.45.1); evidence under docs/qa_evidence/2026-09-24-zellij-VD2M/. · evidence docs/qa_evidence/2026-09-24-zellij-VD2M/ · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260924T222346Z-qn author=agent kind=progress model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
+- ✦ agent is preparing Try it for this card

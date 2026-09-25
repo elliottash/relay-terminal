@@ -36,3 +36,20 @@ The Plan turn can't run commands, so I'll verify state by reading. The code alre
 
 <!-- relay:entry 20260924T043124Z-gb author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260924T210841Z-x4 author=agent kind=event model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 -->
+- ✦ agent claimed this card · assignee agent, Planned → Executing, implemented_by kimi/kimi-k3, session 857ae200
+
+<!-- relay:entry 20260924T210841Z-x5 author=agent kind=progress model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 pane_token=857ae200-ed0f-46b2-85d4-1c9065bb0a08 -->
+Claimed (857ae200) · working on it from a terminal pane
+
+Verification-first per the plan: board tests on current main, then a clean Qt6 build.
+
+<!-- relay:entry 20260924T210903Z-h6 author=agent kind=event model=kimi-k3 pane=857ae200 turn=198f044065dd47079fe9509e50f12651/982d4c3c0b2e45aea46259f582724045 -->
+- ✦ agent updated this card · verify: (unset) → {"artifact": "system", "primary": "script", "also": [], "human": "none", "criter…
+
+<!-- relay:entry 20260924T214740Z-87 author=owner kind=event pane=857ae200 -->
+Released (857ae200) · the pane closed
+
+<!-- relay:entry 20260925T000520Z-f6 author=agent kind=event model=glm-5.3 pane=15e42790 turn=198f044065dd47079fe9509e50f12651/2a01e6a3d6734f549843a58d5e9ef885 -->
+- ✦ agent moved this card · Executing → Needs verification · Clean-export Qt6 build of the landed tree (1d0be291, Qt 6.4.2, /tmp/qt6-verify-final) succeeds and ctest -R board is 9/9 green there; the 3 runtime failures from the earlier Qt6 run were exactly the stale tests #DEH6/#KQ1T fixed. · implemented_by glm/glm-5.3

@@ -27,10 +27,10 @@ User: "not in the queue header -- on the row"
 - `manual: docs/qa_evidence/2026-09-22-queue-send-now/README.md`
 - `ctest -R '^consolemode$'`
 
-### Check 2026-09-23 19:23
+### Check 2026-09-24 18:49
 - not-applicable · manual:docs/qa_evidence/2026-09-22-queue-send-now/README.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-queue-send-now/README.md
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-23T23:23:39Z
-- notice · ctest:consolemode — ctest -R consolemode is slow: p95 2.43 s, p50 0.97 s
+- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 6.69 s, p50 1.62 s
 history: thread
 ## Execution Summary
 Added → beside × on sendable agent queue rows, using the existing interrupt operation. Hover shows Send now (Ctrl+Enter), following the live binding. The isolated real-Pane click/tooltip test passes and preserves the remaining queue and unrelated draft. Worker-owned rows and shell/TUI commands have no equivalent operation and do not offer the arrow. Broader consolemode has an existing repeated-Enter assertion failure tracked by #VZ8C.

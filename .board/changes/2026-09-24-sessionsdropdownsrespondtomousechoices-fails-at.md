@@ -1,7 +1,7 @@
 ---
 id: 9ESY
 type: work
-status: executing
+status: needs-verification
 labels: [bug, sessions, tests]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
 verify: {artifact: code, primary: script, also: [], human: none, criteria: The conversations suite passes; the helper still selects through the popup., sign_off: none, effort: low, stakes: nuisance}
 source: Relay pane, 2026-09-24
-links: {plans: [], commits: [], evidence: [], related: [MXMG], github: null}
+links: {plans: [], commits: [], evidence: ['tests/conversations_test.cpp (ctest -R conversations, 100% passed)'], related: [MXMG], github: null}
 ---
 # sessionsDropdownsRespondToMouseChoices fails at HEAD: group combo will not re-open to \"none\"
 

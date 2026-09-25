@@ -1,7 +1,7 @@
 ---
 id: 1Q5V
 type: work
-status: executing
+status: needs-verification
 labels: [feature, design, sessions, switchboard, ui]
 assignee: agent
 implemented_by: glm/glm-5.3
@@ -9,7 +9,7 @@ rank: zzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
 verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'Sessions'' top is one row + chips, title/id/copy on one spanning line, no ID line; Board has no label chips row; suites green.', sign_off: none, effort: medium, stakes: nuisance}
 source: Relay pane, 2026-09-24
-links: {plans: [], commits: [], evidence: [], related: [MXMG, P7SJ], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/], related: [MXMG, P7SJ], github: null}
 ---
 # Streamline the filter bars: fold Sessions' filters into search, drop the Board's label chips row
 

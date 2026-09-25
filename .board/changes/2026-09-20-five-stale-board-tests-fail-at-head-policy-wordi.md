@@ -1,10 +1,14 @@
 ---
 id: 8EJ4
 type: work
-status: planned
+status: needs-verification
 labels: [bug, switchboard, tests]
+assignee: agent
+implemented_by: kimi/kimi-k3
+session: 857ae200-ed0f-46b2-85d4-1c9065bb0a08
 rank: zzzzzzzzzzzzzzz
 created: '2026-09-20'
+verify: {artifact: code, primary: script, also: [], human: none, criteria: the five named tests pass on a clean export of HEAD, sign_off: none, effort: low}
 source: 'pane eacfa50b executing #CYM9, 2026-09-20'
 links: {plans: [], commits: [], evidence: [], related: [CYM9], github: null}
 ---
@@ -53,3 +57,6 @@ Make the five stale board tests named in the issue green on a clean checkout of 
 - `python3 -m pytest tests/test_board_tools.py tests/test_board_protocol.py -k 'policy_ships or caps_the_thread_tail or capped_per_turn or ticked_cards or round_trips_through_the_protocol' -q` green on a clean export of HEAD.
 - Full `tests/test_board_tools.py` and `tests/test_board_protocol.py` green (no knock-on breakage).
 - No assertion weakened without a comment naming the intentional change it tracks.
+
+## Execution Summary
+Already fixed since 6011141c — no code change, per the plan's step 2. On a clean `git archive HEAD` export (73644db0): `python3 -m unittest tests.test_board_tools tests.test_board_protocol -k policy_ships -k caps_the_thread_tail -k capped_per_turn -k ticked_cards -k round_trips_through_the_protocol` runs the five named tests (6 matched) — all OK. Full modules also green on the export: test_board_tools 312 OK; test_board_protocol 183 run with a single failure in `test_the_launch_directorys_board_is_never_adopted…`, which is an export artifact (`issues/` is untracked, so git-archive exports lack it; the test passes in a real checkout) and is not one of the five. The failures were fallout repaired after filing, exactly as the findings predicted.

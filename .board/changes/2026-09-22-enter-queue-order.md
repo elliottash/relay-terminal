@@ -27,10 +27,10 @@ Fix the empty-Enter selector in src/Pane.h and keep explicit remote steering tar
 - `ctest -R consolemode`
 - manual: docs/qa_evidence/2026-09-22-enter-queue-order/NOTES.md
 
-### Check 2026-09-23 19:23
-- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-23T23:23:39Z
+### Check 2026-09-24 18:49
+- passed · ctest:consolemode — ctest -R consolemode passed for this revision on spark-dcc9, 2026-09-24T22:49:05Z
 - not-applicable · manual:docs/qa_evidence/2026-09-22-enter-queue-order/NOTES.md — manual evidence, recorded by hand: docs/qa_evidence/2026-09-22-enter-queue-order/NOTES.md
-- notice · ctest:consolemode — ctest -R consolemode is slow: p95 2.43 s, p50 0.97 s
+- notice · ctest:consolemode — ctest -R consolemode is slow: p95 6.69 s, p50 1.62 s
 history: thread
 ## Execution Summary
 Empty Enter promotes the FIFO head and then escalates that same steer before considering another queued prompt. Explicit remote steering remains id-targeted. Updated the queue hint. Composer-key regression passes through CTest and under Xvfb with isolated settings. tests_check has no findings; evidence records this run (the board's historical test store is older).

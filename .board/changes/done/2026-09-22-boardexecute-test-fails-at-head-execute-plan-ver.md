@@ -1,7 +1,7 @@
 ---
 id: 3BPH
 type: work
-status: discussing
+status: dropped
 labels: [bug, board]
 rank: zzzzzzzzzzzzzzzzw
 created: '2026-09-22'

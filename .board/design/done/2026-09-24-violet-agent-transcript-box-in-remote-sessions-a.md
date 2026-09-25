@@ -1,11 +1,10 @@
 ---
 id: EE11
 type: work
-status: needs-verification
+status: done
 labels: [feature, ui, remote]
 assignee: agent
 implemented_by: openai/gpt-6-sol via codex
-session: 0e39b062-479d-4ac5-8b40-973c81d6c97b
 rank: zzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 verify: {artifact: visual, primary: person, also: [script], human: optional, criteria: 'The live boxed transcript has a violet outline and violet `Agent - [model]` header in a remote session or program.', sign_off: none, effort: low, stakes: rework, blast: case}

@@ -2,7 +2,7 @@
 id: SP4N
 type: work
 status: needs-qa-llm
-labels: [settings, gui, ux, palette]
+labels: [settings, gui, ux, palette, feature]
 component: [gui]
 milestone: desktop-alpha
 workstream: terminal
@@ -12,7 +12,7 @@ rank: i
 created: '2026-09-18'
 acceptance: a non-Claude model QA session runs the checklist below under Xvfb (or a desktop) and records it under docs/qa_evidence/
 source: 'owner, 2026-09-18: "make settings (ctrl shift a and the gear icon at top right) a full pane rather than a side bar. analyze it and compare it to the settings in warp / claude code / opencode, to make sure that it delivers a good experience" and "the pane could have sub-tabs if thats a good UX"'
-links: {plans: [], commits: [], evidence: ['docs/qa_evidence/2026-09-18-settings-pane/'], github: null, related: [XZZB, RBVK, 05J2]}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-18-settings-pane/], github: null, related: [XZZB, RBVK, 05J2]}
 ---
 # Settings as a full pane, with sub-tabs and one search over settings and actions
 

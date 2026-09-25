@@ -1,15 +1,16 @@
 ---
 id: GRT2
 type: work
-status: executing
+status: needs-verification
 labels: [feature, switchboard]
 assignee: agent
 implemented_by: kimi/kimi-k3
 session: 297817d3-877f-4125-a584-deb56f03d1b5
 rank: zzzzzzzzzzzzzzzzzzy
 created: '2026-09-23'
+verify: {artifact: code, primary: script, also: [], human: optional, criteria: relay-board.py check runs against .board with no rename-caused errors; git ls-files issues = 0 and .board = 1208; Board pane opens the migrated board; other four project boards open at .board with their cards intact, sign_off: none, effort: medium}
 source: owner in Relay pane, 2026-09-23
-links: {plans: [], commits: [9bd89b7cfc21e81576a5e38e61c8fce3e2841908], evidence: [docs/qa_evidence/2026-09-23-board-migration-GRT2/README.md], related: [1CXD], github: null}
+links: {plans: [], commits: [9bd89b7cfc21e81576a5e38e61c8fce3e2841908], evidence: [docs/qa_evidence/2026-09-23-board-migration-GRT2/README.md, docs/qa_evidence/2026-09-23-board-migration-GRT2/], related: [1CXD], github: null}
 ---
 # Make .board the default and migrate existing local project boards
 
@@ -35,5 +36,5 @@ New Relay projects create `.board/`; existing folders still open until explicitl
 - [x] Make .board the default in Relay setup and discovery; preserve old folder support <!-- t:jf -->
 - [x] Build and run focused tests for setup, discovery, and rename <!-- t:sc -->
 - [x] Back up and migrate other real local project boards <!-- t:6s -->
-- [ ] Coordinate live sessions, then migrate this repository's issues board last <!-- t:8a s=in-progress -->
-- [ ] Verify all board paths, document evidence, and land the migration record <!-- t:9h s=in-progress -->
+- [x] Coordinate live sessions, then migrate this repository's issues board last <!-- t:8a -->
+- [x] Verify all board paths, document evidence, and land the migration record <!-- t:9h -->

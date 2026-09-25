@@ -1,10 +1,14 @@
 ---
 id: VASY
 type: work
-status: planned
+status: needs-verification
 labels: [bug, switchboard]
+assignee: agent
+implemented_by: kimi/kimi-k3
+session: 857ae200-ed0f-46b2-85d4-1c9065bb0a08
 rank: zzzzzzzzzzzzzzzy
 created: '2026-09-20'
+verify: {artifact: code, primary: script, also: [], human: none, criteria: the reproduce command shows no FAIL/ERROR lines for the three named tests, sign_off: none, effort: low}
 source: 'pane, 2026-09-20, found while executing #DPJB'
 links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
@@ -51,3 +55,6 @@ The reproduce command in `## Evidence` runs green on main: `tests.test_board_too
 **Risks.** The failure modes disagree about direction: the count failures could in principle be a real off-by-one regression in `board_tools.py` that someone papered over in the tests. Step 4 guards this — the executor must name the commit that introduced the entry and confirm it is a deliberate write-record, not accidental double-append. No owner decision needed; the policy direction was already decided (owner, 2026-09-20, cited in the test comment).
 
 **Verify.** The reproduce command from `## Evidence` exits with no `FAIL:`/`ERROR:` lines. If any test file was edited, run the full `tests.test_board_tools` module (not just the three tests) to catch neighbouring-count breakage. `git status` before and after confirms only `tests/test_board_tools.py` changed, if anything.
+
+## Execution Summary
+Already fixed, as the plan suspected — no code change. The reproduce command from `## Evidence` on current main (73644db0) prints no FAIL/ERROR lines: `tests.test_board_tools` runs 312 tests OK, both in this checkout and on a clean `git archive HEAD` export. The policy test asserts the post-decision wording with a comment citing the owner's 2026-09-20 decision, and the two count tests assert the intentional thread-entry-per-write counts — exactly the repairs the plan's steps 3–4 describe, landed by earlier sessions. The `tests.test_board_protocol` loader note in `## Evidence` no longer reproduces either (module loads and runs; the only export-only failure is `test_the_launch_directorys_board_is_never_adopted…`, an artifact of `issues/` being untracked and thus absent from git-archive exports — it passes in a real checkout).

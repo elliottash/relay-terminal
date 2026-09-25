@@ -32,3 +32,9 @@ User added: “astra was also in my ‘high’ list.” The active High role can
 
 <!-- relay:entry 20260924T133246Z-w5 author=agent kind=event model=gpt-6-sol pane=a85a15ff turn=7f6b15c6559f45e5ad3cfffcdc0c8f64/b5acc9778c5e4cd488ddbab54c627bdb -->
 - ✦ agent moved this card · Executing → Needs verification · The active-role effort menu fix and GLM → Astra High → Sol High → GLM regression test passed in the exact landed tree. · evidence docs/qa_evidence/2026-09-24-2RYC/consolemode.txt · implemented_by openai/gpt-6-sol via codex
+
+<!-- relay:entry 20260924T224259Z-v3 author=agent kind=evidence -->
+Check · 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260924T224910Z-6d author=agent kind=evidence -->
+Check · 1 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.

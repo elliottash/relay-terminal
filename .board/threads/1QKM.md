@@ -18,3 +18,15 @@
 
 <!-- relay:entry 20260924T025357Z-0r author=agent kind=event model=claude-fable-5-1 pane=9b541d35 turn=cf99c92a9b1e48559ab6b383c65134c7/a328f0aa299c4326bff4c99a3b066dc2 -->
 - ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260924T212612Z-cr author=agent kind=event model=gpt-6-sol pane=339319d6 turn=ad860cc68df645ceac3317591bc67857/ef2095ca73d9418d9d0ab1ac46fc35fe -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260924T212616Z-7s author=agent kind=decision model=gpt-6-sol pane=339319d6 turn=ad860cc68df645ceac3317591bc67857/ef2095ca73d9418d9d0ab1ac46fc35fe -->
+Owner: “i think there might be a card on this, to also put skills in the board. put this note on that card, that the board should become 3 tabs, cards, skills, memories” and “globals also needs global skills”. This extends the Skills surface proposal: the project Board has Cards, Skills, and Memories tabs; Globals has global skills. The owner's earlier correction, “globals is showing local memories. local memories go in teh board”, establishes the memory boundary. Recorded in ## Decisions; no implementation or memory migration was done in this note.
+
+<!-- relay:entry 20260924T213458Z-za author=owner kind=event pane=switchboard -->
+- ✦ owner flagged this card · priority +1
+
+<!-- relay:entry 20260924T213459Z-qm author=owner kind=event pane=switchboard -->
+- ✦ owner flagged this card · priority +2

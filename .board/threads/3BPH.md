@@ -9,3 +9,6 @@ Reproduced all three missing-button failures on sphinxpad Ubuntu 26.04 / Qt6, cl
 
 <!-- relay:entry 20260922T184025Z-r5 author=agent kind=event model=gpt-6-astra pane=eda7f821 turn=678e5e19bfda407591a623f02e9421f6/3d4068e3f6b64f3c866e4bb7d09805ca -->
 - ✦ agent moved this card · Inbox → Discussing · the discussion started
+
+<!-- relay:entry 20260925T000520Z-98 author=agent kind=event model=glm-5.3 pane=15e42790 turn=198f044065dd47079fe9509e50f12651/2a01e6a3d6734f549843a58d5e9ef885 -->
+- ✦ agent moved this card · Discussing → Dropped · Duplicate of #DEH6 (same BoardExecuteTests failures since #BGRN); fixed by 1d0be291 and tracked there — closing as duplicate.
