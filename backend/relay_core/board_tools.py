@@ -1542,6 +1542,9 @@ class BoardTools:
         #: The cards this turn wrote to, in order (#95VZ): the row the turn's end writes for a
         #: loaded profiled skill names the last of them.
         self.cards_this_turn: list[str] = []
+        #: Every board file this turn wrote, repo-relative and in write order, deduplicated
+        #: (#FYEY): the turn's end board-syncs exactly these paths with `scripts/land.py`.
+        self.paths_this_turn: list[str] = []
         #: Set while a `board_cleanup` turn runs (protocol 19.9): it raises the per-turn
         #: ceilings, offers the merge/split/sections tools, and records every write.
         self.cleanup: CleanupLog | None = None
@@ -1637,6 +1640,7 @@ class BoardTools:
         self.context.skills.clear()
         self.context.skill_versions.clear()
         self.cards_this_turn = []
+        self.paths_this_turn = []
 
     def begin_cleanup(self, run_id: str, *, dry_run: bool = False, scope: str | None = None,
                       note: str | None = None, limits: dict | None = None) -> CleanupLog:
@@ -2372,6 +2376,17 @@ class BoardTools:
         while len(self._order) > 50:
             self.writes.pop(self._order.pop(0), None)
         rel = str(path.relative_to(self.board.repo))
+        # #FYEY: every board file this write touched joins the turn's board-sync list — the
+        # card file, its thread, and any file a merge or split rewrote beside it.
+        for touched in [path, thread_path, *(other[0] for other in others)]:
+            if touched is None:
+                continue
+            try:
+                other_rel = str(touched.relative_to(self.board.repo))
+            except ValueError:            # a file outside the repo is not board-synced
+                continue
+            if other_rel not in self.paths_this_turn:
+                self.paths_this_turn.append(other_rel)
         activity = {"event": "board_activity", "write_id": write_id, "id": card_id or None,
                     "action": action, "actor": self.context.actor, "model": self.context.model,
                     "pane": self.context.pane, "turn_id": self.context.turn_id,
@@ -2815,6 +2830,10 @@ class BoardTools:
         # And the one switch (#C3Q2): under `ask` a verifier does not close a card whose plan
         # needs no person; under `automatic` it does, and the result says so in one line.
         qa_note = self._qa_ask_gate(card, old_status, status)
+        # And the tree, not just the card (#FYEY): uncommitted work of this pane does not ride a
+        # move into `needs-verification` or `done`. A land script that cannot answer is a warning
+        # on the result, not a refusal — the card moves, the person is told what was not checked.
+        land_note = self._land_gate(card, old_status, status)
         # `section` parks the card in a manual section — a column that collects nothing — and an
         # empty string takes it out (#3XZV). Its status is left alone either way.
         section_arg = args.get("section")
@@ -2991,7 +3010,8 @@ class BoardTools:
                 "hash": B.file_hash(card.path), "moved": moved_from is not None,
                 "write_id": write_id, "summary": summary,
                 **({"case": case["id"]} if case else {}),
-                **({"qa_policy": qa_note} if qa_note else {})}
+                **({"qa_policy": qa_note} if qa_note else {}),
+                **({"land_warning": land_note} if land_note else {})}
 
     def _close_reason(self, card: B.Card, old_status: str, status: str, args: dict) -> str:
         """Set or clear the close reason for a move (#MJ76), returning the words the thread
@@ -3936,6 +3956,55 @@ class BoardTools:
             code="board_signal_open", id=card.id or "",
             signals=[s.to_dict() for s in blocks],
             open_before=[s.to_dict() for s in before])
+
+    # ---- the land gate (#FYEY) ------------------------------------------------
+    def _land_gate(self, card: B.Card, old_status: str, status: str) -> str:
+        """Uncommitted work does not ride a card into verification or done (#FYEY).
+
+        A card that says `needs-verification` or `done` says the work is in the tree, so before
+        the move lands we ask `scripts/land.py status` what this pane's token still owes: any
+        uncommitted hunks refuse the move until they are committed. A land script that errors,
+        times out or prints something unreadable never refuses — the move goes through with the
+        one-line warning returned here ("" when there is nothing to say). Skipped entirely for a
+        move that stays in the same status, a worker with no pane token and a repo with no land
+        script.
+        """
+        if (status not in ("needs-verification", "done") or status == old_status
+                or not (self.pane_token or "").strip()):
+            return ""
+        land = self.board.repo / "scripts" / "land.py"
+        if not land.is_file():
+            return ""
+        try:
+            run = subprocess.run([sys.executable, str(land), "status",
+                                  "--token", self.pane_token, "--json"],
+                                 capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            return "land status timed out after 10 s: uncommitted work was not checked"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"land status could not run: {exc}; uncommitted work was not checked"
+        if run.returncode != 0:
+            detail = (run.stderr or run.stdout or "").strip().splitlines()
+            return (f"land status failed: {detail[0][:200] if detail else 'no output'}; "
+                    "uncommitted work was not checked")
+        try:
+            report = json.loads(run.stdout or "")
+            uncommitted = int(report.get("uncommitted") or 0)
+        except (ValueError, TypeError):
+            return "land status output was not readable: uncommitted work was not checked"
+        if uncommitted <= 0:
+            return ""
+        claimed = []
+        for session in report.get("sessions") or ():
+            name = str(session.get("session") or "?")
+            for claim in session.get("claims") or ():
+                claimed.append(f"{claim.get('path', '?')} ({claim.get('hunks', '?')} hunks, "
+                               f"session {name})")
+        listing = "; ".join(claimed[:6]) or f"{uncommitted} hunks somewhere in this pane's sessions"
+        raise BoardToolError(
+            f"This pane has uncommitted work: {listing}. Commit it first "
+            f"(`{str(land.relative_to(self.board.repo))} commit <session>`), then move the card.",
+            code="board_refused", requires="land", id=card.id or "")
 
     # ---- releasing a claim (#R9G7, owner 2026-09-20: "auto-release on done and on closed") ----
     def _release_on_close(self, card: B.Card, status: str) -> str:

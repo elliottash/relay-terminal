@@ -1,10 +1,12 @@
 import json
+import os
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from relay_core import skills as skills_mod
 from relay_core.agent import Agent, transcript_items
@@ -405,6 +407,48 @@ class StopAndMessageTests(Base):
             self.assertEqual(event['outcome'], 'stopped')
         with self.assertRaises(ValueError):
             self.manager.stop('a99')
+
+    def test_stop_kills_the_subagents_background_jobs(self):
+        # #FYEY: `agent.stop()` cancels the model call, but the jobs the subagent's executor
+        # handed back keep running until someone stops them — the stop does that itself.
+        self.spawn('J gate:g1')
+        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+        sub = self.manager._agents['a1']
+        job = sub.agent.executor.jobs.start('sleep 30', str(self.temp.name), dict(os.environ))
+        self.assertTrue(job.running)
+        self.assertEqual(self.manager.stop('a1'), ['a1'])
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
+        deadline = time.time() + 1
+        while job.running and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(job.running, 'the subagent was stopped but its job still runs')
+
+    def test_stop_writes_the_land_cancelled_marker(self):
+        # #FYEY: a stopped subagent's land thread is marked cancelled, so `land.py commit`
+        # refuses the session it owned instead of landing half-finished work.
+        land_root = Path(self.temp.name) / 'land'
+        with mock.patch.dict(os.environ, {'RELAY_LAND_ROOT': str(land_root),
+                                          'RELAY_PANE_ID': '7'}):
+            self.spawn('L gate:g1')
+            self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+            thread_id = self.manager._agents['a1'].thread_id
+            self.assertTrue(thread_id)
+            self.assertEqual(self.manager.stop('a1'), ['a1'])
+            marker = land_root / 'cancelled' / thread_id
+            data = json.loads(marker.read_text(encoding='utf-8'))
+            self.assertEqual(data['thread'], thread_id)
+            self.assertEqual(data['by'], '7')
+            self.assertIsInstance(data['at'], int)
+
+    def test_the_agent_stop_tool_is_in_the_main_agents_surface(self):
+        # #FYEY: agent_stop was only a GUI protocol message; the main agent now has the tool.
+        self.spawn('S9')
+        names = [spec['function']['name'] for spec in self.manager.tool_specs()]
+        self.assertIn('agent_stop', names)
+        specs = {spec['function']['name']: spec['function'] for spec in self.manager.tool_specs()}
+        self.assertEqual(specs['agent_stop']['parameters']['required'], ['id'])
+        self.assertIn('real stop', specs['agent_message']['description'])
+        self.assertIn('agent_stop', specs['agent_message']['description'])
 
     def test_pause_holds_a_running_subagent_and_resume_continues_it(self):
         self.spawn('P gate:g1')

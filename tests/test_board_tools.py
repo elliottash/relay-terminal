@@ -4273,3 +4273,91 @@ class MemoryRowTests(BoardToolsTest):
         self.assertNotIn("reviewed", row)
         self.assertNotIn("paths", row)
         self.assertNotIn("name", row)
+
+
+class LandGateTests(BoardToolsTest):
+    """A card that lands in `needs-verification` or `done` certifies the tree, not just the
+    card (#FYEY): `_move` asks `scripts/land.py status` what this pane's token still owes and
+    refuses while it owes hunks. A land script that fails, or a repo without one, only warns —
+    the move is never blocked by an answer we could not get."""
+
+    def land(self, script):
+        scripts = self.repo / "scripts"
+        scripts.mkdir(exist_ok=True)
+        (scripts / "land.py").write_text(script, encoding="utf-8")
+
+    def status_script(self, uncommitted, calls=None):
+        """A land.py that reports the given hunk count, recording its argv when asked."""
+        report = {"token": self.pane_token,
+                  "sessions": [{"session": "fyey-py", "auto": True, "card": "#FYEY",
+                                "claims": [{"path": "backend/relay_core/board_tools.py",
+                                            "hunks": uncommitted,
+                                            "snapshot_age_minutes": 0.5}]}],
+                  "uncommitted": uncommitted}
+        script = ""
+        if calls is not None:
+            script += ("import sys\n"
+                       f"open(r'{calls}', 'a').write(' '.join(sys.argv) + '\\n')\n")
+        script += "import json\nprint(json.dumps(%r))\n" % (report,)
+        self.land(script)
+
+    def move(self, status):
+        return self.tools.run("board_move_card", {"id": self.card_id, "status": status,
+                                                  "reason": "closing it"})
+
+    def setUp(self):
+        super().setUp()
+        self.card_id = self.create()
+
+    def test_uncommitted_hunks_refuse_the_move(self):
+        calls = self.repo / "land-calls.txt"
+        self.status_script(3, calls=calls)
+        refused = self.move("needs-verification")
+        text = refused.get("error", "")
+        self.assertIn("backend/relay_core/board_tools.py", text)
+        self.assertIn("3 hunks", text)
+        self.assertIn("land.py commit", text)
+        self.assertEqual(refused["requires"], "land")
+        # The status ran for this pane's token, and the refusal left the card where it was.
+        self.assertIn(f"status --token {self.pane_token} --json",
+                      calls.read_text(encoding="utf-8"))
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "inbox")
+
+    def test_a_committed_tree_moves_through_cleanly(self):
+        self.status_script(0)
+        result = self.move("needs-verification")
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("land_warning", result, result)
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-verification")
+
+    def test_a_broken_land_script_warns_but_does_not_refuse(self):
+        self.land("import sys\nsys.stderr.write('land store unreachable\\n')\nsys.exit(1)\n")
+        result = self.move("done")
+        self.assertNotIn("error", result, result)
+        warning = result.get("land_warning", "")
+        self.assertTrue(warning, result)
+        self.assertEqual(len(warning.splitlines()), 1)
+        self.assertIn("not checked", warning)
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "done")
+
+    def test_moves_to_other_statuses_never_ask_the_land_script(self):
+        calls = self.repo / "land-calls.txt"
+        self.status_script(3, calls=calls)
+        result = self.move("executing")
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("land_warning", result, result)
+        self.assertFalse(calls.exists(), "a move off the green lanes asked the land script")
+
+    def test_a_worker_without_a_token_moves_without_asking(self):
+        calls = self.repo / "land-calls.txt"
+        self.status_script(3, calls=calls)
+        self.tools.pane_token = ""
+        result = self.move("needs-verification")
+        self.assertNotIn("error", result, result)
+        self.assertFalse(calls.exists())
+
+    def test_a_repo_without_a_land_script_moves_without_asking(self):
+        result = self.move("needs-verification")
+        self.assertNotIn("error", result, result)
+        self.assertNotIn("land_warning", result, result)
+        self.assertEqual(self.board.card_by_id(self.card_id).status, "needs-verification")

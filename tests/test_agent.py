@@ -10,6 +10,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from relay_core import board as B
+from relay_core import board_tools as T
+
 from relay_core import agent as agent_module
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig, ProviderStalled, ProviderTruncated
@@ -764,3 +767,118 @@ class GuestAggregateUsageTests(unittest.TestCase):
         self.assertEqual(agent.messages, before_messages)
         # The tracker was not invalidated: the usage measurement is still the basis.
         self.assertEqual(agent.context._usage_tokens, 5_100)
+
+
+# A board small enough for one test, and a land.py fake that records its own argv next to
+# itself: the board-sync of a turn (#FYEY) is observed through exactly what it was handed.
+BOARD_SYNC_CONFIG = """\
+version: 1
+tabs: [{id: features, folder: features}, {id: done, filter: "status:done,dropped"}]
+columns: [inbox, executing, needs-verification, done]
+agent: {autonomy: auto, max_creates_per_turn: 5}
+"""
+
+FAKE_LAND = """\
+import json, os, sys
+log = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "land-calls.jsonl")
+with open(log, "a") as fh:
+    fh.write(json.dumps(sys.argv) + "\\n")
+print("nothing to land")
+"""
+
+
+def board_call(call_id, name, arguments):
+    return {"id": call_id, "type": "function",
+            "function": {"name": name, "arguments": json.dumps(arguments)}}
+
+
+class BoardSyncTests(unittest.TestCase):
+    """The turn's board writes land per turn (card #FYEY, decision 6): `_end_turn` runs
+    `scripts/land.py board-sync <token> -m "board: <pane> <turn>" <paths>` in a thread of its
+    own, exactly once, with exactly the board paths the turn wrote — and never when the turn
+    wrote none or the repo has no land script."""
+
+    pane_token = "0f0e3d1c-3b1b-4d3f-9a52-6a1f6f5f0000"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        (self.root / "issues").mkdir()
+        (self.root / "issues" / "board.yaml").write_text(BOARD_SYNC_CONFIG, encoding="utf-8")
+        self.board_tools = T.BoardTools(
+            B.Board(self.root / "issues", self.root),
+            emit=lambda event: None,
+            context=T.ToolContext(actor="agent", model="anthropic/claude-opus-5-5", pane="2"),
+            state_path=self.root / ".relay" / "board-rate.json",
+            pane_token=self.pane_token)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def land_script(self):
+        scripts = self.root / "scripts"
+        scripts.mkdir(exist_ok=True)
+        (scripts / "land.py").write_text(FAKE_LAND, encoding="utf-8")
+
+    def calls(self):
+        log = self.root / "scripts" / "land-calls.jsonl"
+        return [json.loads(line) for line in
+                log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+
+    def ask(self, response):
+        events = []
+        agent = Agent(CONFIG, str(self.root), events.append, provider=FakeProvider(response),
+                      board=self.board_tools)
+        agent.ask("work on the board")
+        return events
+
+    def settle(self, count, seconds=5):
+        """Wait for the background sync (or its absence) to settle."""
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if len(self.calls()) >= count:
+                break
+            time.sleep(0.02)
+        return self.calls()
+
+    def test_a_turn_that_wrote_two_cards_syncs_them_once(self):
+        self.land_script()
+        response = {"role": "assistant", "content": "", "reasoning_content": "",
+                    "tool_calls": [
+                        board_call("c1", "board_create_card",
+                                   {"tab": "features", "status": "inbox", "title": "One",
+                                    "request": "the first card"}),
+                        board_call("c2", "board_create_card",
+                                   {"tab": "features", "status": "inbox", "title": "Two",
+                                    "request": "the second card"})]}
+        events = self.ask(response)
+        self.assertEqual(events[-1]["event"], "done", events[-1])
+        calls = self.settle(1)
+        self.assertEqual(len(calls), 1, calls)
+        argv = calls[0]
+        self.assertEqual(argv[1:3], ["board-sync", self.pane_token])
+        self.assertEqual(argv[3], "-m")
+        message = argv[4]
+        self.assertTrue(message.startswith("board: 2 "), message)
+        self.assertNotEqual(message.split()[-1], "2", "the turn id is missing from the message")
+        paths = argv[5:]
+        cards = [p for p in paths if p.startswith("issues/features/") and "/threads/" not in p]
+        self.assertEqual(len(cards), 2, paths)
+        self.assertEqual(len(set(paths)), len(paths), "a path was synced twice")
+
+    def test_a_turn_without_board_writes_calls_nothing(self):
+        self.land_script()
+        events = self.ask(tool("run_command", {"command": "printf HELLO"}))
+        self.assertEqual(events[-1]["event"], "done", events[-1])
+        self.settle(0, seconds=1)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_repo_without_a_land_script_calls_nothing(self):
+        events = self.ask({"role": "assistant", "content": "", "reasoning_content": "",
+                           "tool_calls": [
+                               board_call("c1", "board_create_card",
+                                          {"tab": "features", "status": "inbox", "title": "One",
+                                           "request": "the first card"})]})
+        self.assertEqual(events[-1]["event"], "done", events[-1])
+        self.settle(0, seconds=1)
+        self.assertFalse((self.root / "scripts").exists())

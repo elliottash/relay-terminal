@@ -20,6 +20,9 @@ __pycache__/
 # Switchboard worker scratch (rate-limit bookkeeping)
 /.relay/
 
+# The board's alias symlink (`issues -> .board`): a checkout convenience, never committed.
+/issues
+
 # Evidence runs leave these behind under docs/qa_evidence/: the worker's log lock (15 of them
 # were committed on 2026-09-19) and the drivers' own intermediate screenshots.
 .worker.log.lock

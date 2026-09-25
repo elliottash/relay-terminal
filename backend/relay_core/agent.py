@@ -7,6 +7,8 @@ import dataclasses
 import json
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -4430,8 +4432,54 @@ class Agent:
             except Exception as exc:                        # pragma: no cover - never fails the turn
                 logs.event(_log, "cases_skipped", level_name="warning", session=self.session_id,
                            turn=record["turn_id"], error=str(exc)[:200])
+        # The turn's board writes land right here (card #FYEY, decision 6): a background
+        # board-sync of exactly the `.board/` paths this turn wrote, so the next pane to touch
+        # the board sees them and a dying session never leaves them to pile up. Never fails
+        # the turn, and never delays it — the sync runs in a thread of its own.
+        self._sync_board_writes(record)
         self.emit(self.turn_summary(record))
         self.emit(event)
+
+    def _sync_board_writes(self, record: dict) -> None:
+        """Board-sync this turn's board writes in the background (card #FYEY, decision 6).
+
+        Spawns `<repo>/scripts/land.py board-sync <token> -m "board: <pane> <turn>" <paths>`
+        as a daemon thread and returns at once; the thread logs the sync's one-line output and
+        swallows everything, because a landing that fails or a land script that is missing must
+        not fail the turn it serves. Does nothing when this agent has no board, wrote no board
+        paths this turn, holds no pane token, or the repo has no `scripts/land.py`.
+        """
+        try:
+            board = self.board
+            engine = getattr(board, "board", None)         # BoardTools.board is the Board itself
+            paths = list(getattr(board, "paths_this_turn", None) or [])
+            if board is None or engine is None or not paths:
+                return
+            land = Path(engine.repo) / "scripts" / "land.py"
+            if not land.is_file():
+                return
+            token = (getattr(board, "pane_token", "") or os.environ.get("RELAY_SESSION_TOKEN", "")).strip()
+            if not token:
+                return
+            pane = (getattr(board.context, "pane", "") or "").strip()
+            turn_id = str(record.get("turn_id") or "")
+            argv = [sys.executable, str(land), "board-sync", token, "-m",
+                    f"board: {pane} {turn_id}".strip(), *paths]
+
+            def run_sync() -> None:
+                try:
+                    run = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+                    detail = ((run.stdout or "") + (run.stderr or "")).strip().splitlines()
+                    logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
+                               level_name="info" if run.returncode == 0 else "warning",
+                               code=run.returncode, paths=len(paths),
+                               result=detail[0][:200] if detail else "")
+                except Exception as exc:                    # never fails the turn
+                    logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
+                               level_name="warning", error=str(exc)[:200], paths=len(paths))
+            threading.Thread(target=run_sync, name="relay-board-sync", daemon=True).start()
+        except Exception:                                  # never fails the turn
+            pass
 
     def _subagents_rollback(self, batch, delivered) -> None:
         """Subagents: a rolled-back turn stops its foreground subagents and keeps undelivered results."""

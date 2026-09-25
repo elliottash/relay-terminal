@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -64,7 +65,7 @@ def validate_max_auto_turns(value) -> int:
 MAX_TASK_BYTES = 64 * 1024
 MAX_RESULT_CHARS = 32 * 1024
 SUMMARY_CHARS = 2000
-AGENT_TOOLS = ("agent", "agent_message", "agent_wait", "agent_set_model")
+AGENT_TOOLS = ("agent", "agent_message", "agent_stop", "agent_wait", "agent_set_model")
 FORWARDED = {"delta", "tool_started", "tool_output", "tool_result", "status", "thinking_delta", "thinking_done",
              "turn_summary"}
 PROGRESS_INTERVAL = 1.0
@@ -549,8 +550,13 @@ def delegation_tool_specs(catalog=None, max_concurrent=MAX_CONCURRENT) -> list[d
                           "blocked when it ends."}},
              ["description", "prompt", "subagent_type"]),
         spec("agent_message", "Send a message to a subagent. A running subagent reads it before its next step; "
-             "a finished one resumes with it as a new task in the background.",
+             "a finished one resumes with it as a new task in the background. A STOP note is advisory "
+             "only — it ends the turn early but cannot stop a running tool; `agent_stop` is the real stop.",
              {"id": {"type": "string"}, "text": {"type": "string"}}, ["id", "text"]),
+        spec("agent_stop", "Stop a subagent now: end its agent loop, kill its background jobs and mark its "
+             "land thread cancelled, so its work stops and it stops owning land sessions. id 'all' stops "
+             "every running subagent.",
+             {"id": {"type": "string", "description": "Subagent id, e.g. 'a1', or 'all'."}}, ["id"]),
         spec("agent_wait", "Wait for a subagent (or, without id, all running background subagents) to finish "
              "and return their results.",
              {"id": {"type": "string"}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}}, []),
@@ -657,6 +663,8 @@ class SubagentManager:
                     f"\n\n{str(args.get('prompt', ''))[:1000]}")
         if name == "agent_message":
             return f"MESSAGE AGENT {args.get('id')}\n\n{str(args.get('text', ''))[:1000]}"
+        if name == "agent_stop":
+            return f"STOP AGENT {args.get('id') or 'all'}"
         if name == "agent_set_model":
             return f"SET AGENT MODEL {args.get('id')}\n\n{str(args.get('model', ''))[:200]}"
         return f"WAIT FOR AGENT {args.get('id') or 'all background agents'}"
@@ -715,6 +723,13 @@ class SubagentManager:
             if set(args) - {"id", "text"}:
                 raise ValueError("Unknown tool or unexpected argument.")
             return self.send_message(args.get("id"), args.get("text"), origin="main")
+        if name == "agent_stop":
+            if set(args) - {"id"}:
+                raise ValueError("Unknown tool or unexpected argument.")
+            target = args.get("id")
+            if not isinstance(target, str) or not target.strip():
+                raise ValueError("agent_stop needs a subagent id, or 'all'.")
+            return {"ids": self.stop(target.strip()), "stopped": True}
         if name == "agent_wait":
             if set(args) - {"id", "timeout_seconds"}:
                 raise ValueError("Unknown tool or unexpected argument.")
@@ -1285,6 +1300,13 @@ class SubagentManager:
             for sub in subs:
                 sub.stop_requested = True
                 sub.agent.stop()
+                # And what the agent left running (#FYEY): `agent.stop()` cancels the model
+                # call, but the jobs its executor handed back keep running until someone
+                # collects them — a stopped subagent must stop them itself.
+                self._stop_jobs(sub)
+                # And its land thread is marked cancelled, so `land.py commit` refuses the
+                # session it owned and half-finished work never lands as a done session.
+                self._mark_land_cancelled(sub)
             # A paused subagent has no run thread left to observe the request: it is marked
             # stopped here, its todo returned to pending, the UI told (#ZQNG).
             if target == "all":
@@ -1306,6 +1328,36 @@ class SubagentManager:
                             "tokens": sub.tokens, "elapsed_ms": self._elapsed(sub)})
             self._lock.notify_all()
             return [sub.id for sub in subs] + [sub.id for sub in held]
+
+    @staticmethod
+    def _stop_jobs(sub: Subagent) -> None:
+        """Stop every job of the subagent's executor (#FYEY): background jobs it handed back
+        (a `sleep 300`, a watcher, a build) survive `agent.stop()`, so a stop that leaves them
+        running has not stopped the work. Never raises over the stop itself."""
+        jobs = getattr(getattr(sub.agent, "executor", None), "jobs", None)
+        try:
+            if jobs is not None:
+                jobs.stop_all()
+        except Exception:              # a job that will not die must not undo the stop
+            pass
+
+    @staticmethod
+    def _mark_land_cancelled(sub: Subagent) -> None:
+        """Write the land cancelled marker for the subagent's thread (#FYEY): one JSON line in
+        `<land root>/cancelled/<thread-id>`, which makes `land.py commit` refuse a session this
+        thread owned. Best effort — a marker that cannot be written never fails the stop."""
+        thread_id = (sub.thread_id or "").strip()
+        if not thread_id:
+            return
+        try:
+            from .tools import land_root            # local import: tools does not import us
+            folder = land_root() / "cancelled"
+            folder.mkdir(parents=True, exist_ok=True)
+            line = json.dumps({"thread": thread_id, "at": int(time.time()),
+                               "by": os.environ.get("RELAY_PANE_ID", "")})
+            (folder / thread_id).write_text(line + "\n", encoding="utf-8")
+        except (OSError, ValueError):
+            pass
 
     def set_model(self, target, model, warnings_out: list | None = None) -> list[str]:
         """agent_set_model: move one subagent, or every listed one ("all"), to another model.
