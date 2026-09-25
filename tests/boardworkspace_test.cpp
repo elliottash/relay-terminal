@@ -84,6 +84,7 @@ private slots:
     void anOptionOrSessionLinkOpensWhereItNames();
     void theBoardPanePaintsFromTheBoardMaterials();
     void tabMetersGiveWayOnlyWhenFullLabelsDoNotFit();
+    void aBackgroundRunOpensStraightIntoABackgroundWindow();
 };
 
 void BoardWorkspaceTests::cardFileLinksRecognizeOnlyThisBoardsCards()
@@ -880,6 +881,55 @@ void BoardWorkspaceTests::tabMetersGiveWayOnlyWhenFullLabelsDoNotFit()
     QVERIFY(label.contains(QStringLiteral("if (tabMetersHaveRoom()) title += tabUsageSuffix(page);")));
     const QString eventFilter = bodyOf(text, QStringLiteral("bool eventFilter(QObject *object, QEvent *event) {"));
     QVERIFY(eventFilter.contains(QStringLiteral("if (resized) relabelTabsForWidth();")));
+}
+
+// RelayWindow::createBoardPane()'s onExecuteCard needs a whole window to run, so the wiring is
+// pinned here as text like the tests above. A background Run used to insert its pane beside the
+// board, activate and focus it, and let backgroundPaneWhenWorking take it back out a second
+// later: the board visibly split and closed again (#NX72). The background branch must adopt the
+// pane into a hidden background window before the task starts and never touch the foreground
+// layout; the foreground branch (Run in pane) must keep the insert.
+void BoardWorkspaceTests::aBackgroundRunOpensStraightIntoABackgroundWindow()
+{
+    const QString text = windowSource();
+    QVERIFY2(!text.isEmpty(), "src/RelayWindow.h could not be read");
+    const int lambdaStart = text.indexOf(QStringLiteral("view->onExecuteCard = "));
+    QVERIFY2(lambdaStart >= 0, "createBoardPane's onExecuteCard is gone");
+    const int lambdaEnd = text.indexOf(QStringLiteral("view->paneExists = "), lambdaStart);
+    QVERIFY2(lambdaEnd > lambdaStart, "onExecuteCard no longer ends where paneExists begins");
+    const QString body = text.mid(lambdaStart, lambdaEnd - lambdaStart);
+    const int branch = body.indexOf(QStringLiteral("if (runInBackground) {"));
+    QVERIFY2(branch >= 0, "onExecuteCard's runInBackground branch is gone");
+    const int branchEnd = body.indexOf(QStringLiteral("return pane->sessionToken();"), branch);
+    QVERIFY2(branchEnd > branch, "the runInBackground branch no longer returns the pane's token");
+    const QString backgroundBlock = body.mid(branch, branchEnd - branch);
+    // Straight into the hidden window, task parked until the agent configures, same destination
+    // backgroundPane moves panes to.
+    QVERIFY2(backgroundBlock.contains(QStringLiteral("markBackgroundTask(true)")),
+             "a background run no longer marks its pane");
+    QVERIFY2(backgroundBlock.contains(QStringLiteral("newEmptyWindow")),
+             "a background run no longer opens a background window");
+    QVERIFY2(backgroundBlock.contains(QStringLiteral("adoptLeafAsTab")),
+             "a background run no longer adopts its pane into the background window");
+    QVERIFY2(backgroundBlock.indexOf(QStringLiteral("adoptLeafAsTab"))
+                 < backgroundBlock.indexOf(QStringLiteral("startBoardTask")),
+             "the pane must be adopted before its task starts");
+    // And nothing that reshapes or focuses the foreground layout.
+    QVERIFY2(!backgroundBlock.contains(QStringLiteral("insertBeside")),
+             "a background run still inserts its pane beside the board");
+    QVERIFY2(!backgroundBlock.contains(QStringLiteral("spreadAfterAdding")),
+             "a background run still spreads the layout");
+    QVERIFY2(!backgroundBlock.contains(QStringLiteral("setActive")),
+             "a background run still activates its pane");
+    QVERIFY2(!backgroundBlock.contains(QStringLiteral("focusLeaf")),
+             "a background run still focuses its pane");
+    QVERIFY2(!backgroundBlock.contains(QStringLiteral("backgroundPaneWhenWorking")),
+             "a background run still shows the pane while waiting for its agent");
+    // The foreground branch keeps the insert and the focus.
+    QVERIFY2(body.indexOf(QStringLiteral("insertBeside(guard, pane")) > branchEnd,
+             "the foreground run lost its insert beside the board");
+    QVERIFY2(body.indexOf(QStringLiteral("focusLeaf(pane)")) > branchEnd,
+             "the foreground run lost its focus");
 }
 
 QTEST_MAIN(BoardWorkspaceTests)

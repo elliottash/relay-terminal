@@ -5597,16 +5597,37 @@ public:
             Pane *pane = nullptr;
             try { pane = w->createPane({{"cwd", workspace}, {"workspace", workspace}, {"agent_role", "main"}}); }
             catch (const std::exception &error) { w->statusBar()->showMessage(QString::fromUtf8(error.what()), 9000); return QString(); }
+            if (runInBackground) {
+                // A background run never touches the foreground layout (#NX72): the pane goes
+                // straight into a hidden background window — the destination the working-poll
+                // below used to move it to a second later. The old path inserted the pane beside
+                // the board, activated and focused it, then took it back out: the board visibly
+                // split and closed again. The task is parked until the pane's agent is
+                // configured, and a marked pane with no owned requests already reports "working"
+                // (BackgroundTasks.h), so the arrival poll posts no notice; the card's chip still
+                // reveals the pane (focusPane pulls background panes into view) and
+                // refreshBackgroundTasks still posts the settle notices.
+                pane->markBackgroundTask(true);
+                RelayWindow *background = w->m_manager->newEmptyWindow(w->geometry(), true);
+                background->adoptLeafAsTab(pane);
+                if (!workspace.isEmpty()) background->attachTab(background->pageOf(pane), workspace,
+                    QString::fromLatin1(relay::projects::kReasonRestored));
+                pane->startBoardTask(task, card);
+                w->m_manager->scheduleSave();
+                w->notice(QStringLiteral("Job continues in the background. Reopen it in Sessions → Background."), 7000);
+                w->hint(QStringLiteral("sessions.background"),
+                        relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("sessions.open")),
+                                                       QStringLiteral("open Sessions, then Background")));
+                return pane->sessionToken();
+            }
             // The board keeps its list/card split (#BXCN): the new terminal's half comes out of
             // the panes beside the board, not out of the board itself.
             w->insertBeside(guard, pane, Qt::Horizontal, false, w->boardSplitFloor(guard));
             w->spreadAfterAdding(pane);
             w->setActive(pane);
             focusLeaf(pane);
-            if (runInBackground) pane->markBackgroundTask(true);
             pane->startBoardTask(task, card);
             w->updateTitles();
-            if (runInBackground) w->backgroundPaneWhenWorking(pane);
             return pane->sessionToken();
         };
         // And the card wears that token (#R9G7): the chip on the row and on the card page says
@@ -8436,9 +8457,11 @@ private:
         closePane(pane, true);
     }
 
-    // A new pane configures asynchronously. A background run keeps the pane visible until its
-    // agent accepts the task, then moves it to the background window; a failed start leaves the
-    // reason and the pane on screen.
+    // A new pane configures asynchronously. A phone-triggered background run (#E728) keeps the
+    // pane visible until its agent accepts the task, then moves it to the background window; a
+    // failed start leaves the reason and the pane on screen. The board's own Run button does not
+    // come through here (#NX72): it adopts its pane into a hidden background window at once, so
+    // the foreground layout never moves.
     void backgroundPaneWhenWorking(Pane *pane) {
         if (!pane) return;
         auto attempts = std::make_shared<int>(0);
