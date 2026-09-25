@@ -672,10 +672,26 @@ QTreeWidgetItem *ModelPicker::addClassHeader(const QString &tier) {
         item->setCheckState(ColBox, curation::boxShown(tier) ? Qt::Checked : Qt::Unchecked);
     if (boxClassTier(tier) && !effortPage())
         item->setText(ColBox, curation::boxShown(tier) ? QStringLiteral("On") : QStringLiteral("Off"));
+    // A header, not a row (owner, #WBFM): the class name is bold and a step larger than the rows
+    // it introduces, the header row is taller than they are, and the note steps back to the muted
+    // colour. The header keeps no rank of its own: the numbered rows restart at 1 under it.
     QFont font = item->font(ColModel);
     font.setBold(true);
+    font.setPointSizeF(font.pointSizeF() + 1);
     item->setFont(ColModel, font);
-    item->setFont(ColVia, font);
+    int headH = m_list->fontMetrics().height() + 18;
+    if (effortPage()) headH = qMax(headH, m_list->fontMetrics().lineSpacing() * 2 + 6);
+    item->setSizeHint(ColModel, QSize(0, headH));
+    // The count sits over the rank column it describes — "3 ranked" above numbers that restart at
+    // 1 — so the note column keeps its sentence and the header still holds no row number of its own.
+    // The effort page folds the rank column away, so there the header stays bare.
+    if (!effortPage()) {
+        const int ranked = curation::tierList(tier).size();
+        item->setText(ColRank, QStringLiteral("%1 ranked").arg(ranked));
+        item->setTextAlignment(ColRank, Qt::AlignRight | Qt::AlignVCenter);
+        item->setForeground(ColRank, palette().color(QPalette::Disabled, QPalette::Text));
+    }
+    item->setForeground(ColVia, palette().color(QPalette::Disabled, QPalette::Text));
     // "divided sections" (owner, 2026-09-21) — a band across the header row, a step off the list's
     // own background rather than a colour of its own, so it follows a theme change and is visible
     // in a light one and a dark one alike.
@@ -960,6 +976,8 @@ void ModelPicker::buildTier(const QString &tier, const QString &query) {
         const Entry *entry = m_context.catalog.find(item.key);
         if (!query.isEmpty() && !(entry ? matches(*entry, query) : item.key.contains(query, Qt::CaseInsensitive))) continue;
         QTreeWidgetItem *row = addListRow(tier, rank, item, entry);
+        // The rank is the pick order *within this class* — the lists are independent, so numbering
+        // restarts at 1 under every header (#WBFM); equal numbers mean those models draw randomly.
         row->setText(ColRank, QString::number(item.rank > 0 ? item.rank : rank));
         row->setToolTip(ColRank, QStringLiteral("Lower ranks run first; equal ranks draw randomly. Use = or ≠ beside the move arrows."));
         if (effortPage()) decorateEffortRow(row, tier, item, entry);
@@ -1001,10 +1019,14 @@ void ModelPicker::decorateEffortRow(QTreeWidgetItem *row, const QString &tier,
                                     const curation::TierEntry &item, const Entry *entry) {
     if (!row) return;
     row->setText(ColRank, QString());
+    // Two lines — name over "supports: …" — set by the two-line height below, sized from the font
+    // rather than a padded constant: the old 48/66 made this page read twice as loose as the pick
+    // order it sits beside (owner, #WBFM).
+    const int rowH = m_list->fontMetrics().lineSpacing() * 2 + 6;
     if (!entry) {
         row->setText(ColModel, row->text(ColModel) + QStringLiteral("\nmodel unavailable"));
         row->setText(ColReasoning, QStringLiteral("—"));
-        row->setSizeHint(ColModel, QSize(0, 48));
+        row->setSizeHint(ColModel, QSize(0, rowH));
         return;
     }
     const bool fixed = entry->effortFixed || entry->efforts.isEmpty();
@@ -1014,10 +1036,10 @@ void ModelPicker::decorateEffortRow(QTreeWidgetItem *row, const QString &tier,
         : QStringLiteral("supports: %1").arg(entry->efforts.join(QStringLiteral(" · ")));
     row->setText(ColModel, row->text(ColModel) + QLatin1Char('\n') + support);
     row->setToolTip(ColModel, row->toolTip(ColModel) + QLatin1Char('\n') + support);
-    row->setSizeHint(ColModel, QSize(0, fixed ? 48 : 66));
     if (fixed) {
         row->setText(ColReasoning, QStringLiteral("fixed"));
         row->setToolTip(ColReasoning, support);
+        row->setSizeHint(ColModel, QSize(0, rowH));
         return;
     }
     auto *choice = new QComboBox(m_list);
@@ -1047,6 +1069,8 @@ void ModelPicker::decorateEffortRow(QTreeWidgetItem *row, const QString &tier,
             }
     });
     m_list->setItemWidget(row, ColReasoning, choice);
+    // The selector is taller than a text line: the row grows to it plus a breath, and no further.
+    row->setSizeHint(ColModel, QSize(0, qMax(rowH, choice->sizeHint().height() + 4)));
 }
 
 void ModelPicker::buildAll(const QString &query) {
@@ -1441,7 +1465,10 @@ void ModelPicker::rebuild() {
     m_use->setVisible(!effortPage() && !m_hosted);
     m_sidePanel->setVisible(!effortPage());
     m_list->setWordWrap(effortPage());
-    m_list->setUniformRowHeights(!effortPage());
+    // Uniform heights need every row one height; a class header is deliberately taller than its
+    // rows, so the sectioned pages give each row its own (#WBFM). The flat pages keep uniform for
+    // their long tails.
+    m_list->setUniformRowHeights(!sectionsPage());
     m_list->header()->setSectionResizeMode(ColRank, effortPage() ? QHeaderView::Fixed
                                                                   : QHeaderView::ResizeToContents);
     if (effortPage()) m_list->setColumnWidth(ColRank, 4);
