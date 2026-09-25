@@ -1,36 +1,84 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "relay.stata",
   "version": "0.1.0",
   "name": "Stata analysis",
   "description": "Run Stata do-file lines from the composer, with natural-language questions still going to the agent.",
   "activation": {
-    "files": ["*.do", "*.ado"],
-    "programs": ["stata", "stata-mp", "stata-se", "xstata", "xstata-mp", "xstata-se", "StataMP*", "StataSE*"]
+    "files": [
+      "*.do",
+      "*.ado"
+    ],
+    "programs": [
+      "stata",
+      "stata-mp",
+      "stata-se",
+      "xstata",
+      "xstata-mp",
+      "xstata-se",
+      "StataMP*",
+      "StataSE*"
+    ]
   },
   "router": {
-    "language": "stata"
+    "language": "stata",
+    "prose_fallback": "agent"
   },
   "runner": {
     "kind": "repl",
-    "command": ["stata", "-q"],
+    "command": [
+      "stata",
+      "-q"
+    ],
     "cwd": "workspace",
-    "env": ["STATATMP"]
+    "env": [
+      "STATATMP"
+    ]
   },
   "tools": {
     "group": "stata",
     "items": [
-      {"name": "stata_run", "description": "Run Stata commands in the workspace's Stata session, the same one the user's composer uses."},
-      {"name": "stata_describe", "description": "Describe the dataset in memory: variables, types, labels and observation count."}
+      {
+        "name": "stata_run",
+        "description": "Run Stata commands in the workspace's Stata session, the same one the user's composer uses."
+      },
+      {
+        "name": "stata_describe",
+        "description": "Describe the dataset in memory: variables, types, labels and observation count."
+      }
     ]
   },
-  "skills": ["skills/stata-workspace"],
+  "skills": [
+    "skills/stata-workspace"
+  ],
   "panes": {
-    "roles": ["editor", "console", "variables"],
-    "layouts": ["2:1", "1:1:1"],
+    "roles": [
+      "editor",
+      "console",
+      "variables"
+    ],
+    "layouts": [
+      "2:1",
+      "1:1:1"
+    ],
     "default_layout": "2:1"
   },
   "requires": [
-    {"program": "stata", "alternatives": ["stata-mp", "stata-se"], "version_arg": [], "install_hint": "a licensed Stata with its console binary on PATH (e.g. link /usr/local/stata18/stata-mp as stata)"}
-  ]
+    {
+      "program": "stata",
+      "alternatives": [
+        "stata-mp",
+        "stata-se"
+      ],
+      "version_arg": [],
+      "install_hint": "a licensed Stata with its console binary on PATH (e.g. link /usr/local/stata18/stata-mp as stata)"
+    }
+  ],
+  "console": {
+    "program": [
+      "stata",
+      "-q"
+    ],
+    "prompt_marks": "none"
+  }
 }

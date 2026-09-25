@@ -83,11 +83,44 @@ class Fixture(unittest.TestCase):
             self.assertIn(fragment, text)
 
 
+class SchemaV2(Fixture):
+    def test_round_trip(self):
+        data = minimal(schema_version=2, router={"language": "python", "prose_fallback": "agent"},
+                       console={"program": ["python3", "-i"], "prompt_marks": "osc133",
+                                "startup": "startup.py"},
+                       completion={"kind": "static", "table": "completion.json"},
+                       commands=[{"name": "reset", "description": "Reset state",
+                                  "args": [{"name": "force", "required": False}],
+                                  "action": {"kind": "program_line", "line": "%reset"},
+                                  "when": {"roles": ["console"], "languages": ["python"]}}],
+                       requires=[{"program": "python3"}])
+        root = write_pkg(self.base, "v2", data, {"startup.py": "pass\n", "completion.json":
+                                                    '[{"text":"def","description":"keyword"}]'})
+        result = tp.load_manifest(root).to_dict()
+        self.assertEqual(2, result["schema_version"])
+        self.assertEqual("osc133", result["console"]["prompt_marks"])
+        self.assertEqual("static", result["completion"]["kind"])
+        self.assertEqual("program_line", result["commands"][0]["action"]["kind"])
+        self.assertEqual("agent", result["router"]["prose_fallback"])
+
+    def test_bad_action_and_escaping_startup(self):
+        data = minimal(schema_version=2, commands=[{"name": "bad", "description": "Bad",
+                           "action": {"kind": "execute", "line": "x"}}],
+                       console={"program": ["python3"], "startup": "../escape.py"},
+                       requires=[{"program": "python3"}])
+        issues = self.issues(data)
+        self.assertIssue(issues, "commands[0].action.kind", "not supported")
+        self.assertIssue(issues, "console.startup", "..")
+
+    def test_v1_rejects_v2_keys(self):
+        self.assertIssue(self.issues(minimal(console={"program": ["python3"]})), "console", "unknown key")
+
+
 class BundledManifests(unittest.TestCase):
     def test_every_bundled_plugin_is_valid(self):
         found = tp.discover(None, global_plugins=Path(tempfile.gettempdir()) / "no-such-relay-plugins")
         self.assertEqual(found.invalid, [], [str(i) for r in found.invalid for i in r.issues])
-        self.assertEqual({"relay.tex", "relay.python", "relay.stata"}, set(found.plugins))
+        self.assertEqual({"relay.tex", "relay.python", "relay.stata", "relay.shell"}, set(found.plugins))
         for record in found.plugins.values():
             self.assertEqual("bundled", record.origin)
             self.assertTrue(record.digest.startswith("sha256:"))
@@ -127,7 +160,7 @@ class Schema(Fixture):
     def test_schema_version_is_required_and_must_be_known(self):
         self.assertIssue(self.issues({k: v for k, v in minimal().items() if k != "schema_version"}),
                          "schema_version", "is missing", "\"schema_version\": 1")
-        self.assertIssue(self.issues(minimal(schema_version=2)), "schema_version", "2 is not a schema", "update Relay")
+        self.assertIssue(self.issues(minimal(schema_version=3)), "schema_version", "3 is not a schema", "update Relay")
         self.assertIssue(self.issues(minimal(schema_version="1")), "schema_version", "'1'")
         self.assertIssue(self.issues(minimal(schema_version=True)), "schema_version")
 

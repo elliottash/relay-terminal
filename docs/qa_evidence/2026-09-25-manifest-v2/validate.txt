@@ -1,0 +1,4 @@
+ok relay.shell 0.1.0 (/home/elliott/repos/relay-terminal/backend/relay_core/plugins_bundled/shell/plugin.json)
+ok relay.python 0.1.0 (/home/elliott/repos/relay-terminal/backend/relay_core/plugins_bundled/python/plugin.json)
+ok relay.stata 0.1.0 (/home/elliott/repos/relay-terminal/backend/relay_core/plugins_bundled/stata/plugin.json)
+ok relay.tex 0.1.0 (/home/elliott/repos/relay-terminal/backend/relay_core/plugins_bundled/tex/plugin.json)

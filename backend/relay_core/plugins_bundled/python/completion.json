@@ -1,0 +1,34 @@
+[
+  {
+    "text": "def",
+    "description": "Define a function"
+  },
+  {
+    "text": "class",
+    "description": "Define a class"
+  },
+  {
+    "text": "import",
+    "description": "Import a module"
+  },
+  {
+    "text": "print",
+    "description": "Print a value"
+  },
+  {
+    "text": "len",
+    "description": "Length of a value"
+  },
+  {
+    "text": "%timeit",
+    "description": "Time an expression"
+  },
+  {
+    "text": "%run",
+    "description": "Run a script"
+  },
+  {
+    "text": "%matplotlib",
+    "description": "Select a plotting backend"
+  }
+]

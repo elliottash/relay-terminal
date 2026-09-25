@@ -47,7 +47,8 @@ from .filelock import LOCK_EX, LOCK_UN, flock
 from .instructions import git_root, project_dirs
 from .tool_groups import GROUPS as NATIVE_TOOL_GROUPS
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = (1, 2)
 MANIFEST = "plugin.json"
 STATE_VERSION = 1
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -98,8 +99,16 @@ DEFAULT_PANES = {"roles": ["console"], "layouts": ["1"], "default_layout": "1"}
 # misspelt `requires` or `runner` would otherwise quietly drop a dependency check or a safety rule.
 TOP_KEYS = ("schema_version", "id", "version", "name", "description", "activation", "router", "runner",
             "tools", "skills", "panes", "preview", "requires")
+V2_TOP_KEYS = TOP_KEYS + ("console", "completion", "commands")
+CONSOLE_KEYS = ("program", "env", "prompt_marks", "startup")
+COMPLETION_KEYS = ("kind", "table")
+COMMAND_KEYS = ("name", "description", "args", "action", "when")
+COMMAND_ARG_KEYS = ("name", "required")
+COMMAND_ACTION_KEYS = ("kind", "tool", "prompt", "line")
+COMMAND_WHEN_KEYS = ("roles", "languages")
 ACTIVATION_KEYS = ("files", "programs")
 ROUTER_KEYS = ("language", "prefixes")
+V2_ROUTER_KEYS = ROUTER_KEYS + ("prose_fallback",)
 RUNNER_KEYS = ("kind", "command", "cwd", "env")
 TOOLS_KEYS = ("group", "lazy", "items")
 TOOL_ITEM_KEYS = ("name", "description")
@@ -145,6 +154,7 @@ class Activation:
 class RouterSpec:
     language: str = "bash"
     prefixes: tuple[str, ...] = ()
+    prose_fallback: str | None = None
 
 
 @dataclass(frozen=True)
@@ -195,6 +205,29 @@ class Requirement:
 
 
 @dataclass(frozen=True)
+class ConsoleSpec:
+    program: tuple[str, ...]
+    env: tuple[str, ...] = ()
+    prompt_marks: str = "none"
+    startup: str | None = None
+
+
+@dataclass(frozen=True)
+class CompletionSpec:
+    kind: str
+    table: str | None = None
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    name: str
+    description: str
+    args: tuple[dict, ...]
+    action: dict
+    when: dict
+
+
+@dataclass(frozen=True)
 class Manifest:
     id: str
     version: str
@@ -209,6 +242,10 @@ class Manifest:
     panes: PaneSpec = PaneSpec()
     preview: PreviewSpec | None = None
     requires: tuple[Requirement, ...] = ()
+    schema_version: int = 1
+    console: ConsoleSpec | None = None
+    completion: CompletionSpec | None = None
+    commands: tuple[CommandSpec, ...] = ()
 
     @property
     def path(self) -> Path:
@@ -218,14 +255,14 @@ class Manifest:
     def executable(self) -> bool:
         """Does enabling this package let it run something? A runner launches a program and a tool
         group is code the agent can call; router, skills, panes and preview only change the UI."""
-        return self.runner is not None or self.tools is not None
+        return self.runner is not None or self.tools is not None or self.console is not None or bool(self.commands)
 
     def skill_dirs(self) -> list[Path]:
         return [self.root / rel for rel in self.skills]
 
     def to_dict(self) -> dict:
         return {
-            "schema_version": SCHEMA_VERSION, "id": self.id, "version": self.version, "name": self.name,
+            "schema_version": self.schema_version, "id": self.id, "version": self.version, "name": self.name,
             "description": self.description, "root": str(self.root),
             "activation": {"files": list(self.activation.files), "programs": list(self.activation.programs)},
             "router": router_dict(self),
@@ -243,6 +280,13 @@ class Manifest:
             "requires": [{"program": r.program, "alternatives": list(r.alternatives),
                           "version_arg": list(r.version_arg), "optional": r.optional,
                           "install_hint": r.install_hint} for r in self.requires],
+            "console": None if self.console is None else {
+                "program": list(self.console.program), "env": list(self.console.env),
+                "prompt_marks": self.console.prompt_marks, "startup": self.console.startup},
+            "completion": None if self.completion is None else {
+                "kind": self.completion.kind, "table": self.completion.table},
+            "commands": [{"name": c.name, "description": c.description, "args": list(c.args),
+                          "action": c.action, "when": c.when} for c in self.commands],
             "executable": self.executable,
         }
 
@@ -250,7 +294,11 @@ class Manifest:
 def router_dict(manifest: Manifest | None) -> dict:
     if manifest is None:
         return {"language": DEFAULT_ROUTER["language"], "prefixes": list(DEFAULT_ROUTER["prefixes"])}
-    return {"language": manifest.router.language, "prefixes": list(manifest.router.prefixes)}
+    result = {"language": manifest.router.language, "prefixes": list(manifest.router.prefixes)}
+    if manifest.schema_version == 2:
+        result["prose_fallback"] = manifest.router.prose_fallback or "agent"
+    return result
+
 
 
 class _Checker:
@@ -424,13 +472,13 @@ def parse_manifest(data: dict, root: str | Path, file: str | None = None) -> Man
     version = data.get("schema_version")
     if version is None:
         raise ManifestError([ManifestIssue(file, "schema_version", "is missing.",
-                                           f"add \"schema_version\": {SCHEMA_VERSION} as the first key.")])
-    if type(version) is not int or version != SCHEMA_VERSION:
+                                           "add \"schema_version\": 1 or 2 as the first key.")])
+    if type(version) is not int or version not in SUPPORTED_SCHEMA_VERSIONS:
         # An unknown version is not guessed at: its keys may mean something this Relay cannot check.
         raise ManifestError([ManifestIssue(file, "schema_version", f"{version!r} is not a schema this Relay reads "
-                                           f"(it reads {SCHEMA_VERSION}).",
-                                           "update Relay, or write the manifest for schema_version 1.")])
-    check.keys(data, TOP_KEYS, "")
+                                           f"(it reads 1 and 2).",
+                                           "update Relay, or write the manifest for schema_version 1 or 2.")])
+    check.keys(data, V2_TOP_KEYS if version == 2 else TOP_KEYS, "")
 
     plugin_id = data.get("id")
     if not isinstance(plugin_id, str) or not ID_RE.match(plugin_id) or len(plugin_id) > 64:
@@ -461,7 +509,7 @@ def parse_manifest(data: dict, root: str | Path, file: str | None = None) -> Man
 
     # router
     router = RouterSpec()
-    raw = check.obj(data.get("router"), "router", ROUTER_KEYS)
+    raw = check.obj(data.get("router"), "router", V2_ROUTER_KEYS if version == 2 else ROUTER_KEYS)
     if raw is not None:
         language = check.choice(raw.get("language"), "router.language", LANGUAGES)
         prefixes = []
@@ -473,7 +521,9 @@ def parse_manifest(data: dict, root: str | Path, file: str | None = None) -> Man
                 check.add(f"router.prefixes[{i}]", f"{p!r} is not a prefix.", "use 1-3 punctuation characters, e.g. \"%\".")
             else:
                 prefixes.append(p)
-        router = RouterSpec(language or "bash", tuple(prefixes))
+        router = RouterSpec(language or "bash", tuple(prefixes),
+                            check.choice(raw.get("prose_fallback"), "router.prose_fallback",
+                                         ("agent", "program"), "agent") if version == 2 else None)
 
     # requires (before runner: the runner's program must be one of them)
     requires: list[Requirement] = []
@@ -527,6 +577,90 @@ def parse_manifest(data: dict, root: str | Path, file: str | None = None) -> Man
                 env.append(name_)
         if kind and command:
             runner = RunnerSpec(kind, tuple(command), cwd or "workspace", tuple(env))
+
+    # v2 console, completion and visible slash commands
+    console = None
+    raw = check.obj(data.get("console"), "console", CONSOLE_KEYS) if version == 2 else None
+    if raw is not None:
+        program = _command(check, raw.get("program"), root, "kernel", required_names,
+                           fieldname="console.program")
+        env = _environment(check, raw.get("env"), "console.env")
+        marks = check.choice(raw.get("prompt_marks"), "console.prompt_marks", ("osc133", "none"), "none")
+        startup = raw.get("startup")
+        if startup is not None:
+            if _package_path(check, root, startup, "console.startup", "file") is None:
+                startup = None
+        if program:
+            console = ConsoleSpec(tuple(program), tuple(env), marks or "none", startup)
+
+    completion = None
+    raw = check.obj(data.get("completion"), "completion", COMPLETION_KEYS) if version == 2 else None
+    if raw is not None:
+        kind = check.choice(raw.get("kind"), "completion.kind", ("static", "shell"))
+        table = raw.get("table")
+        if table is not None:
+            if _package_path(check, root, table, "completion.table", "file") is None:
+                table = None
+            else:
+                try:
+                    entries = json.loads((root / table).read_text(encoding="utf-8"))
+                    if not isinstance(entries, list) or any(not isinstance(e, dict) or
+                            set(e) != {"text", "description"} or
+                            any(not isinstance(v, str) for v in e.values()) for e in entries):
+                        check.add("completion.table", "must be a JSON list of {text, description} objects.")
+                except (OSError, ValueError):
+                    check.add("completion.table", "must contain valid JSON.")
+        if kind == "static" and table is None:
+            check.add("completion.table", "is required for static completion.")
+        if kind:
+            completion = CompletionSpec(kind, table)
+
+    commands = []
+    raw_commands = data.get("commands", []) if version == 2 else []
+    if not isinstance(raw_commands, list):
+        check.add("commands", "must be a list of slash command objects.")
+        raw_commands = []
+    for i, value in enumerate(raw_commands):
+        where = f"commands[{i}]"
+        item = check.obj(value, where, COMMAND_KEYS)
+        if item is None:
+            continue
+        name_ = item.get("name")
+        if not isinstance(name_, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,31}", name_):
+            check.add(f"{where}.name", "must be a lowercase slash command name without '/'.")
+            continue
+        if any(c.name == name_ for c in commands):
+            check.add(f"{where}.name", "repeats a command name.")
+        description_ = check.text(item.get("description"), f"{where}.description", True, 300)
+        args = []
+        raw_args = item.get("args", [])
+        if not isinstance(raw_args, list):
+            check.add(f"{where}.args", "must be a list of argument objects.")
+            raw_args = []
+        for j, value_arg in enumerate(raw_args):
+            arg = check.obj(value_arg, f"{where}.args[{j}]", COMMAND_ARG_KEYS)
+            if arg is not None:
+                arg_name = check.text(arg.get("name"), f"{where}.args[{j}].name", True, 80)
+                args.append({"name": arg_name, "required": check.flag(arg.get("required"),
+                             f"{where}.args[{j}].required", False)})
+        action = check.obj(item.get("action"), f"{where}.action", COMMAND_ACTION_KEYS)
+        if action is None:
+            check.add(f"{where}.action", "is required.")
+            continue
+        kind = check.choice(action.get("kind"), f"{where}.action.kind", ("tool", "prompt", "program_line"))
+        action_key = {"tool": "tool", "prompt": "prompt", "program_line": "line"}.get(kind)
+        if action_key:
+            check.text(action.get(action_key), f"{where}.action.{action_key}", True, 400)
+            for key in ("tool", "prompt", "line"):
+                if key != action_key and key in action:
+                    check.add(f"{where}.action.{key}", "does not match action.kind.")
+        when = check.obj(item.get("when"), f"{where}.when", COMMAND_WHEN_KEYS)
+        when_out = {"roles": [], "languages": []}
+        if when is not None:
+            for key, choices in (("roles", PANE_ROLES), ("languages", LANGUAGES)):
+                when_out[key] = [v for j, v in enumerate(check.strings(when.get(key), f"{where}.when.{key}"))
+                                 if check.choice(v, f"{where}.when.{key}[{j}]", choices, "")]
+        commands.append(CommandSpec(name_, description_, tuple(args), dict(action), when_out))
 
     # tools
     tools = None
@@ -638,63 +772,76 @@ def parse_manifest(data: dict, root: str | Path, file: str | None = None) -> Man
     if check.issues:
         raise ManifestError(check.issues)
     return Manifest(plugin_id, plugin_version, name, description, root, activation, router, runner, tools,
-                    tuple(skills), panes, preview, tuple(requires))
+                    tuple(skills), panes, preview, tuple(requires), version, console, completion, tuple(commands))
 
 
-def _command(check: _Checker, command, root: Path, kind: str | None, required_names: set[str]) -> list[str]:
+def _environment(check: _Checker, value, fieldname: str) -> list[str]:
+    names = []
+    for i, name in enumerate(check.strings(value, fieldname)):
+        if not ENV_RE.match(name):
+            check.add(f"{fieldname}[{i}]", f"{name!r} is not an environment variable name.")
+        elif SECRET_ENV_PARTS & set(name.upper().split("_")):
+            check.add(f"{fieldname}[{i}]", f"{name!r} looks like a credential.")
+        else:
+            names.append(name)
+    return names
+
+
+def _command(check: _Checker, command, root: Path, kind: str | None, required_names: set[str],
+             fieldname: str = "runner.command") -> list[str]:
     if command is None:
-        check.add("runner.command", "is required.", "give the program and its arguments as a list, e.g. [\"latexmk\", \"-pdf\", \"{file}\"].")
+        check.add(f"{fieldname}", "is required.", "give the program and its arguments as a list, e.g. [\"latexmk\", \"-pdf\", \"{file}\"].")
         return []
     if isinstance(command, str):
         try:
             suggestion = json.dumps(shlex.split(command))
         except ValueError:
             suggestion = "[\"program\", \"arg\", ...]"
-        check.add("runner.command", "is a shell string; Relay never runs a command through a shell.",
+        check.add(f"{fieldname}", "is a shell string; Relay never runs a command through a shell.",
                   f"write it as an argv list: {suggestion}.")
         return []
     if not isinstance(command, list) or not command:
-        check.add("runner.command", f"must be a non-empty list of strings, not {_kind(command)}.")
+        check.add(f"{fieldname}", f"must be a non-empty list of strings, not {_kind(command)}.")
         return []
     ok = True
     for i, arg in enumerate(command):
         if not isinstance(arg, str) or not arg or "\0" in arg:
-            check.add(f"runner.command[{i}]", f"must be a non-empty string, not {_kind(arg)}.")
+            check.add(f"{fieldname}[{i}]", f"must be a non-empty string, not {_kind(arg)}.")
             ok = False
             continue
         # "{{" and "}}" are literal braces, as in str.format.
         for name in PLACEHOLDER_RE.findall(arg.replace("{{", "").replace("}}", "")):
             if name not in PLACEHOLDERS:
-                check.add(f"runner.command[{i}]", f"{{{name}}} is not a placeholder.",
+                check.add(f"{fieldname}[{i}]", f"{{{name}}} is not a placeholder.",
                           "use one of " + ", ".join("{" + p + "}" for p in PLACEHOLDERS) + ".")
                 ok = False
             elif name == "connection_file" and kind != "kernel":
-                check.add(f"runner.command[{i}]", "{connection_file} exists only for kind \"kernel\".")
+                check.add(f"{fieldname}[{i}]", "{connection_file} exists only for kind \"kernel\".")
                 ok = False
     if not ok:
         return []
     program = command[0]
     if PLACEHOLDER_RE.search(program):
-        check.add("runner.command[0]", "the program may not be a placeholder.", "name the program itself.")
+        check.add(f"{fieldname}[0]", "the program may not be a placeholder.", "name the program itself.")
         return []
     base = PurePosixPath(program.replace("\\", "/")).name.lower().removesuffix(".exe")
     if "/" in program or "\\" in program:
         if not program.startswith("./"):
-            check.add("runner.command[0]", f"{program!r} is a path outside the package.",
+            check.add(f"{fieldname}[0]", f"{program!r} is a path outside the package.",
                       f"use the program name (\"{base}\") and list it in requires, or a \"./\" path inside the package.")
             return []
-        if _package_path(check, root, program[2:], "runner.command[0]", "file") is None:
+        if _package_path(check, root, program[2:], f"{fieldname}[0]", "file") is None:
             return []
     elif program not in required_names:
-        check.add("runner.command[0]", f"{program!r} is not listed in requires.",
+        check.add(f"{fieldname}[0]", f"{program!r} is not listed in requires.",
                   f"add {{\"program\": \"{program}\"}} to requires, so a missing program is reported before activation.")
         return []
     if base == "env":
-        check.add("runner.command[0]", "\"env\" re-dispatches to another program.",
+        check.add(f"{fieldname}[0]", "\"env\" re-dispatches to another program.",
                   "name the program directly and list variables in runner.env.")
         return []
     if base in SHELLS and any(a.lower() in SHELL_STRING_FLAGS for a in command[1:]):
-        check.add("runner.command", f"runs {base} with a command string, which is a shell string with extra steps.",
+        check.add(f"{fieldname}", f"runs {base} with a command string, which is a shell string with extra steps.",
                   "name the real program and its arguments as the argv list.")
         return []
     return list(command)
@@ -1265,6 +1412,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workspace", default=None)
     p.add_argument("--probe", action="store_true", help="run each found program's version argument")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("describe", help="print a plugin manifest and its console surfaces")
+    p.add_argument("plugin_id")
+    p.add_argument("--workspace", default=None)
     p = sub.add_parser("validate", help="validate one package folder")
     p.add_argument("package")
     for name in ("enable", "disable"):
@@ -1285,6 +1435,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(rows, indent=2))
             else:
                 _print_rows(rows)
+        elif args.command == "describe":
+            found = registry.discover(args.workspace)
+            record = found.plugins.get(args.plugin_id)
+            if record is None:
+                raise PluginError(f"no task plugin {args.plugin_id!r}")
+            print(json.dumps(record.manifest.to_dict(), indent=2))
         elif args.command == "validate":
             manifest = load_manifest(args.package)
             print(f"ok {manifest.id} {manifest.version} ({manifest.path})")

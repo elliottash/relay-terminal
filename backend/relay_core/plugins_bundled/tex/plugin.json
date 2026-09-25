@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "relay.tex",
   "version": "0.1.0",
   "name": "TeX document",
@@ -8,7 +8,8 @@
     "files": ["*.tex", "*.ltx"]
   },
   "router": {
-    "language": "tex"
+    "language": "tex",
+    "prose_fallback": "program"
   },
   "runner": {
     "kind": "artifact_command",
@@ -36,6 +37,9 @@
   },
   "requires": [
     {"program": "latexmk", "version_arg": "-v", "install_hint": "install TeX Live (latexmk and texlive-latex-extra) or MacTeX"},
-    {"program": "synctex", "version_arg": "help", "optional": true, "install_hint": "ships with TeX Live; needed for source/PDF jumps"}
-  ]
+    {"program": "synctex", "version_arg": "help", "optional": true, "install_hint": "ships with TeX Live; needed for source/PDF jumps"},
+    {"program": "bash"}
+  ],
+  "console": {"program": ["bash", "-i"], "prompt_marks": "osc133"},
+  "commands": [{"name": "build", "description": "Build the TeX document.", "action": {"kind": "tool", "tool": "tex_build"}}, {"name": "errors", "description": "Show TeX diagnostics.", "action": {"kind": "tool", "tool": "tex_diagnostics"}}]
 }
