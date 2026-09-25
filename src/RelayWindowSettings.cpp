@@ -706,6 +706,19 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
         // scale with the machine (agent RAM/16 clamped to 2–8G, shell RAM/2 clamped to 4–16G),
         // and these rows write the same [isolation] keys relay.conf takes, so a manual edit and
         // this page agree.
+        // Unattended turns (#R5TC): a pane woken by another pane's message runs with nobody at
+        // the pane, so it can reach what a phone's prompt cannot — run_in_terminal hands a command
+        // to this machine's real interactive shell (sudo, device logins, ssh to a host the user is
+        // not logged into), which the background runner cannot. The owner's default is the full
+        // set (2026-09-19: "i think unattended turns get the full set -- make that an option that
+        // is on by default"); off, a woken turn is confined the way a prompt from a phone is.
+        security.rows << headingRow(QStringLiteral("Unattended turns"));
+        security.rows << toggleRow(QStringLiteral("security/unattended_full_tools"),
+                                   QStringLiteral("Unattended turns get the full tool set"),
+                                   QStringLiteral("A turn another pane's message started runs with every tool, "
+                                                  "including Run in terminal. Off, such a turn is confined "
+                                                  "the way a prompt from your phone already is."),
+                                   true);
         security.rows << headingRow(QStringLiteral("Memory limits"));
         security.rows << toggleRow(QStringLiteral("isolation/enabled"),
                                    QStringLiteral("Per-pane memory limits"),
