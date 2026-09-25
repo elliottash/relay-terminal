@@ -313,6 +313,46 @@ class ReportTests(Sandbox):
         self.assertIn(str(home / ".cache"), scratch.unledgered_created_since(
             since, ledger=self.ledger(), home=home, tmp=tmp))
 
+    def test_relay_owned_runtime_dirs_are_never_named(self):
+        # Card #27AR: every pane's /tmp/relay-XXXXXX (written by src/RuntimeDirs.cpp), a guest's
+        # board-bridge dir and a tests_run dir appear whenever a pane opens or a run starts, and
+        # were named in whichever turn happened to be running.
+        tmp = self.base / "tmp"
+        home = self.base / "home"
+        home.mkdir()
+        since = time.time() - 5
+        pane = tmp / "relay-FyJqoI"                    # the C++ mark, byte for byte
+        self.write(pane / "owner", 0).write_text("relay-owner 1\npid 30558\nstarttime 26947\n")
+        bridge = tmp / "relay-board-v4ftksyx"          # the Python mark
+        bridge.mkdir()
+        scratch.mark_relay_owned(bridge)
+        forged = tmp / "relay-notours"                 # an `owner` file, but not the mark
+        self.write(forged / "owner", 0).write_text("somebody else\n")
+        link = tmp / "relay-link"                      # a symlink to a marked dir
+        link.symlink_to(pane)
+        agent_made = tmp / "rt-agent-scratch"
+        agent_made.mkdir()
+        found = scratch.unledgered_created_since(since, ledger=self.ledger(), home=home, tmp=tmp)
+        self.assertNotIn(str(pane), found)
+        self.assertNotIn(str(bridge), found)
+        self.assertIn(str(forged), found)
+        self.assertIn(str(link), found)
+        self.assertIn(str(agent_made), found)          # a Relay-ish name alone is not enough
+        mark = (bridge / "owner").read_text().splitlines()
+        self.assertEqual(mark[:2], ["relay-owner 1", "pid %d" % os.getpid()])
+        if Path("/proc/self/stat").exists():
+            self.assertTrue(mark[2].startswith("starttime "))
+        self.assertEqual((bridge / "owner").stat().st_mode & 0o777, 0o600)
+        self.assertFalse((bridge / "owner.tmp").exists())
+
+    def test_guest_board_bridge_marks_its_socket_dir(self):
+        from relay_core import guest_board_bridge
+        bridge = guest_board_bridge.Bridge()
+        try:
+            self.assertTrue(scratch.is_relay_owned(bridge.tmp.name))
+        finally:
+            bridge.close()
+
 
 class OwnPathTests(Sandbox):
     """Card #WZ3K: `own_path` is the supported way to say an existing path is an

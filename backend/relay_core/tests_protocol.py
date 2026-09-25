@@ -1424,6 +1424,8 @@ class TestsCommands:
                  build: Path) -> None:
         """One run, start to finish, on its own thread.  Never raises out of the thread."""
         tmp = Path(tempfile.mkdtemp(prefix="rt-", dir="/tmp"))
+        from . import scratch
+        scratch.mark_relay_owned(tmp)   # Relay's own, so the post-turn sweep skips it (#27AR)
         try:
             started = {"state": "started", "done": 0, "total": run.total,
                        "message": self._started_message(ctest, unit, repeat, run.skipped)}

@@ -72,6 +72,9 @@ class Bridge:
         self.cancel_lock = threading.Lock()
         self.tmp = tempfile.TemporaryDirectory(prefix='relay-board-')
         os.chmod(self.tmp.name, 0o700)
+        # Relay's own state, not agent scratch: the post-turn sweep leaves it alone (#27AR).
+        from relay_core import scratch
+        scratch.mark_relay_owned(self.tmp.name)
         self.token = secrets.token_hex(32)
         self.path = str(Path(self.tmp.name) / 'socket')
         credential = Path(self.tmp.name) / 'capability.json'

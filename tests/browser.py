@@ -114,7 +114,7 @@ class Browser:
         env = {**os.environ, "TMPDIR": self.tmpdir} if self.tmpdir else None
         # Its own process group, so stop() can end the zygote and GPU children too: one that
         # outlives the browser writes its cache back into a profile stop() already removed.
-        self.process = subprocess.Popen(arguments, stdout=subprocess.DEVNULL,
+        self.process = subprocess.Popen(_die_with_parent(arguments), stdout=subprocess.DEVNULL,
                                         stderr=subprocess.DEVNULL, env=env,
                                         start_new_session=True)
 
@@ -221,6 +221,34 @@ class Browser:
         if self.tmpdir:
             await _remove(self.tmpdir)
             self.tmpdir = None
+
+
+def _pdeathsig_launcher() -> list[str]:
+    """`setpriv --pdeathsig KILL --` where util-linux has it (card #XY13): the kernel kills Chrome
+    when the test process dies, SIGKILL and OOM included, which no `finally` or atexit can do. A
+    session of its own (for stop()'s group kill) is exactly what kept Chrome alive after its test
+    died: four ran for days, reparented to systemd --user, filling /tmp. setpriv sets the flag and
+    execs Chrome in place, so the pid Popen returns is still Chrome's, and nothing runs in the
+    forked child the way a preexec_fn would in this threaded process."""
+    setpriv = shutil.which("setpriv")
+    if not setpriv:
+        return []
+    try:
+        probe = subprocess.run([setpriv, "--pdeathsig", "KILL", "--", "true"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [setpriv, "--pdeathsig", "KILL", "--"] if probe.returncode == 0 else []
+
+
+_LAUNCHER: list[str] | None = None
+
+
+def _die_with_parent(arguments: list[str]) -> list[str]:
+    global _LAUNCHER
+    if _LAUNCHER is None:
+        _LAUNCHER = _pdeathsig_launcher()
+    return _LAUNCHER + list(arguments)
 
 
 async def _end_group(process: subprocess.Popen) -> None:

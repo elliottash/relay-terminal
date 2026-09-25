@@ -732,6 +732,56 @@ def own_path(path: str | Path, purpose: str = "", *, ledger: ScratchLedger | Non
                              note="adopted as an application's own state (card #WZ3K)"))
 
 
+# Card #27AR: the owner mark every Relay runtime directory carries (src/RuntimeDirs.h) — a file
+# named `owner` whose first line is this. A pane's /tmp/relay-XXXXXX, a guest's board-bridge
+# socket dir and a tests_run scratch dir are Relay's own state, made whenever a pane opens or a
+# run starts, so the post-turn sweep would otherwise name them in whichever turn was running.
+RELAY_OWNER_FILE = "owner"
+RELAY_OWNER_MAGIC = "relay-owner 1"
+
+
+def _proc_starttime() -> str | None:
+    """Field 22 of /proc/self/stat, the boot ticks this process started at (the #9JYK mark's
+    pid-reuse guard); None where there is no /proc."""
+    try:
+        stat = Path("/proc/self/stat").read_text()
+    except OSError:
+        return None
+    fields = stat[stat.rfind(")") + 2:].split()
+    return fields[19] if len(fields) > 19 else None
+
+
+def mark_relay_owned(directory: str | Path) -> None:
+    """Write the RuntimeDirs owner mark into a directory Relay itself made, atomically and
+    mode 0600, so the sweep knows it for Relay's own. Best effort: a mark that cannot be
+    written leaves the directory named by the sweep, never broken."""
+    lines = [RELAY_OWNER_MAGIC, "pid %d" % os.getpid()]
+    started = _proc_starttime()
+    if started:
+        lines.append("starttime %s" % started)
+    target = Path(directory) / RELAY_OWNER_FILE
+    temp = target.with_name(target.name + ".tmp")
+    try:
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            handle.write("\n".join(lines) + "\n")
+        os.replace(temp, target)
+    except OSError:
+        pass
+
+
+def is_relay_owned(path: str | Path) -> bool:
+    """A real directory (not a symlink) holding an owner mark: Relay's own runtime state."""
+    path = Path(path)
+    if path.is_symlink() or not path.is_dir():
+        return False
+    try:
+        with open(path / RELAY_OWNER_FILE, encoding="utf-8", errors="replace") as handle:
+            return handle.readline().strip() == RELAY_OWNER_MAGIC
+    except OSError:
+        return False
+
+
 def _top_level(home: Path | None, tmp: Path | None):
     """(path, stat) for every entry directly in the temp dirs and $HOME — what the sweep scans."""
     bases = {tmp or temp_dir(), system_tmp(), temp_dir(), home or Path.home()}
@@ -764,7 +814,8 @@ def unledgered_created_since(since: float, *, ledger: ScratchLedger | None = Non
     does, by being the entry or a parent of it. `before` is `top_level_entries()` from the
     turn's start: an entry already there is not new, however recent its mtime — a directory's
     mtime moves whenever something inside it is added or removed, which is how `~/.cache`
-    came to be named (card #NQTD)."""
+    came to be named (card #NQTD). A directory carrying Relay's owner mark is Relay's own
+    runtime state and is never named (card #27AR)."""
     ledger = ledger if ledger is not None else ScratchLedger()
     covered = [Path(r.path) for r in ledger.records().values()]
     covered += [Path(p) for p in skip]
@@ -777,6 +828,8 @@ def unledgered_created_since(since: float, *, ledger: ScratchLedger | None = Non
             continue
         path = Path(raw)
         if any(p == path or p in path.parents for p in covered):
+            continue
+        if is_relay_owned(path):
             continue
         found.append(raw)
     return sorted(found)
