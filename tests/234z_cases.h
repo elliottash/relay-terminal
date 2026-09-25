@@ -20,32 +20,20 @@ void z234zCases()
         XcxdShellContext ctx;
         ctx.workspace = homeDir.path();
         Pane pane(ctx.workspace, ctx.workspace, true, relay::defaultEngineCore(), &ctx);
+        const harness::ProcessGuard guard(pane);   // #DSKT: kill the shell's groups at case end
         pane.show();
         pane.resize(900, 650);
-        xcxdPump(50);
         // argv[0] says ssh — what the pane sees while a session client runs — and SIGINT is
         // ignored, the way a real client only passes a ^C through to the far side: no polite
         // first press can end this program, only the session-exit path can.
         h2kqRun(pane, QStringLiteral("bash -c 'trap \"\" INT; exec -a ssh sleep 30'"), "ssh-exit");
         // The busy line names the key that leaves the session, from the first beat of it.
-        QString busy;
-        for (int i = 0; i < 200
-             && !(busy = h2kqBusyText(pane)).contains(QStringLiteral("Alt+Esc exits")); ++i)
-            xcxdPump(25);
-        CHECK(busy.contains(QStringLiteral("Alt+Esc exits")));
+        CHECK(waitForBusyText(pane, QStringLiteral("Alt+Esc exits")));
         // One press leaves the session: the client is terminated, not interrupted. The toast
-        // waits its turn behind whatever hint is up, so it is polled for, not sampled once.
+        // queues behind whatever hint is up for ~1 s, so it is waited on, not sampled once.
         h2kqKey(pane, Qt::Key_Escape, Qt::AltModifier);
-        QString exited;
-        for (int i = 0; i < 80 && !(exited = z234zToast(pane)).contains(QStringLiteral("Exited ssh")); ++i)
-            xcxdPump(25);
-        CHECK(exited.contains(QStringLiteral("Exited ssh")));
-        for (int i = 0; i < 200 && !h2kqStripStopGone(pane); ++i)
-            xcxdPump(25);
-        CHECK(h2kqStripStopGone(pane));
-        for (int i = 0; i < 200 && !h2kqStripStopGone(pane); ++i)
-            xcxdPump(25);
-        CHECK(h2kqStripStopGone(pane));
+        CHECK(waitForToast(pane, QStringLiteral("Exited ssh")));
+        CHECK(waitForStripEmpty(pane));
     }
 
     // ----- a program that is no session client keeps #H2KQ's two presses -----------------------
@@ -54,37 +42,46 @@ void z234zCases()
         XcxdShellContext ctx;
         ctx.workspace = homeDir.path();
         Pane pane(ctx.workspace, ctx.workspace, true, relay::defaultEngineCore(), &ctx);
+        const harness::ProcessGuard guard(pane);   // #DSKT: kill the shell's groups at case end
         pane.show();
         pane.resize(900, 650);
-        xcxdPump(50);
         // Same INT-ignoring program, but argv[0] says bash: Alt+Esc stays a two-press stop. The
-        // marker in the command line makes the liveness probe target this case's program alone —
-        // other panes and agents on this machine legitimately run their own `sleep 30` loops.
-        h2kqRun(pane, QStringLiteral("bash -c 'trap \"\" INT; sleep 30 # 234z-two-press'"), "two-press");
+        // program is never found by name: its id is the pty's foreground process group (#234Z),
+        // read from the pane, so other panes' and agents' own `sleep 30` loops on this machine
+        // cannot make this case pass or fail (card #DSKT).
+        h2kqRun(pane, QStringLiteral("bash -c 'trap \"\" INT; sleep 30'"), "two-press");
         // The stop strip appears with the submit; the pane's own sight of the program comes a
-        // poll later, and a press before it is a key into a pane that has nothing to stop.
-        QString busy;
-        for (int i = 0; i < 200 && !(busy = h2kqBusyText(pane)).contains(QStringLiteral("stops")); ++i)
-            xcxdPump(25);
-        CHECK(busy.contains(QStringLiteral("stops")));
+        // poll later, and a press before it is a key into a pane that has nothing to stop. And
+        // the busy line must name sleep itself: a press that lands while bash is still starting
+        // the command — busy, but the `trap "" INT` not installed yet — kills it outright,
+        // which is the race behind this case's flakes (card #8ABD).
+        CHECK(waitForBusyText(pane, QStringLiteral("sleep")));
+        CHECK(waitForProcessBusy(pane, true));
+        // The kill below targets this group: the tty's foreground process group, one poll beat
+        // after the program started (card #DSKT). Non-interactive bash runs sleep unexec'd in
+        // its own foreground group, so this one id names the program and its parent alike.
+        int group = 0;
+        CHECK(waitUntil(
+            [&] {
+                group = pane.foregroundProcessGroup();
+                return group > 0;
+            },
+            QStringLiteral("foreground process group of the two-press program")));
         h2kqKey(pane, Qt::Key_Escape, Qt::AltModifier);   // the polite press: Ctrl+C, survived
-        xcxdPump(300);
-        CHECK(!h2kqStripStopGone(pane));
-        xcxdPump(450);                                   // past the beat, the next press closes it
-        h2kqKey(pane, Qt::Key_Escape, Qt::AltModifier);
-        // The kill is the fact under test: the program that ignored Ctrl+C is dead. The pane's
-        // own return to the prompt is case 1's business — asserting the strip here would only
-        // measure how fast the harness's shell poll lands.
-        int dead = 0;
-        for (int i = 0; i < 200; i++) {
-            xcxdPump(25);
-            if (QProcess::execute(QStringLiteral("/bin/sh"), {QStringLiteral("-c"),
-                    QStringLiteral("pgrep -f '[s]leep 30 # 234z-two-press' >/dev/null || exit 0; exit 1")}) == 0) {
-                dead = 1;
-                break;
-            }
-        }
-        CHECK(dead);
+        // The fact under test a beat later: the program that ignored the ^C is still the pane's
+        // foreground. The strip's stop control is layout — it can hide for a moment behind the
+        // toast that the press raises — so it is not the thing to assert (card #8ABD, race 3).
+        // The wait is one 650 ms beat: it both lets a would-be death show and passes the 600 ms
+        // mark that arms the next press as the kill.
+        xcxdPump(650);
+        CHECK(pane.processBusy());
+        h2kqKey(pane, Qt::Key_Escape, Qt::AltModifier);   // past the beat: this press closes it
+        // The kill is the fact under test: the program that ignored Ctrl+C is dead. Signalling
+        // its group fails with ESRCH once the group is empty — no process is found by name, and
+        // a zombie is gone the moment its parent reaps it, within this wait (card #DSKT).
+        CHECK(waitUntil(
+            [group] { return ::kill(pid_t(-group), 0) != 0; },
+            QStringLiteral("kill of the two-press program")));
     }
 }
 

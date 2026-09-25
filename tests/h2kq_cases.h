@@ -20,6 +20,19 @@ QToolButton *h2kqBusyAction(Pane &pane)
     return pane.findChild<QToolButton *>(QStringLiteral("busyAction"));
 }
 
+// Waits for the busy line's action button to exist and be visible (pane_waits.h, card #8ABD).
+QToolButton *h2kqWaitForBusyAction(Pane &pane)
+{
+    QToolButton *action = h2kqBusyAction(pane);
+    waitUntil(
+        [&] {
+            action = h2kqBusyAction(pane);
+            return action && action->isVisible();
+        },
+        QStringLiteral("busy action button visible"));
+    return action;
+}
+
 bool h2kqStripStopGone(Pane &pane)
 {
     return !xcxdHasButton(pane, QStringLiteral("Stop shell ("));
@@ -33,10 +46,12 @@ void h2kqRun(Pane &pane, const QString &command, const char *name)
         QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
         QCoreApplication::sendEvent(editor, &enter);
     }
-    for (int i = 0; i < 100 && !xcxdHasButton(pane, QStringLiteral("Stop shell (")); ++i)
-        xcxdPump(25);
-    if (!xcxdHasButton(pane, QStringLiteral("Stop shell (")))
+    // A shell that never reports busy fails the run (card #8ABD): this used to print to stderr
+    // only, so the case could pass on a dead shell.
+    if (!waitForStopButton(pane, QStringLiteral("Stop shell ("))) {
         std::fprintf(stderr, "FAIL h2kq %s: the shell never reported busy\n", name);
+        CHECK(false);
+    }
 }
 
 void h2kqKey(Pane &pane, int key, Qt::KeyboardModifiers mods)
@@ -56,25 +71,21 @@ void h2kqCases()
         XcxdShellContext ctx;
         ctx.workspace = homeDir.path();
         Pane pane(ctx.workspace, ctx.workspace, true, relay::defaultEngineCore(), &ctx);
+        const harness::ProcessGuard guard(pane);   // #DSKT: kill the shell's groups at case end
         pane.show();
         pane.resize(900, 650);
         xcxdPump(50);
         h2kqRun(pane, QStringLiteral("sleep 20"), "esc-label");
         // The name resolves on the shell poll, a beat after the line itself appears.
-        for (int i = 0; i < 100 && !h2kqBusyText(pane).contains(QStringLiteral("sleep… · Esc stops")); ++i)
-            xcxdPump(25);
+        CHECK(waitForBusyText(pane, QStringLiteral("sleep… · Esc stops")));
         // The Relaying line names the program and its key (card #H2KQ): sleep's key is Esc.
         CHECK(h2kqBusyText(pane).contains(QStringLiteral("sleep")));
         CHECK(h2kqBusyText(pane).contains(QStringLiteral("Esc stops")));
         CHECK(!h2kqBusyText(pane).contains(QStringLiteral("Alt+Esc")));
-        for (int i = 0; i < 100 && !xcxdHasButton(pane, QStringLiteral("Stop shell (Esc)")); ++i)
-            xcxdPump(25);
-        CHECK(xcxdHasButton(pane, QStringLiteral("Stop shell (Esc)")));
+        CHECK(waitForStopButton(pane, QStringLiteral("Stop shell (Esc)")));
         // Esc stops the command.
         h2kqKey(pane, Qt::Key_Escape, Qt::NoModifier);
-        for (int i = 0; i < 100 && !h2kqStripStopGone(pane); ++i)
-            xcxdPump(25);
-        CHECK(h2kqStripStopGone(pane));
+        CHECK(waitForStripEmpty(pane));
     }
 
     // ----- a full-screen program: it keeps Esc, Alt+Esc closes it -----------------------------
@@ -83,26 +94,21 @@ void h2kqCases()
         XcxdShellContext ctx;
         ctx.workspace = homeDir.path();
         Pane pane(ctx.workspace, ctx.workspace, true, relay::defaultEngineCore(), &ctx);
+        const harness::ProcessGuard guard(pane);   // #DSKT: kill the shell's groups at case end
         pane.show();
         pane.resize(900, 650);
         xcxdPump(50);
         h2kqRun(pane, QStringLiteral("printf '\\033[?1049h'; sleep 20"), "altscreen");
         // Wait for the alternate screen: the line's key becomes Alt+Esc.
-        for (int i = 0; i < 100 && !h2kqBusyText(pane).contains(QStringLiteral("Alt+Esc stops")); ++i)
-            xcxdPump(25);
-        CHECK(h2kqBusyText(pane).contains(QStringLiteral("Alt+Esc stops")));
-        for (int i = 0; i < 100 && !xcxdHasButton(pane, QStringLiteral("Stop shell (Alt+Esc)")); ++i)
-            xcxdPump(25);
-        CHECK(xcxdHasButton(pane, QStringLiteral("Stop shell (Alt+Esc)")));
+        CHECK(waitForBusyText(pane, QStringLiteral("Alt+Esc stops")));
+        CHECK(waitForStopButton(pane, QStringLiteral("Stop shell (Alt+Esc)")));
         // Esc is the program's own now: it must not interrupt.
         h2kqKey(pane, Qt::Key_Escape, Qt::NoModifier);
         xcxdPump(200);
         CHECK(!h2kqStripStopGone(pane));
         // Alt+Esc closes it (first press: Ctrl+C, which ends sleep).
         h2kqKey(pane, Qt::Key_Escape, Qt::AltModifier);
-        for (int i = 0; i < 100 && !h2kqStripStopGone(pane); ++i)
-            xcxdPump(25);
-        CHECK(h2kqStripStopGone(pane));
+        CHECK(waitForStripEmpty(pane));
     }
 
     // ----- the top-right bubble is retired ----------------------------------------------------
@@ -134,11 +140,7 @@ void h2kqCases()
         h2kqRun(pane, QStringLiteral("sleep 20"), "auto-delegate");
         // No "Let the agent drive" anywhere: the hand-off already happened.
         CHECK(!xcxdHasButton(pane, QStringLiteral("Let the agent drive")));
-        auto *action = h2kqBusyAction(pane);
-        for (int i = 0; i < 100 && !(action && action->isVisible()); ++i) {
-            xcxdPump(25);
-            action = h2kqBusyAction(pane);
-        }
+        auto *action = h2kqWaitForBusyAction(pane);
         CHECK(action != nullptr);
         CHECK(action && action->isVisible());
         CHECK(action && action->text().startsWith(QStringLiteral("Take over")));
@@ -159,15 +161,12 @@ void h2kqCases()
         XcxdShellContext ctx;
         ctx.workspace = homeDir.path();
         Pane pane(ctx.workspace, ctx.workspace, true, relay::defaultEngineCore(), &ctx);
+        const harness::ProcessGuard guard(pane);   // #DSKT: kill the shell's groups at case end
         pane.show();
         pane.resize(900, 650);
         xcxdPump(50);
         h2kqRun(pane, QStringLiteral("printf '\\033[?1049h'; sleep 20"), "take-control");
-        auto *action = h2kqBusyAction(pane);
-        for (int i = 0; i < 100 && !(action && action->isVisible()); ++i) {
-            xcxdPump(25);
-            action = h2kqBusyAction(pane);
-        }
+        auto *action = h2kqWaitForBusyAction(pane);
         // No agent to take over from; a full-screen program offers Take control instead.
         CHECK(!xcxdHasButton(pane, QStringLiteral("Take over")));
         CHECK(action && action->isVisible());

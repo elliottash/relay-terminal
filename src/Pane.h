@@ -1131,6 +1131,13 @@ public:
         const int foreground = foregroundPid();   // an ioctl: asked once, this runs on every poll
         return foreground > 0 && foreground != shellPid();
     }
+    // Test hook (card #8ABD): runs the same read the m_programPoll timer performs, so a
+    // console-mode test wait ends when the fact is readable rather than a poll beat later. It
+    // deliberately does not rebuild the queue strip: the strip follows the fact through its own
+    // rebuild points, and rebuilding it at a wait's 25 ms cadence churns the lanes mid-layout.
+    void pollPaneStatusNow() {
+        if (m_programPoll.isActive()) pollProgram();
+    }
     // The pane's shell and the process group in the terminal's foreground, through whichever
     // engine this pane uses. 0 when there is no terminal.
     // A console has no shell, so it has no shell pid and no foreground process, whatever the

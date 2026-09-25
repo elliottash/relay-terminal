@@ -2035,6 +2035,14 @@ int main(int argc, char **argv)
     qputenv("HOME", scratch.path().toUtf8());
     home = &scratch;
 
+    if (app.arguments().contains(QStringLiteral("--remote-shutdown-only"))) {
+        // #265N: the quit path's graceful sidecar shutdown, driven by a stub sidecar. No theme:
+        // the case touches RemoteShare and remotesettings, nothing that renders.
+        cases::remoteShutdownIsGraceful();
+        if (!failures) std::fprintf(stdout, "remoteshutdown: all cases passed\n");
+        return failures ? 1 : 0;
+    }
+
     if (app.arguments().contains(QStringLiteral("--recall-only"))) {
         relay::theme::applyTheme(app);
         cases::recallPromptCases();

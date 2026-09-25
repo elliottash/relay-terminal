@@ -49,13 +49,7 @@ public:
     }
 };
 
-bool xcxdHasButton(const Pane &pane, const QString &prefix)
-{
-    for (QToolButton *button : pane.findChildren<QToolButton *>())
-        if (!button->isHidden() && button->text().startsWith(prefix))
-            return true;
-    return false;
-}
+// xcxdHasButton and xcxdPump moved to tests/pane_waits.h (card #8ABD), included first.
 bool xcxdHasLaneLabel(const Pane &pane)
 {
     for (QLabel *label : pane.findChildren<QLabel *>())
@@ -82,14 +76,6 @@ void xcxdEsc(Pane &pane, Qt::KeyboardModifiers mods = Qt::NoModifier, bool autor
         QCoreApplication::sendEvent(editor, &esc);
     }
 }
-void xcxdPump(int msecs)
-{
-    for (int left = msecs; left > 0; left -= 25) {
-        QCoreApplication::processEvents();
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QThread::msleep(25);
-    }
-}
 // Sends `sleep <secs>` to the terminal and waits for the shell's stop control to appear — the
 // new visibility rule made the control itself the busy signal. Fails rather than skips.
 void xcxdRunSleep(Pane &pane, const char *name)
@@ -100,11 +86,10 @@ void xcxdRunSleep(Pane &pane, const char *name)
         QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
         QCoreApplication::sendEvent(editor, &enter);
     }
-    for (int i = 0; i < 100 && !xcxdHasButton(pane, QStringLiteral("Stop shell (")); ++i)
-        xcxdPump(25);
-    CHECK(xcxdHasButton(pane, QStringLiteral("Stop shell (")));
-    if (!xcxdHasButton(pane, QStringLiteral("Stop shell (")))
+    if (!waitForStopButton(pane, QStringLiteral("Stop shell ("))) {
         std::fprintf(stderr, "FAIL xcxd %s: the shell never reported busy (sleep %s)\n", name, name);
+        CHECK(false);
+    }
 }
 void xcxdShot(Pane &pane, const QString &path)
 {
@@ -222,11 +207,9 @@ void xcxdUiCases()
     console.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
     console.initRestore(QJsonObject{{"queue", xcxdMixedQueue()}});
     console.show();
-    for (int i = 0; i < 20 && !xcxdHasButton(console, QStringLiteral("Stop shell (")); ++i)
-        xcxdPump(25);
+    CHECK(waitForStopButton(console, QStringLiteral("Stop shell (")));
     // The agent's stop is the Relaying line's "Esc stops"; the strip does not repeat it.
     CHECK(!xcxdHasButton(console, QStringLiteral("Stop agent (")));
-    CHECK(xcxdHasButton(console, QStringLiteral("Stop shell (")));
     auto *agentList = console.findChild<QListWidget *>(QStringLiteral("queueList"));
     auto *shellList = console.findChild<QListWidget *>(QStringLiteral("terminalQueueList"));
     CHECK(agentList && shellList);
@@ -250,7 +233,9 @@ void xcxdUiCases()
     CHECK(sent.isEmpty());
     xcxdEsc(console, Qt::AltModifier, true);
     CHECK(sent.isEmpty());
-    CHECK(xcxdHasButton(console, QStringLiteral("Stop shell (")));
+    // The strip's stop control is layout: it can hide for a moment while the agent's turn
+    // re-lays the pane, so it is waited on, not sampled once (card #8ABD).
+    CHECK(waitForStopButton(console, QStringLiteral("Stop shell (")));
     // Esc stops the agent only; the shell keeps running.
     sent.clear();
     xcxdEsc(console);
@@ -260,7 +245,7 @@ void xcxdUiCases()
     CHECK(!std::any_of(sent.cbegin(), sent.cend(), [](const QJsonObject &message) {
         return message.value(QStringLiteral("type")).toString() == QStringLiteral("input");
     }));
-    CHECK(xcxdHasButton(console, QStringLiteral("Stop shell (")));
+    CHECK(waitForStopButton(console, QStringLiteral("Stop shell (")));
     // A blank Enter skips an open question, never an approval, and leaves the queue alone.
     console.deliverWorkerEvent(QJsonObject{{"event", "question"},
                                            {"id", QStringLiteral("q1")},
@@ -294,9 +279,7 @@ void xcxdUiCases()
     // Alt+Esc interrupts the shell alone, even while the agent runs.
     sent.clear();
     xcxdEsc(console, Qt::AltModifier);
-    for (int i = 0; i < 100 && xcxdHasButton(console, QStringLiteral("Stop shell (")); ++i)
-        xcxdPump(25);
-    CHECK(!xcxdHasButton(console, QStringLiteral("Stop shell (")));
+    CHECK(waitForStripEmpty(console));
     CHECK(std::none_of(sent.cbegin(), sent.cend(), [](const QJsonObject &message) {
         return message.value(QStringLiteral("type")).toString() == QStringLiteral("cancel");
     }));
@@ -313,9 +296,7 @@ void xcxdUiCases()
     CHECK(!xcxdHasLaneLabel(shell));
     shell.draftInComposer(QStringLiteral("draft that must survive the stop"));
     xcxdEsc(shell);
-    for (int i = 0; i < 100 && xcxdHasButton(shell, QStringLiteral("Stop shell (")); ++i)
-        xcxdPump(25);
-    CHECK(!xcxdHasButton(shell, QStringLiteral("Stop shell (")));
+    CHECK(waitForStripEmpty(shell));
     CHECK(xcxdEditor(shell) && xcxdEditor(shell)->toPlainText()
               == QStringLiteral("draft that must survive the stop"));
     // Nothing running, nothing queued: Esc sends nothing and keeps the draft.
@@ -335,16 +316,13 @@ void xcxdUiCases()
         XcxdShellContext typedContext;
         typedContext.workspace = typedHome.path();
         Pane typed(typedContext.workspace, typedContext.workspace, true, relay::defaultEngineCore(), &typedContext);
+        const harness::ProcessGuard typedGuard(typed);   // #DSKT: kill the shell's groups at case end
         typed.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
         xcxdPump(100);
         typed.sendShellInput(QStringLiteral("sleep 2\n"));
-        for (int i = 0; i < 200 && !xcxdHasButton(typed, QStringLiteral("Stop shell (")); ++i)
-            xcxdPump(25);
-        CHECK(xcxdHasButton(typed, QStringLiteral("Stop shell (")));
+        CHECK(waitForStopButton(typed, QStringLiteral("Stop shell (")));
         // No Esc, nothing queued: sleep exits on its own and its stop control follows.
-        for (int i = 0; i < 400 && xcxdHasButton(typed, QStringLiteral("Stop shell (")); ++i)
-            xcxdPump(25);
-        CHECK(!xcxdHasButton(typed, QStringLiteral("Stop shell (")));
+        CHECK(waitForStripEmpty(typed));
     }
 
     // ----- lanes: separate resume/clear, the shell ×, and stable rebuilds -------------------
@@ -459,13 +437,13 @@ void xcxdUiCases()
             XcxdShellContext wideContext;
             wideContext.workspace = wideHome.path();
             Pane wide(wideContext.workspace, wideContext.workspace, true, relay::defaultEngineCore(), &wideContext);
+            const harness::ProcessGuard wideGuard(wide);   // #DSKT: kill the shell's groups at case end
             wide.deliverWorkerEvent(QJsonObject{{"event", "configured"}, {"model", "test"}});
             xcxdRunSleep(wide, "wide");
             wide.deliverWorkerEvent(QJsonObject{{"event", "agent_started"}, {"id", "running"}});
             wide.initRestore(QJsonObject{{"queue", xcxdMixedQueue()}});
             wide.show();
-            for (int i = 0; i < 20 && !xcxdHasButton(wide, QStringLiteral("Stop shell (")); ++i)
-                xcxdPump(25);
+            waitForStopButton(wide, QStringLiteral("Stop shell ("));
             wide.resize(1200, 650);
             xcxdShot(wide, dir.filePath(QStringLiteral("queue-wide.png")));
             wide.resize(480, 650);
