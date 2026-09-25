@@ -436,6 +436,9 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
                         m_active->setComposerText(
                             QStringLiteral("Tell pane %1 (%2) that ").arg(handle, title));
                         m_active->focusComposer();
+                        // Keyless: the fast path is saying it to the agent, not a key (WARP.md hints).
+                        hint(QStringLiteral("pane.send.palette"),
+                             QStringLiteral("Next time: just ask your agent to \"tell %1 that …\"").arg(handle));
                     };
                     children << item;
                 }

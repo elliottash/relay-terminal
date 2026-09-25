@@ -511,6 +511,9 @@ void Pane::handle(const QJsonObject &event) {
             m_runCommands.clear();
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
+            // Read before the idle reset below: a turn a peer's message started names that pane
+            // in its unwatched-finish notice (#R5TC §7) — work happened here with nobody asking.
+            const bool wokenTurn = m_paneWakeTurn;
             if (!m_agentBusy) {
                 stopTurnClock(); m_idleTip.start();
                 // Idle now (#R5TC): fire notify_when_idle subscriptions, tell the other panes, and
@@ -549,7 +552,13 @@ void Pane::handle(const QJsonObject &event) {
                 if (window() && !window()->isActiveWindow()) m_finishedWhileAway = true;
                 if (!watched() && !moreTurnsPending()
                     && !(window() && window()->property("backgroundSession").toBool()))
-                    notify(m_lastAsked ? QStringLiteral("Agent needs you") : QStringLiteral("Agent finished"), turnSummary(),
+                    notify((m_lastAsked ? QStringLiteral("Agent needs you") : QStringLiteral("Agent finished"))
+                               + (wokenTurn ? QStringLiteral(" · after a message from %1 (%2)")
+                                                  .arg(relay::paneaddress::label(m_paneWakeNote.from),
+                                                       m_paneWakeNote.fromTitle.isEmpty() ? QStringLiteral("a pane")
+                                                                                          : m_paneWakeNote.fromTitle)
+                                            : QString()),
+                           turnSummary(),
                            m_lastAsked ? relay::NotificationCenter::kindWarning : relay::NotificationCenter::kindSuccess);
             } else if (outcome == QStringLiteral("error") && !watched()
                        && !(window() && window()->property("backgroundSession").toBool())) {
