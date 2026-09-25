@@ -384,9 +384,10 @@ private:
         add("agent.stopAllSubagents", "agent", "Stop all running subagents", {});   // subagents UI and palette; Ctrl+Shift+X until #QWAS
         add("agent.agentsMenu", "agent", "Agents: definitions and running subagents", {});
         // The tabbed subagent pane (card #WD83): from the prompt box it opens (or brings forward)
-        // this pane's subagent pane; from the subagent pane it closes it and returns to the main agent. A for
-        // agents; no preset binds Alt+A, and Readline leaves M-a unbound.
-        add("agent.subagentPane", "agent", "Subagents: open this pane's subagent tabs, or close the active subagent pane",
+        // this pane's subagent pane; from the subagent pane it closes it and returns to the main agent
+        // (Esc there holds the live agent in front first, #ZQNG). A for agents; no preset binds
+        // Alt+A, and Readline leaves M-a unbound.
+        add("agent.subagentPane", "agent", "Subagents: open this pane's subagent tabs, or close the active subagent pane (a running agent in it is held first)",
             {QStringLiteral("Alt+A")});
         // Voice transcription: the hold key is its own setting (Settings › Voice), because a
         // push-to-talk key is held rather than pressed and is not a shortcut the keymap can bind.

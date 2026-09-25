@@ -321,13 +321,19 @@ mentions of blockers are not classified. Provider errors remain failed, cancella
   once: their models (as in `subagent_started`) and tiers (`"high"|"main"|"flash"|"lite"|"local"`,
   `null` when unknown), in start order, after their `subagent_started` events. `warning` is set
   when every one is on the High tier. For the parent's transcript; it is not sent to the model.
-- Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"blocked"|"failed"|"stopped", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`,
+- Events: `subagent_started {id, type, description, background, model}`, `subagent_progress {id, status: "running"|"waiting"|"done"|"blocked"|"failed"|"stopped"|"paused", tools, tokens, elapsed_ms, last_activity}`, `subagent_finished {id, outcome, summary}`,
   `subagent_handoff {id, handoff: "next_model_call"|"wake"|"pending", wakeups, max_auto_turns, tools?, tokens?, elapsed_ms?}`
   — how a finished background subagent's result reaches the main agent: at its next model call, as a
   wake-up turn Relay queued, or `pending` because the auto-turn budget is spent.
 - `agent_subscribe {id, on: bool}` → while on, the worker also sends `subagent_event {id, event: {...}}` wrapping that subagent's delta/tool_started/tool_output/tool_result events.
 - `agent_message {id, text}` (user → subagent) → `agent_message_delivered {id, delivered: "next_step"|"resumed", status}`;
-  `agent_stop {id | "all"}` → `agent_stopped {ids}`, the subagent ids that were actually stopped.
+  `agent_stop {id | "all"}` → `agent_stopped {ids}`, the subagent ids that were actually stopped (a paused one is
+  marked stopped there too, which returns its todo to pending).
+- `agent_pause {id | "all"}` → `agent_paused {ids}` (#ZQNG): holds live subagents. The step in flight is cancelled
+  and the run ends `paused` — `subagent_finished {outcome: "paused", handoff: "held"}` — with nothing delivered to
+  the main agent; a linked todo stays in_progress. `agent_resume {id}` continues a paused one:
+  `agent_message_delivered {id, delivered: "resumed"}` (the continuation note is a labelled "Continue."). The two
+  GUI paths are Esc in the subagent's pane (which used to leave it) and the ‖/▶ button on the strip, beside the ×.
 - `agent_set_model {id | "all", model}` moves one subagent, or every listed one, to another model (`model` as in the `agent` tool: `inherit`, a preset id or an alias). The worker emits `subagent_model {id, model, applies: "now"|"next_step", warnings?}` for each: a running subagent switches before its next model call, a waiting or finished one at once.
 - Background completion: the result is delivered to the main agent before its next model call; if the main agent is idle, the worker enqueues a main turn "Background agent <id> finished: <summary>" (owner decision 4).
 - **A main agent blocked on its subagents** (card #V7QD; jobs are the same, section "Commands as jobs") needs no event of its own; the GUI derives it from what is already here, and shows the neutral "Relaying · waiting for N subagents . . ." status immediately above the prompt frame (#R3YN), leaving the editor's normal placeholder alone. It is blocked when subagents are live *and* any of: its running tool call is `agent_wait` (`tool_started {tool: "agent_wait", call_id}` until the matching `tool_result`); a live subagent has `background: false`, because `run_tool` waits on a foreground `agent` call before it returns; or no turn of its own is running (after `agent_finished`) while background subagents go on. A turn that started background subagents and kept working is *not* blocked.

@@ -132,6 +132,7 @@ QString SubagentModel::statusIcon(const QString &status) {
     if (status == QStringLiteral("blocked")) return QStringLiteral("!");
     if (status == QStringLiteral("limit")) return QStringLiteral("◔");   // ran out of turns, resumable (#VTJR)
     if (status == QStringLiteral("stopped")) return QStringLiteral("■");
+    if (status == QStringLiteral("paused")) return QStringLiteral("‖");   // held, resumable (#ZQNG)
     return QStringLiteral("○");   // waiting
 }
 
@@ -142,6 +143,7 @@ QString SubagentModel::handoffText(const QString &handoff, int wakeups, int maxA
         return QStringLiteral("result pending: automatic-turn limit reached (%1/%2); it goes with your next prompt").arg(wakeups).arg(maxAutoTurns);
     if (handoff == QStringLiteral("returned")) return QStringLiteral("result returned to the main agent");
     if (handoff == QStringLiteral("discarded")) return QStringLiteral("result discarded (new conversation)");
+    if (handoff == QStringLiteral("held")) return QStringLiteral("held: nothing was delivered; ▶ or a message continues it");   // agent_pause (#ZQNG)
     return {};
 }
 
@@ -532,9 +534,12 @@ void SubagentsPanel::setFolded(bool folded, const QString &keys) {
 QString SubagentsPanel::foldedText() const {
     const int n = int(m_model->rows().size());
     const int live = m_model->liveCount();
+    const int paused = int(std::count_if(m_model->rows().begin(), m_model->rows().end(),
+                                         [](const SubagentRow &r) { return r.status == QStringLiteral("paused"); }));
     QString text = live > 0 ? QStringLiteral("%1 subagent%2 running").arg(live).arg(live == 1 ? QString() : QStringLiteral("s"))
                             : QStringLiteral("%1 subagent%2 finished").arg(n).arg(n == 1 ? QString() : QStringLiteral("s"));
     if (live > 0 && n > live) text += QStringLiteral(" · %1 finished").arg(n - live);
+    if (paused > 0) text += QStringLiteral(" · %1 paused").arg(paused);   // held runs, resumable (#ZQNG)
     if (m_layout.openTasks > 0)
         text += QStringLiteral(" · %1 task%2 open").arg(m_layout.openTasks).arg(m_layout.openTasks == 1 ? QString() : QStringLiteral("s"));
     return text + QStringLiteral(" · %1 to open").arg(m_foldKeys.isEmpty() ? QStringLiteral("Enter") : m_foldKeys);
@@ -616,9 +621,25 @@ void SubagentsPanel::act(bool stop) {
     const QString id = selectedId();
     const SubagentRow *row = m_model->row(id);
     if (!row) return;
-    if (row->live()) { if (stop && onStop) onStop(id); }
+    // A paused run is still held by the worker (agent_pause, #ZQNG): stopping it must tell the
+    // worker — which returns its todo to pending — not merely hide the row.
+    if (row->live() || row->status == QStringLiteral("paused")) { if (stop && onStop) onStop(id); }
     else m_model->dismiss(id);
     refresh();
+}
+
+// ‖ on a live row holds it (agent_pause), ▶ on a paused one continues it (agent_resume). Esc in
+// that subagent's pane pauses the same way (#ZQNG).
+void SubagentsPanel::togglePause(int row) {
+    if (row <= 0) return;
+    m_selected = row;
+    m_column = Subagents;
+    const QString id = selectedId();
+    const SubagentRow *r = m_model->row(id);
+    if (!r) return;
+    if (r->live()) { if (onPause) onPause(id); }
+    else if (r->status == QStringLiteral("paused")) { if (onResume) onResume(id); }
+    update();
 }
 
 void SubagentsPanel::pickModel(int row) {
@@ -666,6 +687,10 @@ void SubagentsPanel::keyPressEvent(QKeyEvent *event) {
         // A task is not dismissible: act() finds no subagent in the task column and does nothing.
         act(true);
         return;
+    case Qt::Key_P:
+        // p holds a running agent or continues a paused one (‖ beside the ×, #ZQNG).
+        togglePause(m_selected);
+        return;
     case Qt::Key_M:
         pickModel(m_selected);
         return;
@@ -707,8 +732,10 @@ void SubagentsPanel::mousePressEvent(QMouseEvent *event) {
         update();
         return;
     }
-    // The × at the right edge of the subagent cell stops or dismisses; the model chip opens the
-    // model picker; anywhere else on a subagent row opens its tab (owner, 2026-09-18: a click).
+    // The ‖/▶ button beside the × holds or continues the row's agent (#ZQNG); the × at the right
+    // edge of the subagent cell stops or dismisses; the model chip opens the model picker; anywhere
+    // else on a subagent row opens its tab (owner, 2026-09-18: a click).
+    if (row > 0 && m_pauseButtons.value(row).contains(event->pos())) { togglePause(row); return; }
     if (row > 0 && event->pos().x() >= leftWidth() - 24) act(true);
     else if (row > 0 && m_modelChips.value(row).contains(event->pos())) pickModel(row);
     else if (row > 0 && event->button() == Qt::LeftButton && !selectedId().isEmpty() && onOpen) {
@@ -759,9 +786,11 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
     const int lw = leftWidth();
 
     m_modelChips.clear();
+    m_pauseButtons.clear();
     auto drawRow = [&](const QRect &cell, bool selected, const QString &icon, const QColor &iconColor, const QString &name,
                        const QColor &nameColor, int nameW, const QString &description, const QString &metrics,
-                       const QString &badge, bool closable, const QString &model = QString(), int rowIndex = 0) {
+                       const QString &badge, bool closable, const QString &model = QString(), int rowIndex = 0,
+                       const QString &hold = QString()) {
         const QRect r = cell;
         if (selected) p.fillRect(r.adjusted(4, 0, -4, 0), focused ? theme::SurfaceRaised.lighter(135) : theme::SurfaceRaised);
         int x = cell.left() + 10;
@@ -804,6 +833,13 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
         p.setPen(theme::Text);
         const int dw = std::max(0, right - mw - 12 - x);
         p.drawText(QRect(x, r.top(), dw, h), Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(description, Qt::ElideRight, dw));
+        if (!hold.isEmpty()) {
+            // ‖ pauses a live row, ▶ continues a paused one — beside the × that stops (#ZQNG).
+            const QRect hr(cell.left() + cell.width() - 46, r.top(), 16, h);
+            p.setPen(hold == QStringLiteral("▶") ? theme::Accent : theme::TextMuted);
+            p.drawText(hr, Qt::AlignCenter, hold);
+            m_pauseButtons.insert(rowIndex, hr);
+        }
         if (closable) {
             p.setPen(theme::TextMuted);
             p.drawText(QRect(cell.left() + cell.width() - 24, r.top(), 16, h), Qt::AlignCenter, QStringLiteral("×"));
@@ -811,7 +847,7 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
     };
 
     QString hint = QStringLiteral("↓ from the prompt to select");
-    if (focused && !tasksMode()) hint = QStringLiteral("↑↓ select · Enter open tab · m model · x stop/dismiss · Esc back");
+    if (focused && !tasksMode()) hint = QStringLiteral("↑↓ select · Enter open tab · p pause · m model · x stop/dismiss · Esc back");
     else if (focused && split) hint = QStringLiteral("↑↓ select · ←→ columns · Enter open · S run as subagent · Esc back");
     else if (focused) hint = QStringLiteral("↑↓ select · Enter open · S run as subagent · Esc back");
     // With no agents to account for, the main row reports the task list's progress instead.
@@ -860,7 +896,9 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
                 drawRow(leftCell, onRow && (!split || m_column == Subagents), SubagentModel::statusIcon(row->status), color,
                         row->id, theme::Text, nameWidth, description,
                         parts.join(QStringLiteral(" · ")), row->background ? QStringLiteral("bg") : QString(), true,
-                        row->model, rowIndex);
+                        row->model, rowIndex,
+                        row->live() ? QStringLiteral("‖")
+                                    : (row->status == QStringLiteral("paused") ? QStringLiteral("▶") : QString()));
             }
         }
         if (split) {

@@ -243,7 +243,12 @@ bool SubagentTranscriptView::eventFilter(QObject *object, QEvent *event) {
     }
     if (object == m_input && event->type() == QEvent::KeyPress) {
         auto *key = static_cast<QKeyEvent *>(event);
-        if (key->key() == Qt::Key_Escape && key->modifiers() == Qt::NoModifier) { if (onClose) onClose(); return true; }
+        // Esc holds a live run first (agent_pause, #ZQNG); a run that cannot be held closes.
+        if (key->key() == Qt::Key_Escape && key->modifiers() == Qt::NoModifier) {
+            if (live() && onPauseRequested) onPauseRequested();
+            else if (onClose) onClose();
+            return true;
+        }
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) && !(key->modifiers() & Qt::ShiftModifier)) {
             const QString text = m_input->text().trimmed();
             if (!text.isEmpty() && onSend) {
@@ -683,6 +688,17 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
         if (onBackToMain) onBackToMain();
     });
     m_header->addWidget(m_back);
+    // ‖ pauses the agent in front, ▶ continues a paused one (owner, 2026-09-24, #ZQNG): the same
+    // hold as Esc in this pane and the ‖ on the strip, one click from the header.
+    m_hold = new QToolButton;
+    m_hold->setObjectName(QStringLiteral("subagentHold"));
+    m_hold->setText(QStringLiteral("‖ pause"));
+    m_hold->setAutoRaise(true);
+    m_hold->setCursor(Qt::PointingHandCursor);
+    m_hold->setFocusPolicy(Qt::NoFocus);
+    m_hold->setVisible(false);
+    connect(m_hold, &QToolButton::clicked, this, [this] { toggleHold(); });
+    m_header->addWidget(m_hold);
     m_bar = new QTabBar(this);
     relay::paneTabs::registerTabs(this, m_bar);
     m_bar->setObjectName(QStringLiteral("subagentTabBar"));
@@ -720,14 +736,15 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
         const bool hadFocus = isAncestorOf(QApplication::focusWidget());
         m_stack->setCurrentWidget(view);
         if (hadFocus) view->focusInput();
+        updateHoldButton();
         if (onTitleChanged) onTitleChanged();
     });
     connect(m_bar, &QTabBar::tabCloseRequested, this, [this](int index) { closeTabByUser(m_bar->tabData(index).toString()); });
 }
 
 void SubagentTabsView::setBackKeys(const QString &keys) {
-    m_back->setToolTip(keys.isEmpty() ? QStringLiteral("Back to the main agent's prompt box (Esc)")
-                                      : QStringLiteral("Back to the main agent's prompt box (Esc); %1 closes this pane").arg(keys));
+    m_back->setToolTip(keys.isEmpty() ? QStringLiteral("Back to the main agent's prompt box (Esc holds a running agent first)")
+                                      : QStringLiteral("Back to the main agent's prompt box (Esc holds a running agent first); %1 closes this pane").arg(keys));
 }
 
 int SubagentTabsView::indexOf(const QString &id) const {
@@ -785,6 +802,7 @@ void SubagentTabsView::relabel(int index) {
     else if (status == QStringLiteral("done")) color = theme::Success;
     else if (status == QStringLiteral("failed") || status == QStringLiteral("blocked")) color = theme::Error;
     else if (status == QStringLiteral("waiting")) color = theme::Text;
+    else if (status == QStringLiteral("paused")) color = theme::Warning;   // held, resumable (#ZQNG)
     m_bar->setTabTextColor(index, color);
 }
 
@@ -813,6 +831,7 @@ SubagentTranscriptView *SubagentTabsView::ensureTab(const QString &id, bool live
     auto *view = new SubagentTranscriptView(id);
     view->setHostedInPane(true);   // the tab's × and the pane's × close it
     view->onClose = [this] { if (onBackToMain) onBackToMain(); };
+    view->onPauseRequested = [this] { toggleHold(); };   // Esc in its message box holds it (#ZQNG)
     m_views.insert(id, view);
     m_stack->addWidget(view);
     const int index = addTabFor(id, at);
@@ -873,6 +892,31 @@ void SubagentTabsView::syncRows(const SubagentModel &model) {
     const int index = m_bar->currentIndex();
     const QString id = index >= 0 ? m_bar->tabData(index).toString() : QString();
     notifyCurrentTab(m_views.value(id).data(), id);
+    updateHoldButton();   // the ‖/▶ button follows the tab in front and its status (#ZQNG)
+}
+
+void SubagentTabsView::toggleHold() {
+    // The agent on the current tab: ‖ holds a live run (agent_pause), ▶ continues a paused one
+    // (agent_resume). The run keeps its task and its conversation either way (#ZQNG).
+    const QString id = currentId();
+    auto *view = current();
+    if (id.isEmpty() || !view) return;
+    if (view->live()) { if (onPause) onPause(id); }
+    else if (view->statusText() == QStringLiteral("paused")) { if (onResume) onResume(id); }
+}
+
+void SubagentTabsView::updateHoldButton() {
+    const auto *view = current();
+    const QString status = view ? view->statusText() : QString();
+    const bool paused = status == QStringLiteral("paused");
+    const bool holdable = view && !view->ended() && (view->live() || paused);
+    m_hold->setVisible(view != nullptr);
+    m_hold->setText(paused ? QStringLiteral("▶ resume") : QStringLiteral("‖ pause"));
+    m_hold->setEnabled(holdable);
+    m_hold->setToolTip(view ? (paused
+                ? QStringLiteral("Continue this agent's run from where it was held (agent_resume)")
+                : QStringLiteral("Hold this agent's run (agent_pause): its task stays with it and Esc here no longer leaves this pane"))
+            : QString());
 }
 
 void SubagentTabsView::notifyCurrentTab(SubagentTranscriptView *view, const QString &id) {
@@ -902,7 +946,14 @@ void SubagentTabsView::setHeaderRightInset(int pixels) {
 }
 
 void SubagentTabsView::keyPressEvent(QKeyEvent *event) {
-    if (event->key() == Qt::Key_Escape && event->modifiers() == Qt::NoModifier) { if (onBackToMain) onBackToMain(); return; }
+    if (event->key() == Qt::Key_Escape && event->modifiers() == Qt::NoModifier) {
+        // A live agent in front: Esc holds it (agent_pause, #ZQNG), the way Esc stops the main
+        // agent's turn. Nothing to hold — paused, finished, failed, stopped, ended: Esc is the
+        // way back to the main agent's prompt box.
+        if (auto *view = current(); view && view->live()) { toggleHold(); return; }
+        if (onBackToMain) onBackToMain();
+        return;
+    }
     QWidget::keyPressEvent(event);
 }
 
@@ -931,6 +982,7 @@ void SubagentTabsView::restore(const QJsonObject &subagents) {
         auto *view = new SubagentTranscriptView(id);
         view->setHostedInPane(true);
         view->onClose = [this] { if (onBackToMain) onBackToMain(); };
+        view->onPauseRequested = [this] { toggleHold(); };   // a restored tab can be held too
         view->restore(saved.value(QStringLiteral("type")).toString(), saved.value(QStringLiteral("description")).toString(),
                       saved.value(QStringLiteral("status")).toString(), saved.value(QStringLiteral("text")).toString());
         m_views.insert(id, view);
@@ -940,6 +992,7 @@ void SubagentTabsView::restore(const QJsonObject &subagents) {
     const int index = indexOf(subagents.value(QStringLiteral("current")).toString());
     if (index >= 0) m_bar->setCurrentIndex(index);
     if (auto *view = current()) m_stack->setCurrentWidget(view);
+    updateHoldButton();
 }
 
 }  // namespace relay

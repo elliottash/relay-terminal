@@ -408,7 +408,7 @@ class Subagent:
     model: str
     effort: str | None
     agent: object = None
-    status: str = "waiting"            # waiting | running | done | limit | blocked | failed | stopped
+    status: str = "waiting"            # waiting | running | done | limit | blocked | failed | stopped | paused
     outcome: str | None = None         # last terminal event of the current run
     stop_reason: str | None = None     # the done event's stop_reason ("limit"), when it carried one
     warnings: list = field(default_factory=list)   # model warnings from the factory, for the reply
@@ -425,6 +425,7 @@ class Subagent:
     inbox: list = field(default_factory=list)
     subscribed: bool = False
     stop_requested: bool = False
+    pause_requested: bool = False      # agent_pause: end the run held, resumable (#ZQNG)
     waiters: int = 0
     generation: int = 0
     run_start_index: int = 1
@@ -887,7 +888,7 @@ class SubagentManager:
     def _run(self, sub: Subagent, text: str) -> None:
         with self._lock:
             announced = False
-            while self._active >= self.max_concurrent and not sub.stop_requested and not self._closed:
+            while self._active >= self.max_concurrent and not sub.stop_requested and not sub.pause_requested and not self._closed:
                 if not announced:
                     sub.last_activity = "waiting for a free slot"
                     self._progress_locked(sub)
@@ -896,6 +897,10 @@ class SubagentManager:
             if sub.stop_requested or self._closed:
                 sub.result = "Stopped before it started."
                 self._finish_locked(sub, "stopped")
+                return
+            if sub.pause_requested:
+                sub.result = "Paused before it started."
+                self._finish_locked(sub, "paused")
                 return
             self._active += 1
             sub.runs += 1
@@ -911,13 +916,19 @@ class SubagentManager:
             except Exception as exc:  # ask() reports its own errors; defensive
                 sub.outcome, sub.error_text = "error", str(exc)[:2000] if isinstance(exc, ValueError) else type(exc).__name__
             with self._lock:
-                if sub.outcome == "done" and sub.inbox and not sub.stop_requested and not self._closed:
+                if sub.outcome == "done" and sub.inbox and not sub.stop_requested and not sub.pause_requested and not self._closed:
                     text = "\n\n".join(sub.inbox)
                     sub.inbox = []
                     continue
                 self._active -= 1
                 self._lock.notify_all()
-                if sub.stop_requested or sub.outcome == "cancelled":
+                if sub.stop_requested:
+                    outcome = "stopped"
+                elif sub.pause_requested:
+                    # agent_pause (#ZQNG): the run is held, not finished — nothing is delivered to
+                    # the main agent and its todo stays in_progress until agent_resume continues it.
+                    outcome = "paused"
+                elif sub.outcome == "cancelled":
                     outcome = "stopped"
                 elif sub.outcome == "done":
                     # The turn limit is not finished work: report it as what it is (#VTJR).
@@ -951,12 +962,16 @@ class SubagentManager:
         sub.last_activity = outcome
         self._save_thread(sub)
         self._report_usage(sub)
-        if sub.generation == self._generation:   # not a subagent of a conversation that was replaced
+        if sub.generation == self._generation and outcome != "paused":
+            # not a subagent of a conversation that was replaced. A paused run is held, not
+            # finished — its todo stays in_progress until it is resumed or stopped (#ZQNG).
             self._todo_event(sub, "finished", outcome)
         self._progress_locked(sub, force=True)
         try:
             handoff = "returned"
-            if sub.background and sub.waiters == 0 and sub.generation == self._generation and not self._closed:
+            if outcome == "paused":
+                handoff = "held"   # nothing is delivered while the run is held (#ZQNG)
+            elif sub.background and sub.waiters == 0 and sub.generation == self._generation and not self._closed:
                 self._pending[sub.id] = {"note": self._note(sub), "turn": self._turn_text(sub)}
                 handoff = self._handoff_locked(sub.id, submit=False)
             elif sub.background and sub.waiters == 0:
@@ -1045,6 +1060,7 @@ class SubagentManager:
                 raise ValueError(f"Too many subagents are running or waiting ({MAX_LIVE}).")
             self._pending.pop(agent_id, None)
             sub.status, sub.background, sub.stop_requested = "waiting", True, False
+            sub.pause_requested = False
             sub.generation, sub.finished, sub.last_activity = self._generation, None, "queued"
             sub.done.clear()
             self._emit({"event": "subagent_started", "id": sub.id, "type": sub.type, "description": sub.description,
@@ -1053,6 +1069,43 @@ class SubagentManager:
             self._todo_event(sub, "started")
             self._start_thread(sub, labelled)
             return {"id": agent_id, "delivered": "resumed", "status": "running", "background": True}
+
+    def pause(self, target) -> list[str]:
+        """``agent_pause`` (id or "all"): hold live subagents (#ZQNG).
+
+        The step in flight is cancelled and the run ends ``paused``: nothing is delivered to the
+        main agent, its todo stays in_progress, and ``agent_resume`` — or a message — continues it
+        from its own conversation.
+        """
+        with self._lock:
+            if target in (None, "all"):
+                subs = [s for s in self._agents.values() if s.live]
+            else:
+                sub = self._agents.get(target) if isinstance(target, str) else None
+                if sub is None:
+                    raise ValueError(f"Unknown subagent {target!r}.")
+                subs = [sub] if sub.live else []
+            for sub in subs:
+                sub.pause_requested = True
+                sub.agent.stop()   # cancel the model call or command in flight, as a stop would
+            self._lock.notify_all()
+            return [sub.id for sub in subs]
+
+    def resume(self, target) -> dict:
+        """``agent_resume`` (id): continue a paused subagent (#ZQNG).
+
+        No user text was typed, so the continuation note says so: the run restarts from its own
+        conversation with a labelled Continue, the same resume a message performs.
+        """
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("id must be a subagent id.")
+        with self._lock:
+            sub = self._agents.get(target)
+            if sub is None:
+                raise ValueError(f"Unknown subagent {target!r}.")
+            if sub.status != "paused":
+                raise ValueError(f"Subagent {sub.id} is not paused; send agent_message to resume it.")
+        return self.send_message(target, "Continue.", origin="user")
 
     def wait(self, agent_id, timeout, cancel: threading.Event) -> dict:
         if type(timeout) is not int or not 1 <= timeout <= 1800:
@@ -1123,8 +1176,27 @@ class SubagentManager:
             for sub in subs:
                 sub.stop_requested = True
                 sub.agent.stop()
+            # A paused subagent has no run thread left to observe the request: it is marked
+            # stopped here, its todo returned to pending, the UI told (#ZQNG).
+            if target == "all":
+                held = [s for s in self._agents.values() if s.status == "paused"]
+            else:
+                sub = self._agents.get(target) if isinstance(target, str) else None
+                held = [sub] if sub is not None and sub.status == "paused" else []
+            for sub in held:
+                sub.status, sub.result, sub.finished = "stopped", "Stopped while paused.", self.clock()
+                sub.last_activity = "stopped"
+                self._pending.pop(sub.id, None)
+                if sub.generation == self._generation:
+                    self._todo_event(sub, "finished", "stopped")
+                self._progress_locked(sub, force=True)
+                self._emit({"event": "subagent_finished", "id": sub.id, "type": sub.type,
+                            "outcome": "stopped", "summary": sub.result[:SUMMARY_CHARS],
+                            "handoff": "discarded", "wakeups": self._wakeups,
+                            "max_auto_turns": self.max_auto_turns, "tools": sub.tools,
+                            "tokens": sub.tokens, "elapsed_ms": self._elapsed(sub)})
             self._lock.notify_all()
-            return [sub.id for sub in subs]
+            return [sub.id for sub in subs] + [sub.id for sub in held]
 
     def set_model(self, target, model, warnings_out: list | None = None) -> list[str]:
         """agent_set_model: move one subagent, or every listed one ("all"), to another model.

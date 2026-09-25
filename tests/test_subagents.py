@@ -4,6 +4,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from relay_core import skills as skills_mod
 from relay_core.agent import Agent, transcript_items
@@ -404,6 +405,64 @@ class StopAndMessageTests(Base):
             self.assertEqual(event['outcome'], 'stopped')
         with self.assertRaises(ValueError):
             self.manager.stop('a99')
+
+    def test_pause_holds_a_running_subagent_and_resume_continues_it(self):
+        self.spawn('P gate:g1')
+        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+        self.assertTrue(self.hub.started.wait(5))   # the model call is in flight at the gate
+        self.assertEqual(self.manager.pause('a1'), ['a1'])
+        held = self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
+        self.assertEqual(held['outcome'], 'paused')
+        self.assertEqual(held['handoff'], 'held')
+        self.assertEqual(self.manager.list()[0]['status'], 'paused')
+        self.assertEqual(self.manager.pause('a1'), [])   # held is not live: a second pause does nothing
+        self.assertEqual(self.manager.resume('a1')['delivered'], 'resumed')
+        finished = self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1'
+                                 and e['outcome'] != 'paused')
+        self.assertEqual(finished['outcome'], 'done')
+        self.assertIn('REPORT[P]', finished['summary'])
+        # The continuation is a labelled user message, so the model knows who resumed it (#ZQNG).
+        last = [m for m in self.hub.seen[-1][1] if m['role'] == 'user'][-1]['content']
+        self.assertIn('Continue.', last)
+        self.assertEqual(len(self.rec.of('subagent_started', resumed=True)), 1)
+
+    def test_paused_run_keeps_its_todo_until_it_is_stopped(self):
+        seen = []
+        self.manager._todo_owner = SimpleNamespace(
+            todo_for_subagent=lambda todo: None,
+            todo_subagent_event=lambda kind, todo, agent_id, outcome, err: seen.append((kind, todo, outcome)))
+        self.manager.spawn({'description': 'd', 'prompt': 'Q gate:g1', 'subagent_type': 'general',
+                            'background': True, 'todo_id': 'T1'})
+        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+        self.assertTrue(self.hub.started.wait(5))
+        self.assertEqual(self.manager.pause('a1'), ['a1'])
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
+        self.assertEqual(seen, [('started', 'T1', None)])   # held: no finished event, the todo stays in_progress
+        self.assertEqual(self.manager.stop('a1'), ['a1'])
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1' and e['outcome'] == 'stopped')
+        self.assertEqual(seen[-1], ('finished', 'T1', 'stopped'))
+        self.assertEqual(self.manager.list()[0]['status'], 'stopped')
+
+    def test_pause_and_resume_refuse_what_they_cannot_do(self):
+        with self.assertRaises(ValueError):
+            self.manager.pause('a99')
+        with self.assertRaises(ValueError):
+            self.manager.resume('a99')
+        self.spawn('R')
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
+        self.assertEqual(self.manager.pause('a1'), [])   # finished, like stop: nothing to hold
+        with self.assertRaises(ValueError):
+            self.manager.resume('a1')   # done, not paused: only a message resumes it
+
+    def test_reset_stops_a_paused_subagent(self):
+        self.spawn('Z gate:g1')
+        self.rec.wait(lambda e: e['event'] == 'subagent_progress' and e['status'] == 'running')
+        self.assertTrue(self.hub.started.wait(5))
+        self.manager.pause('a1')
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1')
+        self.manager.stop_all(reset=True)
+        self.rec.wait(lambda e: e['event'] == 'subagent_finished' and e['id'] == 'a1' and e['outcome'] == 'stopped')
+        self.assertEqual(self.manager.list()[0]['status'], 'stopped')
 
     def test_message_reaches_running_subagent_at_next_step(self):
         self.spawn('M tool gate:g1')

@@ -46,6 +46,9 @@ public:
 
     std::function<void(const QString &text)> onSend;
     std::function<void()> onClose;
+    // Esc in the message box holds a live run first (agent_pause, #ZQNG); only a run that cannot
+    // be held — finished, failed, stopped, already paused, ended — closes the tab.
+    std::function<void()> onPauseRequested;
 
     // Row state from the model: title, status line.
     void setRow(const SubagentRow &row, qint64 elapsedMs);
@@ -69,6 +72,8 @@ public:
     QString type() const { return m_type; }
     QString description() const { return m_description; }
     QString statusText() const { return m_lastStatus; }
+    // waiting or running: a run the owner can hold with agent_pause (#ZQNG).
+    bool live() const { return m_lastStatus == QStringLiteral("waiting") || m_lastStatus == QStringLiteral("running"); }
     // The line above the message box while the agent works (card #XDZP): the main pane's
     // "Relaying · …" line, said for whom — "Relaying for main agent · reading x… · 12 s". Empty,
     // and the line hidden, when the agent is not running. For tests.
@@ -171,6 +176,10 @@ public:
     // The current tab changed (id empty when the last tab closed): the pane refreshes the model
     // picker's collapsed text for the agent now in front. The view hides the box itself.
     std::function<void(const QString &id)> onCurrentTab;
+    // Hold the agent on the current tab (agent_pause) or continue a paused one (agent_resume):
+    // the header's ‖/▶ button and Esc in this pane do this (#ZQNG). The owner sends the message.
+    std::function<void(const QString &id)> onPause;
+    std::function<void(const QString &id)> onResume;
 
     // Opens (or selects) the tab for `id`; returns its view. `live`: the owner's list has this row,
     // so a restored tab with the same id (an earlier agent) is replaced by a live one.
@@ -222,8 +231,12 @@ private:
     int indexOf(const QString &id) const;
     int addTabFor(const QString &id, int at = -1);
     void relabel(int index);
+    // ‖ pauses the agent in front, ▶ continues a paused one (agent_pause / agent_resume).
+    void toggleHold();
+    void updateHoldButton();
     QHBoxLayout *m_header = nullptr;
     QToolButton *m_back = nullptr;
+    QToolButton *m_hold = nullptr;
     QTabBar *m_bar = nullptr;
     CurrentTextComboBox *m_modelBox = nullptr;
     QString m_notifiedCurrent;   // the id the picker's owner was last told is in front

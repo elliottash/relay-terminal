@@ -368,6 +368,81 @@ private slots:
         QCOMPARE(exits, 2);
     }
 
+    // #ZQNG: agent_pause ends a run held, not finished — the row stays with status paused, a ‖
+    // icon, and a handoff line that says how to continue it.
+    void pausedOutcomeHoldsTheRow() {
+        Harness h;
+        QCOMPARE(SubagentModel::statusIcon(QStringLiteral("paused")), QStringLiteral("‖"));
+        QVERIFY(SubagentModel::handoffText(QStringLiteral("held"), 0, 0)
+                    .contains(QStringLiteral("nothing was delivered")));
+        h.start("a1");
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','outcome':'paused','handoff':'held','summary':'so far'}"));
+        QCOMPARE(h.finished, QStringList{QStringLiteral("a1:paused")});
+        QCOMPARE(h.model.row(QStringLiteral("a1"))->status, QStringLiteral("paused"));
+        QCOMPARE(h.model.liveCount(), 0);
+    }
+
+    // #ZQNG: p on the strip holds a running agent, continues a paused one, and x on a paused row
+    // stops it in the worker rather than merely hiding the row.
+    void stripPauseKeyHoldsAndResumes() {
+        Harness h;
+        SubagentsPanel panel(&h.model);
+        QStringList paused, resumed, stopped;
+        panel.onPause = [&](const QString &id) { paused << id; };
+        panel.onResume = [&](const QString &id) { resumed << id; };
+        panel.onStop = [&](const QString &id) { stopped << id; };
+        h.start("a1");
+        panel.refresh();
+        panel.resize(700, panel.sizeHint().height());
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+        panel.enter();
+        QTest::keyClick(&panel, Qt::Key_Down);
+        QTest::keyClick(&panel, Qt::Key_P);        // running: hold it
+        QCOMPARE(paused, QStringList{QStringLiteral("a1")});
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','outcome':'paused','handoff':'held'}"));
+        QTest::keyClick(&panel, Qt::Key_P);        // paused: continue it
+        QCOMPARE(resumed, QStringList{QStringLiteral("a1")});
+        h.start("a1");                             // the resumed run is waiting again
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','outcome':'paused','handoff':'held'}"));
+        QTest::keyClick(&panel, Qt::Key_X);        // a held run is stopped, not dismissed
+        QCOMPARE(stopped, QStringList{QStringLiteral("a1")});
+        QCOMPARE(h.model.rows().size(), 1);
+    }
+
+    // #ZQNG: Esc in the subagent's pane holds the agent in front — the way Esc stops the main
+    // agent's turn — and only leaves the pane when nothing can be held. The header's ‖/▶ does it
+    // with a click.
+    void escInThePanePausesALiveAgent() {
+        Harness h;
+        SubagentTabsView tabs;
+        tabs.resize(700, 400);
+        QString held, resumed; int backs = 0;
+        tabs.onPause = [&](const QString &id) { held = id; };
+        tabs.onResume = [&](const QString &id) { resumed = id; };
+        tabs.onBackToMain = [&] { ++backs; };
+        tabs.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+        h.start("a1");
+        tabs.showTab(QStringLiteral("a1"));
+        tabs.syncRows(h.model);                    // running
+        QTest::keyClick(&tabs, Qt::Key_Escape);
+        QCOMPARE(held, QStringLiteral("a1"));
+        QCOMPARE(backs, 0);                        // Esc did not go back to main
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','outcome':'paused','handoff':'held'}"));
+        tabs.syncRows(h.model);
+        auto *hold = tabs.findChild<QToolButton *>(QStringLiteral("subagentHold"));
+        QVERIFY(hold);
+        hold->click();                             // ▶ continues a paused run
+        QCOMPARE(resumed, QStringLiteral("a1"));
+        h.start("a1");                             // the resumed run is waiting again
+        tabs.syncRows(h.model);
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','outcome':'paused','handoff':'held'}"));
+        tabs.syncRows(h.model);
+        QTest::keyClick(&tabs, Qt::Key_Escape);    // paused: nothing to hold → back to main
+        QCOMPARE(backs, 1);
+    }
+
     void panelModelPicker() {
         Harness h;
         SubagentsPanel panel(&h.model);
@@ -648,7 +723,9 @@ private slots:
         tabs.syncRows(h.model);
         QCOMPARE(bar->tabText(0), QStringLiteral("● explore a1"));
         QCOMPARE(tabs.title(), QStringLiteral("✦ explore a1 · Summarize fixture"));
-        // The ← control and Esc go back to the main agent; the pane stays.
+        // The ← control goes back to the main agent; the pane stays. Esc in the message box of a
+        // *live* agent holds it first (#ZQNG) — the hold reaches the owner — and only a run that
+        // cannot be held (paused, finished, failed, stopped) leaves the pane.
         auto *back = tabs.findChild<QToolButton *>(QStringLiteral("subagentBack"));
         QVERIFY(back);
         QVERIFY(back->text().contains(QStringLiteral("main agent")));
@@ -659,7 +736,14 @@ private slots:
         tabs.activateWindow();
         tabs.focusInput();
         auto *input = tabs.current()->findChild<QLineEdit *>(QStringLiteral("subagentInput"));
-        QTest::keyClick(input, Qt::Key_Escape);
+        QString held;
+        tabs.onPause = [&](const QString &id) { held = id; };
+        QTest::keyClick(input, Qt::Key_Escape);   // a1 is running: hold it, don't leave
+        QCOMPARE(held, QStringLiteral("a1"));
+        QCOMPARE(backs, 1);
+        h.model.handle(json("{'event':'subagent_finished','id':'a1','type':'explore','outcome':'paused','handoff':'held','tools':1,'tokens':5,'elapsed_ms':500}"));
+        tabs.syncRows(h.model);
+        QTest::keyClick(input, Qt::Key_Escape);   // paused: nothing to hold → back to main
         QCOMPARE(backs, 2);
         QCOMPARE(tabs.count(), 2);
         if (!qEnvironmentVariableIsEmpty("RELAY_SUBAGENTS_TABS_SHOT")) tabs.grab().save(qEnvironmentVariable("RELAY_SUBAGENTS_TABS_SHOT"));

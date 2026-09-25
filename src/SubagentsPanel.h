@@ -22,7 +22,7 @@ struct SubagentRow {
     // The main agent's todo this subagent works on ("T3"), or empty (card #QHR1). The description
     // then starts with "T3 · ", so the strip, the tab and the ✦ lines all say which task it is.
     QString todoId;
-    QString status = QStringLiteral("waiting");   // waiting | running | done | blocked | failed | stopped
+    QString status = QStringLiteral("waiting");   // waiting | running | done | blocked | failed | stopped | paused
     QString lastActivity, summary, handoff;
     QStringList warnings;
     bool background = false, tokensEstimated = true, resumed = false;
@@ -41,7 +41,8 @@ public:
     // A dim one-line notice for the terminal (start, finish, handoff) and the subagent it is
     // about, so the line can link to its tab. Never tool activity.
     std::function<void(const QString &line, const QString &id)> onInline;
-    // A subagent reached done, blocked, failed or stopped.
+    // A subagent reached done, blocked, failed, stopped or paused (#ZQNG: the run is held, not
+    // finished — its todo stays in_progress and agent_resume continues it).
     std::function<void(const SubagentRow &row)> onFinished;
     // Rows, counts or main-agent state changed.
     std::function<void()> onChanged;
@@ -131,8 +132,9 @@ int marginalWindowStart(const QStringList &statuses, int maxRows);
 // The work strip under the composer: a `main` row, then up to kMaxVisible rows pairing the running
 // agents (left) with the current open task list (right). Hidden when there is neither a subagent nor
 // an open task. Up/Down move, Left/Right cross between the columns. On a subagent: Enter (or a
-// click) opens its tab, x or Delete stops a running agent or dismisses a finished row, m picks the
-// row's model. On a task: Enter opens its subagent when it has one, else the task list on that task,
+// click) opens its tab, p holds a running agent or continues a paused one (‖ beside the ×, #ZQNG),
+// x or Delete stops a running agent or dismisses a finished row, m picks the row's model. On a
+// task: Enter opens its subagent when it has one, else the task list on that task,
 // and S hands a delegable task to a new background subagent. Esc (or Up past the first row) returns
 // to the composer.
 class SubagentsPanel final : public QWidget {
@@ -146,6 +148,10 @@ public:
 
     std::function<void(const QString &id)> onOpen;
     std::function<void(const QString &id)> onStop;
+    // ‖ on a live row, ▶ on a paused one (#ZQNG): hold a run (agent_pause) and continue it
+    // (agent_resume). Esc in the subagent's pane pauses the same way.
+    std::function<void(const QString &id)> onPause;
+    std::function<void(const QString &id)> onResume;
     std::function<void()> onExit;    // give focus back to the composer
     std::function<void()> onBelow;   // Down past the last row: the list beneath (commands the agent left running)
     // The row's model chip was clicked (or m pressed): show a model picker at `at` (global).
@@ -211,6 +217,7 @@ private:
     void moveColumn(int column);
     void openSelected();
     void act(bool stop);
+    void togglePause(int row);
     void pickModel(int row);
     SubagentModel *m_model;
     RequestLedgerModel *m_ledger = nullptr;
@@ -219,6 +226,7 @@ private:
     bool m_taskRunning = false;       // a task of that list is in_progress: keep ticking
     int m_column = Subagents;
     QHash<int, QRect> m_modelChips;   // row index (1.. = subagents) -> model chip, from the last paint
+    QHash<int, QRect> m_pauseButtons; // row index (1.. = subagents) -> the ‖/▶ button beside the ×
     int m_selected = 1;
     bool m_allowed = true, m_folded = false;
     QString m_foldKeys;

@@ -693,6 +693,12 @@ def main():
             elif kind == "agent_stop":
                 target = request.get("id")
                 emit({"event": "agent_stopped", "ids": subagents.stop("all" if target in (None, "all") else target)})
+            elif kind == "agent_pause":
+                target = request.get("id")
+                emit({"event": "agent_paused", "ids": subagents.pause("all" if target in (None, "all") else target)})
+            elif kind == "agent_resume":
+                result = subagents.resume(request.get("id"))
+                emit({"event": "agent_message_delivered", **result})
             elif kind == "agent_set_model":
                 target = request.get("id")
                 subagents.set_model("all" if target in (None, "all") else target, request.get("model"))

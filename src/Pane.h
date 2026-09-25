@@ -5257,6 +5257,10 @@ public:
     std::function<void(const QString &id)> onOpenSubagent;
     const relay::SubagentModel &subagents() const { return m_subagents; }
     void stopSubagent(const QString &id) { send({{"type", "agent_stop"}, {"id", id}}); }
+    // agent_pause/agent_resume (#ZQNG): hold a live subagent (its todo stays in_progress)
+    // and continue a paused one. The strip's pause button and Esc in its pane send these.
+    void pauseSubagent(const QString &id) { send({{"type", "agent_pause"}, {"id", id}}); }
+    void resumeSubagent(const QString &id) { send({{"type", "agent_resume"}, {"id", id}}); }
     void stopAllSubagents() {
         if (m_subagents.liveCount() == 0) { status(QStringLiteral("No running agents to stop.")); return; }
         send({{"type", "agent_stop"}, {"id", "all"}});
@@ -5314,6 +5318,10 @@ public:
         tabs->onCurrentTab = [self](const QString &id) {
             if (self) self->refreshSubagentModelBox(id);
         };
+        // Esc in the pane and its ‖/▶ button hold the agent in front (agent_pause,
+        // agent_resume, #ZQNG): its todo stays in_progress and a message still resumes it.
+        tabs->onPause = [self](const QString &id) { if (self) { self->pauseSubagent(id); self->hint(QStringLiteral("subagents.pause"), relay::ShortcutHints::nextTime(QStringLiteral("Esc"), QStringLiteral("paused; Esc again returns to the main agent"))); } };
+        tabs->onResume = [self](const QString &id) { if (self) self->resumeSubagent(id); };
         const QObject *gone = tabs;
         connect(tabs, &QObject::destroyed, this, [this, gone] {
             if (m_closing || (m_subagentTabs && m_subagentTabs.data() != gone)) return;
@@ -9372,6 +9380,9 @@ private:
                                                 QStringLiteral("open a subagent's tab")));
         };
         m_agentsPanel->onStop = [this](const QString &id) { stopSubagent(id); toast(QStringLiteral("Stopping ") + id); };
+        // ‖ / ▶ on the strip (#ZQNG): hold a running agent, continue a paused one.
+        m_agentsPanel->onPause = [this](const QString &id) { pauseSubagent(id); toast(QStringLiteral("Pausing ") + id); };
+        m_agentsPanel->onResume = [this](const QString &id) { resumeSubagent(id); toast(QStringLiteral("Resuming ") + id); };
         m_agentsPanel->onExit = [this] { focusInput(); };
         m_agentsPanel->onPickModel = [this](const QString &id, const QPoint &at) { pickSubagentModel(id, at); };
         // The task half of the strip (owner, 2026-09-19): Enter opens the task list on that task, S
