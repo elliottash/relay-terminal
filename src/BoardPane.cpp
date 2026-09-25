@@ -2176,14 +2176,17 @@ public:
         m_findCount = new QLabel(m_findStrip);
         m_findCount->setObjectName(QStringLiteral("boardCardFindCount"));
         m_findPrevious = new QToolButton(m_findStrip);
+        m_findPrevious->setObjectName(QStringLiteral("boardFindPrev"));
         m_findPrevious->setText(QStringLiteral("↑"));
         m_findPrevious->setAutoRaise(true);
         m_findPrevious->setToolTip(QStringLiteral("Previous match (Shift+Enter)"));
         m_findNext = new QToolButton(m_findStrip);
+        m_findNext->setObjectName(QStringLiteral("boardFindNext"));
         m_findNext->setText(QStringLiteral("↓"));
         m_findNext->setAutoRaise(true);
         m_findNext->setToolTip(QStringLiteral("Next match (Enter)"));
         m_findClose = new QToolButton(m_findStrip);
+        m_findClose->setObjectName(QStringLiteral("boardFindClose"));
         m_findClose->setText(QStringLiteral("×"));
         m_findClose->setAutoRaise(true);
         m_findClose->setToolTip(QStringLiteral("Close (Esc)"));
