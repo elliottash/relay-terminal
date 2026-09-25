@@ -1,17 +1,18 @@
 ---
 id: R5TC
 type: work
-status: executing
+status: needs-verification
 labels: [feature]
 component: [gui, worker]
 milestone: beta
 workstream: agent
 assignee: agent
+implemented_by: anthropic/claude-opus-5-5 via claude-code
 rank: zzzzzzj
 created: '2026-09-19'
 acceptance: the agent in one pane can list the other panes of this Relay and send one a message; the send returns at once, an idle pane is resumed by it without anyone approving, a busy one reads it at its next step boundary, a reply is a message back, and a turn started by a wake cannot wake anyone else
 source: 'issues/feature_intake.txt, 2026-09-19: "allow relay terminals to talk to each other, and even better to claude and codex agents"'
-links: {plans: [], commits: [0d5b34e1, d33c1d6d], evidence: [], related: [3KB7, GT7X, W5N2, JQ7R, T4BS, C1HH, 2JY7, V7QD, TK9C, YMSR], github: null}
+links: {plans: [], commits: [0d5b34e1, d33c1d6d, 2e6ad863, 16763f52, 63a1f5c5, 902cbc16], evidence: [], related: [3KB7, GT7X, W5N2, JQ7R, T4BS, C1HH, 2JY7, V7QD, TK9C, YMSR, 3BM5], github: null}
 ---
 # One pane's agent sends a message to another, inside one Relay
 
@@ -264,43 +265,43 @@ sender never waits, so none of it has anything to attach to.
 
 ## Tasks
 
-- [ ] `src/PaneAddress.{h,cpp}` (new lib + `CMakeLists.txt` + `tests/paneaddress_test.cpp`): the <!-- t:a2 -->
+- [x] `src/PaneAddress.{h,cpp}` (new lib + `CMakeLists.txt` + `tests/paneaddress_test.cpp`): the <!-- t:a2 -->
       monotonic handle counter, `label()`, `parse()`
-- [ ] `src/PaneDirectory.{h,cpp}` (new lib + tests): the token↔handle directory, `PaneHooks` of <!-- t:b3 -->
+- [x] `src/PaneDirectory.{h,cpp}` (new lib + tests): the token↔handle directory, `PaneHooks` of <!-- t:b3 -->
       `std::function` only (the `RemoteShare::PaneHooks` shape, so no circular include), delivery,
       and the 250 ms coalescing of roster changes
-- [ ] `backend/relay_core/panes.py` (new): `PaneMessaging` on the executor beside `Questions` <!-- t:h9 -->
+- [x] `backend/relay_core/panes.py` (new): `PaneMessaging` on the executor beside `Questions` <!-- t:h9 -->
       (`tools.py:243-253`), so `RestrictedExecutor` excludes it from subagents with no new code.
       `pane_list`, `pane_send`, the roster from the GUI, the refusal table, the per-turn cap
-- [ ] Delivery into a busy pane rides the existing notices path (`subagents.py:317`, drained <!-- t:r6 -->
+- [x] Delivery into a busy pane rides the existing notices path (`subagents.py:317`, drained <!-- t:r6 -->
       `agent.py:1189-1192`); confirm a note that arrives with no turn running survives to the next one
-- [ ] **The wake:** an idle pane starts a turn from the note, with no approval. `ask` carries <!-- t:y1 -->
+- [x] **The wake:** an idle pane starts a turn from the note, with no approval. `ask` carries <!-- t:y1 -->
       `origin: "pane:p1"` and `author` end to end (`startAgentEntry` → `worker.py` →
       `queue.submit`, which has always taken `origin`), so the queue row names the sender
-- [ ] **Depth one on wakes:** a turn started by a wake may send, but its sends never wake. One <!-- t:v2 -->
+- [x] **Depth one on wakes:** a turn started by a wake may send, but its sends never wake. One <!-- t:v2 -->
       boolean on the turn; a test that A→B→C cannot chain
-- [ ] **The wake budget:** at most 20 wakes since that pane's person last touched it, reset where <!-- t:w3 -->
+- [x] **The wake budget:** at most 20 wakes since that pane's person last touched it, reset where <!-- t:w3 -->
       `m_handoffChain` is reset (`src/Pane.h:7827`); past it the message still delivers as a note
       and the result says `no_wake`
-- [ ] `notify_when_idle`: a one-shot idle notice per subscription, with the tool description saying <!-- t:s7 -->
+- [x] `notify_when_idle`: a one-shot idle notice per subscription, with the tool description saying <!-- t:s7 -->
       that polling is not the alternative
-- [ ] `security/unattended_full_tools`, default on: a woken turn gets the full tool set. Off, it <!-- t:x4 -->
+- [x] `security/unattended_full_tools`, default on: a woken turn gets the full tool set. Off, it <!-- t:x4 -->
       falls back to the `entry.noHandoff` predicate. The row itself belongs to #3KB7; this card
       owns the predicate and the test for both positions
-- [ ] `backend/relay_core/tools.py`, `agent.py`, `tool_labels.py`, `worker.py`: construct and gate <!-- t:j0 -->
+- [x] `backend/relay_core/tools.py`, `agent.py`, `tool_labels.py`, `worker.py`: construct and gate <!-- t:j0 -->
       the family, the `_execute` branch, the inbound frame, the wake-turn frame, the label rows,
       and the GUI↔worker messages. **`safe_args` must keep the message text out of the log.**
-- [ ] `src/Pane.h` — one session only, as new members beside their neighbours, never by rewriting <!-- t:f7 -->
+- [x] `src/Pane.h` — one session only, as new members beside their neighbours, never by rewriting <!-- t:f7 -->
       them: mint/release the handle, `printPeerLine()`, the roster message, inbound delivery and
       the wake, and the `noHandoff` reverse gate on `pane_send`
-- [ ] `src/RelayWindow.h` / `src/WindowManagerImpl.h`: the address badge from the 400 ms poll, the <!-- t:g8 -->
+- [x] `src/RelayWindow.h` / `src/WindowManagerImpl.h`: the address badge from the 400 ms poll, the <!-- t:g8 -->
       *Message another pane…* palette submenu, and the kill-switch sweep
-- [ ] The permission-laundering rule in both directions, in the SYSTEM prompt's <!-- t:t8 -->
+- [x] The permission-laundering rule in both directions, in the SYSTEM prompt's <!-- t:t8 -->
       one-sentence-per-line style
-- [ ] Docs: protocol §29 with a "deviations" subsection (why nothing blocks, why a wake is depth <!-- t:p4 -->
+- [x] Docs: protocol §29 with a "deviations" subsection (why nothing blocks, why a wake is depth <!-- t:p4 -->
       one where Claude Code has no cap, why `p<n>`, and that a send means delivered and not read);
       `ARCHITECTURE.md`; the hint in the registry list; `VALIDATION.md` rows
-- [ ] Tests: `tests/test_panes.py` (every refusal code, the per-turn cap, a note surviving an idle <!-- t:q5 -->
+- [x] Tests: `tests/test_panes.py` (every refusal code, the per-turn cap, a note surviving an idle <!-- t:q5 -->
       pane, an idle pane woken with no approval, a woken turn's sends not waking, the budget
       expiring into `no_wake` and resetting on user input, the exact inbound frame, `@path` in a
       message attaching nothing), `tests/logging_test.cpp` asserting no message text reaches either
@@ -355,3 +356,33 @@ sender never waits, so none of it has anything to attach to.
 - A turn started by a wake can still send, but its sends never start a turn (A→B→C does not chain), and after 20 wakes without user input a send reports `no_wake`.
 - No message text appears in either log (`crosspane_send` carries identifiers only), and a `noHandoff` turn (phone, guest) is not offered `pane_send` at all.
 - Checked by `tests/test_panes.py`, the C++ address/directory tests, and a live two-pane run with evidence under `docs/qa_evidence/`.
+
+## Execution Summary
+The session that wrote the GUI half (2cb87486) closed before landing it. It was salvaged from the working tree under #3BM5 (pane 64de364c, 2026-09-24) and finished:
+
+- `0d5b34e1`: `relay-panedir` (addresses and directory). `d33c1d6d`: backend `panes.py` (pane_list, pane_send, depth rule, 8-per-turn cap, notify_when_idle), worker handlers, wake asks, SYSTEM laundering rule.
+- `2e6ad863`: pane side. Each pane mints and retires p<n>; roster changes are coalesced and pushed to every worker; the `pane_message` verdict; the ✦ peer line; idle wakes within a 20-wake budget that resets on user input; the reverse gate (a noHandoff turn is not offered pane_send); the `[n]` header badge; Options "Let panes message each other" (agent/cross_pane) and Security "Unattended turns get the full tool set".
+- `16763f52`: palette "Message another pane…" and "Stop cross-pane messaging" (the kill switch). It shared one rootItems() hunk with #XQ8F's remote-pane entries and landed after #XQ8F's actions (7f778cc7).
+- `63a1f5c5`: protocol §37 (§29 was taken), with a deviations subsection.
+- `902cbc16`: the two plan items the salvaged code lacked: the keyless `pane.send.palette` hint (WARP.md), and a woken turn that finishes unwatched now notifies "Agent finished · after a message from pN (title)" (plan §7).
+
+Design change from the plan, already recorded in the decisions entry: the roster is pushed (`pane_roster`), so `pane_list` makes no round trip.
+
+## Tests
+Run 2026-09-24 on the exact landed trees (land.py build gate):
+- `2e6ad863`: build passed; ctest `panedirectory`, `panes`, `consolemode`, `keymap` and `settings` all passed.
+- `16763f52`: build passed; `panedirectory` and `keymap` passed.
+- `902cbc16`: build passed; `panedirectory` and `consolemode` passed.
+- `python3 -m unittest tests.test_panes`: 17 tests OK (refusal codes, per-turn cap, a note surviving an idle gap, depth rule, frame).
+
+Not done: the Done-means live two-pane run with evidence under `docs/qa_evidence/`. It needs two model-backed agent panes in a Relay rebuilt from main, so it is left for Try it below.
+
+## Try it
+Rebuild first (`scripts/relay-build`) and restart Relay: the running binary predates this work.
+
+1. Open two agent panes. Each header shows a muted `[1]` / `[2]` badge.
+2. In pane 1, ask: "list the other panes, then tell pane 2 to say hello back to you". Pane 1's tool row should read `sent to pane 2 … · woke it`. Pane 2 starts a turn on its own, shows a `✦ pane 1 (…) says · …` line, and replies with pane_send. Pane 1 then gets a ✦ line (or, if it is idle, a new turn).
+3. Pane 2's woken turn may send but never wakes anyone: its sends report `delivered as a note`.
+4. Ctrl+K → "Message another pane…" → pick pane 2. The prompt box is prefilled with `Tell pane p2 (…) that `, and a hint suggests just asking your agent next time.
+5. Ctrl+K → "Stop cross-pane messaging". A running woken turn stops, and further sends are refused as `disabled`. Turn it back on in Options ("Let panes message each other").
+6. Switch to another tab while a woken turn runs. The notification reads "Agent finished · after a message from p1 (…)".
