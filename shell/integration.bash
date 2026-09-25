@@ -353,14 +353,15 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
     }
 
     # The persistent mosh form, for RELAY_SSH_LINK=mosh and for a mosh typed by the
-    # user. mosh joins the words after `--` and the remote login shell parses the
-    # single quotes, so the holder reaches the host the same way it does over ssh.
+    # user. mosh shell-quotes every word it passes after `--` and mosh-server execs
+    # those words verbatim, so the holder must come as bare words of its own - no
+    # quotes added here, or the quotes become part of what sh -c runs on the host.
     # A mosh that dies within twenty seconds (no mosh-server there, UDP blocked)
     # falls back to the persistent ssh form, with a line saying so.
     __relay_mosh_persist_run() {
         __relay_mosh_prepare_extra "$@"
         local started=$SECONDS status=0
-        local -a after=(-- sh -c "'$__relay_holder_text'" relay-holder "$__relay_persist_session")
+        local -a after=(-- sh -c "$__relay_holder_text" relay-holder "$__relay_persist_session")
         [[ -n $__relay_persist_cwd ]] && after+=("$__relay_persist_cwd")
         command mosh "${__relay_mosh_extra[@]}" "$@" "${after[@]}" || status=$?
         # A session that lived a while and then ended is the user's business.
@@ -372,10 +373,21 @@ if [[ ${RELAY_SSH_WRAP:-0} == 1 ]]; then
         return "$status"
     }
 
+    # True when ssh "$@" may become a mosh: mosh takes none of ssh's options, so only a
+    # bare destination (optionally after `--`) can be handed over. An ssh port, a jump
+    # host or an identity has no meaning for mosh, and such a login stays on ssh.
+    __relay_ssh_mosh_ok() {
+        case $# in
+            1) [[ $1 != -* ]] ;;
+            2) [[ $1 == -- && $2 != -* ]] ;;
+            *) return 1 ;;
+        esac
+    }
+
     # `function name` rather than `name()`: an alias called ssh must not expand here.
     function ssh {
         if __relay_ssh_persist_ok "$@" && __relay_holder; then
-            if [[ ${RELAY_SSH_LINK:-ssh} == mosh ]] && type -P mosh > /dev/null; then
+            if [[ ${RELAY_SSH_LINK:-ssh} == mosh ]] && type -P mosh > /dev/null && __relay_ssh_mosh_ok "$@"; then
                 __relay_mosh_persist_run "$@"
             else
                 __relay_ssh_persist_run "$@"

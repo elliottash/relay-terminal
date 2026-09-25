@@ -345,9 +345,29 @@ class WrapperTests(unittest.TestCase):
         self.assertEqual(mosh[:2], ["--ssh=ssh " + " ".join(self.control()),
                                     "--experimental-remote-ip=remote"])
         self.assertEqual(mosh[2:6], ["host", "--", "sh", "-c"])
-        self.assertTrue(mosh[6].startswith("'") and mosh[6].endswith("'"), mosh[6][:20])
-        self.assertNotIn("'", mosh[6][1:-1])
+        # mosh shell-quotes each word for the remote shell itself, so the script must
+        # arrive bare: one word, quotes and all, exactly as the holder file holds it.
+        self.assertIn("; ", mosh[6])
+        self.assertIn(" ", mosh[6])
+        self.assertNotIn("'", mosh[6])
+        self.assertNotIn("!", mosh[6])
+        self.assertNotIn("\\", mosh[6])
         self.assertEqual(mosh[7:], ["relay-holder", "relay-abcdef12"])
+        # A destination after the option terminator is still just a destination.
+        result = self.bash('ssh -- host; echo "STATUS $?"', exit_code=0,
+                           extra_env=self.persist_env(RELAY_SSH_LINK="mosh"))
+        self.assertEqual(list(self.runs(result)), ["mosh"])
+
+    def test_ssh_link_mosh_keeps_options_on_ssh(self):
+        # mosh takes none of ssh's options, and an ssh port must not become mosh's UDP
+        # port: any option at all keeps the login on the persistent ssh form.
+        result = self.bash('ssh -p 2222 host; echo "STATUS $?"', exit_code=0,
+                           extra_env=self.persist_env(RELAY_SSH_LINK="mosh"))
+        self.assertEqual(list(self.runs(result)), ["ssh"])
+        ssh = self.runs(result)["ssh"][0]
+        self.assertEqual(ssh[:6], self.control())
+        self.assertEqual(ssh[6], "-t")
+        self.assertTrue(ssh[-1].endswith(" relay-holder relay-abcdef12"))
 
     def test_ssh_link_mosh_falls_back_to_ssh(self):
         # A mosh that dies at once (no mosh-server there, UDP blocked) is retried over ssh.
@@ -355,6 +375,7 @@ class WrapperTests(unittest.TestCase):
                            extra_env=self.persist_env(RELAY_SSH_LINK="mosh"))
         calls = self.runs(result)
         self.assertEqual(list(calls), ["mosh", "ssh"])
+        self.assertEqual(calls["mosh"][0][-5:-3], ["sh", "-c"])
         self.assertEqual(calls["mosh"][0][-2:], ["relay-holder", "relay-abcdef12"])
         ssh = calls["ssh"][0]
         self.assertEqual(ssh[:6], self.control())
@@ -365,11 +386,14 @@ class WrapperTests(unittest.TestCase):
 
     def test_mosh_persistence_appends_the_holder(self):
         # A mosh the user typed shares the same gate: words after the destination would be
-        # the remote command, so only a bare destination takes the holder.
+        # the remote command, so only a bare destination takes the holder - as bare words,
+        # because mosh quotes them itself and mosh-server execs them verbatim.
         ssh = "--ssh=ssh " + " ".join(self.control())
         args = self.mosh(["host"], extra_env=self.persist_env())
         self.assertEqual(args[:2], [ssh, "--experimental-remote-ip=remote"])
         self.assertEqual(args[2:], ["host", "--", "sh", "-c", args[6], "relay-holder", "relay-abcdef12"])
+        self.assertIn("; ", args[6])
+        self.assertNotIn("'", args[6])
         self.assertEqual(self.mosh(["host", "sleep", "5"], extra_env=self.persist_env()),
                          [ssh, "--experimental-remote-ip=remote", "host", "sleep", "5"])
 
