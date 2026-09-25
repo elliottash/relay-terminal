@@ -1890,6 +1890,30 @@ private slots:
         QVERIFY(closed);
     }
 
+    void searchSitsOnItsOwnRow() {
+        // #1Q5V's owner correction, 2026-09-24: sharing a row with the buttons broke the
+        // page. The field — with its "?" helper — owns the top row; Project, Model, Sort ▾,
+        // More ▾ and the subagent switch sit on the row below it.
+        SessionManager manager;
+        manager.onQuery = [](const QJsonObject &) {};
+        manager.show();
+        auto *search = manager.findChild<QLineEdit *>(QStringLiteral("sessionsSearch"));
+        auto *help = manager.findChild<QToolButton *>(QStringLiteral("sessionsHelp"));
+        auto *project = manager.findChild<QComboBox *>(QStringLiteral("sessionsProject"));
+        auto *model = manager.findChild<QComboBox *>(QStringLiteral("sessionsModel"));
+        auto *sort = manager.findChild<QToolButton *>(QStringLiteral("sessionsSort"));
+        auto *filters = manager.findChild<QToolButton *>(QStringLiteral("sessionsFilters"));
+        auto *threads = manager.findChild<QCheckBox *>(QStringLiteral("sessionsThreads"));
+        QVERIFY(search && help && project && model && sort && filters && threads);
+        const int fieldBottom = search->y() + search->height();
+        QVERIFY2(help->y() + help->height() <= fieldBottom, "the ? helper stays in the field's row");
+        const QWidget *peers[] = {project, model, sort, filters, threads};
+        for (const QWidget *peer : peers)
+            QVERIFY2(peer->y() >= fieldBottom, "every button sits below the search field's row");
+        QVERIFY2(project->y() < model->y() + model->height() && model->y() < project->y() + project->height(),
+                 "the buttons still share one row among themselves");
+    }
+
     // ----- guest sessions, protocol 26.7 ------------------------------------------------------
 
     void guestRowsCarryTheToolsOwnResumeCommand() {

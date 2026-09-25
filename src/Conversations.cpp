@@ -1154,11 +1154,12 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_more->setVisible(false);
     auto *close = new QPushButton(QStringLiteral("Close"));
 
-    // One row (#1Q5V): the search field — which speaks model:, project:, branch: and the
-    // three-state toggles — with the two choosers that browse a list you may not know by
-    // heart (Project, Model), then Sort ▾, More ▾ and the subagent checkbox. The six
-    // combos that used to flank them are menus and typed tokens now, so no filter is cut
-    // short in a pane half the window wide and the row stays one line.
+    // Two rows (#1Q5V, corrected by the owner 2026-09-24: sharing one row broke the page):
+    // the search field — which speaks model:, project:, branch: and the three-state toggles —
+    // has a row to itself with its "?" helper, and the choosers that browse a list you may
+    // not know by heart (Project, Model), Sort ▾, More ▾ and the subagent checkbox sit on
+    // the row below. The six combos that used to flank them are menus and typed tokens now,
+    // so no filter is cut short in a pane half the window wide.
     for (QComboBox *combo : {m_scope, m_kind, m_projectFilter, m_model, m_date, m_sort, m_branch, m_group})
         combo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     // The six that left the row are parented here and kept hidden: the menus drive them, the
@@ -1176,13 +1177,18 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_recentlyClosed = new QPushButton(QStringLiteral("Recently closed"));
     m_recentlyClosed->setObjectName(QStringLiteral("sessionsRecentlyClosed"));
     m_recentlyClosed->setVisible(false);  // The window supplies the closed-items page.
-    searchRow->addWidget(m_recentlyClosed);
     connect(m_recentlyClosed, &QPushButton::clicked, this, [this] { showTab(QStringLiteral("closed")); });
     m_background = new QPushButton(QStringLiteral("Background"));
     m_background->setObjectName(QStringLiteral("sessionsBackground"));
     m_background->setVisible(false);  // The window supplies the background-items page.
-    searchRow->addWidget(m_background);
     connect(m_background, &QPushButton::clicked, this, [this] { showTab(QStringLiteral("background")); });
+    // The buttons row of #1Q5V's correction: what narrows the list sits under the field —
+    // the two choosers, the Sort ▾ and More ▾ menus, the subagent switch — and the two
+    // hidden page buttons live here too, out of the search row for good.
+    auto *filterRow = new QHBoxLayout;
+    filterRow->setSpacing(6);
+    filterRow->addWidget(m_recentlyClosed);
+    filterRow->addWidget(m_background);
 
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(m_status, 1);
@@ -1212,12 +1218,14 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     auto *box = new QVBoxLayout(list);
     box->setContentsMargins(8, 8, 8, 8);
     box->setSpacing(6);
-    searchRow->addWidget(m_projectFilter);
-    searchRow->addWidget(m_model);
-    searchRow->addWidget(m_sortButton);
-    searchRow->addWidget(m_filters);
-    searchRow->addWidget(m_threads);
+    filterRow->addWidget(m_projectFilter);
+    filterRow->addWidget(m_model);
+    filterRow->addWidget(m_sortButton);
+    filterRow->addWidget(m_filters);
+    filterRow->addWidget(m_threads);
+    filterRow->addStretch(1);
     box->addLayout(searchRow);
+    box->addLayout(filterRow);
     box->addWidget(m_chipRow);
     box->addWidget(m_ignored);
     box->addLayout(statusRow);
