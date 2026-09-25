@@ -205,6 +205,16 @@ private slots:
         QVERIFY(isUsableNode(QJsonObject{{"board", QJsonObject{{"workspace", "/repo"}}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"board", QJsonObject{}}}));               // no workspace
         QVERIFY(!isUsableNode(QJsonObject{{"board", QJsonObject{{"tab", "bugs"}}}}));
+        // A card pane (#Y2BA), and the first release's `board.solo` shape, which is a board node.
+        QVERIFY(isUsableNode(QJsonObject{{"card", QJsonObject{{"workspace", "/repo"}, {"id", "K7Q2"}}}}));
+        QVERIFY(!isUsableNode(QJsonObject{{"card", QJsonObject{{"workspace", "/repo"}}}}));   // no card
+        QVERIFY(!isUsableNode(QJsonObject{{"card", QJsonObject{{"id", "K7Q2"}}}}));           // no project
+        QVERIFY(!isUsableNode(QJsonObject{{"card", "K7Q2"}}));
+        QVERIFY(isUsableNode(split(QStringLiteral("h"), QJsonArray{
+            QJsonObject{{"board", QJsonObject{{"workspace", "/repo"}}}},
+            QJsonObject{{"card", QJsonObject{{"workspace", "/repo"}, {"id", "K7Q2"}}}},
+            QJsonObject{{"card", QJsonObject{{"workspace", "/repo"}, {"id", "M3XJ"}}}}})));
+        QVERIFY(isUsableNode(QJsonObject{{"board", QJsonObject{{"workspace", "/repo"}, {"solo", true}, {"card", "K7Q2"}}}}));
         // A subagent pane (#WD83) is its tabs' text; with no tabs there is nothing to bring back.
         QVERIFY(isUsableNode(QJsonObject{{"subagents", QJsonObject{{"owner", "p1"}, {"tabs", QJsonArray{QJsonObject{{"id", "a1"}}}}}}}));
         QVERIFY(!isUsableNode(QJsonObject{{"subagents", QJsonObject{{"owner", "p1"}, {"tabs", QJsonArray{}}}}}));

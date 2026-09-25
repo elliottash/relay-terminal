@@ -7,6 +7,10 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileSystemWatcher>
+#include <QTemporaryDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -82,6 +86,7 @@ private slots:
     void shiftEnterOpensTheRowInItsOwnPane();
     void thePopOutButtonHandsTheCardOverAndGoesBackToTheList();
     void aNewCardWhileOneIsOpenGoesToItsOwnPane();
+    void aPinnedPaneLeavesTheTreeWatchToTheList();
 };
 
 void BoardSoloTests::aPinnedPaneShowsOneCardAndClosesAsAPane()
@@ -231,6 +236,35 @@ void BoardSoloTests::aNewCardWhileOneIsOpenGoesToItsOwnPane()
     QVERIFY(!freshSent.isEmpty());
     QCOMPARE(freshSent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_card_get"));
     QCOMPARE(freshSent.last().value(QStringLiteral("card")).toString(), QStringLiteral("P5RD"));
+}
+
+void BoardSoloTests::aPinnedPaneLeavesTheTreeWatchToTheList()
+{
+    // Several card panes in a tab must not each watch the whole board tree: the list Board does,
+    // and the tab's worker tells every view what changed. A card pane keeps the folder itself.
+    QTemporaryDir project;
+    QVERIFY(project.isValid());
+    const QString root = project.path() + QStringLiteral("/board");
+    QVERIFY(QDir().mkpath(root + QStringLiteral("/features/done")));
+    QVERIFY(QDir().mkpath(root + QStringLiteral("/bugs")));
+    QFile yaml(root + QStringLiteral("/board.yaml"));
+    QVERIFY(yaml.open(QIODevice::WriteOnly));
+    yaml.write("columns: [inbox]\n");
+    yaml.close();
+
+    relay::BoardView list(project.path());
+    auto *listWatcher = list.findChild<QFileSystemWatcher *>();
+    QVERIFY(listWatcher);
+    QVERIFY(listWatcher->directories().size() >= 4);   // the folder and its three subfolders
+
+    relay::BoardView card(project.path());
+    card.onSend = [](const QJsonObject &) {};
+    card.onClosePane = [] {};
+    card.pinSolo(QStringLiteral("K7Q2"));
+    auto *watcher = card.findChild<QFileSystemWatcher *>();
+    QVERIFY(watcher);
+    QCOMPARE(watcher->directories().size(), 1);
+    QVERIFY(QFileInfo(watcher->directories().first()).fileName() == QStringLiteral("board"));
 }
 
 QTEST_MAIN(BoardSoloTests)

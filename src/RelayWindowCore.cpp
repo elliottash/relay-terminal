@@ -1192,6 +1192,37 @@ QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
             if (sizes.size() == splitter->count()) splitter->setSizes(sizes);
             return splitter;
         }
+        // A card pane (#Y2BA): `{"card": {workspace, id}}`, and for one release the
+        // `{"board": {solo: true, card}}` the first of them were saved as. Pinned at once, so its
+        // list never shows; the card itself opens once the tab's worker has sent the rows.
+        {
+            QJsonObject card = node.value(QStringLiteral("card")).toObject();
+            if (const QJsonObject board = node.value(QStringLiteral("board")).toObject();
+                card.isEmpty() && board.value(QStringLiteral("solo")).toBool())
+                card = {{"workspace", board.value(QStringLiteral("workspace"))},
+                        {"id", board.value(QStringLiteral("card"))}};
+            const QString workspace = card.value(QStringLiteral("workspace")).toString();
+            const QString id = card.value(QStringLiteral("id")).toString();
+            if (!workspace.isEmpty() && !id.isEmpty()) {
+                if (relay::projects::boardDirOf(workspace).isEmpty()) {
+                    const QString fallback = relay::windowstate::resolveDirectory(
+                        workspace, m_manager->workspace(), QDir::homePath());
+                    return createPane({{"cwd", fallback}, {"workspace", fallback}});
+                }
+                ToolPane *tool = createCardPane(workspace);
+                tool->board()->pinSolo(id);
+                QPointer<ToolPane> guard(tool);
+                QTimer::singleShot(0, tool, [guard, workspace, id] {
+                    auto *w = windowOf(guard);
+                    if (!w) return;
+                    QWidget *page = w->pageOf(guard);
+                    if (page && w->tabProject(page).isEmpty())
+                        w->attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonRestored));
+                    w->waitForBoardCard(guard, id, 0);
+                });
+                return tool;
+            }
+        }
         if (node.contains(QStringLiteral("board"))) {
             const QJsonObject board = node.value(QStringLiteral("board")).toObject();
             const QString workspace = board.value(QStringLiteral("workspace")).toString();
@@ -1210,16 +1241,6 @@ QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
                 if (relay::BoardView *board_view = tool->board()) {
                     board_view->setOpenSignals(board.value(QStringLiteral("signals")).toArray());
                     board_view->restoreNavigation(board.value(QStringLiteral("navigation")).toObject());
-                }
-                // A solo card pane (#Y2BA) comes back on its card. Pinned now, so its list never
-                // shows; the card itself opens once the tab's worker has sent the rows.
-                const QString soloCard = board.value(QStringLiteral("card")).toString();
-                if (board.value(QStringLiteral("solo")).toBool() && !soloCard.isEmpty() && tool->board()) {
-                    tool->board()->pinSolo(soloCard);
-                    QPointer<ToolPane> soloGuard(tool);
-                    QTimer::singleShot(0, tool, [soloGuard, soloCard] {
-                        if (auto *w = windowOf(soloGuard)) w->waitForBoardCard(soloGuard, soloCard, 0);
-                    });
                 }
                 // A restored Switchboard attaches its tab, unless the tab already has a project —
                 // the saved `project` on the tab wins, and a tab holds one. Queued, because

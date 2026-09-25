@@ -6799,7 +6799,7 @@ void BoardView::watchIssues()
     }
     QStringList wanted{root};
     QDirIterator it(root, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (it.hasNext() && wanted.size() < kMaxWatched)
+    while (!m_pinned && it.hasNext() && wanted.size() < kMaxWatched)
         wanted << it.next();
     const QStringList known = m_watcher->directories();
     QStringList fresh;
@@ -6827,6 +6827,9 @@ void BoardView::watchCardFiles()
 {
     if (!m_watcher || m_root.isEmpty())
         return;
+    // A card pane (#Y2BA) watches its own card and nothing else: the tab's list Board watches the
+    // tree, and the tab's worker sends every view of the tab what changed.
+    const bool pinnedOnly = m_pinned;
     const QString threads = m_root + QStringLiteral("/threads/");
     const QString privateThreads = m_root + QStringLiteral("/.private/threads/");
     QStringList wanted;
@@ -6843,7 +6846,7 @@ void BoardView::watchCardFiles()
     // Then whatever is being worked on, while the budget lasts. Ordered by id so the set is
     // stable between calls and the watcher is not churned for nothing.
     QStringList executing;
-    for (const QString &id : m_model.allIds())
+    for (const QString &id : pinnedOnly ? QStringList() : m_model.allIds())
         if (const board::Card *card = m_model.card(id);
             card && card->status == QStringLiteral("in-progress"))
             executing << id;
@@ -9229,6 +9232,14 @@ void BoardView::pinSolo(const QString &id)
     m_pinnedCard = id;
     if (onTitleChanged)
         onTitleChanged(title());
+    // The tree watch is the list's (watchIssues): a card pane keeps the board folder itself, for a
+    // card file that is replaced, and its own card's files (watchCardFiles).
+    if (m_watcher) {
+        QStringList drop = m_watcher->directories();
+        drop.removeAll(m_root.isEmpty() ? projects::boardDirOf(m_workspace) : m_root);
+        if (!drop.isEmpty())
+            m_watcher->removePaths(drop);
+    }
     m_back->setText(QStringLiteral("×  Close pane (Esc)"));
     m_back->setToolTip(QStringLiteral("Close this card's pane (Esc)"));
     closeQuickAdd();

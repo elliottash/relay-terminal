@@ -403,7 +403,9 @@ private:
 // as terminal panes and is saved and restored as {"explorer": {"path"}} or {"preview": {"path"}}.
 class ToolPane final : public QWidget {
 public:
-    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models, Review };
+    // `Card` (#Y2BA) is a Board view pinned to one card (BoardView::pinSolo): several of them make
+    // several cards open at once in one tab. It is still `board()`, so the board plumbing reaches it.
+    enum class Kind { Explorer, Preview, Plan, Subagent, Turn, Board, Settings, Info, Sessions, Diff, Sharing, Internals, TestSuites, Profile, Models, Review, Card };
 
     ToolPane(Kind kind, const QString &path, bool planActions = true) : m_kind(kind) {
         setObjectName(QStringLiteral("pane"));
@@ -436,7 +438,8 @@ public:
 
     // The Switchboard: cards, threads and the card detail view (protocol 17). Saved and restored
     // by workspace and tab, not by path.
-    ToolPane(relay::BoardView *view, const QString &cwd) : m_kind(Kind::Board), m_board(view), m_subagentCwd(cwd) {
+    ToolPane(relay::BoardView *view, const QString &cwd, Kind kind = Kind::Board)
+        : m_kind(kind), m_board(view), m_subagentCwd(cwd) {
         setObjectName(QStringLiteral("pane"));
         setAttribute(Qt::WA_StyledBackground);
         auto *layout = new QVBoxLayout(this); layout->setContentsMargins(1, 1, 1, 1);
@@ -516,12 +519,10 @@ public:
         // which are unticked in the section checkboxes.
         // `self_closed` is the sections whose "N closed by the agent" row is open (#93WR), beside
         // the folded set and in the same shape: default folded, so an empty array is the default.
-        // A solo card pane (#Y2BA) adds the card it is on and `solo: true`; restore re-pins it.
-        if (m_board && m_board->pinned()) {
-            QJsonObject board{{"workspace", m_board->workspace()}, {"solo", true},
-                              {"card", m_board->pinnedCard()}};
-            return {{"board", board}};
-        }
+        // A card pane (#Y2BA) is the project and the card it is on; restore pins it again. The
+        // first release of these wrote `{"board": {solo, card}}`, which the restore still reads.
+        if (m_board && m_board->pinned())
+            return {{"card", QJsonObject{{"workspace", m_board->workspace()}, {"id", m_board->pinnedCard()}}}};
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()},
@@ -609,6 +610,7 @@ public:
     QString defaultPaneType() const {
         switch (m_kind) {
         case Kind::Board: return QStringLiteral("board");
+        case Kind::Card: return QStringLiteral("card");   // #Y2BA
         case Kind::Sharing: return QStringLiteral("sharing");
         case Kind::Settings:
             return m_settingsView && m_settingsView->mode() == relay::SettingsPane::Mode::Actions ? QStringLiteral("actions") : QStringLiteral("options");

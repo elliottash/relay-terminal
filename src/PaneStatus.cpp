@@ -273,6 +273,8 @@ const QList<Kind> &kinds() {
         // the violet and the turn pane's bubble.
         {QStringLiteral("internals"), QStringLiteral("Activity"), QStringLiteral("agents"), Glyph::Turn},
         {QStringLiteral("board"), QStringLiteral("Board"), QStringLiteral("tools"), Glyph::Switchboard},
+        // One card in a pane of its own (#Y2BA): the Board's jacks and hue, its own label.
+        {QStringLiteral("card"), QStringLiteral("Card"), QStringLiteral("tools"), Glyph::Switchboard},
         // The Test suites pane (card #7BM4): the project's tests and their history, opened beside
         // the Board and answered by the same worker. A tool surface, like the board it
         // hangs off; no glyph of its own yet, so the generic tool mark.

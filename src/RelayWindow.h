@@ -4821,6 +4821,11 @@ public:
         // or a card that has been removed). Say so rather than leave the click looking ignored.
         if (attempt >= 24) {
             statusBar()->showMessage(QStringLiteral("No card #%1 on this board.").arg(id), 9000);
+            // A card pane (#Y2BA) whose card is not among rows that did arrive has nothing to
+            // show: a card deleted while the window was closed. Rows that never came leave it be.
+            if (tool && tool->board() && tool->board()->pinned() && tool->board()->model().total() > 0
+                && !tool->board()->model().card(id))
+                closeToolPane(tool);
             return;
         }
         QPointer<ToolPane> guard(tool);
@@ -4862,7 +4867,7 @@ public:
             notice(QStringLiteral("Open a terminal in the directory whose Board you want."));
             return;
         }
-        ToolPane *tool = createBoardPane(workspace);
+        ToolPane *tool = createCardPane(workspace);
         if (!tool) return;
         if (anchor) dockBeside(anchor, tool);
         else if (page->layout()) page->layout()->addWidget(tool);
@@ -5421,11 +5426,17 @@ public:
             if (m_boardWorkers.value(tab)) startBoardWorker(pageOfTabId(tab));
     }
 
+    // A card pane (#Y2BA): a Board view that pinSolo will pin to one card, in a Kind::Card pane.
+    ToolPane *createCardPane(const QString &workspace) {
+        return createBoardPane(workspace, {}, {}, QString(), {}, {}, QString(), ToolPane::Kind::Card);
+    }
+
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
                               const QJsonArray &hidden = {}, const QString &sort = QString(),
                               const QJsonArray &labels = {},
                               const QJsonArray &selfClosed = {},
-                              const QString &grouping = QString()) {
+                              const QString &grouping = QString(),
+                              ToolPane::Kind kind = ToolPane::Kind::Board) {
         auto *view = new relay::BoardView(workspace);
         if (!collapsed.isEmpty()) view->setCollapsedSections(collapsed);
         if (!hidden.isEmpty()) view->setHiddenSections(hidden);
@@ -5437,7 +5448,7 @@ public:
         // Sections or one flat list (#ESDF); empty — a new pane, or a node saved before the
         // choice existed — is the flat list the owner asked for, newest-updated first.
         view->restoreGrouping(grouping);
-        auto *tool = new ToolPane(view, workspace);
+        auto *tool = new ToolPane(view, workspace, kind);
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
         QPointer<ToolPane> guard(tool);

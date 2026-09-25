@@ -171,6 +171,14 @@ bool isUsableNode(const QJsonObject &node, int depth) {
         return node.value(QStringLiteral("board")).isObject()
                && !board.value(QStringLiteral("workspace")).toString().isEmpty();
     }
+    // A card pane (#Y2BA) is a project and one card id; a card that has gone since is the
+    // restore's problem (it says so and closes the pane), not a reason to lose the split.
+    if (node.contains(QStringLiteral("card"))) {
+        const QJsonObject card = node.value(QStringLiteral("card")).toObject();
+        return node.value(QStringLiteral("card")).isObject()
+               && !card.value(QStringLiteral("workspace")).toString().isEmpty()
+               && !card.value(QStringLiteral("id")).toString().isEmpty();
+    }
     // An Options or Actions pane (card #XAME) restores with whatever the catalog holds then; a
     // saved tab or row id that no longer exists is simply not revealed.
     if (node.contains(QStringLiteral("settings"))) return node.value(QStringLiteral("settings")).isObject();
