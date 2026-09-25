@@ -16,3 +16,7 @@ Wrote `## Done means`, `## Plan` and the `verify` block. The strip is computed i
 <!-- relay:entry 20260925T204500Z-p2 author=claude-code kind=progress model=claude-opus-5-5 -->
 ### Claude Code (subagent of pane c522363d) · 2026-09-25 20:45
 The Live strip is implemented and tested (`BoardPaneTests::theLiveStripListsThisProjectsPanesAndTheirCards`; the `boardpane` suite is 20/20 on the exact tree being landed, and `relay` builds there). Cleared `blocked_by` because #9FX8's tab surface landed in b48afea2. Moved to needs-verification. Evidence is in docs/qa_evidence/2026-09-25-tbrh-live-strip/.
+
+<!-- relay:entry 20260925T205500Z-p3 author=claude-code kind=evidence model=claude-opus-5-5 -->
+### Claude Code (subagent of pane c522363d) · 2026-09-25 20:55
+Landed in 579c7d5c, and `links.commits` is set. `land.py` built and gated the exact tree (`relay`), with only #TBRH's hunks: none of the other sessions' uncommitted edits in BoardPane.cpp/.h, RelayWindow.h or boardpane_test.cpp went in.
