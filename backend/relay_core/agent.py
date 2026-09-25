@@ -725,7 +725,8 @@ def scratch_sweep_note(entries) -> str | None:
             f"{listed}{more}\n"
             "Relay owns agent scratch (#DVV2): ledger each one (a directory you made: "
             "scratch_dir, or relay-scratch adopt), move it into the project, or delete it. "
-            "Nothing is deleted for you.")
+            "An application's own state rather than scratch (a tool's home or install dir) is "
+            "recorded once with relay-scratch own <path>. Nothing is deleted for you.")
 
 
 
@@ -2440,6 +2441,18 @@ class Agent:
         context and reports turn-aggregate usage rather than one request's prompt (#CP3M)."""
         return self._injected_provider and not getattr(self.provider, "serves_side_calls", True)
 
+    def _own_home_paths(self) -> list[str]:
+        """The home-level state of the guest harness serving this pane (card #WZ3K), skipped by
+        the post-turn scratch sweep: the harness rewrites it every turn, and it is an
+        application's own files, not agent scratch. Imported lazily beside `_guest_label` —
+        the guest stack is heavy, and only a pane a guest serves ever asks. A native agent
+        that runs `claude` itself is still asked about what it created; `relay-scratch own`
+        is the answer there."""
+        if not self._guest_harness():
+            return []
+        from . import guest_harness_provider
+        return guest_harness_provider.own_home_paths(self.config)
+
     def _clear_stale_tool_results(self, turn_id) -> None:
         """Card #0C0V: after a tool group, clear the results older than the last few groups when
         they add up to enough to be worth one cache rebuild (context.clear_stale_tool_results).
@@ -2780,7 +2793,8 @@ class Agent:
                     # second pass the turn closes. The sweep asks; it never deletes anything.
                     if not ctx.get("swept"):
                         try:
-                            unledgered = scratch.unledgered_created_since(turn_started)
+                            unledgered = scratch.unledgered_created_since(
+                                turn_started, skip=self._own_home_paths())
                         except Exception as exc:
                             logs.event(_log, "scratch_sweep_failed", level_name="warning",
                                        session=self.session_id, turn=turn_id,

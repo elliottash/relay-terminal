@@ -271,6 +271,61 @@ class ReportTests(Sandbox):
         self.assertNotIn(str(old_tmp), found)       # older than the turn
         self.assertNotIn(str(tmp / "ledgered-build" / "child"), found)  # top level only
 
+    def test_unledgered_created_since_honours_skip(self):
+        # Card #WZ3K: the guest harness's own home files leave the sweep through `skip`,
+        # matched the way a covered row is — by being the entry itself or a parent of it.
+        tmp = self.base / "tmp"
+        home = self.base / "home"
+        tmp.mkdir()
+        (home / ".claude").mkdir(parents=True)
+        since = time.time() - 5
+        harness_dir = self.write(home / ".claude" / "history.jsonl", 64).parent
+        harness_file = self.write(home / ".claude.json", 64)
+        guest_tmp = self.write(tmp / "guest-home" / "child.bin", 64).parent
+        sibling = self.write(home / "relay-other-tool", 64)
+        found = scratch.unledgered_created_since(
+            since, ledger=self.ledger(), home=home, tmp=tmp,
+            skip=[str(harness_dir), str(harness_file), str(guest_tmp)])
+        self.assertNotIn(str(harness_dir), found)    # a directory, by equality
+        self.assertNotIn(str(harness_file), found)   # a top-level file
+        self.assertNotIn(str(guest_tmp), found)      # an entry of the temp dir
+        self.assertIn(str(sibling), found)           # an unlisted sibling is still named
+        found = scratch.unledgered_created_since(
+            since, ledger=self.ledger(), home=home, tmp=tmp, skip=[str(home)])
+        self.assertEqual([f for f in found if f.startswith(str(home))], [])  # a parent skips all
+
+
+class OwnPathTests(Sandbox):
+    """Card #WZ3K: `own_path` is the supported way to say an existing path is an
+    application's own state — the answer the sweep's note points at when what it named
+    is a harness's home files rather than agent scratch."""
+
+    def test_own_path_ledgers_existing_path_as_live_install_row(self):
+        target = self.base / "home" / ".some-harness"
+        target.mkdir(parents=True)
+        self.write(target / "state.json", 64)
+        row = scratch.own_path(target, "the harness's own state", ledger=self.ledger())
+        self.assertEqual(row.cls, "install")
+        self.assertEqual(row.lifetime, "user")
+        self.assertEqual(row.state, "live")
+        self.assertEqual(row.path, str(target))
+        self.assertEqual(row.created_by["source"], "own")
+        self.assertTrue(row.size >= 64)
+        self.assertTrue(target.is_dir())              # nothing was created or moved
+        again = scratch.own_path(target, "a second call", ledger=self.ledger())
+        self.assertEqual(again.id, row.id)            # idempotent: the row comes back unchanged
+        rows = [r for r in self.ledger().rows() if r.path == str(target)]
+        self.assertEqual(len(rows), 1)
+        found = scratch.unledgered_created_since(
+            time.time() - 60, ledger=self.ledger(), home=self.base / "home",
+            tmp=self.base / "tmp")
+        self.assertNotIn(str(target), found)          # and the sweep honours the row
+
+    def test_own_path_refuses_a_path_that_does_not_exist(self):
+        with self.assertRaises(ValueError):
+            scratch.own_path(self.base / "home" / "never-there", "x", ledger=self.ledger())
+        self.assertFalse(self.ledger_file.exists())   # refused before anything was written
+
 
 class ToolDeclarationTests(Sandbox):
     def test_tools_declared_and_prepared(self):
@@ -376,6 +431,7 @@ class SweepTests(Sandbox):
         self.assertIn("/home/u/agent-made", note)
         self.assertIn("scratch_dir", note)
         self.assertIn("relay-scratch adopt", note)
+        self.assertIn("relay-scratch own", note)       # card #WZ3K
         self.assertIn("Nothing is deleted", note)
         self.assertIsNone(agent.scratch_sweep_note([]))
 

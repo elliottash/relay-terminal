@@ -700,13 +700,41 @@ def end_session(session: str, ledger: ScratchLedger | None = None) -> list[Row]:
     return transitions
 
 
+def own_path(path: str | Path, purpose: str = "", *, ledger: ScratchLedger | None = None) -> Row:
+    """Record an *existing* path as an application's own state — install-class, lifetime
+    user, live — without creating or moving anything (card #WZ3K). This is the supported
+    answer when the sweep names something that is not agent scratch at all: a guest
+    harness's home files, a tool's own install root. Idempotent: a path a ledger row
+    already covers comes back unchanged, so the hand-appended rows of the #WZ3K era and
+    a repeated `own` both stay one row."""
+    resolved = Path(path).expanduser()
+    if not (resolved.exists() or resolved.is_symlink()):
+        raise ValueError("%s does not exist; `own` records what is already there" % resolved)
+    ledger = ledger if ledger is not None else ScratchLedger()
+    row = ledger.find(str(resolved))
+    if row is not None:
+        return row
+    purpose = " ".join(str(purpose).split())[:200] or "unspecified"
+    size, newest = measure(resolved)
+    return ledger.append(Row(id=ledger.next_id(), path=str(resolved), cls="install",
+                             purpose=purpose,
+                             created_by={"source": "own"},
+                             created_at=_iso(newest) if newest else _now(),
+                             lifetime="user", state="live", size=size, at=_now(),
+                             note="adopted as an application's own state (card #WZ3K)"))
+
+
 def unledgered_created_since(since: float, *, ledger: ScratchLedger | None = None,
-                             home: Path | None = None, tmp: Path | None = None) -> list[str]:
+                             home: Path | None = None, tmp: Path | None = None,
+                             skip: list[str] | tuple[str, ...] = ()) -> list[str]:
     """Top-level entries of the temp dir and $HOME newer than `since`, owned by this user,
     and not covered by any ledger row — the post-turn sweep's list. Top-level only, so the
-    scan stays cheap enough to run on every turn end."""
+    scan stays cheap enough to run on every turn end. `skip` names paths to leave out (the
+    guest harness's own home files, card #WZ3K); each one matches exactly as a covered row
+    does, by being the entry or a parent of it."""
     ledger = ledger if ledger is not None else ScratchLedger()
     covered = [Path(r.path) for r in ledger.records().values()]
+    covered += [Path(p) for p in skip]
     me = os.getuid() if hasattr(os, "getuid") else None
     found: list[str] = []
     bases = {tmp or temp_dir(), system_tmp(), temp_dir(), home or Path.home()}
@@ -815,6 +843,10 @@ def main(argv=None) -> int:
     n.add_argument("--lifetime", default=None,
                    help="task | session | days:N | until-promoted (default by class)")
     n.add_argument("--project", default=None, help="project dir for --class keep")
+    o = sub.add_parser("own", help="record an existing path as an application's own state "
+                                   "(install-class, lifetime user; nothing is created or moved)")
+    o.add_argument("path", help="the existing path to own")
+    o.add_argument("--purpose", default="", help="one line: what it is")
     rel = sub.add_parser("release", help="end a ledgered dir: reclaim, promote or drop")
     rel.add_argument("ref", help="row id or path")
     rel.add_argument("--promote-to", default=None, help="move it into the project first (keep)")
@@ -838,6 +870,14 @@ def main(argv=None) -> int:
             print("relay-scratch new: %s" % exc, file=sys.stderr)
             return 2
         print(row.path)
+        return 0
+    if verb == "own":
+        try:
+            row = own_path(args.path, args.purpose)
+        except ValueError as exc:
+            print("relay-scratch own: %s" % exc, file=sys.stderr)
+            return 2
+        print("%s %s %s" % (row.id, row.state, row.path))
         return 0
     if verb == "release":
         try:

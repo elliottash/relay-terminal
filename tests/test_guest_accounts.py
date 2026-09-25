@@ -269,6 +269,54 @@ class LaunchTests(unittest.TestCase):
         make.assert_not_called()                  # default-login session, account harness: left
 
 
+class OwnHomePathsTests(unittest.TestCase):
+    """Card #WZ3K: the scratch sweep skips the running harness's own home-level files.
+    `own_home_paths` names them for a config: the config dir the account actually runs on,
+    the default home, and Claude Code's ~/.claude.json sidecar."""
+
+    def setUp(self):
+        self.reg = Registry(self)
+
+    def config(self, url):
+        return ProviderConfig(url, "m", "", {}, 1)
+
+    def test_claude_names_its_config_dir_and_the_sidecar_file(self):
+        with mock.patch.dict(os.environ, {"HOME": self.reg.root}):
+            paths = ghp.own_home_paths(self.config("harness://claude"))
+        self.assertIn(os.path.join(self.reg.root, ".claude"), paths)
+        self.assertIn(os.path.join(self.reg.root, ".claude.json"), paths)
+        self.assertNotIn(os.path.join(self.reg.root, ".codex"), paths)
+
+    def test_an_env_override_is_owned_and_the_default_stays_listed(self):
+        override = os.path.join(self.reg.root, ".claude-work")
+        with mock.patch.dict(os.environ, {"HOME": self.reg.root, "CLAUDE_CONFIG_DIR": override}):
+            paths = ghp.own_home_paths(self.config("harness://claude"))
+        self.assertIn(override, paths)                              # the env-var home
+        self.assertIn(os.path.join(self.reg.root, ".claude"), paths)  # the default, still listed
+        self.assertIn(os.path.join(self.reg.root, ".claude.json"), paths)
+
+    def test_an_account_runs_on_its_registered_directory(self):
+        entry = self.reg.add("claude", "work")
+        with mock.patch.dict(os.environ, {"HOME": self.reg.root}):
+            paths = ghp.own_home_paths(self.config("harness://claude/work"))
+        self.assertIn(entry.config_dir, paths)                      # the account's dir
+        self.assertIn(os.path.join(self.reg.root, ".claude"), paths)
+
+    def test_codex_names_its_home_and_no_claude_sidecar(self):
+        with mock.patch.dict(os.environ, {"HOME": self.reg.root}):
+            paths = ghp.own_home_paths(self.config("harness://codex"))
+            self.assertIn(os.path.join(self.reg.root, ".codex"), paths)
+            self.assertNotIn(os.path.join(self.reg.root, ".claude.json"), paths)
+            with mock.patch.dict(os.environ,
+                                 {"CODEX_HOME": os.path.join(self.reg.root, ".codex-work")}):
+                paths = ghp.own_home_paths(self.config("harness://codex"))
+        self.assertIn(os.path.join(self.reg.root, ".codex-work"), paths)
+        self.assertIn(os.path.join(self.reg.root, ".codex"), paths)
+
+    def test_a_config_no_guest_serves_owns_nothing(self):
+        self.assertEqual(ghp.own_home_paths(self.config("https://api.anthropic.com")), [])
+
+
 class RowsAndLimitsTests(unittest.TestCase):
     def setUp(self):
         self.reg = Registry(self)

@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import importlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -145,6 +146,35 @@ def config_account(config) -> str:
     """The account a guest ProviderConfig runs under; "" for the default login."""
     found = _config_key(config)
     return found[1] if found else ""
+
+
+# Top-level home files a harness rewrites every turn whatever its config dir says: Claude Code
+# keeps ~/.claude.json beside CLAUDE_CONFIG_DIR (card #WZ3K).
+_OWN_HOME_FILES = {"claude": (".claude.json",)}
+
+
+def own_home_paths(config) -> list[str]:
+    """The home-level paths the guest harness named by ``config`` owns and rewrites itself every
+    turn (card #WZ3K) — Claude Code's config dir, whichever login it runs on, plus
+    ~/.claude.json; Codex's CODEX_HOME — so the post-turn scratch sweep can skip them: an
+    application's own state is not agent scratch. Pure path arithmetic, per protocol 26.7: the
+    account's directory, the env override and the default home are all listed whether or not
+    they exist (the sweep matches by path), and nothing here is created, moved or written."""
+    guest_id = config_guest_id(config)
+    if guest_id is None:
+        return []
+    paths: list[str] = []
+    # Both candidate locations, unconditionally: the account's dir (which itself falls back to
+    # the CONFIG_ENV var) and the harness's default, so the skip holds on any machine.
+    for directory in (guest_accounts.config_dir(guest_id, config_account(config)),
+                      guest.config_dir(guest_id)):
+        if directory and directory not in paths:
+            paths.append(directory)
+    for name in _OWN_HOME_FILES.get(guest_id, ()):
+        path = os.path.join(os.path.expanduser("~"), name)
+        if path not in paths:
+            paths.append(path)
+    return paths
 
 
 def config_preset(config) -> str | None:
