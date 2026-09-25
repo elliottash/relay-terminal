@@ -83,6 +83,18 @@ unchanged one is never read again.
 
 The index holds message text, so it stays on this machine: same 0700 directory as the sessions,
 never synced, and deleting a conversation deletes its rows.
+
+**Shell text** (card #HEY7, step 4) is the one source that is *not* a conversation and whose text
+the index does not hold. Each pane's text journal (`relay/text/<id>/`, `textjournal.py`) is cut
+into commands (`textjournal.commands`: the prompt line and up to 200 lines of what followed), and
+each command is one row of `shell_fts`, a **contentless** FTS5 table (`content=''`): the index
+keeps the terms and their positions, never the text, so a snippet for a hit is cut from the journal
+itself when the hit is shown. `shell_commands` maps a row to `(journal, command, at, time)` and
+`shell_journals` holds, per journal, the stamp it was read at (segment and meta file names, sizes
+and mtimes), how many commands it had and a digest of all but the last, so an unchanged journal is
+never read and a grown one re-indexes only from its last command on. A journal directory that is
+gone has its rows dropped. Search leaves these rows out unless it is asked for them
+(`include_shell`, or `has:shell` in the query), and they come back as items of `source: "shell"`.
 """
 from __future__ import annotations
 
@@ -97,6 +109,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import textjournal
 from .presets import model_name as _model_name
 
 # v2 (2026-09-18, cards #Y63Z/#R6J0): subagent threads, owner/parent links, models and usage totals.
@@ -242,6 +255,23 @@ CREATE TABLE IF NOT EXISTS session_sidecars(
     session_id TEXT PRIMARY KEY,
     stamp      TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS shell_journals(
+    journal  TEXT PRIMARY KEY,
+    stamp    TEXT NOT NULL DEFAULT '',
+    commands INTEGER NOT NULL DEFAULT 0,
+    head     TEXT NOT NULL DEFAULT '',
+    cwd      TEXT NOT NULL DEFAULT '',
+    created  REAL,
+    updated  REAL
+);
+CREATE TABLE IF NOT EXISTS shell_commands(
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    journal TEXT NOT NULL,
+    command INTEGER NOT NULL,
+    at      TEXT NOT NULL DEFAULT '',
+    time    REAL
+);
+CREATE INDEX IF NOT EXISTS shell_commands_by_journal ON shell_commands(journal, command);
 """
 
 KINDS = ("title", "summary", "prompt", "reply", "tool_call", "tool_output", "command",
@@ -358,10 +388,90 @@ GUEST_META_NAME = "guest-meta.json"
 # `key:value` pairs parsed out of the query before anything reaches FTS5. An unknown key is not an
 # error: the whole token stays free text, so a path or a URL typed into the box still searches.
 OPERATOR_KEYS = ("project", "file", "model", "branch", "before", "after", "has", "is", "in")
-OPERATOR_VALUES = {"has": ("tasks", "edits", "summary", "rewound"), "is": ("pinned", "unfinished"),
+OPERATOR_VALUES = {"has": ("tasks", "edits", "summary", "rewound", "shell"), "is": ("pinned", "unfinished"),
                    "in": ("terminal", "agent")}
 # Todo states that still want doing; a conversation with one of them is unfinished.
 OPEN_TODO_STATES = ("pending", "in_progress", "blocked")
+
+
+# ----- shell journals (#HEY7) -------------------------------------------------------------------
+# How often a search starts a pass over the journals in the background, so a journal the pane is
+# still writing becomes searchable without the flag having to be on (turning it on is then instant).
+JOURNAL_REFRESH_EVERY = 30.0
+# Rows fetched per shell search before they are grouped by journal.
+MAX_SHELL_ROWS = 2000
+# In the fallback mode (an SQLite older than 3.43, no `contentless_delete`), a contentless row
+# cannot be deleted without its text, so a row whose command changed is orphaned instead: its
+# `shell_commands` row goes, the join drops it, and its rowid is never reused (AUTOINCREMENT). Once
+# there are more orphans than this and than live rows, the whole table is emptied with
+# `delete-all` and every journal is read again.
+SHELL_ORPHANS_COMPACT = 5000
+# Conversation-only filters: when one of them is in force, no journal can satisfy it.
+_SHELL_BLOCKING_OPERATORS = ("model", "file", "branch", "is", "in")
+
+
+def _create_shell_fts(db) -> bool:
+    """Create `shell_fts` if it is missing. True when rows can be deleted by rowid
+    (`contentless_delete=1`, SQLite 3.43+), False for the orphaning fallback above."""
+    row = db.execute("SELECT sql FROM sqlite_master WHERE name='shell_fts'").fetchone()
+    if row is not None:
+        return "contentless_delete" in (row[0] or "")
+    try:
+        db.execute("CREATE VIRTUAL TABLE shell_fts USING fts5(text, content='', contentless_delete=1,"
+                   " tokenize='unicode61 remove_diacritics 2')")
+        return True
+    except sqlite3.OperationalError:
+        db.execute("CREATE VIRTUAL TABLE shell_fts USING fts5(text, content='',"
+                   " tokenize='unicode61 remove_diacritics 2')")
+        return False
+
+
+def journal_stamp(directory: str | Path) -> str:
+    """What a journal looked like: every segment and meta file's name, size and mtime. Sealing or
+    recompressing a segment changes it too, which costs a read and no re-index (see `head`)."""
+    parts = []
+    try:
+        entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+    except OSError:
+        return ""
+    for entry in entries:
+        if entry.name != "meta.json" and not entry.name.startswith("seg-"):
+            continue
+        try:
+            stat = entry.stat()
+        except OSError:
+            continue
+        parts.append(f"{entry.name}:{stat.st_size}:{stat.st_mtime_ns}")
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest() if parts else ""
+
+
+def command_text(command) -> str:
+    """One journal command as it is indexed and as its snippet is cut: prompt, then output."""
+    return "\n".join([command.prompt, *command.output] if command.prompt else command.output)
+
+
+def commands_digest(commands) -> str:
+    digest = hashlib.sha256()
+    for command in commands:
+        digest.update(command_text(command).encode("utf-8", "replace"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def iso_seconds(value) -> float | None:
+    """Epoch seconds of a journal's `at` stamp (ISO 8601, `Z` allowed); None for anything else."""
+    from datetime import datetime, timezone
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        stamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.timestamp()
 
 
 # ----- paths ---------------------------------------------------------------------------------
@@ -1186,8 +1296,16 @@ class ConversationIndex:
     replaced atomically for the other processes.
     """
 
-    def __init__(self, path: str | Path | None = None, *, rebuild_on_reset: bool = False):
+    def __init__(self, path: str | Path | None = None, *, rebuild_on_reset: bool = False,
+                 journal_root: str | Path | None = None):
         self.path = Path(path) if path else default_index_path()
+        # The pane text journals (#HEY7): `relay/text/` beside the database, which for the default
+        # database is `textjournal.text_root()`. An index opened elsewhere (a test's temp file)
+        # looks beside itself, so it never reads the user's real journals.
+        self.journal_root = Path(journal_root) if journal_root else self.path.parent / "text"
+        self._journal_lock = threading.Lock()
+        self._journals_at = 0.0
+        self.shell_delete = True     # set by _connect: contentless_delete is available
         # Before `_open()`: everything below serialises on it.
         self._lock = threading.RLock()
         self._db: sqlite3.Connection | None = None
@@ -1242,6 +1360,7 @@ class ConversationIndex:
             os.chmod(self.path, 0o600)
         _register_functions(db)
         db.executescript(SCHEMA)
+        self.shell_delete = _create_shell_fts(db)
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
         db.commit()
         try:
@@ -2032,8 +2151,150 @@ class ConversationIndex:
             db.commit()
         if gone:
             self._run(drop)
+        # The pane text journals (#HEY7) are indexed whatever the search flag says, so turning
+        # *Search shell output* on finds what is already there.
+        journals = self.reconcile_journals()
         return {"added": added, "refreshed": refreshed, "removed": len(gone), "backfilled": backfilled,
-                "sidecars": sidecars, "ms": int((time.time() - started) * 1000)}
+                "sidecars": sidecars, "journals": journals["indexed"],
+                "ms": int((time.time() - started) * 1000)}
+
+    # ----- shell journals (#HEY7) --------------------------------------------------------
+    def journal_stamps(self) -> dict[str, str]:
+        return self._run(lambda db: {row["journal"]: row["stamp"] for row in
+                                     db.execute("SELECT journal, stamp FROM shell_journals").fetchall()})
+
+    def reconcile_journals(self, root: str | Path | None = None) -> dict:
+        """Index every journal whose stamp moved and drop the ones whose directory is gone.
+
+        `{indexed, removed, commands, ms}`: `indexed` counts journals read, `commands` the rows
+        written. An unchanged journal costs one directory listing. The reads happen outside the
+        connection's lock; only the writes take it. One pass at a time: a second caller returns at
+        once with nothing done."""
+        started = time.time()
+        if not self._journal_lock.acquire(blocking=False):
+            return {"indexed": 0, "removed": 0, "commands": 0, "busy": True, "ms": 0}
+        try:
+            self._journals_at = time.monotonic()
+            directory = Path(root) if root else self.journal_root
+            self._compact_shell()
+            stored = self.journal_stamps()
+            seen: set[str] = set()
+            indexed = written = 0
+            try:
+                listing = [entry for entry in os.scandir(directory)
+                           if entry.is_dir() and textjournal.is_journal_id(entry.name)]
+            except OSError:
+                listing = []
+            for entry in listing:
+                seen.add(entry.name)
+                stamp = journal_stamp(entry.path)
+                if stamp and stamp == stored.get(entry.name):
+                    continue
+                written += self._index_journal(entry.name, Path(entry.path), stamp)
+                indexed += 1
+            gone = [journal for journal in stored if journal not in seen]
+            if gone:
+                self._run(lambda db: (self._drop_journals(db, gone), db.commit()))
+            return {"indexed": indexed, "removed": len(gone), "commands": written,
+                    "ms": int((time.time() - started) * 1000)}
+        finally:
+            self._journal_lock.release()
+
+    def _index_journal(self, journal: str, directory: Path, stamp: str) -> int:
+        """(Re-)index one journal's commands. A journal only grows, so when every command before
+        the last one indexed is unchanged (`head`), only the last one and the new ones are
+        written; otherwise (a rewritten or a different journal) all of it is. Rows written."""
+        commands = textjournal.commands(directory)
+        info = textjournal.meta(directory)
+        cwd = str(info.get("cwd") or "")
+        created, updated = iso_seconds(info.get("created")), iso_seconds(info.get("updated"))
+
+        def work(db):
+            row = db.execute("SELECT commands, head FROM shell_journals WHERE journal=?",
+                             (journal,)).fetchone()
+            keep = 0
+            if row is not None and row["commands"] and len(commands) >= row["commands"]:
+                candidate = row["commands"] - 1
+                if commands_digest(commands[:candidate]) == row["head"]:
+                    keep = candidate
+            self._drop_commands(db, journal, keep)
+            written = 0
+            for command in commands[keep:]:
+                text = command_text(command)
+                cursor = db.execute("INSERT INTO shell_commands(journal, command, at, time) VALUES(?,?,?,?)",
+                                    (journal, command.index, command.at, iso_seconds(command.at) or updated))
+                if text.strip():
+                    db.execute("INSERT INTO shell_fts(rowid, text) VALUES(?, ?)", (cursor.lastrowid, text))
+                written += 1
+            db.execute("INSERT OR REPLACE INTO shell_journals(journal, stamp, commands, head, cwd, created,"
+                       " updated) VALUES(?,?,?,?,?,?,?)",
+                       (journal, stamp, len(commands), commands_digest(commands[:max(0, len(commands) - 1)]),
+                        cwd, created, updated))
+            db.commit()
+            return written
+        return self._run(work)
+
+    def _drop_commands(self, db, journal: str, from_command: int = 0) -> None:
+        """Remove a journal's rows from `from_command` on. With `contentless_delete` the FTS rows
+        go by rowid; without it they are orphaned (see SHELL_ORPHANS_COMPACT)."""
+        if self.shell_delete:
+            db.execute("DELETE FROM shell_fts WHERE rowid IN (SELECT id FROM shell_commands"
+                       " WHERE journal=? AND command>=?)", (journal, from_command))
+        else:
+            orphaned = db.execute("SELECT count(*) FROM shell_commands WHERE journal=? AND command>=?",
+                                  (journal, from_command)).fetchone()[0]
+            if orphaned:
+                db.execute("INSERT INTO meta(key, value) VALUES('shell_orphans', ?) ON CONFLICT(key)"
+                           " DO UPDATE SET value = CAST(value AS INTEGER) + excluded.value", (orphaned,))
+        db.execute("DELETE FROM shell_commands WHERE journal=? AND command>=?", (journal, from_command))
+
+    def _drop_journals(self, db, journals) -> None:
+        for journal in journals:
+            self._drop_commands(db, journal, 0)
+            db.execute("DELETE FROM shell_journals WHERE journal=?", (journal,))
+
+    def _compact_shell(self) -> None:
+        """The fallback mode's clean-up: empty the table and forget every stamp once orphans
+        outnumber live rows, so this pass reads every journal again."""
+        if self.shell_delete:
+            return
+
+        def work(db):
+            row = db.execute("SELECT value FROM meta WHERE key='shell_orphans'").fetchone()
+            orphans = int(row[0]) if row else 0
+            live = db.execute("SELECT count(*) FROM shell_commands").fetchone()[0]
+            if orphans <= SHELL_ORPHANS_COMPACT or orphans <= live:
+                return
+            db.execute("INSERT INTO shell_fts(shell_fts) VALUES('delete-all')")
+            db.execute("DELETE FROM shell_commands")
+            db.execute("DELETE FROM shell_journals")
+            db.execute("DELETE FROM meta WHERE key='shell_orphans'")
+            db.commit()
+        self._run(work)
+
+    def _refresh_journals(self, wait: bool) -> None:
+        """Keep the journals indexed between reconciles: at most every JOURNAL_REFRESH_EVERY
+        seconds, on a background thread, or right here when the search is about to read them."""
+        if not self.journal_root.is_dir():
+            return
+        # A search that reads them catches up at most every two seconds, so typing a query does
+        # not list every journal per keystroke.
+        if time.monotonic() - self._journals_at < (2.0 if wait else JOURNAL_REFRESH_EVERY):
+            return
+        if wait:
+            try:
+                self.reconcile_journals()
+            except (OSError, sqlite3.Error):
+                pass
+            return
+        self._journals_at = time.monotonic()
+
+        def run():
+            try:
+                self.reconcile_journals()
+            except (OSError, sqlite3.Error, AttributeError):
+                pass     # the index was closed under it
+        threading.Thread(target=run, name="conv-index-journals", daemon=True).start()
 
     def rebuild(self, root: str | Path | None = None) -> dict:
         """Drop every agent conversation and rebuild it from the session JSON files.
@@ -2354,6 +2615,8 @@ class ConversationIndex:
                 add("COALESCE(c.updated, 0) >= ?", parse_date(value, now), negated=negated)
             elif key == "before":
                 add("COALESCE(c.updated, 0) < ?", parse_date(value, now), negated=negated)
+            elif key == "has" and value == "shell":
+                continue     # not a condition on conversations: it asks for shell rows (#HEY7)
             elif key == "has":
                 add({"tasks": "c.open_requests > 0", "edits": "c.has_edits = 1",
                      "summary": "c.summary != ''",
@@ -2395,8 +2658,14 @@ class ConversationIndex:
                pinned: bool | None = None, file: str | None = None, branch: str | None = None,
                has_summary: bool | None = None, now: float | None = None,
                project: str | None = None, outside_projects: list[str] | None = None,
-               session_ids: list[str] | None = None, meta_only: bool = False) -> dict:
+               session_ids: list[str] | None = None, meta_only: bool = False,
+               include_shell: bool = False) -> dict:
         """Conversations matching `query`, each with its matching turns.
+
+        With `include_shell` (Options › *Search shell output*, off by default), or `has:shell` in
+        the query, the first page also carries the shell commands from the pane text journals
+        that match the text (#HEY7): one item per journal, `source: "shell"`, after the
+        conversations (see `_search_shell`). `-has:shell` leaves them out even with the flag on.
 
         With `meta_only` (#G2C7) the query text is ignored and the reply is every
         conversation's light listing — no full-text pass, no matches — as one SELECT the
@@ -2574,12 +2843,133 @@ class ConversationIndex:
                                params).fetchone()[0]
             return out, total, more, self._facets(db, clause, params)
         items, total, more, facets = self._run(work)
-        result = {"items": items, "total": total, "query": query, "sort": sort, "offset": offset,
-                  "scope": scope, "parsed": parsed, "facets": facets,
+        shell_items: list[dict] = []
+        shell_total = 0
+        shell_asked = [op for op in operators if op.get("key") == "has" and op.get("value") == "shell"]
+        want_shell = (not meta_only and bool(parts)
+                      and (include_shell or any(not op.get("negated") for op in shell_asked))
+                      and not any(op.get("negated") for op in shell_asked))
+        if want_shell:
+            # A conversation-only filter in force is one no journal can pass.
+            blocked = (model or has_open or file or branch or session_ids is not None
+                       or any(flag is True for flag in (has_edits, unfinished, pinned, has_summary))
+                       or any(not op.get("negated") and (op.get("key") in _SHELL_BLOCKING_OPERATORS
+                                                         or (op.get("key") == "has" and op.get("value") != "shell"))
+                              for op in operators))
+            if not blocked:
+                self._refresh_journals(wait=True)
+                if offset == 0:
+                    shell_items, shell_total = self._search_shell(
+                        parts, terms, excluded, scope=scope, workspace=workspace, since=since, until=until,
+                        project=project, outside_projects=outside_projects or (), operators=operators,
+                        now=now, limit=limit, per_item=per_item)
+                else:
+                    shell_total = -1     # counted on the first page only
+        else:
+            self._refresh_journals(wait=False)
+        result = {"items": items + shell_items, "total": total, "query": query, "sort": sort,
+                  "offset": offset, "scope": scope, "parsed": parsed, "facets": facets,
                   "elapsed_ms": int((time.time() - started) * 1000)}
+        if want_shell:
+            result["shell_total"] = shell_total
         if more:
             result["next_offset"] = offset + len(items)
         return result
+
+    def _search_shell(self, parts, terms, excluded, *, scope, workspace, since, until, project,
+                      outside_projects, operators, now, limit, per_item) -> tuple[list[dict], int]:
+        """The journals whose commands match, newest hit first, at most `limit`, and how many
+        journals matched in all.
+
+        Every word or phrase must be in **one command** (a journal is a whole pane's life, so an
+        AND over all of it would match nearly anything); an excluded word leaves out the journals
+        with any command holding it, the way it leaves out a conversation. `scope: "project"`,
+        `project`, `outside_projects`, `project:`, the dates and `before:`/`after:` apply to the
+        journal's `cwd` and the command's time. The matching line of each command is cut from the
+        journal here — the index has no copy of it."""
+        where, params = ["shell_fts MATCH ?"], [" AND ".join(parts)]
+
+        def under(folder):
+            folder = normalize_workspace(str(folder))
+            return r"(j.cwd = ? OR j.cwd LIKE ? ESCAPE '\')", [folder, under_pattern(folder)]
+
+        if scope == "project":
+            sql, args = under(workspace or "")
+            where.append(sql)
+            params += args
+        if project:
+            sql, args = under(project)
+            where.append(sql)
+            params += args
+        for folder in outside_projects:
+            sql, args = under(folder)
+            where.append("NOT " + sql)
+            params += args
+        if isinstance(since, (int, float)):
+            where.append("COALESCE(s.time, 0) >= ?")
+            params.append(float(since))
+        if isinstance(until, (int, float)):
+            where.append("COALESCE(s.time, 0) <= ?")
+            params.append(float(until))
+        for operator in operators:
+            key, value = operator.get("key"), operator.get("value") or ""
+            sql, args = None, []
+            if key == "project":
+                sql, args = r"lower(j.cwd) LIKE ? ESCAPE '\'", [like_value(value)]
+            elif key == "after":
+                sql, args = "COALESCE(s.time, 0) >= ?", [parse_date(value, now)]
+            elif key == "before":
+                sql, args = "COALESCE(s.time, 0) < ?", [parse_date(value, now)]
+            if sql:
+                where.append(("NOT (" + sql + ")") if operator.get("negated") else sql)
+                params += args
+        for part in excluded:
+            where.append("s.journal NOT IN (SELECT s2.journal FROM shell_fts JOIN shell_commands s2"
+                         " ON s2.id = shell_fts.rowid WHERE shell_fts MATCH ?)")
+            params.append(part)
+        base = (" FROM shell_fts JOIN shell_commands s ON s.id = shell_fts.rowid"
+                " JOIN shell_journals j ON j.journal = s.journal WHERE " + " AND ".join(where))
+
+        def work(db):
+            try:
+                total = db.execute("SELECT count(DISTINCT s.journal)" + base, params).fetchone()[0]
+                groups = db.execute("SELECT s.journal, count(*) AS hits, MAX(COALESCE(s.time, 0)) AS last,"
+                                    " j.cwd, j.created, j.updated, j.commands" + base
+                                    + " GROUP BY s.journal ORDER BY last DESC LIMIT ?",
+                                    [*params, limit]).fetchall()
+                hits = []
+                if groups:
+                    wanted = [row["journal"] for row in groups]
+                    hits = db.execute("SELECT s.journal, s.command, s.at, s.time" + base
+                                      + " AND s.journal IN (%s)" % ",".join("?" * len(wanted))
+                                      + " ORDER BY s.time DESC, s.command DESC LIMIT ?",
+                                      [*params, *wanted, min(MAX_SHELL_ROWS, len(wanted) * per_item * 4)]).fetchall()
+            except sqlite3.OperationalError as exc:
+                raise ValueError(f"Search query is not valid ({exc}).") from exc
+            return total, [dict(row) for row in groups], [dict(row) for row in hits]
+        total, groups, hits = self._run(work)
+        by_journal: dict[str, list[dict]] = {}
+        for hit in hits:
+            chosen = by_journal.setdefault(hit["journal"], [])
+            if len(chosen) < per_item:
+                chosen.append(hit)
+        items = []
+        for group in groups:
+            journal = group["journal"]
+            commands = textjournal.commands(self.journal_root / journal)
+            matches = []
+            for hit in by_journal.get(journal, []):
+                if hit["command"] >= len(commands):
+                    continue     # the journal moved under the index; the next pass catches up
+                command = commands[hit["command"]]
+                line, ranges = match_line(command_text(command), terms)
+                matches.append({"turn": hit["command"], "command": hit["command"], "kind": "shell",
+                                "line": line, "ranges": ranges, "time": hit["time"],
+                                "prompt": _one_line(command.prompt, MAX_PREVIEW)})
+            if not matches:
+                continue
+            items.append(_shell_item(journal, group, matches))
+        return items, total
 
     @staticmethod
     def _overview(db, row) -> dict:
@@ -2727,6 +3117,28 @@ def _item(row) -> dict:
             "has_edits": bool(row["has_edits"]), "branch": row["branch"] or "",
             "unfinished": bool(row["unfinished"]), "mode": row["mode"] or "",
             "snippet": "", "matches": [], "match_count": 0}
+
+
+def _shell_item(journal: str, group: dict, matches: list[dict]) -> dict:
+    """A journal's search hits as a list item (#HEY7): the conversation item's fields, so a list
+    that draws those draws this, plus `journal_id`, `command` (the first match's index), `cwd`
+    and `time`. `session_id` is `shell-<journal>`, which no conversation can have."""
+    cwd = group.get("cwd") or ""
+    workspace = normalize_workspace(cwd) if cwd else ""
+    first = matches[0]
+    return {"session_id": "shell-" + journal, "source": "shell", "journal_id": journal,
+            "command": first["command"], "cwd": cwd, "time": first["time"],
+            "title": first["prompt"] or ("Shell in " + project_name(workspace)),
+            "generated_title": "", "workspace": workspace, "project": project_name(workspace),
+            "raw_cwd": cwd, "model": "", "model_name": "", "preset": "",
+            "created": group.get("created"), "updated": group.get("last") or group.get("updated"),
+            "turns": group.get("commands") or 0, "open_requests": 0, "session_dir": "", "pinned": 0,
+            "owner_session": None, "parent_thread": None, "agent_id": "", "agent_type": "",
+            "spawn_turn": None, "status": "", "models": [], "tokens": 0, "cost": None, "codes": [],
+            "summary": "", "first_prompt": "", "last_prompt": "", "files": [], "files_count": 0,
+            "has_edits": False, "branch": "", "unfinished": False, "mode": "",
+            "snippet": first["line"], "matches": sorted(matches, key=lambda m: m["command"]),
+            "match_count": group.get("hits") or len(matches)}
 
 
 def _json_list(text) -> list:

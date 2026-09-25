@@ -2061,6 +2061,7 @@ FTS5; what is left is the free text. A value may be quoted (`file:"my file.py"`)
 | `has:edits` | the session wrote a file |
 | `has:summary` | it has a summary |
 | `has:rewound` | a rewind of it was kept (v6): the conversation has `rewound` entries |
+| `has:shell` | not a filter: this one query also searches shell output from the pane text journals, as `include_shell` does (14.3, #HEY7). `-has:shell` leaves shell rows out even when `include_shell` is true |
 | `is:pinned` | pinned |
 | `is:unfinished` | `unfinished` (14.1) |
 | `in:terminal`, `in:agent` | that `source` only |
@@ -2090,7 +2091,8 @@ rename re-writes the title entry, so a conversation is findable under its new na
 ### 14.3 `conversations`
 
 `conversations {query?, scope: "project"|"all", workspace?, model?, has_open_tasks?, since?,
-until?, sources?: ["agent"|"terminal"|"subagent"|"claude"|"codex"], include_threads?: bool, sort?:
+until?, sources?: ["agent"|"terminal"|"subagent"|"claude"|"codex"], include_threads?: bool,
+include_shell?: bool, sort?:
 "recent"|"oldest"|"longest"|"shortest"|"requests_desc"|"requests"|"title"|"title_desc"|"model"|"model_desc"|"summary"|"summary_desc"|"relevance",
 offset?, matches_per_item? (1–20, default 5), limit? (1–200, default 50), id?}`
 
@@ -2183,6 +2185,43 @@ five turns per conversation, with the matching line and the character ranges to 
 
 Terminal history appears as its own conversation per workspace, `session_id` `term-<16 hex>` and
 `source: "terminal"`; its `turn` is the command's ordinal. It cannot be resumed.
+
+**Shell output** (card #HEY7). `include_shell?: bool` (default `false`; anything but a boolean is
+an error) is Options › *Search shell output*: the query is run over the pane text journals too
+(`$XDG_DATA_HOME/relay/text/<id>/`, `backend/relay_core/textjournal.py`), cut into shell commands
+— each the prompt line and up to 200 lines of its output. `has:shell` in the query does the same
+for that one query, and `-has:shell` turns it off. The journals are indexed whatever the flag
+says: by every `reconcile()` (the worker's first use of the index), by a background pass at most
+every 30 s behind any search, and, before a search that asks for shell rows, by a catch-up pass at
+most every 2 s. So turning the flag on needs no indexing first. The index holds no copy of that
+text. `shell_fts` is a contentless FTS5 table (terms and positions only), and `shell_commands` /
+`shell_journals` map a row to its journal, command index and time. The snippet is cut from the
+journal when the hit is returned. A journal whose files have not changed is not read again. When a
+journal grows, only its last command and the new ones are re-indexed. A journal directory that
+has gone loses its rows.
+
+Shell rows come only when there is free text (an empty query lists no shell rows), only on the
+first page (`offset: 0`), and only when no conversation-only filter is in force (`model`,
+`has_open_tasks`, `file`, `branch`, `session_ids`, a boolean filter set to `true`, or a
+non-negated `model:`/`file:`/`branch:`/`is:`/`in:`/other `has:` operator). `scope: "project"`,
+`project`, `outside_projects` and `project:` apply to the journal's `cwd`; `since`/`until` and
+`before:`/`after:` apply to the command's time. Every word must be in **one command** (not
+anywhere in the journal). An excluded word leaves out every journal that has it in any command.
+There is one item per journal, newest hit first, at most `limit`, **after** the conversation items
+of that page. The event then carries `shell_total`: the number of matching journals, or `-1` on a
+later page, where they are not counted. A shell item has every field of a conversation item
+(empty or zero where it means nothing), and:
+
+`{session_id: "shell-<journal id>", source: "shell", journal_id, command, cwd, time, title,
+workspace, project, created, updated, turns, snippet, match_count, matches: [{turn, command,
+kind: "shell", line, ranges, time, prompt}]}`
+
+`command` (and each match's `command`, repeated as `turn`) is the 0-based index of the command in
+the journal, as `textjournal.commands()` cuts it. `title` is the first matching command's prompt
+line. `turns` is how many commands the journal holds. `time` is the command's stamp (epoch
+seconds, from the journal's `at` records). `match_count` is how many commands matched.
+`conversation_get` does not open a shell row. A hit opens as a read-only replay of the journal
+(`python3 -m relay_core.textjournal cat <journal id>`).
 
 ### 14.4 `conversation_get`
 
