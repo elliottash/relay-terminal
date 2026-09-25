@@ -689,6 +689,15 @@ class Cli(Fixture):
         self.assertIn("schema_version", err)
         self.assertIn("Fix:", err)
 
+    def test_describe_prints_console_surfaces(self):
+        code, out, err = self.run_cli("describe", "relay.shell")
+        self.assertEqual((0, ""), (code, err))
+        data = json.loads(out)
+        self.assertEqual(2, data["schema_version"])
+        self.assertEqual("osc133", data["console"]["prompt_marks"])
+        self.assertEqual("shell", data["completion"]["kind"])
+        self.assertEqual([], data["commands"])
+
     def test_list_enable_and_select(self):
         write_pkg(self.global_, "sql", runner_manifest(activation={"files": ["*.sql"]}))
         write_pkg(self.project, "proj", runner_manifest(id="acme.proj"))
