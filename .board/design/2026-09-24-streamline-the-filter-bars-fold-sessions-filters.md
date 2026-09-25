@@ -5,11 +5,12 @@ status: needs-verification
 labels: [feature, design, sessions, switchboard, ui]
 assignee: agent
 implemented_by: glm/glm-5.3
+session: ce44ed66-7d52-4aa0-a9ee-d710378e9082
 rank: zzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-24'
-verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'Sessions'' top is one row + chips, title/id/copy on one spanning line, no ID line; Board has no label chips row; suites green.', sign_off: none, effort: medium, stakes: nuisance}
+verify: {artifact: visual, primary: script, also: [ai-visual], human: none, criteria: 'Sessions'' top: the search field on a row of its own with its ?, active-filter chips under it, then a buttons row (Project, Model, Sort ▾, More ▾, subagent switch); title/id/copy on one spanning line, no ID line; Board has no label chips row; suites green.', sign_off: none, effort: medium, stakes: nuisance}
 source: Relay pane, 2026-09-24
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/], related: [MXMG, P7SJ], github: null}
+links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/, docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/], related: [MXMG, P7SJ], github: null}
 ---
 # Streamline the filter bars: fold Sessions' filters into search, drop the Board's label chips row
 
@@ -46,7 +47,7 @@ What is there today (2026-09-24, code reading):
    there is room and wrap only when the pane is narrow.
 
 ## Done means
-- The top of Sessions & Projects is one row: the search field, the **Project** and **Model** combos, a small **Sort ▾** menu (grouping + sort), and the existing **More ▾**. The Scope, Kind, Date, Branch, Group and Sort combos are gone from the row; Branch is typed (`branch:`), Date/scope/kind live in More where they are still reachable, grouping/sort in Sort ▾.
+- The top of Sessions & Projects is two rows (owner's correction, 2026-09-24: sharing one row broke the page): the search field on a row of its own with its `?`, and below it the **Project** and **Model** combos, a small **Sort ▾** menu (grouping + sort) and the existing **More ▾**. The Scope, Kind, Date, Branch, Group and Sort combos are gone from the rows; Branch is typed (`branch:`), Date/scope/kind live in More where they are still reachable, grouping/sort in Sort ▾.
 - Active non-token filters show as removable chips under the field (click the × to clear).
 - The session title line spans the other columns; the session id and a copy button follow on that same line; the separate "ID: xxx" line is gone.
 - The Board's label chips row is gone; the section checkboxes stay; `label:` in the filter field still filters (that behaviour is unchanged).
@@ -62,8 +63,11 @@ Implemented 2026-09-24, all three of the owner's agreements plus the title/id as
 - Tests updated to the new surfaces: `sessionsDropdownsRespondToMouseChoices` drives Project/Model by mouse and the menus by action; `headerClickSortsByThatColumn` drives the `sectionClicked` signal (the header is hidden; wiring unchanged); the branch assertions check the More submenu; `navigationSurvivesReload` writes a `board-top.png` when `RELAY_SHOT_DIR` is set (the conversations suite's own pattern).
 - Known unrelated breakage in the tree: `boardworkspace` and `boardexecute` tests fail on another session's in-flight RelayWindow/`actionButton` refactor — not this change, not touched.
 
+2026-09-24 correction (the owner's words on the thread): the one-row top broke the page. The search field now owns the top row with its `?`, and Project, Model, Sort ▾, More ▾ and the subagent switch sit on a second row below; the two hidden page buttons (Recently closed, Background) moved to that buttons row so nothing can appear beside the field again (`fc6cc067`, evidence `docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/`). `ConversationsTest::searchSitsOnItsOwnRow` pins the geometry: every button below the field's row, the `?` in it, the buttons sharing one row.
+
 ## Tests
 - `ctest -R 'conversations|boardpane|boardmodel|boardfilter|boardsections|closedlist'` — 100% passed, 0 failed (includes the rewritten `sessionsDropdownsRespondToMouseChoices`, `headerClickSortsByThatColumn`, `filtersSendTheirOwnFieldsAndClear`, `chipsFollowTheParsedQueryAndTakeItBack`).
 - `scripts/relay-build --target relay` — green.
 - Evidence shots in `docs/qa_evidence/2026-09-24-1q5v-one-row-and-spanning/` (sessions-list, sessions-tokens, by-date, by-project, board-top + report).
 - Not runnable here: `boardworkspace`, `boardexecute` — another session's in-flight refactor breaks them independently of this change (see Execution Summary).
+- 2026-09-24 correction: `ctest -R conversations` green including the new `searchSitsOnItsOwnRow`; `QT_QPA_PLATFORM=offscreen ./build/relay-conversations-tests searchSitsOnItsOwnRow` PASS; land.py's verify slot built the exact landed tree (`--target relay`). Evidence: `docs/qa_evidence/2026-09-24-1q5v-search-on-its-own-row/` (sessions-first.png + report).
