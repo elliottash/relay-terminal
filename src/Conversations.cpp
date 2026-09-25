@@ -3022,7 +3022,7 @@ FindBar::FindBar(QWidget *parent) : QWidget(parent) {
     connect(m_field, &QLineEdit::textChanged, this, &FindBar::refresh);
     connect(m_next, &QToolButton::clicked, this, [this] { step(false); });
     connect(m_previous, &QToolButton::clicked, this, [this] { step(true); });
-    connect(m_close, &QToolButton::clicked, this, [this] { hide(); if (onClosed) onClosed(); });
+    connect(m_close, &QToolButton::clicked, this, [this] { closeBar(); });
     connect(m_inConversation, &QPushButton::clicked, this,
             [this] { if (onOpenConversation) onOpenConversation(m_field->text()); });
 }
@@ -3044,9 +3044,20 @@ void FindBar::start(const QString &preset) {
 void FindBar::refresh() {
     m_conversationMatches = -1;
     const QString needle = m_field->text();
-    m_terminalMatches = (needle.isEmpty() || !onFind || !m_canSearchTerminal) ? 0 : onFind(needle, false);
+    // An empty needle is not "skip": it is the clear. The engine drops its matches and
+    // repaints, so emptying the field leaves no highlights behind (the view's own inline
+    // bar does the same on textChanged).
+    m_terminalMatches = (!onFind || !m_canSearchTerminal) ? 0 : onFind(needle, false);
     if (!needle.isEmpty() && onCountConversation) onCountConversation(needle);
     updateLabel();
+}
+
+void FindBar::closeBar() {
+    hide();
+    // Clear the engine's search, or its highlights outlive the bar: the pane's find
+    // painted them through onFind, and nothing else ever asks the engine to drop them.
+    if (onFind && m_canSearchTerminal) onFind(QString(), false);
+    if (onClosed) onClosed();
 }
 
 void FindBar::step(bool backwards) {
@@ -3071,7 +3082,7 @@ void FindBar::updateLabel() {
 }
 
 void FindBar::keyPressEvent(QKeyEvent *event) {
-    if (event->key() == Qt::Key_Escape) { hide(); if (onClosed) onClosed(); return; }
+    if (event->key() == Qt::Key_Escape) { closeBar(); return; }
     if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)) {
         step(event->modifiers() & Qt::ShiftModifier);
         return;
@@ -3082,7 +3093,7 @@ void FindBar::keyPressEvent(QKeyEvent *event) {
 bool FindBar::eventFilter(QObject *object, QEvent *event) {
     if (object != m_field || event->type() != QEvent::KeyPress) return QWidget::eventFilter(object, event);
     auto *key = static_cast<QKeyEvent *>(event);
-    if (key->key() == Qt::Key_Escape) { hide(); if (onClosed) onClosed(); return true; }
+    if (key->key() == Qt::Key_Escape) { closeBar(); return true; }
     if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
         step(key->modifiers() & Qt::ShiftModifier);
         return true;

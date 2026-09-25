@@ -475,6 +475,7 @@ protected:
 private:
     void step(bool backwards);
     void refresh();
+    void closeBar();
     void updateLabel();
     bool eventFilter(QObject *object, QEvent *event) override;
 

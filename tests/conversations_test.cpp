@@ -2222,6 +2222,40 @@ private slots:
         QCOMPARE(calls, before);   // the label alone does not re-search
     }
 
+    // Closing the bar (× or Esc) and emptying its field both hand the engine an empty
+    // needle, which is the clear: without it the highlights outlive the find.
+    void findBarClearsTheTerminalSearchWhenClosedOrEmptied() {
+        FindBar bar;
+        QStringList needles;
+        bar.onFind = [&needles](const QString &text, bool) { needles << text; return text.isEmpty() ? 0 : 4; };
+        bar.start(QStringLiteral("needle"));
+        QCOMPARE(needles, QStringList{QStringLiteral("needle")});
+
+        // Emptying the field clears while the bar stays open (the clear button does this).
+        bar.findChild<QLineEdit *>()->clear();
+        const QStringList cleared{QStringLiteral("needle"), QString()};
+        QCOMPARE(needles, cleared);
+        QVERIFY(bar.isVisible());
+
+        // Esc in the field closes and clears; onClosed still fires for the pane's focus.
+        bool closed = false;
+        bar.onClosed = [&closed] { closed = true; };
+        QTest::keyClick(bar.findChild<QLineEdit *>(), Qt::Key_Escape);
+        QVERIFY(closed);
+        QVERIFY(!bar.isVisible());
+        QCOMPARE(needles.back(), QString());
+
+        // The × button takes the same road.
+        needles.clear();
+        bar.start(QStringLiteral("again"));
+        bar.onClosed = nullptr;
+        for (QToolButton *b : bar.findChildren<QToolButton *>())
+            if (b->text() == QStringLiteral("×")) b->click();
+        QVERIFY(!bar.isVisible());
+        const QStringList clearedAgain{QStringLiteral("again"), QString()};
+        QCOMPARE(needles, clearedAgain);
+    }
+
     // ----- the helper agent (card #FEJQ; a console since card #AGNT step 7) -------------------
     //
     // "When you are in options, actions, or sessions, you have a helper agent, same as the
