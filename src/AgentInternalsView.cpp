@@ -5,6 +5,7 @@
 #include "Theme.h"
 
 #include <QColor>
+#include <QDateTime>
 #include <QEvent>
 #include <QFontDatabase>
 #include <QHBoxLayout>
@@ -451,9 +452,9 @@ QString AgentInternalsView::rowText(const ToolCall &call) const {
     // text (" ✗" after the title, finishedRow) and in its ink.
     const QString marker = call.expanded ? QStringLiteral("▾") : QStringLiteral("▸");
     relay::calllines::Row row = call.merged
-        ? relay::calllines::mergedRow(call.run, 0)
-        : call.done ? relay::calllines::finishedRow(call.label, 0)
-                    : relay::calllines::runningRow(call.label, 0, call.liveLines);
+        ? relay::calllines::mergedRow(call.run, 0, call.timestamp)
+        : call.done ? relay::calllines::finishedRow(call.label, 0, call.timestamp)
+                    : relay::calllines::runningRow(call.label, 0, call.liveLines, call.timestamp);
     QString text = row.text();
     if (text.isEmpty()) text = call.label.title;
     return marker + QLatin1Char(' ') + text;
@@ -507,13 +508,18 @@ void AgentInternalsView::toolStarted(const QJsonObject &event) {
     const QString callId = event.value(QStringLiteral("call_id")).toString();
     const QString turnId = event.value(QStringLiteral("turn_id")).toString();
     const toollabel::Label label = toollabel::fromEvent(event);
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     // Inside a run of reads the started row shows nothing of its own: the run's row is already
     // there, and a "reading x.py…" that lives a millisecond only flickers (LineCursor::start).
-    if (m_mergeHead >= 0 && m_merge.active() && label.hasMerge && m_merge.accepts(label)) return;
+    if (m_mergeHead >= 0 && m_merge.active() && label.hasMerge && m_merge.accepts(label)) {
+        m_calls[m_mergeHead].timestamp = timestamp;
+        return;
+    }
     endThinking();
     ToolCall call;
     call.callId = callId;
     call.turnId = turnId;
+    call.timestamp = timestamp;
     call.label = label;
     call.callIds << callId;
     ensureLineStart();
@@ -558,6 +564,7 @@ void AgentInternalsView::toolResult(const QJsonObject &event) {
         if (m_mergeHead >= 0 && m_merge.accepts(label)) {
             m_merge.add(label);
             ToolCall &head = m_calls[m_mergeHead];
+            head.timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
             head.run = m_merge;
             head.merged = true;
             head.done = true;
@@ -577,6 +584,7 @@ void AgentInternalsView::toolResult(const QJsonObject &event) {
     }
     ToolCall &call = m_calls[at];
     call.label = label;
+    call.timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     call.done = true;
     call.turnId = turnId.isEmpty() ? call.turnId : turnId;
     call.diff = event.value(QStringLiteral("diff")).toString();

@@ -80,14 +80,14 @@ struct Row {
 
 // The finished row. `cells` is how many columns the text may use (the pane subtracts the "▸ "
 // placeholder and any trailing hint); zero or less means "do not cut".
-Row finishedRow(const toollabel::Label &label, int cells);
+Row finishedRow(const toollabel::Label &label, int cells, const QString &time = {});
 // The row while the call runs. `liveLines` above zero appends the live counter the streaming
-// output feeds ("running pytest… · 120 lines"); a non-empty `since` appends the start timestamp
-// the caller stamps the row with ("… · since 14:32:05").
+// output feeds ("running pytest… · 120 lines"); a non-empty `time` appends the local time when
+// that row is written ("… · 14:32:05").
 Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines = 0,
-               const QString &since = {});
-// A merged run's row: "read 6 files · 4,100 lines".
-Row mergedRow(const toollabel::MergeRun &run, int cells);
+               const QString &time = {});
+// A merged run's row: "read 6 files · 4,100 lines · 14:32:05".
+Row mergedRow(const toollabel::MergeRun &run, int cells, const QString &time = {});
 
 // Cuts `text` to `cells` columns, ending it with "…" when anything was dropped.
 QString fit(const QString &text, int cells);
@@ -193,7 +193,7 @@ private:
     bool m_held = false;        // a row is on screen with no newline
     bool m_dirty = false;       // something else printed since the row was drawn
     bool m_runRow = false;      // the held row belongs to a run, not to one started call
-    QDateTime m_rowStart;       // when the held running row appeared: its "since HH:mm:ss" stamp
+    QDateTime m_rowStart;       // when the running row appeared; settled rows get a fresh stamp
     int m_cells = 0;
 };
 

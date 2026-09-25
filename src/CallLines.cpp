@@ -122,7 +122,7 @@ QString fit(const QString &text, int cells) {
     return text.left(cells - 1) + QStringLiteral("…");
 }
 
-Row finishedRow(const toollabel::Label &label, int cells) {
+Row finishedRow(const toollabel::Label &label, int cells, const QString &time) {
     Row out;
     out.failed = label.failed();
     out.refused = label.refused;
@@ -132,12 +132,13 @@ Row finishedRow(const toollabel::Label &label, int cells) {
     // A call that never happened says why on the same row; one that ran and failed already has
     // "exit 1" in its stats (§ 23.2).
     if (!label.error.isEmpty()) pieces << label.error;
+    if (!time.isEmpty()) pieces << time;
     if (!pieces.isEmpty()) out.rest = QStringLiteral(" · ") + pieces.join(QStringLiteral(" · "));
     cut(out, cells);
     return out;
 }
 
-Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines, const QString &since) {
+Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines, const QString &time) {
     Row out;
     const QString head = !label.running.isEmpty() ? label.running
                        : !label.title.isEmpty()   ? label.title
@@ -147,14 +148,15 @@ Row runningRow(const toollabel::Label &label, int cells, qint64 liveLines, const
     if (liveLines > 0)
         pieces << QStringLiteral("%1 %2").arg(toollabel::thousands(liveLines),
                                               liveLines == 1 ? QStringLiteral("line") : QStringLiteral("lines"));
-    if (!since.isEmpty()) pieces << QStringLiteral("since %1").arg(since);
+    if (!time.isEmpty()) pieces << time;
     if (!pieces.isEmpty()) out.rest = QStringLiteral(" · ") + pieces.join(QStringLiteral(" · "));
     cut(out, cells);
     return out;
 }
 
-Row mergedRow(const toollabel::MergeRun &run, int cells) {
+Row mergedRow(const toollabel::MergeRun &run, int cells, const QString &time) {
     Row out = splitAt(run.line(), false);
+    if (!time.isEmpty()) out.rest += QStringLiteral(" · ") + time;
     cut(out, cells);
     return out;
 }
@@ -227,6 +229,7 @@ QString LineCursor::openCall() const {
 
 Step LineCursor::start(const QString &call, const toollabel::Label &label) {
     Step step;
+    m_rowStart = QDateTime::currentDateTime();
     // Inside a run of reads a member that will merge shows nothing of its own: the run's row is
     // already on screen, and a "reading x.py…" that lives for a millisecond only flickers.
     const QString key = mergeKeyOf(label);
@@ -239,7 +242,6 @@ Step LineCursor::start(const QString &call, const toollabel::Label &label) {
     dropRun();
     step.newRow = true;
     step.hold = true;               // the result rewrites this row in place
-    m_rowStart = QDateTime::currentDateTime();
     step.row = runningRow(label, m_cells, 0, m_rowStart.toString(QStringLiteral("HH:mm:ss")));
     step.call = call;
     step.callId = call;
@@ -264,6 +266,9 @@ Step LineCursor::live(const QString &call, const toollabel::Label &label, qint64
 
 Step LineCursor::result(const QString &call, const toollabel::Label &label, int cells) {
     const int width = cells > 0 ? cells : m_cells;
+    // The finished line is written now, after the tool result arrived. Its stamp is the time the
+    // note appears, while the live row above carried the separate start time.
+    const QString time = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     Step step;
     // The run on screen grows: rewrite its row and keep the cursor on it.
     if (m_held && !m_dirty && m_runRow && m_run.accepts(label)) {
@@ -272,7 +277,9 @@ Step LineCursor::result(const QString &call, const toollabel::Label &label, int 
         step.rewrite = true;
         step.hold = true;
         step.merged = m_run.count() > 1;
-        step.row = step.merged ? mergedRow(m_run, width) : finishedRow(label, width);
+        step.row = step.merged
+            ? mergedRow(m_run, width, time)
+            : finishedRow(label, width, time);
         step.call = runCall(m_first, m_run.count());
         step.callId = m_first;
         step.extra = m_run.count() > 1 ? m_run.count() : 0;
@@ -287,7 +294,7 @@ Step LineCursor::result(const QString &call, const toollabel::Label &label, int 
     }
     m_held = false;
     dropRun();
-    step.row = finishedRow(label, width);
+    step.row = finishedRow(label, width, time);
     step.call = call;
     step.callId = call;
     // A mergeable result opens a run: the row keeps the cursor so the next read can rewrite it.

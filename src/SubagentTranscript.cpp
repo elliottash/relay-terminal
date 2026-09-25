@@ -5,6 +5,7 @@
 #include "CurrentTextComboBox.h"
 #include "Theme.h"
 #include <QApplication>
+#include <QDateTime>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -404,7 +405,9 @@ QString SubagentTranscriptView::rowText(const ToolCall &call) const {
     const QString marker = call.done && call.label.failed() ? QStringLiteral("✗")
                          : call.expanded                    ? QStringLiteral("▾")
                                                             : QStringLiteral("▸");
-    const QString text = call.done ? call.label.line() : call.label.runningLine();
+    const calllines::Row row = call.done ? calllines::finishedRow(call.label, 0, call.timestamp)
+                                         : calllines::runningRow(call.label, 0, 0, call.timestamp);
+    const QString text = row.text();
     return marker + QLatin1Char(' ') + (text.isEmpty() ? call.label.title : text);
 }
 
@@ -454,6 +457,7 @@ void SubagentTranscriptView::forgetCalls() {
 void SubagentTranscriptView::toolStarted(const QJsonObject &payload) {
     ToolCall call;
     call.callId = payload.value(QStringLiteral("call_id")).toString();
+    call.timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     call.label = toollabel::fromEvent(payload);
     // `preview` is legacy for display (§ 23.1), but it is still the best detail this surface has:
     // the subagent pane never asks for tool_output_get, so the fold shows what the call was.
@@ -495,6 +499,7 @@ void SubagentTranscriptView::toolResult(const QJsonObject &payload) {
         call.label = landed;
     }
     call.done = true;
+    call.timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     call.diff = payload.value(QStringLiteral("diff")).toString();
     const QJsonObject result = payload.value(QStringLiteral("result")).toObject();
     if (result.contains(QStringLiteral("error"))) {
@@ -519,6 +524,7 @@ void SubagentTranscriptView::toolResult(const QJsonObject &payload) {
         cursor.removeSelectedText();
         cursor.deletePreviousChar();                    // the newline the row was printed on
         ToolCall &head = m_calls[m_mergeHead];
+        head.timestamp = call.timestamp;
         head.label.title = m_merge.line();
         head.label.stats.clear();
         // The fold of a merged run shows every member's detail, in order.

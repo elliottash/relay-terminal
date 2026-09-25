@@ -99,7 +99,7 @@ private:
     static QColor inkColor(Ink ink);   // from the live theme tokens
     // One tool call's row: the line itself, what a click folds open under it, and where both sit.
     struct ToolCall {
-        QString callId;
+        QString callId, timestamp;
         toollabel::Label label;
         QString detail;          // command, arguments, output, error — what the fold shows
         QString diff;            // the unified diff of a write or an edit, when the event had one

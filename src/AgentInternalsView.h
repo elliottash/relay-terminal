@@ -128,7 +128,7 @@ private:
 
     // One tool row: the line, what a click folds open under it, and where both sit in the log.
     struct ToolCall {
-        QString callId, turnId;
+        QString callId, turnId, timestamp;
         QStringList callIds;                            // the members of a merged run
         toollabel::Label label;
         toollabel::MergeRun run;                        // the run this row stands for, once merged
