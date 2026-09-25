@@ -387,8 +387,11 @@ private:
         add("agent.newChat", "agent", "Start a new agent conversation and clear the terminal", {});
         // Keyboard walk over the files, folders and links in the output (issue GWXM). Free in
         // every preset (docs/KEYBINDING-PRESETS.md), so all four keep the Relay default.
-        add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves)",
-            {QStringLiteral("Ctrl+Shift+L")});
+        // Ctrl+L is the prompt-box form of the same walk (owner ask 2026-09-25): the window gates
+        // the unshifted chord to the composer, because in the terminal Ctrl+L is Readline's own
+        // clear-screen and belongs to the shell.
+        add("links.step", "terminal", "Step through files, folders and links in the output (Enter opens, Esc leaves; Ctrl+L from the prompt box)",
+            {QStringLiteral("Ctrl+Shift+L"), QStringLiteral("Ctrl+L")});
         add("agent.clearQueue", "agent", "Clear queued agent prompts", {});
         // Ctrl+Q empties the prompt box, and Ctrl+Z in the box brings the text back (#CPRQ). Plain
         // Ctrl+Q acts only from the prompt box: under a program it is the program's (XON in a

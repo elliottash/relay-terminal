@@ -278,6 +278,11 @@ Ctrl+Shift+L), and Relay had no Ctrl+Shift+L either. It is left out of the prese
 every preset inherits the Relay default. It is a Ctrl+Shift combination, so it also acts while
 a program owns the terminal under the default `program_keys: "shift-only"`.
 
+**Plain Ctrl+L, the same walk from the prompt box (added 2026-09-25):** the second default on
+`links.step` is Ctrl+L, gated to the composer — at the shell Ctrl+L is Readline's clear-screen
+and stays the shell's. It is prompt-box-only, so no terminal program or preset loses a key, and
+it is left out of the preset tables with the Ctrl+Shift+L form.
+
 **Desktop-environment grabs:**
 - **Alt+Tab / Alt+Shift+Tab** (Relay default window.next/previous): taken by GNOME, KDE Plasma, Cinnamon and XFCE, so no preset uses them.
 - **Ctrl+Alt+T** (Warp closed.restore): launches a terminal on Ubuntu/GNOME and KDE Plasma, so it will usually never reach Relay. Warp on Linux has the same problem. Rebind if needed.

@@ -894,7 +894,7 @@ Default window shortcuts:
 | Split right | Ctrl+E | Clear the prompt box (Ctrl+Z undoes) | Ctrl+Q (composer), Ctrl+Shift+Q |
 | Focus neighbor pane | Alt+Arrows | Native input toggle (same hand-over as Ctrl+H) | F12 |
 | Toggle terminal/agent input | Ctrl+I | Board / Sessions / Projects / Globals / File explorer | Ctrl+Shift+A / Ctrl+Shift+S / Ctrl+Shift+P / Ctrl+Shift+G / Ctrl+Shift+D |
-| Run prompt in background | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L |
+| Run prompt in background | Ctrl+Alt+Enter | Step through links in the output | Ctrl+Shift+L (Ctrl+L from the prompt box) |
 | Conversation info (the ⓘ view) | Alt+I | Subagents / Flash / Reasoning panes | Alt+A / Alt+F / Alt+R |
 | Activity pane | Alt+Shift+R | | |
 
