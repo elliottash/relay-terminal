@@ -64,6 +64,11 @@ ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 LOCK = BUILD / ".relay-build.lock"
 
+# The cmake arguments every configure here uses. scripts/land.py loads this list (rather
+# than copying it) to configure its verify build slots the same way, so a developer build
+# and a `land.py try` build can never drift apart in their build type (card #76QW).
+CONFIGURE_ARGS = ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"]
+
 # Anything with one of these suffixes is a build product whose mtime make reads.
 ARTIFACT_SUFFIXES = (".o", ".obj", ".lo", ".a", ".so", ".dylib", ".dll", ".lib", ".pdb")
 
@@ -359,7 +364,7 @@ def main(argv: list[str]) -> int:
             command = ["cmake", "-S", str(ROOT), "-B", str(BUILD)]
             if args.fast:
                 command += ["-G", "Ninja", "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O0 -g1 -DNDEBUG"]
-            command += ["-DCMAKE_BUILD_TYPE=RelWithDebInfo", *args.cmake_arg]
+            command += [*CONFIGURE_ARGS, *args.cmake_arg]
             say("configuring: " + " ".join(command))
             code = subprocess.call(command, cwd=str(ROOT))
             if code != 0:

@@ -147,8 +147,9 @@ IDLE_HOURS = 12
 # removed — 255 of them, 153 GB, on 2026-09-24. It is now a small pool of slots shared by every
 # session of one repository, each held under a lock for a whole materialise-and-build, so the
 # disk it takes is bounded by the slot count instead of the session count. Every session's tree
-# is close to the tip, so a slot another session built last stays incremental.
-VERIFY_SLOTS = max(1, int(os.environ.get("RELAY_LAND_VERIFY_SLOTS") or 2))
+# is close to the tip, so a slot another session built last stays incremental. Card #76QW
+# sizes the pool after the machine instead: see verify_slots() near the slot machinery.
+
 # A session idle this long is not coming back: `gc` removes its snapshots and its registry
 # entry. Stale (IDLE_HOURS) sessions younger than this are still listed and kept.
 GC_DAYS = float(os.environ.get("RELAY_LAND_GC_DAYS") or 3)
@@ -1351,11 +1352,14 @@ def materialise_tree(repo, tree, dest, manifest_file):
         if len(bits) == 3 and bits[1] == "blob":
             wanted[path] = [bits[0], bits[2]]
     try:
-        have = json.loads(manifest_file.read_text(encoding="utf-8"))
+        data = json.loads(manifest_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        have = {}
-    if not isinstance(have, dict):
-        have = {}
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    # The manifest names the tree it materialised too (`who` prints it as the slot's last
+    # tree); a manifest from before #76QW is the file map alone and still reads as one.
+    have = data["files"] if isinstance(data.get("files"), dict) else data
 
     written = 0
     for path, (mode, sha) in sorted(wanted.items()):
@@ -1376,8 +1380,19 @@ def materialise_tree(repo, tree, dest, manifest_file):
             (dest / path).unlink()
         except OSError:
             pass
-    write_json(manifest_file, wanted)
+    write_json(manifest_file, {"tree": tree, "files": wanted})
     return written
+
+
+def manifest_tree(manifest_file):
+    """The tree a slot's manifest.json was last materialised from, or None."""
+    try:
+        data = json.loads(Path(manifest_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("tree"), str):
+        return data["tree"]
+    return None
 
 
 def first_errors(output, limit=25):
@@ -1407,6 +1422,25 @@ def py_compile_landed(plans):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def relay_build_module():
+    """scripts/relay-build loaded as a module, for the environment caps and configure
+    flags it computes, or None when it cannot be read or run.
+
+    exec rather than the import system: the file has no .py extension, so
+    SourceFileLoader's spec path refuses the name (load_module() would work
+    but is deprecated); the wrapper has no import-time side effects anyway.
+    """
+    try:
+        import types
+        script = Path(__file__).resolve().parent / "relay-build"
+        module = types.ModuleType("relay_build_module")
+        module.__file__ = str(script)
+        exec(compile(script.read_text(), str(script), "exec"), module.__dict__)
+        return module
+    except Exception:
+        return None
+
+
 def relay_build_jobs(log, limit_bytes=None):
     """Compile jobs for the verify build, capped by memory like scripts/relay-build.
 
@@ -1415,29 +1449,92 @@ def relay_build_jobs(log, limit_bytes=None):
     (card #04EC) -- so the wrapper's cap is loaded rather than copied, and the two
     cannot drift apart. `limit_bytes` overrides the detected limit (tests).
     """
+    module = relay_build_module()
+    if module is not None:
+        try:
+            return module.jobs_for_environment(
+                os.environ, note=lambda message: log("verify: %s" % message),
+                limit=limit_bytes)
+        except Exception as exc:  # the cap is a guard, never a gate
+            log("verify: memory job cap unavailable (%s); using RELAY_JOBS or 8" % exc)
+    else:
+        log("verify: scripts/relay-build unreadable; using RELAY_JOBS or 8")
+    return os.environ.get("RELAY_JOBS") or "8"
+
+
+def relay_configure_args(log):
+    """The cmake flags scripts/relay-build itself configures a developer build with.
+
+    A verify slot is configured the same way (card #76QW), so what `try` builds is
+    what a developer builds. Loaded from the wrapper so the two cannot drift; the
+    literal list only ever answers when the wrapper cannot be read.
+    """
+    module = relay_build_module()
+    if module is not None:
+        flags = getattr(module, "CONFIGURE_ARGS", None)
+        if isinstance(flags, list) and all(isinstance(f, str) for f in flags):
+            return list(flags)
+        log("verify: scripts/relay-build defines no CONFIGURE_ARGS; using the literal default")
+    else:
+        log("verify: scripts/relay-build unreadable; using the literal default")
+    return ["-DCMAKE_BUILD_TYPE=RelWithDebInfo"]
+
+
+def memory_for_slots():
+    """Bytes of memory a verify build may count on: the cgroup limit when one applies
+    (the same one scripts/relay-build caps its parallel jobs by), else MemAvailable,
+    else 2 GiB on platforms without /proc/meminfo."""
+    module = relay_build_module()
+    if module is not None:
+        try:
+            limit = module.memory_limit_bytes()
+            if limit:
+                return limit
+        except Exception:
+            pass
     try:
-        import types
-        script = Path(__file__).resolve().parent / "relay-build"
-        module = types.ModuleType("relay_build_jobs")
-        module.__file__ = str(script)
-        # exec rather than the import system: the file has no .py extension, so
-        # SourceFileLoader's spec path refuses the name (load_module() would work
-        # but is deprecated); the wrapper has no import-time side effects anyway.
-        exec(compile(script.read_text(), str(script), "exec"), module.__dict__)
-        return module.jobs_for_environment(
-            os.environ, note=lambda message: log("verify: %s" % message), limit=limit_bytes)
-    except Exception as exc:  # the cap is a guard, never a gate
-        log("verify: memory job cap unavailable (%s); using RELAY_JOBS or 8" % exc)
-        return os.environ.get("RELAY_JOBS") or "8"
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 2 * 1024 ** 3
+
+
+def verify_slots(root, env=None, disk_free_bytes=None, mem_bytes=None):
+    """How many verify slots this machine can hold (card #76QW).
+
+    RELAY_LAND_VERIFY_SLOTS wins outright. Otherwise a slot holds a whole tree plus its
+    build (about 3 GB of disk) and a parallel build plus its tests (about 8 GB of
+    memory), so the machine's spare disk and memory bound the pool, clamped to [1, 4]:
+    at most 4 concurrent heavy builds on one host, always at least one. `root` is the
+    land root (the pool lives on its filesystem); disk_free_bytes and mem_bytes inject
+    the measurements for tests.
+    """
+    env = os.environ if env is None else env
+    try:
+        asked = int(env.get("RELAY_LAND_VERIFY_SLOTS") or 0)
+    except ValueError:
+        asked = 0
+    if asked > 0:
+        return asked
+    if disk_free_bytes is None:
+        disk_free_bytes = shutil.disk_usage(str(root)).free
+    if mem_bytes is None:
+        mem_bytes = memory_for_slots()
+    gigabyte = 1024 ** 3
+    return max(1, min(4, disk_free_bytes // (3 * gigabyte), mem_bytes // (8 * gigabyte)))
 
 
 def run_verify(repo, root, session, tree, args, log):
     """Build the exact tree this commit would put on the branch.
 
-    Returns (failed step, output) or (None, None). The working tree is never read: that is
-    the whole point, because it holds everyone's uncommitted code and proves nothing.
+    Returns (failed step, output, tests failed) or (None, None, False). The working
+    tree is never read: that is the whole point, because it holds everyone's
+    uncommitted code and proves nothing.
     """
-    with verify_slot(repo, root, log) as base:
+    with verify_slot(repo, root, log, session=session, tree=tree) as base:
         return _run_verify_in(repo, base, tree, args, log)
 
 
@@ -1447,25 +1544,61 @@ def slot_prefix(repo):
                       hashlib.sha1(str(repo).encode("utf-8")).hexdigest()[:8])
 
 
-class verify_slot:
-    """Hold one of VERIFY_SLOTS build slots for this repository, waiting if all are busy.
+def configure_flag_value(flags, name):
+    """The value one -D<name>=<value> configure flag carries, or None when absent."""
+    prefix = "-D%s=" % name
+    for flag in flags:
+        if flag.startswith(prefix):
+            return flag[len(prefix):]
+    return None
 
-    The lock is an flock on `<slot>.lock`, so a session that dies mid-build frees its slot.
-    Without fcntl (Windows) the first slot is used without a lock.
+
+def cache_build_type(cache):
+    """CMAKE_BUILD_TYPE as a configured slot's CMakeCache.txt records it, '' or None when
+    the cache does not say."""
+    try:
+        for line in Path(cache).read_text(encoding="utf-8").splitlines():
+            if line.startswith("CMAKE_BUILD_TYPE:"):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+class verify_slot:
+    """Hold one of the verify_slots() build slots for this repository, waiting if all are
+    busy.
+
+    The lock is an flock on `<slot>.lock`, so a session that dies mid-build frees its
+    slot; while it holds one, the lock file also records who is building (`who` prints
+    it). Without fcntl (Windows) the first slot is used without a lock.
     """
 
-    def __init__(self, repo, root, log):
+    def __init__(self, repo, root, log, session=None, tree=None):
         self.base = Path(root) / "verify-slots"
         self.prefix = slot_prefix(repo)
         self.log = log
+        self.session, self.tree = session, tree
         self.handle = None
+
+    def _note_holder(self):
+        """Record who holds the slot in its lock file, already flocked by __enter__."""
+        if self.handle is None:
+            return
+        self.handle.seek(0)
+        self.handle.truncate()
+        self.handle.write(json.dumps({"pid": os.getpid(), "session": self.session,
+                                      "since": time.time(), "tree": self.tree}) + "\n")
+        self.handle.flush()
 
     def __enter__(self):
         self.base.mkdir(parents=True, exist_ok=True)
-        slots = [self.base / ("%s-%d" % (self.prefix, n)) for n in range(VERIFY_SLOTS)]
+        slots = [self.base / ("%s-%d" % (self.prefix, n))
+                 for n in range(verify_slots(self.base))]
         try:
             import fcntl
         except ImportError:
+            self.slot = slots[0]
             return slots[0]
         # The most recently used free slot first: it is the one most likely to be warm.
         order = sorted(slots, key=lambda s: -(s / "manifest.json").stat().st_mtime
@@ -1477,21 +1610,36 @@ class verify_slot:
             except OSError:
                 handle.close()
                 continue
-            self.handle = handle
+            self.handle, self.slot = handle, slot
+            self._note_holder()
             return slot
         slot = order[0]
         self.log("verify: all %d build slot(s) busy; waiting for %s" % (len(slots), slot.name))
         self.handle = open(str(slot) + ".lock", "a+")
         fcntl.flock(self.handle, fcntl.LOCK_EX)
+        self.slot = slot
+        self._note_holder()
         return slot
 
     def __exit__(self, *exc):
         if self.handle is not None:
+            try:
+                self.handle.seek(0)
+                self.handle.truncate()        # the slot reads free again in `who`
+            except OSError:
+                pass
             self.handle.close()
         return False
 
 
 def _run_verify_in(repo, base, tree, args, log):
+    """Materialise `tree` in the slot and build it.
+
+    Returns (failed step, output, tests failed): (None, None, False) when it all built,
+    otherwise the label and output of the first failing step, with `tests failed` set
+    when that step is the ctest run -- its output is returned as a tail, because a full
+    ctest log is noise where a compile log is signal.
+    """
     src, build = base / "src", base / "build"
     src.mkdir(parents=True, exist_ok=True)
     build.mkdir(parents=True, exist_ok=True)
@@ -1504,8 +1652,19 @@ def _run_verify_in(repo, base, tree, args, log):
     if args.verify_cmd:
         steps.append(("verify command", ["sh", "-c", args.verify_cmd]))
     else:
-        if not (build / "CMakeCache.txt").exists():
-            steps.append(("cmake configure", ["cmake", "-S", str(src), "-B", str(build)]))
+        flags = relay_configure_args(log)
+        wanted_type = configure_flag_value(flags, "CMAKE_BUILD_TYPE")
+        cache = build / "CMakeCache.txt"
+        why = None
+        if not cache.exists():
+            why = "fresh slot"
+        elif wanted_type is not None and cache_build_type(cache) != wanted_type:
+            why = ("the slot's CMAKE_BUILD_TYPE is %r, the developer build is %r"
+                   % (cache_build_type(cache), wanted_type))
+        if why is not None:
+            log("verify: configuring (%s)" % why)
+            steps.append(("cmake configure",
+                          ["cmake", "-S", str(src), "-B", str(build)] + flags))
         target = [] if args.verify_tests else ["--target", args.verify_target]
         steps.append(("compile", ["cmake", "--build", str(build), "--parallel", jobs]
                       + target))
@@ -1520,9 +1679,11 @@ def _run_verify_in(repo, base, tree, args, log):
         proc = subprocess.run(command, cwd=str(src), env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, text=True)
         if proc.returncode != 0:
-            return label, proc.stdout
+            if label.startswith("ctest"):
+                return label, "\n".join(proc.stdout.splitlines()[-60:]), True
+            return label, proc.stdout, False
     log("verify: the exact tree builds")
-    return None, None
+    return None, None, False
 
 
 # --------------------------------------------------------------------------- commit
@@ -1634,17 +1795,14 @@ def set_shared_index(repo, branch, entries, log):
                 "%s,%s,%s" % (mode, blob, path))
 
 
-def cmd_commit(args, log):
-    repo = repo_root()
-    root = Path(args.root)
-    meta = read_meta(root, args.session)
-    auto_gc(root, log)
-    branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
-    if Path(meta.get("repo", repo)) != Path(repo):
-        raise Fail("session %r was started in %s, not %s"
-                   % (args.session, meta.get("repo"), repo))
+def session_selection(repo, session, meta, args, log):
+    """The claimed paths and hunk selections one landing uses, exactly as commit parses them.
 
-    message = read_message(args.message)
+    Everything between a session's meta and its merge attempts: --whole joins the claimed
+    set, --paths narrows it, intake files and *.orig drop out with a log line, and the
+    --exclude-hunk/--only-hunk/--take-foreign selections are validated. Raises the same
+    Fail refusals commit raises. Returns (claimed, paths, whole, excludes, onlys, takes).
+    """
     claimed = dict(meta.get("paths") or {})
     whole = [norm_path(repo, p) for p in (args.whole or [])]
 
@@ -1663,7 +1821,7 @@ def cmd_commit(args, log):
                        "it is now, so only later edits land), or `land.py begin --base HEAD "
                        "%s %s` if you have already edited it and want the diff against main, "
                        "or pass --whole %s to commit the whole working copy of it."
-                       % (path, args.session, path, args.session, path, path))
+                       % (path, session, path, session, path, path))
         if path not in paths:
             paths.append(path)
     for path in dropped:
@@ -1696,100 +1854,136 @@ def cmd_commit(args, log):
         if path in onlys and not takes[path] <= onlys[path]:
             raise Fail("--only-hunk already leaves %s:%s out, so --take-foreign cannot land "
                        "it" % (path, ",".join(str(n) for n in sorted(takes[path] - onlys[path]))))
+    return claimed, paths, whole, excludes, onlys, takes
+
+
+def session_tree(repo, root, session, meta, args, tip, log=None, selection=None):
+    """The landing tree for `session` against `tip`: one attempt of cmd_commit's computation.
+
+    This is commit's per-path loop through the merge-conflict check, verbatim: each path's
+    PathInfo (hunks, selections, contested/foreign marks) and its plan against `tip`,
+    honouring --paths/--whole and --exclude-hunk/--only-hunk/--take-foreign and the safety
+    refusals. Raises Fail (code 3) when any path conflicts. Returns (plans, infos,
+    conflicts); `conflicts` is always empty when the call returns.
+    """
+    if log is None:
+        log = lambda message: print(message, file=sys.stderr)
+    if selection is None:
+        selection = session_selection(repo, session, meta, args, log)
+    claimed, paths, whole, excludes, onlys, takes = selection
+    branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
+    plans, infos, conflicts = {}, {}, []
+    for path in paths:
+        record = claimed.get(path, {"existed": False, "tracked_at_begin": False})
+        info = PathInfo(path)
+        infos[path] = info
+        info.holders = claimants(root, session, path)
+        info.age = age_minutes(record.get("at") or meta.get("started"))
+        info.from_base = record.get("base_rev")
+
+        theirs = _MISSING
+        if path in whole:
+            # No snapshot, so no hunks and no age to be stale: --whole already prints the
+            # whole diff it is about to take and says whose code may be in it.
+            info.whole_path = True
+        else:
+            info.stale = info.age is not None and info.age > args.stale_minutes
+            working = work_bytes(repo, path)
+            info.snapshot = snapshot_bytes(root, session, path, record)
+            info.hunks = path_hunks(info.snapshot, working)
+            if not info.hunks and path not in whole:
+                # Two sessions were caught by this: a file edited BEFORE `begin` snapshots as
+                # already-edited, so there is nothing to land and the silence looked like success.
+                log("  %s: no change since your snapshot. If you edited it before `begin`, run "
+                    "`begin %s --base main %s` to snapshot it from the tip instead."
+                    % (path, session, path))
+            numbers = set(range(1, len(info.hunks) + 1))
+            asked = onlys.get(path) or excludes.get(path) or set()
+            unknown = sorted(asked - numbers)
+            if unknown:
+                raise Fail("%s has %d hunk(s) right now, so there is no hunk %s. Run "
+                           "commit again without a selection to see them numbered."
+                           % (path, len(info.hunks),
+                              ", ".join(str(n) for n in unknown)))
+            info.selected = (onlys[path] & numbers) if path in onlys else \
+                (numbers - excludes.get(path, set()))
+            info.excluded = numbers - info.selected
+            info.contested = contested_hunks(root, session, path, info.snapshot,
+                                             info.hunks, info.holders,
+                                             forced=bool(info.from_base))
+            # FOREIGN: a held hunk whose removed+added lines are exactly the change
+            # another pane's authorship journal recorded for this path is that pane's
+            # edit sitting in your working tree (#6CSN confirmed such a review and
+            # landed #234Z's hunk as its own). Only held paths need it — an
+            # uncontested path has no review to read past. No journal, an unreadable
+            # blob, or no match, and the hunk stays merely CONTESTED, as today.
+            if info.contested or info.stale or info.from_base:
+                mine = {t for t in (my_token(), meta.get("token")) if t}
+                found = foreign_hunks(root, repo, path, mine)
+                for number, hunk in enumerate(info.hunks, 1):
+                    entry = found.get(hunk_blocks(hunk))
+                    if entry is not None:
+                        info.foreign[number] = entry
+            info.taken = (takes.get(path) or set()) & set(info.foreign)
+            stray_takes = sorted((takes.get(path) or set()) - set(info.foreign))
+            if stray_takes:
+                raise Fail("--take-foreign %s:%s — hunk %s of %s is not FOREIGN right now "
+                           "(yours, or merely contested, or the numbering moved). Run "
+                           "commit again without --take-foreign to see the hunks numbered."
+                           % (path, ",".join(str(n) for n in stray_takes),
+                              ",".join(str(n) for n in stray_takes), path))
+            if info.foreign:
+                # A FOREIGN hunk is somebody else's edit: --confirm leaves it in the
+                # working tree. Leaving it out rides the --exclude-hunk machinery, so
+                # the digest, the merge and the snapshot left behind all treat it as
+                # "still to land later".
+                info.selected -= set(info.foreign) - info.taken
+                info.excluded = numbers - info.selected
+            if info.excluded:
+                if not info.selected:
+                    continue          # every hunk left out: this path is not in the commit
+                theirs = apply_hunks(info.snapshot, working, info.hunks, info.selected)
+
+        try:
+            outcome = plan_path(repo, root, session, path, record, tip,
+                                path in whole, theirs)
+        except Conflict as clash:
+            conflicts.extend(clash.paths)
+            continue
+        if outcome is None:
+            continue
+        plans[path] = outcome
+    if conflicts:
+        raise Fail("merge conflict in: %s\nNothing was committed and nothing in the "
+                   "working tree was touched. Pull the other session's change into your "
+                   "copy by hand (their version is `git show %s:<path>`), then run commit "
+                   "again. The cheapest resolution is often to need fewer files "
+                   "(restructure so the contested file needs no change), not to merge "
+                   "harder." % (", ".join(sorted(conflicts)), branch), code=3)
+    return plans, infos, conflicts
+
+
+def cmd_commit(args, log):
+    repo = repo_root()
+    root = Path(args.root)
+    meta = read_meta(root, args.session)
+    auto_gc(root, log)
+    branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
+    if Path(meta.get("repo", repo)) != Path(repo):
+        raise Fail("session %r was started in %s, not %s"
+                   % (args.session, meta.get("repo"), repo))
+
+    message = read_message(args.message)
+    selection = session_selection(repo, args.session, meta, args, log)
+    claimed, paths, whole, excludes, onlys, takes = selection
 
     warn_overlaps(root, args.session, paths, log)
 
     last_error, verified = None, None
     for attempt in range(1, SWAP_ATTEMPTS + 1):
         tip = branch_tip(repo, branch)          # read once per attempt, used everywhere below
-        plans, infos, conflicts = {}, {}, []
-        for path in paths:
-            record = claimed.get(path, {"existed": False, "tracked_at_begin": False})
-            info = PathInfo(path)
-            infos[path] = info
-            info.holders = claimants(root, args.session, path)
-            info.age = age_minutes(record.get("at") or meta.get("started"))
-            info.from_base = record.get("base_rev")
-
-            theirs = _MISSING
-            if path in whole:
-                # No snapshot, so no hunks and no age to be stale: --whole already prints the
-                # whole diff it is about to take and says whose code may be in it.
-                info.whole_path = True
-            else:
-                info.stale = info.age is not None and info.age > args.stale_minutes
-                working = work_bytes(repo, path)
-                info.snapshot = snapshot_bytes(root, args.session, path, record)
-                info.hunks = path_hunks(info.snapshot, working)
-                if not info.hunks and path not in whole:
-                    # Two sessions were caught by this: a file edited BEFORE `begin` snapshots as
-                    # already-edited, so there is nothing to land and the silence looked like success.
-                    log("  %s: no change since your snapshot. If you edited it before `begin`, run "
-                        "`begin %s --base main %s` to snapshot it from the tip instead."
-                        % (path, args.session, path))
-                numbers = set(range(1, len(info.hunks) + 1))
-                asked = onlys.get(path) or excludes.get(path) or set()
-                unknown = sorted(asked - numbers)
-                if unknown:
-                    raise Fail("%s has %d hunk(s) right now, so there is no hunk %s. Run "
-                               "commit again without a selection to see them numbered."
-                               % (path, len(info.hunks),
-                                  ", ".join(str(n) for n in unknown)))
-                info.selected = (onlys[path] & numbers) if path in onlys else \
-                    (numbers - excludes.get(path, set()))
-                info.excluded = numbers - info.selected
-                info.contested = contested_hunks(root, args.session, path, info.snapshot,
-                                                 info.hunks, info.holders,
-                                                 forced=bool(info.from_base))
-                # FOREIGN: a held hunk whose removed+added lines are exactly the change
-                # another pane's authorship journal recorded for this path is that pane's
-                # edit sitting in your working tree (#6CSN confirmed such a review and
-                # landed #234Z's hunk as its own). Only held paths need it — an
-                # uncontested path has no review to read past. No journal, an unreadable
-                # blob, or no match, and the hunk stays merely CONTESTED, as today.
-                if info.contested or info.stale or info.from_base:
-                    mine = {t for t in (my_token(), meta.get("token")) if t}
-                    found = foreign_hunks(root, repo, path, mine)
-                    for number, hunk in enumerate(info.hunks, 1):
-                        entry = found.get(hunk_blocks(hunk))
-                        if entry is not None:
-                            info.foreign[number] = entry
-                info.taken = (takes.get(path) or set()) & set(info.foreign)
-                stray_takes = sorted((takes.get(path) or set()) - set(info.foreign))
-                if stray_takes:
-                    raise Fail("--take-foreign %s:%s — hunk %s of %s is not FOREIGN right now "
-                               "(yours, or merely contested, or the numbering moved). Run "
-                               "commit again without --take-foreign to see the hunks numbered."
-                               % (path, ",".join(str(n) for n in stray_takes),
-                                  ",".join(str(n) for n in stray_takes), path))
-                if info.foreign:
-                    # A FOREIGN hunk is somebody else's edit: --confirm leaves it in the
-                    # working tree. Leaving it out rides the --exclude-hunk machinery, so
-                    # the digest, the merge and the snapshot left behind all treat it as
-                    # "still to land later".
-                    info.selected -= set(info.foreign) - info.taken
-                    info.excluded = numbers - info.selected
-                if info.excluded:
-                    if not info.selected:
-                        continue          # every hunk left out: this path is not in the commit
-                    theirs = apply_hunks(info.snapshot, working, info.hunks, info.selected)
-
-            try:
-                outcome = plan_path(repo, root, args.session, path, record, tip,
-                                    path in whole, theirs)
-            except Conflict as clash:
-                conflicts.extend(clash.paths)
-                continue
-            if outcome is None:
-                continue
-            plans[path] = outcome
-        if conflicts:
-            raise Fail("merge conflict in: %s\nNothing was committed and nothing in the "
-                       "working tree was touched. Pull the other session's change into your "
-                       "copy by hand (their version is `git show %s:<path>`), then run commit "
-                       "again. The cheapest resolution is often to need fewer files "
-                       "(restructure so the contested file needs no change), not to merge "
-                       "harder." % (", ".join(sorted(conflicts)), branch), code=3)
+        plans, infos, conflicts = session_tree(
+            repo, root, args.session, meta, args, tip, log, selection)
         if not plans:
             log("nothing to land: every claimed path already matches the tip"
                 + (" once the hunks you left out are taken off" if
@@ -1821,7 +2015,7 @@ def cmd_commit(args, log):
                 log("(--dry-run, so nothing was committed either way.)")
             if any(is_cxx_path(path) for path in plans) and not args.no_verify:
                 log("(a real commit would also build this exact tree in one of the %d shared "
-                    "build slots under %s before the swap.)" % (VERIFY_SLOTS, root / "verify-slots"))
+                    "build slots under %s before the swap.)" % (verify_slots(root), root / "verify-slots"))
             return 0
 
         if args.no_verify and held:
@@ -1868,9 +2062,13 @@ def cmd_commit(args, log):
             if cxx and cxx == verified:
                 log("verify: every landed C++ blob is the one already built; not rebuilding")
             elif cxx:
-                step, output = run_verify(repo, root, args.session, tree, args, log)
+                step, output, tests_failed = run_verify(repo, root, args.session, tree,
+                                                        args, log)
                 if step is not None:
-                    sys.stdout.write("\n".join(first_errors(output)) + "\n")
+                    if tests_failed:
+                        sys.stdout.write(output + "\n")
+                    else:
+                        sys.stdout.write("\n".join(first_errors(output)) + "\n")
                     raise Fail("the exact tree this commit would put on %s does not build "
                                "(%s failed). Nothing was landed. The working tree is not the "
                                "same thing: it holds every session's uncommitted code, so it "
@@ -1959,6 +2157,105 @@ def cmd_commit(args, log):
     raise Fail("%s moved under every one of the %d attempts (last: %s). Nothing was landed; "
                "run commit again." % (branch, SWAP_ATTEMPTS, last_error or "swap refused"),
                code=3)
+
+
+# --------------------------------------------------------------------------- try
+
+def cmd_try(args, log):
+    """Build and optionally test the exact tree `commit` would land -- without landing it.
+
+    The working tree holds every session's uncommitted code, so a green build there proves
+    nothing about what a landing would put on the branch (card #76QW). `try` materialises
+    tip + this session's claimed hunks -- the very merge `commit` would swap in -- into a
+    verify slot and builds it there, without moving a ref or touching the shared index or
+    the working tree. `--commit`/`--tree` skip the merge and materialise that revision
+    instead, for post-land checks and for a Try-it run.
+
+    Nothing lands, so nothing is held: contested or stale paths are built like any other,
+    and their stat line still says what they are. A conflict still stops the try (exit 3).
+
+    stdout is a machine-readable summary, in this order: `tip <sha>` (or `commit <sha>` in
+    --commit/--tree mode), one stat line per claimed path in the tree, `src <slot>/src`,
+    `build <slot>/build`, `binary <slot>/build/<target>` (nothing when --verify-cmd built
+    something else). With --print-binary, stdout is the binary path alone. Everything else
+    -- logs, compiler errors, ctest tails -- goes to stderr. Exits: 0 built (and tested),
+    1 usage, 3 the merge conflicts, 5 the build (or py-compile or --verify-cmd) failed,
+    6 --tests failed. A failed try leaves the slot's tree in place for inspection.
+    """
+    repo = repo_root()
+    root = Path(args.root)
+    if args.commit and args.tree:
+        raise Fail("--commit and --tree are two ways to name one revision; give one", code=1)
+    meta = read_meta(root, args.session)
+    auto_gc(root, log)
+    branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
+    if Path(meta.get("repo", repo)) != Path(repo):
+        raise Fail("%s was begun in %s, not %s" % (args.session, meta.get("repo"), repo),
+                   code=1)
+    log = lambda message: sys.stderr.write(message + "\n")  # stdout stays machine-readable
+
+    def say(line):
+        if not args.print_binary:
+            sys.stdout.write(line + "\n")
+
+    target = args.target
+    if args.commit or args.tree:
+        given = args.commit or args.tree
+        kind = "commit" if args.commit else "tree"
+        try:
+            revision = git_out(repo, "rev-parse", "--verify", "%s^{%s}" % (given, kind))
+            tree = git_out(repo, "rev-parse", "--verify", "%s^{tree}" % revision)
+        except Fail:
+            raise Fail("%s does not name a %s in %s" % (given, kind, repo), code=1)
+        say("commit %s" % revision)
+    else:
+        tip = branch_tip(repo, branch)
+        plans, infos, _conflicts = session_tree(repo, root, args.session, meta, args, tip,
+                                                log)
+        say("tip %s" % tip)
+        for path in sorted(plans):
+            say(infos[path].stat())
+        problem = py_compile_landed(plans)
+        if problem is not None:
+            raise Fail("the exact bytes this commit would land do not compile as Python:\n"
+                       "%s\nNothing was landed and nothing was touched." % problem.strip(),
+                       code=5)
+        entries = {}
+        for path, (content, mode) in plans.items():
+            if content is None:
+                entries[path] = (None, mode, True)
+            else:
+                entries[path] = (hash_blob(repo, content), mode, False)
+        tree = build_tree(repo, tip, entries)
+
+    verify = argparse.Namespace(verify_cmd=args.verify_cmd, verify_tests=args.tests,
+                                verify_target=target)
+    binary = None
+    with verify_slot(repo, root, log, session=args.session, tree=tree) as base:
+        step, output, tests_failed = _run_verify_in(repo, base, tree, verify, log)
+        if step is None:
+            say("src %s" % (base / "src"))
+            say("build %s" % (base / "build"))
+            if not args.verify_cmd:
+                binary = base / "build" / target
+                say("binary %s" % binary)
+        elif tests_failed:
+            sys.stderr.write(output + "\n")
+            raise Fail("the tests failed (%s) in the tree this try built on %s. Nothing was "
+                       "landed and nothing was touched; the failing tree is still in %s."
+                       % (step, branch, base / "build"), code=6)
+        else:
+            sys.stderr.write("\n".join(first_errors(output)) + "\n")
+            raise Fail("the tree this try built does not compile (%s failed). Nothing was "
+                       "landed and nothing was touched. The working tree is not the same "
+                       "thing: it holds every session's uncommitted code, so it can compile "
+                       "while this tree cannot. Look at the errors above; a missing "
+                       "declaration usually means you are landing one half of somebody "
+                       "else's change (`land.py who`). The failing tree is still in %s."
+                       % (step, base / "src"), code=5)
+    if args.print_binary and binary is not None:
+        print(binary)
+    return 0
 
 
 # Card links (#MJ76): a landed commit whose message names a card as `#ID` is appended to that
@@ -2377,6 +2674,26 @@ def cmd_doctor(args, log):
 
 # --------------------------------------------------------------------------- who
 
+def read_slot_holder(lock_path):
+    """Who holds a verify slot: (session, pid, seconds held) read from its lock file, when
+    that names a live process. A lock file left behind by a crashed or killed build reads
+    as free: the flock it was written under is gone, and so is the pid."""
+    try:
+        note = json.loads(Path(lock_path).read_text(encoding="utf-8"))
+        pid = int(note["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass
+    since = note.get("since")
+    held = time.time() - since if isinstance(since, (int, float)) else None
+    return note.get("session"), pid, held
+
+
 def cmd_who(args, log):
     root = Path(args.root)
     auto_gc(root, log)
@@ -2400,7 +2717,20 @@ def cmd_who(args, log):
     log("disk: %s holds %s, of which verify build slots %s (at most %d per repository; "
         "`land.py gc` reclaims stale sessions)"
         % (root, human_bytes(tree_bytes(root)),
-           human_bytes(tree_bytes(slots)) if slots.exists() else "0 B", VERIFY_SLOTS))
+           human_bytes(tree_bytes(slots)) if slots.exists() else "0 B", verify_slots(root)))
+    if slots.is_dir():
+        for slot in sorted(p for p in slots.iterdir() if p.is_dir()):
+            last = manifest_tree(slot / "manifest.json")
+            tail = ", last tree %s" % last[:12] if last else ", no tree yet"
+            holder = read_slot_holder(str(slot) + ".lock")
+            if holder is None:
+                log("    slot %s: free%s" % (slot.name, tail))
+            else:
+                session, pid, held = holder
+                log("    slot %s: session %s (pid %s), held %s%s"
+                    % (slot.name, session or "unknown", pid,
+                       human_age(held / 60) if held is not None else "an unknown time",
+                       tail))
     return 0
 
 
@@ -2617,9 +2947,11 @@ CMakeLists.txt, *.cmake), `commit` materialises the EXACT tree it is about to pu
 into a build slot, <root>/verify-slots/<repo>-<n>/src, and builds it in .../build before the
 swap. Only a tree that compiles is landed; otherwise the first errors are printed, nothing is
 landed, and it exits 5. A slot is the tool's own check, not a place to work: nobody edits there.
-There are RELAY_LAND_VERIFY_SLOTS of them per repository (default 2), shared by every session
-and held under a lock for the whole build, so twenty sessions take two build trees of disk, not
-twenty (card #SZHQ). Only the files whose blob changed are rewritten, so a slot stays
+There are at most four of them per repository, sized after the machine's spare disk and memory
+(RELAY_LAND_VERIFY_SLOTS pins the count) and shared by every session, each held under a lock for
+the whole build, so twenty sessions take a few build trees of disk, not twenty (cards #SZHQ,
+#76QW). A slot is configured exactly like a developer build (scripts/relay-build's
+CONFIGURE_ARGS), and only the files whose blob changed are rewritten, so a slot stays
 incremental whoever used it last. Landed .py files are byte-compiled the same way.
 
 disk
@@ -2632,6 +2964,40 @@ what it would take. `who` prints the root's size.
 The working tree is deliberately not what gets built: it holds every session's uncommitted
 code, so it can compile while the tree you are landing cannot. That is how a green build of
 code nobody had written reached main twice on 2026-09-19.
+
+try: build your landing without landing it
+
+`try <session>` builds the exact tree `commit` would land -- the tip plus your claimed hunks,
+contested or stale included, because nothing lands and so nothing is held -- in a verify slot,
+and moves nothing: no refs, no shared index, no working tree. It is what to run when the
+working tree is full of other sessions' edits and you want to know whether YOUR change builds
+(#76QW's #234Z scenario: someone else's broken edit in the working tree must not be able to
+fail your check), and after landing, with --commit, to check what is now on the branch. Its
+stdout is a machine-readable summary, in this order:
+
+  tip <sha>                       the tip merged against, or `commit <sha>` in --commit/--tree
+                                  mode (a revision materialised instead of merged).
+  <stat line>                     one per claimed path in the tree, as commit's review prints
+                                  them.
+  src <slot>/src                  the materialised tree.
+  build <slot>/build              the build directory (ctest runs there with --tests).
+  binary <slot>/build/<target>    the target's output; omitted when --verify-cmd built
+                                  something else.
+
+Everything else -- logs, compiler errors, the ctest tail -- goes to stderr.
+
+  --paths P...           try only this subset of the session's paths.
+  --tests RE             build everything, then run the ctest cases matching RE.
+  --target T             the cmake target (default relay, or RELAY_LAND_VERIFY_TARGET).
+  --verify-cmd "..."     run this instead of the cmake build (cwd = the materialised tree,
+                         VERIFY_BUILD in the environment).
+  --commit SHA           materialise that revision instead of merging (--tree SHA names a
+  --tree SHA             tree); for post-land checks and a Try-it run.
+  --print-binary         print ONLY the binary path on stdout; logs go to stderr.
+
+`try` exits 0 when it built (and tested), 1 on usage, 3 when the merge conflicts, 5 when the
+build (a py-compile, or --verify-cmd) fails, 6 when a --tests run fails. A failed try lands
+nothing and touches nothing, and leaves the slot's tree in place for inspection.
 
   --verify-cmd "..."   run this instead (cwd = the materialised tree, VERIFY_BUILD in env).
   --verify-tests RE    also build everything and run the ctest cases matching RE.
@@ -2655,8 +3021,8 @@ code nobody had written reached main twice on 2026-09-19.
       so verify a repair on `git archive <new sha>`, never in the checkout.
 
 exit codes: 0 fine, 1 usage or environment error, 2 doctor found something, 3 conflict or a
-swap that could not be completed, 4 held for review, 5 the exact tree does not build.
-Nothing was changed on 3, 4 or 5.
+swap that could not be completed, 4 held for review, 5 the exact tree does not build, 6 a
+`try --tests` run failed. Nothing was changed on 3, 4, 5 or 6.
 """.replace("{stale}", str(DEFAULT_STALE_MINUTES))
 
 
@@ -2727,6 +3093,45 @@ def build_parser():
                         help="skip the build gate; refused when any path is contested, "
                              "FOREIGN or stale")
     commit.set_defaults(func=cmd_commit)
+
+    try_cmd = subs.add_parser(
+        "try", help="build (and test) the exact tree commit would land, landing nothing",
+        description="Build the tip plus this session's claimed hunks -- the exact merge "
+                    "`commit` would land -- in a verify slot, without moving a ref or "
+                    "touching the shared index or the working tree. See the try section "
+                    "of --help for the output format and exit codes.")
+    try_cmd.add_argument("session")
+    try_cmd.add_argument("--paths", nargs="+", action="extend", default=None,
+                         metavar="P", help="try only this subset of the session's paths")
+    try_cmd.add_argument("--tests", default=None, metavar="REGEX",
+                         help="after building everything, run the ctest cases matching "
+                              "REGEX in the slot (a failing test exits 6)")
+    try_cmd.add_argument("--target", default=os.environ.get("RELAY_LAND_VERIFY_TARGET")
+                         or "relay", metavar="T",
+                         help="the cmake target to build (default relay, or "
+                              "RELAY_LAND_VERIFY_TARGET)")
+    try_cmd.add_argument("--verify-cmd", default=None, metavar="SHELL",
+                         help="run this instead of the default cmake build, with cwd = the "
+                              "materialised tree and VERIFY_BUILD in the environment")
+    try_cmd.add_argument("--commit", default=None, metavar="SHA",
+                         help="skip the merge and materialise this revision instead "
+                              "(post-land checks, Try-it)")
+    try_cmd.add_argument("--tree", default=None, metavar="SHA",
+                         help="the same, naming a tree sha")
+    try_cmd.add_argument("--print-binary", dest="print_binary", action="store_true",
+                         help="print only the built binary's path on stdout; logs go to "
+                              "stderr")
+    try_cmd.add_argument("--branch", default=None)
+    try_cmd.add_argument("--whole", nargs="+", action="extend", default=None, metavar="P",
+                         help="include the entire working copy of a path you never ran "
+                              "`begin` on, as commit would")
+    try_cmd.add_argument("--exclude-hunk", action="append", default=None, metavar="PATH:N",
+                         help="try without these hunks (repeatable, as in commit)")
+    try_cmd.add_argument("--only-hunk", action="append", default=None, metavar="PATH:N",
+                         help="try with only these hunks (repeatable, as in commit)")
+    try_cmd.add_argument("--stale-minutes", type=float, default=DEFAULT_STALE_MINUTES,
+                         help="as in commit (default %d)" % DEFAULT_STALE_MINUTES)
+    try_cmd.set_defaults(func=cmd_try, take_foreign=None)
 
     who = subs.add_parser("who", help="live sessions, their paths, ages and contacts")
     who.set_defaults(func=cmd_who)

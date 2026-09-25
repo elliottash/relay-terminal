@@ -8,6 +8,7 @@ real one does.
 
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -65,6 +66,9 @@ class LandCase(unittest.TestCase):
         self.repo = base / "repo"
         self.land_root = base / "land"
         self.repo.mkdir()
+        # The verify slot pool sizes itself after the host (verify_slots); pin it so these
+        # tests keep asserting two slots whatever machine they run on.
+        os.environ["RELAY_LAND_VERIFY_SLOTS"] = "2"
         git(self.repo, "init", "-q", "-b", "main", ".")
         git(self.repo, "config", "user.email", "test@example.invalid")
         git(self.repo, "config", "user.name", "Test")
@@ -77,6 +81,7 @@ class LandCase(unittest.TestCase):
         git(self.repo, "commit", "-q", "-m", "first")
 
     def tearDown(self):
+        os.environ.pop("RELAY_LAND_VERIFY_SLOTS", None)
         self.temp.cleanup()
 
     def test_commit_records_named_card_and_no_cards_skips_it(self):
@@ -946,6 +951,24 @@ class Who(LandCase):
     def test_who_says_so_when_there_is_nothing(self):
         self.assertIn("no land sessions", self.land("who").stdout)
 
+    def test_who_shows_each_verify_slot_its_holder_and_last_tree(self):
+        # Card #76QW: a slot records who is building in it and what it last built.
+        self.land("begin", "mine", "f.txt")
+        slots = self.land_root / "verify-slots"
+        busy, free = slots / "repo-0123abcd-0", slots / "repo-0123abcd-1"
+        for slot in (busy, free):
+            slot.mkdir(parents=True)
+        tree = "abcdef123456" + "0" * 28
+        (busy / "manifest.json").write_text(
+            json.dumps({"tree": tree, "files": {}}), encoding="utf-8")
+        (busy.parent / (busy.name + ".lock")).write_text(
+            json.dumps({"pid": os.getpid(), "session": "mine", "since": time.time() - 130,
+                        "tree": tree}), encoding="utf-8")
+        out = self.land("who")
+        self.assertIn("slot repo-0123abcd-0: session mine (pid %d), held 2m, last tree %s"
+                      % (os.getpid(), tree[:12]), out.stdout)
+        self.assertIn("slot repo-0123abcd-1: free, no tree yet", out.stdout)
+
 
 class SharedRoot(LandCase):
     """Cards #BHJZ and #HRF6: the default root is one shared, Relay-owned place per user,
@@ -1281,6 +1304,159 @@ class Verify(LandCase):
             lock.close()
         self.assertEqual(len([p for p in slots.iterdir() if p.is_dir()]), 2)
         self.assertIn("return 3;", self.tip_text("src/main.cpp"))
+
+
+@unittest.skipUnless(shutil.which("cmake"), "cmake is not installed")
+class Try(LandCase):
+    """`try` builds the exact tree commit would land, landing nothing (card #76QW)."""
+
+    def setUp(self):
+        super().setUp()
+        write(self.repo / "CMakeLists.txt", TINY_CMAKE)
+        write(self.repo / "src/main.cpp", TINY_MAIN)
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "the tiny project")
+
+    def try_it(self, *args, **kw):
+        return self.land("try", "mine", "--target", "tiny", *args, **kw)
+
+    def slot_src(self, out):
+        found = re.search(r"(?m)^src (\S+)$", out.stdout)
+        self.assertTrue(found, "no src line in try's stdout:\n%s" % out.stdout)
+        return Path(found.group(1))
+
+    def test_a_broken_edit_i_never_claimed_cannot_fail_my_check(self):
+        # #234Z: another session's broken edit sits unclaimed in the working tree, so the
+        # shared tree cannot compile. try builds MY landing tree, not the shared tree.
+        self.land("begin", "mine", "CMakeLists.txt")
+        write(self.repo / "src/main.cpp", TINY_MAIN.replace("return 0;", "return OOPS;"))
+        write(self.repo / "CMakeLists.txt", TINY_CMAKE + "# mine\n")
+        out = self.try_it()
+        self.assertRegex(out.stdout, r"(?m)^tip [0-9a-f]{40}$")
+        self.assertIn("CMakeLists.txt", out.stdout)         # my claimed path's stat line
+        main = (self.slot_src(out) / "src/main.cpp").read_text(encoding="utf-8")
+        self.assertIn("return 0;", main)                    # the tree holds the tip's main
+        self.assertNotIn("OOPS", main)                      # ...not the neighbour's breakage
+        self.assertRegex(out.stdout, r"(?m)^binary \S+/build/tiny$")
+
+    def test_commit_names_the_revision_it_materialises(self):
+        main = self.repo / "src/main.cpp"
+        self.land("begin", "mine", "src/main.cpp")
+        write(main, TINY_MAIN.replace("return 1;", "return 41;"))
+        self.land("commit", "mine", "-m", "forty one", "--verify-target", "tiny")
+        landed = self.tip()
+        write(main, TINY_MAIN.replace("return 0;", "return OOPS;"))   # broken, uncommitted
+        out = self.try_it("--commit", landed)
+        self.assertIn("commit %s" % landed, out.stdout)
+        self.assertNotIn("tip ", out.stdout)                # no merge happened
+        self.assertIn("return 41;", (self.slot_src(out) / "src/main.cpp").read_text(
+            encoding="utf-8"))                              # that revision, whole
+
+    def test_tests_run_in_the_slot_and_a_failure_exits_6(self):
+        self.land("begin", "mine", "CMakeLists.txt")
+        write(self.repo / "CMakeLists.txt",
+              TINY_CMAKE + "enable_testing()\n"
+                           "add_test(NAME tiny-passes COMMAND tiny)\n"
+                           "add_test(NAME tiny-fails COMMAND /bin/false)\n")
+        out = self.try_it("--tests", "tiny-passes")
+        self.assertIn("binary", out.stdout)                 # everything was built too
+        out = self.try_it("--tests", "tiny-fails", expect=6)
+        self.assertIn("tiny-fails", out.stderr)             # the ctest tail
+        self.assertIn("tests failed", out.stderr)
+
+    def test_a_compile_failure_exits_5_not_6(self):
+        self.land("begin", "mine", "src/main.cpp")
+        write(self.repo / "src/main.cpp",
+              TINY_MAIN.replace("int value() { return 1; }", "int value() { return ; }"))
+        out = self.try_it("--tests", "tiny", expect=5)
+        self.assertIn("does not compile", out.stderr)
+        self.assertIn("error", out.stderr)                  # the compiler's own words
+
+    def test_try_moves_no_refs_index_or_working_tree(self):
+        self.land("begin", "mine", "CMakeLists.txt")
+        write(self.repo / "CMakeLists.txt", TINY_CMAKE + "# mine\n")
+        write(self.repo / "src/main.cpp", TINY_MAIN.replace("return 1;", "return 2;"))
+
+        def snapshot():
+            files = {str(p.relative_to(self.repo)): hashlib.sha256(p.read_bytes()).hexdigest()
+                     for p in sorted(self.repo.rglob("*"))
+                     if p.is_file() and ".git" not in p.parts}
+            return (git(self.repo, "for-each-ref").stdout,
+                    git(self.repo, "ls-files", "-s").stdout, files)
+
+        before = snapshot()
+        self.try_it()
+        self.assertEqual(snapshot(), before)
+
+    def test_intake_paths_are_refused(self):
+        write(self.repo / "f.txt.orig", "junk\n")
+        out = self.land("begin", "mine", "f.txt", "f.txt.orig")
+        self.assertIn("never committed by this tool", out.stdout)  # begin refuses to claim it
+        write(self.repo / "f.txt", "changed\n")
+        out = self.try_it("--whole", "f.txt.orig", "--verify-cmd", "test -f f.txt")
+        self.assertIn("not committing f.txt.orig", out.stderr)     # named anyway: dropped
+        self.assertNotIn("f.txt.orig", out.stdout)                 # and certainly not built
+        out = self.try_it("--verify-cmd", "true", "--paths", "f.txt.orig", expect=1)
+        self.assertIn("nothing to commit", out.stderr)             # an intake path alone: exit 1
+
+    def test_a_slot_configured_with_the_wrong_build_type_is_reconfigured(self):
+        self.land("begin", "mine", "src/main.cpp")
+        write(self.repo / "src/main.cpp", TINY_MAIN.replace("return 1;", "return 2;"))
+        out = self.try_it()
+        cache = self.slot_src(out).parent / "build" / "CMakeCache.txt"
+        self.assertIn("CMAKE_BUILD_TYPE:STRING=RelWithDebInfo", cache.read_text(
+            encoding="utf-8"))                              # the developer configure
+        cache.write_text(cache.read_text(encoding="utf-8").replace(
+            "CMAKE_BUILD_TYPE:STRING=RelWithDebInfo", "CMAKE_BUILD_TYPE:STRING=Debug"),
+            encoding="utf-8")
+        out = self.try_it()
+        self.assertIn("CMAKE_BUILD_TYPE is 'Debug'", out.stderr)
+        self.assertIn("CMAKE_BUILD_TYPE:STRING=RelWithDebInfo", cache.read_text(
+            encoding="utf-8"))                              # configured back, once
+        out = self.try_it()
+        self.assertNotIn("CMAKE_BUILD_TYPE is", out.stderr)
+
+    def test_print_binary_prints_only_the_binary_path(self):
+        self.land("begin", "mine", "src/main.cpp")
+        write(self.repo / "src/main.cpp", TINY_MAIN.replace("return 1;", "return 42;"))
+        out = self.try_it("--print-binary")
+        self.assertEqual(out.stdout.count("\n"), 1)
+        binary = out.stdout.strip()
+        self.assertTrue(binary.endswith("/build/tiny"), binary)
+        self.assertTrue(Path(binary).exists())
+        self.assertIn("materialised", out.stderr)           # the logs went to stderr
+
+
+def land_module():
+    """scripts/land.py loaded as a module, for unit-testing its helpers directly."""
+    spec = importlib.util.spec_from_file_location("land_under_test", str(LAND))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class VerifySlots(unittest.TestCase):
+    """verify_slots sizes the build-slot pool after the machine; the env wins (card #76QW)."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+
+    def slots(self, disk_gib, mem_gib, env=None):
+        return land_module().verify_slots(self.root, env=env or {},
+                                          disk_free_bytes=disk_gib * 2 ** 30,
+                                          mem_bytes=mem_gib * 2 ** 30)
+
+    def test_disk_and_memory_bound_the_pool_between_one_and_four(self):
+        self.assertEqual(self.slots(100, 40), 4)            # min(4, disk//3, mem//8)
+        self.assertEqual(self.slots(9, 40), 3)              # disk: 9 GiB // 3
+        self.assertEqual(self.slots(100, 8), 1)             # memory: 8 GiB // 8
+        self.assertEqual(self.slots(0, 0), 1)               # always at least one
+
+    def test_relay_land_verify_slots_wins(self):
+        self.assertEqual(self.slots(0, 0, env={"RELAY_LAND_VERIFY_SLOTS": "3"}), 3)
+
+    def test_a_nonsense_value_falls_back_to_the_machine(self):
+        self.assertEqual(self.slots(9, 40, env={"RELAY_LAND_VERIFY_SLOTS": "bogus"}), 3)
 
 
 class Gc(LandCase):
