@@ -8,7 +8,7 @@ implemented_by: openai/gpt-6-sol via codex
 verified_by: openai/gpt-6-sol via codex
 rank: zzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
-verify: {artifact: code, primary: script, also: [], human: none, criteria: Focused Board limit tests pass and board check is clean., sign_off: none, effort: low}
+verify: {artifact: code, primary: script, also: [], human: none, criteria: 'Focused Board limit tests pass, and a fresh board accepts 20 creates but refuses the 21st.', sign_off: none, effort: low}
 source: Codex guest in Relay, 2026-09-24
 links: {plans: [], commits: [], evidence: [], related: [], github: null}
 ---
