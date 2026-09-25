@@ -309,6 +309,44 @@ private Q_SLOTS:
         QCOMPARE(reattachCommand(QStringLiteral("quoted host"), QStringLiteral("relay-abcdef12")),
                  QStringLiteral("RELAY_SSH_SESSION=relay-abcdef12 ssh 'quoted host'"));
     }
+
+    void buildsAMasterKeepalive() {
+        // The argv rides the master the login already made; nothing is negotiated, so a missing
+        // master (or host) is not a keepalive at all.
+        QCOMPARE(keepaliveArgv(QStringLiteral("/run/relay/sock"), QStringLiteral("user@host")),
+                 QStringList({QStringLiteral("ssh"), QStringLiteral("-S"), QStringLiteral("/run/relay/sock"),
+                              QStringLiteral("-o"), QStringLiteral("ControlMaster=no"),
+                              QStringLiteral("-o"), QStringLiteral("ProxyCommand=none"),
+                              QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+                              QStringLiteral("user@host"), QStringLiteral("true")}));
+        QCOMPARE(keepaliveArgv(QString(), QStringLiteral("user@host")), QStringList());
+        QCOMPARE(keepaliveArgv(QStringLiteral("/run/relay/sock"), QString()), QStringList());
+        // The command line is the same words, quoted for a shell — here nothing needs quoting,
+        // but a socket path with a space is quoted, not split.
+        QCOMPARE(keepaliveCommand(QStringLiteral("/run/relay/sock"), QStringLiteral("user@host")),
+                 QStringLiteral("ssh -S /run/relay/sock -o ControlMaster=no -o ProxyCommand=none "
+                                "-o BatchMode=yes user@host true"));
+        QCOMPARE(keepaliveCommand(QStringLiteral("/run/re lay/sock"), QStringLiteral("user@host")),
+                 QStringLiteral("ssh -S '/run/re lay/sock' -o ControlMaster=no -o ProxyCommand=none "
+                                "-o BatchMode=yes user@host true"));
+        QCOMPARE(keepaliveCommand(QString(), QStringLiteral("user@host")), QString());
+    }
+
+    void derivesTheWrapperEnvironment() {
+        // Persistence is armed only when the wrapper can share a connection at all.
+        QCOMPARE(sshPersistValue(true, true), QStringLiteral("1"));
+        QCOMPARE(sshPersistValue(false, true), QStringLiteral("0"));
+        QCOMPARE(sshPersistValue(true, false), QStringLiteral("0"));
+        // Only the two transports the wrapper knows; anything else falls back to ssh.
+        QCOMPARE(sshLinkValue(QStringLiteral("ssh")), QStringLiteral("ssh"));
+        QCOMPARE(sshLinkValue(QStringLiteral("mosh")), QStringLiteral("mosh"));
+        QCOMPARE(sshLinkValue(QStringLiteral("telnet")), QStringLiteral("ssh"));
+        QCOMPARE(sshLinkValue(QString()), QStringLiteral("ssh"));
+        // The never list keeps what it is given, minus padding and blanks.
+        QCOMPARE(sshNeverList({QStringLiteral(" Bastion "), QString(), QStringLiteral("lab.example")}),
+                 QStringList({QStringLiteral("Bastion"), QStringLiteral("lab.example")}));
+        QCOMPARE(sshNeverList(QStringList()), QStringList());
+    }
 };
 
 QTEST_MAIN(SshConfigTests)

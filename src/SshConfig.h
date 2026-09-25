@@ -120,4 +120,21 @@ QList<RemoteSession> parseSessionList(const QByteArray &output);
 // minting a new one — so a restored pane lands where it was, its programs still running.
 QString reattachCommand(const QString &target, const QString &session);
 
+// A no-op ssh over the master behind a mosh login (card #XQ8F): mosh's own ssh exits as soon as
+// the connection is up, so nothing of Relay's holds the socket open and ControlPersist expires it
+// ten idle minutes after the agent last used it — the host tools go with it. Run detached every
+// four minutes it resets that clock. An ssh login needs no such thing: its own session keeps its
+// master. Empty when either part is missing, for a login with no master to keep.
+QStringList keepaliveArgv(const QString &controlPath, const QString &host);
+QString keepaliveCommand(const QString &controlPath, const QString &host);
+
+// The values the pane shell's environment carries for its ssh/mosh wrapper (card #XQ8F). Pure so
+// the rules are testable without a pane: persistence is armed only when the wrapper itself can
+// share a connection at all; only "ssh" and "mosh" are transports the wrapper knows how to route,
+// anything else falls back to plain ssh; and the never list is what the wrapper compares the
+// destination's host against, trimmed and emptied of blank entries.
+QString sshPersistValue(bool wrapSsh, bool persist);
+QString sshLinkValue(const QString &setting);
+QStringList sshNeverList(const QStringList &hosts);
+
 }  // namespace relay::ssh

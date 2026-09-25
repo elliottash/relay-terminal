@@ -584,4 +584,51 @@ QString reattachCommand(const QString &target, const QString &session) {
     return QStringLiteral("RELAY_SSH_SESSION=") + shellQuote(session) + QStringLiteral(" ssh ") + shellQuote(target);
 }
 
+QStringList keepaliveArgv(const QString &controlPath, const QString &host) {
+    if (controlPath.isEmpty() || host.isEmpty()) return {};
+    // Nothing new is negotiated: ControlMaster=no rides the master the login already made, and
+    // ProxyCommand=none keeps a login that needed a jump host from opening a second, interactive
+    // one just to prove the first is alive. BatchMode makes silence an exit, never a question.
+    return {QStringLiteral("ssh"),
+            QStringLiteral("-S"), controlPath,
+            QStringLiteral("-o"), QStringLiteral("ControlMaster=no"),
+            QStringLiteral("-o"), QStringLiteral("ProxyCommand=none"),
+            QStringLiteral("-o"), QStringLiteral("BatchMode=yes"),
+            host,
+            QStringLiteral("true")};
+}
+
+QString keepaliveCommand(const QString &controlPath, const QString &host) {
+    // The same words as keepaliveArgv, joined for a log line or a shell.
+    const QStringList argv = keepaliveArgv(controlPath, host);
+    QString line;
+    for (const QString &word : argv) {
+        if (!line.isEmpty()) line += QLatin1Char(' ');
+        line += shellQuote(word);
+    }
+    return line;
+}
+
+QString sshPersistValue(bool wrapSsh, bool persist) {
+    // "1" arms the wrapper's holder session; anything else leaves ssh alone (old behaviour).
+    return wrapSsh && persist ? QStringLiteral("1") : QStringLiteral("0");
+}
+
+QString sshLinkValue(const QString &setting) {
+    // The wrapper knows the two transports; anything else falls back to the one that needs no
+    // local client to exist.
+    return setting == QStringLiteral("mosh") ? setting : QStringLiteral("ssh");
+}
+
+QStringList sshNeverList(const QStringList &hosts) {
+    // The wrapper splits on commas and compares case-insensitively with the destination's host;
+    // here only blanks and padding are dropped, so the Options row stays free-form.
+    QStringList trimmed;
+    for (const QString &host : hosts) {
+        const QString value = host.trimmed();
+        if (!value.isEmpty()) trimmed << value;
+    }
+    return trimmed;
+}
+
 }  // namespace relay::ssh

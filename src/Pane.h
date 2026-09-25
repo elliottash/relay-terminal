@@ -1288,6 +1288,14 @@ public:
             m_agentPauseReason = QStringLiteral("Restored after exit");
             rebuildQueueStrip();
         }
+        // The holder re-attach line of card #XQ8F (docs/SSH-AND-MOSH.md section 3b): this pane
+        // was logged into a remote holder session when Relay was last quit, and the holder went
+        // on running on its host. Unlike the restored queue above it must not wait for the
+        // person — surviving the restart is the feature — so the pane's restarted shell runs it
+        // once, at its first prompt (runRestoredRemoteLogin, PaneRuntime.cpp). A line a
+        // hand-edited layout grew past reason is ignored rather than typed.
+        const QString remoteLogin = spec.value(QStringLiteral("remote_login")).toString();
+        if (remoteLogin.size() <= 4096) m_remoteLoginRestore = remoteLogin;
         // The terminal text this pane had when Relay was last quit (src/WindowState.h). The pane
         // keeps the saved id, so the same file is rewritten instead of one per restart, and the
         // lines are replayed once the restarted shell reports its first prompt.
@@ -14983,6 +14991,9 @@ private:
         for (int i = m_entries.size() - 1; i >= 0; --i)
             if (!m_entries[i].remoteToken.isEmpty()) m_entries.removeAt(i);
         m_login = RemoteLogin();
+        // #XQ8F: no login, no master to keep alive, and the chip reverts to its ordinary tooltip.
+        m_masterKeepalive.stop();
+        updateRemoteHolderChip();
         publishLoginContext(); updatePaths(); rebuildQueueStrip();
         changed();
     }
@@ -15059,6 +15070,10 @@ private:
         }
         if (before != m_login.atPrompt) { updateTakeControl(); publishLoginContext(); }
         refreshBusyLine();
+        // #XQ8F: the remote chip and the mosh master's keepalive follow this login; their bodies
+        // are in PaneRuntime.cpp, beside the environment that armed the wrapper behind it.
+        updateRemoteHolderChip();
+        updateMasterKeepalive();
     }
 
     // Load shell/remote-integration.sh into the remote shell once per login, per Options ›
@@ -16003,6 +16018,14 @@ struct PendingPrompt { QString text, why, program; bool fix = false, handoff = f
 
     void pollShell();
 
+    // The holder-session runtime of card #XQ8F (bodies in PaneRuntime.cpp): the saved
+    // remote_login line re-attaches at the local shell's first prompt, the remote chip says when
+    // a login rides a holder session, and a mosh login's master is kept from expiring.
+    void runRestoredRemoteLogin();
+    void updateRemoteHolderChip();
+    void updateMasterKeepalive();
+    void runMasterKeepalive();
+
     // Hiding or showing the prompt box changes this pane's minimum size, and every splitter above
     // it then redistributes the panes: taking control in a three-pane row shrank the last pane to
     // almost nothing (#G152), and the saved window layout stored that collapsed size. Run the
@@ -16643,6 +16666,11 @@ private:
         QByteArray line;             // what the host has written since its last newline: the prompt
         QByteArray promptBytes;      // that prompt, text and colour only (relay::remote::promptEcho)
     } m_login;
+    // The holder session this pane restores into, and the master under a mosh login (#XQ8F): see
+    // runRestoredRemoteLogin()/updateMasterKeepalive() in PaneRuntime.cpp.
+    QString m_remoteLoginRestore;   // the spec's remote_login, run once at the shell's first prompt
+    bool m_remoteLoginRan = false;  // and never again, not even after a later shell restart
+    QTimer m_masterKeepalive;       // mosh only: ssh's own session keeps its master open
     // prompt-box-only input: masked prompt box at a password prompt, and the take-control button
     QLineEdit *m_secretEdit = nullptr;
     QLabel *m_secretChip = nullptr;

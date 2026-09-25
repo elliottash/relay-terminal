@@ -821,10 +821,9 @@ public:
             m_glyph->setLive(relay::panestatus::isLive(state));
         }
         if (remote != m_remote || host != m_remoteHost) {
-            m_remote = remote; m_remoteHost = host;
+            m_remote = remote; m_remoteHost = host; m_remoteCommand = remoteCommand;
             m_remoteChip->setText(host.isEmpty() ? program : host);
-            m_remoteChip->setToolTip(QStringLiteral("Remote session · %1\nWhat you type here goes to %2, not this machine.")
-                                         .arg(remoteCommand, host.isEmpty() ? QStringLiteral("another machine") : host));
+            m_remoteChip->setToolTip(remoteToolTip(host.isEmpty() ? program : host));
             m_remoteChip->setVisible(remote);
             m_backdrop->setVisible(remote || m_guestDriving);
             if (auto *pane = dynamic_cast<Pane *>(parentWidget())) {
@@ -838,6 +837,18 @@ public:
             m_phoneChip->setVisible(phone);
             if (auto *pane = dynamic_cast<Pane *>(parentWidget())) pane->updateHeader();
         }
+    }
+
+    // #XQ8F: this login rides a holder session — a tmux session on the host that stays alive
+    // when the pane closes or Relay quits (docs/SSH-AND-MOSH.md section 3b) — and the chip's
+    // tooltip must say so, because closing the pane is exactly what does *not* end it. Empty
+    // restores the ordinary remote tooltip; the session name is the one the login's own command
+    // line carries, so a plain ssh the person typed gets none.
+    void setRemotePersistent(const QString &session) {
+        if (session == m_remoteSession) return;
+        m_remoteSession = session;
+        if (m_remoteChip && m_remote)
+            m_remoteChip->setToolTip(remoteToolTip(QFileInfo(m_remoteCommand.section(' ', 0, 0)).fileName()));
     }
 
     // The pane's resource meter (issue #D03W). Called by the same 400 ms poll that calls
@@ -1378,6 +1389,19 @@ private:
         }
     };
 
+    // The remote chip's tooltip, from what setStatus last saw plus the holder session, if any,
+    // that setRemotePersistent() named (#XQ8F). `label` is what the chip itself shows: the host,
+    // or the program when no host could be read from the line.
+    QString remoteToolTip(const QString &label) const {
+        if (!m_remoteSession.isEmpty())
+            return QStringLiteral("Persistent session %1 on %2\nClosing this pane leaves it running; "
+                                  "Close and end the remote session (pane menu) ends it.\n"
+                                  "What you type here goes to %2, not this machine.")
+                .arg(m_remoteSession, label);
+        return QStringLiteral("Remote session · %1\nWhat you type here goes to %2, not this machine.")
+            .arg(m_remoteCommand, m_remoteHost.isEmpty() ? QStringLiteral("another machine") : m_remoteHost);
+    }
+
     int m_fullWidth = 0;
     QHBoxLayout *m_row = nullptr;     // the button row the ⓘ joins; the share button hangs below it
     PaneStateGlyph *m_glyph = nullptr;
@@ -1388,5 +1412,7 @@ private:
     relay::panestatus::State m_state = relay::panestatus::State::Idle;
     bool m_remote = false, m_phone = false, m_guestDriving = false;
     QString m_remoteHost;
+    QString m_remoteCommand;          // the line setStatus() judged the chip by (its host, program)
+    QString m_remoteSession;          // the holder session of #XQ8F, or none for a plain login
     int m_layoutLogSerial = 0;        // RELAY_LAYOUT_LOG only: which pane a line is about
 };

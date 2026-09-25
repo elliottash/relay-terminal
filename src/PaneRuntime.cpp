@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Pane.h"
+#include "PaneChrome.h"   // the remote chip this pane owns (setRemotePersistent, #XQ8F)
+#include <QProcess>        // the master keepalive runs detached
 
 bool Pane::restoreAgentPrompt() {
     if (!m_editor->toPlainText().isEmpty() || inQueueSelection()
@@ -682,6 +684,19 @@ void Pane::startTerminal(bool cleanShell) {
         }
         qputenv("RELAY_SSH_WRAP", wrapSsh ? "1" : "0");
         qputenv("RELAY_SSH_DIR", sshSocketDir().toUtf8());
+        // The holder sessions of card #XQ8F (docs/SSH-AND-MOSH.md section 3b): this pane's ssh
+        // land in a tmux session on their host, so the remote work survives disconnects, pane
+        // closes and Relay restarts. Persistence is armed only while the wrapper can share a
+        // connection at all; ssh/link chooses which transport a persistent login takes; and
+        // ssh/hosts_never names hosts that never get one. The Options rows are the terminal
+        // area's; the values are derived in relay::ssh so the rules are testable without a pane.
+        qputenv("RELAY_SSH_PERSIST", relay::ssh::sshPersistValue(
+                    wrapSsh, QSettings().value(QStringLiteral("ssh/persist"), true).toBool()).toUtf8());
+        qputenv("RELAY_SSH_LINK", relay::ssh::sshLinkValue(
+                    QSettings().value(QStringLiteral("ssh/link"), QStringLiteral("ssh")).toString()).toUtf8());
+        qputenv("RELAY_SSH_NEVER", relay::ssh::sshNeverList(
+                    QSettings().value(QStringLiteral("ssh/hosts_never")).toStringList())
+                    .join(QLatin1Char(',')).toUtf8());
         // The Claude IDE bridge (GT7X, 26.9): the shell carries *no* bridge variables. They go on
         // the one command line the pane types when Claude Code is picked (`launchGuest`), so no
         // other program in this shell, and no shell started later, ever sees a port that may since
@@ -855,6 +870,13 @@ void Pane::startTerminal(bool cleanShell) {
         const QString parentPythonPath = qEnvironmentVariable("PYTHONPATH");
         shellEnvironment << QStringLiteral("PYTHONPATH=") +
             (parentPythonPath.isEmpty() ? scriptsPath : parentPythonPath + QDir::listSeparator() + scriptsPath);
+        // Child-only, like the pair above it: this pane's own id for the ssh/mosh wrapper of
+        // #XQ8F, whose default holder name is "relay-" plus the first eight characters of it.
+        // RELAY_SSH_PERSIST and friends are process-wide and so use qputenv in startTerminal;
+        // this one is per pane. The id exists before any shell starts (the pane's token) and
+        // initRestore takes the saved one back for the shells that follow, so a pane restored
+        // from a layout still owns the holders named after it.
+        shellEnvironment << QStringLiteral("RELAY_PANE_ID=") + scrollbackId();
         if (isolation::enabled() && isolation::available()) {
             // OOMPolicy=continue (default): when a command exceeds the limit, the kernel stops that
             // command and the shell keeps running; Relay reports the kill from memory.events.
@@ -2101,6 +2123,9 @@ void Pane::pollShell() {
             registerWithBridge();
         }
         if (stage == QStringLiteral("ready")) {
+            // The first of the shell's prompts is the one a restored pane has been waiting for
+            // (#XQ8F: the saved remote_login line re-attaches below, beside the scrollback).
+            const bool firstPrompt = !m_promptReported;
             m_promptReported = true;
             refreshShellReady();
             m_knownCommands = event.value(QStringLiteral("known_commands")).toArray();
@@ -2110,6 +2135,9 @@ void Pane::pollShell() {
             if (!m_agentBusy) this->status(QStringLiteral("Shell ready · exit %1").arg(status));
             // A restored pane brings its old text back above this first prompt.
             replayRestoredScrollback();
+            // And its remote_login line follows at once, unlike the restored queue above it: the
+            // holder session it re-attaches to is the whole point of staying alive (#XQ8F).
+            if (firstPrompt) runRestoredRemoteLogin();
             // Fast commands can finish between two polls, so "running" is not a reliable trigger.
             const bool suggestNext = m_commandLoaded;
             m_commandLoaded = false;
@@ -2208,3 +2236,74 @@ void Pane::pollShell() {
             status(QStringLiteral("Your shell already has a DEBUG hook. It was left untouched; use native mode or relaunch with --clean-shell."));
         }
     }
+
+// The holder-session runtime of card #XQ8F. The declarations and members are Pane.h's; the
+// bodies live here, beside the shell environment that arms the wrapper they belong to.
+
+// A pane whose layout leaf carried a remote_login line re-attaches to its holder session
+// (docs/SSH-AND-MOSH.md section 3b): the holder kept running on the host when Relay was last
+// quit, and surviving that is the feature — so unlike the restored queue, which waits for the
+// person to resume it, the line runs once, at the pane's own shell's first prompt, without
+// asking. A pane that started a program instead of a shell never reports that prompt (only the
+// shell bridge writes the state pollShell reads here), and the flag keeps a shell restarted
+// later from running the line a second time into whatever the person is doing by then.
+void Pane::runRestoredRemoteLogin() {
+    if (m_remoteLoginRestore.isEmpty() || m_remoteLoginRan) return;
+    m_remoteLoginRan = true;
+    relay::log::info(QStringLiteral("remote_login_restored pane=%1 line=%2")
+                         .arg(paneLogId(), m_remoteLoginRestore));
+    queueCommand(m_remoteLoginRestore);
+}
+
+// The remote chip says when this login rides a holder session that outlives the pane. Only a
+// login whose own command line names one has it — the wrapper appends `relay-holder <session>`
+// to every ssh it lands in a holder — so the argv is the whole truth: a plain `ssh host` typed
+// by hand shares the connection but runs no holder, and the chip keeps its ordinary tooltip.
+void Pane::updateRemoteHolderChip() {
+    // PaneChrome parents itself to the pane (the window that owns the layout builds it), and
+    // PaneChrome.h includes Pane.h, so the pointer cannot be a Pane member. A pane has few
+    // children; finding the chrome costs nothing beside the argv read that precedes it.
+    for (QObject *child : children()) {
+        if (auto *chrome = dynamic_cast<PaneChrome *>(child)) {
+            chrome->setRemotePersistent(m_login.active ? relay::ssh::holderSession(foregroundArgv())
+                                                       : QString());
+            return;
+        }
+    }
+}
+
+// Under mosh the ssh that built the connection exits as soon as the session is up, so the
+// shared master under it has nothing of Relay's holding it open: ControlPersist expires it ten
+// idle minutes after the agent last used the socket, and the host tools go with it. A no-op ssh
+// over the master every four minutes resets that clock. An ssh login needs none of this — its
+// own session keeps its master — so the timer runs for mosh and mosh-client only, and stops the
+// moment the login ends (endLogin, in Pane.h).
+void Pane::updateMasterKeepalive() {
+    const bool mosh = m_login.program == QStringLiteral("mosh")
+        || m_login.program == QStringLiteral("mosh-client");
+    if (!(m_login.active && mosh && loginReachable())) {
+        if (m_masterKeepalive.isActive()) m_masterKeepalive.stop();
+        return;
+    }
+    if (!m_masterKeepalive.isActive()) {
+        m_masterKeepalive.setInterval(4 * 60 * 1000);
+        connect(&m_masterKeepalive, &QTimer::timeout, this, &Pane::runMasterKeepalive,
+                Qt::UniqueConnection);
+        m_masterKeepalive.start();
+    }
+}
+
+void Pane::runMasterKeepalive() {
+    // The login this was armed for may have ended between ticks; endLogin stops the timer, but
+    // one tick already in flight still lands here.
+    if (!m_login.active || !loginReachable()) {
+        m_masterKeepalive.stop();
+        return;
+    }
+    const QStringList argv = relay::ssh::keepaliveArgv(m_login.where.controlPath, loginHost());
+    if (argv.isEmpty()) return;
+    relay::log::info(QStringLiteral("ssh_master_keepalive pane=%1 host=%2").arg(paneLogId(), loginHost()));
+    // Detached: a hung or dead ssh must never take the pane — or Relay — down with it, and the
+    // keepalive's lifetime is the master's, not the pane's.
+    QProcess::startDetached(argv.first(), argv.mid(1));
+}
