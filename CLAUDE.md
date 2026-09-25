@@ -154,11 +154,14 @@ tree; the tree that went onto the branch did not compile at all.
 
 So when the paths being landed include C++ or build files (`src/`, `engine/`, `tests/*.cpp`,
 `CMakeLists.txt`, `*.cmake`), `commit` materialises the **exact** tree it is about to put on `main`
-into `/tmp/claude-1000/land/<me>/verify/src`, builds it in `.../verify/build`, and performs the
-compare-and-swap only if that exits 0. Otherwise it prints the first compiler errors, lands nothing
-and exits 5. Only files whose blob changed are rewritten and the build directory is kept between
-commits, so it stays incremental. That directory is the tool's own check, not a workspace: nobody
-edits there. `--verify-cmd "<shell>"`, `--verify-tests "<ctest regex>"` and `--verify-target`
+into a build slot, `/tmp/claude-1000/land/verify-slots/<repo>-<n>/src`, builds it in `.../build`,
+and performs the compare-and-swap only if that exits 0. Otherwise it prints the first compiler
+errors, lands nothing and exits 5. Only files whose blob changed are rewritten, so a slot stays
+incremental whoever used it last. There are `RELAY_LAND_VERIFY_SLOTS` slots (default 2) shared by
+every session and each is locked for a whole build: until card #SZHQ every session kept its own
+verify build forever, and on 2026-09-24 that was 255 of them and 153 GB. A slot is the tool's own
+check, not a workspace: nobody edits there. `land.py gc` (which also runs by itself at most hourly)
+drops sessions idle for 3 days; `who` prints what the land root takes on disk. `--verify-cmd "<shell>"`, `--verify-tests "<ctest regex>"` and `--verify-target`
 override the default (configure if needed, then `cmake --build … --target relay`); `--no-verify`
 exists and is refused whenever any path is contested or stale. Landed `.py` files are byte-compiled
 the same way, which costs nothing.

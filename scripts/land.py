@@ -81,12 +81,25 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_ROOT = "/tmp/claude-1000/land"
+DEFAULT_ROOT = os.path.join(tempfile.gettempdir(),
+                            "claude-%d" % os.getuid() if hasattr(os, "getuid") else "claude",
+                            "land")
 DEFAULT_BRANCH = "main"
 DEFAULT_STALE_MINUTES = 15
 # A session that has not run a land.py command for this long is not editing anything any
 # more: `who` and `doctor` call it stale and contest detection ignores it.
 IDLE_HOURS = 12
+# Card #SZHQ: the verify build used to live in each session's own directory and was never
+# removed — 255 of them, 153 GB, on 2026-09-24. It is now a small pool of slots shared by every
+# session of one repository, each held under a lock for a whole materialise-and-build, so the
+# disk it takes is bounded by the slot count instead of the session count. Every session's tree
+# is close to the tip, so a slot another session built last stays incremental.
+VERIFY_SLOTS = max(1, int(os.environ.get("RELAY_LAND_VERIFY_SLOTS") or 2))
+# A session idle this long is not coming back: `gc` removes its snapshots and its registry
+# entry. Stale (IDLE_HOURS) sessions younger than this are still listed and kept.
+GC_DAYS = float(os.environ.get("RELAY_LAND_GC_DAYS") or 3)
+# A pre-#SZHQ per-session verify directory untouched this long is not mid-build: gc drops it.
+LEGACY_VERIFY_MINUTES = 30
 NEVER_COMMIT = (".board/bug_intake.txt", ".board/feature_intake.txt")
 # Variables that would silently redirect a git command at someone else's index or work tree.
 GIT_ENV_STRIP = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY",
@@ -748,6 +761,7 @@ def cmd_begin(args, log):
     if not paths:
         raise Fail("nothing to claim")
 
+    auto_gc(root, log)
     directory = session_dir(root, args.session)
     directory.mkdir(parents=True, exist_ok=True)
     try:
@@ -1114,7 +1128,61 @@ def run_verify(repo, root, session, tree, args, log):
     Returns (failed step, output) or (None, None). The working tree is never read: that is
     the whole point, because it holds everyone's uncommitted code and proves nothing.
     """
-    base = session_dir(root, session) / "verify"
+    with verify_slot(repo, root, log) as base:
+        return _run_verify_in(repo, base, tree, args, log)
+
+
+def slot_prefix(repo):
+    """Slots are per repository: two projects landing through one root never share a build."""
+    return "%s-%s" % (Path(str(repo)).name or "repo",
+                      hashlib.sha1(str(repo).encode("utf-8")).hexdigest()[:8])
+
+
+class verify_slot:
+    """Hold one of VERIFY_SLOTS build slots for this repository, waiting if all are busy.
+
+    The lock is an flock on `<slot>.lock`, so a session that dies mid-build frees its slot.
+    Without fcntl (Windows) the first slot is used without a lock.
+    """
+
+    def __init__(self, repo, root, log):
+        self.base = Path(root) / "verify-slots"
+        self.prefix = slot_prefix(repo)
+        self.log = log
+        self.handle = None
+
+    def __enter__(self):
+        self.base.mkdir(parents=True, exist_ok=True)
+        slots = [self.base / ("%s-%d" % (self.prefix, n)) for n in range(VERIFY_SLOTS)]
+        try:
+            import fcntl
+        except ImportError:
+            return slots[0]
+        # The most recently used free slot first: it is the one most likely to be warm.
+        order = sorted(slots, key=lambda s: -(s / "manifest.json").stat().st_mtime
+                       if (s / "manifest.json").exists() else 0)
+        for slot in order:
+            handle = open(str(slot) + ".lock", "a+")
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                handle.close()
+                continue
+            self.handle = handle
+            return slot
+        slot = order[0]
+        self.log("verify: all %d build slot(s) busy; waiting for %s" % (len(slots), slot.name))
+        self.handle = open(str(slot) + ".lock", "a+")
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+        return slot
+
+    def __exit__(self, *exc):
+        if self.handle is not None:
+            self.handle.close()
+        return False
+
+
+def _run_verify_in(repo, base, tree, args, log):
     src, build = base / "src", base / "build"
     src.mkdir(parents=True, exist_ok=True)
     build.mkdir(parents=True, exist_ok=True)
@@ -1261,6 +1329,7 @@ def cmd_commit(args, log):
     repo = repo_root()
     root = Path(args.root)
     meta = read_meta(root, args.session)
+    auto_gc(root, log)
     branch = args.branch or meta.get("branch", DEFAULT_BRANCH)
     if Path(meta.get("repo", repo)) != Path(repo):
         raise Fail("session %r was started in %s, not %s"
@@ -1401,8 +1470,8 @@ def cmd_commit(args, log):
                 print_review(log, root, branch, infos, plans, held, digest, unselected)
                 log("(--dry-run, so nothing was committed either way.)")
             if any(is_cxx_path(path) for path in plans) and not args.no_verify:
-                log("(a real commit would also build this exact tree in %s before the swap.)"
-                    % (session_dir(root, args.session) / "verify"))
+                log("(a real commit would also build this exact tree in one of the %d shared "
+                    "build slots under %s before the swap.)" % (VERIFY_SLOTS, root / "verify-slots"))
             return 0
 
         if args.no_verify and held:
@@ -1555,6 +1624,125 @@ def cmd_abandon(args, log):
     return 0
 
 
+# --------------------------------------------------------------------------- gc
+
+def tree_bytes(path):
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(str(path)):
+        for name in filenames:
+            try:
+                total += os.lstat(os.path.join(dirpath, name)).st_blocks * 512
+            except (OSError, AttributeError):
+                pass
+    return total
+
+
+def human_bytes(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return ("%.0f %s" if unit in ("B", "KB") else "%.1f %s") % (n, unit)
+        n /= 1024.0
+
+
+def newest_mtime(path):
+    newest = 0.0
+    for dirpath, dirnames, filenames in os.walk(str(path)):
+        for name in dirnames + filenames:
+            try:
+                newest = max(newest, os.lstat(os.path.join(dirpath, name)).st_mtime)
+            except OSError:
+                pass
+    try:
+        newest = max(newest, os.lstat(str(path)).st_mtime)
+    except OSError:
+        pass
+    return newest
+
+
+def collect_garbage(root, log, dry_run=False, quiet=False):
+    """Reclaim what no session will read again. Returns (removed count, bytes freed).
+
+    - a pre-#SZHQ `<session>/verify` directory nobody has written for LEGACY_VERIFY_MINUTES;
+    - a session idle longer than GC_DAYS: its directory and its registry entry;
+    - a session directory with no meta.json and no registry entry (a crashed `begin`).
+    Live sessions' snapshots are never touched, and neither is the working tree.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return 0, 0
+    registry = read_registry(root).get("sessions", {})
+    doomed = []          # (path, why, registry name to drop or None)
+    cutoff = _dt.datetime.now().timestamp() - LEGACY_VERIFY_MINUTES * 60
+    for directory in sorted(p for p in root.iterdir() if p.is_dir()):
+        name = directory.name
+        if name == "verify-slots" or name.startswith("."):
+            continue
+        entry = registry.get(name)
+        idle = session_idle_minutes(entry) if isinstance(entry, dict) else None
+        if idle is None and not (directory / "meta.json").exists():
+            try:
+                idle = (_dt.datetime.now().timestamp() - directory.stat().st_mtime) / 60
+            except OSError:
+                continue
+        if idle is not None and idle > GC_DAYS * 24 * 60:
+            doomed.append((directory, "idle %s" % human_age(idle), name))
+            continue
+        legacy = directory / "verify"
+        if legacy.is_dir() and newest_mtime(legacy / "manifest.json"
+                                            if (legacy / "manifest.json").exists()
+                                            else legacy) < cutoff:
+            doomed.append((legacy, "per-session verify build (now pooled)", None))
+
+    freed = 0
+    for path, why, name in doomed:
+        size = tree_bytes(path)
+        freed += size
+        if not quiet or dry_run:
+            log("gc: %s %s (%s, %s)" % ("would remove" if dry_run else "removed",
+                                        path, why, human_bytes(size)))
+        if not dry_run:
+            shutil.rmtree(str(path), ignore_errors=True)
+    names = [name for _, _, name in doomed if name]
+    if names and not dry_run:
+        def mutate(data):
+            for name in names:
+                data["sessions"].pop(name, None)
+        edit_registry(root, mutate)
+    if doomed and quiet and not dry_run:
+        log("gc: reclaimed %s from %d stale land director%s under %s"
+            % (human_bytes(freed), len(doomed), "y" if len(doomed) == 1 else "ies", root))
+    return len(doomed), freed
+
+
+def auto_gc(root, log):
+    """Run gc at most once an hour, from the commands every session already runs."""
+    stamp = Path(root) / ".last-gc"
+    try:
+        if _dt.datetime.now().timestamp() - stamp.stat().st_mtime < 3600:
+            return
+    except OSError:
+        pass
+    try:
+        Path(root).mkdir(parents=True, exist_ok=True)
+        stamp.touch()
+        collect_garbage(root, log, quiet=True)
+    except Exception as exc:   # housekeeping must never fail a begin or a commit
+        log("gc: skipped (%s)" % exc)
+
+
+def cmd_gc(args, log):
+    root = Path(args.root)
+    count, freed = collect_garbage(root, log, dry_run=args.dry_run)
+    if not count:
+        log("gc: nothing to reclaim under %s" % root)
+    else:
+        log("gc: %s %s in %d director%s" % ("would free" if args.dry_run else "freed",
+                                           human_bytes(freed), count,
+                                           "y" if count == 1 else "ies"))
+    log("gc: %s now holds %s" % (root, human_bytes(tree_bytes(root)) if root.exists() else "0 B"))
+    return 0
+
+
 # --------------------------------------------------------------------------- doctor
 
 def older_versions(repo, path, limit=80):
@@ -1571,6 +1759,7 @@ def cmd_doctor(args, log):
     repo = repo_root()
     branch = args.branch
     findings = 0
+    auto_gc(Path(args.root), log)
 
     on = head_branch(repo)
     if on != branch:
@@ -1664,6 +1853,7 @@ def cmd_doctor(args, log):
 
 def cmd_who(args, log):
     root = Path(args.root)
+    auto_gc(root, log)
     sessions = registered_sessions(root)
     if not sessions:
         log("no land sessions under %s" % root)
@@ -1679,6 +1869,11 @@ def cmd_who(args, log):
         if len(claims) > WHO_PATHS:
             log("    ... and %d more (%s/%s/meta.json has them all)"
                 % (len(claims) - WHO_PATHS, root, name))
+    slots = root / "verify-slots"
+    log("disk: %s holds %s, of which verify build slots %s (at most %d per repository; "
+        "`land.py gc` reclaims stale sessions)"
+        % (root, human_bytes(tree_bytes(root)),
+           human_bytes(tree_bytes(slots)) if slots.exists() else "0 B", VERIFY_SLOTS))
     return 0
 
 
@@ -1864,11 +2059,19 @@ the build gate
 
 When the paths being landed include C++ or build files (src/, engine/, tests/*.cpp,
 CMakeLists.txt, *.cmake), `commit` materialises the EXACT tree it is about to put on the branch
-into <root>/<me>/verify/src and builds it in <root>/<me>/verify/build before the swap. Only a
-tree that compiles is landed; otherwise the first errors are printed, nothing is landed, and it
-exits 5. That directory is the tool's own check, not a place to work: nobody edits there. It is
-kept between commits and only the files whose blob changed are rewritten, so the build stays
-incremental. Landed .py files are byte-compiled the same way, which costs nothing.
+into a build slot, <root>/verify-slots/<repo>-<n>/src, and builds it in .../build before the
+swap. Only a tree that compiles is landed; otherwise the first errors are printed, nothing is
+landed, and it exits 5. A slot is the tool's own check, not a place to work: nobody edits there.
+There are RELAY_LAND_VERIFY_SLOTS of them per repository (default 2), shared by every session
+and held under a lock for the whole build, so twenty sessions take two build trees of disk, not
+twenty (card #SZHQ). Only the files whose blob changed are rewritten, so a slot stays
+incremental whoever used it last. Landed .py files are byte-compiled the same way.
+
+disk
+
+`gc` reclaims what nobody will read again: sessions idle longer than RELAY_LAND_GC_DAYS (default
+3) and pre-#SZHQ per-session verify builds. It runs by itself at most once an hour from begin,
+commit, who and doctor; `gc --dry-run` says what it would take. `who` prints the root's size.
 
 The working tree is deliberately not what gets built: it holds every session's uncommitted
 code, so it can compile while the tree you are landing cannot. That is how a green build of
@@ -1958,6 +2161,11 @@ def build_parser():
 
     who = subs.add_parser("who", help="live sessions, their paths, ages and contacts")
     who.set_defaults(func=cmd_who)
+
+    gc = subs.add_parser("gc", help="reclaim stale sessions and old verify builds "
+                                    "(runs by itself at most hourly)")
+    gc.add_argument("--dry-run", action="store_true")
+    gc.set_defaults(func=cmd_gc)
 
     abandon = subs.add_parser("abandon", help="drop a session's snapshots and claims")
     abandon.add_argument("session")

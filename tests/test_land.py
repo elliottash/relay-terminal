@@ -869,8 +869,9 @@ class Verify(LandCase):
         write(main, main.read_text(encoding="utf-8").replace("return 1;", "return 41 + 1;"))
         out = self.verify("commit", "mine", "-m", "first")
         self.assertIn("the exact tree builds", out.stdout)
-        verify_dir = self.land_root / "mine" / "verify"
-        self.assertTrue((verify_dir / "build/CMakeCache.txt").exists())
+        slots = list((self.land_root / "verify-slots").glob("repo-*[0-9]"))
+        self.assertEqual(len(slots), 1)
+        self.assertTrue((slots[0] / "build/CMakeCache.txt").exists())
 
         write(main, main.read_text(encoding="utf-8").replace("return 41 + 1;", "return 7;"))
         out = self.verify("commit", "mine", "-m", "second")
@@ -885,7 +886,8 @@ class Verify(LandCase):
         main = self.repo / "src/main.cpp"
         write(main, main.read_text(encoding="utf-8").replace("return 1;", "return 5;"))
         self.verify("commit", "mine", "-m", "mine")
-        built = (self.land_root / "mine" / "verify/src/src/main.cpp").read_text()
+        slot, = (self.land_root / "verify-slots").glob("repo-*[0-9]")
+        built = (slot / "src/src/main.cpp").read_text()
         self.assertIn("return 5;", built)
         self.assertFalse((self.repo / "build").exists())
 
@@ -931,6 +933,103 @@ class Verify(LandCase):
         out = self.verify("commit", "mine", "-m", "mine", "--verify-tests", "tiny-runs")
         self.assertIn("ctest", out.stdout)
         self.assertIn("tiny-runs", self.tip_text("CMakeLists.txt"))
+
+
+    def test_many_sessions_share_a_bounded_pool_of_build_slots(self):
+        # Card #SZHQ: one verify tree per session, kept forever, was 153 GB on 2026-09-24.
+        main = self.repo / "src/main.cpp"
+        for n in range(5):
+            name = "s%d" % n
+            self.land("begin", name, "src/main.cpp")
+            write(main, main.read_text(encoding="utf-8").replace(
+                "return %d;" % (n + 1), "return %d;" % (n + 2)))
+            self.land("commit", name, "-m", name, "--verify-cmd", "test -f src/main.cpp")
+        slots = [p for p in (self.land_root / "verify-slots").iterdir() if p.is_dir()]
+        self.assertLessEqual(len(slots), 2)
+        self.assertEqual([p for p in self.land_root.glob("s*/verify")], [])
+        self.assertIn("return 6;", self.tip_text("src/main.cpp"))
+
+    def test_a_second_session_uses_another_slot_while_the_first_is_building(self):
+        import fcntl
+        main = self.repo / "src/main.cpp"
+        self.land("begin", "mine", "src/main.cpp")
+        write(main, main.read_text(encoding="utf-8").replace("return 1;", "return 2;"))
+        self.land("commit", "mine", "-m", "mine", "--verify-cmd", "true")
+        slots = self.land_root / "verify-slots"
+        first, = [p for p in slots.iterdir() if p.is_dir()]
+        # Hold the warm slot the way a concurrent build does: the next commit takes the other.
+        lock = open(str(first) + ".lock", "a+")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            self.land("begin", "yours", "src/main.cpp")
+            write(main, main.read_text(encoding="utf-8").replace("return 2;", "return 3;"))
+            self.land("commit", "yours", "-m", "yours", "--verify-cmd", "true")
+        finally:
+            lock.close()
+        self.assertEqual(len([p for p in slots.iterdir() if p.is_dir()]), 2)
+        self.assertIn("return 3;", self.tip_text("src/main.cpp"))
+
+
+class Gc(LandCase):
+    """Card #SZHQ: nothing under the land root outlives its use."""
+
+    def test_gc_removes_a_long_idle_session_and_keeps_a_live_one(self):
+        self.land("begin", "gone", "f.txt")
+        self.land("begin", "here", "big.txt")
+        self.age_session("gone", 24 * 4)
+        out = self.land("gc")
+        self.assertIn("removed", out.stdout)
+        self.assertFalse((self.land_root / "gone").exists())
+        self.assertTrue((self.land_root / "here" / "snap" / "big.txt").exists())
+        registry = json.loads((self.land_root / "registry.json").read_text(encoding="utf-8"))
+        self.assertNotIn("gone", registry["sessions"])
+        self.assertIn("here", registry["sessions"])
+        self.assertEqual(self.porcelain(), "")             # the working tree is never touched
+
+    def test_a_stale_session_younger_than_the_gc_age_is_kept(self):
+        self.land("begin", "stale", "f.txt")
+        self.age_session("stale", 20)                      # stale for contest, not for gc
+        self.land("gc")
+        self.assertTrue((self.land_root / "stale" / "snap" / "f.txt").exists())
+
+    def test_gc_removes_an_old_per_session_verify_build_and_keeps_a_fresh_one(self):
+        self.land("begin", "old", "f.txt")
+        self.land("begin", "new", "big.txt")
+        for name, age in (("old", 3600), ("new", 60)):
+            manifest = self.land_root / name / "verify" / "manifest.json"
+            write(manifest, "{}")
+            write(self.land_root / name / "verify" / "build" / "x.o", "x" * 4096)
+            when = datetime.datetime.now().timestamp() - age
+            os.utime(str(manifest), (when, when))
+        out = self.land("gc")
+        self.assertFalse((self.land_root / "old" / "verify").exists())
+        self.assertTrue((self.land_root / "old" / "snap" / "f.txt").exists())
+        self.assertTrue((self.land_root / "new" / "verify").exists())
+        self.assertIn("per-session verify build", out.stdout)
+
+    def test_gc_dry_run_removes_nothing(self):
+        self.land("begin", "gone", "f.txt")
+        self.age_session("gone", 24 * 4)
+        out = self.land("gc", "--dry-run")
+        self.assertIn("would remove", out.stdout)
+        self.assertTrue((self.land_root / "gone").exists())
+
+    def test_gc_runs_by_itself_from_begin_at_most_hourly(self):
+        self.land("begin", "gone", "f.txt")                # the first command stamps gc
+        self.age_session("gone", 24 * 4)
+        stamp = self.land_root / ".last-gc"
+        hour_ago = datetime.datetime.now().timestamp() - 3700
+        os.utime(str(stamp), (hour_ago, hour_ago))
+        self.land("begin", "next", "big.txt")              # an hour later: gc runs
+        self.assertFalse((self.land_root / "gone").exists())
+        self.land("begin", "gone2", "f.txt")
+        self.age_session("gone2", 24 * 4)
+        self.land("begin", "next", "big.txt")              # within the hour: it does not
+        self.assertTrue((self.land_root / "gone2").exists())
+
+    def test_who_reports_the_disk_the_root_takes(self):
+        self.land("begin", "alice", "f.txt")
+        self.assertIn("disk:", self.land("who").stdout)
 
 
 class PythonGate(LandCase):
