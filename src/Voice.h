@@ -13,7 +13,9 @@
 // a window: which tool to run and with what arguments, which key event is the hold key, where the
 // transcript lands in the composer's text, and how a WAV written by a killed recorder is repaired.
 #include <QByteArray>
+#include <QList>
 #include <QObject>
+#include <QPair>
 #include <QString>
 #include <QStringList>
 #include <functional>
@@ -40,6 +42,22 @@ QString chooseTool(const QString &preferred, const std::function<bool(const QStr
 bool toolOnPath(const QString &tool);
 
 QString missingToolsMessage();
+
+// ----- capture sources --------------------------------------------------------------------------
+// The machine's capture sources as (name, description) pairs, in the current tool's own namespace:
+// PulseAudio/PipeWire source names for pw-record, parecord and ffmpeg, ALSA PCM names for arecord.
+// `name` is what captureArguments() passes as `device`; `description` is the human line the listing
+// showed, empty when it carried none. All three are pure parsers over a tool's listing text, so a
+// dropdown of microphones can be tested without audio hardware. `.monitor` sources are desktop
+// outputs rather than microphones and are skipped.
+QList<QPair<QString, QString>> sourcesFromPactl(const QString &text);    // `pactl list sources`
+QList<QPair<QString, QString>> devicesFromArecord(const QString &text);  // `arecord -L`
+QList<QPair<QString, QString>> sourcesFromPwDump(const QString &text);   // `pw-dump Node`
+
+// The listing for the tool that would record, run synchronously with a short timeout. An unknown or
+// empty tool, a missing listing binary, a failure or a timeout answers an empty list — the dropdown
+// then offers only the desktop default. Like toolOnPath(), this is Linux audio only.
+QList<QPair<QString, QString>> captureDevices(const QString &tool);
 
 // ----- the hold key ----------------------------------------------------------------------------
 // Settings values for `voice/hold_key`. Right Alt is what Warp uses (the owner's Warp settings have

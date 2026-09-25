@@ -903,9 +903,39 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
         voice.rows << numberRow(QStringLiteral("voice/max_seconds"), QStringLiteral("Longest recording"),
                                 QStringLiteral("Recording stops by itself after this many seconds"),
                                 relay::voice::kDefaultSeconds, 5, 600, QStringLiteral(" s"));
-        voice.rows << textRow(QStringLiteral("voice/device"), QStringLiteral("Microphone"),
-                              QStringLiteral("The capture tool's own source name (empty: the desktop default)"),
-                              QStringLiteral("default"));
+        {
+            // The machine's real capture sources, in the current tool's own namespace, plus an
+            // explicit "Desktop default" that keeps the old empty-value behaviour (card #4DS8).
+            const QString tool = relay::voice::chooseTool(QSettings().value(QStringLiteral("voice/tool")).toString(),
+                                                          relay::voice::toolOnPath);
+            const QString stored = QSettings().value(QStringLiteral("voice/device")).toString();
+            QStringList ids{QString()}, labels{QStringLiteral("Desktop default")};
+            for (const QPair<QString, QString> &source : relay::voice::captureDevices(tool)) {
+                ids << source.first;
+                labels << (source.second.isEmpty() ? source.first
+                                                   : QStringLiteral("%1 · %2").arg(source.first, source.second));
+            }
+            // A stored source that is not plugged in (or was saved under another tool) stays
+            // choosable, so the control never silently drops the saved value.
+            if (!stored.isEmpty() && !ids.contains(stored)) {
+                ids << stored;
+                labels << QStringLiteral("%1 · not currently available").arg(stored);
+            }
+            relay::SettingRow device = choiceRow(QStringLiteral("option:voice_device"), QStringLiteral("Microphone"),
+                                    QStringLiteral("The source recordings are captured from"),
+                                    ids, labels, stored, QString(), [this](const QString &value) {
+                // "Desktop default" is forgetting the key, as the tool then picks the source.
+                if (value.isEmpty()) QSettings().remove(QStringLiteral("voice/device"));
+                else QSettings().setValue(QStringLiteral("voice/device"), value);
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/device"));
+            });
+            device.reset = [this] {
+                QSettings().remove(QStringLiteral("voice/device"));
+                if (m_active) m_active->agentOptionsChanged(QStringLiteral("voice/device"));
+            };
+            device.changed = QSettings().contains(QStringLiteral("voice/device"));
+            voice.rows << device;
+        }
         {
             relay::SettingRow info;
             info.kind = relay::SettingRow::Info;

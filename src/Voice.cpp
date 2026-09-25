@@ -6,6 +6,10 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryFile>
@@ -139,6 +143,139 @@ QString missingToolsMessage() {
 #else
     return QStringLiteral("No microphone recorder found. Install pipewire-utils (pw-record), "
                           "pulseaudio-utils (parecord) or alsa-utils (arecord).");
+#endif
+}
+
+// ----- capture sources --------------------------------------------------------------------------
+QList<QPair<QString, QString>> sourcesFromPactl(const QString &text) {
+    // `pactl list sources` prints one block per source: a "Source #47" line, then tab-indented
+    // fields, of which Name is the source capture tools take and Description the human line. The
+    // Properties list inside a block carries lower-case look-alikes (device.description, node.name)
+    // that must not shadow the fields.
+    QList<QPair<QString, QString>> sources;
+    QString name, description;
+    bool inBlock = false;
+    auto flush = [&] {
+        // .monitor sources are the desktop's outputs, not microphones: not offered.
+        if (inBlock && !name.isEmpty() && !name.endsWith(QStringLiteral(".monitor")))
+            sources.append({name, description});
+        name.clear();
+        description.clear();
+    };
+    for (const QString &raw : text.split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (line.startsWith(QStringLiteral("Source #"))) {
+            flush();
+            inBlock = true;
+            continue;
+        }
+        if (!inBlock) continue;
+        if (line.startsWith(QStringLiteral("Name:")))
+            name = line.mid(QStringLiteral("Name:").size()).trimmed();
+        else if (line.startsWith(QStringLiteral("Description:")))
+            description = line.mid(QStringLiteral("Description:").size()).trimmed();
+    }
+    flush();
+    return sources;
+}
+
+QList<QPair<QString, QString>> devicesFromArecord(const QString &text) {
+    // `arecord -L` lists PCM names at the left margin, each followed by one or more indented
+    // description lines. The indented lines are joined with a space.
+    QList<QPair<QString, QString>> devices;
+    QString name, description;
+    auto flush = [&] {
+        if (!name.isEmpty()) devices.append({name, description});
+        name.clear();
+        description.clear();
+    };
+    for (const QString &raw : text.split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (line.isEmpty()) continue;
+        const bool indented = raw.startsWith(QLatin1Char(' ')) || raw.startsWith(QLatin1Char('\t'));
+        if (indented) {
+            if (!name.isEmpty()) {
+                if (!description.isEmpty()) description += QLatin1Char(' ');
+                description += line;
+            }
+        } else if (line.contains(QLatin1Char(' '))) {
+            // A message at the margin, not a PCM name: arecord's names never contain spaces.
+            continue;
+        } else {
+            flush();
+            name = line;
+        }
+    }
+    flush();
+    return devices;
+}
+
+QList<QPair<QString, QString>> sourcesFromPwDump(const QString &text) {
+    // `pw-dump Node` prints one JSON array of the graph's nodes, full of properties nobody needs
+    // here. A source is a node whose media.class is Audio/Source; the name pw-record takes as
+    // --target is node.name, and node.description is the human line (a monitor node carries
+    // device.class "monitor" and often a ".monitor" name — the desktop's own output, not a mic).
+    QList<QPair<QString, QString>> sources;
+    const QJsonDocument doc = QJsonDocument::fromJson(text.toUtf8());
+    if (!doc.isArray()) return sources;
+    for (const QJsonValue &value : doc.array()) {
+        const QJsonObject props = value.toObject().value(QStringLiteral("info")).toObject()
+                                      .value(QStringLiteral("props")).toObject();
+        if (props.value(QStringLiteral("media.class")).toString() != QStringLiteral("Audio/Source"))
+            continue;
+        const QString name = props.value(QStringLiteral("node.name")).toString();
+        if (name.isEmpty()) continue;
+        if (name.endsWith(QStringLiteral(".monitor"))
+            || props.value(QStringLiteral("device.class")).toString() == QStringLiteral("monitor"))
+            continue;
+        QString description = props.value(QStringLiteral("node.description")).toString();
+        if (description.isEmpty())
+            description = props.value(QStringLiteral("device.description")).toString();
+        sources.append({name, description});
+    }
+    return sources;
+}
+
+QList<QPair<QString, QString>> captureDevices(const QString &tool) {
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+    // toolOnPath() already answers false for these: there is no Linux audio namespace to list.
+    Q_UNUSED(tool);
+    return {};
+#else
+    const bool alsa = tool == QStringLiteral("arecord");
+    const bool pulse = tool == QStringLiteral("pw-record") || tool == QStringLiteral("parecord")
+                       || tool == QStringLiteral("ffmpeg");
+    if (!alsa && !pulse) return {};  // no recorder on PATH, or a name captureArguments() would not run
+    // A wedged listing must not wedge the settings page open: ~2 s each to start and to finish.
+    auto runListing = [](const QString &program, const QStringList &args, QString *out) {
+        QProcess listing;
+        listing.start(program, args);
+        if (!listing.waitForStarted(2000) || !listing.waitForFinished(2000)) {
+            listing.kill();
+            listing.waitForFinished(500);
+            return false;
+        }
+        if (listing.exitStatus() != QProcess::NormalExit || listing.exitCode() != 0) return false;
+        *out = QString::fromUtf8(listing.readAllStandardOutput());
+        return true;
+    };
+    QString text;
+    if (alsa) {
+        if (toolOnPath(QStringLiteral("arecord")) && runListing(QStringLiteral("arecord"), {QStringLiteral("-L")}, &text))
+            return devicesFromArecord(text);
+        return {};
+    }
+    // pw-record, parecord and ffmpeg all capture from the PulseAudio namespace that PipeWire also
+    // serves, so pactl's listing is the shared source of names for them.
+    if (toolOnPath(QStringLiteral("pactl"))
+        && runListing(QStringLiteral("pactl"), {QStringLiteral("list"), QStringLiteral("sources")}, &text))
+        return sourcesFromPactl(text);
+    // A PipeWire machine need not have pulseaudio-utils, so pactl can be missing (or fail without
+    // pipewire-pulse) while pw-record works: the graph's own dump names the same nodes.
+    if (tool == QStringLiteral("pw-record") && toolOnPath(QStringLiteral("pw-dump"))
+        && runListing(QStringLiteral("pw-dump"), {QStringLiteral("Node")}, &text))
+        return sourcesFromPwDump(text);
+    return {};
 #endif
 }
 

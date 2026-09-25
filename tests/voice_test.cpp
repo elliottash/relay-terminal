@@ -85,6 +85,112 @@ private Q_SLOTS:
         QCOMPARE(chooseTool(QString(), [](const QString &) { return false; }), QString());
     }
 
+    // ----- capture sources -----------------------------------------------------------------------
+    void pactlListingsBecomeMicrophonesAndMonitorsAreSkipped() {
+        const QString listing = QStringLiteral(
+            "Source #43\n"
+            "\tState: SUSPENDED\n"
+            "\tName: alsa_input.pci-0000_00_1f.3.analog-stereo\n"
+            "\tDescription: Built-in Audio Analog Stereo\n"
+            "\tProperties:\n"
+            "\t\tdevice.description = \"Built-in Audio Analog Stereo\"\n"
+            "\t\tnode.name = \"alsa_input.pci-0000_00_1f.3.analog-stereo\"\n"
+            "Source #44\n"
+            "\tState: SUSPENDED\n"
+            "\tName: alsa_input.usb-046d_HD_Pro_Webcam_C922_07B8A88F-03.analog-stereo\n"
+            "\tDriver: module-alsa-card.c\n"
+            "Source #45\n"
+            "\tState: IDLE\n"
+            "\tName: alsa_output.pci-0000_00_1f.3.analog-stereo.monitor\n"
+            "\tDescription: Monitor of Built-in Audio Analog Stereo\n"
+            "Source #46\n"
+            "\tState: SUSPENDED\n"
+            "\tName: bluez_input.88_C9_E8_1B_34_1F.88c6d8c2-7d1b-4bf4\n"
+            "\tDescription: WH-1000XM5\n");
+        const QList<QPair<QString, QString>> sources = sourcesFromPactl(listing);
+        // The .monitor source is the desktop's own output, not a microphone: not offered.
+        QCOMPARE(sources.size(), 3);
+        QCOMPARE(sources.at(0).first, QStringLiteral("alsa_input.pci-0000_00_1f.3.analog-stereo"));
+        QCOMPARE(sources.at(0).second, QStringLiteral("Built-in Audio Analog Stereo"));
+        // A source with no Description line of its own: the lower-case look-alikes in Properties
+        // (device.description, node.name) must not stand in for it.
+        QCOMPARE(sources.at(1).first, QStringLiteral("alsa_input.usb-046d_HD_Pro_Webcam_C922_07B8A88F-03.analog-stereo"));
+        QCOMPARE(sources.at(1).second, QString());
+        QCOMPARE(sources.at(2).first, QStringLiteral("bluez_input.88_C9_E8_1B_34_1F.88c6d8c2-7d1b-4bf4"));
+        QCOMPARE(sources.at(2).second, QStringLiteral("WH-1000XM5"));
+    }
+
+    void arecordListingsBecomeMicrophones() {
+        const QString listing = QStringLiteral(
+            "null\n"
+            "    Discard all samples (playback) or generate zero samples (capture)\n"
+            "default\n"
+            "    Playback/recording through the PulseAudio server\n"
+            "hw:CARD=U192k,DEV=0\n"
+            "    USB Audio CODEC, USB Audio\n"
+            "    Direct hardware device without any conversions\n");
+        const QList<QPair<QString, QString>> devices = devicesFromArecord(listing);
+        QCOMPARE(devices.size(), 3);
+        QCOMPARE(devices.at(0).first, QStringLiteral("null"));
+        QCOMPARE(devices.at(0).second, QStringLiteral("Discard all samples (playback) or generate zero samples (capture)"));
+        QCOMPARE(devices.at(2).first, QStringLiteral("hw:CARD=U192k,DEV=0"));
+        // A device's indented description lines are joined into one.
+        QCOMPARE(devices.at(2).second, QStringLiteral("USB Audio CODEC, USB Audio Direct hardware device without any conversions"));
+    }
+
+    void pipeWireDumpsBecomeMicrophonesWithoutPulseUtils() {
+        // `pw-dump Node` as it comes off this machine (a PipeWire desktop with pipewire-tools but
+        // no pulseaudio-utils, so no pactl), with a monitor and a camera added for the skips.
+        const QString dump = QStringLiteral(
+            "[\n"
+            "  {\n"
+            "    \"id\": 36,\n"
+            "    \"type\": \"PipeWire:Interface:Node\",\n"
+            "    \"info\": { \"props\": {\n"
+            "        \"media.class\": \"Audio/Source\",\n"
+            "        \"node.name\": \"alsa_input.usb-046d_HD_Pro_Webcam_C920_B38639BF-02.analog-stereo\",\n"
+            "        \"node.description\": \"C920 PRO HD Webcam Analog Stereo\",\n"
+            "        \"device.class\": \"sound\",\n"
+            "        \"object.path\": \"alsa:pcm:1:front:1:capture\" } }\n"
+            "  },\n"
+            "  {\n"
+            "    \"id\": 58,\n"
+            "    \"type\": \"PipeWire:Interface:Node\",\n"
+            "    \"info\": { \"props\": {\n"
+            "        \"media.class\": \"Audio/Source\",\n"
+            "        \"node.name\": \"alsa_output.pci-0000_00_1f.3.analog-stereo.monitor\",\n"
+            "        \"node.description\": \"Monitor of Built-in Audio Analog Stereo\",\n"
+            "        \"device.class\": \"monitor\" } }\n"
+            "  },\n"
+            "  {\n"
+            "    \"id\": 74,\n"
+            "    \"type\": \"PipeWire:Interface:Node\",\n"
+            "    \"info\": { \"props\": {\n"
+            "        \"media.class\": \"Video/Source\",\n"
+            "        \"node.name\": \"v4l2_input.platform-NVDA8000_02-usb-0_1.4.3_1.0\",\n"
+            "        \"node.description\": \"HD Pro Webcam C920 (V4L2)\" } }\n"
+            "  }\n"
+            "]");
+        const QList<QPair<QString, QString>> sources = sourcesFromPwDump(dump);
+        QCOMPARE(sources.size(), 1);   // the monitor and the camera are not microphones
+        QCOMPARE(sources.at(0).first, QStringLiteral("alsa_input.usb-046d_HD_Pro_Webcam_C920_B38639BF-02.analog-stereo"));
+        QCOMPARE(sources.at(0).second, QStringLiteral("C920 PRO HD Webcam Analog Stereo"));
+    }
+
+    void listingsThatAreNotListingsAnswerNothing() {
+        QVERIFY(sourcesFromPactl(QString()).isEmpty());
+        QVERIFY(sourcesFromPactl(QStringLiteral("You are running PulseAudio as root. No, really.\n")).isEmpty());
+        // Fields without a Source block are no source at all.
+        QVERIFY(sourcesFromPactl(QStringLiteral("Name: not-a-source\nDescription: nope\n")).isEmpty());
+        QVERIFY(devicesFromArecord(QString()).isEmpty());
+        QVERIFY(devicesFromArecord(QStringLiteral("arecord: device_list:270: some cards configured...")).isEmpty());
+        QVERIFY(sourcesFromPwDump(QString()).isEmpty());
+        QVERIFY(sourcesFromPwDump(QStringLiteral("{\"id\": 0}")).isEmpty());
+        // A tool that is not one of ours never runs a listing.
+        QVERIFY(captureDevices(QStringLiteral("sox")).isEmpty());
+        QVERIFY(captureDevices(QString()).isEmpty());
+    }
+
     // ----- the hold key -----------------------------------------------------------------------
     void rightAltIsTheHoldKeyAndLeftAltIsNot() {
         const QString setting = QStringLiteral("right-alt");

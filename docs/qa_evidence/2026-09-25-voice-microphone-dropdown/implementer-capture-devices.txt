@@ -1,0 +1,15 @@
+$ pw-record/pactl/pw-dump availability on this machine:
+/usr/bin/pw-record
+/usr/bin/arecord
+/usr/bin/pw-dump
+
+$ the one-off binary linked against build/librelay-voice.a (source: scratch/devices.cpp,
+  same call the Options > Voice Microphone row makes):
+chosen tool: pw-record
+captureDevices( pw-record ) -> 1 source(s)
+   alsa_input.usb-046d_HD_Pro_Webcam_C920_B38639BF-02.analog-stereo | C920 PRO HD Webcam Analog Stereo
+
+$ the offered name steers pw-record (2 s captures, deleted after):
+-rw-rw-r-- 1 elliott elliott 63474 Sep 25 01:24 /home/elliott/.cache/relay/scratch/4fd1a2ba4a9d456ea158b83bb849c15a/One-off-check-binary-for-4DS8-call-relay-scce262/default.wav
+-rw-rw-r-- 1 elliott elliott 63474 Sep 25 01:24 /home/elliott/.cache/relay/scratch/4fd1a2ba4a9d456ea158b83bb849c15a/One-off-check-binary-for-4DS8-call-relay-scce262/target.wav
+RIFF

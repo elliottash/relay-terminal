@@ -1,0 +1,28 @@
+********* Start testing of VoiceTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : VoiceTests::initTestCase()
+PASS   : VoiceTests::everyToolAsksFor16kMonoWav()
+PASS   : VoiceTests::aDeviceIsPassedInEachToolsOwnSpelling()
+PASS   : VoiceTests::theFirstAvailableToolWinsUnlessOneIsChosen()
+PASS   : VoiceTests::pactlListingsBecomeMicrophonesAndMonitorsAreSkipped()
+PASS   : VoiceTests::arecordListingsBecomeMicrophones()
+PASS   : VoiceTests::pipeWireDumpsBecomeMicrophonesWithoutPulseUtils()
+PASS   : VoiceTests::listingsThatAreNotListingsAnswerNothing()
+PASS   : VoiceTests::rightAltIsTheHoldKeyAndLeftAltIsNot()
+PASS   : VoiceTests::theHoldKeyIsConfigurableAndCanBeOff()
+PASS   : VoiceTests::layoutsThatTypeWithAltGrDoNotGetRightAltByDefault()
+PASS   : VoiceTests::aTranscriptIsSpacedIntoWhateverIsAlreadyTyped()
+PASS   : VoiceTests::aClipsLengthIsReadFromItsHeader()
+PASS   : VoiceTests::aKilledRecordersSizesAreRepairedFromTheRealLength()
+PASS   : VoiceTests::theRecordingCapIsBounded()
+PASS   : VoiceTests::cleanupTestCase()
+Totals: 16 passed, 0 failed, 0 skipped, 0 blacklisted, 1ms
+********* Finished testing of VoiceTests *********
+Internal ctest changing into directory: /home/elliott/repos/relay-terminal/build
+Test project /home/elliott/repos/relay-terminal/build
+    Start 80: voice
+1/1 Test #80: voice ............................   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.00 sec
