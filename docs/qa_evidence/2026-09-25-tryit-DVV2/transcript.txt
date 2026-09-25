@@ -1,0 +1,40 @@
+
+[1m== 1. A pane session starts: the worker writes one TMPDIR row for the pane; mktemp then lands in it, no agent effort[0m
+a plain mktemp landed in: /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox/home/.cache/scratch/relay/scratch/tok-tryit/tmp/tmp.89gNCKp3Mi
+
+[1m== 2. The agent asks for scratch for a build, and for a keep dir for its report draft[0m
+build: /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox/home/.cache/scratch/relay/scratch/tok-tryit/export-tree-for-card-TY-sc2c208
+keep:  /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox/project/.relay/work/draft-report-sc8b254
+
+[1m== 3. The agent misbehaves: a rogue dir straight into /tmp, outside everything[0m
+
+[1m== 4. The ledger after the turn (scratch + keep rows, created_by with card and session)[0m
+sc2c208 live      scratch         0 B  tok-tryit  export tree for card TY
+sc8b254 live      keep            0 B  tok-tryit  draft report
+scfda6f live      scratch         0 B  tok-tryit  TMPDIR for pane tok-tryit
+class   keep                    1 rows  0 B
+class   scratch                 2 rows  0 B
+session tok-tryit               3 rows  0 B
+
+[1m== 5. The task ends: the agent releases scratch (reclaimed, gone from disk)[0m
+sc2c208 reclaimed /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox/home/.cache/scratch/relay/scratch/tok-tryit/export-tree-for-card-TY-sc2c208
+ls: cannot access '/home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox/home/.cache/scratch/relay/scratch/tok-tryit/export-tree-for-card-TY-sc2c208': No such file or directory
+
+[1m== 6. The keep dir refuses to be deleted silently: promote it into the project[0m
+relay-scratch release: keep must be promoted (promote_to=...) or explicitly dropped (drop=True); it is never silently deleted
+sc8b254 promoted /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox/project/.relay/work/draft-report-sc8b254
+quarterly numbers
+
+[1m== 7. The pane closes: end_session reclaims this session's scratch, keeps keep/install rows[0m
+reclaimed: ['scfda6f']
+still live: []
+
+[1m== 8. The rogue dir is still there, unledgered - exactly what the post-turn sweep names to the agent[0m
+sweep found: ['/tmp/dvv2-tryit-rogue']
+
+[1m== 9. The floor that failed this machine once: gc --apply below 6h idle on default roots refuses[0m
+refused: refusing gc --apply with --idle-hours 0.0 on the default roots (floor is 6); pass force_idle=True / --force-idle if you really mean it
+
+[1m== Done. Everything above ran against /home/elliott/repos/relay-terminal/docs/qa_evidence/2026-09-25-tryit-DVV2/sandbox - the real ledger was never touched.[0m
+
+[1m== The one thing left for you: the rogue dir /tmp/dvv2-tryit-rogue is still on the real /tmp (that is the point).[0m
