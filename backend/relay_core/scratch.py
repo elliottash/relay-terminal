@@ -724,37 +724,53 @@ def own_path(path: str | Path, purpose: str = "", *, ledger: ScratchLedger | Non
                              note="adopted as an application's own state (card #WZ3K)"))
 
 
+def _top_level(home: Path | None, tmp: Path | None):
+    """(path, stat) for every entry directly in the temp dirs and $HOME — what the sweep scans."""
+    bases = {tmp or temp_dir(), system_tmp(), temp_dir(), home or Path.home()}
+    for raw in sorted(str(b) for b in bases):
+        try:
+            children = list(os.scandir(raw))
+        except OSError:
+            continue
+        for child in children:
+            try:
+                yield child.path, child.stat(follow_symlinks=False)
+            except OSError:
+                continue
+
+
+def top_level_entries(*, home: Path | None = None, tmp: Path | None = None) -> frozenset[str]:
+    """The names the sweep would scan, as they stand now: taken at turn start and handed back to
+    `unledgered_created_since` as `before`, so only what truly appeared is named (card #NQTD)."""
+    return frozenset(path for path, _ in _top_level(home, tmp))
+
+
 def unledgered_created_since(since: float, *, ledger: ScratchLedger | None = None,
                              home: Path | None = None, tmp: Path | None = None,
-                             skip: list[str] | tuple[str, ...] = ()) -> list[str]:
+                             skip: list[str] | tuple[str, ...] = (),
+                             before: frozenset[str] | set[str] | None = None) -> list[str]:
     """Top-level entries of the temp dir and $HOME newer than `since`, owned by this user,
     and not covered by any ledger row — the post-turn sweep's list. Top-level only, so the
     scan stays cheap enough to run on every turn end. `skip` names paths to leave out (the
     guest harness's own home files, card #WZ3K); each one matches exactly as a covered row
-    does, by being the entry or a parent of it."""
+    does, by being the entry or a parent of it. `before` is `top_level_entries()` from the
+    turn's start: an entry already there is not new, however recent its mtime — a directory's
+    mtime moves whenever something inside it is added or removed, which is how `~/.cache`
+    came to be named (card #NQTD)."""
     ledger = ledger if ledger is not None else ScratchLedger()
     covered = [Path(r.path) for r in ledger.records().values()]
     covered += [Path(p) for p in skip]
     me = os.getuid() if hasattr(os, "getuid") else None
     found: list[str] = []
-    bases = {tmp or temp_dir(), system_tmp(), temp_dir(), home or Path.home()}
-    for raw in sorted(str(b) for b in bases):
-        base = Path(raw)
-        try:
-            children = list(os.scandir(base))
-        except OSError:
+    for raw, st in _top_level(home, tmp):
+        if st.st_mtime < since or (me is not None and st.st_uid != me):
             continue
-        for child in children:
-            try:
-                st = child.stat(follow_symlinks=False)
-            except OSError:
-                continue
-            if st.st_mtime < since or (me is not None and st.st_uid != me):
-                continue
-            path = Path(child.path)
-            if any(p == path or p in path.parents for p in covered):
-                continue
-            found.append(str(path))
+        if before is not None and raw in before:
+            continue
+        path = Path(raw)
+        if any(p == path or p in path.parents for p in covered):
+            continue
+        found.append(raw)
     return sorted(found)
 
 

@@ -2644,6 +2644,11 @@ class Agent:
         over_budget_steps = 0
         reminders = 0
         turn_started = time.time()   # card #DVV2: what the post-turn scratch sweep scans from
+        try:
+            # Card #NQTD: what was already there is not new, whatever its mtime says later.
+            turn_top_level = scratch.top_level_entries()
+        except Exception:
+            turn_top_level = None
         empty_final_retries = 0
         batch = None               # subagents: `agent` calls started for the current response
         pictures = image_attachments(attachments)
@@ -2794,7 +2799,8 @@ class Agent:
                     if not ctx.get("swept"):
                         try:
                             unledgered = scratch.unledgered_created_since(
-                                turn_started, skip=self._own_home_paths())
+                                turn_started, skip=self._own_home_paths(),
+                                before=turn_top_level)
                         except Exception as exc:
                             logs.event(_log, "scratch_sweep_failed", level_name="warning",
                                        session=self.session_id, turn=turn_id,

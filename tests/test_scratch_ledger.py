@@ -295,6 +295,25 @@ class ReportTests(Sandbox):
         self.assertEqual([f for f in found if f.startswith(str(home))], [])  # a parent skips all
 
 
+    def test_an_entry_there_before_the_turn_is_not_new_whatever_its_mtime(self):
+        # Card #NQTD: writing inside ~/.cache moves ~/.cache's own mtime; it was named as new.
+        tmp = self.base / "tmp"
+        home = self.base / "home"
+        tmp.mkdir()
+        (home / ".cache").mkdir(parents=True)
+        since = time.time() - 5
+        before = scratch.top_level_entries(home=home, tmp=tmp)
+        self.write(home / ".cache" / "relay" / "fresh.bin", 64)   # bumps .cache's mtime
+        made = self.write(home / "made-this-turn", 64)
+        found = scratch.unledgered_created_since(since, ledger=self.ledger(), home=home,
+                                                 tmp=tmp, before=before)
+        self.assertNotIn(str(home / ".cache"), found)
+        self.assertIn(str(made), found)
+        # Without the start-of-turn list the old reading comes back: mtime alone says "new".
+        self.assertIn(str(home / ".cache"), scratch.unledgered_created_since(
+            since, ledger=self.ledger(), home=home, tmp=tmp))
+
+
 class OwnPathTests(Sandbox):
     """Card #WZ3K: `own_path` is the supported way to say an existing path is an
     application's own state — the answer the sweep's note points at when what it named
