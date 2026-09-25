@@ -2,6 +2,7 @@
 #include "ModelCatalog.h"
 
 #include <QDateTime>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
@@ -1238,9 +1239,9 @@ QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now) {
     return out;
 }
 
-Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double unitDraw) {
+Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double unitDraw, QJsonObject *trace) {
     if (now <= 0) now = QDateTime::currentSecsSinceEpoch();
-    struct Candidate { Entry entry; double weight; };
+    struct Candidate { Entry entry; double weight; double score = -1.0; };
     QList<Candidate> peers;
     int bestRank = std::numeric_limits<int>::max();
     const QList<curation::TierEntry> list = curation::activeTierList(tier);
@@ -1262,7 +1263,7 @@ Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double u
                 weight = weight < 0 ? rate : qMin(weight, rate);
             }
         }
-        peers << Candidate{*entry, weight};
+        peers << Candidate{*entry, weight, weight};
     }
     if (peers.isEmpty()) return {};
     QList<double> known;
@@ -1272,16 +1273,32 @@ Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now, double u
     const double neutral = known.isEmpty() ? 1.0 : known.at(known.size() / 2);
     for (Candidate &peer : peers)
         if (peer.weight < 0) peer.weight = neutral;
-    if (peers.size() == 1) return peers.first().entry;
-    if (unitDraw < 0 || unitDraw >= 1) unitDraw = QRandomGenerator::global()->generateDouble();
     double total = 0;
     for (const Candidate &peer : peers) total += peer.weight;
+    auto picked = [&](const Entry &chosen, double unit) {
+        if (trace) {
+            QJsonArray candidates;
+            for (const Candidate &peer : peers)
+                candidates.append(QJsonObject{
+                    {QStringLiteral("key"), peer.entry.key},
+                    {QStringLiteral("score"), peer.score < 0 ? QJsonValue() : QJsonValue(peer.score)},
+                    {QStringLiteral("weight"), peer.weight},
+                    {QStringLiteral("p"), total > 0 ? peer.weight / total : 1.0 / peers.size()}});
+            *trace = QJsonObject{{QStringLiteral("tier"), tier}, {QStringLiteral("rank"), bestRank},
+                                 {QStringLiteral("u"), unit < 0 ? QJsonValue() : QJsonValue(unit)},
+                                 {QStringLiteral("chosen"), chosen.key},
+                                 {QStringLiteral("candidates"), candidates}};
+        }
+        return chosen;
+    };
+    if (peers.size() == 1) return picked(peers.first().entry, -1);
+    if (unitDraw < 0 || unitDraw >= 1) unitDraw = QRandomGenerator::global()->generateDouble();
     double position = unitDraw * total;
     for (const Candidate &peer : peers) {
-        if (position < peer.weight) return peer.entry;
+        if (position < peer.weight) return picked(peer.entry, unitDraw);
         position -= peer.weight;
     }
-    return peers.last().entry;
+    return picked(peers.last().entry, unitDraw);
 }
 
 // Once the tier lists exist the main list is the order: rank 1 is Main, the rest its fallbacks.
@@ -1358,7 +1375,7 @@ StartChoice startEntry(const Catalog &catalog, const QString &restoredPreset, co
     // Rank 1 of the main list, guests included (owner, 2026-09-21). An exhausted rank 1 is stepped
     // over by mainDefault, and nothing is written down, so the pane goes back to it by itself when
     // the subscription resets (design edge case 15).
-    const Entry main = curation::tierListsSet() ? drawTier(catalog, QStringLiteral("main"), now)
+    const Entry main = curation::tierListsSet() ? drawTier(catalog, QStringLiteral("main"), now, -1, &choice.draw)
                                                : mainDefault(catalog, now);
     if (main.key.isEmpty()) return choice;   // empty: the caller's own ladder answers
     choice.entry = main;

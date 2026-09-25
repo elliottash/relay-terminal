@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QRegularExpression>
@@ -143,6 +144,24 @@ void write(Level messageLevel, const QString &message) {
     file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
     file.write(line.toUtf8());
     file.close();
+}
+
+void routingDraw(const QJsonObject &draw, const QString &surface, const QString &pane) {
+    if (draw.isEmpty() || level() == Level::Off) return;
+    const QString dir = directory();
+    if (dir.isEmpty()) return;
+    QJsonObject record = draw;
+    record.insert(QStringLiteral("v"), 1);
+    record.insert(QStringLiteral("ts"), double(QDateTime::currentMSecsSinceEpoch()) / 1000.0);
+    record.insert(QStringLiteral("component"), QStringLiteral("qt"));
+    record.insert(QStringLiteral("surface"), surface);
+    record.insert(QStringLiteral("pane"), pane);
+    // One write of one line to an O_APPEND file: the worker's records never interleave with it.
+    const QByteArray line = QJsonDocument(record).toJson(QJsonDocument::Compact) + '\n';
+    QFile file(dir + QStringLiteral("/routing-draws.jsonl"));
+    if (!file.open(QIODevice::Append | QIODevice::WriteOnly | QIODevice::Unbuffered)) return;
+    file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+    file.write(line);
 }
 
 void installMessageHandler() {

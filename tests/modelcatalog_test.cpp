@@ -1516,6 +1516,50 @@ private Q_SLOTS:
         QCOMPARE(drawTier(catalog, tier, now, 0.60).key, QStringLiteral("kimi-code|k3"));
     }
 
+    // Every new-pane choice is recorded with the probability it was made with, for evaluating the
+    // routing later: the trace names every tied candidate, its score, weight and probability.
+    void aDrawTracesEveryCandidateWithItsProbability() {
+        Catalog catalog = catalogFrom(presets());
+        const QString tier = QStringLiteral("main");
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 1},
+            {QStringLiteral("kimi-code|k3"), QStringLiteral("high"), 1},
+            {QStringLiteral("guest:claude|opus"), QStringLiteral("high"), 2}});
+        const qint64 now = 100000;
+        catalog.limitUpdatedAt[QStringLiteral("glm-coding")] = now;
+        catalog.limits[QStringLiteral("glm-coding")] = {LimitWindow{QStringLiteral("5h"), 70, now + 5400}}; // 20/h
+        QJsonObject trace;
+        QCOMPARE(drawTier(catalog, tier, now, 0.25, &trace).key, QStringLiteral("glm-coding|glm-5.3"));
+        QCOMPARE(trace.value(QStringLiteral("tier")).toString(), tier);
+        QCOMPARE(trace.value(QStringLiteral("rank")).toInt(), 1);
+        QCOMPARE(trace.value(QStringLiteral("u")).toDouble(), 0.25);
+        QCOMPARE(trace.value(QStringLiteral("chosen")).toString(), QStringLiteral("glm-coding|glm-5.3"));
+        const QJsonArray candidates = trace.value(QStringLiteral("candidates")).toArray();
+        QCOMPARE(candidates.size(), 2);
+        // kimi has no report, so it is weighed at the median of its reported peers: an even draw.
+        QCOMPARE(candidates.at(0)[QStringLiteral("score")].toDouble(), 20.0);
+        QVERIFY(candidates.at(1)[QStringLiteral("score")].isNull());
+        QCOMPARE(candidates.at(1)[QStringLiteral("weight")].toDouble(), 20.0);
+        QCOMPARE(candidates.at(0)[QStringLiteral("p")].toDouble(), 0.5);
+        QCOMPARE(candidates.at(1)[QStringLiteral("p")].toDouble(), 0.5);
+        // One candidate at the best rank: certain, and recorded without a draw.
+        curation::setTierList(tier, {
+            {QStringLiteral("kimi-code|k3"), QStringLiteral("high"), 1},
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 2}});
+        trace = QJsonObject();
+        QCOMPARE(drawTier(catalog, tier, now, 0.25, &trace).key, QStringLiteral("kimi-code|k3"));
+        QVERIFY(trace.value(QStringLiteral("u")).isNull());
+        QCOMPARE(trace.value(QStringLiteral("candidates")).toArray().size(), 1);
+        QCOMPARE(trace.value(QStringLiteral("candidates")).toArray().at(0)[QStringLiteral("p")].toDouble(), 1.0);
+        // A new pane carries its draw back to the caller that records it; a restored one does not.
+        curation::setTierList(tier, {
+            {QStringLiteral("glm-coding|glm-5.3"), QStringLiteral("max"), 1},
+            {QStringLiteral("kimi-code|k3"), QStringLiteral("high"), 1}});
+        catalog = catalogFrom(presets());
+        QCOMPARE(startEntry(catalog, QString(), QString(), now).draw.value(QStringLiteral("candidates")).toArray().size(), 2);
+        QVERIFY(startEntry(catalog, QStringLiteral("kimi-code"), QStringLiteral("k3"), now).draw.isEmpty());
+    }
+
     // Owner, 2026-09-21: a harness he ranked first is what a new pane starts on. Being installed
     // is not a default; being put first is.
     void aGuestAtRankOneIsWhatANewPaneStartsOn() {

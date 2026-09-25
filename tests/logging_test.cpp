@@ -6,6 +6,8 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -116,6 +118,30 @@ private slots:
         // And it is a log line like any other: ISO timestamp, level, source.
         QVERIFY(QRegularExpression(QStringLiteral("\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z ERROR relay.gui gui_crash "))
                     .match(report).hasMatch());
+    }
+
+    void routingDrawsAreAppendedAsPrivateJsonLines() {
+        const QString path = relay::log::directory() + QStringLiteral("/routing-draws.jsonl");
+        const QJsonObject draw{{QStringLiteral("tier"), QStringLiteral("main")},
+                               {QStringLiteral("chosen"), QStringLiteral("kimi-code|k3")}};
+        relay::log::routingDraw(draw, QStringLiteral("new_pane"), QStringLiteral("p1"));
+        relay::log::routingDraw(QJsonObject(), QStringLiteral("new_pane"), QStringLiteral("p1"));
+        relay::log::routingDraw(draw, QStringLiteral("switchboard"), QStringLiteral("switchboard"));
+        const QStringList lines = read(path).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        QCOMPARE(lines.size(), 2);
+        const QJsonObject first = QJsonDocument::fromJson(lines.first().toUtf8()).object();
+        QCOMPARE(first.value(QStringLiteral("v")).toInt(), 1);
+        QCOMPARE(first.value(QStringLiteral("component")).toString(), QStringLiteral("qt"));
+        QCOMPARE(first.value(QStringLiteral("surface")).toString(), QStringLiteral("new_pane"));
+        QCOMPARE(first.value(QStringLiteral("pane")).toString(), QStringLiteral("p1"));
+        QCOMPARE(first.value(QStringLiteral("chosen")).toString(), QStringLiteral("kimi-code|k3"));
+        QVERIFY(first.value(QStringLiteral("ts")).toDouble() > 1.7e9);
+        QCOMPARE(QFile::permissions(path) & (QFile::ReadGroup | QFile::ReadOther | QFile::WriteGroup | QFile::WriteOther),
+                 QFile::Permissions());
+        relay::log::setLevel(QStringLiteral("off"));
+        QFile::remove(path);
+        relay::log::routingDraw(draw, QStringLiteral("new_pane"), QStringLiteral("p1"));
+        QVERIFY(!QFile::exists(path));
     }
 
     void levelNamesRoundTrip() {

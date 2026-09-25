@@ -12,6 +12,7 @@
 // of defence, not as a licence. The opt-in "verbose" level is the single exception and only the
 // backend uses it for prompt text.
 #pragma once
+#include <QJsonObject>
 #include <QString>
 #include <QStringList>
 
@@ -35,6 +36,13 @@ void write(Level level, const QString &message);
 inline void error(const QString &message) { write(Level::Error, message); }
 inline void info(const QString &message) { write(Level::Info, message); }
 inline void debug(const QString &message) { write(Level::Debug, message); }
+
+// Append one routing choice to routing-draws.jsonl beside this log, for evaluating the routing
+// policy: `draw` is `relay::models::drawTier`'s trace; `surface` says which choice it was
+// ("new_pane", "switchboard") and `pane` is the pane's log id, the `pane=` the worker's own
+// records carry. Not rotated, 0600, one line per O_APPEND write; the worker appends to the same
+// file (`logs.routing_draw`). Nothing when logging is off or `draw` is empty.
+void routingDraw(const QJsonObject &draw, const QString &surface, const QString &pane);
 
 QString scrub(const QString &text);
 // Route qWarning()/qCritical()/Qt internals into the same file, so a launcher-started Relay keeps them.

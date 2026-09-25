@@ -4885,6 +4885,7 @@ public:
             if (!catalog.entries.isEmpty()) break;
         }
         const relay::models::StartChoice start = relay::models::startEntry(catalog, QString(), QString());
+        relay::log::routingDraw(start.draw, QStringLiteral("switchboard"), QStringLiteral("switchboard"));
         const QString preset = start.entry.preset.isEmpty()
                                    ? settings.value(QStringLiteral("provider/preset")).toString()
                                    : start.entry.preset;

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import faulthandler
 import hashlib
+import json
 from functools import lru_cache
 import logging
 import os
@@ -312,6 +313,40 @@ def event(logger: logging.Logger, message: str, *, level_name: str = "info", **v
     """One structured line: `<message> key=value …`. Never pass prompts or tool output."""
     line = message if not values else message + " " + fields(**values)
     getattr(logger, "error" if level_name == "error" else "debug" if level_name == "debug" else "info")(line)
+
+
+ROUTING_DRAWS = "routing-draws.jsonl"
+
+
+def routing_draw(record: dict) -> None:
+    """Append one routing choice to `routing-draws.jsonl`, for evaluating the routing policy.
+
+    Unlike worker.log this file is not rotated: a record is a few hundred bytes and one is written
+    per lifecycle choice (a new pane, a subagent, a mode change, a quota handoff), and an
+    off-policy evaluation needs every choice together with the probability it was made with. The
+    Qt window appends to the same file (`relay::log::routingDraw`). Records hold preset ids, model
+    names and quota numbers only — never prompts. Logging `off` writes nothing."""
+    if level() == "off":
+        return
+    # A unit test that did not isolate itself (scripts/test.sh does, with origin=test and its own
+    # data directory) must not put synthetic draws into the live file an evaluation reads.
+    if "unittest" in sys.modules and os.environ.get("RELAY_LOG_ORIGIN") != "test":
+        return
+    line = {"v": 1, "ts": round(time.time(), 3), "component": "worker",
+            "pane": _state.get("pane") or os.environ.get("RELAY_PANE_ID") or "", **context(), **record}
+    try:
+        directory = log_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / ROUTING_DRAWS
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            # One write of one line under O_APPEND: records from several workers and the window
+            # never interleave.
+            os.write(fd, (json.dumps(line, separators=(",", ":"), sort_keys=True) + "\n").encode())
+        finally:
+            os.close(fd)
+    except (OSError, TypeError, ValueError):
+        pass   # a routing record must never stop the turn it describes
 
 
 def prompt(logger: logging.Logger, message: str, text, **values) -> None:

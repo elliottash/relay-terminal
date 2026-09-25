@@ -3304,7 +3304,8 @@ class Agent:
         swap = self._failover
         if swap is None:
             tier = self._failover_tier()
-            chain = ordered_candidates(self._failover_chain(tier), choose=True)
+            chain = ordered_candidates(self._failover_chain(tier), choose=True,
+                                       surface=f"quota_failover:{tier}")
             swap = {"turn_id": record["turn_id"], "provider": self.provider,
                     "config": self.config, "preset": self.preset, "window": self.context.window,
                     "effort": self.effort, "injected": self._injected_provider,
@@ -3412,7 +3413,8 @@ class Agent:
                     "high", failed_preset, self.config.model,
                     **({"entries": custom} if custom else {}))]
                 if quota:
-                    swap["chain"] = ordered_candidates(swap["chain"], choose=True)
+                    swap["chain"] = ordered_candidates(swap["chain"], choose=True,
+                                                       surface="quota_failover:high")
                 swap["tried"], swap["hosts"], swap["moves"] = set(), set(), 0
                 swap["max_moves"] = len(swap["chain"])
             if failed_preset:

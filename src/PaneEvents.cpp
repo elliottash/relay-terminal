@@ -224,6 +224,7 @@ void Pane::handle(const QJsonObject &event) {
                 // glm-5.3-flash in one pane and the next one opened on glm-5.3.
                 const relay::models::StartChoice start =
                     relay::models::startEntry(modelCatalog(), m_restorePreset, m_restoreModel);
+                relay::log::routingDraw(start.draw, QStringLiteral("new_pane"), paneLogId());   // #495G
                 QString choice = start.entry.preset, startModel = start.entry.model;
                 m_restorePreset.clear();
                 m_restoreModel.clear();

@@ -469,7 +469,12 @@ QList<Entry> fallbacks(const Catalog &catalog, qint64 now = 0);
 QList<Entry> liveTier(const Catalog &catalog, const QString &tier, qint64 now = 0);
 // One draw from the best live rank. `unitDraw` in [0, 1) is injectable for deterministic tests;
 // a negative value uses the process RNG. Missing or stale quota figures give equal weights.
-Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now = 0, double unitDraw = -1);
+// `trace`, when given, receives the draw for the routing record (`relay::log::routingDraw`): the
+// tier, the rank, every candidate with its quota score (null: no fresh report), the weight it was
+// drawn with and the probability that gave, the uniform draw (null when only one could be picked)
+// and the pick — what an off-policy evaluation of the routing needs.
+Entry drawTier(const Catalog &catalog, const QString &tier, qint64 now = 0, double unitDraw = -1,
+               QJsonObject *trace = nullptr);
 
 // ----- one default, and /swap as a toggle (card #MDL1, rule 3) ----------------------------------
 // > A pane runs on rank 1 of the main list until you pick something else *in that pane*.
@@ -490,6 +495,9 @@ struct StartChoice {
     // Whether this is the pane's *own* saved entry coming back (a restored pane) rather than rank
     // 1 of the main list. The caller says so differently and does not re-announce a default.
     bool restored = false;
+    // The draw that picked `entry` (see drawTier's `trace`); empty when nothing was drawn — a
+    // restored pane, or no tier lists yet. The caller, which knows the pane, records it.
+    QJsonObject draw;
 };
 // `restoredPreset`/`restoredModel` are what a restored pane saved, empty for a new one. The saved
 // entry wins while it is still usable and not exhausted — resolved through `Catalog::resolveKey`,

@@ -350,6 +350,55 @@ class TiedRankTests(unittest.TestCase):
         self.assertEqual(model_roles.ordered_candidates(tied, choose=True, draw=lambda: 0)[0], tied[0])
         self.assertEqual(model_roles.ordered_candidates(tied, choose=True, draw=lambda: .99)[0], tied[1])
 
+    def test_every_draw_is_recorded_with_its_probabilities(self):
+        now = 100000
+        rows = [{"preset": "kimi", "model": "k3", "rank": 1},
+                {"preset": "glm", "model": "glm-5.3", "rank": 1},
+                {"preset": "local", "model": "q", "rank": 2}]
+        limits = {  # kimi: 80 % left over 2 h = 40 %/h; glm: 20 % left over 1 h = 20 %/h
+            "kimi": {"updated_at": now, "windows": [
+                {"kind": "five_hour", "used_percent": 20, "resets_at": now + 7200}]},
+            "glm": {"updated_at": now, "windows": [
+                {"kind": "five_hour", "used_percent": 80, "resets_at": now + 3600}]}}
+        records = []
+        order = model_roles.ordered_candidates(rows, choose=True, draw=lambda: .9,
+                                               limits_lookup=limits.get, now=now,
+                                               surface="role:subagent", record=records.append)
+        self.assertEqual([r["preset"] for r in order], ["glm", "kimi", "local"])
+        (record,) = records
+        self.assertEqual(record["surface"], "role:subagent")
+        self.assertEqual(record["order"], ["glm|glm-5.3", "kimi|k3", "local|q"])
+        first = record["steps"][0]
+        self.assertEqual((first["rank"], first["u"], first["chosen"]), (1, .9, "glm|glm-5.3"))
+        self.assertEqual([(c["key"], round(c["p"], 4)) for c in first["candidates"]],
+                         [("kimi|k3", .6667), ("glm|glm-5.3", .3333)])
+        self.assertEqual(first["candidates"][0]["score"], 40.0)
+        # What was left once glm was drawn, and the rank below: certain, and recorded as such.
+        self.assertEqual([(s["rank"], s["candidates"][0]["p"]) for s in record["steps"][1:]],
+                         [(1, 1.0), (2, 1.0)])
+        # Ordering for display is not a choice and records nothing.
+        model_roles.ordered_candidates(rows, record=records.append)
+        self.assertEqual(len(records), 1)
+
+    def test_draw_record_goes_to_the_routing_file_and_not_from_a_stray_unit_test(self):
+        from relay_core import logs
+        rows = [{"preset": "kimi", "model": "k3", "rank": 1},
+                {"preset": "glm", "model": "glm-5.3", "rank": 1}]
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp, "RELAY_LOG_ORIGIN": "interactive"}):
+                model_roles.ordered_candidates(rows, choose=True, surface="role:subagent")
+            self.assertFalse((Path(tmp) / "relay/logs" / logs.ROUTING_DRAWS).exists())
+            with mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp, "RELAY_LOG_ORIGIN": "test",
+                                              "RELAY_PANE_ID": "p7"}):
+                model_roles.ordered_candidates(rows, choose=True, surface="quota_failover:main")
+            path = Path(tmp) / "relay/logs" / logs.ROUTING_DRAWS
+            (line,) = path.read_text().splitlines()
+            record = json.loads(line)
+            self.assertEqual((record["v"], record["component"], record["surface"], record["origin"]),
+                             (1, "worker", "quota_failover:main", "test"))
+            self.assertEqual(sum(c["p"] for c in record["steps"][0]["candidates"]), 1.0)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
     def test_recent_unused_allowance_near_reset_gets_more_weight(self):
         rows = [{"preset": "kimi", "rank": 1}, {"preset": "glm", "rank": 1}]
         now = 100000

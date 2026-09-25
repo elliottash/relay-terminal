@@ -3266,6 +3266,25 @@ and the same pane id, so the two sides of one pane line up. Workers share `worke
 is written under an advisory lock on a hidden `.worker.log.lock` and a handler whose file was
 rotated by another worker reopens it.
 
+**Routing draws** (`#495G`; owner, 2026-09-24: "we will need those for model eval"). Every choice
+the quota-paced routing makes is appended to `routing-draws.jsonl` in the same directory — one JSON
+object per line, `0600`, **never rotated** (a record is a few hundred bytes, one per lifecycle
+choice), and nothing when logging is off. The window writes the new-pane and Switchboard draws
+(`relay::log::routingDraw`, from `relay::models::drawTier`'s trace); the worker writes subagent and
+mode-switch draws and quota-exhaustion handoffs (`logs.routing_draw`, from
+`roles.ordered_candidates`). Common fields: `v` (1), `ts` (Unix seconds), `component`
+(`qt`/`worker`), `surface` (`new_pane`, `switchboard`, `role:<role>`, `quota_failover:<tier>`) and
+`pane` — the same id as `pane=` in the text logs, so a draw joins to the session it started; worker
+records add `origin`, `run_id` and `build_id`. A `qt` record is one draw: `tier`, `rank`, `u` (the
+uniform draw, null when one candidate was certain), `chosen`, and `candidates`, each with `key`
+(`preset|model`), `score` (quota % left per hour until reset on the tighter window; null with no
+report under 30 minutes old), `weight` (the score, or the peers' median for a null) and `p`. A
+`worker` record is one full ordering: `order`, and `steps` — one per pick in rank order, each shaped
+like a `qt` draw (a step with one candidate has `p` 1 and `u` null), plus `{rank, excluded, score: 0}`
+for an exhausted account left out. The entry actually run is the first in `order` that could start
+(a stored key, an installed harness), which the pane's session records. Test runs that do not set
+`RELAY_LOG_ORIGIN=test` with their own data directory write none.
+
 **Nothing about content is logged**: no prompts, model answers, reasoning, tool arguments, tool
 output, file contents, terminal output, API keys or password-mode input. Identifiers, model and
 host, event types, counts, durations and error types only; `scrub()` masks credential-shaped text

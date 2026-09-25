@@ -510,8 +510,16 @@ def _usage_weight(preset_id: str | None, now: int | None = None,
 
 
 def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
-                       limits_lookup=None, now: int | None = None) -> list[dict]:
-    """Sort ranks, then optionally draw a weighted order within each tied rank."""
+                       limits_lookup=None, now: int | None = None, surface: str = "",
+                       record=None) -> list[dict]:
+    """Sort ranks, then optionally draw a weighted order within each tied rank.
+
+    With ``choose`` every draw is recorded for evaluating the routing policy: ``surface`` says
+    which choice it was (``role:<role>``, ``quota_failover:<tier>``), and each step lists the
+    candidates with their quota score (None: no fresh report), the weight drawn with (the peers'
+    median standing in for None), the probability that gave, the uniform draw and the pick. The
+    record goes to ``record`` when given, else — for a real draw, not an injected one — to
+    `logs.routing_draw`."""
     groups: dict[int, list[dict]] = {}
     for index, entry in enumerate(entries, 1):
         rank = entry.get("rank", index)
@@ -519,16 +527,29 @@ def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
             rank = index
         groups.setdefault(rank, []).append(entry)
     result = []
+    if record is None and draw is None and choose:
+        from . import logs
+        record = logs.routing_draw
     if draw is None:
         draw = random.random
+    steps = []
     for rank in sorted(groups):
         group = groups[rank].copy()
         if choose:
-            group = [entry for entry in group
-                     if _usage_weight(entry.get("preset"), now,
-                                      limits_lookup(entry.get("preset")) if limits_lookup else None) != 0]
+            kept = []
+            for entry in group:
+                score = _usage_weight(entry.get("preset"), now,
+                                      limits_lookup(entry.get("preset")) if limits_lookup else None)
+                if score == 0:
+                    steps.append({"rank": rank, "excluded": _draw_key(entry), "score": 0.0})
+                else:
+                    kept.append(entry)
+            group = kept
         while group:
             if not choose or len(group) == 1:
+                if choose:
+                    steps.append({"rank": rank, "u": None, "chosen": _draw_key(group[0]),
+                                  "candidates": [{"key": _draw_key(group[0]), "p": 1.0}]})
                 result.append(group.pop(0))
                 continue
             scores = [_usage_weight(e.get("preset"), now,
@@ -540,15 +561,29 @@ def ordered_candidates(entries: list[dict], *, choose: bool = False, draw=None,
             if not any(weights):
                 result.extend(group)
                 break
-            position = max(0.0, min(float(draw()), 0.999999999999)) * sum(weights)
+            unit = max(0.0, min(float(draw()), 0.999999999999))
+            total = sum(weights)
+            position = unit * total
             selected = len(group) - 1
             for index, weight in enumerate(weights):
                 if position < weight:
                     selected = index
                     break
                 position -= weight
+            steps.append({"rank": rank, "u": round(unit, 6), "chosen": _draw_key(group[selected]),
+                          "candidates": [{"key": _draw_key(e), "score": score, "weight": weight,
+                                          "p": weight / total}
+                                         for e, score, weight in zip(group, scores, weights)]})
             result.append(group.pop(selected))
+    if choose and record is not None and steps:
+        record({"surface": surface or "unlabelled", "order": [_draw_key(e) for e in result],
+                "steps": steps})
     return result
+
+
+def _draw_key(entry: dict) -> str:
+    """A candidate as the routing record names it: `preset|model`, the Qt catalog's key form."""
+    return f"{entry.get('preset') or ''}|{entry.get('model') or ''}"
 
 
 def _strict_entry(name: str, value: dict) -> dict:
@@ -728,7 +763,8 @@ class RoleResolver:
                     skip_presets=()) -> Resolved:
         if "candidates" in entry:
             tier = "high" if role == "planning" else "main"
-            for candidate in ordered_candidates(entry["candidates"], choose=choose):
+            for candidate in ordered_candidates(entry["candidates"], choose=choose,
+                                                surface=f"role:{role}"):
                 preset_id = candidate.get("preset")
                 if preset_id in skip_presets:
                     continue
@@ -828,7 +864,8 @@ class RoleResolver:
         return (preset_id, guest_base_url(preset_id), entry.get("model") or "", {},
                 entry.get("effort"))
 
-    def _tier_entries(self, tier: str, guests: bool = True, choose: bool = False) -> list[tuple[str | None, str, str, dict, str | None]]:
+    def _tier_entries(self, tier: str, guests: bool = True, choose: bool = False,
+                      surface: str = "") -> list[tuple[str | None, str, str, dict, str | None]]:
         """The (preset, base_url, model, extra, effort) candidates of one tier, in order: the
         user's list when there is one (protocol 13.7), otherwise the one built-in default — the
         default provider's row of TIER_DEFAULTS, or the first saved endpoint for Local. [] when
@@ -839,7 +876,7 @@ class RoleResolver:
         listed = [entry for entry in self.tiers.get(tier) or []
                   if not is_guest_preset(entry.get("preset")) or (guests and tier in GUEST_TIERS)]
         if listed:
-            listed = ordered_candidates(listed, choose=choose)
+            listed = ordered_candidates(listed, choose=choose, surface=surface or f"tier:{tier}")
             return [self._guest_target(entry) if is_guest_preset(entry.get("preset"))
                     else self._list_target(entry, tier) for entry in listed]
         if self.tiers.get(tier):
@@ -934,7 +971,7 @@ class RoleResolver:
         for candidate in tier_fallbacks(tier):
             if candidate == "main":
                 break
-            entries = self._tier_entries(candidate, guests, choose)
+            entries = self._tier_entries(candidate, guests, choose, surface=f"role:{role}")
             if not entries and not self.tiers.get(candidate):
                 break               # no list and no built-in default: nothing further down either
             guest_skipped = False
