@@ -412,6 +412,14 @@ class RestoreThreadsTests(LiveThreadTests):
         outcome = manager2.wait("a1", 1, threading.Event())
         self.assertFalse(outcome["timed_out"])
         self.assertEqual(outcome["agents"][0]["status"], "interrupted")
+        # A second restart of the same interrupted thread keeps its status rather than degrading.
+        rec3, hub3 = Recorder(), Hub()
+        manager3 = self.manager_over(hub3, rec3)
+        agent3 = self.agent_over(rec3)
+        agent3.session_id = OWNER
+        manager3.attach(agent3)
+        self.assertEqual(manager3.restore_threads(agent3), 1)
+        self.assertEqual(manager3.list()[0]["status"], "interrupted")
 
     def test_finished_threads_stay_records(self):
         self.store.save_thread(thread(status="done", owner=OWNER))

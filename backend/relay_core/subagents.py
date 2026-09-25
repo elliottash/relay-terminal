@@ -944,8 +944,12 @@ class SubagentManager:
             agent.models_used = list(models)
             agent.usage_totals = session_files.load_usage(data.get("usage"))
             sub.agent, sub.model, sub.warnings = agent, model_label, []
-            orphan = data.get("status") in ("running", "waiting", "paused")
-            sub.status = "interrupted" if orphan else "stopped"
+            saved_status = data.get("status")
+            # `running`/`waiting`/`paused` on disk is a run no stop was ever written for: the
+            # kill case. `interrupted` is one of those after an earlier restore; it keeps its
+            # status across further restarts. Everything else restorable was stopped cleanly.
+            orphan = saved_status in ("running", "waiting", "paused")
+            sub.status = "interrupted" if orphan or saved_status == "interrupted" else "stopped"
             sub.result = str(data.get("result_preview") or "")
             sub.task = str(data.get("task") or "")[:8000]
             sub.thread_id = str(data.get("id") or "")
