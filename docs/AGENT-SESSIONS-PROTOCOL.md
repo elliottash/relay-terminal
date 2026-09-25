@@ -122,10 +122,16 @@ of them. Sending an endpoint with no preset is unchanged: the key is looked up f
   (`ProviderConfig.key_source`) is looked up again on a 401/403, and the request is sent once more
   when the keyring now holds a different key; a key that is a JWT already past its `exp` is looked
   up again before the request. A key typed into the request is never swapped.
-- **Failover skips spent providers.** The failover walk and a side call's chain skip a preset this
-  pane holds a quota refusal for, or whose last fresh quota report (`provider_limits` for the
-  Coding Plan and Kimi Code, a guest's `usage_limits`) has a window at 100% before its reset; the
-  note says what it skipped and why, and the worker logs `provider_failover_skip`.
+- **Failover picks the way a default is picked (owner, 2026-09-25).** Every failover chain — a
+  turn's Main/Flash walk, a plan turn's High list, a side call's list — is ordered by the same
+  `roles.ordered_candidates(choose=True)` draw a new pane's default uses: ranks stay authoritative,
+  entries tied on a rank are drawn by remaining quota per hour, and an entry whose fresh quota
+  report has a spent window is left out. Each draw is a `routing-draws.jsonl` record with
+  `surface` `failover:<tier>`, `failover:high` or `side_failover:<tier>`. The walk also skips a
+  preset this pane holds a quota refusal for; the move's note says what it skipped and why
+  ("Skipped glm-5.3: 5-hour usage limit reached; resets 17:53"), and the worker logs
+  `provider_failover_skip`. The older `fallbacks` option carries no ranks, so only a `tiers` list
+  can tie.
 - `set_effort {effort}` → event `effort_changed {effort, applied: {...provider params}}`.
 
 ## 3. Effort levels (v3.11, 2026-09-21: the model's own words)

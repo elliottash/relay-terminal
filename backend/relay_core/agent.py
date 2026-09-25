@@ -2074,6 +2074,8 @@ class Agent:
             entries = []
         if not entries:
             return first
+        # The same default pick as a turn's failover (#QK2Q): ranks, then the quota-weighted draw.
+        entries = ordered_candidates(entries, choose=True, surface=f"side_failover:{resolved.tier}")
         tried = {resolved.preset_id} if resolved.preset_id else set()
         hosts = {_host(resolved.config.base_url)}
 
@@ -3715,9 +3717,10 @@ class Agent:
                 swap["chain"] = [dict(entry) for entry in chain(
                     "high", failed_preset, self.config.model,
                     **({"entries": custom} if custom else {}))]
-                if quota:
-                    swap["chain"] = ordered_candidates(swap["chain"], choose=True,
-                                                       surface="quota_failover:high")
+                # Every move along the High list is a default pick too (#QK2Q), not only a quota one.
+                swap["chain"] = ordered_candidates(swap["chain"], choose=True,
+                                                   surface=("quota_failover:high" if quota
+                                                            else "failover:high"))
                 swap["tried"], swap["hosts"], swap["moves"] = set(), set(), 0
                 swap["max_moves"] = len(swap["chain"])
             if failed_preset:
@@ -3821,7 +3824,17 @@ class Agent:
             # turns - `tiers.main`, or the `fallbacks` option when no list was sent - and the
             # Flash or Local list for a pane on that tier. From the entry after the pane's own
             # model when the list names it, from the top for a model picked by hand.
-            swap["fallbacks"] = self._failover_chain(swap["tier"])
+            # Ordered the way a new pane's default is picked (owner, 2026-09-25, #QK2Q): ranks
+            # first, a weighted draw by remaining quota per hour within a tied rank, and a spent
+            # entry left out — not the list's bare order, which sent a Kimi 401 onto a Z.AI plan
+            # whose 5-hour window was at 100%.
+            chain = self._failover_chain(swap["tier"])
+            swap["fallbacks"] = ordered_candidates(chain, choose=True,
+                                                   surface=f"failover:{swap['tier']}")
+            # What the draw left out as spent, for the move's note ("Skipped glm-5.3: …").
+            swap["spent"] = [f"{entry.get('model') or entry.get('preset')}: {reason}"
+                             for entry in chain if entry not in swap["fallbacks"]
+                             for reason in [self._spent_reason(entry.get("preset"))] if reason]
             # How many moves this turn can make at most, for the notes: every entry of the
             # chain, plus the twin when the failed model was opted in.
             swap["max_attempts"] = len(swap["fallbacks"]) + (1 if swap["twin"] else 0)
@@ -3830,7 +3843,7 @@ class Agent:
             # same terms as any candidate, and one that cannot take the turn — no key, the failing
             # host, a preset already asked, a guest — is skipped silently for the next.
             target, twin = None, False
-            skipped = []
+            skipped = swap.pop("spent", [])
             while target is None and swap["next"] < len(swap["fallbacks"]):
                 entry = swap["fallbacks"][swap["next"]]
                 swap["next"] += 1

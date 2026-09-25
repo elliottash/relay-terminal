@@ -249,6 +249,35 @@ class FailoverSkipsSpentPlansTests(unittest.TestCase):
         self.assertIn('5-hour usage limit reached', move['text'])
         self.assertEqual(move['issue']['kind'], 'token_expired')
 
+    def test_a_tied_rank_is_drawn_by_remaining_quota_like_a_new_panes_default(self):
+        # Owner, 2026-09-25: failovers pick the way a pane's default is picked. Two spares share
+        # rank 1; Kimi has 90% of its window left, Z.AI 10%, both resetting in an hour.
+        now = int(time.time())
+        for preset, used in (('glm-coding', 90.0), ('kimi-code', 10.0)):
+            provider_limits._last[preset] = {'updated_at': now, 'windows': [
+                {'kind': '5h', 'used_percent': used, 'resets_at': now + 3600}]}
+        openai = PRESETS['openai']
+        config = ProviderConfig(openai.base_url, 'gpt-6-mini', 'k')
+        picked = {}
+        for u in (0.05, 0.95):
+            with self.subTest(u=u):
+                self.events.clear()
+                self.stubs.update({'gpt-6-mini': Refuser(ProviderError('Provider HTTP 503.')),
+                                   'glm-5.3': Answerer(), 'k3': Answerer()})
+                # The ranked Main list, as the GUI sends it (`tiers`); the older `fallbacks` option
+                # has no ranks, so nothing in it ever ties.
+                roles = RoleResolver(config, 'openai', {}, key_lookup=lambda p: 'k', tiers={'main': [
+                    {'preset': 'glm-coding', 'model': 'glm-5.3', 'rank': 1},
+                    {'preset': 'kimi-code', 'model': 'k3', 'rank': 1}]})
+                agent = Agent(config, self.temp.name, self.events.append, preset_id='openai', roles=roles)
+                with mock.patch('relay_core.roles.random.random', return_value=u), \
+                     mock.patch('relay_core.logs.routing_draw'):
+                    agent.ask('hello')
+                picked[u] = [e['to_model'] for e in self.events if e.get('reason') == 'failover']
+        # Kimi's weight is nine times Z.AI's: most draws land on it, a low one on Z.AI.
+        self.assertEqual(picked[0.95], ['k3'])
+        self.assertNotEqual(picked[0.05], picked[0.95])
+
     def test_a_turn_that_fails_carries_its_issue(self):
         issue = {'kind': 'auth', 'label': 'API key rejected', 'preset': 'kimi-code'}
         self.stubs['k3'] = Refuser(ProviderError('Provider HTTP 401 …', issue=issue))
