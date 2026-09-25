@@ -1614,8 +1614,9 @@ class Agent:
         if provider is not None:
             self.provider, self._injected_provider = provider, True
         elif not self._injected_provider or getattr(self.provider, "stand_in", False):
-            # A stand-in (`guest_harness_provider.UnavailableProvider`) is what a helper had when
-            # it had no model; a model picked now is one, so it gets a real provider.
+            # A stand-in provider (one whose `stand_in` is True, as the removed #GH5T
+            # `UnavailableProvider` was) is what a helper had when it had no model; a model
+            # picked now is one, so it gets a real provider.
             self.provider = self._hook_preempt(_with_first_token(_provider_for(config, self.stall_timeout_s),
                                                                  self.first_token_timeout_s))
             self._injected_provider = False

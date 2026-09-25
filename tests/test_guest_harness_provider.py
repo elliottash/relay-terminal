@@ -969,15 +969,38 @@ class QuestionTests(unittest.TestCase):
 
 
 class AgentWiringTests(unittest.TestCase):
-    def test_a_model_picked_after_the_stand_in_replaces_it(self):
-        """Found on #MH7P (2026-09-22): Main was Claude Code with nothing else usable, so the helper
-        was built on the stand-in that only refuses. Picking glm in its model box was applied —
-        and every turn still said "The helper agent cannot run on Claude Code", because
-        `set_model` kept any injected provider, the stand-in included. The pick is what the next
-        turn runs on."""
+    def test_a_model_picked_after_a_stand_in_replaces_it(self):
+        """Found on #MH7P (2026-09-22): Main was Claude Code with nothing else usable, so the
+        helper was built on the #GH5T stand-in, a provider that only refuses. Picking glm in its
+        model box was applied — and every turn still said "The helper agent cannot run on Claude
+        Code", because `set_model` kept any injected provider, the stand-in included. That
+        stand-in went with #E34S (a helper may run on the guest now), but the rule it found is
+        general: a provider that says it is a stand-in is never what the next turn runs on."""
+        class StandIn:
+            stand_in = True
+            serves_side_calls = False
+
+            def __init__(self):
+                self.stall_timeout = 30.0
+
+            def complete(self, *args, **kwargs):
+                raise ProviderError("no model")
+
+            def cancel(self):
+                pass
+
+            def set_stall_timeout(self, seconds):
+                self.stall_timeout = seconds
+
+            def response_open(self):
+                return False
+
+            def close(self):
+                pass
+
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        stand_in = ghp.UnavailableProvider(guest_config(), ghp.helper_refusal("Claude Code"))
+        stand_in = StandIn()
         agent = Agent(guest_config(), temp.name, lambda event: None, provider=stand_in,
                       session_dir=str(Path(temp.name) / "sessions"), track_requests=False)
         self.assertIs(agent.provider, stand_in)
@@ -1472,11 +1495,12 @@ class WorkerProtocolTests(unittest.TestCase):
                          {"type": "shutdown"}], second)
         self.assertTrue(second.closed)
 
-    # ----- the helper worker never starts a guest (card #GH5T) --------------------------------
-    def helper(self, harness, *, fallbacks=None, roles=None, keys=None):
-        """One `configure` as the tab's helper worker: the window's guest preset, the
-        `switchboard` role, and the Options › Models priority list the GUI sends with it."""
-        request = {"type": "configure", "preset": "guest:claude", "workspace": str(ROOT),
+    # ----- the helper worker runs on the guest (card #E34S; it once could not, #GH5T) ---------
+    def helper(self, harness, *, preset="guest:claude", fallbacks=None, roles=None, keys=None):
+        """One `configure` as the tab's helper worker: the window's guest preset (or the
+        helper's own box pick), the `switchboard` role, and the Options › Models priority list
+        the GUI sends with it."""
+        request = {"type": "configure", "preset": preset, "workspace": str(ROOT),
                    "agent_role": "switchboard", "use_stored_key": True, "api_key": "",
                    "fallbacks": fallbacks if fallbacks is not None else []}
         if roles is not None:
@@ -1485,11 +1509,11 @@ class WorkerProtocolTests(unittest.TestCase):
             events = self.run_worker([request, {"type": "shutdown"}], harness)
         return events
 
-    def test_the_helper_worker_follows_the_priority_list_instead_of_starting_a_guest(self):
-        """Owner report, 2026-09-20: Main is Claude Code, and every helper turn answered "Base URL
-        must be an HTTPS URL without credentials, query, or fragment". The helper's tools are
-        Relay's own, which a guest does not take (#4NXH), so it runs on the first model of the
-        priority list that can take a turn — and starts no guest process it could never use."""
+    def test_the_helper_worker_starts_the_guest_and_hands_it_the_board_bridge(self):
+        """#E34S: the `relay_board` bridge (#4NXH) is how a guest helper takes Relay's own
+        `board_*` and `app_*` tools, and the guest process is the helper's own agent. The
+        priority list is no longer walked to divert it — it names where a *card console* goes
+        (`tests/test_card_model_selection.py`), because a second agent may not share this one."""
         harness = FakeHarness([], session_id="w-sess", model="claude-fake")
         events = self.helper(harness,
                              fallbacks=[{"preset": "guest:codex", "model": ""},
@@ -1497,15 +1521,72 @@ class WorkerProtocolTests(unittest.TestCase):
                              keys={"RELAY_KIMI_API_KEY": "k"})
         configured = [e for e in events if e["event"] == "configured"]
         self.assertTrue(configured, [e for e in events if e["event"] == "error"])
-        self.assertEqual(harness.starts, [])              # nothing was started
-        self.assertEqual(configured[0]["model"], "kimi-k3")
-        self.assertNotIn("guest", configured[0])
-        role = configured[0]["roles"]["switchboard"]
-        self.assertEqual(role["preset"], "kimi")
-        # What the model box says: "Follow Main — kimi-k3", and why, in its tooltip.
-        self.assertEqual(configured[0]["tiers"]["main"]["model"], "kimi-k3")
-        self.assertIn("Claude Code", role["note"])
-        self.assertIn("kimi-k3", role["note"])
+        self.assertEqual(len(harness.starts), 1)          # the guest is the helper's agent
+        self.assertEqual(configured[0]["guest"], "claude")
+        self.assertEqual(configured[0]["model"], "claude-fake")
+        self.assertEqual(configured[0]["agent_role"], "main")
+        # "Follow Main" onto the guest: the summary carries the harness config, and a guest
+        # preset id is no catalog preset, so the row's `preset` is None by design.
+        self.assertEqual(configured[0]["roles"]["switchboard"]["base_url"], "harness://claude")
+        # What the model box says: "Follow Main — claude-fake", the guest it really runs on.
+        self.assertEqual(configured[0]["tiers"]["main"]["model"], "claude-fake")
+        # The board bridge went to the guest with the start; the exchange over it is the next
+        # test but one.
+        self.assertIsNotNone(harness.board_bridge)
+        self.assertIn("args", harness.board_bridge)
+        self.assertFalse([e for e in events if e["event"] == "error"])
+
+    def test_the_helpers_own_role_pick_may_name_a_guest_and_starts_it(self):
+        """A guest picked in the helper's model box (#PK5Q) is honoured like a pane's own pick:
+        the worker reconfigures on that preset and starts that guest, one process for its one
+        agent. Before #E34S this configure was the one `worker.py` diverted off the guest."""
+        harness = FakeHarness([], session_id="w-sess", model="codex-fake", guest="codex")
+        events = self.helper(harness, preset="guest:codex",
+                             fallbacks=[{"preset": "kimi", "model": "kimi-k3"}],
+                             keys={"RELAY_KIMI_API_KEY": "k"})
+        configured = [e for e in events if e["event"] == "configured"]
+        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
+        self.assertEqual(len(harness.starts), 1)
+        self.assertEqual(configured[0]["guest"], "codex")
+        self.assertEqual(configured[0]["model"], "codex-fake")
+        self.assertEqual(configured[0]["roles"]["switchboard"]["base_url"], "harness://codex")
+
+    def test_a_board_tool_call_over_the_helpers_bridge_answers_from_its_board(self):
+        """The wiring `configure` now builds for a helper on a guest (#E34S) — the provider
+        the guest process runs on, the agent whose board tools are this tab's, and `attach`
+        between them — serves Relay's own `board_list` from the workspace's `.board`."""
+        from relay_core.guest_board_bridge import exchange
+        from relay_core import board as B, board_tools as T
+        from tests.test_board_tools import CONFIG
+        with tempfile.TemporaryDirectory() as cwd:
+            root = Path(cwd) / 'issues'
+            root.mkdir()
+            (root / B.BOARD_CONFIG).write_text(CONFIG)
+            board = T.BoardTools(B.Board(root, Path(cwd)), emit=lambda e: None,
+                                 state_path=Path(cwd) / 'rate.json')
+            board.begin_turn('helper-guest')
+            harness = FakeHarness([], guest="claude")
+            with mock.patch.object(ghp, "make_harness", return_value=harness):
+                provider = ghp.start_provider("guest:claude",
+                                              {"skills": {"enabled": False},
+                                               "agent_role": "switchboard"}, cwd)
+            try:
+                agent = Agent(provider.config, cwd, lambda e: None,
+                              provider=provider, board=board, track_requests=False)
+                ghp.attach(agent, provider)
+                cap = json.loads(Path(harness.board_bridge['args'][-1]).read_text())
+                names = {t['name'] for t in exchange(cap, 'tools/list')['tools']}
+                self.assertIn('board_list', names)
+                bridge = provider.board_bridge
+                bridge.begin(threading.Event())
+                try:
+                    result = exchange(cap, 'tools/call', {'name': 'board_list', 'arguments': {}},
+                                      'helper-guest')
+                    self.assertIn('cards', result)
+                finally:
+                    bridge.end()
+            finally:
+                provider.close()
 
     def test_a_role_pick_is_honoured_under_a_guest_window_preset(self):
         harness = FakeHarness([], session_id="w-sess", model="claude-fake")
@@ -1517,16 +1598,15 @@ class WorkerProtocolTests(unittest.TestCase):
         self.assertEqual(configured[0]["agent_role"], "switchboard")
         self.assertEqual(configured[0]["roles"]["switchboard"]["preset"], "glm-coding")
 
-    def test_with_nothing_usable_it_configures_anyway_and_a_turn_says_why(self):
-        """The board is files, so the pane still opens and browses its cards; what it cannot
-        do is answer, and it says so in a sentence instead of the endpoint error."""
-        harness = FakeHarness([], session_id="w-sess", model="claude-fake")
-        events = self.helper(harness, fallbacks=[{"preset": "kimi", "model": "kimi-k3"}])
-        configured = [e for e in events if e["event"] == "configured"]
-        self.assertTrue(configured, [e for e in events if e["event"] == "error"])
-        self.assertEqual(harness.starts, [])
-        self.assertIn("nothing else it can use",
-                      configured[0]["roles"]["switchboard"]["note"])
+    def test_a_helper_guest_that_cannot_start_is_one_error(self):
+        """A guest helper that cannot start is a failed configure, as a pane's is (29.3) — the
+        stand-in provider that once configured-but-refused (#GH5T) went with its reason."""
+        harness = FakeHarness([], start_error=HarnessNotAvailable("claude is not installed here."))
+        events = self.helper(harness)
+        self.assertFalse([e for e in events if e["event"] == "configured"])
+        errors = [e for e in events if e["event"] == "error"]
+        self.assertTrue(errors)
+        self.assertIn("not installed", errors[0]["text"])
 
     def test_a_pane_on_the_same_preset_still_starts_the_guest(self):
         harness = FakeHarness([], session_id="w-sess", model="claude-fake")

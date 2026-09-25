@@ -355,27 +355,23 @@ def main():
                 resolver = model_roles.RoleResolver(config, options.get("preset_id"), role_table,
                                                     key_lookup=keystore.lookup, main_effort=options.get("effort"),
                                                     tiers=tier_table)
-                # Card #GH5T (owner report, 2026-09-20: "The Switchboard agent could not answer:
-                # Base URL must be an HTTPS URL without credentials, query, or fragment"). The
-                # helper worker is configured with the *window's* preset, so a Main on Claude Code
-                # made it a guest worker — and the helper's whole job is Relay's own `board_*` and
-                # `app_*` tools, which a guest does not take (#4NXH). So it never starts one: the
-                # resolver is moved off the harness onto the Options › Models priority list before
-                # any role is resolved, which is what makes "Follow Main", the tiers and a role
-                # pick in the helper's model box all name a model that can actually answer. A
-                # *pane* on a guest preset is untouched; this is the helper role and nothing else.
-                helper_on_guest = is_guest and agent_role == model_roles.HELPER_ROLE
-                spare = (resolver.leave_guest(options.get("fallbacks"),
-                                              guest_harness_provider.guest_name(request.get("preset")))
-                         if helper_on_guest else None)
+                # A helper may run on a guest (#E34S). It could not once (#GH5T: a Main on Claude
+                # Code configured this worker with `harness://`, the helper's whole job is
+                # Relay's `board_*` and `app_*` tools, and a guest took none of them) — but the
+                # `relay_board` bridge (#4NXH) serves exactly those tools to a guest now, and a
+                # guest process is one agent, which for this worker is the helper's own. So the
+                # resolver is no longer diverted off a guest here; the one thing that still cannot
+                # use that harness is a card console, a *second* agent in this worker, and
+                # `board_protocol` chooses that one's model off the priority list.
                 pane_role = resolver.resolve(agent_role)
+                helper = agent_role == model_roles.HELPER_ROLE
                 # The guest starts here: every field of the request has been accepted, and a guest
                 # that cannot start is one `error` with the pane left on the model it had (29.3).
                 # `config` is filled in rather than replaced, so the resolver holds the same object
                 # and its summary names the model the guest reports.
                 guest_provider = (guest_harness_provider.start_provider(
                     request.get("preset"), request, workspace, config=config)
-                    if is_guest and not helper_on_guest else None)
+                    if is_guest and not helper else None)
                 if guest_provider is not None:
                     agent_role = "main"
                 elif not pane_role.is_main:
@@ -389,19 +385,12 @@ def main():
                             pane_role.preset_id, role_request, workspace, config=config)
                 else:
                     agent_role = "main"   # the role follows the main agent, or fell back to it
-                    if spare is not None:
-                        # The helper follows Main and Main was a guest: it follows where the
-                        # resolver landed instead (#GH5T).
-                        config, options["preset_id"] = spare.config, spare.preset_id
+                    if helper and is_guest:
+                        # The helper itself follows a guest Main (#E34S): the request's preset is
+                        # the window's, and the guest process it names is this worker's agent.
+                        guest_provider = guest_harness_provider.start_provider(
+                            request.get("preset"), request, workspace, config=config)
                 state["agent_role"] = agent_role
-                # Nothing on the list could take it either, so this worker has no model at all. It
-                # is still configured — the board is files, so the pane opens, reads its
-                # cards and shows in its model box why it cannot answer — on a provider that is
-                # never called: a turn gets the sentence, not an endpoint error (#GH5T).
-                stand_in = (guest_harness_provider.UnavailableProvider(
-                    config, guest_harness_provider.helper_refusal(
-                        guest_harness_provider.guest_name(config)))
-                    if helper_on_guest and spare is None else None)
                 # --- end model roles ---
                 # A configure replaces the pane's agent, so a guest harness the old one held has
                 # nobody left to close it (protocol 29.3). Idle by now: configure refuses mid-turn.
@@ -409,7 +398,7 @@ def main():
                     guest_harness_provider.detach(turns.agent)
                 try:
                     agent = Agent(config, workspace, turns.agent_emit,
-                                  provider=guest_provider or stand_in,
+                                  provider=guest_provider,
                                   keybindings=catalog, skills=skill_index, roles=resolver,
                                   # Protocol 33: the named scope and the brief. `tool_scope`
                                   # decides the tool set in one place (`Agent.tools`) instead of
@@ -780,7 +769,7 @@ def main():
                                                              "model": request.get("model"),
                                                              "effort": request.get("effort")})
                             if isinstance(pick, str) and pick.strip() else agent.roles.choose_role(role))
-                if board.refuse_model_selection(request, resolved.config):
+                if board.refuse_model_selection(request):
                     continue
                 new_role = "main" if resolved.is_main else role
                 def follow_role(_agent, new_role=new_role):

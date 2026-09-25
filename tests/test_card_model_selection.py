@@ -1,7 +1,7 @@
 """Board selection must name the provider serving an existing card (#BMS1)."""
 import copy
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from test_board_protocol import ProtocolTest
 from relay_core.agent import Agent
@@ -33,20 +33,67 @@ class CardModelSelectionTests(ProtocolTest):
         self.commands._sync_card_model(session)
         self.assertIs(card.provider, same_provider)
 
-    def test_guest_pick_is_refused_with_actual_model_before_launch(self):
+    def test_guest_pick_is_allowed_now_that_the_helper_can_run_on_one(self):
+        """#E34S: the guest process is the helper's own agent, so a guest pick in its model box
+        is a real selection — a card console follows the priority list instead, not the pick."""
         with patch('relay_core.guest_harness_provider.start_provider') as start:
+            self.assertFalse(self.commands.refuse_model_selection(
+                {'preset': 'guest:codex', 'model': 'gpt-6-astra', 'id': 'pick'}))
+        start.assert_not_called()          # launching the guest was never this event's job
+        self.assertFalse(self.of('model_switch_refused'))
+        self.assertEqual(self.main.config.model, 'kimi-k3')
+
+    def test_guest_pick_still_refuses_while_cards_are_running(self):
+        """The #BMS1 rule stands: a card console cannot swap models mid-turn."""
+        with patch.object(self.commands.cards, 'idle', return_value=False):
             self.assertTrue(self.commands.refuse_model_selection(
                 {'preset': 'guest:codex', 'model': 'gpt-6-astra', 'id': 'pick'}))
-        start.assert_not_called()
         event = self.of('model_switch_refused')[-1]
         self.assertEqual(event['current_model'], 'kimi-k3')
-        self.assertIn('cannot run', event['reason'])
+        self.assertIn('queued', event['reason'])
         self.assertEqual(event['code'], 'board_model_unavailable')
         self.assertEqual(self.main.config.model, 'kimi-k3')
 
-    def test_guest_role_pick_is_also_refused(self):
-        config = ProviderConfig(api_key='', base_url='harness://codex', model='gpt-6-astra')
-        self.assertTrue(self.commands.refuse_model_selection({'role': 'high'}, config))
+    def guest_main(self, keys=('kimi',)):
+        """The helper agent as #E34S configures it: its own agent is the guest, and the
+        resolver's Main list is the Options › Models priority list the worker was sent. The
+        agent is built on an injected provider, as the worker builds it — a `harness://`
+        config is not an endpoint, so nothing may validate one."""
+        from relay_core.roles import RoleResolver
+        config = ProviderConfig(api_key='', base_url='harness://claude', model='claude-fake')
+        store = {name: 'test' for name in keys}
+        self.main = Agent(config, str(self.repo), self.events.append, provider=Mock(),
+                          track_requests=False)
+        self.main.roles = RoleResolver(config, 'guest:claude', None,
+                                       key_lookup=lambda pid: store.get(pid, ''),
+                                       tiers={'main': [{'preset': 'kimi', 'model': 'kimi-k3'}]},
+                                       guest_check=lambda guest_id: True)
+        self.turns.agent = self.main
+
+    def test_a_card_console_takes_the_priority_list_when_the_helper_runs_on_a_guest(self):
+        self.guest_main()
+        config, preset, effort = self.commands._console_model(self.main)
+        self.assertEqual(preset, 'kimi')
+        self.assertEqual(config.model, 'kimi-k3')
+        self.assertEqual(config.base_url, 'https://api.moonshot.ai/v1')
+
+    def test_with_nothing_on_the_list_the_console_gets_the_refusal_sentence(self):
+        self.guest_main(keys=())
+        with self.assertRaises(ValueError) as raised:
+            self.commands._console_model(self.main)
+        self.assertIn('cannot be a second', str(raised.exception))
+
+    def test_a_cached_card_moves_to_the_spare_model_and_keeps_history(self):
+        self.guest_main()
+        card = Agent(ProviderConfig(api_key='test', base_url='https://example.invalid',
+                                    model='old-model'), str(self.repo), self.events.append)
+        card.messages.append({'role': 'user', 'content': 'Remember this conversation'})
+        old_provider = card.provider
+        self.commands._sync_card_model(SimpleNamespace(agent=card, idle=True))
+        self.assertEqual(card.config.model, 'kimi-k3')
+        self.assertEqual(card.config.base_url, 'https://api.moonshot.ai/v1')
+        self.assertIsNot(card.provider, old_provider)
+        self.assertIn('Remember this conversation', str(card.messages))
 
     def test_busy_or_queued_card_refuses_model_selection(self):
         with patch.object(self.commands.cards, 'idle', return_value=False):

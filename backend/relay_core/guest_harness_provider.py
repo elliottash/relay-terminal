@@ -209,55 +209,21 @@ def guest_name(preset_or_config) -> str:
 
 
 def helper_refusal(name: str) -> str:
-    """What the helper agent says when the only model it has is a guest harness (card #GH5T).
+    """What a card console says when its helper runs on a guest and no other model is set
+    (cards #GH5T, #E34S).
 
-    The helper — the Board's agent and the one the Options, Actions and Sessions panes ask
-    (protocol 30.7) — works through Relay's own `board_*` and `app_*` tools, which a guest does
-    not take (#4NXH). So it cannot run on one, and when the Options › Models priority list holds
-    nothing else usable there is nothing to fall back to. This is the sentence the user sees then,
-    in place of the endpoint error a guest's `harness://` base URL used to raise deep inside the
-    agent builder (owner report, 2026-09-20: "The Switchboard agent could not answer: Base URL
-    must be an HTTPS URL without credentials, query, or fragment").
+    The helper itself may run on a guest now: the guest process is the helper's own agent, and
+    the `relay_board` bridge (#4NXH) is how it takes Relay's `board_*` and `app_*` tools. But a
+    guest is one process that runs one agent, and a per-card conversation would be a second on
+    the same harness — so it takes the first usable model off the Options › Models priority list
+    (`board_protocol._console_model`), and when the list holds nothing this sentence is its whole
+    answer, in place of the endpoint error the guest's `harness://` base URL would otherwise
+    raise deep in the agent builder (owner report, 2026-09-20: "The Board agent could not
+    answer: Base URL must be an HTTPS URL without credentials, query, or fragment").
     """
-    return (f"The helper agent cannot run on {name or 'a guest session'}. Add a provider under "
-            "Options › Models, or pick a model for the helper in its model box.")
-
-
-class UnavailableProvider:
-    """The stand-in a helper worker is built on when it has no model at all (card #GH5T).
-
-    Its Main is a guest harness, which the helper may not run on, and the priority list holds
-    nothing else — so there is no endpoint to build. The worker is still configured, because the
-    The board is files: the pane opens, its cards are read and its model box says what is wrong.
-    Nothing is started and nothing is ever sent; a turn that reaches a provider at all gets
-    `helper_refusal` back, the same sentence the agent builder raises before it gets that far.
-    """
-
-    serves_side_calls = False       # a side call would be a model call too
-    # Not a provider anybody chose: a model picked afterwards replaces it (`Agent.set_model`).
-    # Kept as an injected one it outlived the pick, and every turn after choosing glm in the
-    # helper's model box still said this refusal (found on #MH7P, 2026-09-22).
-    stand_in = True
-
-    def __init__(self, config: ProviderConfig, text: str):
-        self.config = config
-        self.text = text
-        self.stall_timeout = DEFAULT_STALL_TIMEOUT
-
-    def complete(self, *args, **kwargs):
-        raise ProviderError(self.text)
-
-    def cancel(self) -> None:
-        pass
-
-    def set_stall_timeout(self, seconds) -> None:
-        self.stall_timeout = seconds
-
-    def response_open(self) -> bool:
-        return False
-
-    def close(self) -> None:
-        pass
+    return (f"{name or 'The guest session'} runs this Board's own agent, and a card conversation "
+            "cannot be a second one on it. Add a provider under Options › Models, or rank one "
+            "for the card consoles to use.")
 
 
 def config_for_preset(preset_id: str, request: dict) -> ProviderConfig:

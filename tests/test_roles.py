@@ -930,79 +930,80 @@ class TierTests(unittest.TestCase):
         self.assertIn("preset", events[1]["text"])
 
 
-# ----- the helper agent leaves a guest (card #GH5T) -------------------------------------------
+# ----- the card console leaves the helper's guest (cards #GH5T, #E34S) ------------------------
 class LeaveGuestTests(unittest.TestCase):
-    """`RoleResolver.leave_guest`: a helper worker whose Main is a guest harness walks the
-    Options › Models priority list for a model it can actually build.
+    """`RoleResolver.leave_guest`: the model a card console takes when the helper it belongs
+    to runs on a guest.
 
-    Owner report, 2026-09-20: his Main is Claude Code, so the tab's helper worker was configured
-    on `harness://claude` and every card and page turn died in `ProviderConfig.validate` —
-    "Base URL must be an HTTPS URL without credentials, query, or fragment".
+    The helper itself runs on the guest since #E34S — the guest process is its own agent, and
+    the `relay_board` bridge (#4NXH) is how it takes Relay's `board_*` and `app_*` tools — but a
+    per-card console is another agent in that same worker, and the #GH5T report (owner,
+    2026-09-20: every card turn died in `ProviderConfig.validate` on the helper's
+    `harness://claude`) is why it cannot share the harness. It walks the Options › Models
+    priority list instead, and the resolver is only *asked* — never rebased.
     """
 
-    def guest(self, keys=("kimi",)):
+    def guest(self, keys=("kimi",), roles=None):
         store = {name: f"{name}-key" for name in keys}
         return RoleResolver(ProviderConfig("harness://claude", "", "", {}, 32_768), "guest:claude",
-                            key_lookup=lambda pid: store.get(pid, ""))
+                            roles, key_lookup=lambda pid: store.get(pid, ""),
+                            guest_check=lambda guest_id: True)
 
-    def test_the_first_usable_entry_becomes_main_and_the_helper_follows_it(self):
+    def test_the_first_usable_entry_answers_and_the_resolver_stays_on_its_guest(self):
         made = self.guest()
-        spare = made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code")
+        spare = made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}])
         self.assertIsNotNone(spare)
         self.assertEqual(spare.preset_id, "kimi")
-        self.assertEqual(made.main_config.model, "kimi-k3")
-        self.assertEqual(made.main_preset_id, "kimi")
-        helper = made.resolve(model_roles.HELPER_ROLE)
-        self.assertEqual(helper.config.model, "kimi-k3")
-        self.assertEqual(helper.config.base_url, CONFIGS["kimi"][0])
-        # The model box reads the reason out of the role's note and the Main tier's.
-        self.assertIn("Claude Code", helper.note)
-        self.assertIn("kimi-k3", helper.note)
-        self.assertIn("Claude Code", made.tier_summary()["main"]["note"])
-        self.assertEqual(made.tier_summary()["main"]["model"], "kimi-k3")
+        self.assertEqual(spare.config.model, "kimi-k3")
+        self.assertEqual(spare.config.base_url, CONFIGS["kimi"][0])
+        # A question, not a rebase: the helper keeps running on the guest it was configured on.
+        self.assertEqual(made.main_config.base_url, "harness://claude")
+        self.assertEqual(made.resolve(model_roles.HELPER_ROLE).config.base_url, "harness://claude")
         self.assertFalse(made.warnings)          # an expected fallback, not a protocol warning
 
     def test_a_guest_row_and_an_entry_with_no_key_are_skipped_in_the_users_order(self):
         made = self.guest(keys=("glm-coding",))
         spare = made.leave_guest([{"preset": "guest:codex", "model": ""},
                                   {"preset": "kimi", "model": "kimi-k3"},
-                                  {"preset": "glm-coding", "model": "glm-5.3"}], "Claude Code")
+                                  {"preset": "glm-coding", "model": "glm-5.3"}])
         self.assertEqual(spare.preset_id, "glm-coding")
-        self.assertEqual(made.main_config.model, "glm-5.3")
+        self.assertEqual(spare.config.model, "glm-5.3")
 
     def test_relay_free_is_a_target_only_when_the_list_names_it_and_it_works(self):
         made = self.guest(keys=())
         with mock.patch.object(model_roles.hosted, "available", return_value=False):
-            self.assertIsNone(made.leave_guest([{"preset": "relay-free", "model": ""}], "Claude Code"))
+            self.assertIsNone(made.leave_guest([{"preset": "relay-free", "model": ""}]))
         with mock.patch.object(model_roles.hosted, "available", return_value=True):
-            spare = self.guest(keys=()).leave_guest([{"preset": "relay-free", "model": ""}], "Claude Code")
+            spare = self.guest(keys=()).leave_guest([{"preset": "relay-free", "model": ""}])
         self.assertIsNotNone(spare)
         self.assertEqual(spare.preset_id, "relay-free")
 
-    def test_nothing_usable_leaves_the_resolver_on_the_guest_and_says_so(self):
+    def test_nothing_usable_is_none_and_the_resolver_is_untouched(self):
         made = self.guest(keys=())
-        self.assertIsNone(made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code"))
+        self.assertIsNone(made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}]))
+        self.assertIsNone(made.leave_guest([]))
         self.assertEqual(made.main_config.base_url, "harness://claude")
-        self.assertIn("nothing else it can use", made.resolve(model_roles.HELPER_ROLE).note)
-        self.assertIsNone(made.leave_guest([], "Claude Code"))
 
-    def test_a_role_pick_still_wins_over_where_the_resolver_landed(self):
-        store = {"kimi": "kimi-key", "glm-coding": "glm-key"}
-        made = RoleResolver(ProviderConfig("harness://claude", "", "", {}, 32_768), "guest:claude",
-                            validate_roles({"switchboard": {"preset": "glm-coding"}}),
-                            key_lookup=lambda pid: store.get(pid, ""))
-        made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code")
-        helper = made.resolve(model_roles.HELPER_ROLE)
-        self.assertEqual(helper.preset_id, "glm-coding")
-        self.assertEqual(helper.source, "configured")
-        self.assertIsNone(helper.note)            # it was picked, so nothing fell back
-
-    def test_a_later_set_model_clears_the_note(self):
+    def test_the_helper_role_itself_may_now_resolve_onto_a_guest(self):
+        """A `switchboard` pick that names a guest is a real pick since #E34S — the guest
+        process is the helper's own agent — where the entry was the one skipped before."""
         made = self.guest()
-        made.leave_guest([{"preset": "kimi", "model": "kimi-k3"}], "Claude Code")
-        made.rebase(main_config("glm"), "glm")
-        self.assertIsNone(made.main_note)
-        self.assertIsNone(made.resolve(model_roles.HELPER_ROLE).note)
+        helper = made.resolve_entry(model_roles.HELPER_ROLE,
+                                    {"preset": "guest:codex", "model": "gpt-6-astra"})
+        self.assertEqual(helper.preset_id, "guest:codex")
+        self.assertEqual(helper.config.model, "gpt-6-astra")
+        self.assertEqual(helper.config.base_url, "harness://codex")
+        self.assertEqual(helper.source, "configured")
+
+    def test_the_helpers_list_may_choose_a_guest_entry(self):
+        """The helper's model box holds the Main list; its guest entries are usable for
+        `switchboard` since #E34S, on the same terms as every other role."""
+        made = self.guest(roles=validate_roles(
+            {"switchboard": {"candidates": [{"preset": "guest:codex", "model": ""},
+                                            {"preset": "kimi", "model": "kimi-k3"}]}}))
+        helper = made.resolve(model_roles.HELPER_ROLE)
+        self.assertEqual(helper.preset_id, "guest:codex")
+        self.assertEqual(helper.source, "configured")
 
 
 if __name__ == "__main__":

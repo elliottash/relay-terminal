@@ -26,7 +26,9 @@
 //   only gates are the two that are already the owner's — the `settable` / `agent_safe` markers on
 //   the catalog rows and the Options › Agent toggle "Agents may change options and run actions"
 //   (#FEJQ decisions 1-3) — plus real constraints that are not fences: no board means no `board_*`
-//   tools because there is nothing to act on, a guest harness cannot run Relay's tools (#GH5T),
+//   tools because there is nothing to act on, a guest harness runs its one agent rather than
+//   Relay's tool list (its `board_*` and `app_*` reach it through the `relay_board` bridge, #4NXH,
+//   since #E34S — but a card console may not be a second agent on it),
 //   and a card's Plan turn may only write `## Plan` (protocol 19.20's stage machine).
 // - **It is not a widget and it holds no worker.** The surface draws; the window makes the console
 //   and attaches it to the tab's worker (card #AGNT step 5). A context that wanted a different
