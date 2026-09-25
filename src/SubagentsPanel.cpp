@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPolygonF>
 #include <QSet>
 #include <vector>
 #include <algorithm>
@@ -836,9 +837,27 @@ void SubagentsPanel::paintEvent(QPaintEvent *) {
         p.drawText(QRect(x, r.top(), dw, h), Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(description, Qt::ElideRight, dw));
         if (!hold.isEmpty()) {
             // ‖ pauses a live row, ▶ continues a paused one — beside the × that stops (#ZQNG).
+            // Painted as shapes, not text: the UI font renders ‖ as a hairline stroke and is
+            // missing ▶ entirely (Noto Sans), so the per-glyph fallback drew a foreign blob
+            // (bug, 2026-09-25). The rect is unchanged, so clicks and the p key hit-test as
+            // before.
             const QRect hr(cell.left() + cell.width() - 46, r.top(), 16, h);
-            p.setPen(hold == QStringLiteral("▶") ? theme::Accent : theme::TextMuted);
-            p.drawText(hr, Qt::AlignCenter, hold);
+            const QColor ink = hold == QStringLiteral("▶") ? theme::Accent : theme::TextMuted;
+            const int gh = qBound(4, h / 2, 14);
+            const int gy = r.top() + (h - gh) / 2;
+            if (hold == QStringLiteral("▶")) {
+                QPolygonF play;
+                play << QPointF(hr.left() + 5, gy) << QPointF(hr.left() + 5, gy + gh)
+                     << QPointF(hr.left() + 12, gy + gh / 2.0);
+                p.save();
+                p.setPen(Qt::NoPen);
+                p.setBrush(ink);
+                p.drawPolygon(play);
+                p.restore();
+            } else {
+                p.fillRect(hr.left() + 4, gy, 3, gh, ink);
+                p.fillRect(hr.left() + 9, gy, 3, gh, ink);
+            }
             m_pauseButtons.insert(rowIndex, hr);
         }
         if (closable) {

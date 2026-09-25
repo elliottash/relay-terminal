@@ -433,6 +433,8 @@ private slots:
         tabs.syncRows(h.model);
         auto *hold = tabs.findChild<QToolButton *>(QStringLiteral("subagentHold"));
         QVERIFY(hold);
+        QVERIFY(!hold->icon().isNull());           // the pause/play mark is a painted icon: the
+                                                   // ‖/▶ text glyphs fall back to foreign fonts
         hold->click();                             // ▶ continues a paused run
         QCOMPARE(resumed, QStringLiteral("a1"));
         h.start("a1");                             // the resumed run is waiting again

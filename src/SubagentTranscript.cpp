@@ -11,8 +11,10 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <QPolygonF>
 #include <QScopeGuard>
 #include <QScrollBar>
 #include <QSettings>
@@ -47,6 +49,29 @@ calllines::Palette transcriptPalette(bool prose = false) {
     p.error = theme::SyntaxUnknown;
     p.accent = theme::Accent;
     return p;
+}
+
+// The hold button's pause/play mark, painted rather than typed: ‖ renders as a hairline in the
+// UI font and ▶ is missing from it entirely (Noto Sans), so the per-glyph fallback drew foreign
+// blobs (bug, 2026-09-25). Same shapes the strip paints beside the ×, same colors.
+QIcon holdGlyphIcon(bool paused) {
+    QPixmap pm(32, 32);
+    pm.setDevicePixelRatio(2.0);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QColor ink = paused ? theme::Accent : theme::TextMuted;
+    if (paused) {
+        QPolygonF play;
+        play << QPointF(11, 6) << QPointF(11, 26) << QPointF(26, 16);
+        p.setPen(Qt::NoPen);
+        p.setBrush(ink);
+        p.drawPolygon(play);
+    } else {
+        p.fillRect(11, 8, 4, 16, ink);
+        p.fillRect(18, 8, 4, 16, ink);
+    }
+    return QIcon(pm);
 }
 
 void insertMarkdown(QTextCursor &cursor, const QVector<FoldLine> &lines, bool finalNewline) {
@@ -688,11 +713,14 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
         if (onBackToMain) onBackToMain();
     });
     m_header->addWidget(m_back);
-    // ‖ pauses the agent in front, ▶ continues a paused one (owner, 2026-09-24, #ZQNG): the same
-    // hold as Esc in this pane and the ‖ on the strip, one click from the header.
+    // Pauses the agent in front, continues a paused one (owner, 2026-09-24, #ZQNG): the same
+    // hold as Esc in this pane and the mark on the strip, one click from the header. The mark is
+    // a painted icon (see holdGlyphIcon), not ‖/▶ text, which fonts render badly.
     m_hold = new QToolButton;
     m_hold->setObjectName(QStringLiteral("subagentHold"));
-    m_hold->setText(QStringLiteral("‖ pause"));
+    m_hold->setText(QStringLiteral("pause"));
+    m_hold->setIcon(holdGlyphIcon(false));
+    m_hold->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_hold->setAutoRaise(true);
     m_hold->setCursor(Qt::PointingHandCursor);
     m_hold->setFocusPolicy(Qt::NoFocus);
@@ -911,7 +939,8 @@ void SubagentTabsView::updateHoldButton() {
     const bool paused = status == QStringLiteral("paused");
     const bool holdable = view && !view->ended() && (view->live() || paused);
     m_hold->setVisible(view != nullptr);
-    m_hold->setText(paused ? QStringLiteral("▶ resume") : QStringLiteral("‖ pause"));
+    m_hold->setText(paused ? QStringLiteral("resume") : QStringLiteral("pause"));
+    m_hold->setIcon(holdGlyphIcon(paused));
     m_hold->setEnabled(holdable);
     m_hold->setToolTip(view ? (paused
                 ? QStringLiteral("Continue this agent's run from where it was held (agent_resume)")
