@@ -54,3 +54,12 @@ Landed `218d8fea` on main (verify-slot build of the exact tree passed). Worker: 
 - `tests/queuesubmit_test.cpp` — Steer decided for a busy turn parked on background work; Queue when an agent prompt is queued ahead; Queue (never Steer) while a turn is still starting. **pass** (`ctest -R queuesubmit`)
 - Neighbours green: `ctest -R "subagents|queuenav"`, `tests.test_tools`, `tests.test_terminal_handoff`, `tests.test_queue` minus two pre-existing tree failures unrelated to this change (`test_tool_outcomes` import of `test_agent`; #CTRN wording in `board_tools.py`, a file this change never touched).
 - Evidence: `docs/qa_evidence/2026-09-27-t4vk-steer-wakes-agent-wait/EVIDENCE.md`
+
+## Try it
+**Open:** `sh docs/qa_evidence/2026-09-25-tryit-T4VK/stage.sh`
+
+The script prints, with timestamps, an agent turn that spawns a background subagent and parks in `agent_wait`; at t+0.5 s you "type" a message and press Enter. Read the timeline it prints: when the wait gives way, what the wait reports, what the model sees next, and how many turns ran. About 2 minutes.
+
+Is one Enter — the message reaching the parked agent while the background work simply keeps running — the behaviour you wanted, and does the wait's `stopped_for_user_message` result read clearly enough for the agent to act on?
+
+Expected: docs/qa_evidence/2026-09-25-tryit-T4VK/expected.md (sealed until you answer)
