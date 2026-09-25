@@ -1781,9 +1781,10 @@ every view of the tab what changed. It is saved as `{"card": {"workspace", "id"}
 (`relay::windowstate::isUsableNode` accepts it) and restored pinned, opening the card once the
 rows arrive; a card that is not among the rows that did arrive closes its pane. The first release
 saved `{"board": {"workspace", "solo": true, "card"}}`, which restore still reads.
-`tests/boardsolo_test.cpp`, `tests/windowstate_test.cpp`. What is still ahead (the card's step 2
-remainder): `CardDetail` in `src/CardPane.{h,cpp}` behind a `CardController` so a card pane need
-not carry a whole `BoardView` and its own copy of the model.
+`tests/boardsolo_test.cpp`, `tests/windowstate_test.cpp`. The card page itself, `CardDetail`,
+lives in `src/CardPane.h` (moved out of `src/BoardPane.cpp` with the step 2 remainder); its host
+sets the page's `std::function` callbacks — that callback surface is the plan's `CardController`,
+and `BoardView` remains the host that implements it.
 
 Memory is a card type, not a work card: the Memory tab is one list per topic. There is no
 plan card type — card #X7NB dropped it on 2026-09-20 — so `planning/` is an ordinary tab of

@@ -85,6 +85,8 @@ target_compile_options(relay-skillregistry PRIVATE ${RELAY_WARNINGS})
 # Switchboard pane: the card board, its detail view and the per-window Switchboard worker.
 # BoardModel holds the logic (tabs, columns, filters, search) so it can be tested headless.
 add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane.cpp src/BoardPane.h
+    # CardDetail, the Board's card page, moved out of BoardPane.cpp (#Y2BA step 2).
+    src/CardPane.h
     src/BoardSections.cpp src/BoardSections.h
     # Signals (#AQ6X): the machine's own faults as rows the board draws, and the page one opens.
     src/BoardSignals.cpp src/BoardSignals.h
