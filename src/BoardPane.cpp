@@ -5069,6 +5069,12 @@ BoardView::BoardView(const QString &workspace, QWidget *parent)
 {
     setObjectName(QStringLiteral("boardView"));
     m_requestPrefix = QStringLiteral("sb%1-").arg(quintptr(this), 0, 36);
+    // The closed stages open unticked (owner, 2026-09-25: "make verified, done, dropped
+    // unchecked by default"): Done is where dropped cards fold, and a "dropped" id is held for
+    // the board that gives one a column. A saved choice still wins — the restore replaces this
+    // whole set with `setHiddenSections`, and only when the last visit left something hidden.
+    m_hidden = QSet<QString>::fromList(
+        QList<QString>{board::verifiedSection(), board::doneSection(), QStringLiteral("dropped")});
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -7530,6 +7536,40 @@ void BoardView::syncSectionChecks()
         });
         m_checksLayout->addWidget(box);
     }
+    // And a one-click way to clear the row (owner, 2026-09-25: "add a uncheck all button on the
+    // board"): the row is long, and the way to see just one or two stages is to untick everything
+    // and tick those back on. Nothing is deleted — the unticks sit in `m_hidden`, and one tick
+    // per section brings the list back.
+    auto *uncheck = new QToolButton(m_checks);
+    uncheck->setObjectName(QStringLiteral("boardSectionUncheckAll"));
+    uncheck->setText(QStringLiteral("Uncheck all"));
+    uncheck->setAutoRaise(true);
+    uncheck->setCursor(Qt::PointingHandCursor);
+    uncheck->setFocusPolicy(Qt::NoFocus);
+    uncheck->setToolTip(
+        QStringLiteral("Untick every section — tick the ones you want back on"));
+    connect(uncheck, &QToolButton::clicked, this, [this] {
+        const QList<board::Column> sections = m_model.sections();
+        if (sections.isEmpty())
+            return;
+        for (const board::Column &section : sections)
+            m_hidden.insert(section.id);
+        // The boxes themselves, signal-blocked, instead of a rebuild that would delete them from
+        // under the pointer; one rebuild after the lot.
+        for (int i = 0; i < m_checksLayout->count(); ++i) {
+            if (auto *box = qobject_cast<QCheckBox *>(m_checksLayout->itemAt(i)->widget())) {
+                const QSignalBlocker block(box);
+                box->setChecked(false);
+            }
+        }
+        rebuild();
+        // The selection may have been in what just went away: stand on the first card left.
+        if (board::rowOfCard(m_rows, m_selected) < 0) {
+            const int first = board::stepRow(m_rows, -1, 1);
+            m_selected = first >= 0 ? m_rows.at(first).cardId : QString();
+        }
+    });
+    m_checksLayout->addWidget(uncheck);
     // After the sections themselves, because it is about the list of them rather than about any
     // one (owner, 2026-09-19: "put a gear after the list of switchboard sections").
     auto *gear = new QToolButton(m_checks);
@@ -10177,6 +10217,15 @@ void BoardView::selectCard(const QString &id)
     if (board::rowOfCard(m_rows, id) < 0) {
         const board::Card *card = m_model.card(id);
         const QString section = card ? m_model.sectionOf(*card) : QString();
+        if (card && !section.isEmpty() && m_hidden.contains(section)) {
+            // The closed stages are unticked by default (owner, 2026-09-25: "make verified,
+            // done, dropped unchecked by default"), so a card reached by id in one ticks its
+            // section back on and unfolds it — a reference finds what it names, whatever holds it.
+            m_hidden.remove(section);
+            m_collapsedSeeded = true;
+            m_collapsed.remove(section);
+            rebuild();
+        }
         if (card && board::selfClosed(*card) && !section.isEmpty()) {
             bool opened = false;
             if (!m_selfClosedOpen.contains(section)) {

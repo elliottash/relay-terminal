@@ -173,22 +173,24 @@ void BoardSectionsTests::removingASectionFreesItsStatusesRatherThanHidingThem()
 
 void BoardSectionsTests::aSectionThatIsOnlyThereBecauseOfACardCannotBeRemoved()
 {
-    // A deferred card with no `deferred` column: the model draws the section anyway, and taking
-    // it away would do nothing at all — it would be back on the next redraw.
+    // A card carrying a status no column collects (a `needs-review` one here): the model draws
+    // the section anyway, and taking it away would do nothing at all — it would be back on the
+    // next redraw. (`deferred` used to be the example until it stopped drawing a section at all,
+    // owner, 2026-09-25: "remove active and deferred".)
     Model model = board();
     model.reset(QJsonArray{QJsonObject{{"id", "K7Q2"}, {"title", "parked"}, {"type", "work"},
-                                       {"status", "deferred"}, {"tab", "features"}, {"rank", "i"},
+                                       {"status", "icebox"}, {"tab", "features"}, {"rank", "i"},
                                        {"path", "issues/features/k.md"}}});
     SectionPlan plan = SectionPlan::from(model);
-    QVERIFY(ids(plan).contains(QStringLiteral("deferred")));
-    QVERIFY(!plan.canRemove(QStringLiteral("deferred")));
-    QVERIFY(plan.whyNotRemove(QStringLiteral("deferred")).contains(QStringLiteral("cards have")));
-    plan.remove(QStringLiteral("deferred"));
+    QVERIFY(ids(plan).contains(QStringLiteral("icebox")));
+    QVERIFY(!plan.canRemove(QStringLiteral("icebox")));
+    QVERIFY(plan.whyNotRemove(QStringLiteral("icebox")).contains(QStringLiteral("cards have")));
+    plan.remove(QStringLiteral("icebox"));
     QVERIFY(!plan.dirty());
     // Merging it away is the thing that does work, and it is offered.
-    QVERIFY(plan.canMerge(QStringLiteral("deferred")));
-    plan.merge(QStringLiteral("deferred"), QStringLiteral("ready"));
-    QVERIFY(plan.row(QStringLiteral("ready"))->statuses.contains(QStringLiteral("deferred")));
+    QVERIFY(plan.canMerge(QStringLiteral("icebox")));
+    plan.merge(QStringLiteral("icebox"), QStringLiteral("ready"));
+    QVERIFY(plan.row(QStringLiteral("ready"))->statuses.contains(QStringLiteral("icebox")));
 }
 
 void BoardSectionsTests::theLastTwoSectionsCanBeRenamedButNeverTakenAway()
@@ -300,19 +302,21 @@ void BoardSectionsTests::movingASectionRewritesColumnsAndNeverACard()
     QCOMPARE(ids(plan).last(), QStringLiteral("done"));
 
     // A section that is only there because a card carries that status moves like any other, and is
-    // simply not written into `columns:` — it has no line in the file to move.
+    // simply not written into `columns:` — it has no line in the file to move. (`deferred` used
+    // to be the example here until it stopped drawing a section at all, owner, 2026-09-25:
+    // "remove active and deferred".)
     Model withCard = board();
-    withCard.reset(QJsonArray{QJsonObject{{"id", "DEF1"}, {"title", "Deferred card"},
-                                          {"type", "work"}, {"status", "deferred"},
+    withCard.reset(QJsonArray{QJsonObject{{"id", "DEF1"}, {"title", "Needs review"},
+                                          {"type", "work"}, {"status", "icebox"},
                                           {"tab", "features"}, {"rank", "i"},
                                           {"path", "issues/features/DEF1.md"}}});
     SectionPlan extra = SectionPlan::from(withCard);
-    QVERIFY(ids(extra).contains(QStringLiteral("deferred")));
-    QVERIFY(!extra.row(QStringLiteral("deferred"))->configured);
-    QVERIFY(extra.moveBefore(QStringLiteral("deferred"), QStringLiteral("inbox")));
-    QCOMPARE(ids(extra).first(), QStringLiteral("deferred"));
+    QVERIFY(ids(extra).contains(QStringLiteral("icebox")));
+    QVERIFY(!extra.row(QStringLiteral("icebox"))->configured);
+    QVERIFY(extra.moveBefore(QStringLiteral("icebox"), QStringLiteral("inbox")));
+    QCOMPARE(ids(extra).first(), QStringLiteral("icebox"));
     QVERIFY(!arrayOf(extra.message(), QStringLiteral("columns"))
-                 .contains(QStringLiteral("deferred")));
+                 .contains(QStringLiteral("icebox")));
 }
 
 // The same verb from the page: the ▲ ▼ buttons, the drag handle, and a section dropped on a row.

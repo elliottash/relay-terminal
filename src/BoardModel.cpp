@@ -1372,10 +1372,25 @@ const Tab *Model::tab(const QString &id) const
 }
 
 // The one list's sections. The configured columns come first in their configured order, then any
-// status they do not collect — a plan's Draft, a memory's Active, a Deferred card — so that one
-// list really does hold every card that is not closed. A column configured to collect nothing
+// status they do not collect — a plan's Draft, a parked card's own status — so that one list
+// really does hold every card that is not closed. A column configured to collect nothing
 // (`column_statuses: {research: []}`) is kept as a manual section (#3XZV): cards land in it by
 // being parked there, not by their status. Done is always last.
+namespace {
+
+// The statuses that stopped earning the cards list a section of their own (owner, 2026-09-25:
+// "remove active and deferred"). A memory's active/retired/... are the Memories page's object
+// states, not stages of this list, and deferred is where work is parked rather than worked
+// through; a board that wants either back on the cards list collects the status in a column of
+// its own. The same rule keeps them out of `openCount()`, so the count's "what is on" arithmetic
+// still adds up.
+bool earnsNoSection(const Card &card)
+{
+    return card.type == QLatin1String("memory") || card.status == QLatin1String("deferred");
+}
+
+}
+
 QList<Column> Model::sections() const
 {
     QList<Column> out;
@@ -1397,9 +1412,16 @@ QList<Column> Model::sections() const
             collected.insert(status);
         out << Column{id, sectionTitle(id), statuses};
     }
+    // An extra section is a status no column collects that a card carries anyway, so the list
+    // still holds every card that is not closed. Two statuses stopped earning one (owner,
+    // 2026-09-25: "remove active and deferred") — `earnsNoSection`, below. Such cards keep
+    // their status; they just no longer draw a section here, so they are not in this list until
+    // a column collects the status.
     QStringList extras;
     for (const Card &card : m_cards) {
         if (card.closed() || card.status.isEmpty() || collected.contains(card.status))
+            continue;
+        if (earnsNoSection(card))
             continue;
         if (!extras.contains(card.status))
             extras << card.status;
@@ -1605,7 +1627,7 @@ int Model::openCount() const
 {
     int total = 0;
     for (const Card &card : m_cards)
-        if (!card.closed() && shown(card))
+        if (!card.closed() && !earnsNoSection(card) && shown(card))
             ++total;
     return total;
 }

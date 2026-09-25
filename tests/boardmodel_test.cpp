@@ -360,7 +360,7 @@ private slots:
     void categoryFoldersComeFromTheConfig();
     void sectionsAreTheConfiguredStatusesThenTheRest();
     void cardsLandInTheSectionOfTheirStatus();
-    void closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn();
+    void closedCardsGoToTheDoneSectionAndExtrasKeepTheListWhole();
     void memoriesKeepTheirOwnStatuses();
     void rankOrdersASectionAndDoneIsNewestFirst();
     void timeSortsOrderEverySectionAlikeAndTheIdsRoundTrip();
@@ -399,6 +399,7 @@ private slots:
     void theColumnsNameTheOrdersAClickGoesThrough();
     void arrowsFoldASectionAndTheFoldIsSaved();
     void aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo();
+    void theClosedStagesStartUntickedAndUncheckAllClearsTheRow();
     void theListToolsSitOnTheListPageAndTheHeaderIsTheWayBack();
     void escOnTheMainPageGoesToTheFilterBar();
     void aRefusedWriteIsShownAndAnAcceptedOneCanBeUndone();
@@ -508,19 +509,23 @@ void BoardModelTests::cardsLandInTheSectionOfTheirStatus()
              QStringLiteral("waiting"));
 }
 
-void BoardModelTests::closedCardsGoToTheDoneSectionAndParkedOnesToTheirOwn()
+void BoardModelTests::closedCardsGoToTheDoneSectionAndExtrasKeepTheListWhole()
 {
     Model model;
     model.setConfig(config());
-    model.reset(rows({row("K7Q2", "deferred", "features"), row("M3XJ", "done", "bugs"),
-                      row("P9AB", "dropped", "features"), row("R4CD", "ready", "features")}));
+    model.reset(rows({row("K7Q2", "needs-review", "features"), row("M3XJ", "done", "bugs"),
+                      row("P9AB", "dropped", "features"), row("R4CD", "ready", "features"),
+                      row("D1EF", "deferred", "bugs")}));
     // Done is a status, not a place: done and dropped share the last section, and the open count
-    // leaves them out.
+    // leaves them out — the waiting column collects needs-review, so it is ordinary open work.
     QCOMPARE(model.openCount(), 2);
     QCOMPARE(model.cards(relay::board::doneSection()).size(), 2);
-    // Deferred is not a configured lane, so it gets a section of its own before Done.
-    QCOMPARE(sectionIds(model).mid(6), (QStringList{"deferred", "verified", "done"}));
-    QCOMPARE(model.cards(QStringLiteral("deferred")).first().id, QStringLiteral("K7Q2"));
+    // Deferred is the one status that stopped earning a section of its own before Done (owner,
+    // 2026-09-25: "remove active and deferred"): parked work is not a stage of this list, and
+    // the board that wants it here collects the status in a column of its own.
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"verified", "done"}));
+    QVERIFY(!sectionIds(model).contains(QStringLiteral("deferred")));
+    QCOMPARE(model.cards(QStringLiteral("waiting")).first().id, QStringLiteral("K7Q2"));
     QCOMPARE(model.cards(QStringLiteral("ready")).first().id, QStringLiteral("R4CD"));
     // …and `status:done` in the filter box still finds a closed card.
     model.setFilter(QStringLiteral("status:dropped"));
@@ -539,12 +544,15 @@ void BoardModelTests::memoriesKeepTheirOwnStatuses()
     model.reset(rows({row("K7Q2", "ready", "features"), planning, memory}));
 
     // Statuses no configured lane collects get a section each, so one list really does hold
-    // every open card whatever its type. A card in the `planning` folder is an ordinary work
-    // card (#X7NB): it sits in the section its work status names.
-    QCOMPARE(sectionIds(model).mid(6), (QStringList{"active", "planned", "verified", "done"}));
+    // every open work card — but no memory card, any more (owner, 2026-09-25: "remove active
+    // and deferred"): a memory's active/retired/... are the Memories page's object states, and
+    // the cards list keeps to work. A card in the `planning` folder is an ordinary work card
+    // (#X7NB): it sits in the section its work status names.
+    QCOMPARE(sectionIds(model).mid(6), (QStringList{"planned", "verified", "done"}));
+    QVERIFY(!sectionIds(model).contains(QStringLiteral("active")));
     QCOMPARE(model.cards(QStringLiteral("planned")).first().id, QStringLiteral("PL01"));
-    QCOMPARE(model.cards(QStringLiteral("active")).first().id, QStringLiteral("ME01"));
-    QCOMPARE(model.openCount(), 3);
+    QVERIFY(model.cards(QStringLiteral("active")).isEmpty());
+    QCOMPARE(model.openCount(), 2);
 }
 
 void BoardModelTests::rankOrdersASectionAndDoneIsNewestFirst()
@@ -1334,11 +1342,12 @@ void BoardModelTests::theViewRendersOneListFromAnEvent()
     QVERIFY(!view.findChild<QListWidget *>(QStringLiteral("boardColumn")));
     // A new Board is a compact overview: every header is present and every card starts
     // folded away.
+    // The closed stages are unticked by default (owner, 2026-09-25: "make verified, done,
+    // dropped unchecked by default"), so verified and done draw nothing until a tick brings
+    // them back; every other section is there, its header folded over its cards.
     QCOMPARE(sketch(view.rows()),
              (QStringList{"# inbox 1 folded", "# discussing 0 folded", "# ready 1 folded",
-                          "# in-progress 0 folded", "# waiting 0 folded", "# needs-qa 0 folded",
-                          "# verified 0 folded",
-                          "# done 1 folded"}));
+                          "# in-progress 0 folded", "# waiting 0 folded", "# needs-qa 0 folded"}));
     QCOMPARE(listOf(view)->count(), view.rows().size());
 
     view.handleEvent(QJsonObject{{"event", "board_changed"},
@@ -1776,13 +1785,16 @@ void BoardModelTests::arrowsFoldASectionAndTheFoldIsSaved()
     view.setCollapsedSections(QJsonArray{QStringLiteral("ready")});
     QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("ready"))).collapsed);
     QVERIFY(!view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("inbox"))).collapsed);
-    // A restored pane keeps exactly what the window remembered — Done is not re-folded under it.
-    QVERIFY(!view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);
+    // A restored pane keeps exactly what the window remembered — and the closed stages draw
+    // nothing at all here, unticked by default (owner, 2026-09-25: "make verified, done,
+    // dropped unchecked by default").
+    QCOMPARE(relay::board::rowOfSection(view.rows(), QStringLiteral("done")), -1);
 }
 
-// A checkbox at the top of the list page per section, all ticked until one is unticked; unticked
-// takes the section off the page entirely, composes with the text filter, and is remembered the
-// same way the folds are (owner, 2026-09-18).
+// A checkbox at the top of the list page per section; the closed stages start unticked (owner,
+// 2026-09-25: "make verified, done, dropped unchecked by default"), the rest ticked until one is
+// unticked; unticked takes the section off the page entirely, composes with the text filter, and
+// is remembered the same way the folds are (owner, 2026-09-18).
 void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo()
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
@@ -1791,15 +1803,21 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
                              row("N4YK", "inbox", "features", "j"),
                              row("DN01", "done", "features")}));
 
-    // One box per section the model has, in order, every one ticked.
+    // One box per section the model has, in order. Done is where the dropped cards fold, so
+    // Verified and Done are the two boxes that start off.
     const QList<QCheckBox *> boxes = view.findChildren<QCheckBox *>(
         QStringLiteral("boardSectionCheck"));
     QCOMPARE(boxes.size(), sectionIds(view.model()).size());
-    for (QCheckBox *box : boxes)
-        QVERIFY2(box->isChecked(), qPrintable(box->text()));
+    for (QCheckBox *box : boxes) {
+        const bool closedStage = box->text() == QStringLiteral("VERIFIED")
+                              || box->text() == QStringLiteral("DONE");
+        QVERIFY2(box->isChecked() == !closedStage, qPrintable(box->text()));
+    }
 
     QLabel *count = view.findChild<QLabel *>(QStringLiteral("boardCount"));
     QVERIFY(count);
+    // The default unticks hide only the closed card, which the open count had already left out:
+    // what is on the page is every open card, so the count reads as if nothing were unticked.
     QCOMPARE(count->text(), QStringLiteral("3 open"));
 
     // Unticking Inbox takes its header and both its cards away; the count says how many of the
@@ -1825,11 +1843,13 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
     QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")) >= 0);
     filter->clear();
 
-    // Unticked is not folded: the model counts them apart, and the layout node carries both.
+    // Unticked is not folded: the model counts them apart, and the layout node carries both —
+    // the defaults' unticks now riding along with the one the test just made.
     QStringList hidden;
     for (const QJsonValue &value : view.hiddenSections())
         hidden << value.toString();
-    QCOMPARE(hidden, (QStringList{"inbox"}));
+    hidden.sort();
+    QCOMPARE(hidden, (QStringList{"done", "dropped", "inbox", "verified"}));
     QCOMPARE(view.model().hiddenCount({QStringLiteral("inbox")}), 2);
     QCOMPARE(view.model().hiddenCount({}), 0);
     QVERIFY(!view.collapsedSections().contains(QJsonValue(QStringLiteral("inbox"))));
@@ -1839,6 +1859,50 @@ void BoardModelTests::aSectionCheckboxTakesItsSectionOffThePageAndTheCountSaysSo
     QVERIFY(inbox->isChecked());
     QCOMPARE(relay::board::rowOfSection(view.rows(), QStringLiteral("ready")), -1);
     QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("M3XJ")) >= 0);
+}
+
+// The closed stages open unticked and one button clears the whole row (owner, 2026-09-25):
+// "make verified, done, dropped unchecked by default … add a uncheck all button on the board".
+void BoardModelTests::theClosedStagesStartUntickedAndUncheckAllClearsTheRow()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-uncheck-all-test"));
+    view.setCollapsedSections(QJsonArray{});   // sections unfolded, so card rows are present
+    view.handleEvent(opened({row("K7Q2", "ready", "features"), row("M3XJ", "inbox", "features"),
+                             row("DN01", "done", "features")}));
+
+    // A fresh pane's saved choice is nothing: Verified and Done — which is where dropped cards
+    // fold — are the unticks a pane is born with.
+    auto asList = [](const QJsonArray &array) {
+        QStringList list;
+        for (const QJsonValue &value : array)
+            list << value.toString();
+        list.sort();
+        return list;
+    };
+    QCOMPARE(asList(view.hiddenSections()), (QStringList{"done", "dropped", "verified"}));
+
+    auto *uncheck = view.findChild<QToolButton *>(QStringLiteral("boardSectionUncheckAll"));
+    QVERIFY(uncheck);
+    uncheck->click();
+    // Every section unticked: the list is empty, the count is honest, and nothing was deleted.
+    // (The default's "dropped" tick rides along; no section carries that id.)
+    const QStringList allHidden = asList(view.hiddenSections());
+    QCOMPARE(allHidden.size(), sectionIds(view.model()).size() + 1);
+    for (const QString &id : sectionIds(view.model()))
+        QVERIFY2(allHidden.contains(id), qPrintable(id));
+    QVERIFY(view.rows().isEmpty());
+    QCOMPARE(view.findChild<QLabel *>(QStringLiteral("boardCount"))->text(),
+             QStringLiteral("0 of 2 open"));
+
+    // One tick brings its section back, exactly as if it had never been unticked.
+    for (QCheckBox *box : view.findChildren<QCheckBox *>(QStringLiteral("boardSectionCheck"))) {
+        if (box->text() != QStringLiteral("INBOX"))
+            continue;
+        box->setChecked(true);
+        break;
+    }
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("M3XJ")) >= 0);
+    QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("K7Q2")) < 0);
 }
 
 // The filter and "+ New card" are the top of the list page, not of the pane's header; the header
@@ -4532,7 +4596,8 @@ void BoardModelTests::theFoldRowTogglesOnClickEnterAndTheArrowsAndRidesTheLayout
 {
     relay::BoardView view(QStringLiteral("/tmp/workspace"));
     view.setCollapsedSections(QJsonArray{});   // as a restored pane with everything open
-    const auto own = [](const char *id, const char *rank) {
+    view.setHiddenSections(QJsonArray{});      // …and with Done ticked on (owner, 2026-09-25:
+    const auto own = [](const char *id, const char *rank) {   // the closed stages start unticked)
         QJsonObject json = row(QString::fromUtf8(id), "done", "features", QString::fromUtf8(rank));
         json.insert("implemented_by", "anthropic/claude-opus-5-5");
         json.insert("verified_by", "anthropic/claude-opus-5-5");
@@ -4636,12 +4701,13 @@ void BoardModelTests::aSelfClosedCardReachedByIdUnfoldsItsGroup()
     QJsonObject own = row("CCC3", "done", "features", "c");
     own.insert("implemented_by", "anthropic/claude-opus-5-5");
     own.insert("verified_by", "anthropic/claude-opus-5-5");
-    // A brand-new pane: every section folded, and the group inside Done folded too.
+    // A brand-new pane: Done is unticked by default (owner, 2026-09-25), so a `#CCC3` in a
+    // card's or a thread's text reaches a card the list is not drawing.
     view.handleEvent(opened({own, row("AAA1", "done", "features", "a")}));
-    QVERIFY(view.rows().at(relay::board::rowOfSection(view.rows(), QStringLiteral("done"))).collapsed);
     QCOMPARE(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")), -1);
 
     view.selectCard(QStringLiteral("CCC3"));
+    // The reach ticks Done back on, unfolds it and opens the group inside it.
     QVERIFY(relay::board::rowOfCard(view.rows(), QStringLiteral("CCC3")) >= 0);
     QCOMPARE(view.selectedCard(), QStringLiteral("CCC3"));
     QVERIFY(view.selectedFold().isEmpty());
@@ -4651,14 +4717,17 @@ void BoardModelTests::aSelfClosedCardReachedByIdUnfoldsItsGroup()
         open << value.toString();
     QCOMPARE(open, (QStringList{"done"}));
 
-    // An ordinary card asked for by id leaves the folds exactly as they were: only a card the
-    // group is holding needs the group opened.
+    // An ordinary card asked for by id opens nothing of the group — but its section, which was
+    // unticked, comes back unfolded so the card is on the page at all; the fold row inside it
+    // stays exactly as it was.
     relay::BoardView other(QStringLiteral("/tmp/workspace"));
     other.handleEvent(opened({own, row("AAA1", "done", "features", "a")}));
     other.selectCard(QStringLiteral("AAA1"));
     QVERIFY(other.openSelfClosed().isEmpty());
-    QVERIFY(other.rows().at(relay::board::rowOfSection(other.rows(),
-                                                       QStringLiteral("done"))).collapsed);
+    QVERIFY(!other.rows().at(relay::board::rowOfSection(other.rows(),
+                                                        QStringLiteral("done"))).collapsed);
+    QVERIFY(other.rows().at(relay::board::rowOfFold(other.rows(),
+                                                    QStringLiteral("done"))).collapsed);
 }
 
 // The QA ladder's `verify:` block (#WFRA) as `board_card` sends it. The model reads the whole
