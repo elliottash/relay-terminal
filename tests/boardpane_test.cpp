@@ -528,6 +528,10 @@ void BoardPaneTests::theCardPagesLabelsEditInPlace()
     QVERIFY(meta);
     QVERIFY(meta->text().contains(QStringLiteral("tagx:bug")));
     QVERIFY(meta->text().contains(QStringLiteral("tagadd:")));
+    // The labels row with its × and + (RELAY_SHOT_DIR set writes it, the split test's pattern).
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+    if (!shotDir.isEmpty())
+        QVERIFY(a.grab().save(shotDir + QStringLiteral("/card-labels-row.png")));
 
     // × writes the list without the clicked label, through the hash-checked board_update
     // the title saves with.
@@ -547,6 +551,8 @@ void BoardPaneTests::theCardPagesLabelsEditInPlace()
     QVERIFY(edit);
     QVERIFY(!edit->isHidden());
     QCOMPARE(edit->text(), QStringLiteral("bug, voice"));
+    if (!shotDir.isEmpty())
+        QVERIFY(a.grab().save(shotDir + QStringLiteral("/card-labels-field.png")));
     edit->setText(QStringLiteral("voice, remote"));
     QTest::keyClick(edit, Qt::Key_Return);
     const QJsonArray saved = sent.last().value(QStringLiteral("patch")).toObject()
