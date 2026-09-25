@@ -1411,6 +1411,13 @@ def resolve_preset(preset_id, base_url: str = "", model: str = "") -> Preset | N
         return PRESETS[preset_id]
     # Built-in endpoints first; match_preset itself stays cloud-only, because the key import and the
     # keyring use the id it returns and a `local:` id is not a keyring name.
+    # A second subscription of a plan (key_accounts, #YC0T) is asked by id before the URL: it shares
+    # its plan's base URL, and matching that would name the plan's own key instead.
+    if isinstance(preset_id, str) and ":" in preset_id and not preset_id.startswith(("custom:", "local:", "guest:")):
+        from . import key_accounts
+        account = key_accounts.as_preset(preset_id)
+        if account is not None:
+            return account
     return match_preset(base_url or "", model or "") or _local(preset_id, base_url or "", model or "") \
         or _custom(preset_id, base_url or "")
 

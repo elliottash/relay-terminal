@@ -1200,7 +1200,8 @@ class ChatProvider:
         if preset is not None:
             from . import provider_limits
             if preset.id in provider_limits.PRESETS:
-                poll = provider_limits.last(preset.id) or None
+                # A second subscription (#YC0T) reads its own report, not its plan's default key's.
+                poll = provider_limits.last(self._account_id(preset)) or None
         refusal = provider_errors.classify(exc, host=_host(self.config.base_url),
                                            api_key=self.config.api_key, poll=poll)
         try:
@@ -1208,6 +1209,13 @@ class ChatProvider:
         except AttributeError:
             pass
         return refusal
+
+    def _account_id(self, preset) -> str:
+        """The preset id this key belongs to: a second subscription's `glm-coding:ethz` when the key
+        came from that account (#YC0T), else the matched preset's own."""
+        source = self.config.key_source
+        return source if source and preset is not None and source.split(":", 1)[0] == preset.id else (
+            preset.id if preset is not None else "")
 
     def _issue(self, refusal) -> dict | None:
         """The structured failure the agent and the pane read (protocol: `issue`)."""
@@ -1218,7 +1226,7 @@ class ChatProvider:
         preset = None if self.config.local else match_preset(self.config.base_url, self.config.model)
         host = _host(self.config.base_url)
         return provider_errors.Issue(
-            kind=refusal.kind, label=refusal.label, preset=preset.id if preset else "",
+            kind=refusal.kind, label=refusal.label, preset=self._account_id(preset),
             model=self.config.model, host=host, status=refusal.status, resets_at=refusal.resets_at,
             hint=provider_errors.hint(refusal.kind, preset_label=preset.label if preset else host,
                                       token_expired_at=refusal.token_expired_at),

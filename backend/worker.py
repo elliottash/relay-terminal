@@ -16,7 +16,7 @@ from relay_core import (__version__, board_protocol, customproviders, hosted, re
 from relay_core.agent import Agent, validate_turn_options
 from relay_core import activity_tools, agent_context, agents_defs, app_tools, guest_harness_provider
 from relay_core.open_buffers import OpenBuffers
-from relay_core import guest_accounts
+from relay_core import guest_accounts, key_accounts
 from relay_core import board_chat
 from relay_core import memory_import, openrouter_catalog, provider_limits, guest_usage_poll
 from relay_core import final_summary
@@ -199,8 +199,19 @@ def main():
               "presets": [{**p.to_dict(), **(pro_status if p.id == "relay-pro" else relay_free if p.id == "relay-free" else
                                              {"has_stored_key": bool(sources[p.id]),
                                               "key_source": sources[p.id],
-                                              "limits": provider_limits.last(p.id)})}
+                                              "limits": provider_limits.last(p.id),
+                                              # Sources offers "add account…" on these (#YC0T).
+                                              **({"accounts_allowed": True}
+                                                 if p.id in key_accounts.PLANS else {})})}
                           for p in PRESETS.values()]
+              # A second subscription of a plan (key_accounts, #YC0T): the plan's row under the
+              # account's own id, key state and usage, so it ranks and routes on its own.
+              + [{**account.to_dict(), "has_stored_key": bool(keystore.key_source(account.id)),
+                  "key_source": keystore.key_source(account.id),
+                  "limits": provider_limits.last(account.id),
+                  "account": entry.id, "account_label": entry.label, "base_preset": entry.preset}
+                 for entry in key_accounts.accounts()
+                 for account in [key_accounts.as_preset(entry.preset_id)] if account is not None]
               # Model servers on this machine (protocol 28): no key to store, so
               # has_stored_key stays false and `local` is what makes the row usable.
               + [{**e.to_dict(), "has_stored_key": False, "key_source": "local"}
@@ -545,6 +556,14 @@ def main():
                 if kind != "guest_accounts":
                     emit_presets()
                     guest_harness_provider.refresh_account_logins()
+            elif kind in key_accounts.TYPES:
+                # A second Z.AI / Kimi Code subscription (#YC0T): a save or a delete changes the
+                # preset list, and a new key is worth a usage read straight away.
+                key_accounts.handle(request, emit)
+                if kind != "key_accounts":
+                    emit_presets()
+                    threading.Thread(target=lambda: provider_limits.poll_once(key_lookup=keystore.lookup, emit=emit),
+                                     name="relay-key-account-poll", daemon=True).start()
             elif kind in customproviders.TYPES:
                 # A save or delete changes the preset list, so a fresh `presets` follows the answer.
                 customproviders.handle(request, emit)

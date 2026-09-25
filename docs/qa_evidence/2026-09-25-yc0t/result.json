@@ -1,0 +1,22 @@
+{
+ "add_account_offered": true,
+ "save_request": [
+  {
+   "type": "key_account_save",
+   "preset": "glm-coding",
+   "label": "ethz",
+   "key_length": 25
+  }
+ ],
+ "account_row_after": [
+  "zai glm-5.3 coding plan (ethz)"
+ ],
+ "account_buttons_after": [
+  "remove",
+  "replace key...",
+  "replace key...",
+  "remove",
+  "replace key...",
+  "remove"
+ ]
+}

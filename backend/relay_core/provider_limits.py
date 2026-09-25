@@ -140,8 +140,19 @@ def parse_kimi(payload) -> list[dict]:
     return [found[k] for k in ("5h", "weekly", "monthly") if found.get(k)]
 
 
+def _plan(preset: str) -> str:
+    """The plan a preset id polls as: itself, or the plan of a second subscription (#YC0T)."""
+    return preset.split(":", 1)[0]
+
+
+def targets() -> list[str]:
+    """The plans' own keys, then each saved second subscription under its own id (#YC0T)."""
+    from . import key_accounts
+    return list(PRESETS) + [a.preset_id for a in key_accounts.accounts()]
+
+
 def fetch(preset: str, key: str, *, opener=None) -> list[dict]:
-    url = ZAI_URL if preset == "glm-coding" else KIMI_URL
+    url = ZAI_URL if _plan(preset) == "glm-coding" else KIMI_URL
     # Kimi 403s a request without a User-Agent (its WAF); z.ai accepts one, so send it to both.
     request = urllib.request.Request(url, headers={"Authorization": "Bearer " + key,
                                                     "Accept": "application/json",
@@ -149,11 +160,11 @@ def fetch(preset: str, key: str, *, opener=None) -> list[dict]:
     opener = opener or urllib.request.urlopen
     with opener(request, timeout=TIMEOUT_SECONDS) as response:
         payload = json.loads(response.read(1024 * 1024))
-    return parse_zai(payload) if preset == "glm-coding" else parse_kimi(payload)
+    return parse_zai(payload) if _plan(preset) == "glm-coding" else parse_kimi(payload)
 
 
 def poll_once(*, key_lookup, emit, fetcher=fetch, clock=time.time) -> None:
-    for preset in PRESETS:
+    for preset in targets():
         try:
             key = key_lookup(preset)
             if not key:

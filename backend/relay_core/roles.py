@@ -24,7 +24,7 @@ from .presets import (EFFORT_LADDER, PRESETS, TIER_LABELS, TIERS, apply_effort, 
                       openrouter_twin, provider_tier_model, tier_default,
                       tier_fallbacks, validate_effort, validate_tier)
 from .provider import MIN_OUTPUT_TOKENS, ProviderConfig
-from . import customproviders, hosted, localmodels, relay_pro
+from . import customproviders, hosted, key_accounts, localmodels, relay_pro
 
 
 def _hostname(base_url: str) -> str:
@@ -59,6 +59,8 @@ def _preset(preset_id):
     if found is None and customproviders.is_custom_id(preset_id):
         entry = customproviders.find(preset_id)
         found = entry.as_preset() if entry is not None else None
+    if found is None and key_accounts.is_account_id(preset_id):
+        found = key_accounts.as_preset(preset_id)        # a second plan subscription (#YC0T)
     return found
 
 # Protocol names. "switchboard" is stored and resolved even though the Board itself is not
@@ -489,7 +491,7 @@ def _usage_weight(preset_id: str | None, now: int | None = None,
     if limits is None and is_guest_preset(preset_id):
         from . import guest_harness_provider
         limits = guest_harness_provider.last_limits(guest_id_of(preset_id))
-    elif limits is None and preset_id in ("glm-coding", "kimi-code"):
+    elif limits is None and (preset_id in ("glm-coding", "kimi-code") or key_accounts.is_account_id(preset_id)):
         from . import provider_limits
         limits = provider_limits.last(preset_id)
     if not isinstance(limits, dict):

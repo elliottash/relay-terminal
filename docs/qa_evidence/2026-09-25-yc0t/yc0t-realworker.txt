@@ -1,0 +1,12 @@
+saved: {'id': 'ethz', 'preset': 'glm-coding', 'label': 'ethz', 'preset_id': 'glm-coding:ethz', 'has_stored_key': True, 'key_source': 'env'}
+{'id': 'glm-coding', 'label': 'z.ai · glm-5.3 · coding plan', 'account': None, 'base_preset': None, 'has_stored_key': False, 'key_source': '', 'accounts_allowed': True, 'model': 'glm-5.3'}
+{'id': 'glm-coding:ethz', 'label': 'z.ai · glm-5.3 · coding plan (ethz)', 'account': 'ethz', 'base_preset': 'glm-coding', 'has_stored_key': True, 'key_source': 'env', 'accounts_allowed': None, 'model': 'glm-5.3'}
+registry: {
+  "accounts": [
+    {
+      "id": "ethz",
+      "preset": "glm-coding",
+      "label": "ethz"
+    }
+  ]
+}

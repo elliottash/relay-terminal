@@ -7147,6 +7147,21 @@ set and never handles the credentials, which stay where the CLI puts them inside
   removed}` then `guest_accounts`. A save or delete pushes `presets`. `guest_logins_refresh` asks
   every login again (the pane sends it when a sign-in it typed exits 0). `test_key {preset:
   "guest:claude:work"}` tests that account and its answer carries `account`.
+* **Second plan subscriptions (#YC0T).** The keyed counterpart of the accounts above, for the
+  Z.AI Coding Plan and Kimi Code (`key_accounts.PLANS`; their `presets` rows say
+  `accounts_allowed: true`). An account is a name and a key: preset id `<plan>:<slug>`
+  (`glm-coding:ethz`), resolved to the plan's preset under that id with a label naming the account,
+  its key in the keyring under that id (or `RELAY_GLM_CODING_ETHZ_API_KEY`). Registry
+  `$XDG_CONFIG_HOME/relay/key-accounts.json` (`RELAY_KEY_ACCOUNTS`), never holding a key.
+  `presets` carries one row per account — the plan's row plus `account`, `account_label`,
+  `base_preset`, its own `has_stored_key`, `key_source` and `limits` — and `provider_limits` polls
+  it with its own key, so ranks, quota weighting, quota holds and `issue.preset` all name the
+  account. Requests: `key_accounts` → `key_accounts {accounts}`; `key_account_save {account:
+  {preset, label, id?, api_key?}}` → `key_account_saved {account}` then `key_accounts`, and a fresh
+  `presets` and usage poll; `key_account_delete {key: "glm-coding:ethz"}` → `key_account_deleted
+  {key, removed}` (its keyring entry goes too) then `key_accounts` and `presets`. `store_key`,
+  `test_key` and `configure` take the account id like any preset id. An ordinary failover still
+  skips the plan's host (an outage takes both); a quota refusal moves to the sibling account.
 * **Email and a usage refresh (#EQH0).** Every guest row — the CLI's default login and each
   account — carries `email`, the address the login is signed in as, read from its own files
   (Claude Code's `.claude.json` `oauthAccount.emailAddress`, in CLAUDE_CONFIG_DIR or the home

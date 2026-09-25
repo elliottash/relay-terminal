@@ -51,7 +51,10 @@ def _preset(preset_id: str):
     if endpoint is not None:
         return endpoint.as_preset()
     entry = customproviders.find(preset_id)
-    return entry.as_preset() if entry is not None else None
+    if entry is not None:
+        return entry.as_preset()
+    from . import key_accounts
+    return key_accounts.as_preset(preset_id)            # a second plan subscription (#YC0T)
 
 
 def _keyless(preset) -> bool:

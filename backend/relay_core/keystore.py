@@ -25,6 +25,9 @@ _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # A custom provider (customproviders.py) keeps its key under its own id. It is the one id with a
 # colon the keyring takes: a `local:` id still has no key and is still refused.
 _CUSTOM_ID = re.compile(r"^custom:[a-z0-9][a-z0-9-]{0,47}$")
+# A second subscription of a built-in plan (key_accounts, #YC0T) keeps its key under
+# `<preset>:<slug>` — `glm-coding:ethz` — beside the plan's own `glm-coding`.
+_ACCOUNT_ID = re.compile(r"^([a-z0-9][a-z0-9-]{0,63}):[a-z0-9][a-z0-9-]{0,31}$")
 
 
 class KeystoreError(RuntimeError):
@@ -52,7 +55,11 @@ def _run(args: list[str], stdin: str | None = None) -> subprocess.CompletedProce
 
 
 def _check_id(preset_id: str) -> None:
-    if not isinstance(preset_id, str) or not (_ID.match(preset_id) or _CUSTOM_ID.match(preset_id)):
+    if not isinstance(preset_id, str):
+        raise ValueError("Invalid provider identifier.")
+    account = _ACCOUNT_ID.match(preset_id)
+    if not (_ID.match(preset_id) or _CUSTOM_ID.match(preset_id)
+            or (account is not None and account.group(1) in PRESETS)):
         raise ValueError("Invalid provider identifier.")
 
 

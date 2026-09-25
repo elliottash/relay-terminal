@@ -452,13 +452,42 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                                  QStringLiteral("Delete %1 and its stored key?").arg(label)) == QMessageBox::Yes)
                         request({{"type", "custom_provider_delete"}, {"provider_id", id}});
                 };
-            } else {
-                row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
-                if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
+            } else if (!str(preset, "base_preset").isEmpty()) {
+                // A second subscription of a plan (#YC0T): its own key, and "remove" forgets the
+                // account and its key together — there is no account without one.
+                row.aliases += QStringLiteral(" account subscription ") + str(preset, "account_label");
+                row.buttonTexts = QStringList{QStringLiteral("replace key…"), QStringLiteral("test"), QStringLiteral("remove")};
                 row.onButton = [this, request, id, label, askForKey](int index) {
                     if (index == 0) askForKey(id, label);
                     else if (index == 1) request({{"type", "test_key"}, {"preset", id}});
-                    else if (QMessageBox::question(this, QStringLiteral("Remove key"),
+                    else if (QMessageBox::question(this, QStringLiteral("Remove account"),
+                                 QStringLiteral("Remove %1 and its key from Relay?").arg(label)) == QMessageBox::Yes)
+                        request({{"type", "key_account_delete"}, {"key", id}});
+                };
+            } else {
+                row.buttonTexts = QStringList{hasKey ? QStringLiteral("replace key…") : QStringLiteral("add key…"), QStringLiteral("test")};
+                if (source == QStringLiteral("keyring")) row.buttonTexts << QStringLiteral("remove");
+                // Another subscription of the same plan, side by side (#YC0T): a name and its key.
+                const bool accounts = preset.value(QStringLiteral("accounts_allowed")).toBool();
+                if (accounts) row.buttonTexts << QStringLiteral("add account…");
+                const int addAt = row.buttonTexts.size() - 1;
+                row.onButton = [this, request, id, label, askForKey, accounts, addAt](int index) {
+                    if (index == 0) askForKey(id, label);
+                    else if (index == 1) request({{"type", "test_key"}, {"preset", id}});
+                    else if (accounts && index == addAt) {
+                        bool ok = false;
+                        const QString name = QInputDialog::getText(this, QStringLiteral("Add %1 account").arg(label),
+                            QStringLiteral("A name for the other subscription (e.g. work, ethz).\n"
+                                           "It gets its own key, usage and place in the pick order."),
+                            QLineEdit::Normal, QString(), &ok).trimmed();
+                        if (!ok || name.isEmpty()) return;
+                        const QString key = QInputDialog::getText(this, QStringLiteral("Add %1 account").arg(label),
+                            QStringLiteral("The API key of the %1 subscription.\nIt is saved to the desktop keyring.").arg(name),
+                            QLineEdit::Password, QString(), &ok).trimmed();
+                        if (!ok || key.isEmpty()) return;
+                        request({{"type", "key_account_save"},
+                                 {"account", QJsonObject{{"preset", id}, {"label", name}, {"api_key", key}}}});
+                    } else if (QMessageBox::question(this, QStringLiteral("Remove key"),
                                  QStringLiteral("Remove the stored key for %1 from the keyring?").arg(label)) == QMessageBox::Yes)
                         request({{"type", "remove_key"}, {"preset", id}});
                 };

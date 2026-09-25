@@ -17,7 +17,7 @@ import uuid
 import weakref
 from urllib.parse import urlsplit
 
-from . import (alias_import, aliases, attachments, conv_index, customproviders,
+from . import (alias_import, aliases, attachments, conv_index, customproviders, key_accounts,
                guest_harness_provider, guest_sessions, instructions, keystore, localmodels, logs,
                planning, suggestions, titles)
 from .agent import validate_turn_options
@@ -115,6 +115,12 @@ def provider_config(request: dict) -> ProviderConfig:
             raise ValueError(f"No custom provider {named!r} is saved. Add it in Options > Models, "
                              "or pick another model.")
         preset = entry.as_preset()
+    if preset is None and key_accounts.is_account_id(named):
+        # A second subscription of a plan (#YC0T): the plan's endpoint, the account's own key.
+        preset = key_accounts.as_preset(named)
+        if preset is None:
+            raise ValueError(f"No account {named!r} is saved. Add it in Options > Models > Sources, "
+                             "or pick another model.")
     base_url = str(request.get("base_url") or "") or (preset.base_url if preset else "")
     model = str(request.get("model") or "") or (preset.model if preset else "")
     # A Pro code is an entitlement for Relay, never a generic provider API key. Pin the
