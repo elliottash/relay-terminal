@@ -240,7 +240,7 @@ int rowsFor(int column, int length, int columns) {
     return (end - 1) / columns + 1;
 }
 
-QString bootstrapLine(const QByteArray &script, int promptColumn, int columns) {
+QString bootstrapLine(const QByteArray &script, int promptColumn, int columns, bool viaMosh) {
     // The row count lives inside the payload, not in front of the line as `RELAY_R=3 eval …`: a
     // shell that is not bash or zsh has to be able to *parse* what Relay types, or it answers by
     // printing the two kilobytes back at the user. fish reads `eval "$(…)"` and then fails on the
@@ -255,8 +255,14 @@ QString bootstrapLine(const QByteArray &script, int promptColumn, int columns) {
         if (trimmed.isEmpty() || trimmed.startsWith('#')) continue;
         bare += row + '\n';
     }
+    // #XQ8F: over mosh the script sends its marks as OSC 52 writes (the one OSC mosh forwards),
+    // so RELAY_M rides inside the payload beside RELAY_R — for the same reason: a prefix
+    // assignment is a shell it does not know would print back at the user. The line grows by the
+    // setting, and the settled row count below counts the whole line, so it covers it.
     const auto line = [&](int rows) {
-        const QByteArray payload = "RELAY_R=" + QByteArray::number(rows) + "\n" + bare;
+        QByteArray settings = "RELAY_R=" + QByteArray::number(rows);
+        if (viaMosh) settings += "\nRELAY_M=1";
+        const QByteArray payload = settings + "\n" + bare;
         return QStringLiteral(" eval \"$(printf %s '%1' | base64 -d | gzip -dc)\"")
             .arg(QString::fromLatin1(gzip(payload).toBase64()));
     };

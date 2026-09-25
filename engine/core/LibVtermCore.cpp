@@ -153,6 +153,12 @@ struct LibVtermCore::Impl {
     std::vector<QString> linkUris{QString()};
     bool clipboardAllowed = false;
     QByteArray clipBuf;
+    // #XQ8F: an OSC 52 write whose decoded text starts with "relay:" is not a clipboard
+    // write. The remote shell script wraps its marks in OSC 52 because mosh forwards
+    // that one sequence while dropping every other OSC. onSelectionSet queues the
+    // payload here; feed() feeds the bytes back through the parser once
+    // vterm_input_write has returned, so every OSC handler runs unchanged.
+    QByteArray relayOsc;
     char selectionBuf[8192];
     bool reflow = true;
     uint32_t defFg = 0xd8d8d8;
@@ -909,6 +915,13 @@ struct LibVtermCore::Impl {
             d->clipBuf.clear();
         if (d->clipBuf.size() < 1 << 20)
             d->clipBuf.append(frag.str, int(frag.len));
+        // #XQ8F: see relayOsc. Recognised before the clipboardAllowed gate so a rerouted
+        // mark is dispatched even with clipboard writes off, and never reaches
+        // events.clipboardWrite.
+        if (frag.final && d->clipBuf.startsWith("relay:") && d->relayOsc.size() < 65536) {
+            d->relayOsc += QByteArrayLiteral("\x1b]") + d->clipBuf.mid(6) + QByteArrayLiteral("\x07");
+            return 1;
+        }
         if (frag.final && d->clipboardAllowed && d->q->events.clipboardWrite)
             d->q->events.clipboardWrite((mask & VTERM_SELECTION_CLIPBOARD) ? QStringLiteral("clipboard") : QStringLiteral("primary"),
                                         d->clipBuf);
@@ -1089,6 +1102,15 @@ LibVtermCore::~LibVtermCore()
 void LibVtermCore::feed(const char *data, size_t len)
 {
     vterm_input_write(d->vt, data, len);
+    // #XQ8F: rerouted marks (see relayOsc) are fed back through the parser here, after
+    // the vterm_input_write that queued them returned — never re-entrantly from inside
+    // its onSelectionSet callback. A mark can only queue more by nesting OSC 52 inside
+    // OSC 52, so the depth cap keeps a crafted stream from looping forever.
+    for (int depth = 0; depth < 8 && !d->relayOsc.isEmpty(); ++depth) {
+        const QByteArray bytes = d->relayOsc;
+        d->relayOsc.clear();
+        vterm_input_write(d->vt, bytes.constData(), size_t(bytes.size()));
+    }
     vterm_screen_flush_damage(d->screen);
     ++d->changeCounter;
 }

@@ -55,11 +55,16 @@ int pruneSockets(const QString &dir);
 QByteArray gzip(const QByteArray &data);
 
 // The line typed into the remote shell to load `script` (shell/remote-integration.sh):
-//   " RELAY_R=<rows> eval \"$(printf %s '<base64>' | base64 -d | gzip -dc)\""
-// The leading space keeps it out of history. RELAY_R is how many rows the old prompt and this
-// echoed line take, given the column the prompt left the cursor at and the terminal's width, so
-// the script can erase them and the session looks as if the prompt was simply redrawn.
-QString bootstrapLine(const QByteArray &script, int promptColumn, int columns);
+//   " eval \"$(printf %s '<base64>' | base64 -d | gzip -dc)\""
+// The leading space keeps it out of history. The payload opens with `RELAY_R=<rows>` — how many
+// rows the old prompt and this echoed line take, given the column the prompt left the cursor at
+// and the terminal's width, so the script can erase them and the session looks as if the prompt
+// was simply redrawn. With `viaMosh` it also sets `RELAY_M=1` there (#XQ8F): mosh forwards OSC 52
+// and drops every other OSC, so over a mosh link the script wraps each of its marks — OSC 133
+// prompt marks, OSC 7 cwd, 777/7772 notifications — in an OSC 52 write instead, and Relay's
+// terminal cores unpack it again. It stays inside the payload for the same reason as the row
+// count: what Relay types must parse in a shell that is neither bash nor zsh.
+QString bootstrapLine(const QByteArray &script, int promptColumn, int columns, bool viaMosh = false);
 
 // The prompt a remote shell last drew, kept from the bytes it sent, so Relay can put it back
 // after printing over it (a remote line editor without Relay's integration cannot be asked to

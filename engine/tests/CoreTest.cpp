@@ -995,6 +995,56 @@ private slots:
         QCOMPARE(h.clips[0].second, QByteArray("hello"));
     }
 
+    void osc52CarriesRelayMarksOverMosh()
+    {
+        // #XQ8F: over a mosh link the remote script wraps every mark in an OSC 52 write, the one
+        // OSC mosh forwards. A write whose decoded text starts with "relay:" is not a clipboard
+        // write: the rest is fed back through the parser as a bare OSC, whatever
+        // setClipboardWriteAllowed says, so the callbacks the real sequences fire run — and
+        // events.clipboardWrite never sees it.
+        QFETCH_GLOBAL(QString, core);
+        const auto wrapped = [](const QByteArray &payload) {
+            return QByteArrayLiteral("\x1b]52;c;") + payload.toBase64() + QByteArrayLiteral("\x07");
+        };
+        {
+            Harness h(core);   // clipboard writes denied, the default
+            h.feed(wrapped("relay:133;A"));
+            QCOMPARE(h.marks.size(), 1);
+            QCOMPARE(std::get<0>(h.marks[0]), MarkPromptStart);
+            QVERIFY(h.clips.isEmpty());
+        }
+        Harness h(core);
+        h.vt->setClipboardWriteAllowed(true);
+        h.feed(wrapped("relay:133;A"));
+        QCOMPARE(std::get<0>(h.marks.value(0)), MarkPromptStart);
+        QVERIFY(h.clips.isEmpty());   // allowed or not, a mark is never a clipboard write
+        // An ordinary OSC 52 write still behaves as before.
+        h.feed("\x1b]52;c;" + QByteArray("hello").toBase64() + "\x07");
+        QCOMPARE(h.clips.size(), 1);
+        QCOMPARE(h.clips[0].second, QByteArray("hello"));
+        // The rest of the family rides the same channel.
+        h.feed(wrapped("relay:7;file://box/tmp"));
+        QCOMPARE(h.cwds.size(), 1);
+        QCOMPARE(h.cwds[0].first, QStringLiteral("/tmp"));
+        QCOMPARE(h.cwds[0].second, QStringLiteral("box"));
+        h.feed(wrapped("relay:777;notify;Build;done"));
+        QCOMPARE(h.notes.size(), 1);
+        QCOMPARE(h.notes[0].first, QStringLiteral("Build"));
+        QCOMPARE(h.notes[0].second, QStringLiteral("done"));
+        h.feed(wrapped("relay:133;D;0"));
+        QCOMPARE(h.marks.size(), 2);
+        QCOMPARE(std::get<0>(h.marks[1]), MarkCommandFinished);
+        QCOMPARE(std::get<2>(h.marks[1]), 0);
+        h.feed(wrapped("relay:7772;shell"));
+        QVERIFY(h.frame().lines[0].marks & MarkUserShell);
+        // A mark can be split across feeds, exactly as a real OSC can: both cores buffer.
+        Harness split(core);
+        split.feed(wrapped("relay:133;A").left(12));
+        split.feed(wrapped("relay:133;A").mid(12));
+        QCOMPARE(std::get<0>(split.marks.value(0)), MarkPromptStart);
+        QVERIFY(split.clips.isEmpty());
+    }
+
     void cursorShape()
     {
         QFETCH_GLOBAL(QString, core);

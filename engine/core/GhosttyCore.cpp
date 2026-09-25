@@ -177,6 +177,13 @@ struct GhosttyCore::Impl {
     QString title;
     SequenceScanner scanner;
 
+    // #XQ8F: an OSC 52 write whose text starts with "relay:" is not a clipboard write.
+    // The remote shell script wraps its marks (OSC 133/7/777/7772) in OSC 52 because
+    // mosh forwards that one sequence while dropping every other OSC. onClipboardWrite
+    // queues the payload here; feed() puts the bytes back through the parser once the
+    // ghostty_terminal_vt_write that queued them has returned.
+    QByteArray relayOsc;
+
     // Row roles (OSC 7772;shell/agent, CellTypes.h): libghostty-vt has no
     // storage for them, so every marked row is held as a tracked grid ref —
     // the same mechanism the selection anchor uses — with its bits. The ref
@@ -237,15 +244,25 @@ struct GhosttyCore::Impl {
         auto *d = static_cast<Impl *>(ud);
         GhosttyClipboardWriteReply reply = GHOSTTY_INIT_SIZED(GhosttyClipboardWriteReply);
         reply.result = GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED;
-        if (d->clipboardAllowed && d->q->events.clipboardWrite) {
-            QByteArray data;
-            for (size_t i = 0; i < w->contents_len; ++i) {
-                const QByteArray mime(reinterpret_cast<const char *>(w->contents[i].mime.ptr), int(w->contents[i].mime.len));
-                if (mime.startsWith("text/")) {
-                    data = QByteArray(reinterpret_cast<const char *>(w->contents[i].data.ptr), int(w->contents[i].data.len));
-                    break;
-                }
+        QByteArray data;
+        for (size_t i = 0; i < w->contents_len; ++i) {
+            const QByteArray mime(reinterpret_cast<const char *>(w->contents[i].mime.ptr), int(w->contents[i].mime.len));
+            if (mime.startsWith("text/")) {
+                data = QByteArray(reinterpret_cast<const char *>(w->contents[i].data.ptr), int(w->contents[i].data.len));
+                break;
             }
+        }
+        // #XQ8F: a write whose text starts with "relay:" is a mark the remote script
+        // hid inside OSC 52 (mosh forwards OSC 52 and drops every other OSC). Recognised
+        // before the clipboardAllowed gate, so it is dispatched with clipboard writes off
+        // as well, and never reaches events.clipboardWrite: feed() drains relayOsc back
+        // through the parser, firing the callbacks the bare sequences fire.
+        if (data.startsWith("relay:") && d->relayOsc.size() < 1 << 18) {
+            d->relayOsc += QByteArrayLiteral("\x1b]") + data.mid(6) + QByteArrayLiteral("\x07");
+            w->reply(w, &reply);
+            return;
+        }
+        if (d->clipboardAllowed && d->q->events.clipboardWrite) {
             const QString target = w->location == GHOSTTY_CLIPBOARD_LOCATION_STANDARD ? QStringLiteral("clipboard")
                                                                                        : QStringLiteral("primary");
             d->q->events.clipboardWrite(target, data);
@@ -585,29 +602,46 @@ GhosttyCore::~GhosttyCore()
 
 void GhosttyCore::feed(const char *data, size_t len)
 {
-    size_t off = 0;
-    SequenceScanner::Hit hit;
-    while (off < len && d->scanner.next(data, len, off, &hit)) {
-        ghostty_terminal_vt_write(d->t, reinterpret_cast<const uint8_t *>(data + off), hit.end - off);
-        off = hit.end;
-        if (hit.kind == SequenceScanner::Hit::AltScreen) {
-            d->checkAltScreen();
-        } else if (hit.kind == SequenceScanner::Hit::RowRole) {
-            d->trackRowRole(hit.role);
-        } else if (hit.kind == SequenceScanner::Hit::Erase) {
-            d->eraseRoleRows(hit.mark, hit.eraseParam);
-        } else if (events.promptMark) {
-            uint16_t y = 0;
-            ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
-            const PromptMark kind = hit.mark == 'A' ? MarkPromptStart
-                : hit.mark == 'B'                   ? MarkCommandStart
-                : hit.mark == 'C'                   ? MarkOutputStart
-                                                    : MarkCommandFinished;
-            events.promptMark(kind, int(y), hit.exitCode);
+    // #XQ8F: marks the remote script hid inside OSC 52 are queued by onClipboardWrite
+    // while libghostty-vt parses the write. They are fed back through this same loop
+    // only once that write has returned — never re-entrantly from inside its callback —
+    // so the scanner and libghostty-vt see them exactly as a bare OSC.
+    QByteArray replay;
+    const char *p = data;
+    size_t left = len;
+    for (int depth = 0;; ++depth) {
+        size_t off = 0;
+        SequenceScanner::Hit hit;
+        while (off < left && d->scanner.next(p, left, off, &hit)) {
+            ghostty_terminal_vt_write(d->t, reinterpret_cast<const uint8_t *>(p + off), hit.end - off);
+            off = hit.end;
+            if (hit.kind == SequenceScanner::Hit::AltScreen) {
+                d->checkAltScreen();
+            } else if (hit.kind == SequenceScanner::Hit::RowRole) {
+                d->trackRowRole(hit.role);
+            } else if (hit.kind == SequenceScanner::Hit::Erase) {
+                d->eraseRoleRows(hit.mark, hit.eraseParam);
+            } else if (events.promptMark) {
+                uint16_t y = 0;
+                ghostty_terminal_get(d->t, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &y);
+                const PromptMark kind = hit.mark == 'A' ? MarkPromptStart
+                    : hit.mark == 'B'                   ? MarkCommandStart
+                    : hit.mark == 'C'                   ? MarkOutputStart
+                                                        : MarkCommandFinished;
+                events.promptMark(kind, int(y), hit.exitCode);
+            }
         }
+        if (off < left)
+            ghostty_terminal_vt_write(d->t, reinterpret_cast<const uint8_t *>(p + off), left - off);
+        // A rerouted mark can only enqueue more by nesting OSC 52 inside OSC 52, so the
+        // depth cap keeps a crafted stream from making this loop unbounded.
+        if (depth >= 7 || d->relayOsc.isEmpty())
+            break;
+        replay = d->relayOsc;
+        d->relayOsc.clear();
+        p = replay.constData();
+        left = size_t(replay.size());
     }
-    if (off < len)
-        ghostty_terminal_vt_write(d->t, reinterpret_cast<const uint8_t *>(data + off), len - off);
     d->checkAltScreen();
 }
 

@@ -157,6 +157,29 @@ private slots:
         QVERIFY(again.waitForFinished(5000));
         QCOMPARE(again.readAllStandardOutput(), QByteArray::number(399 * 7919) + "\n");
     }
+
+    void bootstrapMoshDecodes() {
+        // #XQ8F: the mosh login carries RELAY_M the same way as RELAY_R — inside the payload,
+        // where a shell that is neither bash nor zsh can still parse the typed line (#S5SH).
+        const QByteArray script = "echo relay-mosh-ok \"$RELAY_R\" \"$RELAY_M\"\n";
+        const QString plain = bootstrapLine(script, 18, 80);
+        const QString mosh = bootstrapLine(script, 18, 80, true);
+        QVERIFY(mosh.startsWith(QStringLiteral(" eval \"$(printf")));
+        QVERIFY(!mosh.contains(QStringLiteral("RELAY_M=")));   // not typed in front of the eval
+        QVERIFY(mosh.size() > plain.size());                   // the setting rides inside the payload
+        if (QStandardPaths::findExecutable("bash").isEmpty() || QStandardPaths::findExecutable("gzip").isEmpty()
+            || QStandardPaths::findExecutable("base64").isEmpty())
+            QSKIP("bash, gzip and base64 are needed to decode the line");
+        QProcess bash;
+        bash.start("bash", {"--noprofile", "--norc", "-c", mosh});
+        QVERIFY(bash.waitForFinished(5000));
+        const QByteArray printed = bash.readAllStandardOutput().trimmed();
+        QVERIFY2(printed.startsWith("relay-mosh-ok "), printed.constData());
+        QVERIFY2(printed.endsWith(" 1"), printed.constData());   // RELAY_M reached the script
+        // The row count settles on the mosh line's own, longer size.
+        QCOMPARE(printed.mid(printed.indexOf(' ') + 1).split(' ').first().toInt(),
+                 rowsFor(18, mosh.size(), 80));
+    }
 };
 
 QTEST_GUILESS_MAIN(RemoteSessionTest)
