@@ -175,7 +175,8 @@ class BridgeTests(unittest.TestCase):
 
     def test_console_board_tools_follow_native_scope(self):
         pane_names = {s['name'] for s in exchange(self.cap, 'tools/list')['tools']}
-        self.assertFalse({'board_merge_cards', 'board_split_card', 'search_files'} & pane_names)
+        self.assertIn('board_merge_cards', pane_names)   # ordinary since #GREM, native parity
+        self.assertFalse({'board_split_card', 'search_files'} & pane_names)
         self.tools.begin_console()
         console_names = {s['name'] for s in exchange(self.cap, 'tools/list')['tools']}
         self.assertTrue({'board_merge_cards', 'board_split_card', 'search_files'} <= console_names)

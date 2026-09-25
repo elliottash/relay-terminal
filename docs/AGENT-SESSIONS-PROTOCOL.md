@@ -3403,10 +3403,12 @@ before it stopped.
 card's, and the card seeded for `board_ask` is forgotten, so the next question about that card
 reseeds from the file.
 
-**Three more tools, only while it runs** (`relay_core.board_tools.CLEANUP_TOOL_SPECS`). Outside a
+**Two more tools, only while it runs** (`relay_core.board_tools.CLEANUP_TOOL_SPECS`). Outside a
 cleanup they are neither advertised nor accepted (`{"code": "board_refused"}`), so a pane agent's
-every turn does not carry them and cannot merge the user's cards on a whim. Plan mode blocks them
-with the other writes.
+every turn does not carry them. Plan mode blocks them with the other writes. `board_merge_cards`
+was the third of these until #GREM (owner decision, 2026-09-25): a delivery that finds a duplicate
+folds it on the spot — board hygiene, like `board_move_card` — so merge moved into the ordinary
+set every pane is offered. The table below still describes what it writes.
 
 | Tool | Arguments | What it writes |
 |---|---|---|
@@ -4042,8 +4044,10 @@ What is still the board's own:
   is not seeded again. The **brief** is not part of it: since #AGNT it is in the system prompt, once
   (`agent_context`, `brief.key: "switchboard"` → `board_chat_brief.md`).
 - **Tools.** The console's `ConsoleScope`: the whole executor — the shell and the file tools included since
-  the owner's decision of 2026-09-20 — plus the ordinary board tools, `board_merge_cards`,
-  `board_split_card`, `board_import_items`, `tests_check`, `tests_run` and `search_files`. §19.18 used to
+  the owner's decision of 2026-09-20 — plus the ordinary board tools, `board_split_card`,
+  `board_import_items`, `tests_check`, `tests_run` and `search_files`. `board_merge_cards` has
+  been an ordinary tool since #GREM (2026-09-25), so it is in that set rather than the console's
+  extras. §19.18 used to
   say "No shell, no file writes: code is a card's Execute"; that fence is gone (33.3), and a board-less
   console got round it by accident anyway. `board_sections` still belongs to a cleanup and `board_claim`
   to a terminal pane, which are constraints rather than fences.

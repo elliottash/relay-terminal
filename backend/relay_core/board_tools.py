@@ -481,12 +481,6 @@ TOOL_SPECS = [
           "escalated": {"type": "string",
                         "description": "Who it was escalated to, when it was."}},
          ["server"]),
-]
-
-#: The three tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9).
-#: They are offered only while `board_cleanup` is running, so a pane agent's every turn does
-#: not carry three more tool schemas — and cannot merge the user's cards on a whim.
-CLEANUP_TOOL_SPECS = [
     spec("board_merge_cards",
          "Fold one or more redundant cards into one surviving card. Nothing is deleted: each "
          "merged card keeps its file and its id, gains a `## Resolution` naming the survivor and "
@@ -498,6 +492,14 @@ CLEANUP_TOOL_SPECS = [
                     "description": "Ids of the cards folded into it."},
           "reason": {"type": "string", "description": "Why they are the same request, in one line."}},
          ["into", "cards", "reason"]),
+]
+
+#: The tools a whole-board cleanup needs and an ordinary turn does not (protocol 19.9): split
+#: and sections restructure the board wholesale, so they are offered only while `board_cleanup`
+#: is running and a pane agent's every turn does not carry them. `board_merge_cards` used to
+#: live here; since #GREM (owner decision, 2026-09-25) it is an ordinary tool — a pane folding
+#: the duplicate it just found mid-delivery is board hygiene, like `board_move_card`.
+CLEANUP_TOOL_SPECS = [
     spec("board_split_card",
          "Split a card that mixes unrelated work into one card per piece. Each part's `request` is "
          "the user's own words for that piece, quoted verbatim from the original; the title is "
@@ -548,8 +550,9 @@ CLEANUP_TOOL_SPECS = [
          ["reason"]),
 ]
 
-#: The tools of every turn.  The cleanup-only three are in `CLEANUP_TOOL_NAMES`; `ALL_TOOL_NAMES`
-#: is what `handles` answers to, since a cleanup call still arrives through the same dispatch.
+#: The tools of every turn, `board_merge_cards` included.  The cleanup-only two are in
+#: `CLEANUP_TOOL_NAMES`; `ALL_TOOL_NAMES` is what `handles` answers to, since a cleanup call
+#: still arrives through the same dispatch.
 TOOL_NAMES = tuple(s["function"]["name"] for s in TOOL_SPECS)
 CLEANUP_TOOL_NAMES = tuple(s["function"]["name"] for s in CLEANUP_TOOL_SPECS)
 
@@ -1677,10 +1680,11 @@ class BoardTools:
             return [dict(s) for s in TOOL_SPECS
                     if s["function"]["name"] in UNINITIALIZED_TOOLS]
         if self.console:
-            # An agent console (#AGNT): the ordinary set plus merge, split and the import, and
-            # `search_files`, which a console reaches through the board rather than the executor.
-            # The flag rather than the scope, so a card turn's `CardScope` does not switch this
-            # list out from under a conversation that is mid-prefix (#CTRN).
+            # An agent console (#AGNT): the ordinary set (merge included since #GREM) plus split
+            # and the import, and `search_files`, which a console reaches through the board
+            # rather than the executor. The flag rather than the scope, so a card turn's
+            # `CardScope` does not switch this list out from under a conversation that is
+            # mid-prefix (#CTRN).
             return console_board_specs()
         specs = list(TOOL_SPECS) + (list(CLEANUP_TOOL_SPECS) if self.cleanup is not None else [])
         return [dict(s) for s in specs]

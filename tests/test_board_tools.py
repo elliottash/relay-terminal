@@ -115,7 +115,9 @@ class SpecTests(unittest.TestCase):
                                         # protocol 31.10 (#JNYN): stage the card for its verifier
                                         "board_try",
                                         # #95VZ: a person-served case into the ledger
-                                        "board_case"))
+                                        "board_case",
+                                        # #GREM: fold a duplicate mid-delivery, outside a cleanup
+                                        "board_merge_cards"))
 
     def test_there_is_no_delete_tool(self):
         names = " ".join(T.TOOL_NAMES)
@@ -2132,7 +2134,12 @@ class SectionWriterTests(unittest.TestCase):
 # ------------------------------------------------------------- whole-board cleanup
 
 class CleanupToolTests(BoardToolsTest):
-    """The three tools only a `board_cleanup` turn gets (protocol 19.9)."""
+    """The tools only a `board_cleanup` turn gets (protocol 19.9): split and sections.
+
+    `board_merge_cards` was one of these until #GREM (owner decision, 2026-09-25): a pane
+    folding the duplicate it just found mid-delivery is board hygiene, like `board_move_card`,
+    so it moved into the ordinary set.
+    """
 
     def test_they_are_refused_and_unadvertised_outside_a_cleanup(self):
         offered = {s["function"]["name"] for s in self.tools.tool_specs()}
@@ -2143,6 +2150,20 @@ class CleanupToolTests(BoardToolsTest):
         self.tools.begin_cleanup("c-1")
         offered = {s["function"]["name"] for s in self.tools.tool_specs()}
         self.assertEqual(offered, set(T.TOOL_NAMES) | set(T.CLEANUP_TOOL_NAMES))
+
+    def test_a_pane_merges_a_duplicate_without_a_cleanup(self):
+        keep = self.create("Voice mode", "add voice transcribe mode")
+        gone = self.create("Dictation", "let me dictate into the box")
+        offered = {s["function"]["name"] for s in self.tools.tool_specs()}
+        self.assertIn("board_merge_cards", offered)
+        self.assertNotIn("board_split_card", offered)
+        result = self.tools.run("board_merge_cards",
+                                {"into": keep, "cards": [gone], "reason": "the same request"})
+        self.assertNotIn("error", result, result)
+        self.assertIsNotNone(self.board.card_by_id(gone))          # nothing was deleted
+        self.assertEqual(self.board.card_by_id(gone).status, "dropped")
+        self.assertIn("let me dictate into the box", self.board.card_by_id(keep).body)
+        self.assertIn("merged this card into", self.thread_text(gone))
 
     def test_a_cleanup_raises_the_per_turn_ceilings(self):
         self.assertEqual(self.tools.limit("max_writes_per_turn"), 100)

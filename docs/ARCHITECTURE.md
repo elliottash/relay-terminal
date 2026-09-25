@@ -1978,7 +1978,7 @@ got the whole executor while a board-attached one got read-only tools.
 | Scope | Who | Tools |
 |---|---|---|
 | `pane` | a terminal pane's agent | the whole executor, the app tools, its own session's read tools, the ordinary board tools. The only scope that defers its on-demand tool groups (protocol 12.13) |
-| `console` | the Board page, an open card, Options, Actions, Sessions | the same list, plus `board_merge_cards`, `board_split_card`, `board_import_items` and `search_files` |
+| `console` | the Board page, an open card, Options, Actions, Sessions | the same list, plus `board_split_card`, `board_import_items` and `search_files` (`board_merge_cards` became an ordinary tool in #GREM, 2026-09-25) |
 
 There was a third row, `card`, until card #CTRN: one Discuss or Plan turn on one card, offered the
 mode's board tools and the read-only file tools. It is gone. A card console is a console, and what a

@@ -311,7 +311,9 @@ class ConsoleScopeTest(BoardConsoleTest):
         self.commands.console = False
         names = {t["function"]["name"] for t in self.tools().tool_specs()}
         self.assertIn("board_claim", names)
-        self.assertNotIn("board_merge_cards", names)   # merge and split stay with a cleanup
+        self.assertIn("board_merge_cards", names)      # an ordinary tool since #GREM: a pane
+                                                       # folds the duplicate it just found
+        self.assertNotIn("board_split_card", names)    # split and sections stay with a cleanup
 
     def test_the_import_tool_runs_through_the_same_never_twice_path(self):
         (self.repo / "TODO.md").write_text("- [ ] one thing\n", encoding="utf-8")
