@@ -985,6 +985,10 @@ void aWorkerRowIsRemovedAndMovedWithItsSurface()
     QKeyEvent ctrlDown(QEvent::KeyPress, Qt::Key_Down, Qt::ControlModifier);
     QCoreApplication::sendEvent(editor, &ctrlDown);
     CHECK_EQ(sent.size(), 1);
+    // CHECK_EQ does not return, and `sent.at(0)` on the empty list a failed precondition leaves
+    // is undefined behaviour — under the redirected test-harness environment this read has been
+    // segfaulting the whole suite instead of reporting the failure (signal ctest:consolemode).
+    if (sent.size() != 1) return;
     CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_move"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q1"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("to")).toInt(), 1);
@@ -995,6 +999,7 @@ void aWorkerRowIsRemovedAndMovedWithItsSurface()
     sent.clear();
     CHECK(console.removeRow(QStringLiteral("item:q2")));
     CHECK_EQ(sent.size(), 1);
+    if (sent.size() != 1) return;   // same precondition, same UB a row short of here
     CHECK_EQ(sent.at(0).value(QStringLiteral("type")).toString(), QStringLiteral("queue_remove"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("item")).toString(), QStringLiteral("q2"));
     CHECK_EQ(sent.at(0).value(QStringLiteral("surface")).toString(), QStringLiteral("card:K7Q2"));
