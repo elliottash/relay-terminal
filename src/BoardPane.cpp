@@ -8865,7 +8865,7 @@ void BoardView::updateDetailLayout()
     // The key line says what the keys do in what is on screen: the list, or a card that has the
     // pane to itself.
     static const QString boardKeys = QStringLiteral(
-        "<b>Enter</b> open &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>r</b> run &nbsp; "
+        "<b>Enter</b> open &nbsp; <b>Shift+Enter</b> own pane &nbsp; <b>e</b> edit &nbsp; <b>p</b> plan &nbsp; <b>r</b> run &nbsp; "
         "<b>v</b> verify &nbsp; <b>d</b> done &nbsp; "
         "<b>n</b> new &nbsp; <b>←/→</b> fold section &nbsp; "
         "<b>Alt+Shift+↑↓</b> reorder &nbsp; <b>Alt+Shift+←→</b> status &nbsp; <b>m</b> move "
@@ -9935,7 +9935,13 @@ bool BoardView::eventFilter(QObject *object, QEvent *event)
     if (mods == Qt::ShiftModifier && (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
         && onOpenInNewPane && !m_selected.isEmpty() && selectedFold().isEmpty()
         && selectedSignalFold().isEmpty() && selectedSignal().isEmpty() && m_model.card(m_selected)) {
-        onOpenInNewPane(m_selected);
+        // The card leaves this board the way the page's ⤴ takes it: a page here already on it
+        // closes, or the list would show the same card as the new pane, and a narrowed board
+        // would give its whole width to that page instead of the rows.
+        const QString id = m_selected;
+        if (detailOpen() && m_detail->cardId() == id)
+            closeDetail();
+        onOpenInNewPane(id);
         return true;
     }
     if (handleBoardKey(key))

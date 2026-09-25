@@ -84,6 +84,7 @@ private slots:
     void aPinnedPaneShowsOneCardAndClosesAsAPane();
     void aLinkOnAPinnedPageMovesThePane();
     void shiftEnterOpensTheRowInItsOwnPane();
+    void shiftEnterOnTheOpenCardTakesItOffThisBoard();
     void thePopOutButtonHandsTheCardOverAndGoesBackToTheList();
     void aNewCardWhileOneIsOpenGoesToItsOwnPane();
     void aPinnedPaneLeavesTheTreeWatchToTheList();
@@ -160,7 +161,8 @@ void BoardSoloTests::aLinkOnAPinnedPageMovesThePane()
 void BoardSoloTests::shiftEnterOpensTheRowInItsOwnPane()
 {
     relay::BoardView view(QStringLiteral("/tmp/relay-card-solo-test"));
-    view.onSend = [](const QJsonObject &) {};
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
     QStringList popped;
     view.onOpenInNewPane = [&popped](const QString &id) { popped << id; };
     view.resize(1600, 900);
@@ -169,9 +171,44 @@ void BoardSoloTests::shiftEnterOpensTheRowInItsOwnPane()
     view.selectCard(QStringLiteral("M3XJ"));
     auto *list = view.findChild<QListWidget *>();
     QVERIFY(list);
-    pressOn(list, Qt::Key_Return, Qt::ShiftModifier, QStringLiteral("\r"));
+    const int before = sent.size();
+    // Through the real key path, with the list focused, the way a person presses it.
+    list->setFocus();
+    QTest::keyClick(list, Qt::Key_Return, Qt::ShiftModifier);
+    QCoreApplication::processEvents();
     QCOMPARE(popped, QStringList{QStringLiteral("M3XJ")});
+    // …and the list Board did not ask for the card as well: the page would open here too.
+    for (int i = before; i < sent.size(); ++i)
+        QVERIFY2(sent.at(i).value(QStringLiteral("type")).toString() != QStringLiteral("board_card_get"),
+                 "Shift+Enter also opened the card on the list Board");
     // This board stays on its list; nothing opened here.
+    QVERIFY(!view.detailOpen());
+    QVERIFY(view.listPaneVisible());
+    QVERIFY(!view.pinned());
+}
+
+// The live pass (#Y2BA, 2026-09-25): a row clicked on a wide board opens its page beside the
+// rows, and Shift+Enter then popped the card out while leaving that page open, so the narrowed
+// list showed the same card as the new pane and no rows at all.
+void BoardSoloTests::shiftEnterOnTheOpenCardTakesItOffThisBoard()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-card-solo-test"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QStringList popped;
+    view.onOpenInNewPane = [&popped](const QString &id) { popped << id; };
+    view.resize(1600, 900);
+    view.show();
+    view.handleEvent(opened({QStringLiteral("K7Q2"), QStringLiteral("M3XJ")}));
+    view.openCard(QStringLiteral("K7Q2"));
+    view.handleEvent(cardEvent(QStringLiteral("K7Q2"), lastId(sent)));
+    QVERIFY(view.detailOpen());
+    auto *list = view.findChild<QListWidget *>();
+    QVERIFY(list);
+    list->setFocus();
+    QTest::keyClick(list, Qt::Key_Return, Qt::ShiftModifier);
+    QCoreApplication::processEvents();
+    QCOMPARE(popped, QStringList{QStringLiteral("K7Q2")});
     QVERIFY(!view.detailOpen());
     QVERIFY(view.listPaneVisible());
     QVERIFY(!view.pinned());
