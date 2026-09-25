@@ -428,6 +428,21 @@ private Q_SLOTS:
         QCOMPARE(relay::input::epollWatchedFds(fdinfo), (QList<long>{26, 20}));
         QVERIFY(relay::input::epollWatchedFds("pos:\t0\n").isEmpty());
     }
+    // Ctrl+I cycles the routing mode; in `auto` with a verdict in hand for the draft it lands
+    // on the other mode first (#6T6R), because flipping to the detected one changes nothing.
+    void cycledModeFlipsAwayFromTheDetectedRoute() {
+        using relay::input::cycledMode;
+        // Detected verdicts in auto: the other mode first.
+        QCOMPARE(cycledMode(QStringLiteral("auto"), QStringLiteral("shell"), false), QStringLiteral("agent"));
+        QCOMPARE(cycledMode(QStringLiteral("auto"), QStringLiteral("agent"), false), QStringLiteral("shell"));
+        // No verdict in hand (empty box, slash command, prefix mode): the plain cycle stands.
+        QCOMPARE(cycledMode(QStringLiteral("auto"), QString(), false), QStringLiteral("shell"));
+        // The rest of the cycle is unchanged, and `detected` is ignored outside auto.
+        QCOMPARE(cycledMode(QStringLiteral("shell"), QStringLiteral("shell"), false), QStringLiteral("agent"));
+        QCOMPARE(cycledMode(QStringLiteral("agent"), QStringLiteral("agent"), false), QStringLiteral("auto"));
+        QCOMPARE(cycledMode(QStringLiteral("agent"), QString(), true), QStringLiteral("program"));
+        QCOMPARE(cycledMode(QStringLiteral("program"), QString(), false), QStringLiteral("auto"));
+    }
 };
 
 QTEST_APPLESS_MAIN(InputPolicyTests)

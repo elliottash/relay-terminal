@@ -106,6 +106,8 @@ void Pane::handle(const QJsonObject &event) {
                     });
                     m_assistQueuedText = routedText;
                     m_assistLocalGuess = route;
+                    m_detectedRoute = route;   // stands until the assist answers or the draft changes
+                    m_detectedRouteText = routedText;
                     m_assistDebounce.start();
                 }
             } else if (id == m_pendingSubmit && haveAssist) {
@@ -119,6 +121,10 @@ void Pane::handle(const QJsonObject &event) {
                 else
                     setRouteText(route.toUpper() + QStringLiteral(" · ") + event.value(QStringLiteral("reason")).toString());
                 m_routeLabel->setToolTip(event.value(QStringLiteral("syntax_error")).toString());
+                if (id == m_previewId && (route == QStringLiteral("shell") || route == QStringLiteral("agent"))) {
+                    m_detectedRoute = route;
+                    m_detectedRouteText = routedText;
+                }
             }
             if (id == m_pendingSubmit) {
                 m_pendingSubmit.clear();

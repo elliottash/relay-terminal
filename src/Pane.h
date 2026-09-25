@@ -2868,6 +2868,17 @@ public:
         return (value == QStringLiteral("shell") || value == QStringLiteral("agent")) ? value : QStringLiteral("auto");
     }
 
+    // What the router has decided the draft in the editor is: the assist answer for this text
+    // (or, until it answers or fails, its local guess), else the last route verdict for it.
+    // Matched against the editor's text, so a stale verdict for an older draft never counts.
+    QString detectedRoute() const {
+        const QString text = m_editor->toPlainText();
+        if (text.isEmpty()) return QString();
+        if (m_assistText == text) return m_assistRoute.isEmpty() ? m_assistLocalGuess : m_assistRoute;
+        if (m_detectedRouteText == text) return m_detectedRoute;
+        return QString();
+    }
+
     void toggleInputMode() {
         // Ctrl+I at a password prompt leaves masked input and talks to the agent instead
         // (issue decision 4), e.g. "paste the password from my clipboard". The agent's typing
@@ -2881,10 +2892,7 @@ public:
         }
         const bool programAvailable = !m_secretMode &&
             (relay::input::lineEditorWaiting(inputState()) || relay::input::lineRequested(inputState()));
-        const QString next = m_modeValue == QStringLiteral("auto")  ? QStringLiteral("shell")
-                           : m_modeValue == QStringLiteral("shell") ? QStringLiteral("agent")
-                           : m_modeValue == QStringLiteral("agent") && programAvailable ? QStringLiteral("program")
-                                                                    : QStringLiteral("auto");
+        const QString next = relay::input::cycledMode(m_modeValue, detectedRoute(), programAvailable);
         setMode(next);
         toast(next == QStringLiteral("agent") ? QStringLiteral("Input: Agent · ! runs one line in the terminal")
               : next == QStringLiteral("shell") ? QStringLiteral("Input: Terminal · * sends one line to the agent")
@@ -17268,6 +17276,7 @@ private:
     QTimer m_assistDebounce, m_assistHold;
     QString m_assistLocalGuess, m_assistFailedText;
     QString m_assistId, m_assistText, m_assistInflightText, m_assistQueuedText, m_assistRoute, m_assistReason, m_heldMode;
+    QString m_detectedRoute, m_detectedRouteText;   // the router's verdict for the draft in the editor
     double m_assistConfidence = 0;
     QJsonObject m_heldDecision;
     QHash<QString, QString> m_turnThinking;

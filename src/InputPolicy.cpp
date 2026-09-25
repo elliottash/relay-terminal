@@ -140,6 +140,17 @@ WithoutRouter withoutRouter(const QString &mode) {
     return WithoutRouter::Refuse;
 }
 
+QString cycledMode(const QString &current, const QString &detected, bool programAvailable) {
+    if (current == QStringLiteral("auto")) {
+        if (detected == QStringLiteral("agent")) return QStringLiteral("shell");
+        if (detected == QStringLiteral("shell")) return QStringLiteral("agent");
+        return QStringLiteral("shell");
+    }
+    if (current == QStringLiteral("shell")) return QStringLiteral("agent");
+    if (current == QStringLiteral("agent") && programAvailable) return QStringLiteral("program");
+    return QStringLiteral("auto");
+}
+
 QString noRouterText(const QString &restartKeys, const QString &terminalKeys) {
     const QString restart = restartKeys.isEmpty()
                                 ? QStringLiteral("Use the banner's Restart agent")

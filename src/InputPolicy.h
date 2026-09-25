@@ -92,6 +92,12 @@ enum class WithoutRouter {
     Refuse,   // `auto`: nothing here can tell a command from a prompt, so say so and offer the restart
 };
 WithoutRouter withoutRouter(const QString &mode);
+// The mode Ctrl+I (`input.toggle`) cycles to from `current`. The plain cycle is
+// auto → shell → agent → [program, when a line editor is waiting] → auto. In `auto` with a
+// route already detected for the draft in the editor (`detected` is the router's verdict,
+// "agent" or "shell" — the chip's TERMINAL/AGENT), the first press lands on the *other* mode:
+// flipping to the detected mode would change nothing (#6T6R).
+QString cycledMode(const QString &current, const QString &detected, bool programAvailable);
 // What `auto` is told: why the line did not go, the banner's own action, and the key that sends
 // it to the terminal anyway. Either key text may be empty, and is then named rather than typed.
 QString noRouterText(const QString &restartKeys, const QString &terminalKeys);
