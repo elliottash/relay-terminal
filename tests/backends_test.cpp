@@ -145,6 +145,43 @@ private Q_SLOTS:
             if (item.id == QStringLiteral("openFile")) QVERIFY(item.label.contains(QStringLiteral("notes.md")));
     }
 
+    // A folder under the pointer can also move the pane's shell there (#KKYC); a file cannot.
+    void menuOffersNavigateHereOnlyOnAFolder() {
+        relay::TerminalMenuState state = relayEngineState();
+        state.filePath = QStringLiteral("/tmp/relay/notes.md");
+        state.canNavigate = true;
+        QVERIFY(!menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("navigateHere")));
+        state.filePath = QStringLiteral("/tmp/relay");
+        state.fileIsFolder = true;
+        QVERIFY(enabledOf(relay::terminalContextMenu(state), QStringLiteral("navigateHere")));
+        state.canNavigate = false;   // an agent console with no shell: shown, greyed
+        QVERIFY(menuIds(relay::terminalContextMenu(state)).contains(QStringLiteral("navigateHere")));
+        QVERIFY(!enabledOf(relay::terminalContextMenu(state), QStringLiteral("navigateHere")));
+    }
+
+    // The owner's scheme for a folder link (#KKYC): click asks, Ctrl opens the explorer, Shift
+    // navigates. A keyboard Enter has nowhere to put a menu, so it opens the explorer.
+    void folderClickFollowsTheModifiers() {
+        using relay::FolderClick;
+        QCOMPARE(relay::folderClickAction(false, false, true), FolderClick::Menu);
+        QCOMPARE(relay::folderClickAction(true, false, true), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(false, true, true), FolderClick::Navigate);
+        QCOMPARE(relay::folderClickAction(true, true, true), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(false, false, false), FolderClick::Explorer);
+        QCOMPARE(relay::folderClickAction(false, true, false), FolderClick::Navigate);
+        QCOMPARE(relay::folderClickAction(true, false, false), FolderClick::Explorer);
+    }
+
+    void folderClickMenuNamesBothChoicesAndTheirChords() {
+        const auto items = relay::folderClickMenu(true);
+        QCOMPARE(menuIds(items), (QStringList{QStringLiteral("explorer"), QStringLiteral("navigate"),
+                                              QStringLiteral("external")}));
+        QVERIFY(items.at(0).label.endsWith(QStringLiteral("\tCtrl+click")));
+        QVERIFY(items.at(1).label.endsWith(QStringLiteral("\tShift+click")));
+        QVERIFY(enabledOf(items, QStringLiteral("navigate")));
+        QVERIFY(!enabledOf(relay::folderClickMenu(false), QStringLiteral("navigate")));
+    }
+
     // A pane in an ssh or mosh session offers a split that logs in to the same host (#S5SH).
     void menuOffersANewPaneOnTheSameHostOnlyInARemotePane() {
         relay::TerminalMenuState state = relayEngineState();

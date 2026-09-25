@@ -20,6 +20,22 @@ QString resolveEngineCore(const QString &commandLine, const QString &environment
 QString defaultEngineCore() { return s_defaultCore; }
 void setDefaultEngineCore(const QString &core) { s_defaultCore = core; }
 
+FolderClick folderClickAction(bool control, bool shift, bool fromMouse)
+{
+    if (control) return FolderClick::Explorer;
+    if (shift) return FolderClick::Navigate;
+    return fromMouse ? FolderClick::Menu : FolderClick::Explorer;
+}
+
+QList<TerminalMenuItem> folderClickMenu(bool canNavigate)
+{
+    return {
+        {QStringLiteral("explorer"), QStringLiteral("Open in explorer\tCtrl+click"), true},
+        {QStringLiteral("navigate"), QStringLiteral("Navigate here\tShift+click"), canNavigate},
+        {QStringLiteral("external"), QStringLiteral("Open in file manager"), true},
+    };
+}
+
 QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
 {
     QList<TerminalMenuItem> items;
@@ -54,6 +70,8 @@ QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state)
         }
         if (!state.filePath.isEmpty())
             add("openFile", QStringLiteral("Open “%1”").arg(state.filePath.section(QLatin1Char('/'), -1)));
+        if (!state.filePath.isEmpty() && state.fileIsFolder)
+            add("navigateHere", QStringLiteral("Navigate here"), state.canNavigate);
         // A `#K7Q2` reference: the card it names, the reference itself, and the reference in the
         // prompt box — the same three things the Switchboard's own card detail offers (`t`, `y`).
         if (!state.cardId.isEmpty()) {

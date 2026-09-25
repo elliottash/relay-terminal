@@ -55,6 +55,8 @@ struct TerminalMenuState {
     bool canZoom = false;            // the engine can change its font size
     QString link;                    // the URL under the pointer, empty when there is none
     QString filePath;                // an existing path under the pointer, empty when there is none
+    bool fileIsFolder = false;       // that path is a folder: "Navigate here" is offered (#KKYC)
+    bool canNavigate = false;        // the pane has a shell to `cd`, so "Navigate here" can run
     QString cardId;                  // a `#K7Q2` card reference under the pointer ("K7Q2"), or empty
     QString cardTitle;               // what the board calls that card, when it knows a title
     bool hasTurn = false;            // the pane has a finished agent turn to open
@@ -68,5 +70,18 @@ struct TerminalMenuState {
 // The entries for one right-click, in order, with separators as items whose id is "-". Never
 // starts or ends with a separator and never has two in a row.
 QList<TerminalMenuItem> terminalContextMenu(const TerminalMenuState &state);
+
+// ----- a click on a folder in the output (card #KKYC) --------------------------------------------
+//
+// The owner's scheme: a plain click asks, Ctrl+click opens the explorer, Shift+click navigates the
+// pane's shell there. A keyboard-walked link has no pointer to put a menu at, so its plain Enter
+// opens the explorer, as every folder link did before. Ctrl wins over Shift.
+enum class FolderClick { Menu, Explorer, Navigate };
+FolderClick folderClickAction(bool control, bool shift, bool fromMouse);
+
+// The menu a plain click on a folder opens: "explorer", "navigate" (greyed when the pane has no
+// shell to move) and "external". Each label carries its direct chord after a tab, which QMenu
+// draws in its shortcut column, so the menu teaches the modifiers.
+QList<TerminalMenuItem> folderClickMenu(bool canNavigate);
 
 } // namespace relay

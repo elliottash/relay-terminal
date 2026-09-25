@@ -104,6 +104,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
+#include <QCursor>
 #include <QCryptographicHash>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -3627,6 +3628,16 @@ public:
     // Where a clicked or keyboard-selected link goes. `fromMouse` teaches the keyboard path.
     void openOutputTarget(const QString &target, int line, bool fromMouse,
                           Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        // A local folder (card #KKYC): a plain click asks, Ctrl opens the explorer, Shift moves
+        // this pane's shell there. Its file manager is in the menu, no longer on Shift.
+        if (QDir::isAbsolutePath(target) && QFileInfo(target).isDir()) {
+            switch (relay::folderClickAction(modifiers.testFlag(Qt::ControlModifier),
+                                             modifiers.testFlag(Qt::ShiftModifier), fromMouse)) {
+            case relay::FolderClick::Menu: showFolderClickMenu(target, QCursor::pos()); return;
+            case relay::FolderClick::Navigate: navigateToOutputFolder(target); return;
+            case relay::FolderClick::Explorer: modifiers = Qt::NoModifier; break;   // the path below
+            }
+        }
         // File actions use the actual path, even when ordinary opening resolves a Markdown file
         // to a Switchboard card. Remote paths never arrive here with Shift (the login branch at
         // the backend callback keeps handling those on their own machine).
@@ -3753,6 +3764,33 @@ public:
                                                 QStringLiteral("navigate output links with the arrow keys")));
         if (onOpenPath) onOpenPath(target, line > 0 ? line : 0);
     }
+    // The menu a plain click on a folder link opens (#KKYC); each entry names its direct chord.
+    void showFolderClickMenu(const QString &folder, const QPoint &global) {
+        auto *menu = new QMenu(this);
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        for (const relay::TerminalMenuItem &item : relay::folderClickMenu(hasShell())) {
+            QAction *action = menu->addAction(item.label);
+            action->setEnabled(item.enabled);
+            const QString id = item.id;
+            connect(action, &QAction::triggered, this, [this, id, folder] {
+                if (id == QStringLiteral("explorer")) { if (onOpenPath) onOpenPath(folder, 0); }
+                else if (id == QStringLiteral("navigate")) navigateToOutputFolder(folder);
+                else if (id == QStringLiteral("external")) openFolderExternally(folder);
+            });
+        }
+        menu->popup(global);
+    }
+    // Shift+click on a folder link, or "Navigate here": `cd` this pane's shell into it. runCommand
+    // refuses, and says why, when a program has the terminal, so nothing is typed into it.
+    void navigateToOutputFolder(const QString &folder) {
+        if (!hasShell()) { status(QStringLiteral("This pane has no shell to navigate.")); return; }
+        if (changeDirectory(folder)) status(QStringLiteral("cd ") + folder);
+    }
+    void openFolderExternally(const QString &folder) {
+        if (onOpenExternal) onOpenExternal(folder);
+        else if (!QDesktopServices::openUrl(QUrl::fromLocalFile(folder)))
+            status(QStringLiteral("Could not open externally: ") + folder);
+    }
     bool canWalkOutputLinks() const { return terminalCan(relay::TerminalBackend::LinkWalk); }
     bool outputLinkWalkActive() const { return m_backend && m_backend->linkWalkActive(); }
     // Ctrl+Shift+L and the arrows: highlight the previous (-1) or next (+1) link.
@@ -3775,7 +3813,7 @@ public:
                             : link.target;
         const bool local = QDir::isAbsolutePath(link.target);
         const QString keys = local
-            ? (link.directory ? QStringLiteral("Enter opens in Relay, Shift+Enter opens externally")
+            ? (link.directory ? QStringLiteral("Enter opens the explorer, Shift+Enter navigates here")
                               : QStringLiteral("Enter opens in Relay, Ctrl+Enter edits, Shift+Enter opens externally"))
             : QStringLiteral("Enter opens");
         // The selected target is state, not a queued toast: every arrow must replace it
@@ -3936,6 +3974,8 @@ public:
                 state.link = target;
             else if (!target.isEmpty() && QFileInfo::exists(target)) {
                 state.filePath = target;
+                state.fileIsFolder = QFileInfo(target).isDir();
+                state.canNavigate = hasShell();
                 m_menuFileLine = line;
             }
             Q_UNUSED(column);
@@ -3987,6 +4027,7 @@ public:
         if (id == QStringLiteral("openLink")) { QDesktopServices::openUrl(QUrl(link)); return; }
         if (id == QStringLiteral("copyLink")) { QApplication::clipboard()->setText(link); return; }
         if (id == QStringLiteral("openFile")) { if (onOpenPath) onOpenPath(file, m_menuFileLine); return; }
+        if (id == QStringLiteral("navigateHere")) { navigateToOutputFolder(file); return; }
         // A `#K7Q2` under the pointer: open the card, copy the reference, or put it in the prompt
         // box — the same three the Switchboard's card detail offers.
         if (id == QStringLiteral("openCard")) { if (onOpenCard) onOpenCard(card); return; }
