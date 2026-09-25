@@ -6,12 +6,12 @@ labels: [feature, switchboard, skills, board, qa]
 component: [gui, worker, skills]
 assignee: agent
 implemented_by: glm/glm-5.3
-session: cca5043b-76a8-47aa-bbab-5971db9e0226
+session: a0e3fa74-1a2a-402b-827a-5f1e2a531191
 rank: zzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: visual, primary: script, also: [ai-visual, person], human: required, criteria: 'the Board''s three tabs read as one surface; a skill page answers version, profile, cases and staleness at a glance without a QA plan in view', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: 'owner, Relay conversation, 2026-09-24 and 2026-09-25; the Skills registry phase of #1QKM'
-links: {plans: [], commits: [], evidence: [], related: [1QKM, SZ1H, HS7V, MSJ0, 95VZ, Y2MP, P7SJ, GSK7], github: null}
+links: {commits: [e5b1a648d096, d138dc638e9e, b48afea250ef], evidence: [], github: null, plans: [], related: [1QKM, SZ1H, HS7V, MSJ0, 95VZ, Y2MP, P7SJ, GSK7]}
 ---
 # Skills registry: the Board becomes Cards | Skills | Memories, Globals gets global skills, and a skill page shows version, profile, cases and staleness
 
