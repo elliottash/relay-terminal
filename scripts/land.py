@@ -53,7 +53,8 @@ What it refuses to do, and why:
     accumulates entries equal to older commits' blobs as `main` moves, so a plain `git commit`
     silently reverts newer commits. `hook install` makes git refuse that too.
   * It never runs `git checkout`, `git stash`, `git reset`, or writes any working-tree file
-    (the single exception is `doctor --fix` on a provably stale path, see below). Restoring a
+    (the exceptions: `doctor --fix` on a provably stale path, see below, and after a landing
+    the `links.commits` line of the `#ID` board cards the message names, #MJ76). Restoring a
     path from git over someone's live edit destroys work that was never committed anywhere.
   * It merges with real temporary files, never process substitution: `git merge-file` on a
     /dev/fd pipe exits 0 and applies nothing.
@@ -75,6 +76,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1598,12 +1600,74 @@ def cmd_commit(args, log):
             entry["last_commit"] = new
         edit_registry(root, mutate)
 
+        if not getattr(args, "no_cards", False):
+            try:
+                append_commit_to_cards(repo, new, message, log)
+            except Exception as exc:  # the commit already landed; card bookkeeping is best effort
+                log("cards: could not record %s (%s)" % (new[:12], exc))
+
         print(new)
         return 0
 
     raise Fail("%s moved under every one of the %d attempts (last: %s). Nothing was landed; "
                "run commit again." % (branch, SWAP_ATTEMPTS, last_error or "swap refused"),
                code=3)
+
+
+# Card links (#MJ76): a landed commit whose message names a card as `#ID` is appended to that
+# card's `links.commits`, kept in commit order, so the card's commit sequence fills itself and
+# QA's "newest hash" is its last entry. The card file is written in the working tree *after* the
+# swap and is not part of the commit it records; it lands with the session's next commit.
+CARD_REF_RE = re.compile(r"#([0-9A-HJKMNP-TV-Z]{4})(?![0-9A-Za-z])")
+
+
+def append_commit_to_cards(repo, sha, message, log):
+    """Append `sha` to `links.commits` of every card `message` names as `#ID`. Best effort:
+    no board, no backend or a card another writer changed meanwhile is logged and skipped,
+    never a failure -- the commit has already landed."""
+    ids = sorted(set(CARD_REF_RE.findall(message)))
+    if not ids:
+        return []
+    backend = str(Path(repo) / "backend")
+    if backend not in sys.path:
+        sys.path.insert(0, backend)
+    try:
+        from relay_core import board as B
+    except Exception as exc:        # noqa: BLE001 - a checkout without the backend
+        log("cards: not recording %s on %s (%s)" % (sha[:12], ", ".join(ids), exc))
+        return []
+    folder = B.board_folder(repo)
+    if folder is None:
+        return []
+    board = B.Board(folder, repo)
+    by_id = {card.id: card for card in board.cards() if card.id in ids}
+    done = []
+    for card_id in ids:
+        card = by_id.get(card_id)
+        if card is None:
+            continue
+        for _attempt in range(3):
+            base = B.file_hash(card.path)
+            links = dict(B.card_links(card))
+            commits = [str(c) for c in (links.get("commits") or [])] \
+                if isinstance(links.get("commits"), list) else []
+            merged = B.normalize_commits(Path(repo), commits + [sha], drop_unresolved=True)
+            if merged == commits:
+                break
+            links["commits"] = merged
+            card.set("links", links)
+            try:
+                board.save(card, base_hash=base)
+            except B.BoardConflict:
+                card = board.card_by_id(card_id)
+                if card is None:
+                    break
+                continue
+            done.append(card_id)
+            break
+    if done:
+        log("cards: recorded %s on %s (links.commits)" % (sha[:12], ", ".join("#" + i for i in done)))
+    return done
 
 
 def read_message(value):
@@ -2071,6 +2135,7 @@ makes it stop matching, and you are asked again.
   --paths p...       land only some of the session's paths.
   --whole p          commit the entire working copy of a path you never ran `begin` on.
   --dry-run          print the merged diff (and the review, if it would be held) and stop.
+  --no-cards         do not append the landed sha to the `#ID` cards the message names.
   --stale-minutes N  hold a path whose snapshot is older than this (default {stale}).
 
 the build gate
@@ -2154,6 +2219,8 @@ def build_parser():
     commit.add_argument("--whole", nargs="+", action="extend", default=None, help="commit a whole working copy, unsnapshotted (repeatable)")
     commit.add_argument("--branch", default=None)
     commit.add_argument("--dry-run", action="store_true")
+    commit.add_argument("--no-cards", action="store_true",
+                        help="do not append the landed sha to links.commits of the #ID cards the message names")
     commit.add_argument("--confirm", default=None, metavar="DIGEST",
                         help="the digest a held commit printed; lands it unchanged")
     commit.add_argument("--exclude-hunk", action="append", default=None, metavar="PATH:N",

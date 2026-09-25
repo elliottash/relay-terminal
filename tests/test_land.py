@@ -77,6 +77,23 @@ class LandCase(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_commit_records_named_card_and_no_cards_skips_it(self):
+        # The script runs from a separate checkout in these tests, so expose the backend it
+        # imports when an actual Relay repository has a Board.
+        (self.repo / "backend").symlink_to(ROOT / "backend", target_is_directory=True)
+        write(self.repo / ".board/board.yaml", "{}\n")
+        card = self.repo / ".board/features/card.md"
+        write(card, "---\nid: K7Q2\ntype: work\nstatus: executing\n"
+                    "created: '2026-09-25'\nlinks: {plans: [], commits: [], evidence: [], "
+                    "related: [], github: null}\n---\n# A card\n\n## Issue\nTest.\n")
+        self.land("begin", "cards", "f.txt")
+        edit_line(self.repo / "f.txt", 2, "FIRST")
+        first = self.land("commit", "cards", "-m", "#K7Q2 first").stdout.strip().splitlines()[-1]
+        self.assertIn(first[:12], card.read_text(encoding="utf-8"))
+        edit_line(self.repo / "f.txt", 8, "SECOND")
+        second = self.land("commit", "cards", "-m", "#K7Q2 second", "--no-cards").stdout.strip().splitlines()[-1]
+        self.assertNotIn(second[:12], card.read_text(encoding="utf-8"))
+
     # -- driving the script ------------------------------------------------
 
     def land(self, *args, expect=0, cwd=None):

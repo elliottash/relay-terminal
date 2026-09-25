@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from relay_core import board as B
@@ -1738,6 +1738,50 @@ class PolicyReachesTheRelayPromptTests(unittest.TestCase):
         loaded = instructions.load({"files": [], "project_auto": True}, self.dir)
         self.assertIn("CLAUDE-ONLY-MARKER", loaded.section)
         self.assertIn("LOCAL-ONLY-MARKER", loaded.section)
+
+class MetadataTests(TempBoardTest):
+    def test_due_dates_milestones_and_snooze_are_computed(self):
+        card = self.card()
+        card.front["milestone"] = "beta"
+        card.front["snooze"] = "2026-10-10"
+        flags = B.date_flags(card, today=date(2026, 10, 1), milestones={"beta": "2026-09-30"})
+        self.assertEqual(flags["effective_due"], "2026-09-30")
+        self.assertTrue(flags["overdue"])
+        self.assertTrue(flags["snoozed"])
+        card.front["due"] = "2026-10-03"
+        flags = B.date_flags(card, today=date(2026, 10, 1), milestones={"beta": "2026-09-30"})
+        self.assertEqual(flags["effective_due"], "2026-10-03")
+        self.assertTrue(flags["due_soon"])
+        with self.assertRaises(B.BoardError):
+            B.validate_due("2026-02-30")
+
+    def test_reverse_links_are_derived_from_forward_links(self):
+        parent = self.card()
+        child = self.card("features/child.md", CARD.replace("id: K7Q2", "id: M3XJ"))
+        child.front["parent"] = parent.id
+        child.front["blocked_by"] = [parent.id]
+        index = B.links_index([parent, child])
+        self.assertEqual(index["children"][parent.id][0]["id"], child.id)
+        self.assertEqual(index["blocks"][parent.id][0]["id"], child.id)
+
+    def test_commit_sequence_deduplicates_prefixes_and_sorts_by_date(self):
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "test@example.invalid"], check=True)
+        hashes = []
+        for day in ("2026-09-01", "2026-09-02"):
+            write(self.repo / "change.txt", day)
+            subprocess.run(["git", "-C", str(self.repo), "add", "change.txt"], check=True)
+            env = dict(os.environ, GIT_AUTHOR_DATE=f"{day}T12:00:00+0000",
+                       GIT_COMMITTER_DATE=f"{day}T12:00:00+0000")
+            subprocess.run(["git", "-C", str(self.repo), "commit", "-q", "-m", day],
+                           check=True, env=env)
+            hashes.append(subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+                                                  text=True).strip())
+        self.assertEqual(B.normalize_commits(self.repo,
+                         [hashes[1][:12], hashes[0], hashes[1]]),
+                         [hashes[0][:12], hashes[1][:12]])
+
 
 if __name__ == "__main__":
     unittest.main()

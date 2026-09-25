@@ -72,6 +72,37 @@ class BoardToolsTest(unittest.TestCase):
 
 # --------------------------------------------------------------------------- specs
 
+class MetadataTests(BoardToolsTest):
+    def test_dates_owner_and_reverse_children_round_trip(self):
+        parent = self.create(title="Parent")
+        child = self.create(title="Child", request="Implement the child feature",
+                            parent=parent, not_duplicate_of=[parent])
+        current = self.tools.run("board_read", {"id": child})
+        result = self.tools.run("board_update_card", {
+            "id": child, "base_hash": current["hash"],
+            "fields": {"owner": "Elliott", "due": "2026-10-01", "snooze": "2026-09-30"}})
+        self.assertNotIn("error", result, result)
+        read = self.tools.run("board_read", {"id": child})
+        self.assertEqual(read["front"]["due"], {"date": "2026-10-01", "whose": "mine"})
+        self.assertEqual(read["front"]["owner"], "Elliott")
+        self.assertEqual(read["reverse"]["child_of"], parent)
+        children = self.tools.run("board_read", {"id": parent})["children"]
+        self.assertEqual([row["id"] for row in children], [child])
+
+    def test_bad_resolution_and_parent_cycle_are_refused(self):
+        parent = self.create(title="Parent")
+        child = self.create(title="Child", request="Implement the child feature",
+                            parent=parent, not_duplicate_of=[parent])
+        read = self.tools.run("board_read", {"id": parent})
+        bad = self.tools.run("board_update_card", {"id": parent,
+            "base_hash": read["hash"], "fields": {"resolution": "unknown"}})
+        self.assertEqual(bad["code"], "board_refused")
+        cycle = self.tools.run("board_update_card", {"id": parent,
+            "base_hash": read["hash"], "fields": {"parent": child}})
+        self.assertEqual(cycle["code"], "board_refused")
+        self.assertIn(child, cycle["error"])
+
+
 class SpecTests(unittest.TestCase):
     def test_the_designed_tools_are_offered_and_nothing_else(self):
         self.assertEqual(T.TOOL_NAMES, ("board_list", "board_read", "board_create_card",

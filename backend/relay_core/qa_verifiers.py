@@ -622,7 +622,7 @@ def commits_for(repo, card_id: str, limit: int = 50) -> list[str]:
 
 def card_commits(repo, card_id: str, links: dict | None = None, expected: str | None = None,
                  limit: int = 50) -> list[dict]:
-    """The commit rows of the `qa` block: `links.commits` first, then `git log --grep '#ID'`."""
+    """The card's listed and discovered commits, de-duplicated and oldest first (#MJ76)."""
     listed = [str(h).strip() for h in ((links or {}).get("commits") or []) if str(h).strip()]
     found = commits_for(repo, card_id, limit)
     ordered: list[str] = []
@@ -632,4 +632,10 @@ def card_commits(repo, card_id: str, links: dict | None = None, expected: str | 
         if any(value.startswith(seen) or seen.startswith(value) for seen in ordered):
             continue
         ordered.append(value)
+    def commit_time(value: str) -> int:
+        try:
+            return int(_git(repo, ["show", "-s", "--format=%ct", value]).strip())
+        except ValueError:
+            return 0
+    ordered.sort(key=commit_time)
     return commit_trailers(repo, ordered[:20], expected)

@@ -2547,7 +2547,8 @@ class BoardTools:
                     for v in _string_list(value.get("related"), "links.related")))
             if value.get("commits"):
                 value["commits"] = B.normalize_commits(
-                    self.board.repo, _string_list(value.get("commits"), "links.commits"))
+                    self.board.repo, _string_list(value.get("commits"), "links.commits"),
+                    drop_unresolved=True)
             return value
         return value
 
