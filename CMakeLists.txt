@@ -402,6 +402,11 @@ target_include_directories(relay-panes PUBLIC src)
 target_link_libraries(relay-panes PUBLIC ${RELAY_QT}::Widgets)
 target_compile_options(relay-panes PRIVATE ${RELAY_WARNINGS})
 
+# Tab tear-off (#W6ES): when a tab-label drag has left its window, and which window a release
+# lands in. Header-only; RelayWindow.h includes it directly.
+add_library(relay-tabtearoff INTERFACE src/TabTearOff.h)
+target_include_directories(relay-tabtearoff INTERFACE src)
+
 # Image context (issue EM1E): where a pasted, dropped or captured image is written, what counts as
 # an image, the `@` token the composer gets and the cache sweep. Plain Qt Gui so every rule can be
 # tested without a window; the worker attaches the file and picks the model (protocol 17).
@@ -1038,6 +1043,10 @@ if(BUILD_TESTING)
     target_link_libraries(relay-panes-tests PRIVATE relay-panes ${RELAY_QT}::Test)
     add_test(NAME panes COMMAND relay-panes-tests)
     set_tests_properties(panes PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(relay-tabtearoff-tests tests/tabtearoff_test.cpp)
+    target_link_libraries(relay-tabtearoff-tests PRIVATE relay-tabtearoff ${RELAY_QT}::Widgets ${RELAY_QT}::Test)
+    add_test(NAME tabtearoff COMMAND relay-tabtearoff-tests)
+    set_tests_properties(tabtearoff PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(relay-outputlinks-tests tests/outputlinks_test.cpp)
     target_link_libraries(relay-outputlinks-tests PRIVATE relay-outputlinks ${RELAY_QT}::Test)
     add_test(NAME outputlinks COMMAND relay-outputlinks-tests)

@@ -33,6 +33,7 @@
 #include "Notifications.h"
 #include "ScreenPrompt.h"
 #include "PaneLayout.h"
+#include "TabTearOff.h"    // when a tab-label drag leaves its window and becomes a tab move (#W6ES)
 #include "QueueNav.h"
 #include "PaneTitles.h"
 #include "PaneUsage.h"    // the tab-level sum of the panes' CPU / memory
@@ -7609,10 +7610,27 @@ private:
         if (leaf) dragPaneEnd(leaf, global, drop);
     }
 
-    void dragPaneMove(QWidget *dragged, const QPoint &global) {
-        const auto target = dropTarget(dragged, global);
-        if (!target.first) { if (m_dropZone) m_dropZone->hide(); return; }
-        RelayWindow *w = windowOf(target.first);
+    // ----- dragging a tab out of its window (#W6ES) ---------------------------------------
+    // QTabBar already drags a tab label inside the bar (reorder); pulling it further, out of
+    // the window, used to be nothing at all. tabDrag watches the bar's mouse events from the
+    // window's event filter and, once the cursor leaves this window (relay::tabs::leavesWindow),
+    // turns the gesture into a tab move: the whole page — splits included — goes to the Relay
+    // window under the cursor, or to a window of its own on empty space. Every event is passed
+    // on untouched: Qt's internal drag owns the mouse grab for as long as the button is down
+    // and its state has to run to its own release, so this only observes.
+
+    // The Relay window at a global point, if any: a torn-off tab targets whole windows, not
+    // panes or tab labels.
+    static RelayWindow *relayWindowAt(const QPoint &global) {
+        for (QWidget *w : QApplication::topLevelWidgets())
+            if (auto *window = dynamic_cast<RelayWindow *>(w);
+                window && !window->isMinimized() && window->frameGeometry().contains(global))
+                return window;
+        return nullptr;
+    }
+
+    // The drop highlight, reparented to whichever window the drop would land in.
+    QFrame *dropZoneOverlay(RelayWindow *w) {
         if (!m_dropZone || m_dropZone->window() != w) {
             delete m_dropZone;
             m_dropZone = new QFrame(w->centralWidget());
@@ -7620,6 +7638,90 @@ private:
             m_dropZone->setAttribute(Qt::WA_TransparentForMouseEvents);
             m_dropZone->setAttribute(Qt::WA_StyledBackground);
         }
+        return m_dropZone;
+    }
+
+    bool tabDrag(QObject *object, QEvent *event) {
+        if (object != m_tabs->tabBar()) return false;
+        switch (event->type()) {
+        case QEvent::MouseButtonPress: {
+            auto *mouse = dynamic_cast<QMouseEvent *>(event);
+            const int tab = mouse && mouse->button() == Qt::LeftButton
+                                ? m_tabs->tabBar()->tabAt(mouse->pos()) : -1;
+            m_tabDragPressed = tab >= 0;
+            m_tabDragTorn = false;
+            m_tabDragPage = tab >= 0 ? m_tabs->widget(tab) : nullptr;
+            if (m_tabDragPressed) m_tabDragPressAt = mouse->globalPos();
+            return false;
+        }
+        case QEvent::MouseMove: {
+            if (!m_tabDragPressed) return false;
+            const auto *mouse = static_cast<QMouseEvent *>(event);
+            if (!(mouse->buttons() & Qt::LeftButton)) {   // the grab broke without a release
+                m_tabDragPressed = false;
+                m_tabDragTorn = false;
+                if (m_dropZone) m_dropZone->hide();
+                return false;
+            }
+            if (!relay::tabs::leavesWindow(m_tabDragPressAt, mouse->globalPos(), frameGeometry(),
+                                           QApplication::startDragDistance())) {
+                // Back inside this window: Qt's reorder owns the gesture again, and the window
+                // under the cursor stops offering a drop.
+                if (m_tabDragTorn) tabDragMove(nullptr, mouse->globalPos());
+                m_tabDragTorn = false;
+                return false;
+            }
+            m_tabDragTorn = true;
+            tabDragMove(m_tabDragPage, mouse->globalPos());
+            return false;
+        }
+        case QEvent::MouseButtonRelease: {
+            if (!m_tabDragPressed) return false;
+            if (static_cast<QMouseEvent *>(event)->button() != Qt::LeftButton) return false;
+            m_tabDragPressed = false;
+            const bool torn = m_tabDragTorn;
+            m_tabDragTorn = false;
+            if (torn) {
+                const QPoint global = static_cast<QMouseEvent *>(event)->globalPos();
+                tabDragMove(nullptr, global);   // the highlight has done its job
+                tabDragEnd(m_tabDragPage, global);
+            }
+            return false;
+        }
+        default: return false;
+        }
+    }
+
+    // Live feedback for a torn-off tab: the window under the cursor lights up where the tab
+    // would land — its tab row, since wherever it is dropped it arrives as a tab. A null page
+    // means "show nothing": the cursor came back inside this window, or the drag ended.
+    void tabDragMove(QWidget *page, const QPoint &global) {
+        RelayWindow *w = page ? relayWindowAt(global) : nullptr;
+        if (!w || w == this) {
+            if (m_dropZone) m_dropZone->hide();
+            return;
+        }
+        QFrame *zone = dropZoneOverlay(w);
+        QWidget *bar = w->m_tabs->tabBar();
+        zone->setGeometry(QRect(bar->mapTo(w->centralWidget(), QPoint(0, 0)), bar->size()));
+        zone->show();
+        zone->raise();
+    }
+
+    // The release of a torn-off tab: the page moves to the window under the cursor, or to a
+    // window of its own centred on the drop point when the cursor is on empty space or over
+    // another application. moveTabToWindow owns the whole move-out sequence.
+    void tabDragEnd(QWidget *page, const QPoint &global) {
+        RelayWindow *target = relayWindowAt(global);
+        if (target == this) target = nullptr;   // the drag left this window; anything else is stale
+        moveTabToWindow(m_tabs->indexOf(page), target, global);
+    }
+
+    void dragPaneMove(QWidget *dragged, const QPoint &global) {
+        const auto target = dropTarget(dragged, global);
+        if (!target.first) { if (m_dropZone) m_dropZone->hide(); return; }
+        RelayWindow *w = windowOf(target.first);
+        dropZoneOverlay(w);
         QRect rect(target.first->mapTo(w->centralWidget(), QPoint(0, 0)), target.first->size());
         switch (target.second) {
         case Edge::Left: rect.setWidth(rect.width() / 2); break;
@@ -7798,10 +7900,17 @@ private:
         adoptLeafAsTab(leaf, index);
     }
 
-    void moveTabToNewWindow(int index) {
+    // The move-out sequence of one tab, shared by "Move tab to new window" and a tear-off
+    // release (#W6ES): detach the page — its name and project travel with it — hand it to
+    // `target`, creating the window when there is none yet, and fix up both windows. A window
+    // created here is centred on `dropAt` (a tear-off release) or offset from this one (the
+    // action's offset-from-source behaviour, kept).
+    void moveTabToWindow(int index, RelayWindow *target, const QPoint &dropAt) {
         QWidget *page = m_tabs->widget(index);
         if (!page) return;
-        if (m_tabs->count() <= 1) { notice(QStringLiteral("This is the only tab in the window."), 4000); return; }
+        if (!target && m_tabs->count() <= 1) {   // a window keeps at least its last tab
+            notice(QStringLiteral("This is the only tab in the window."), 4000); return;
+        }
         QWidget *lastActive = m_lastActive.value(page);
         if (m_active && pageOf(m_active) == page) m_active = nullptr;
         if (m_activeLeaf && pageOf(m_activeLeaf) == page) m_activeLeaf = nullptr;
@@ -7811,18 +7920,26 @@ private:
         forgetTab(page);
         m_tabs->removeTab(index);
         page->setParent(nullptr);
-        RelayWindow *window = m_manager->newEmptyWindow(geometry().translated(40, 40));
-        window->adoptPage(page, lastActive);
-        if (!tabName.isEmpty()) window->renameTab(tabName, false, page);
+        if (!target) {
+            const QSize size = page->size().isEmpty() ? this->size() : page->size();
+            target = m_manager->newEmptyWindow(
+                QRect(dropAt - QPoint(size.width() / 2, size.height() / 3), size));
+        }
+        target->adoptPage(page, lastActive);
+        if (!tabName.isEmpty()) target->renameTab(tabName, false, page);
         if (!project.isEmpty())
-            window->attachTab(page, project, QString::fromLatin1(relay::projects::kReasonRestored));
+            target->attachTab(page, project, QString::fromLatin1(relay::projects::kReasonRestored));
         if (QWidget *current = m_tabs->currentWidget()) {
             QWidget *leaf = m_lastActive.value(current);
             if (!leaf) { const auto leaves = leavesIn(current); leaf = leaves.isEmpty() ? nullptr : leaves.first(); }
             if (leaf) setActiveLeaf(leaf);
         }
         updateTitles();
-        window->raise(); window->activateWindow();
+        target->raise(); target->activateWindow();
+    }
+
+    void moveTabToNewWindow(int index) {
+        moveTabToWindow(index, nullptr, geometry().translated(40, 40).center());
     }
 
     // Keyboard move: swap with the neighbor in that direction when they share a splitter,
@@ -8331,6 +8448,12 @@ private:
     QPointer<QWidget> m_toolLeaf;
     QPoint m_toolPressAt;
     bool m_toolPressed = false, m_toolDragging = false;
+    // Dragging a tab label out of its window (#W6ES): the pressed tab's page, where the press
+    // landed, and whether the cursor has since left this window with the button still down.
+    // Inside the window the gesture is QTabBar's own (reorder); past the window edge it is ours.
+    QPointer<QWidget> m_tabDragPage;
+    QPoint m_tabDragPressAt;
+    bool m_tabDragPressed = false, m_tabDragTorn = false;
     // "New pane, then ← ↑ ↓ places it" (issue #78BN): the open window, the pane it made, the pane
     // it was split from, and the transient hint over the new pane.
     relay::panes::PlacementWindow m_placement;

@@ -92,6 +92,10 @@ bool RelayWindow::eventFilter(QObject *object, QEvent *event) {
         activateOnPress(object, event);
         if (headerDrag(object, event)) return true;
         if (toolHeaderDrag(object, event)) return true;
+        // A tab-label drag that leaves this window (#W6ES). Runs for its side effects only and
+        // never consumes: Qt's own tab drag owns the bar's mouse grab and has to see every
+        // event through to its release.
+        tabDrag(object, event);
         if (event->type() == QEvent::Resize && isLeaf(qobject_cast<QWidget *>(object)))
             if (auto *chrome = chromeOf(static_cast<QWidget *>(object))) chrome->place();
         if (object == m_tabs->tabBar() && (event->type() == QEvent::Resize || event->type() == QEvent::MouseMove || event->type() == QEvent::Leave
