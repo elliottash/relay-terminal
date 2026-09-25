@@ -15,6 +15,7 @@
 #include <QJsonObject>
 #include <QMouseEvent>
 #include <QToolButton>
+#include <QTreeWidget>
 #include <QLineEdit>
 #include <QLabel>
 #include <QBoxLayout>
@@ -90,6 +91,9 @@ private slots:
     void metadataPageListsChildrenReverseLinksAndCommits();
     void hygieneChecksBeforeCleanup();
     void emptyAgentTranscriptDoesNotReserveConversationHeight();
+    // The three object tabs (#9FX8 step 2).
+    void theSkillsTabListsProjectSkillsAndOpensAPage();
+    void theMemoriesTabShowsExpiredFirstAndOpensTheCard();
 };
 
 void BoardPaneTests::metadataPageListsChildrenReverseLinksAndCommits()
@@ -761,4 +765,163 @@ void BoardPaneTests::namedDriverUsesControlsAndRefusesUnavailableTargets()
     done->setEnabled(true);
     QVERIFY(view.drive({{"op", "press"}, {"name", "boardCardDone"}}).value("ok").toBool());
     QTRY_VERIFY(!sent.isEmpty() && sent.last().value("type").toString() == QStringLiteral("board_move"));
+}
+
+// The Skills tab (#9FX8 step 2): Cards opens first (decision 1); the registry's project rows
+// list (decision 2), with version, cases, pass rate, last verified and the stale flag; the
+// stale reason and the profile strip read the same row the list does; the page's tab choice
+// rides navigation state so it persists per board.
+void BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-skills-tab-test"));
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    auto *tabs = view.findChild<QWidget *>(QStringLiteral("boardPageTabs"));
+    QVERIFY(tabs);
+    QVERIFY(!tabs->isHidden());                       // the row is up while the list is
+    auto *cardsButton = view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabCards"));
+    auto *skillsButton = view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabSkills"));
+    QVERIFY(cardsButton && skillsButton);
+    QVERIFY(cardsButton->isChecked());                // Cards is the tab the pane opens on
+    QVERIFY(!view.findChild<QWidget *>(QStringLiteral("boardSkillsPage"))->isVisibleTo(&view));
+    QVERIFY(view.findChild<QWidget *>(QStringLiteral("boardMemoriesPage"))->isHidden());
+
+    // One project skill, one global one, one stale project one (decision 2 filters here).
+    QJsonObject fresh{{"id", "zz-project-skill"}, {"name", "zz-project-skill"},
+        {"source", "project-relay"}, {"project", true},
+        {"path", QStringLiteral("/home/t/.relay/skills/zz-project-skill/SKILL.md")},
+        {"version", "sha256:abc123"}, {"version_short", "abc123"},
+        {"description", "a project skill"},
+        {"profile", QJsonObject{{"artifact", "decision"}, {"primary", "person"},
+                                {"human", "required"}, {"effort", "medium"},
+                                {"stakes", "rework"}}},
+        {"stats", QJsonObject{{"cases", 2}, {"pass_rate_30", 0.5},
+                              {"last_served", "2026-09-20"}, {"stale", false}}},
+        {"last_verified", "2026-09-20"}, {"cases", QJsonArray{}},
+        {"cards", QJsonArray{QStringLiteral("K7Q2")}}, {"changelog", QJsonArray{}},
+        {"profile_warnings", QJsonArray{}}, {"excluded", false}};
+    QJsonObject staleSkill = fresh;
+    staleSkill["id"] = QStringLiteral("zz-stale-skill");
+    staleSkill["name"] = QStringLiteral("zz-stale-skill");
+    staleSkill["description"] = QStringLiteral("a stale skill");
+    staleSkill["stats"] = QJsonObject{{"cases", 4}, {"pass_rate_30", QJsonValue()},
+                                      {"last_served", "2026-08-01"}, {"stale", true}};
+    staleSkill["last_verified"] = QStringLiteral("2026-08-01");
+    staleSkill["stale_reason"] = QStringLiteral("last passed 2026-08-01");
+    QJsonObject globalSkill = fresh;
+    globalSkill["id"] = QStringLiteral("zz-global-skill");
+    globalSkill["name"] = QStringLiteral("zz-global-skill");
+    globalSkill["source"] = QStringLiteral("bundled");
+    globalSkill["project"] = false;
+    globalSkill["description"] = QStringLiteral("a bundled skill");
+    QJsonArray items{fresh, staleSkill, globalSkill};
+
+    skillsButton->click();
+    QVERIFY(skillsButton->isChecked());
+    QVERIFY(view.findChild<QWidget *>(QStringLiteral("boardSkillsPage"))->isVisibleTo(&view));
+    auto *count = view.findChild<QLabel *>(QStringLiteral("boardSkillCount"));
+    QCOMPARE(count->text(), QStringLiteral("Loading…"));   // asked, unanswered
+    view.handleEvent(QJsonObject{{"event", "skills_registry"}, {"items", items}});
+    auto *list = view.findChild<QTreeWidget *>(QStringLiteral("boardSkillList"));
+    QVERIFY(list);
+    QCOMPARE(count->text(), QStringLiteral("2 skills · 0 excluded"));   // global filtered out
+    QCOMPARE(list->topLevelItemCount(), 2);
+    QVERIFY(list->topLevelItem(0)->text(0).startsWith(QStringLiteral("zz-project-skill")));
+    QVERIFY(list->topLevelItem(0)->text(5).isEmpty());                 // fresh: Stale empty
+    int staleRow = -1;
+    for (int i = 0; i < list->topLevelItemCount(); ++i)
+        if (list->topLevelItem(i)->text(0).startsWith(QStringLiteral("zz-stale-skill")))
+            staleRow = i;
+    QVERIFY(staleRow >= 0);
+    QCOMPARE(list->topLevelItem(staleRow)->text(5), QStringLiteral("stale"));
+    QCOMPARE(list->topLevelItem(staleRow)->text(3), QStringLiteral("—"));  // null pass rate
+
+    // The page reads the same row: version, profile strip words, staleness with its reason.
+    auto *title = view.findChild<QLabel *>(QStringLiteral("boardSkillTitle"));
+    auto *profile = view.findChild<QLabel *>(QStringLiteral("boardSkillProfile"));
+    auto *stats = view.findChild<QLabel *>(QStringLiteral("boardSkillStats"));
+    QVERIFY(title && profile && stats);
+    QVERIFY(title->text().contains(QStringLiteral("zz-project-skill")));
+    QVERIFY(title->text().contains(QStringLiteral("abc123")));
+    QVERIFY(profile->text().contains(QStringLiteral("artifact decision")));
+    QVERIFY(profile->text().contains(QStringLiteral("human required")));
+    QVERIFY(stats->text().contains(QStringLiteral("pass 50%")));
+    QVERIFY(stats->text().contains(QStringLiteral("last verified 2026-09-20")));
+    QVERIFY(!stats->text().contains(QStringLiteral("stale")));
+    // The Linked panel (#EA37 (c)): the cards the registry names, as chips.
+    auto *linked = view.findChild<QWidget *>(QStringLiteral("boardSkillLinked"));
+    QVERIFY(linked);
+    QVERIFY(linked->findChild<QPushButton *>() != nullptr);
+
+    // The stale skill's page says stale and why.
+    list->topLevelItem(staleRow)->setSelected(true);
+    list->setCurrentItem(list->topLevelItem(staleRow));
+    QVERIFY(stats->text().contains(QStringLiteral("<b>stale</b>")));
+    QVERIFY(stats->text().contains(QStringLiteral("last passed 2026-08-01")));
+
+    // The choice rides navigation state: a restored pane lands back on Skills.
+    QCOMPARE(view.navigationState().value(QStringLiteral("page")).toInt(), 1);
+    relay::BoardView restored(QStringLiteral("/tmp/relay-skills-tab-test"));
+    restored.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    restored.restoreNavigation(view.navigationState());
+    QVERIFY(view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabSkills"))->isChecked());
+}
+
+// The Memories tab (#9FX8 step 2): Expired first (#EA37 (b)), with the paths-moved date in the
+// Reviewed column, then Active; Retired folds; a row opens the ordinary card page.
+void BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-memories-tab-test"));
+    const QJsonObject expiredMemory{{"id", "TM1A"}, {"title", "expired memory"},
+        {"type", "memory"}, {"status", "active"}, {"rank", "i"},
+        {"path", "issues/memory/tm1a-expired-memory.md"}, {"name", "expired memory"},
+        {"reviewed", "2026-08-01"}, {"paths", QJsonArray{QStringLiteral("docs/topic.md")}},
+        {"paths_last_commit", "2026-09-20"}, {"expired", true}};
+    const QJsonObject freshMemory{{"id", "TM1B"}, {"title", "fresh memory"},
+        {"type", "memory"}, {"status", "active"}, {"rank", "i"},
+        {"path", "issues/memory/tm1b-fresh-memory.md"}, {"name", "fresh memory"},
+        {"reviewed", "2026-09-21"}, {"paths", QJsonArray{QStringLiteral("docs/topic.md")}},
+        {"paths_last_commit", "2026-09-20"}, {"expired", false}};
+    const QJsonObject retiredMemory{{"id", "TM1C"}, {"title", "retired memory"},
+        {"type", "memory"}, {"status", "retired"}, {"rank", "i"},
+        {"path", "issues/memory/archive/tm1c-retired-memory.md"}, {"name", "retired memory"},
+        {"reviewed", "2026-08-01"}, {"paths", QJsonArray{QStringLiteral("docs/old.md")}},
+        {"paths_last_commit", "2026-09-20"}, {"expired", false}};
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox")),
+                             expiredMemory, freshMemory, retiredMemory}));
+    auto *memoriesButton = view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabMemories"));
+    QVERIFY(memoriesButton);
+    memoriesButton->click();
+    QVERIFY(memoriesButton->isChecked());
+    QVERIFY(view.findChild<QWidget *>(QStringLiteral("boardMemoriesPage"))->isVisibleTo(&view));
+    QVERIFY(view.findChild<QWidget *>(QStringLiteral("boardSkillsPage"))->isHidden());
+    auto *list = view.findChild<QTreeWidget *>(QStringLiteral("boardMemoryList"));
+    QVERIFY(list);
+    QCOMPARE(list->topLevelItemCount(), 3);           // Expired, Active, Retired (no suggestions)
+    QCOMPARE(list->topLevelItem(0)->text(0), QStringLiteral("Expired (1)"));
+    QCOMPARE(list->topLevelItem(1)->text(0), QStringLiteral("Active (1)"));
+    QCOMPARE(list->topLevelItem(2)->text(0), QStringLiteral("Retired (1)"));
+    QVERIFY(!list->topLevelItem(2)->isExpanded());    // retired folds
+    QCOMPARE(list->topLevelItem(0)->childCount(), 1);
+    QVERIFY(list->topLevelItem(0)->child(0)->text(1)
+                .contains(QStringLiteral("paths moved 2026-09-20")));
+    auto *count = view.findChild<QLabel *>(QStringLiteral("boardMemoryCount"));
+    QVERIFY(count->text().contains(QStringLiteral("1 expired")));
+
+    // Opening a memory goes to the ordinary card page, solo — a memory is a card, `#ID` and all.
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    auto *expiredItem = list->topLevelItem(0)->child(0);
+    list->setCurrentItem(expiredItem);
+    auto *reverify = view.findChild<QAbstractButton *>(QStringLiteral("boardMemoryReverify"));
+    auto *retire = view.findChild<QAbstractButton *>(QStringLiteral("boardMemoryRetire"));
+    QVERIFY(reverify && retire);
+    QVERIFY(reverify->isEnabled());                    // an expired row re-verifies
+    QVERIFY(retire->isEnabled());
+    reverify->click();
+    QCOMPARE(sent.size(), 0);                          // a draft, never a send
+    // Retire goes through the worker as a status move to the archive.
+    retire->click();
+    QTRY_VERIFY(!sent.isEmpty()
+                && sent.last().value(QStringLiteral("type")).toString() == QStringLiteral("board_move_card")
+                && sent.last().value(QStringLiteral("status")).toString() == QStringLiteral("retired"));
 }

@@ -120,6 +120,22 @@ A QA reopen is not a status: the card returns to Ready with label `reopened` and
 
 ## 4. UI
 
+### 4.0 The three object tabs (#9FX8, 2026-09-25)
+
+The pane opens on a segmented row — **Cards | Skills | Memories** (`kPageDefs`, `BoardView::applyPage`). These are
+*objects*, not the category tabs 4.6 removed (owner, 2026-09-18): the Cards page is the list of 4.2 untouched with
+`board.yaml`'s categories inside it, so that decision stands; the row sits above it because the person is choosing
+what to look *at*, not filtering what they see. **Cards** is the default and the tab the pane opens on. **Skills**
+is the registry (`skills_registry`, protocol §11): the *project* skills only (owner decision — global ones live in
+Globals' Skills section), one row per skill with source, version, cases, pass rate, last verified and stale, and a
+page per skill with the profile strip, provenance, the last ten cases (decision 4's input rule) and the cards that
+name it, with Load / Exclude / Refine / Open file. **Memories** is this board's `type: memory` cards — Expired
+first (#EA37: `reviewed` older than the newest commit touching `paths`, computed worker-side in the card row),
+then Active and Suggestions, Retired and Rejected folded; a memory opens on the ordinary card page (a memory is a
+card: `#ID` addresses it, no `memory:` prefix). A card opened from Skills or Memories goes solo and Esc returns to
+the tab it left; a pinned card pane (#Y2BA) carries no row at all. The choice persists per board in the pane's
+navigation state. A fourth object (Artifacts, #EA37) is one entry in `kPageDefs` — no redesign.
+
 ### 4.1 Opening
 
 - **Ctrl+Shift+S** = `board.open`: opens the Board beside the anchor terminal (split right) or focuses the tab's

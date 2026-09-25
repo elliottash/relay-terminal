@@ -26,6 +26,7 @@
 
 class QComboBox;
 class QCheckBox;
+class QButtonGroup;
 class QFrame;
 class QHBoxLayout;
 class QLabel;
@@ -37,6 +38,7 @@ class QSplitter;
 class QFileSystemWatcher;
 class QTextBrowser;
 class QToolButton;
+class QTreeWidget;
 class QVBoxLayout;
 class RichEditor;
 
@@ -430,6 +432,45 @@ private:
     // The cleanup's result, in the list page itself rather than over it: outcome, counts, every
     // change with its card as a link, the refusals, the agent's report and the changelog.
     void buildCleanupPanel(QVBoxLayout *layout);
+    // ---- the pane's three object tabs: Cards | Skills | Memories (#9FX8 step 2).
+    //
+    // `m_page` below is which object the pane is about. Cards is the existing list page untouched
+    // and the pane's default; Skills lists the *project* skills of the `skills_registry` rows (the
+    // owner's decision 2 — global ones belong to Globals) with a page per skill: profile strip,
+    // provenance, the last cases and the cards that name it; Memories is this board's
+    // `type: memory` cards, Expired section first, opened on the ordinary card page. A card
+    // opened from those pages goes solo (`openCardSolo`) so the tab survives the round trip,
+    // and a pinned card pane (#Y2BA) shows no tabs at all. The tab row is built from
+    // `kPageDefs` so a fourth object (Artifacts, #EA37) is one entry in one place.
+    enum class Page { Cards, Skills, Memories };
+    struct PageDef { Page page; const char *label; const char *objectName; };
+    static const PageDef kPageDefs[3];
+    // `buildPageTabs` is the segmented row at the top of the pane; the Skills and Memories pages
+    // are built beside the list page and shown in the tab's place. `setPage` switches,
+    // `applyPage` is the visibility rule rebuild() re-runs, and the two refill methods re-read
+    // what the pane already holds (the registry rows; the model's memory cards). A registry
+    // fetch happens on the first switch to Skills, never at pane open: a board nobody inspects
+    // skills on pays for none.
+    void buildPageTabs(QVBoxLayout *layout);
+    void buildSkillsPage(QVBoxLayout *layout);
+    void buildMemoriesPage(QVBoxLayout *layout);
+    void setPage(Page page);
+    void applyPage();
+    void requestSkillsRegistry();
+    void refillSkills();
+    void showSkill(const QString &id);
+    void refillMemories();
+    void openMemory(const QString &id);
+    void retireMemory();
+    void reverifyMemory();
+    // The skill page's actions. Exclude/Include and Refine go through the same settings write and
+    // the same `refine_skills` request SkillsDialog uses, so the two surfaces cannot disagree.
+    void toggleSkillExcluded(const QString &name, bool excluded);
+    void refineSkill(const QString &name);
+    // The Linked panel the card page and the skill page share (#EA37 (c)): chips for the
+    // front-matter links and the `#ID` mentions, each opening the card it names.
+    void buildLinkedPanel(QWidget *host, QVBoxLayout *layout, const QString &title);
+    void setLinkedCards(QWidget *host, const QStringList &ids, const QString &emptyText);
     // The Switchboard agent's area, pinned under the list and deliberately outside the splitter
     // (see the comment where it is built). Three things live in it, top to bottom: the Check
     // findings, the survey offer — both **board** widgets, because they are lists to act on and
@@ -721,6 +762,40 @@ private:
     QJsonArray m_quickAddDuplicates, m_quickAddRelated;
     QSet<QString> m_quickAddChosenRelated;
     bool m_quickAddTabTouched = false, m_quickAddLabelsTouched = false;
+
+    // ---- the three object tabs' state (#9FX8 step 2); the `Page` enum and `kPageDefs` sit with
+    // the methods, above, where the declarations can name them. The Skills page holds the
+    // registry rows that arrived (`m_skillItems`) and which one its page is showing; the
+    // Memories page reads the model's own memory cards, so it keeps nothing but the selection.
+    Page m_page = Page::Cards;
+    QWidget *m_pageTabs = nullptr;      // the segmented row, top of the pane
+    QButtonGroup *m_pageGroup = nullptr;
+    // The Skills page (`m_skillsPage`), a vertical list over a detail.
+    QWidget *m_skillsPage = nullptr;
+    QWidget *m_skillDetail = nullptr;   // the selected skill's page, below the list
+    QLineEdit *m_skillFilter = nullptr;
+    QLabel *m_skillCount = nullptr;
+    QTreeWidget *m_skillList = nullptr;
+    QToolButton *m_skillRefresh = nullptr;
+    QLabel *m_skillTitle = nullptr, *m_skillTrigger = nullptr, *m_skillProfile = nullptr,
+           *m_skillProvenance = nullptr, *m_skillStats = nullptr;
+    QWidget *m_skillLinked = nullptr;   // the Linked panel (#EA37 (c)): cards that name it
+    QVBoxLayout *m_skillLinkedLayout = nullptr;
+    QLabel *m_skillLinkedEmpty = nullptr;
+    QTreeWidget *m_skillCases = nullptr;
+    QWidget *m_skillActions = nullptr;
+    QPushButton *m_skillExcludeButton = nullptr;   // "Exclude"/"Include", retitled per row
+    QJsonArray m_skillItems;            // the registry rows, as they arrived
+    QString m_skillSelected;            // id of the row whose page is showing
+    QString m_skillRequest;             // the id the last skills_registry went out under
+    bool m_skillsRequested = false;     // asked at least once this worker's life
+    // The Memories page (`m_memoriesPage`): the memory cards from the model's own rows.
+    QWidget *m_memoriesPage = nullptr;
+    QTreeWidget *m_memoryList = nullptr;
+    QLabel *m_memoryCount = nullptr;
+    QToolButton *m_memoryRetire = nullptr, *m_memoryReverify = nullptr;
+    QString m_memorySelected;
+
 
     // ---- the Switchboard agent, under the list on the list page (card #AGNT step 6).
     //

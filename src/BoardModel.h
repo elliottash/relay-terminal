@@ -59,6 +59,15 @@ struct Card {
     int priority = 0;
     bool isPrivate = false;
     bool unread = false;   // local, from QSettings; never in git
+    // A memory card's own record (#9FX8 Memories tab), from the row the worker builds for
+    // `type: memory` cards only: `reviewed` is when the memory was last confirmed against its
+    // `paths`, `pathsLastCommit` when those paths last moved in git, and `expired` the two
+    // compared by the worker — the pane never recomputes it. Empty/default on work and alias
+    // rows, and the cards list ignores all of it.
+    QString scope, reviewed, pathsLastCommit, name;
+    QStringList paths;
+    bool pinned = false;
+    bool expired = false;
 
     static Card fromJson(const QJsonObject &object);
     bool closed() const;                 // done or dropped
@@ -447,6 +456,10 @@ public:
     // screen, so the count label can say "62 of 84 open" without counting rows twice.
     int hiddenCount(const QSet<QString> &hidden) const;
     int total() const { return m_cards.size(); }
+    // Every card the model holds, unfiltered — the Memories tab's source (#9FX8): it reads the
+    // `type: memory` rows the columned accessors never return (their `memory` tab is not one of
+    // board.yaml's), so it needs the whole map, not a column.
+    QList<Card> allCards() const { return m_cards.values(); }
     QStringList allLabels() const;
     QStringList allIds() const;
     // The rows of the list: a header per section, then its cards unless the section is in

@@ -4197,3 +4197,79 @@ class RegistryTests(BoardToolsTest):
             self.assertFalse(shown[0]["confidential"])
             self.assertTrue(all("input" not in case for case in shown))  # ids only off-workspace
             self.assertEqual(row["stats"]["cases"], 2)                   # statistics still count both
+
+
+class MemoryRowTests(BoardToolsTest):
+    """#9FX8's Memories tab: the row a `type: memory` card carries — name, scope, pinned,
+    reviewed, paths — and the expiry the worker computes from git (`paths_last_commit`), so no
+    client recomputes it. A memory is expired when `reviewed` is older than the newest commit
+    touching its `paths`; a memory with paths and no `reviewed` is expired the moment the paths
+    have any commit; without paths there is nothing to compare against, never expired."""
+
+    def setUp(self):
+        super().setUp()
+        subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True)
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs" / "topic.md").write_text("v1\n", encoding="utf-8")
+        B._git(self.repo, "add", "-A")
+        B._git(self.repo, "-c", "user.name=t", "-c", "user.email=t@example",
+               "commit", "-qm", "one")
+        self.write_memory("TM1A", paths=["docs/"], reviewed="2020-01-01")
+        (self.repo / "docs" / "topic.md").write_text("v2\n", encoding="utf-8")
+        B._git(self.repo, "add", "-A")
+        B._git(self.repo, "-c", "user.name=t", "-c", "user.email=t@example",
+               "commit", "-qm", "two")
+        self.write_memory("TM1B", paths=["docs/"], reviewed="2099-01-01")
+        self.write_memory("TM1C", paths=[], reviewed="")
+        self.write_memory("TM1D", paths=["docs/"], reviewed="")
+
+    def write_memory(self, card_id, *, paths, reviewed):
+        lines = ["---", f"id: {card_id}", "type: memory", "status: active", "rank: z",
+                 "name: Test memory", "scope: project", "pinned: false"]
+        if reviewed:
+            lines.append(f"reviewed: '{reviewed}'")
+        if paths:
+            lines.append("paths: [" + ", ".join(paths) + "]")
+        lines += ["---", "", f"# {card_id} Test memory", "", "remember this", ""]
+        folder = self.root / "memory"
+        folder.mkdir(exist_ok=True)
+        (folder / f"{card_id.lower()}-test-memory.md").write_text("\n".join(lines),
+                                                                 encoding="utf-8")
+
+    def memory_rows(self):
+        result = self.tools.run("board_list", {"type": "memory"})
+        self.assertNotIn("error", result, result)
+        return {row["id"]: row for row in result["cards"]}
+
+    def test_memory_rows_carry_the_tab_fields(self):
+        rows = self.memory_rows()
+        self.assertEqual(set(rows), {"TM1A", "TM1B", "TM1C", "TM1D"})
+        stale, fresh, pathless, never = (rows["TM1A"], rows["TM1B"],
+                                         rows["TM1C"], rows["TM1D"])
+        self.assertEqual(stale["name"], "Test memory")
+        self.assertEqual(stale["scope"], "project")
+        self.assertFalse(stale["pinned"])
+        self.assertEqual(stale["reviewed"], "2020-01-01")
+        self.assertEqual(stale["paths"], ["docs/"])
+        # The expiry is the worker's judgement, from git: reviewed before the newest commit
+        # touching the paths; a never-reviewed memory is expired the moment its paths moved.
+        self.assertTrue(stale["expired"], stale)
+        self.assertTrue(stale["paths_last_commit"], stale)
+        self.assertFalse(fresh["expired"], fresh)
+        self.assertEqual(fresh["paths_last_commit"], stale["paths_last_commit"])
+        self.assertFalse(pathless["expired"], pathless)
+        self.assertEqual(pathless["paths_last_commit"], "")
+        self.assertTrue(never["expired"], never)
+
+    def test_work_rows_carry_no_memory_fields(self):
+        result = self.tools.run("board_create_card", {
+            "tab": "features", "status": "inbox", "title": "Plain work",
+            "summary": "A work card, for the row comparison."})
+        self.assertNotIn("error", result, result)
+        work_id = result["id"]
+        rows = self.tools.run("board_list", {"query": "Plain work"})
+        row = [r for r in rows["cards"] if r["id"] == work_id][0]
+        self.assertNotIn("expired", row)
+        self.assertNotIn("reviewed", row)
+        self.assertNotIn("paths", row)
+        self.assertNotIn("name", row)

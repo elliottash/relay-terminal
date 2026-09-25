@@ -1204,6 +1204,15 @@ Card Card::fromJson(const QJsonObject &object)
     card.tasksDone = object.value(QStringLiteral("tasks_done")).toInt();
     card.tasksTotal = object.value(QStringLiteral("tasks_total")).toInt();
     card.isPrivate = object.value(QStringLiteral("private")).toBool();
+    // Memory-only fields (#9FX8): the worker fills them on `type: memory` rows; absent on the
+    // rest, so a work row parses to the defaults and nothing downstream notices them.
+    card.name = object.value(QStringLiteral("name")).toString();
+    card.scope = object.value(QStringLiteral("scope")).toString();
+    card.pinned = object.value(QStringLiteral("pinned")).toBool();
+    card.reviewed = object.value(QStringLiteral("reviewed")).toString();
+    card.paths = stringList(object.value(QStringLiteral("paths")));
+    card.pathsLastCommit = object.value(QStringLiteral("paths_last_commit")).toString();
+    card.expired = object.value(QStringLiteral("expired")).toBool();
     return card;
 }
 

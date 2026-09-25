@@ -2617,6 +2617,23 @@ def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedPro
                           timeout=30, check=check, env=_git_env())
 
 
+def last_commit_date(repo: Path, paths: list[str]) -> str:
+    """The commit date (YYYY-MM-DD) of the newest commit touching `paths`, '' when there is none.
+
+    #9FX8's Memories tab marks a memory expired when `reviewed` is older than this: the files the
+    memory is about moved after the last look. Glob pathspecs work as git pathspecs do; a path no
+    commit ever touched, a board outside a checkout (ask `in_git_checkout` first) and any git
+    failure all read as '' — never expired — rather than as an error.
+    """
+    if not paths or not in_git_checkout(repo):
+        return ""
+    try:
+        out = _git(repo, "log", "-1", "--format=%cs", "--", *paths)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
 @dataclass
 class FolderMove:
     """What `rename_board_folder` did, for the event the GUI shows."""

@@ -2105,7 +2105,29 @@ class BoardTools:
                 # row alone that a card is taken.
                 "session": card.front.get("session"),
                 "tasks_total": len(tasks),
-                "tasks_done": sum(1 for task in tasks if task.done)}
+                "tasks_done": sum(1 for task in tasks if task.done),
+                **self._memory_fields(card)}
+
+    def _memory_fields(self, card: B.Card) -> dict:
+        """A memory card's own row fields (#9FX8's Memories tab); {} for every other type.
+
+        `name`/`scope`/`pinned` are the record's identity, `reviewed` when it was last confirmed
+        against its `paths`, `paths_last_commit` when those paths last moved in git, and `expired`
+        the two compared — a memory with paths and no `reviewed` counts as expired the moment the
+        paths have any commit. Work and alias rows carry none of this: the Memories tab is the
+        only reader. One `git log -1` per memory that names paths (boards hold few); a board
+        outside a checkout reads as '' without running git.
+        """
+        if card.type != "memory":
+            return {}
+        paths = [str(p).strip() for p in (card.front.get("paths") or [])
+                 if isinstance(p, (str, int)) and str(p).strip()]
+        reviewed = str(card.front.get("reviewed") or "").strip()
+        last = B.last_commit_date(self.board.repo, paths)
+        return {"name": card.front.get("name"), "scope": card.front.get("scope"),
+                "pinned": bool(card.front.get("pinned")), "reviewed": reviewed,
+                "paths": paths, "paths_last_commit": last,
+                "expired": bool(paths and last and (not reviewed or reviewed < last))}
 
     def _threads(self) -> dict[str, list[B.ThreadEntry]]:
         """Every card's thread entries, read once: the count on a row comes from here, and so
