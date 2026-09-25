@@ -1,0 +1,11 @@
+[t+ 0.02s] turn starts: "go" — the agent spawns a background subagent (a1), then calls agent_wait
+[t+ 0.56s] >>> you type "actually, summarise only the python files" and press Enter  (the pane steers it into the turn)
+[t+ 0.58s] agent_wait returned: stopped_for_user_message=True timed_out=False a1.status=running
+[t+ 0.58s] the model's next request ends with the user message:
+          [Sent by the user while you were working (R2, 13:08). Keep your current task (R1) unless this changes it. Add it to your todos if it is a new ask. Say briefly how you handled it in your final answer.]
+          actually, summarise only the python files
+[t+ 0.88s] turn finished. turns started: 1; a1 still running in the background, untouched
+
+Before the fix, this same scene sits parked for the whole 10-minute wait: the
+steered message has no step boundary to land at, and the only way in is Enter,
+Enter — interrupting the turn. Everything above should read as one Enter.
