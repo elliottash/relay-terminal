@@ -3484,8 +3484,9 @@ that is offered:
 | | Discuss | Plan | Refine (#6W9X) |
 |---|---|---|---|
 | repository | `read_file`, `list_directory`, `search_files`, skills (read) | the same | the same |
+| commands | `run_command`, `command_output`, `stop_command` — to read, inspect and verify (card #NXN0, 2026-09-25); never to change code or files | the same | the same |
 | board | `board_list`, `board_read`, `board_create_card`, `board_update_card`, `board_move_card`, `board_comment` | `board_list`, `board_read`; `board_update_card` **only this card's `## Plan`** (`replace_section`/`append_section` with heading `Plan`, nothing else in the patch); `board_comment` **only on this card** | `board_list`, `board_read`; `board_update_card` **only this card**, and only `fields.links` with nothing but `related` changed, `fields.labels` with words another card already carries, and a `## Done means` the card does not have yet; `board_comment` **only on this card** |
-| never | `run_command` and the job tools, `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same | the same |
+| never | `write_file`, `edit_file`, `run_in_terminal`, `type_into_program`, `set_keybinding`, subagents, `update_todos`, the cleanup-only tools | the same | the same |
 
 **Refine** (`mode: "refine"`, v1, card #6W9X, 2026-09-23) checks the *request* before anyone plans
 it: the brief, `board_refine_brief.md`, has it search the whole board, done and dropped cards
@@ -3498,10 +3499,13 @@ decided and an inbox card stays in the inbox. A phone may send it too (`BoardRem
 `discuss`, `plan` and `refine`).
 
 A call outside the mode is refused with `code: "board_mode_refused"` (board tools) or an ordinary
-tool error (the rest); both sentences name **Execute** as where that work belongs, and the turn
+tool error (the rest); the sentence names **Run** as where code-writing belongs, and the turn
 carries on and answers. The honest cost of the shape is that a Plan turn is *offered* `write_file`
-and `run_command` and told no if it calls them — which is what a read-only turn already is, and what
-owner decision 3 on card #CTRN chose over re-prefilling the request on every mode change.
+and told no if it calls it — which is what a read-only turn already is, and what
+owner decision 3 on card #CTRN chose over re-prefilling the request on every mode change. Card
+#NXN0 (2026-09-25) took commands off that refusal: a Discuss or Plan verifies by running —
+`pytest --version`, a targeted test — through the executor exactly as a console's, Options ›
+Security's command policies included, while the writers stay refused.
 `search_files {pattern, path?, glob?}` was added for a card turn and is a console's tool too (33.3):
 a case-insensitive (unless the pattern has a capital) regular-expression search of
 the workspace's text files, ≤80 matching lines as `path:line: text`, skipping `.git`, build and
@@ -8480,7 +8484,7 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
 ```jsonc
 {"type": "configure", "workspace": "/home/e/relay-terminal", "…": "…",
  "context": {
-   "name": "switchboard",            // terminal | switchboard | card | options | actions | sessions | projects | globals
+   "name": "switchboard",            // terminal | switchboard | card | options | actions | sessions | projects | globals | models | artifact | tests | sharing (#3B1B)
    "surface": "switchboard",         // this console's own id; defaults to `name`
    "agent_role": "switchboard",      // 13.1; the top-level `agent_role` wins when both are sent
    "workspace": "/home/e/relay-terminal",
@@ -8489,6 +8493,17 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
    "scope": "console",               // pane | console — the NAMED tool scope ("card" is retired)
    "shell": false,
    "routing": "agent"}}              // auto | agent
+```
+
+An **artifact** console — the agent docked under a file open in Relay's editor (v4.12, 2026-09-25,
+card #PBZ4) — sends two more fields, and no other context sends them:
+
+```jsonc
+ "context": {"name": "artifact", "surface": "file:/home/e/proj/README.md", "…": "…",
+             "persist": {"scope": "helper", "key": "t0123456789ab/file:/home/e/proj/README.md"},
+             "brief": {"key": "artifact", "title": "README.md agent"},
+             "file": "/home/e/proj/README.md",   // absolute, or ssh://host/abs/path
+             "plugin": "relay.markdown"}          // the task plugin the file activates; absent when none does
 ```
 
 | Field | Type | Default | Meaning |
@@ -8505,12 +8520,32 @@ So there is no second protocol for a helper. A helper worker is `backend/worker.
 | `scope` | `pane` \| `console` | from `name` | the **named tool scope** (33.3). `terminal` → `pane`, everything else — a card's console included — → `console`. **`card` is retired** (card #CTRN): `agent_context.SCOPES` is two names and `RETIRED_SCOPES` maps the third, so a `configure` that still sends `scope: "card"` is answered as `console` rather than refused, for the release it takes a GUI to catch up. The `configured` echo says which scope the worker settled on, which is how a GUI sees the mapping happen. |
 | `shell` | bool | `name == "terminal"` | whether the surface spawns a shell. The GUI's; the worker records and echoes it. |
 | `routing` | `auto` \| `agent` | `auto` for `terminal`, else `agent` | what the composer does with a line that is not obviously a prompt. The terminal is the only context that can run it as a command. |
+| `file` | string ≤4096 | absent | an `artifact` console's file: the absolute path, or `ssh://host/abs/path`, of the buffer the agent is docked on (card #PBZ4). The worker writes an `Open file: <file>` line under the brief. **Additive**: `ContextSpec::toJson` emits it only when set and `configured` echoes it only then, so every other context's block is byte for byte what it was. |
+| `plugin` | string ≤128 | absent | the task plugin (36) that file activates — `relay.markdown` — found by the GUI from `activation.files` without a round trip (`relay::agent::pluginForFile`, a read-only mirror of `task_plugins`' discovery). Named in the `Open file:` line as `(task plugin <id>)`. Absent when no plugin claims the file. Same additive rule as `file`. |
 
 `configured` gains `context`, the same block back with `scope` set to the scope the worker actually
 settled on — which is what the GUI reads to confirm the surface it is drawn on was understood.
 
 A `configure` with no `context` is a terminal pane, byte for byte what it was: no event grows a field,
 and the pane still defers its tool groups (12.13).
+
+**The artifact context, in the rest of this section's terms.** `surface` and `persist.key` are
+per file — `file:<path>`, and `<tab id>/file:<path>` — so each open file keeps a conversation of its
+own, as a card does (33.2); a `file:<path>` longer than 64 characters (the surface) or 80 (the
+persist key, before the tab id goes in front of it) is sent as `file:sha1:<16 hex>` instead
+(`relay::agent::artifactKey`). Like a card's, that key is never the tab id: the worker reads the tab
+from the top-level `tab` (`board_chat.tab_of` skips a `persist.key` holding `card:` or `file:`),
+which a worker before this card did not do for `file:` and so refused the console's `configure`
+with "tab must be the tab's id". `agent_role` is `switchboard`, as on the other consoles. `brief.key` is `artifact`,
+whose brief tells the model that its `edit_file` and `write_file` on this file land in the open
+buffer as one undo step (35), what a `held` or `conflict` answer means, and to prefer a small exact
+`old_string`. `scope` is `console`: the tool set is every console's, and nothing about the file
+narrows it. `screen` on each `ask` (33.2) is the file with its view (`markdown`, `text`, `plan`),
+whether it is being edited and whether the buffer has unsaved edits, then the plugin, the cursor line
+and column, and the selection's lines and text (cut to fit the 2 000 characters). The plugin's
+`commands` (manifest v2, `when.roles` containing `editor`) are the GUI's alone — the action row and
+the `/` popup, where a command is sent as an ordinary `ask` whose prompt is the manifest's with
+`{file}` filled in — and nothing about them is on the wire.
 
 ### 33.2 `ask {surface, screen, readonly}`, and the fields a card turn rides on
 
@@ -8591,8 +8626,9 @@ Three things still withhold a tool, and each is a constraint rather than a fence
 2. **A guest harness cannot run Relay's tools** (#GH5T, #4NXH), so the helper never runs on one and never
    starts one. 29.3 and 30.7's last bullet stand exactly as written.
 3. **A card's Plan turn is refused the writers at call time** (19.20, `board_tools.CardScope`). It
-   writes only its own `## Plan`, gets no shell and no file writes — but it is *offered* the same
-   tools every console turn is, and told no in a sentence that names Execute if it calls one. That is
+   writes only its own `## Plan`, and gets no file writes — but it runs commands (19.19, card
+   #NXN0: a Discuss or Plan verifies by reading *and* by running), and it is *offered* the same
+   tools every console turn is, told no in a sentence that names Run if it calls a writer. That is
    the stage machine rather than a per-surface fence, and saying it at call time is what keeps a
    card's prefix byte-identical to any other console's (card #CTRN, owner decision 3).
 
@@ -9003,7 +9039,7 @@ always got. Code: `backend/relay_core/open_buffers.py`, `ToolExecutor._through_b
 |---|---|---|
 | GUI → worker | `open_buffers` | `files: [{path, sha256, dirty}]` — every patchable text file open in the pane's window, replacing the last list (at most 500). `path` is absolute, or `ssh://host/abs/path`; `sha256` the revision the buffer was loaded, merged or saved against; `dirty` says it has unsaved edits. |
 | worker → GUI | `buffer_request` (event) | `id`, `op` (`read` or `patch`), `path` (as listed). A patch adds `tool`, `content` (the whole new text), `base_sha256` (the text it was worked out against), `intent`, `turn_id`, `model`, and for `edit_file` `old_string`, `new_string`, `replace_all`. |
-| GUI → worker | `buffer_result` | `id`, `ok`. A read: `text`, `dirty`, `sha256`. A patch: `applied` (`exact`, `merged`, `unchanged`), `saved`, `sha256`, `buffer_sha256`, optional `save_error`. A refusal: `error` (`not_open`, `not_representable`, `unsupported`, `stale`, `conflict`), `message`, and for `conflict` `conflicts: [{buffer, base, agent, line?}]`. |
+| GUI → worker | `buffer_result` | `id`, `ok`. A read: `text`, `dirty`, `sha256`. A patch: `applied` (`exact`, `merged`, `unchanged`, and since v4.12 `held` and `conflict`), `saved`, `sha256`, `buffer_sha256`, optional `save_error`, and for `conflict` `conflicts: [{buffer, base, agent, line}]` and `message`. A refusal: `error` (`not_open`, `not_representable`, `unsupported`, `stale`, and from a GUI older than v4.12 `conflict`), `message`, and for `conflict` `conflicts: [{buffer, base, agent, line?}]`. |
 
 **Reads.** A dirty buffer is what the user sees, so `read_file` returns its text with
 `open_buffer: "unsaved"` and a note that commands see the disk; a clean one reads the disk with
@@ -9019,6 +9055,27 @@ beside the user's edits. `not_open` and the other "cannot hold it" answers, or n
 3 s (40 s for an ssh patch), leave the ordinary disk write — except when the write was worked out
 against unsaved text, which only the editor can apply: then nothing is written and the tool says
 so. Stop ends the wait. Subagents share the pane's list.
+
+**Held and conflicted patches** (v4.12, 2026-09-25, card #PBZ4; owner decisions D1 and D2 of
+#P2W8). Two answers are added, and the worker still reads the older refusal:
+
+- `applied: "held"` — the file's **Review before apply** switch is on (a per-project setting on the
+  agent docked under the file). Nothing is in the buffer or on disk: the patch waits on the pane's
+  agent bar for Apply or Discard, `saved` is false and `sha256` is the unchanged base. The tool
+  result says the change is waiting and tells the model not to make it again. Apply runs the held
+  request through the path above, marked `reviewed` so it is not held twice; Discard drops it.
+- `applied: "conflict"` — the patch and the user's unsaved edits touch the same lines. It is no
+  longer refused: the three-way merge goes into the buffer as one undo step with each contested
+  region between markers (`<<<<<<< editor`, `||||||| base`, `=======`, `>>>>>>> agent`), is
+  **never saved** (the person resolves, then saves), and a ⚠ chip on the agent bar says how many
+  places. `conflicts` lists each region with its 1-based `line`, and the tool result names the
+  lines and tells the model not to edit them again unless asked. Before that, an `edit_file` whose
+  `old_string` still names exactly one place in the buffer is applied there as written and answered
+  `merged`, as it was.
+
+Each applied change is also listed under its turn in the docked agent's **change list** (the words
+that asked, then each change with its lines; a click goes to them). That list is the GUI's record,
+built from the same undo steps, and adds nothing to the wire.
 
 ## 36. Task-plugin workspaces: routing, runtimes and tools (v4.8, 2026-09-23, card #C0Q8)
 
@@ -9037,7 +9094,7 @@ tools this worker's agent is offered. Other ids exist so one worker can hold sev
 
 | Request `type` | Fields | Response `event` |
 |---|---|---|
-| `workspace_activate` | `plugin_id`, optional `workspace` (directory; default the configured workspace), `path` (the file that selected it — the `.tex` for `relay.tex`), `workspace_id` | `workspace_state {change: "activated"}` |
+| `workspace_activate` | `plugin_id`, optional `workspace` (directory; default the configured workspace), `path` (the file that selected it — the `.tex` for `relay.tex`), `workspace_id`, `console` (see 36.4) | `workspace_state {change: "activated"}`, and `workspace_console` when `console` is true |
 | `workspace_deactivate` | `workspace_id` | `workspace_state {change: "deactivated"}` |
 | `workspace_state` | `workspace_id` | `workspace_state {change: "state"}` (`state: null` when nothing is active) |
 | `workspace_candidates` | optional `workspace`, `path`, `foreground_program` | `workspace_candidates {candidates: [{plugin_id, origin, reason, enabled, enable_reason, missing}]}` |
@@ -9137,7 +9194,8 @@ manifest's rule still holds — v1 plugin groups are always lazy — so `load_to
 schemas are appended after the list. Activation therefore re-prefills once; it is rare and
 deliberate. A tool of another workspace's plugin is refused with a sentence naming it; running
 code or a build (`py_run_cell`, `py_restart`, `py_interrupt`, `tex_build` with `action: build`)
-is refused on a read-only turn and on a card's Discuss or Plan turn, like `run_command`.
+is refused on a read-only turn and on a card's Discuss or Plan turn (commands proper —
+`run_command` — pass on a card turn since card #NXN0; the plugin's build-and-run surfaces do not).
 
 | Group | Tools |
 |---|---|
@@ -9150,3 +9208,25 @@ active, gated by the same object and the same refusals; the proxy now advertises
 `tools.listChanged` and sends `notifications/tools/list_changed` when the offered names change
 (it polls the bridge's read-only `tools/version` every 2 s), and `py_run_cell` and `tex_build`
 get the long-call transport deadline.
+
+### 36.5 `workspace_activate {console: true}`: the console pane (#83YV)
+
+A console pane — the palette's "New Python console" — starts no shell. At its worker's `ready`
+it sends `workspace_activate {plugin_id: "relay.python", workspace_id: <pane token>, console:
+true}`; `console: true` starts the runtime now instead of at its first cell, and the answer the
+pane runs is `workspace_console {id, workspace_id, plugin_id, argv, program, label, shared,
+connection_file?, startup, note, runtime}` (`console_command` in
+`backend/relay_core/workspace_plugins.py`): `argv` is the manifest's `console.program` with the
+connection file substituted — `jupyter console --existing <file> --config=ipython_startup.py`
+on the shared kernel, else `ipython`, else `python3`; `program` is what to call it (`ipython`
+for both Python forms); `label` is the pane's header chip ("Python · ipython"). A pane with no
+answer yet, or a refused ask (the ordinary `error` event), starts a shell and says why — a
+console pane is never a dead surface.
+
+The connection file is the attachment between the two processes: `JupyterBackend.restart`
+keeps it, so a kernel restart does not strand a running `jupyter console`, and the pane's
+"Restart shell" replays the same argv to reattach after the console itself died. The bundled
+`ipython_startup.py` emits the OSC 133 A/B/C/D marks in the pty, so pane history tracks cells
+exactly as it tracks shell commands. Routing inside a console pane is the foreground REPL of
+36.2 — the pane still sends the real command line as `foreground_program`, and names the
+program `ipython` for the chip, completion and the REPL delivery rules.

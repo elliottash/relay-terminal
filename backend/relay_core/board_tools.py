@@ -971,8 +971,14 @@ def cleanup_brief() -> str:
 # closed cards too — and writes only related links, labels, a missing `## Done means` and a note.
 CARD_MODES = ("discuss", "plan", "refine")
 
-#: The worker's own tools a card turn keeps: reading, never writing or running anything.
+#: The worker's own tools a card turn keeps: reading, never writing.
 CARD_READ_TOOLS = ("read_file", "list_directory", "load_skill", "read_skill_file")
+
+#: The commands a card turn runs to inspect and verify (card #NXN0, owner 2026-09-25): a
+#: Discuss or Plan that cannot run `pytest --version` has to take the owner's word for what it
+#: could have checked. These run through the executor exactly as a console's do — Options ›
+#: Security's command policies and all — and change no stage rule: the writers stay refused.
+CARD_COMMAND_TOOLS = ("run_command", "command_output", "stop_command")
 
 #: The board tools each mode offers. Plan writes only its own card's `## Plan` (and may
 #: comment on that card); Discuss keeps the whole ordinary set, cleanup-only tools aside.
@@ -1122,19 +1128,21 @@ class CardScope:
     file tools, which is what the turn was *offered*.  A card turn is an ordinary console turn
     now: it is offered the console's list, every turn, and what the stage forbids is refused when
     it is called (`Agent.set_card_turn`, `_check_card_scope`, and `refusal` below, which names
-    Run).  `allows` and `refusal` did not move an inch; only the list did.
+    Run).  `allows` and `refusal` did not move an inch; only the list did.  Card #NXN0 then let
+    the turn run commands: `allows` keeps `CARD_COMMAND_TOOLS` next to the read tools.
     """
     mode: str
     card_id: str
 
     def allows(self, name: str) -> bool:
-        return (name in CARD_READ_TOOLS or name == "search_files"
+        return (name in CARD_READ_TOOLS or name in CARD_COMMAND_TOOLS or name == "search_files"
                 or name in CARD_MODE_BOARD_TOOLS.get(self.mode, ()))
 
     def refusal(self, name: str) -> str:
         what = CARD_MODE_TITLES.get(self.mode, "Discuss")
         return (f"{name} is not available in a {what} turn on #{self.card_id}: it reads the "
-                "repository (read_file, list_directory, search_files) and writes only through the "
+                "repository (read_file, list_directory, search_files) and runs commands to "
+                "inspect and verify (run_command), and writes only through the "
                 "board tools. Writing code is Run's job — the owner hands the card to a "
                 "terminal pane for that.")
 
