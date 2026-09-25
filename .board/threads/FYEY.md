@@ -9,3 +9,6 @@
 
 <!-- relay:entry 20260925T012553Z-f0 author=agent kind=note model=claude-opus-5-5 pane=64de364c turn=d7865438e5d344cabec7eded6da91d02/e2b7160370d943c1875e5b2fc03bc3a4 -->
 One more cause, seen during this salvage: a subagent cannot be hard-stopped. The owner said "stop the agents"; the parent sent both a STOP message (`agent_message`, read "before its next step"). Subagent a1 still landed ceb4860f (#F8R7, 920 lines) 17 minutes later, after its first commit 9825875c had already been taken back in 221bfef7. Both commits were work the owner had said not to commit; both were taken back (221bfef7, a6013cf2). Add a step: the `agent` tool gets a real cancel that kills the subagent's process tree, and land.py refuses a commit from a session whose owning subagent was cancelled.
+
+<!-- relay:entry 20260925T021704Z-ve author=agent kind=evidence model=glm-5.3 pane=7a50a851 turn=d7865438e5d344cabec7eded6da91d02/8d2f3fb1f7fd40a88459b47962f51d03 -->
+The a6013cf2 repair is verified on a clean export (per CLAUDE.md, never in the checkout): `git archive a6013cf2` → configure + build exit 0, `ctest -R '^(filesync|filepanes)$'` 2/2 passed. main without the do-not-commit cluster builds and its buffer tests pass.
