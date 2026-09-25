@@ -5107,6 +5107,8 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     // These are *objects*, not the 2026-09-18 category tabs: the Cards page is the existing
     // list untouched and `board.yaml`'s categories stay inside it, so that decision stands.
     buildPageTabs(layout);
+    // Under it, on the Cards tab only: who is working on this project right now (#TBRH).
+    buildLiveStrip(layout);
     // The pane's header row. Since 2026-09-18 there are no category tabs and no tools here: the
     // filter, "+ New card" and the section checkboxes are the top of the *list page*
     // (buildListTools), so a card that is open is not also looking at the list's controls. All
@@ -9202,6 +9204,7 @@ void BoardView::rebuild()
     }
     syncChatVisible();
     applyPage();    // the Skills/Memories pages' visibility (#9FX8) settles last, over the list's
+    syncLiveStrip();
 }
 
 // The page agent belongs to the list page: it is there whenever the board is, including a board
@@ -9721,6 +9724,125 @@ void BoardView::catchUp()
 {
     if (m_open && m_refresh)
         m_refresh->start();
+}
+
+// ------------------------------------------------------ the Live strip (#TBRH)
+//
+// PROJECT-BOARD-DESIGN §6 and #EA37 decision 3: no pane tab. What the Board lacks is the reverse
+// of the Projects page — from here, who is working on this project right now — so the top of
+// the Cards tab carries one chip per open terminal pane attached to the project: its token's
+// first eight (the chip every other surface shows, `board::sessionChip`), its model, ✦ while a
+// turn runs, and then the open cards whose `session` is that pane. The pane chip reveals the
+// pane; a card chip opens the card. It is computed from the window's panes and the model's own
+// rows on every refresh and never written anywhere — a pane is never a stored link target
+// (§4.1). The Projects page keeps attach, reveal and filter.
+void BoardView::buildLiveStrip(QVBoxLayout *layout)
+{
+    m_liveStrip = new QWidget(this);
+    m_liveStrip->setObjectName(QStringLiteral("boardLiveStrip"));
+    m_liveLayout = new FlowLayout(m_liveStrip, 6, 4);
+    m_liveLayout->setContentsMargins(8, 4, 8, 4);
+    m_liveStrip->hide();
+    layout->addWidget(m_liveStrip);
+    // Panes open, close and start turns without any board event, so the strip also looks again
+    // on a slow tick — only while the pane is on screen, and only redrawing what changed.
+    m_liveTimer = new QTimer(this);
+    m_liveTimer->setInterval(2000);
+    connect(m_liveTimer, &QTimer::timeout, this, [this] {
+        if (isVisible())
+            syncLiveStrip();
+    });
+    m_liveTimer->start();
+}
+
+void BoardView::syncLiveStrip()
+{
+    if (m_liveStrip == nullptr)
+        return;
+    // The tab row's own rule (applyPage), narrowed to Cards: never on Skills or Memories, the
+    // sections editor or a pinned card pane (#Y2BA).
+    const bool onCards = !m_pinned && !m_sectionsOpen && m_page == Page::Cards;
+    const QJsonArray panes = onCards && livePanes ? livePanes() : QJsonArray{};
+    struct Live { QString token, title, model; bool busy; QStringList cards; };
+    QList<Live> rows;
+    QString key;
+    for (const QJsonValue &value : panes) {
+        const QJsonObject pane = value.toObject();
+        Live live{pane.value(QStringLiteral("token")).toString(),
+                  pane.value(QStringLiteral("title")).toString(),
+                  pane.value(QStringLiteral("model")).toString(),
+                  pane.value(QStringLiteral("busy")).toBool(), {}};
+        if (live.token.isEmpty())
+            continue;
+        live.cards = m_model.claimedBy(live.token);
+        key += QStringLiteral("%1|%2|%3|%4|").arg(live.token, live.title, live.model,
+                                                   live.busy ? QStringLiteral("1") : QString());
+        for (const QString &id : std::as_const(live.cards)) {
+            const board::Card *card = m_model.card(id);
+            key += id + QLatin1Char(':') + (card ? card->title : QString()) + QLatin1Char(',');
+        }
+        key += QLatin1Char('\n');
+        rows << live;
+    }
+    m_liveStrip->setVisible(!rows.isEmpty());
+    if (key == m_liveKey)
+        return;
+    m_liveKey = key;
+    while (QLayoutItem *item = m_liveLayout->takeAt(0)) {
+        if (QWidget *widget = item->widget())
+            widget->deleteLater();
+        delete item;
+    }
+    if (rows.isEmpty())
+        return;
+    auto *label = new QLabel(QStringLiteral("Live"), m_liveStrip);
+    label->setObjectName(QStringLiteral("boardLiveLabel"));
+    label->setToolTip(QStringLiteral("The panes open on this project and the cards they hold"));
+    // The flow top-aligns its items; a label as tall as a chip reads on the chips' line.
+    label->setMinimumHeight(QPushButton(QStringLiteral("x")).sizeHint().height());
+    label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_liveLayout->addWidget(label);
+    for (const Live &live : std::as_const(rows)) {
+        // A pane and its cards are one group, so the flow wraps between panes, not inside one.
+        auto *group = new QWidget(m_liveStrip);
+        group->setObjectName(QStringLiteral("boardLivePane"));
+        auto *row = new QHBoxLayout(group);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(2);
+        QString text = board::sessionChip(live.token, true);
+        if (!live.model.isEmpty())
+            text += QStringLiteral(" · ") + live.model;
+        if (live.busy)
+            text += QStringLiteral(" ✦");
+        auto *paneChip = new QPushButton(text, group);
+        paneChip->setObjectName(QStringLiteral("boardLivePaneChip"));
+        paneChip->setProperty("token", live.token);
+        paneChip->setCursor(Qt::PointingHandCursor);
+        paneChip->setToolTip(QStringLiteral("%1%2 — reveal this pane")
+                                 .arg(live.title.isEmpty() ? live.token.left(8) : live.title,
+                                      live.busy ? QStringLiteral(" (working)") : QString()));
+        const QString token = live.token;
+        connect(paneChip, &QPushButton::clicked, this, [this, token] {
+            if (onFocusPane)
+                onFocusPane(token);
+        });
+        row->addWidget(paneChip);
+        for (const QString &id : live.cards) {
+            const board::Card *card = m_model.card(id);
+            const QString title = card ? card->title : QString();
+            const QString shortTitle = title.size() > 36 ? title.left(35) + QStringLiteral("…") : title;
+            auto *cardChip = new QPushButton(
+                shortTitle.isEmpty() ? QStringLiteral("#%1").arg(id)
+                                     : QStringLiteral("#%1 %2").arg(id, shortTitle), group);
+            cardChip->setObjectName(QStringLiteral("boardLiveCardChip"));
+            cardChip->setProperty("card", id);
+            cardChip->setCursor(Qt::PointingHandCursor);
+            cardChip->setToolTip(QStringLiteral("#%1 %2 — open the card").arg(id, title));
+            connect(cardChip, &QPushButton::clicked, this, [this, id] { openCard(id); });
+            row->addWidget(cardChip);
+        }
+        m_liveLayout->addWidget(group);
+    }
 }
 
 // Wide enough, the open card sits beside the list; in a narrow pane it takes the whole pane
@@ -10354,6 +10476,7 @@ void BoardView::pinSolo(const QString &id)
     closeQuickAdd();
     openCardSolo(id);
     updateDetailLayout();
+    syncLiveStrip();   // a pinned card pane never carries the Live strip (#TBRH)
     if (onNavigationChanged) onNavigationChanged();
 }
 

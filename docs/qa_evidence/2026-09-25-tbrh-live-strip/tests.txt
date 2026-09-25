@@ -1,0 +1,29 @@
+# #TBRH — tests run 2026-09-25T20:39:21Z on the exact tree land.py would land (tip d27de59a + only #TBRH's hunks), in a land.py verify slot
+$ python3 scripts/land.py try tbrh --target relay   # exit 0: the exact tree builds (RelayWindow.h livePanes wiring)
+$ python3 scripts/land.py try tbrh --target relay-boardpane-tests --tests '^boardpane$'   # exit 0
+
+$ QT_QPA_PLATFORM=offscreen XDG_CONFIG_HOME=<tmp> RELAY_QA_SCREENSHOT=01-cards-tab-live-strip.png relay-boardpane-tests
+********* Start testing of BoardPaneTests *********
+Config: Using QtTest library 5.15.13, Qt 5.15.13 (arm64-little_endian-lp64 shared (dynamic) release build; by GCC 13.3.0), ubuntu 24.04
+PASS   : BoardPaneTests::initTestCase()
+PASS   : BoardPaneTests::longFindingsRemainReadableAndScrollable()
+PASS   : BoardPaneTests::namedDriverUsesControlsAndRefusesUnavailableTargets()
+PASS   : BoardPaneTests::cleanupOperationsHaveTranscriptNotes()
+PASS   : BoardPaneTests::unsurfacedEventsNameTheirCard()
+PASS   : BoardPaneTests::tryItOpenKeepsWindowsPathsWithSpaces()
+PASS   : BoardPaneTests::theVerifyStripReadsTheCardsVerifyBlock()
+PASS   : BoardPaneTests::doneButtonAndKeyOfferUndo()
+PASS   : BoardPaneTests::navigationSurvivesReload()
+PASS   : BoardPaneTests::aCardLinkOpensTheBoardOnTheCardAlone()
+PASS   : BoardPaneTests::aCardOpenedInOnePaneDoesNotOpenInTheOther()
+PASS   : BoardPaneTests::boardDataStillReachesBothPanes()
+PASS   : BoardPaneTests::theCardPagesFlagClicksThroughToBoardPriority()
+PASS   : BoardPaneTests::metadataPageListsChildrenReverseLinksAndCommits()
+PASS   : BoardPaneTests::hygieneChecksBeforeCleanup()
+PASS   : BoardPaneTests::emptyAgentTranscriptDoesNotReserveConversationHeight()
+PASS   : BoardPaneTests::theSkillsTabListsProjectSkillsAndOpensAPage()
+PASS   : BoardPaneTests::theMemoriesTabShowsExpiredFirstAndOpensTheCard()
+PASS   : BoardPaneTests::theLiveStripListsThisProjectsPanesAndTheirCards()
+PASS   : BoardPaneTests::cleanupTestCase()
+Totals: 20 passed, 0 failed, 0 skipped, 0 blacklisted, 493ms
+********* Finished testing of BoardPaneTests *********

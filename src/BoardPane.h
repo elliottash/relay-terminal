@@ -156,6 +156,12 @@ public:
     // card wears its pane's token as a chip; a closed pane's chip says so and stops linking.
     // Unset — a test, or a window that cannot look — means every token reads as live.
     std::function<bool(const QString &token)> paneExists;
+    // The Live strip on the Cards tab (#TBRH, PROJECT-BOARD-DESIGN §6): the open terminal panes
+    // attached to this board's project, as `[{token, title, model, busy}]`, asked on every
+    // refresh and never stored — the card each one holds comes from the cards' own `session`
+    // field (`claimedBy`). The Projects page keeps attach, reveal and filter. Unset (a test that
+    // does not set it, a window that cannot look) means no strip.
+    std::function<QJsonArray()> livePanes;
     // A signal thread's history (#AQ6X phase 3): `threadId` and the owner session it is saved
     // beside, the same two the Sessions manager's `onOpenThread` hands over. A signal a thread
     // claimed wears the *thread's* id as its chip, so the chip opens a thread rather than
@@ -883,6 +889,16 @@ private:
     // pinSolo (#Y2BA): the pane is one card's for good, and which card that is.
     bool m_pinned = false;
     QString m_pinnedCard;
+    // The Live strip (#TBRH): a row under the tab row, rebuilt by `syncLiveStrip` from
+    // `livePanes` at the end of every rebuild and on `m_liveTimer` while the pane is visible —
+    // panes open, close and start turns without a board event. `m_liveKey` is what was last
+    // drawn, so an unchanged tick touches no widget.
+    void buildLiveStrip(QVBoxLayout *layout);
+    void syncLiveStrip();
+    QWidget *m_liveStrip = nullptr;
+    QLayout *m_liveLayout = nullptr;   // a FlowLayout: the chips wrap rather than widen the pane
+    QTimer *m_liveTimer = nullptr;
+    QString m_liveKey;
     // Which of the two pages that sizing was for (#AQ6X): the card's or the signal's, so opening
     // the other one re-divides the splitter instead of leaving it sized for the first.
     bool m_sizedForSignal = false;

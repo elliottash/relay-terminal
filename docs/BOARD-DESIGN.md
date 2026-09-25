@@ -136,6 +136,17 @@ card: `#ID` addresses it, no `memory:` prefix). A card opened from Skills or Mem
 the tab it left; a pinned card pane (#Y2BA) carries no row at all. The choice persists per board in the pane's
 navigation state. A fourth object (Artifacts, #EA37) is one entry in `kPageDefs` — no redesign.
 
+**The Live strip** (#TBRH, `PROJECT-BOARD-DESIGN.md` §6, #EA37 decision 3). Panes get no tab. Under the tab row, on
+the Cards tab only, one row answers "who is working on this project right now": a chip per open terminal pane whose
+tab is attached to this project or whose workspace is it (`⧉` + its token's first eight, its model, ✦ while a turn
+runs), followed by the open cards whose `session` is that pane's token (`board::Model::claimedBy`, the reverse the
+row chips already draw). The pane chip reveals the pane (`onFocusPane`); a card chip opens the card. It is computed,
+never stored: `BoardView::syncLiveStrip` asks the window's `livePanes` callback (the same walk `feedProjects` does for
+the Projects page) at the end of every rebuild, and again every 2 s while the pane is visible, because panes open,
+close and start turns without any board event. It writes no card field and sends no protocol message. It is hidden
+when no pane is attached, on Skills and Memories, while the sections editor is open, and on a pinned card pane. The
+Projects page keeps attach, reveal and filter.
+
 ### 4.1 Opening
 
 - **Ctrl+Shift+S** = `board.open`: opens the Board beside the anchor terminal (split right) or focuses the tab's

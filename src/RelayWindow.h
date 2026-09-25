@@ -5667,6 +5667,27 @@ public:
             auto *w = windowOf(guard);
             return w && !token.isEmpty() && w->findPaneByToken(token) != nullptr;
         };
+        // The Live strip on the Cards tab (#TBRH): every terminal pane, in any window, whose tab
+        // is attached to this project or whose workspace is it — the walk `feedProjects` does for
+        // the Projects page, filtered to one project. Asked on each refresh, stored nowhere.
+        view->livePanes = [workspace]() {
+            QJsonArray live;
+            const QString project = QDir::cleanPath(workspace);
+            for (QWidget *top : QApplication::topLevelWidgets()) {
+                auto *window = dynamic_cast<RelayWindow *>(top);
+                if (!window) continue;
+                for (Pane *pane : window->allPanes()) {
+                    const QString tabProject = window->tabProject(window->pageOf(pane));
+                    const bool here = (!tabProject.isEmpty() && QDir::cleanPath(tabProject) == project)
+                        || (!pane->workspace().isEmpty() && QDir::cleanPath(pane->workspace()) == project);
+                    if (!here || pane->sessionToken().isEmpty()) continue;
+                    live.append(QJsonObject{{"token", pane->sessionToken()},
+                        {"title", pane->paneTitle().isEmpty() ? shortPath(pane->cwd()) : pane->paneTitle()},
+                        {"model", pane->paneModel()}, {"busy", pane->dimmingAgentBusy()}});
+                }
+            }
+            return live;
+        };
         // A signal thread's chip (#AQ6X phase 3): the claim's token is the *thread's* id, and no
         // pane has one, so the chip opens that thread's history — the same ⓘ view the Sessions
         // manager's Enter opens and the pickup's notification goes to. The thread file lives in
