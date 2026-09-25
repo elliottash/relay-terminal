@@ -40,8 +40,14 @@ from .terminal_handoff import TerminalHandoff
 from .provider import Cancelled
 from .jobs import JobTable, line_range, sent_length, split_lines
 from . import approvals, remote_files, remote_session, security
+from .open_buffers import conflict_text, local_key, remote_key
 
 MAX_FILE = 131072
+
+# Card #F8R7: a write worked out against an open editor's unsaved text can only be applied there.
+UNSAVED_HEADER = "Open in Relay with unsaved edits: this diff is against the editor's text.\n"
+NO_EDITOR_ANSWER = ("The file is open in Relay with unsaved edits and the editor did not answer, so "
+                    "nothing was written. Try again, or ask the user to save the file first.")
 MAX_OUTPUT = 32768
 # Card #0C0V: what one command result, file read or search puts into the model's context, which is
 # resent on every later step. The user's fold still gets MAX_OUTPUT and the whole file; the model
@@ -394,6 +400,9 @@ class Prepared:
     # Card #K2FV: the capabilities this call already drew its approval ask for, so the re-check at
     # execution time asks only about what the policy added since — one ask per action.
     approved: tuple[str, ...] = ()
+    # Card #F8R7: the open editor's path when this write was worked out against its *unsaved* text
+    # rather than the disk's (`old_sha` is then that text's hash). Only the editor can apply it.
+    buffer: str | None = None
 
 
 class Workspace:
@@ -523,6 +532,11 @@ class ToolExecutor:
         self.jobs = JobTable(on_change=self._announce_jobs)
         self._waiting = None
         self._lock = threading.Lock()
+        # Card #F8R7: the files open in Relay's editor (relay_core/open_buffers.py), set by the
+        # worker; None writes the disk as always. `provenance` is the turn and model a write is
+        # labelled with in the editor, set by the agent before each write.
+        self.buffers = None
+        self.provenance: dict = {}
 
     def _approval(self, name: str, args: dict, *, exists: bool = False, outside_workspace: bool = False,
                   subject: str = "", already: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -716,22 +730,26 @@ class ToolExecutor:
                            subject=str(path))
             return Prepared(name, args, f"LIST DIRECTORY\n\n{path}", path)
         existed = path.exists()
+        # A file open in Relay with unsaved edits is edited as the user sees it (card #F8R7).
+        unsaved = self._unsaved_buffer(local_key(path)) if existed else None
         if name == "edit_file":
             if not existed:
                 raise ValueError("edit_file needs a file that already exists; use write_file to create one.")
-            old = self.workspace.read_bytes(path)
+            old = unsaved[1] if unsaved else self.workspace.read_bytes(path)
             content, replacements = self._edited(args, old)
         else:
             # Missing parent directories are made at execute time (card #NC17): refusing here cost
             # the model a whole round trip on mkdir for what is the common case.
             content, replacements = self._text(args, "content"), 0
-            old = self.workspace.read_bytes(path) if existed else b""
+            old = unsaved[1] if unsaved else (self.workspace.read_bytes(path) if existed else b"")
         self._approval(name, args, exists=existed, subject=str(path))
-        return self._write_prepared(name, args, str(path), old, content, existed, replacements, path=path)
+        return self._write_prepared(name, args, str(path), old, content, existed, replacements, path=path,
+                                    header=UNSAVED_HEADER if unsaved else "",
+                                    buffer=unsaved[0]["path"] if unsaved else None)
 
     def _write_prepared(self, name: str, args: dict, shown: str, old: bytes, content: str, existed: bool,
                         replacements: int, *, path: Path | None = None, host: str | None = None,
-                        header: str = "") -> Prepared:
+                        header: str = "", buffer: str | None = None) -> Prepared:
         """The diff the user sees and the bytes the write will put in place — the same computation
         for a file on this machine and one on the ssh host (card #S5SH)."""
         old_sha = hashlib.sha256(old).hexdigest()
@@ -745,7 +763,7 @@ class ToolExecutor:
         preview = (f"{title}{f' ON {host}' if host else ''}\n\n{header}{shown}\n\n{diff or '(No text changes)'}"
                    f"\n\nOld bytes: {len(old)}; new bytes: {len(content.encode('utf-8'))}.")
         return Prepared(name, args, preview, path, old_sha, existed, content, replacements, added, removed,
-                        diff=diff, host=host, remote_path=shown if host else None)
+                        diff=diff, host=host, remote_path=shown if host else None, buffer=buffer)
 
     def _host(self, args: dict) -> str:
         """The `host` argument, checked as text. Empty or absent is a call on this machine, and the
@@ -777,6 +795,11 @@ class ToolExecutor:
             return Prepared(name, args, f"LIST DIRECTORY ON {host}\n\n{header}{path}", host=host,
                             remote_path=path)
         old, existed = self._remote_before(session, path)
+        # Open in Relay with unsaved edits (card #F8R7): edited as the user sees it, as locally.
+        unsaved = (self._unsaved_buffer(remote_key(session["host"], path, session.get("cwd")))
+                   if existed else None)
+        if unsaved:
+            old = unsaved[1]
         if name == "edit_file":
             if not existed:
                 raise ValueError("edit_file needs a file that already exists; use write_file to create one.")
@@ -787,7 +810,8 @@ class ToolExecutor:
         # user may want asked about, and the ask names the host in its subject line.
         self._approval(name, args, exists=existed, subject=f"{path} on {host}")
         return self._write_prepared(name, args, path, old, content, existed, replacements, host=host,
-                                    header=header + "\n")
+                                    header=header + (UNSAVED_HEADER if unsaved else "") + "\n",
+                                    buffer=unsaved[0]["path"] if unsaved else None)
 
     def _prepare_remote(self, args: dict, command: str, host: str, wait: str,
                         approved: tuple[str, ...] = ()) -> Prepared:
@@ -858,6 +882,8 @@ class ToolExecutor:
         name, args, path = prepared.name, prepared.arguments, prepared.remote_path
         session = self._remote_ready(prepared.host)
         if name == "read_file":
+            if unsaved := self._unsaved_buffer(remote_key(session["host"], path, session.get("cwd"))):
+                return self._unsaved_result(self._read_result(args, unsaved[1], host=session["host"]))
             data = self._remote_read(session, path)
             return self._read_result(args, data, host=session["host"])
         if name == "list_directory":
@@ -865,6 +891,12 @@ class ToolExecutor:
                                     path, wrong_type="Path is not a directory.")
             found, truncated = remote_files.entries(data)
             return {"entries": found, "truncated": truncated, "host": session["host"]}
+        if (routed := self._through_buffer(prepared, remote_key(session["host"], path, session.get("cwd")),
+                                           remote=True)) is not None:
+            routed["host"] = session["host"]
+            return routed
+        if prepared.buffer:
+            raise ValueError(NO_EDITOR_ANSWER)
         old, existed = self._remote_before(session, path)
         if existed != prepared.existed:
             raise ValueError("File appeared or disappeared while the write was prepared. Request a new diff.")
@@ -879,6 +911,84 @@ class ToolExecutor:
             result["replacements"] = prepared.replacements
         else:
             result["created"] = not prepared.existed
+        return result
+
+    # ----- files open in Relay's editor (card #F8R7, protocol §35) ---------------------------
+
+    def _unsaved_buffer(self, key: str | None) -> tuple[dict, bytes] | None:
+        """The open editor's text, when this file is open in Relay *with unsaved edits*: that text
+        is what the user is looking at, so it is what a read shows and an edit is worked out
+        against. A clean editor holds the disk's text, so it costs no round trip; neither does a
+        file nobody has open, or a GUI that did not answer."""
+        entry = self.buffers.entry(key) if self.buffers is not None else None
+        if entry is None or not entry.get("dirty"):
+            return None
+        reply = self.buffers.request({"op": "read", "path": entry["path"]})
+        if not reply or not reply.get("ok") or not isinstance(reply.get("text"), str):
+            return None
+        return entry, reply["text"].encode("utf-8")
+
+    @staticmethod
+    def _unsaved_result(result: dict) -> dict:
+        result["open_buffer"] = "unsaved"
+        result["note"] = ("This is the text in the user's open editor in Relay, which has unsaved edits; "
+                          "the file on disk differs until they save. Commands you run see the disk.")
+        return result
+
+    def _through_buffer(self, prepared: Prepared, key: str | None, *, remote: bool = False) -> dict | None:
+        """write_file / edit_file on a file open in Relay: the editor applies it (src/FilePanes.cpp,
+        FilePreview::applyAgentPatch) — exactly when its text is the one this was worked out
+        against, merged when the user's unsaved edits are elsewhere in the file, and refused with
+        the lines in question when they overlap. None when the file is not open or nothing
+        answered, and the caller writes the disk as it always did."""
+        entry = self.buffers.entry(key) if self.buffers is not None else None
+        if entry is None:
+            return None
+        name, args = prepared.name, prepared.arguments
+        content = prepared.content if prepared.content is not None else args["content"]
+        what = "Edit" if name == "edit_file" else "Write"
+        fields = {"op": "patch", "path": entry["path"], "tool": name, "base_sha256": prepared.old_sha,
+                  "content": content,
+                  "intent": f"{what} {posixpath.basename(str(args['path']))} (+{prepared.added} -{prepared.removed})",
+                  "turn_id": self.provenance.get("turn_id"), "model": self.provenance.get("model")}
+        if name == "edit_file":
+            fields.update(old_string=args["old_string"], new_string=args["new_string"],
+                          replace_all=bool(args.get("replace_all", False)))
+        reply = self.buffers.request(fields, remote=remote)
+        if reply is None:
+            return None
+        if not reply.get("ok"):
+            error = reply.get("error")
+            if error in ("not_open", "not_text", "not_representable", "unsupported") and not prepared.buffer:
+                return None   # the editor cannot hold it; the disk write follows, and its watcher sees it
+            if error == "conflict":
+                raise ValueError(conflict_text({**reply, "path": args["path"]}))
+            message = reply.get("message") if isinstance(reply.get("message"), str) else ""
+            if error == "stale":
+                raise ValueError(message or f"{args['path']} changed in the editor while this was prepared, so "
+                                 "nothing was changed. Read it again and redo the edit.")
+            raise ValueError(message or f"Relay could not apply this to {args['path']}, which is open in the "
+                             "editor; nothing was changed.")
+        saved = reply.get("saved") is True
+        result = {"path": args["path"], "written_bytes": len(content.encode("utf-8")) if saved else 0,
+                  "sha256": reply.get("sha256") if isinstance(reply.get("sha256"), str) else prepared.old_sha,
+                  "added": prepared.added, "removed": prepared.removed,
+                  "open_buffer": {"applied": reply.get("applied") or "exact", "saved": saved}}
+        if name == "edit_file":
+            result["replacements"] = prepared.replacements
+        else:
+            result["created"] = not prepared.existed
+        where = f"{args['path']} is open in Relay's editor"
+        if saved:
+            result["note"] = f"{where}: the change was applied there as one undoable step and saved."
+        else:
+            reason = reply.get("save_error") if isinstance(reply.get("save_error"), str) else ""
+            result["note"] = (f"{where} with unsaved edits: the change was applied to that unsaved buffer "
+                              f"(one undoable step), not to the file on disk. It reaches the disk when the "
+                              f"user saves; commands you run see the disk until then."
+                              + (f" Saving failed: {reason}" if reason else ""))
+        if reply.get("applied") == "merged":
+            result["note"] += " It was merged around the user's own unsaved edits."
         return result
 
     def _edited(self, args: dict, old: bytes) -> tuple[str, int]:
@@ -959,6 +1069,8 @@ class ToolExecutor:
         path = self.workspace.resolve(args["path"], allow_missing=name in ("write_file", "edit_file"),
                                       for_read=name in ("read_file", "list_directory"))
         if name == "read_file":
+            if unsaved := self._unsaved_buffer(local_key(path)):
+                return self._unsaved_result(self._read_result(args, unsaved[1]))
             return self._read_result(args, self.workspace.read_bytes(path))
         if name == "list_directory":
             if not path.is_dir():
@@ -970,6 +1082,12 @@ class ToolExecutor:
                         return {"entries": sorted(entries, key=lambda x: x['name']), "truncated": True}
                     entries.append({"name": entry.name, "type": "symlink" if entry.is_symlink() else "directory" if entry.is_dir(follow_symlinks=False) else "file"})
             return {"entries": sorted(entries, key=lambda x: x['name']), "truncated": False}
+        # A file open in Relay's editor is changed there, as one undo step (card #F8R7). No answer
+        # from the editor, or no editor, is the disk write below, guarded by the revision read.
+        if (routed := self._through_buffer(prepared, local_key(path))) is not None:
+            return routed
+        if prepared.buffer:
+            raise ValueError(NO_EDITOR_ANSWER)
         if path.exists() != prepared.existed:
             raise ValueError("File appeared or disappeared while the write was prepared. Request a new diff.")
         old = self.workspace.read_bytes(path) if path.exists() else b""

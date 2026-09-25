@@ -721,6 +721,10 @@ class Agent:
         # `ActivityTools.attach` after construction because they need the finished agent. Only a
         # pane agent has them: the helper worker has no pane of its own to report on (30.5).
         self.activity = None
+        # The tool group of this pane's task-plugin workspace (protocol 36, #C0Q8): a
+        # `workspace_plugins.PluginTools` the worker attaches, or None. Its group is loaded with
+        # `load_tools` like Relay's own and exists only while the workspace has the plugin active.
+        self.plugin_tools = None
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
         # Keystrokes the agent may send into the visible program in one turn (protocol 17).
@@ -1145,7 +1149,7 @@ class Agent:
             # Below the workspace line because `tests` is one of the groups: which groups exist
             # changes when a project is attached, and that belongs with the Switchboard sections
             # rather than above everything they share.
-            ("tool_groups", tool_groups.prompt_line(deferred)),
+            ("tool_groups", tool_groups.prompt_line(deferred, self._plugin_groups())),
             ("board_policy", board_tools.prompt_section(getattr(self, "board", None))),
             ("board_note", pins["board_note"]),
         ]
@@ -1365,7 +1369,7 @@ class Agent:
         # fetches are appended, at the very end, where an append costs nothing above them.
         deferred = self._deferred_groups()
         if deferred:
-            extra = extra + [tool_groups.LOAD_TOOLS_SPEC]
+            extra = extra + [tool_groups.load_tools_spec(self._plugin_groups())]
         if self.subagents is not None:
             extra = extra + self.subagents.tool_specs()
         # Protocol 30: the app tools and, on a pane agent, its own session's read tools. Plan
@@ -1382,18 +1386,47 @@ class Agent:
         offered = tools + extra + tail
         # The short profile keeps eight of these (#GMCF decision 7) — filtered here rather than
         # assembled separately, so a tool cannot exist in two shapes.
+        plugin = self._plugin_groups()
         if self.profile() == "short":
-            return prompt_profiles.tool_specs(offered)
+            return self._with_plugin_tools(prompt_profiles.tool_specs(offered), plugin)
         if not deferred:
-            return offered
+            return self._with_plugin_tools(offered, plugin)
         # The three on-demand groups are named in one line of the prompt; their schemas are held
         # back until `load_tools` asks, and then appended after everything else — so a load leaves
         # every byte a provider has already cached exactly where it was (#GMCF decision 9).
         held = set(tool_groups.deferred_names(deferred))
-        # In the order they were loaded, so each load is an append (#0C0V).
-        loaded = [t for group in self.loaded_tool_groups if group in deferred
-                  for t in offered if t["function"]["name"] in tool_groups.GROUPS[group][0]]
+        # In the order they were loaded, so each load is an append (#0C0V). A task plugin's group
+        # (protocol 36) takes its place in the same order.
+        loaded = []
+        for group in self.loaded_tool_groups:
+            if group in plugin:
+                loaded += plugin[group][2]
+            elif group in deferred:
+                loaded += [t for t in offered if t["function"]["name"] in tool_groups.GROUPS[group][0]]
         return [t for t in offered if t["function"]["name"] not in held] + loaded
+
+    def _plugin_groups(self) -> dict:
+        """{group: (names, what, specs)} of this pane's active task-plugin workspace; {} without one."""
+        tools = getattr(self, "plugin_tools", None)
+        return tools.groups() if tools is not None else {}
+
+    def _with_plugin_tools(self, offered: list[dict], plugin: dict) -> list[dict]:
+        """Where Relay defers nothing (a console, the Local tier, the short profile) a plugin group
+        still arrives through `load_tools`: the manifest says v1 groups are always lazy. So
+        `load_tools` and each loaded group are appended — nothing above them moves."""
+        if not plugin:
+            return offered
+        return offered + [tool_groups.load_tools_spec(plugin)] + [
+            t for group in self.loaded_tool_groups if group in plugin for t in plugin[group][2]]
+
+    def plugin_workspace_changed(self) -> None:
+        """The pane's workspace was activated, replaced or deactivated (protocol 36): a group that
+        is no longer offered is forgotten, and the prompt's one line names what is."""
+        plugin = self._plugin_groups()
+        for group in list(self.loaded_tool_groups):
+            if group not in tool_groups.GROUPS and group not in plugin:
+                self.loaded_tool_groups.discard(group)
+        self.refresh_system_prompt()
 
     @property
     def _routed(self) -> dict | None:
@@ -4208,12 +4241,32 @@ class Agent:
         # #GMCF decision 9, before anything else can handle the name: a group's tools are wired up
         # whether or not their schemas were sent, so the refusal has to be here rather than in
         # whichever module owns the tool. It names the group, which is all the model needs.
-        if name == tool_groups.LOAD_TOOLS and self._deferred_groups():
-            group = tool_groups.validate(args)
+        plugin = self._plugin_groups()
+        if name == tool_groups.LOAD_TOOLS and (self._deferred_groups() or plugin):
+            group = tool_groups.validate(args, [*(tool_groups.GROUPS if self._deferred_groups() else ()),
+                                                *plugin])
             return Prepared(name, {"group": group}, f"LOAD TOOLS\n\n{group}")
         group = tool_groups.group_of(name)
         if group is not None and group in self._deferred_groups() and group not in self.loaded_tool_groups:
             raise ValueError(tool_groups.refusal(name, group))
+        if self.plugin_tools is not None:
+            # Protocol 36: a task plugin's tool, only in the workspace that has the plugin active,
+            # only once its group is loaded, and — running code or a build — never on a turn that
+            # writes nothing (read-only, a card's Discuss or Plan).
+            group = self.plugin_tools.group_of(name)
+            if group is not None:
+                if not isinstance(args, dict):
+                    raise ValueError("Tool arguments must be an object.")
+                if group not in self.loaded_tool_groups:
+                    raise ValueError(tool_groups.refusal(name, group))
+                if self.readonly_turn and self.plugin_tools.writes(name, args):
+                    raise ValueError(READONLY_REFUSAL)
+                if self.card_turn is not None and self.plugin_tools.writes(name, args):
+                    raise ValueError(board_tools.CardScope(*self.card_turn).refusal(name))
+                return Prepared(name, args, self.plugin_tools.preview(name, args))
+            elsewhere = self.plugin_tools.inactive_refusal(name)
+            if elsewhere:
+                raise ValueError(elsewhere)
         # A read-only turn (`ask {readonly: true}`): the board refuses its own writes in
         # `BoardTools.run`, and these are the executor's half. The tool *list* is unchanged —
         # narrowing it for one turn would re-prefill every cached request below it (#GMCF 4.2) —
@@ -4282,7 +4335,10 @@ class Agent:
             group = prepared.arguments["group"]
             already = group in self.loaded_tool_groups
             self.loaded_tool_groups.add(group)
-            return tool_groups.result(group, already)
+            plugin = self._plugin_groups()
+            return tool_groups.result(group, already, plugin[group][0] if group in plugin else None)
+        if self.plugin_tools is not None and self.plugin_tools.handles(prepared.name):
+            return self.plugin_tools.run(prepared.name, prepared.arguments, self.cancel_event)
         if prepared.name == "type_into_program":
             ctx = self._turn_ctx or {}
             return self.executor.program.execute(prepared.arguments, ctx.get("turn_id"))
@@ -4332,6 +4388,10 @@ class Agent:
                 self._planning["plan_written"] = True
             self.emit({"event": "plan_written", "path": str(path), "title": prepared.arguments["title"]})
             return {"path": str(path), "written": True}
+        if prepared.name in ("write_file", "edit_file"):
+            # Card #F8R7: what an edit to a file open in the editor is labelled with there.
+            self.executor.provenance = {"turn_id": (self._turn_ctx or {}).get("turn_id"),
+                                        "model": self.config.model}
         if prepared.name in ("write_file", "edit_file") and prepared.path is not None:
             old = Workspace.read_bytes(prepared.path) if prepared.existed else None
             self.checkpoints.record_before(turn, prepared.path, old)

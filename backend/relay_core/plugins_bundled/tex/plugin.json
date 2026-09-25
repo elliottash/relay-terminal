@@ -21,7 +21,9 @@
     "items": [
       {"name": "tex_build", "description": "Build the workspace's main .tex with latexmk and report whether the PDF is current."},
       {"name": "tex_diagnostics", "description": "List the last build's errors and warnings as file:line rows."},
-      {"name": "tex_synctex_lookup", "description": "Map a source line to a PDF page and position, or a PDF position back to a source line."}
+      {"name": "tex_forward_search", "description": "Map a source line to a PDF page and position (SyncTeX)."},
+      {"name": "tex_inverse_search", "description": "Map a PDF page position back to its source file and line (SyncTeX)."},
+      {"name": "tex_dependencies", "description": "List the main file and every file it pulls in, in document order."}
     ]
   },
   "skills": ["skills/tex-workspace"],
