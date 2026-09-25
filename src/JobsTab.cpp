@@ -205,8 +205,8 @@ const QList<JobsTab::Job> &JobsTab::jobs() {
          QStringLiteral("the conversation in each agent pane"), QStringLiteral("main"), false},
         {QStringLiteral("subagent"), QStringLiteral("subagents"),
          QStringLiteral("agents the main agent starts"), QStringLiteral("main"), true},
-        {QStringLiteral("switchboard"), QStringLiteral("helper agent"),
-         QStringLiteral("the switchboard, and the helper in options, actions and sessions"),
+        {QStringLiteral("switchboard"), QStringLiteral("system-pane agent"),
+         QStringLiteral("the Board, Options, Actions, Sessions, and Models"),
          QStringLiteral("main"), true},
 
         {QStringLiteral("planning"), QStringLiteral("plan mode"),

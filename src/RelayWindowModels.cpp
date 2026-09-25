@@ -100,7 +100,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             relay::SettingRow none;
             none.kind = relay::SettingRow::Info;
             none.id = QStringLiteral("info:models/none");
-            none.label = QStringLiteral("Starting the helper agent to read your providers…");
+            none.label = QStringLiteral("Starting the agent to read your providers…");
             models.rows << none;
         }
         // The add-key flow, shared by the listed rows and "+ add provider".
@@ -370,7 +370,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                         form->addRow(QStringLiteral("name"), name);
                         form->addRow(QStringLiteral("config directory"), dir);
                         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-                        auto *withHelper = buttons->addButton(QStringLiteral("Set up with helper agent"),
+                        auto *withHelper = buttons->addButton(QStringLiteral("Set up with agent"),
                                                                QDialogButtonBox::ActionRole);
                         connect(withHelper, &QPushButton::clicked, &dialog, [&dialog] { dialog.done(2); });
                         connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, name] {
@@ -406,7 +406,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                                             && !preset.startsWith(QStringLiteral("guest:"))) console->askAgent(prompt);
                                         else {
                                             console->draftInComposer(prompt);
-                                            notice(QStringLiteral("Choose a non-guest model for the helper, then send the prepared setup request."));
+                                            notice(QStringLiteral("Choose a non-guest model for the agent, then send the prepared setup request."));
                                         }
                                     });
                             });

@@ -356,6 +356,7 @@ QLabel#route { color: @accent; font-family: "@mono"; }
    "shell" here, so a pane frame must not compete with the composer (relay-dark.toml). */
 QLabel#paneTitle { color: @muted; font-weight: 600; }
 QLabel#paneTitle[relayActive="true"] { color: @text; }
+QLabel#paneConsoleKind { color: @muted; font-size: 9pt; background: @raised; border: 1px solid @border; border-radius: 4px; padding: 0 4px; }
 QLabel#paneCwd { color: @muted; font-size: 9pt; }
 /* The claims chip before the title (#C7PF, #0FBB): as quiet as the directory and no focus mark,
    but a button — the ring shows where Tab landed, and nothing else changes with focus. */

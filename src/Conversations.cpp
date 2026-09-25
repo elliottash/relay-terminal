@@ -762,7 +762,7 @@ class SessionsContext final : public relay::agent::Context {
         return spec;
     }
 
-    QString placeholder() const override { return QStringLiteral("Ask the %1 helper…").arg(m_pane->paneTitle()); }
+    QString placeholder() const override { return QStringLiteral("Ask the %1 agent…").arg(m_pane->paneTitle()); }
 
     // `session:<id>` is this pane's own business: the helper was asked about what is in the list
     // and answered with a row of it, so the row is selected *here* rather than the window being
@@ -775,7 +775,7 @@ class SessionsContext final : public relay::agent::Context {
         return true;
     }
 
-    QString title() const { return QStringLiteral("%1 helper").arg(m_pane->paneTitle()); }
+    QString title() const { return QStringLiteral("%1 agent").arg(m_pane->paneTitle()); }
     void tabChanged() { changed(); }
 
     void setTabId(const QString &tabId) { if (tabId != m_tabId) { m_tabId = tabId; changed(); } }
@@ -1259,7 +1259,7 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_tabs, &QTabWidget::currentChanged, this, [this] {
         if (currentTab() == QLatin1String("sessions")) m_sessionPages->setCurrentIndex(0);
         if (m_context) m_context->tabChanged();
-        if (m_helperHead) m_helperHead->setText(QStringLiteral("%1 helper").arg(paneTitle()));
+        if (m_helperHead) m_helperHead->setText(QStringLiteral("%1 agent").arg(paneTitle()));
         if (onTabActivated) onTabActivated(currentTab());
         if (currentTab() == QLatin1String("sessions")) refresh();
         focusSearch();
@@ -1677,11 +1677,11 @@ void SessionManager::applyHelperCollapsed() {
 void SessionManager::updateHelperRow() {
     if (m_askRow) {
         if (auto *ask = m_askRow->findChild<QToolButton *>(QStringLiteral("boardChatAsk"))) {
-            ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
-                                             : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
+            ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Agent")
+                                             : QStringLiteral("Agent (%1)").arg(m_askKeys));
             ask->setToolTip(m_askKeys.isEmpty()
-                ? QStringLiteral("Ask the helper agent about this pane.")
-                : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
+                ? QStringLiteral("Ask the agent about this pane.")
+                : QStringLiteral("Ask the agent about this pane (%1).").arg(m_askKeys));
         }
     }
     if (m_helperHead && m_context) m_helperHead->setText(m_context->title());

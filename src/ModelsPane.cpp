@@ -67,9 +67,9 @@ class ModelsContext final : public agent::Context {
         return spec;
     }
 
-    QString placeholder() const override { return QStringLiteral("Ask the Models helper…"); }
+    QString placeholder() const override { return QStringLiteral("Ask the Models agent…"); }
 
-    QString title() const { return QStringLiteral("Models helper"); }
+    QString title() const { return QStringLiteral("Models agent"); }
 
     void setTabId(const QString &tabId) { if (tabId != m_tabId) { m_tabId = tabId; changed(); } }
     void setWorkspace(const QString &workspace) {
@@ -175,7 +175,7 @@ ModelsPane::ModelsPane(std::function<QList<SettingsSection>()> sections, QWidget
     m_tabs->setTabToolTip(1, QStringLiteral("Choose which models are enabled"));
     m_tabs->setTabToolTip(2, QStringLiteral("Set the model pick order, fallbacks, ties, and box cutoff"));
     m_tabs->setTabToolTip(3, QStringLiteral("Set reasoning effort for each model"));
-    m_tabs->setTabToolTip(4, QStringLiteral("Choose what Planning, Subagents, and Helper run on"));
+    m_tabs->setTabToolTip(4, QStringLiteral("Choose what Planning, Subagents, and system-pane agents run on"));
     layout->addWidget(m_tabs);
     relay::paneTabs::registerTabs(this, m_tabs);
 
@@ -610,11 +610,11 @@ void ModelsPane::applyHelperCollapsed() {
 // "Helper Agent (Alt+Q)" — the live key in the button's own text.
 void ModelsPane::updateHelperRow() {
     if (m_ask) {
-        m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
-                                           : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
+        m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Agent")
+                                           : QStringLiteral("Agent (%1)").arg(m_askKeys));
         m_ask->setToolTip(m_askKeys.isEmpty()
-            ? QStringLiteral("Ask the Models helper about models and routing.")
-            : QStringLiteral("Ask the Models helper about models and routing (%1).").arg(m_askKeys));
+            ? QStringLiteral("Ask the Models agent about models and routing.")
+            : QStringLiteral("Ask the Models agent about models and routing (%1).").arg(m_askKeys));
     }
     if (m_helperHead && m_context) m_helperHead->setText(m_context->title());
 }

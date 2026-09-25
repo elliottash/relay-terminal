@@ -223,7 +223,7 @@ The JSON Relay ships is `Keymap::presetJson()` in `src/Keymap.h`; this copy mirr
 }
 ```
 
-**Since issue #78BN:** one key is the whole of "new pane". `pane.splitRight` makes a pane on the
+**Since issue #78BN:** Ctrl+E is **New shell**. `pane.splitRight` makes a shell pane on the
 right, and Left, Up or Down within two seconds re-docks it to that side, so **`pane.splitDown` has no
 default key in any preset** and `pane.splitLeft` / `pane.splitUp` have none either. All four keep an
 action, so they can still be bound here or run from the palette. The rows above record what each

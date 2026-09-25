@@ -370,7 +370,7 @@ class OptionsContext final : public agent::Context {
     agent::ContextSpec spec() const override {
         const bool actions = m_pane->mode() == SettingsPane::Mode::Actions;
         agent::ContextSpec spec;
-        // The mode decides both: a turn asked in Actions is answered by the Actions helper, with
+        // The mode decides both: a turn asked in Actions is answered by the Actions agent, with
         // the Actions brief, on the same conversation. That is what "the helper follows the mode"
         // has always meant here (#FEJQ) — only now it is one field rather than a `pane` tag.
         spec.name = actions ? QStringLiteral("actions") : QStringLiteral("options");
@@ -395,7 +395,7 @@ class OptionsContext final : public agent::Context {
     }
 
     QString placeholder() const override {
-        return QStringLiteral("Ask the %1 helper…").arg(
+        return QStringLiteral("Ask the %1 agent…").arg(
             m_pane->mode() == SettingsPane::Mode::Actions ? QStringLiteral("Actions")
                                                           : QStringLiteral("Options"));
     }
@@ -412,8 +412,8 @@ class OptionsContext final : public agent::Context {
     }
 
     QString title() const {
-        return m_pane->mode() == SettingsPane::Mode::Actions ? QStringLiteral("Actions helper")
-                                                             : QStringLiteral("Options helper");
+        return m_pane->mode() == SettingsPane::Mode::Actions ? QStringLiteral("Actions agent")
+                                                             : QStringLiteral("Options agent");
     }
 
     void setTabId(const QString &tabId) { if (tabId != m_tabId) { m_tabId = tabId; changed(); } }
@@ -1607,11 +1607,11 @@ void SettingsPane::applyHelperCollapsed() {
 // rather than leaving an empty label behind.
 void SettingsPane::updateHelperRow() {
     if (m_ask) {
-        m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Helper Agent")
-                                           : QStringLiteral("Helper Agent (%1)").arg(m_askKeys));
+        m_ask->setText(m_askKeys.isEmpty() ? QStringLiteral("Agent")
+                                           : QStringLiteral("Agent (%1)").arg(m_askKeys));
         m_ask->setToolTip(m_askKeys.isEmpty()
-            ? QStringLiteral("Ask the helper agent about this pane.")
-            : QStringLiteral("Ask the helper agent about this pane (%1).").arg(m_askKeys));
+            ? QStringLiteral("Ask the agent about this pane.")
+            : QStringLiteral("Ask the agent about this pane (%1).").arg(m_askKeys));
     }
     if (m_helperHead && m_context) m_helperHead->setText(m_context->title());
 }
