@@ -100,14 +100,14 @@ private slots:
         view.toolStarted(json("{'call_id':'c1','turn_id':'t1','tool':'run_command',"
                               " 'label':{'kind':'run','running':'running pytest','title':'ran pytest'}}"));
         QCOMPARE(view.toolRowCount(), 1);
-        QCOMPARE(view.toolLines().first(), QStringLiteral("▸ running pytest…"));
+        QVERIFY(view.toolLines().first().startsWith(QStringLiteral("▸ running pytest… · ")));
         view.toolOutput(2);   // two lines, however the worker said so (§ 23.10, #PPR4)
         QVERIFY(view.toolLines().first().contains(QStringLiteral("2 lines")));
         view.toolResult(json("{'call_id':'c1','turn_id':'t1','tool':'run_command','ok':true,"
                              " 'label':{'kind':'run','running':'running pytest','title':'ran pytest',"
                              "          'stats':['212 lines','exit 1','8 s'],'ok':true}}"));
         QCOMPARE(view.toolRowCount(), 1);
-        QCOMPARE(view.toolLines().first(), QStringLiteral("▸ ran pytest · 212 lines · exit 1 · 8 s"));
+        QVERIFY(view.toolLines().first().startsWith(QStringLiteral("▸ ran pytest · 212 lines · exit 1 · 8 s · ")));
         // The settled row is in the log once, where the running one was.
         QCOMPARE(view.plainText().count(QStringLiteral("ran pytest")), 1);
         QCOMPARE(view.plainText().count(QStringLiteral("running pytest")), 0);
@@ -118,7 +118,7 @@ private slots:
         view.toolResult(json("{'call_id':'c1','turn_id':'t1','tool':'edit_file','ok':false,"
                              " 'label':{'kind':'edit','running':'editing x.py','title':'edit x.py',"
                              "          'error':'old_string was not found','ok':false}}"));
-        QCOMPARE(view.toolLines().first(), QStringLiteral("▸ edit x.py ✗ · old_string was not found"));
+        QVERIFY(view.toolLines().first().startsWith(QStringLiteral("▸ edit x.py ✗ · old_string was not found · ")));
     }
 
     void aRunOfReadsIsOneRow() {
@@ -159,8 +159,8 @@ private slots:
         view.toolResult(json("{'call_id':'c1','turn_id':'t2','tool':'run_command','ok':true,"
                              " 'label':{'kind':'run','title':'ran second','ok':true}}"));
         QCOMPARE(view.toolRowCount(), 2);
-        QCOMPARE(view.toolLines().at(0), QStringLiteral("▸ ran first"));
-        QCOMPARE(view.toolLines().at(1), QStringLiteral("▸ ran second"));
+        QVERIFY(view.toolLines().at(0).startsWith(QStringLiteral("▸ ran first · ")));
+        QVERIFY(view.toolLines().at(1).startsWith(QStringLiteral("▸ ran second · ")));
     }
 
     void aClickAsksTheWorkerAndTheReplyFoldsOpen() {

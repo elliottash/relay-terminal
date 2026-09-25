@@ -249,9 +249,9 @@ private slots:
     // rewrites, and absent when the caller passes none.
     void runningRowShowsStartStamp() {
         QCOMPARE(runningRow(pytest(), 0, 0, QStringLiteral("14:32:05")).rest,
-                 QStringLiteral(" · since 14:32:05"));
+                 QStringLiteral(" · 14:32:05"));
         QCOMPARE(runningRow(pytest(), 0, 4100, QStringLiteral("14:32:05")).rest,
-                 QStringLiteral(" · 4,100 lines · since 14:32:05"));
+                 QStringLiteral(" · 4,100 lines · 14:32:05"));
         QVERIFY(runningRow(pytest(), 0).rest.isEmpty());
     }
 
@@ -336,12 +336,12 @@ private slots:
         LineCursor cursor;
         cursor.setCells(0);
         const Step started = cursor.start(QStringLiteral("c1"), pytest());
-        QVERIFY(started.row.rest.contains(QStringLiteral("since ")));
-        const QString stamp = started.row.rest.section(QStringLiteral("since "), 1);
+        const QString stamp = started.row.rest.section(QStringLiteral(" · "), -1);
+        QCOMPARE(stamp.size(), 8);
 
         const Step live = cursor.live(QStringLiteral("c1"), pytest(), 500, 0);
         QVERIFY(live.rewrite);
-        QCOMPARE(live.row.rest, QStringLiteral(" · 500 lines · since %1").arg(stamp));
+        QCOMPARE(live.row.rest, QStringLiteral(" · 500 lines · %1").arg(stamp));
     }
 
     void anythingPrintedBetweenForcesANewRow() {        LineCursor cursor;
@@ -429,8 +429,7 @@ private slots:
         const Step tick = cursor.live(QStringLiteral("c1"), pytest(), 120, 0);
         QVERIFY(tick.rewrite);
         QVERIFY(tick.hold);
-        QCOMPARE(tick.row.rest.section(QStringLiteral(" · since "), 0, 0),
-                 QStringLiteral(" · 120 lines"));   // the "since HH:mm:ss" stamp follows
+        QVERIFY(tick.row.rest.startsWith(QStringLiteral(" · 120 lines · ")));
         QVERIFY(cursor.live(QStringLiteral("c2"), pytest(), 3, 0).nothing);
         cursor.other();
         QVERIFY(cursor.live(QStringLiteral("c1"), pytest(), 9, 0).nothing);
