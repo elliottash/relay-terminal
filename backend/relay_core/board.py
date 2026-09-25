@@ -377,6 +377,14 @@ def date_flags(card: "Card", today: date | None = None, milestones: Mapping | No
     return out
 
 
+def card_links(card: "Card") -> dict:
+    """The card's `links` object for reading.  A hand-edited card can hold something else there
+    (a bare id list was seen on 2026-09-25); that reads as no links rather than taking every
+    Board page down with an AttributeError."""
+    links = card.front.get("links")
+    return links if isinstance(links, dict) else {}
+
+
 def links_index(cards: Iterable["Card"]) -> dict:
     """The reverse of every card-to-card link, computed in one pass and never written (#MJ76):
     `children[id]` (cards whose `parent` is id), `blocks[id]` (cards blocked_by id),
@@ -399,7 +407,7 @@ def links_index(cards: Iterable["Card"]) -> dict:
         dup = str(card.front.get("duplicate_of") or "").strip().lstrip("#").upper()
         if dup and dup != card.id:
             _add("duplicated_by", dup, card)
-        for other in _link_ids((card.front.get("links") or {}).get("related")):
+        for other in _link_ids(card_links(card).get("related")):
             if other != card.id:
                 _add("related_from", other, card)
     for kind in index.values():

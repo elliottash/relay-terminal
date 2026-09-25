@@ -2211,7 +2211,7 @@ class BoardTools:
                    "duplicated_by": links["duplicated_by"].get(card.id or "", []),
                    "related_from": links["related_from"].get(card.id or "", [])}
         commits = B.commit_details(self.board.repo,
-                                  (card.front.get("links") or {}).get("commits") or [])
+                                  B.card_links(card).get("commits") or [])
         return {**({"qa": qa} if qa else {}),
                 **({"verify_error": verify_error} if verify_error else {}),
                 "id": card.id, "hash": B.file_hash(card.path), "type": card.type,
