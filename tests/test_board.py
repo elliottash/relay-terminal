@@ -1307,7 +1307,7 @@ class BoardFolderTests(unittest.TestCase):
         files = B.scaffold(board)
         self.assertEqual(files, [".board/board.yaml", ".board/.gitignore",
                                  ".board/threads/.gitkeep", ".gitattributes",
-                                 ".board/POLICY.md", "AGENTS.md"])
+                                 ".board/POLICY.md", "RELAY.md", "AGENTS.md"])
         self.assertEqual(B.board_folder(self.dir), board.root)
         self.assertIn(".board/threads/*.md merge=union",
                       (self.dir / ".gitattributes").read_text())
@@ -1317,7 +1317,7 @@ class BoardFolderTests(unittest.TestCase):
         files = B.scaffold(board)
         self.assertEqual(files, [".switchboard/board.yaml", ".switchboard/.gitignore",
                                  ".switchboard/threads/.gitkeep", ".gitattributes",
-                                 ".switchboard/POLICY.md", "AGENTS.md"])
+                                 ".switchboard/POLICY.md", "RELAY.md", "AGENTS.md"])
         self.assertEqual(B.board_folder(self.dir), board.root)
         self.assertIn(".switchboard/threads/*.md merge=union",
                       (self.dir / ".gitattributes").read_text())
@@ -1327,7 +1327,7 @@ class BoardFolderTests(unittest.TestCase):
         files = B.scaffold(board)
         self.assertEqual(files, ["switchboard/board.yaml", "switchboard/.gitignore",
                                  "switchboard/threads/.gitkeep", ".gitattributes",
-                                 "switchboard/POLICY.md", "AGENTS.md"])
+                                 "switchboard/POLICY.md", "RELAY.md", "AGENTS.md"])
         self.assertIn("version: 1", (board.root / B.BOARD_CONFIG).read_text())
         self.assertIn(".private/", (board.root / ".gitignore").read_text())
         self.assertTrue((board.root / "threads").is_dir())
@@ -1584,7 +1584,9 @@ class PolicyFileTests(unittest.TestCase):
         when it next scaffolds or indexes that board.
         """
         repo = Path(B.__file__).resolve().parents[2]
-        root = repo / B.LEGACY_BOARD_FOLDER
+        # The board this checkout actually uses (#WC3E as of the issues/ → .board/ move): a
+        # leftover gitignored legacy folder must not fail the suite on a machine that has one.
+        root = B.board_folder(repo)
         policy = root / B.POLICY_FILE
         if not policy.is_file():                           # pragma: no cover - not this checkout
             self.skipTest(f"{policy} is not in this tree")
@@ -1605,11 +1607,14 @@ class PolicyFileTests(unittest.TestCase):
         self.assertTrue(text.startswith("# Project\n\nThe project's own rules.\n"))
         self.assertIn(B.POINTER_START, text)
         self.assertIn(B.POINTER_END, text)
-        self.assertIn(".board/POLICY.md", text)
-        self.assertIn("needs-verification", text)
-        # The one sentence that tells an agent where the cards are and how to keep them out of
-        # a code search (owner, 2026-09-21, #1CXD).
-        self.assertIn("rg --hidden", text)
+        self.assertIn("@RELAY.md", text)                 # the note is an import (#C8XD)
+        # The policy itself, with the cards folder and the rg hint (owner, 2026-09-21, #1CXD),
+        # now lives in RELAY.md rather than being embedded here.
+        self.assertNotIn(".board/POLICY.md", text)
+        relay_md = (self.dir / "RELAY.md").read_text()
+        self.assertIn(".board/POLICY.md", relay_md)
+        self.assertIn("needs-verification", relay_md)
+        self.assertIn("rg --hidden", relay_md)
 
     def test_an_agents_md_is_created_with_an_import_when_only_claude_md_exists(self):
         # instructions.py loads the FIRST hit per directory in PROJECT_ORDER, so a new AGENTS.md
@@ -1643,17 +1648,42 @@ class PolicyFileTests(unittest.TestCase):
         for name in ("CLAUDE.md", "AGENTS.md"):
             self.assertIn(B.POINTER_START, (self.dir / name).read_text())
 
-    def test_warp_md_is_never_touched(self):
-        # WARP.md remains a compatible instruction source, but Board scaffolding writes its
-        # pointer only to AGENTS.md and CLAUDE.md; Relay's agent has the policy in its prompt.
-        (self.dir / "WARP.md").write_text("# Warp\n")
-        (self.dir / "RELAY.md").write_text("# Relay\n")
-        (self.dir / "CLAUDE.md").write_text("# Project\n")
+    def test_warp_md_gets_the_note_and_is_never_created_or_renamed(self):
+        # WARP.md is the Warp terminal's own agents file (#C8XD): annotated in place when it
+        # exists, never written from scratch, never renamed, nothing outside the markers touched.
+        (self.dir / "WARP.md").write_text("# Warp\n\nThe terminal's own rules.\n")
         files = B.scaffold(self.board())
-        self.assertNotIn("WARP.md", files)
-        self.assertNotIn("RELAY.md", files)
-        self.assertEqual((self.dir / "WARP.md").read_text(), "# Warp\n")
-        self.assertEqual((self.dir / "RELAY.md").read_text(), "# Relay\n")
+        self.assertIn("WARP.md", files)
+        self.assertIn("RELAY.md", files)                 # the guidance the note points at
+        text = (self.dir / "WARP.md").read_text()
+        self.assertTrue(text.startswith("# Warp\n\nThe terminal's own rules.\n"))
+        self.assertIn("@RELAY.md", text)
+        self.assertIn("relay_core.board.note_text", text)
+        self.assertNotIn("POLICY.md", text)              # the policy itself is not embedded
+
+    def test_an_old_embedded_policy_block_migrates_to_the_note(self):
+        # A project scaffolded before #C8XD holds the full policy block in CLAUDE.md/AGENTS.md;
+        # the next run moves it into RELAY.md and leaves the note behind.
+        block = B.pointer_text(self.board())
+        (self.dir / "CLAUDE.md").write_text("# Project\n\nRules.\n\n" + block + "\n")
+        (self.dir / "AGENTS.md").write_text("# Agents\n\n" + block + "\n")
+        files = B.scaffold(self.board())
+        self.assertIn("RELAY.md", files)
+        relay_md = (self.dir / "RELAY.md").read_text()
+        self.assertIn("Before doing work, read `.board/POLICY.md`", relay_md)
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            text = (self.dir / name).read_text()
+            self.assertIn("@RELAY.md", text)
+            self.assertNotIn("Before doing work, read", text)   # the policy lives in RELAY.md now
+            self.assertEqual(text.count(B.POINTER_START), 1)
+
+    def test_a_hand_written_relay_md_gains_the_block_without_losing_a_word(self):
+        (self.dir / "RELAY.md").write_text("# Mine\n\nEvery word here is the owner's.\n")
+        files = B.scaffold(self.board())
+        self.assertIn("RELAY.md", files)
+        text = (self.dir / "RELAY.md").read_text()
+        self.assertTrue(text.startswith("# Mine\n\nEvery word here is the owner's.\n"))
+        self.assertIn("## Board (Relay)", text)
 
     def test_a_second_scaffold_changes_nothing(self):
         (self.dir / "CLAUDE.md").write_text("# Project\n")
@@ -1718,6 +1748,21 @@ class PolicyReachesTheRelayPromptTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name).resolve()
+
+    def test_the_note_imports_relay_md_into_every_prompt(self):
+        # #C8XD: the files keep only the @RELAY.md note, and the note is a real import, so the
+        # Board policy reaches the prompt through RELAY.md instead of being embedded twice.
+        from relay_core import instructions
+        (self.dir / ".git").mkdir()
+        (self.dir / "CLAUDE.md").write_text("# Project\n\nCLAUDE-ONLY-MARKER: build with ninja.\n")
+        board = B.Board(self.dir / ".switchboard", self.dir)
+        B.scaffold(board)
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            self.assertNotIn("Before doing work, read", (self.dir / name).read_text())
+        loaded = instructions.load({"files": [], "project_auto": True}, self.dir)
+        self.assertIn(str(self.dir / "RELAY.md"), loaded.loaded)
+        self.assertIn("Before doing work, read", loaded.section)
+        self.assertIn("CLAUDE-ONLY-MARKER: build with ninja.", loaded.section)  # the chain holds
 
     def test_the_created_agents_md_imports_the_claude_md_it_would_shadow(self):
         from relay_core import instructions
