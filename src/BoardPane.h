@@ -203,6 +203,10 @@ public:
     // What the list shows right now, headers and cards in order (design 4.6). Public so a test
     // can read the list without walking widgets.
     const QList<board::Row> &rows() const { return m_rows; }
+    // The claim chip on a card's row (#YJ4A): where the ⧉ naming the pane that claimed it is
+    // drawn, in viewport coordinates, so a test can click the same rect the click guard uses.
+    // Empty when the card has no live claim — a closed pane and a dropped badge leave no chip.
+    QRect claimChipRect(const QString &cardId) const;
 
     // Which sections are folded, for the layout node. A new pane starts with every section
     // folded; saved panes restore their exact set with the rest of the window's state.

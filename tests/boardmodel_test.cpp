@@ -382,6 +382,7 @@ private slots:
     void aClaimedCardCarriesThePanesSession();
     void aClaimedRowSaysWhichPaneHoldsItAndWhetherItIsStillOpen();
     void theCardPageLinksTheClaimToThePaneAndMutesAClosedOne();
+    void aClaimedCardsRowLinksItsChipToThePane();
     void aRowDropsItsLeastImportantBadgesFirst();
     void theBodyLosesOnlyAHeadingThatRepeatsTheTitle();
     void threadEntriesSayHowLongAgo();
@@ -1214,6 +1215,45 @@ void BoardModelTests::theCardPageLinksTheClaimToThePaneAndMutesAClosedOne()
     openCard(view, sent, page);
     QVERIFY(meta->text().contains(QStringLiteral("\u29C9 9f3a7c21 closed")));
     QVERIFY(!meta->text().contains(QStringLiteral("relay-pane:")));
+}
+
+// The row carries the same link the card page does (#YJ4A): a click on the claim chip at its end
+// reveals the pane that claimed the card — and it is only the chip: the click is neither a
+// selection nor a card open. A closed pane's chip is paint, not a link, and a card nobody
+// claimed has no chip to click.
+void BoardModelTests::aClaimedCardsRowLinksItsChipToThePane()
+{
+    const QString token = QStringLiteral("9f3a7c21d4e5b6a7");
+    QJsonObject claimed = row("K7Q2", "executing", "features");
+    claimed.insert(QStringLiteral("session"), token);
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(::opened({claimed, row("M3XJ", "ready", "features")}));
+    view.setCollapsedSections(QJsonArray{});
+
+    QListWidget *list = view.findChild<QListWidget *>(QStringLiteral("boardList"));
+    QVERIFY(list);
+    // The view is never shown, so its layout never sizes the list; give the row the width a real
+    // pane has, which is what the chip's place depends on.
+    list->resize(1280, 600);
+    QCOMPARE(view.claimChipRect(QStringLiteral("M3XJ")), QRect());   // nobody claimed it
+    const QRect chip = view.claimChipRect(QStringLiteral("K7Q2"));
+    QVERIFY2(chip.isValid(), qPrintable(QStringLiteral("list width %1, rows %2")
+                                            .arg(list->viewport()->width())
+                                            .arg(view.rows().size())));
+
+    QStringList revealed;
+    view.onFocusPane = [&revealed](const QString &t) { revealed << t; };
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, chip.center());
+    QCOMPARE(revealed, QStringList{token});
+    QVERIFY(sent.isEmpty());   // the chip's click opened no card
+
+    // The pane has gone: the chip is inert paint, and the same click does nothing.
+    view.paneExists = [](const QString &) { return false; };
+    QCOMPARE(view.claimChipRect(QStringLiteral("K7Q2")), QRect());
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, Qt::NoModifier, chip.center());
+    QCOMPARE(revealed, QStringList{token});
 }
 
 void BoardModelTests::aRowDropsItsLeastImportantBadgesFirst()

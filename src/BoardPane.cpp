@@ -657,6 +657,27 @@ public:
             .idCopyRect.translated(itemRect.topLeft());
     }
 
+    // The claim chip at a card row's end (#R9G7), given that row's rect: the ⧉ that names the
+    // pane that claimed the card. While that pane is open the chip is a link to it (#YJ4A), so
+    // this is its click target, exactly where paint() draws it — empty when the pane has closed
+    // (nothing to reveal) and when the row was too narrow to keep the badge at all, the way a
+    // dropped badge stops copying its filter term.
+    QRect sessionChipRectOf(int rowIndex, const QRect &itemRect) const
+    {
+        const board::Row *row = rowAt(rowIndex);
+        if (!row || row->kind != board::Row::Card)
+            return QRect();
+        const board::Card *card = m_model->card(row->cardId);
+        if (!card || card->session.isEmpty() || !sessionLive(card->session))
+            return QRect();
+        const CardShape shape = filteredShape(*card, row->showStatus, row->stage, m_list->font(),
+                                              rowWidth(), true);
+        for (const auto &placed : shape.badges)
+            if (placed.first.kind == board::Badge::Session)
+                return placed.second.translated(itemRect.topLeft());
+        return QRect();
+    }
+
     // The label a click at `at` (viewport coordinates) lands on in the card row at `rowIndex`
     // (#3ZAP): labels are the one badge that copies rather than decorates. A null string when
     // the click is anywhere else in the row.
@@ -1355,6 +1376,11 @@ public:
     std::function<void(const QString &cardId)> onCopyId;
     std::function<QRect(int rowIndex, const QRect &itemRect)> addRectOf, priorityRectOf,
         triageRectOf, idCopyRectOf;
+    // A click on the claim chip at a card row's end (#YJ4A): while the pane that claimed the
+    // card (#R9G7) is open, its ⧉ is a link that reveals that pane — the card page's chip link,
+    // on the row.
+    std::function<void(const QString &cardId)> onRevealPane;
+    std::function<QRect(int rowIndex, const QRect &itemRect)> sessionChipRectOf;
     // The label badge a point lands on, as text, or a null string (#3ZAP).
     std::function<QString(int rowIndex, const QRect &itemRect, const QPoint &at)> labelBadgeAt;
     static QString dragging;
@@ -1412,6 +1438,33 @@ protected:
                                                                          : QString();
     }
 
+    // The card whose claim chip a point lands on, or a null string (#YJ4A): press, release,
+    // double-click and the hover cursor share it, the one-gesture rule the ⧉ id-copy keeps. The
+    // rect is empty while the claiming pane is closed, so a dead chip is just paint.
+    QString sessionChipAt(const QPoint &at) const
+    {
+        if (!sessionChipRectOf)
+            return QString();
+        const QModelIndex index = indexAt(at);
+        const board::Row *row = rowAt(index.row());
+        if (!row || row->kind != board::Row::Card)
+            return QString();
+        const QRect rect = sessionChipRectOf(index.row(), visualRect(index));
+        return rect.isValid() && rect.adjusted(-2, -2, 2, 2).contains(at) ? row->cardId
+                                                                         : QString();
+    }
+
+    QString sessionChipUnder(const QMouseEvent *event) const
+    {
+        if (event->button() != Qt::LeftButton)
+            return QString();
+#if QT_VERSION_MAJOR >= 6
+        return sessionChipAt(event->position().toPoint());
+#else
+        return sessionChipAt(event->pos());
+#endif
+    }
+
     // A click on a section header toggles it, or adds into it; it never becomes a selection.
     void mousePressEvent(QMouseEvent *event) override
     {
@@ -1449,6 +1502,14 @@ protected:
         if (const QString label = labelBadgeUnder(event); !label.isEmpty()) {
             if (onCopyLabel)
                 onCopyLabel(label);
+            event->accept();
+            return;
+        }
+        // The claim chip at the row's end is a link to the pane that claimed the card (#YJ4A):
+        // a reveal, never a selection — the card page's chip, on the row.
+        if (const QString id = sessionChipUnder(event); !id.isEmpty()) {
+            if (onRevealPane)
+                onRevealPane(id);
             event->accept();
             return;
         }
@@ -1509,6 +1570,10 @@ protected:
             event->accept();
             return;
         }
+        if (!sessionChipUnder(event).isEmpty()) {
+            event->accept();
+            return;
+        }
         QListWidget::mouseReleaseEvent(event);
     }
 
@@ -1529,7 +1594,27 @@ protected:
             event->accept();
             return;
         }
+        // The claim chip again (#YJ4A): a second click is another reveal.
+        if (const QString id = sessionChipUnder(event); !id.isEmpty()) {
+            if (onRevealPane)
+                onRevealPane(id);
+            event->accept();
+            return;
+        }
         QListWidget::mouseDoubleClickEvent(event);
+    }
+
+    // The claim chip is the row's one link (#YJ4A), so it says so: the pointing hand over it
+    // while the pane it names is open, the arrow anywhere else on the list.
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+#if QT_VERSION_MAJOR >= 6
+        const bool overChip = !sessionChipAt(event->position().toPoint()).isEmpty();
+#else
+        const bool overChip = !sessionChipAt(event->pos()).isEmpty();
+#endif
+        viewport()->setCursor(overChip ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        QListWidget::mouseMoveEvent(event);
     }
 
     // Our own drag, not QListWidget's: the default image is the row painted on a transparent
@@ -2255,6 +2340,16 @@ void BoardView::buildChrome(QVBoxLayout *layout)
     m_list->onCopyLabel = [this](const QString &label) { copyTag(label); };
     m_list->idCopyRectOf = [delegate](int rowIndex, const QRect &itemRect) {
         return delegate->idCopyRectOf(rowIndex, itemRect);
+    };
+    m_list->sessionChipRectOf = [delegate](int rowIndex, const QRect &itemRect) {
+        return delegate->sessionChipRectOf(rowIndex, itemRect);
+    };
+    // A click on the claim chip reveals the pane that claimed the card (#YJ4A) — `revealClaim`
+    // is the same path the card page's chip link takes (#R9G7).
+    m_list->onRevealPane = [this](const QString &cardId) {
+        const board::Card *card = m_model.card(cardId);
+        if (card && !card->session.isEmpty())
+            revealClaim(card->session);
     };
     m_list->onCopyId = [this](const QString &id) {
         copyCardReference(id);
@@ -5757,7 +5852,8 @@ void BoardView::refill()
                    : m_signalThreads.isRunning(card->session)
                            ? QStringLiteral("\nWorked by %1, a signal thread Relay started")
                                      .arg(chip)
-                           : QStringLiteral("\nClaimed by the pane %1").arg(chip);
+                           : QStringLiteral("\nClaimed by the pane %1. Click the chip to open it.")
+                                     .arg(chip);
             }
             item->setToolTip(tip);
         }
@@ -6195,6 +6291,20 @@ void BoardView::revealClaim(const QString &token)
     }
     if (onFocusPane)
         onFocusPane(token);
+}
+
+QRect BoardView::claimChipRect(const QString &cardId) const
+{
+    // The same rect the click guard hit-tests, through the same std::function the pane wires
+    // (#YJ4A): a test clicking here and a user clicking there can only be the same click.
+    for (int i = 0; i < m_rows.size(); ++i) {
+        if (m_rows.at(i).kind != board::Row::Card || m_rows.at(i).cardId != cardId)
+            continue;
+        const QListWidgetItem *item = m_list->item(i);
+        return item ? m_list->sessionChipRectOf(i, m_list->visualItemRect(const_cast<QListWidgetItem *>(item)))
+                    : QRect();
+    }
+    return QRect();
 }
 
 void BoardView::announceSignalThread(const board::SignalThreadRun &run)
