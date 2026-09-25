@@ -41,6 +41,9 @@
 #include <QToolButton>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QTemporaryDir>   // (#G2C7) a throwaway .board for the claimed-code chips
+#include <QDir>
+#include <QFile>
 #include <QElapsedTimer>
 #include <QTreeWidgetItemIterator>
 #include <QUrl>
@@ -52,6 +55,15 @@ using namespace relay::conversations;
 // unfolded session holds. They are private to the file, so the test names them once, here.
 static constexpr int kBadgeRole = Qt::UserRole + 5;
 static constexpr int kHtmlRole = Qt::UserRole + 6;
+// (#G2C7) The instant filter's roles: title, sub line, the #card codes and their claimed
+// subset, the highlighted runs in the title and the snippet, and the instant pass' rank.
+static constexpr int kTitleRole = Qt::UserRole + 3;
+static constexpr int kSubRole = Qt::UserRole + 4;
+static constexpr int kCodesRole = Qt::UserRole + 10;
+static constexpr int kCodesClaimedRole = Qt::UserRole + 11;
+static constexpr int kTitleRangesRole = Qt::UserRole + 12;
+static constexpr int kSubRangesRole = Qt::UserRole + 13;
+static constexpr int kInstantRole = Qt::UserRole + 14;
 
 static QString unfoldedText(QTreeWidgetItem *row) {
     QString all;
@@ -380,13 +392,23 @@ private slots:
 
     void managerGroupsByProjectAndSearches() {
         SessionManager dialog;
-        QJsonObject asked;
+        QJsonObject asked, meta;
         int queries = 0;
-        dialog.onQuery = [&asked, &queries](const QJsonObject &request) { asked = request; ++queries; };
-        // Showing the list asks for it: the default view is this project, everything, any time.
+        dialog.onQuery = [&asked, &meta, &queries](const QJsonObject &request) {
+            ++queries;
+            if (request.value(QStringLiteral("meta_only")).toBool())
+                meta = request;
+            else
+                asked = request;
+        };
+        // Showing the list asks for it: the default view is this project, everything, any time —
+        // and once more for the instant filter's light listing (#G2C7), which carries no query.
         dialog.resize(1000, 650);
         dialog.show();
-        QCOMPARE(queries, 1);
+        QCOMPARE(queries, 2);
+        QVERIFY(meta.value(QStringLiteral("meta_only")).toBool());
+        QCOMPARE(meta.value(QStringLiteral("id")).toString(), QStringLiteral("conv-meta"));
+        QVERIFY(!meta.contains(QStringLiteral("query")));
         QCOMPARE(asked.value(QStringLiteral("scope")).toString(), QStringLiteral("project"));
         QCOMPARE(asked.value(QStringLiteral("query")).toString(), QString());
         QVERIFY(!asked.contains(QStringLiteral("since")));
@@ -1471,9 +1493,10 @@ private slots:
         QVERIFY(header->isSortIndicatorShown());
 
         // Updated: oldest first, and a second choice toggles back; the combo follows both ways.
-        // The header itself is hidden since #1Q5V — sorting is the Sort ▾ menu's job — so
-        // the test drives the signal a header click used to carry; the wiring under it is
-        // unchanged.
+        // (#G2C7) The header is visible again — the columns it names are what a session row's
+        // values are drawn under — so the click a header used to carry is a real click again;
+        // the wiring under it is unchanged.
+        QVERIFY(header->isVisible());
         emit header->sectionClicked(1);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("oldest"));
         QCOMPARE(sort->currentData().toString(), QStringLiteral("oldest"));
@@ -1517,6 +1540,120 @@ private slots:
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("summary_desc"));
         emit header->sectionClicked(5);
         QCOMPARE(asked.last().value(QStringLiteral("sort")).toString(), QStringLiteral("tokens_desc"));
+    }
+
+    // (#G2C7) The columns the header names are back under a title that spans the width: the
+    // header shows, and the values a session row paints on its columns line are in the row's
+    // cells (empty cells — the row is spanned — but the delegate reads them, and the header's
+    // sections are fitted to them).
+    void columnsAreBackUnderTheStraddlingTitle() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        manager.setResults({{QStringLiteral("items"), QJsonArray{sessionItem(QStringLiteral("a"),
+                                                                        QStringLiteral("Alpha"))}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QHeaderView *header = tree->header();
+        QVERIFY(!header->isHidden());   // the pane is not shown here; isHidden is the truth
+        QCOMPARE(tree->headerItem()->text(1), QStringLiteral("Updated"));
+        // The session's value for that column is in its cell (the row is spanned, so the cells
+        // paint nothing — the delegate's columns line reads them) — the group row has none.
+        QVERIFY(!rowTitled(tree, QStringLiteral("Alpha"))->text(1).isEmpty());
+        // The section is wide enough for the values the delegate draws inside it.
+        QVERIFY(header->sectionSize(1) >= header->sectionSizeHint(1));
+    }
+
+    // (#G2C7) Typing filters titles on the keystroke, before any worker reply: exact title
+    // matches first, then ones that contain the words, each with the matched terms marked in
+    // the title; sessions that do not match are gone. No debounce is waited for.
+    void instantTitleFilterOrdersExactFirstAndMarksTheMatch() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        QJsonArray items{sessionItem(QStringLiteral("ex1"), QStringLiteral("conv about sqlite")),
+                         sessionItem(QStringLiteral("ex2"), QStringLiteral("sqlite conv")),
+                         sessionItem(QStringLiteral("ex3"), QStringLiteral("nothing here"))};
+        manager.setResults({{QStringLiteral("id"), QStringLiteral("conv-meta")},
+                            {QStringLiteral("items"), items}});
+        // The worker's list reply for that query: what the full-text pass matched. ex3 never
+        // matched anything, so it is not in the reply and cannot be in the list.
+        manager.setResults({{QStringLiteral("items"),
+                             QJsonArray{items.at(0), items.at(1)}}});
+        manager.setQuery(QStringLiteral("sqlite conv"));
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QCOMPARE(tree->topLevelItemCount(), 2);              // ex3 never matched anything
+        QTreeWidgetItem *exact = tree->topLevelItem(0);
+        QCOMPARE(exact->data(0, kTitleRole).toString(), QStringLiteral("sqlite conv"));
+        QCOMPARE(exact->data(0, kInstantRole).toInt(), 0);   // the exact title match leads
+        QTreeWidgetItem *contains = tree->topLevelItem(1);
+        QCOMPARE(contains->data(0, kTitleRole).toString(), QStringLiteral("conv about sqlite"));
+        QCOMPARE(contains->data(0, kInstantRole).toInt(), 1);   // its first word starts a word
+        // The matched words are marked where they sit in the title.
+        const QVariantList runs = contains->data(0, kTitleRangesRole).toList();
+        QVERIFY(runs.size() >= 4);
+        const QString firstRun = contains->data(0, kTitleRole).toString()
+                                     .mid(runs.at(0).toInt(), runs.at(1).toInt() - runs.at(0).toInt());
+        QCOMPARE(firstRun, QStringLiteral("sqlite"));
+        manager.setQuery(QString());
+        // Cleared: the plain list returns — both sessions, under whatever grouping is on.
+        QVERIFY(rowTitled(tree, QStringLiteral("conv about sqlite")));
+        QVERIFY(rowTitled(tree, QStringLiteral("sqlite conv")));
+    }
+
+    // (#G2C7) A `#code` filters on the keystroke over the codes the index recorded, and the
+    // chips carry which codes the board holds a claim on: claimed-or-was-claimed is the boxed,
+    // bold set; a code with no card behind it is plain.
+    void codeChipsFilterInstantlyAndBoldClaimedOnes() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        QJsonObject withCodes = sessionItem(QStringLiteral("ex1"), QStringLiteral("board talk"));
+        withCodes.insert(QStringLiteral("codes"), QJsonArray{QStringLiteral("G2C7"), QStringLiteral("ZZZZ")});
+        manager.setResults({{QStringLiteral("id"), QStringLiteral("conv-meta")},
+                            {QStringLiteral("items"), QJsonArray{withCodes}}});
+        QTemporaryDir board;
+        QDir(board.path()).mkpath(QStringLiteral("threads"));
+        QFile marker(board.filePath(QStringLiteral("threads/G2C7.md")));
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        QVERIFY(marker.write(QByteArrayLiteral("agent claimed this card\n")) > 0);
+        marker.close();
+        manager.setBoardRoot(board.path());
+        manager.setQuery(QStringLiteral("#g2c7"));           // lowercase, as it gets typed
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QTreeWidgetItem *row = tree->topLevelItem(0);
+        const QStringList codes = row->data(0, kCodesRole).toStringList();
+        QCOMPARE(codes.size(), 2);
+        QVERIFY(codes.contains(QStringLiteral("G2C7")));
+        QVERIFY(codes.contains(QStringLiteral("ZZZZ")));
+        QCOMPARE(row->data(0, kCodesClaimedRole).toStringList(), QStringList{QStringLiteral("G2C7")});
+    }
+
+    // (#G2C7) When the worker's full-text reply lands, the first hit's line is the sub line
+    // with its matched ranges, in place of the opening prompt — including on a row the
+    // instant pass had already placed.
+    void fullTextReplyPutsTheMatchedLineInTheSubLine() {
+        SessionManager manager;
+        QList<QJsonObject> asked;
+        manager.onQuery = [&asked](const QJsonObject &request) { asked << request; };
+        QJsonObject item = sessionItem(QStringLiteral("ex1"), QStringLiteral("a sqlite question"));
+        QJsonObject match;
+        match.insert(QStringLiteral("line"), QStringLiteral("the sqlite cache is a cache"));
+        match.insert(QStringLiteral("turn"), 3);
+        match.insert(QStringLiteral("ranges"), QJsonArray{QJsonArray{4, 10}});
+        item.insert(QStringLiteral("matches"), QJsonArray{match});
+        manager.setResults({{QStringLiteral("id"), QStringLiteral("conv-meta")},
+                            {QStringLiteral("items"), QJsonArray{item}}});
+        manager.setQuery(QStringLiteral("sqlite"));          // instant pass arms over titles
+        manager.setResults({{QStringLiteral("items"), QJsonArray{item}}});
+        auto *tree = manager.findChild<QTreeWidget *>(QStringLiteral("sessionsTree"));
+        QTreeWidgetItem *row = tree->topLevelItem(0);
+        QCOMPARE(row->data(0, kSubRole).toString(), QStringLiteral("the sqlite cache is a cache"));
+        const QVariantList runs = row->data(0, kSubRangesRole).toList();
+        QCOMPARE(runs.size(), 2);
+        QCOMPARE(row->data(0, kSubRole).toString().mid(runs.at(0).toInt(),
+                                                       runs.at(1).toInt() - runs.at(0).toInt()),
+                 QStringLiteral("sqlite"));
     }
 
     void filtersSendTheirOwnFieldsAndClear() {
@@ -1598,10 +1735,13 @@ private slots:
         QCOMPARE(tree->topLevelItemCount(), 2);
         QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
         QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Last month"));
-        // The supplied search results keep the same grouping.
+        // The supplied search results keep the same grouping — and (#G2C7) a title match
+        // answers first: "Last month" carries the term "month", so the instant pass places
+        // it ahead of the worker's rows.
         manager.setQuery(QStringLiteral("month"));
         manager.setResults({{QStringLiteral("items"), QJsonArray{today, older}}});
-        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Today's work"));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QStringLiteral("Last month"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QStringLiteral("Today's work"));
     }
 
     void sessionsDropdownsRespondToMouseChoices() {
@@ -2427,10 +2567,12 @@ private slots:
             QCOMPARE(row->childCount(), 1);
             QVERIFY(row->child(0)->isFirstColumnSpanned());
         }
-        // The narrow columns are back to sizing themselves once the list is filled.
+        // (#G2C7) The sections are fitted to the values the delegate paints under them, not
+        // left to ResizeToContents (which, with empty cells, would size a section to its label
+        // alone); Recap still stretches.
         for (int column = 1; column < 5; ++column)
-            QCOMPARE(tree->header()->sectionResizeMode(column), QHeaderView::ResizeToContents);
-        QCOMPARE(tree->header()->sectionResizeMode(5), QHeaderView::ResizeToContents);
+            QCOMPARE(tree->header()->sectionResizeMode(column), QHeaderView::Interactive);
+        QCOMPARE(tree->header()->sectionResizeMode(5), QHeaderView::Interactive);
         QCOMPARE(tree->header()->sectionResizeMode(6), QHeaderView::Stretch);
     }
 

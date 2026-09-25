@@ -1557,7 +1557,8 @@ QList<Card> Model::cards(const QString &columnId) const
             continue;
         out << card;
     }
-    return sorted(out, columnId == doneSection() || columnId == verifiedSection());
+    const QList<Card> ordered = sorted(out, columnId == doneSection() || columnId == verifiedSection());
+    return textFilterActive() ? rankedForFilter(ordered) : ordered;   // (#G2C7) relevance first
 }
 
 int Model::openCount() const
@@ -1619,7 +1620,10 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
                 sectionOfCard.insert(card.id, column.id);
             }
         }
-        for (const Card &card : sorted(all, false)) {
+        QList<Card> flatCards = sorted(all, false);
+        if (textFilterActive())
+            flatCards = rankedForFilter(flatCards);   // (#G2C7) exact ids and titles answer first
+        for (const Card &card : flatCards) {
             Row row;
             row.kind = Row::Card;
             row.columnId = sectionOfCard.value(card.id);
@@ -1633,8 +1637,10 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
     for (const Column &column : list) {
         if (hidden.contains(column.id))
             continue;      // its checkbox is unticked: the section is not on the page at all
-        const QList<Card> cards = sorted(grouped.value(column.id),
-                                         column.id == doneSection() || column.id == verifiedSection());
+        QList<Card> cards = sorted(grouped.value(column.id),
+                                   column.id == doneSection() || column.id == verifiedSection());
+        if (textFilterActive())
+            cards = rankedForFilter(cards);   // (#G2C7) exact ids and titles answer first
         if (filtered && cards.isEmpty())
             continue;      // a section with nothing to show gets out of the way
         Row header;
@@ -1684,6 +1690,88 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
                 out << cardRow(card);
     }
     return out;
+}
+
+// (#G2C7) While the text filter is on, a section's cards answer it in relevance order: an
+// exact #id, then an exact title, then titles that carry the terms, then what only the body
+// matched — the same order the Sessions list answers in, as the owner asked. Stable inside a
+// rank, so the section's own sort survives as the tiebreak.
+QList<Card> Model::rankedForFilter(const QList<Card> &cards) const
+{
+    QList<QPair<int, int>> ranked;   // rank, index into `cards`
+    for (int i = 0; i < cards.size(); ++i)
+        ranked.append(qMakePair(filterRank(cards.at(i)), i));
+    std::stable_sort(ranked.begin(), ranked.end());
+    QList<Card> out;
+    out.reserve(cards.size());
+    for (const auto &entry : ranked)
+        out.append(cards.at(entry.second));
+    return out;
+}
+
+// (#G2C7) Where a card's answer to the text filter ranks. Rank 9 is a filter with no plain
+// terms (a `label:` or `#id` filter): there is nothing to rank by, and every card keeps the
+// section's own order.
+int Model::filterRank(const Card &card) const
+{
+    const QStringList terms = plainTerms(m_filter);
+    if (terms.isEmpty())
+        return 9;
+    const QString flat = terms.join(QLatin1Char(' '));
+    if (flat.compare(card.id, Qt::CaseInsensitive) == 0)
+        return 0;
+    if (card.title.trimmed().compare(flat, Qt::CaseInsensitive) == 0)
+        return 1;
+    int inTitle = 0;
+    for (const QString &term : terms)
+        if (card.title.contains(term, Qt::CaseInsensitive))
+            ++inTitle;
+    if (inTitle == terms.size())
+        return 2;
+    if (inTitle > 0)
+        return 3;
+    return 4;
+}
+
+// (#G2C7) The filter's marks on one card: where the terms landed in the title, and the first
+// line of the card's text a term landed in — the piece the owner asked to see, from the text
+// the local fallback already scans, so no worker round trip is added.
+board::Model::FilterMark Model::filterMark(const QString &title, const QString &text) const
+{
+    FilterMark mark;
+    const QStringList terms = plainTerms(m_filter);
+    if (terms.isEmpty())
+        return mark;
+    for (const QString &term : terms) {
+        int at = 0;
+        while ((at = title.indexOf(term, at, Qt::CaseInsensitive)) >= 0) {
+            mark.runs.append(qMakePair(at, at + term.size()));
+            at += term.size();
+        }
+    }
+    std::sort(mark.runs.begin(), mark.runs.end());
+    for (const QString &term : terms) {
+        const int at = text.indexOf(term, Qt::CaseInsensitive);
+        if (at < 0)
+            continue;
+        const int start = text.lastIndexOf(QLatin1Char('\n'), at) + 1;
+        int stop = text.indexOf(QLatin1Char('\n'), at);
+        if (stop < 0)
+            stop = text.size();
+        QString line = text.mid(start, stop - start);
+        if (line.size() > 140)
+            line = line.left(140);   // runs are found in what is shown, so this stays honest
+        mark.snippet = line;
+        for (const QString &again : terms) {
+            int from = 0;
+            while ((from = mark.snippet.indexOf(again, from, Qt::CaseInsensitive)) >= 0) {
+                mark.snippetRuns.append(qMakePair(from, from + again.size()));
+                from += again.size();
+            }
+        }
+        break;
+    }
+    return mark;
 }
 
 QStringList Model::allLabels() const

@@ -1340,6 +1340,9 @@ class SessionCommands:
                 raise ValueError(f"{name} must be an integer.")
         if type(request.get("include_threads", False)) is not bool:
             raise ValueError("include_threads must be true or false.")
+        # The instant filter's meta listing (#G2C7): the same filters, no text, no matches.
+        if type(request.get("meta_only", False)) is not bool:
+            raise ValueError("meta_only must be true or false.")
         # Options › Privacy: whether the guests' sessions are indexed at all (26.7, review B1). It
         # rides every listing, so a change takes effect at the next one with no second message.
         if request.get("index_guests") is not None:
@@ -1372,7 +1375,8 @@ class SessionCommands:
             file=request.get("file") or None, branch=request.get("branch") or None,
             project=request.get("project") or None,
             outside_projects=request.get("outside_projects") or None,
-            session_ids=request.get("session_ids"), **flags)
+            session_ids=request.get("session_ids"), meta_only=bool(request.get("meta_only", False)),
+            **flags)
         # A guest row carries what it takes to resume it: the tool's own argv and the directory it
         # must be run in (protocol 26.7). `fork_command` is the same argv with the guest's fork
         # flag, so Ctrl+Enter on a guest row is one message rather than a rule spelled twice.

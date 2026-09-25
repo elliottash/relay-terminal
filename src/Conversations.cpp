@@ -15,6 +15,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDir>
+#include <QDirIterator>
+#include <QFileInfo>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -57,6 +60,17 @@ constexpr int kHtmlRole = Qt::UserRole + 6;
 constexpr int kKindRole = Qt::UserRole + 7;
 constexpr int kLoadedRole = Qt::UserRole + 8;
 constexpr int kGroupNameRole = Qt::UserRole + 9;
+// (#G2C7) The instant filter and the code chips. kCodesRole is the #card codes a session
+// mentions; kCodesClaimedRole is the subset whose cards are claimed now or were claimed once
+// (drawn bold). kTitleRangesRole/kSubRangesRole are flattened [start, end) int pairs — the
+// runs the matched terms make in the title and in the snippet line, drawn bold as they are
+// typed. kInstantRole > 0 marks a row the instant pass produced (its rank), so the delegate
+// and the click handlers can tell them from the worker's rows.
+constexpr int kCodesRole = Qt::UserRole + 10;
+constexpr int kCodesClaimedRole = Qt::UserRole + 11;
+constexpr int kTitleRangesRole = Qt::UserRole + 12;
+constexpr int kSubRangesRole = Qt::UserRole + 13;
+constexpr int kInstantRole = Qt::UserRole + 14;
 }  // namespace
 
 // ----- pure helpers ------------------------------------------------------------------------
@@ -362,6 +376,30 @@ bool isGuestItem(const QJsonObject &item) {
 
 // A guest UUID belongs to its tool. Relay's own session ids keep their existing bare key so
 // the closed list and live usage tags still use the same index (#J8QP).
+// (#G2C7) The plain words of the filter text: operators (`key:`, `-word`) and `#code` tokens
+// are the worker's and the code pass's business; these are the words the title pass reads.
+static QStringList instantWords(const QString &text) {
+    QStringList words;
+    static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+    for (const QString &token : text.split(whitespace, Qt::SkipEmptyParts)) {
+        if (token.contains(QLatin1Char(':')) || token.startsWith(QLatin1Char('-'))) continue;
+        if (token.startsWith(QLatin1Char('#')) && token.size() >= 2) continue;
+        words.append(token);
+    }
+    return words;
+}
+
+// (#G2C7) The `#code` tokens of the filter text, uppercased to how codes are stored.
+static QStringList instantCodes(const QString &text) {
+    QStringList codes;
+    static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+    for (const QString &token : text.split(whitespace, Qt::SkipEmptyParts)) {
+        if (token.startsWith(QLatin1Char('#')) && token.size() >= 2)
+            codes.append(token.mid(1).toUpper());
+    }
+    return codes;
+}
+
 static QString openSessionKey(const QJsonObject &item) {
     const QString id = item.value(QStringLiteral("session_id")).toString();
     if (id.isEmpty()) return {};
@@ -553,9 +591,11 @@ public:
             if (!index.data(kTitleRole).toString().isEmpty()) {
                 const QFontMetrics metrics(option.font);
                 const bool two = !index.data(kSubRole).toString().isEmpty() || !index.data(kBadgeRole).toStringList().isEmpty();
-                // (#1Q5V) The id rides the title line now, so the row is title + at most
-                // one more line of tags and summary.
-                return QSize(160, metrics.height() * (1 + int(two)) + 8);
+                // (#G2C7) A session row is the title, the column values beneath it, and at
+                // most one more line of tags and summary; a group row keeps the title and
+                // that line. The DemiBold title measures the same height as the base font.
+                const bool session = !index.data(kIdRole).toString().isEmpty();
+                return QSize(160, metrics.height() * (1 + int(session) + int(two)) + 8);
             }
         }
         return QStyledItemDelegate::sizeHint(option, index);
@@ -627,9 +667,9 @@ public:
         const QFontMetrics metrics(titleFont);
         const QFontMetrics tailMetrics(opt.font);
         const QString sessionId = index.data(kIdRole).toString();
-        const QString when = index.siblingAtColumn(1).data(Qt::DisplayRole).toString();
-        const QString tail = (sessionId.isEmpty() ? QString() : sessionId)
-            + (sessionId.isEmpty() || when.isEmpty() ? QString() : QStringLiteral(" · ")) + when;
+        // (#G2C7) The relative time moved to the columns line, under the Updated header it
+        // belongs to; the tail is the session id and its copy glyph.
+        const QString tail = sessionId;
         const int glyph = 16;
         const int gap = 6;
         const int tailRoom = tail.isEmpty() ? 0
@@ -638,6 +678,24 @@ public:
         const QString elided = metrics.elidedText(title, Qt::ElideRight, titleWidth);
         painter->setFont(titleFont);
         painter->setPen(ink);
+        // (#G2C7) A matched term is highlighted where it sits in the title: a soft fill
+        // behind the run, which stays readable on a selected row and costs the elided text
+        // nothing (the ranges are clamped to what is actually shown).
+        QColor fill = opt.palette.color(QPalette::Highlight);
+        fill.setAlphaF(selected ? 0.30 : 0.22);
+        for (const auto &run : runsOf(index.data(kTitleRangesRole))) {
+            const int start = qBound(0, run.first, elided.length());
+            const int stop = qBound(start, run.second, elided.length());
+            if (stop <= start) continue;
+            const int runX = rect.left() + metrics.horizontalAdvance(elided.left(start));
+            const int runW = metrics.horizontalAdvance(elided.mid(start, stop - start));
+            const QRect bar(runX - 1, rect.top() + 2, runW + 2, metrics.height() - 4);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(fill);
+            painter->drawRoundedRect(bar, 3, 3);
+            painter->setPen(ink);
+            painter->setBrush(Qt::NoBrush);
+        }
         painter->drawText(QRect(rect.left(), rect.top(), titleWidth, metrics.height()),
                           Qt::AlignLeft | Qt::AlignVCenter, elided);
         if (!sessionId.isEmpty()) {
@@ -654,10 +712,30 @@ public:
             painter->drawText(copyGlyph, Qt::AlignCenter, QStringLiteral("⧉"));
             m_copyRects[sessionId] = copyGlyph.translated(rect.topLeft());
         }
+        // (#G2C7) The columns line: each sortable column's value drawn on the line beneath
+        // the title at its header section's x, so the values sit under the labels again.
+        // The cells stay empty (the row spans the width), so the header's own sections are
+        // what place these; each value elides inside its own section.
+        const int columnsLine = sessionId.isEmpty() ? 0 : tailMetrics.height() + 1;
+        if (columnsLine) {
+            const QHeaderView *columns = m_tree->header();
+            const int y = rect.top() + metrics.height() + 1;
+            painter->setFont(opt.font);
+            painter->setPen(muted);
+            for (int column = 1; column < m_tree->columnCount(); ++column) {
+                const QString value = index.siblingAtColumn(column).data(Qt::DisplayRole).toString();
+                if (value.isEmpty()) continue;
+                const int x = columns->sectionViewportPosition(column) + 4;
+                const int width = qMax(0, columns->sectionSize(column) - 8);
+                painter->drawText(QRect(x, y, width, tailMetrics.height()),
+                                  Qt::AlignLeft | Qt::AlignVCenter,
+                                  tailMetrics.elidedText(value, Qt::ElideRight, width));
+            }
+        }
         const QStringList tags = index.data(kBadgeRole).toStringList();
         const QString sub = index.data(kSubRole).toString();
         if (tags.isEmpty() && sub.isEmpty() && sessionId.isEmpty()) { painter->restore(); return; }
-        const int lineTop = rect.top() + metrics.height() + 2;
+        const int lineTop = rect.top() + metrics.height() + columnsLine + 2;
         int x = rect.left();
         painter->setPen(muted);
         for (const QString &tag : tags) {
@@ -668,10 +746,53 @@ public:
             painter->drawText(box, Qt::AlignCenter, tag);
             x += width + 6;
         }
-        if (!sub.isEmpty() && x < rect.right() - 24)
-            painter->drawText(QRect(x, lineTop, rect.right() - x, metrics.height()),
-                              Qt::AlignLeft | Qt::AlignVCenter,
-                              metrics.elidedText(sub, Qt::ElideRight, rect.right() - x));
+        // (#G2C7) The #card codes this session mentions come before the snippet, in the first
+        // column's line: plain and muted for a code no card holds, boxed and bold for one
+        // whose card is claimed now or was claimed once. The snippet follows, and the
+        // full-text pass' matched terms are highlighted in it the same way the title's are.
+        const QStringList codes = index.data(kCodesRole).toStringList();
+        const QStringList claimedCodes = index.data(kCodesClaimedRole).toStringList();
+        for (const QString &code : codes) {
+            if (x > rect.right() - 30) break;
+            const QString chip = QLatin1Char('#') + code;
+            const bool claimed = claimedCodes.contains(code);
+            QFont chipFont(opt.font);
+            if (claimed) chipFont.setWeight(QFont::DemiBold);
+            const QFontMetrics chipMetrics(chipFont);
+            const int width = chipMetrics.horizontalAdvance(chip) + 8;
+            if (x + width > rect.right()) break;
+            const QRect box(x, lineTop + 1, width, metrics.height() - 2);
+            if (claimed) {
+                painter->setPen(ink);
+                painter->drawRoundedRect(box, 4, 4);
+            } else {
+                painter->setPen(muted);
+            }
+            painter->setFont(chipFont);
+            painter->drawText(box, Qt::AlignCenter, chip);
+            painter->setFont(opt.font);
+            painter->setPen(muted);
+            x += width + 6;
+        }
+        if (!sub.isEmpty() && x < rect.right() - 24) {
+            const int subWidth = rect.right() - x;
+            const QString shown = metrics.elidedText(sub, Qt::ElideRight, subWidth);
+            for (const auto &run : runsOf(index.data(kSubRangesRole))) {
+                const int start = qBound(0, run.first, shown.length());
+                const int stop = qBound(start, run.second, shown.length());
+                if (stop <= start) continue;
+                const int runX = x + metrics.horizontalAdvance(shown.left(start));
+                const int runW = metrics.horizontalAdvance(shown.mid(start, stop - start));
+                const QRect bar(runX - 1, lineTop + 2, runW + 2, metrics.height() - 4);
+                painter->setPen(Qt::NoPen);
+                painter->setBrush(fill);
+                painter->drawRoundedRect(bar, 3, 3);
+                painter->setPen(muted);
+                painter->setBrush(Qt::NoBrush);
+            }
+            painter->drawText(QRect(x, lineTop, subWidth, metrics.height()),
+                              Qt::AlignLeft | Qt::AlignVCenter, shown);
+        }
         // (#1Q5V) The "ID: …" line is gone: the id, its ⧉ and the relative time ride the
         // title line, drawn above.
         painter->restore();
@@ -713,6 +834,15 @@ protected:
     }
 
 private:
+    // (#G2C7) A ranges role flattened to [start, end) int pairs — the runs the matched terms
+    // make in the title (kTitleRangesRole) or the snippet line (kSubRangesRole).
+    static QList<QPair<int, int>> runsOf(const QVariant &value) {
+        QList<QPair<int, int>> out;
+        const QVariantList list = value.toList();
+        for (int i = 0; i + 1 < list.size(); i += 2)
+            out.append(qMakePair(list.at(i).toInt(), list.at(i + 1).toInt()));
+        return out;
+    }
     // How wide column 0 is for this row: the column less the indentation its depth costs.
     int textWidth(const QModelIndex &index) const {
         int depth = 1;
@@ -1014,12 +1144,13 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     // display text ("14 min ago"). Sorting is asked of the worker —
     // a header click is the Sort combo in another form (the sectionClicked wiring below).
     m_tree->setSortingEnabled(false);
-    // The header is hidden (#1Q5V): session rows span the whole width now — the title
-    // keeps going into the other columns, as the owner asked — so the per-column cells
-    // are not painted and the header would name columns nothing lives in. Sorting and
-    // grouping moved to the Sort ▾ button; the sectionClicked wiring below stays, so a
-    // programmatic header poke still works.
-    m_tree->header()->setVisible(false);
+    // (#G2C7) The header is back: the owner wanted the sortable columns kept, with each
+    // session's title straddling them — the title spans the whole width on its own line and
+    // the column values are painted by RowDelegate on a line beneath, each under its header
+    // section, so the labels name what sits under them again. Sorting is still asked of the
+    // worker (a header click is the Sort combo in another form, the sectionClicked wiring
+    // below), never Qt's own tree sort.
+    m_tree->header()->setVisible(true);
     m_tree->header()->setSectionsClickable(true);
     // The unfolded rows wrap, so their height depends on how wide the first column is.
     connect(m_tree->header(), &QHeaderView::sectionResized, this,
@@ -1307,6 +1438,9 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     connect(m_search, &QLineEdit::textChanged, this, [this] {
         // Search narrows the list without changing its sort. Newest first stays the default;
         // a sort selected in the combo or by a header click stays selected as the query changes.
+        // (#G2C7) The instant pass runs on the keystroke itself, over the titles the pane
+        // already holds; the worker's full-text query follows on the debounce as before.
+        applyInstant();
         scheduleQuery();
     });
     // The Project chooser narrows the results to one folder (or no known folder). An explicit
@@ -1825,6 +1959,16 @@ void SessionManager::requery() {
     rebuildChips(m_lastParsed);   // (#1Q5V) the combo chips read the combos live
     m_nextOffset = -1;
     m_previewFor.clear();          // a new list: the side preview is asked for afresh
+    // (#G2C7) The full-text reply is out: until it lands the tree shows the instant pass
+    // alone, so a stale list cannot flash under what the user just typed. The meta table
+    // is asked for once per filter signature, and the board's claimed codes are refreshed
+    // (cheaply, at most every 10 s) only while a #code is being typed, which is when the
+    // bold chips are read.
+    m_awaitingResults = true;
+    requestMeta();
+    if (m_search->text().contains(QLatin1Char('#'))
+            && QDateTime::currentMSecsSinceEpoch() - m_codesAgeMs > 10'000)
+        refreshBoardCodes();
     onQuery(queryRequest());
 }
 
@@ -1841,6 +1985,15 @@ void SessionManager::removed(const QString &sessionId) {
 }
 
 void SessionManager::setResults(const QJsonObject &event) {
+    // (#G2C7) The meta reply is not the list: it only fills the pane's table of titles and
+    // #card codes, and a live filter is re-run against the grown table.
+    if (event.value(QStringLiteral("id")).toString() == QLatin1String("conv-meta")) {
+        for (const auto &value : event.value(QStringLiteral("items")).toArray())
+            rememberMeta(value.toObject());
+        if (instantActive()) applyInstant();
+        return;
+    }
+    m_awaitingResults = false;
     const QJsonArray items = event.value(QStringLiteral("items")).toArray();
     const QString keep = m_pendingSelect.isEmpty() ? selectedId() : m_pendingSelect;
     m_pendingSelect.clear();
@@ -1849,6 +2002,7 @@ void SessionManager::setResults(const QJsonObject &event) {
     } else {
         m_items = items;
     }
+    for (const auto &value : std::as_const(m_items)) rememberMeta(value.toObject());
     m_nextOffset = event.contains(QStringLiteral("next_offset")) ? event.value(QStringLiteral("next_offset")).toInt() : -1;
     m_more->setVisible(m_nextOffset >= 0);
     m_elapsed = event.value(QStringLiteral("elapsed_ms")).toDouble();
@@ -1953,6 +2107,151 @@ void SessionManager::fillFacets(const QJsonObject &facets) {
 }
 
 // One row of the list: the title with its tags, the muted summary under it, and the columns.
+// (#G2C7) Remember one light listing: every item the pane ever sees feeds the meta table,
+// so the instant filter works over what has loaded even before the meta reply lands.
+void SessionManager::rememberMeta(const QJsonObject &item) {
+    const QString id = item.value(QStringLiteral("session_id")).toString();
+    if (id.isEmpty()) return;
+    Meta meta;
+    meta.item = item;
+    meta.title = item.value(QStringLiteral("custom_title")).toString();
+    if (meta.title.isEmpty()) meta.title = item.value(QStringLiteral("title")).toString();
+    meta.updated = item.value(QStringLiteral("updated")).toDouble();
+    for (const auto &code : item.value(QStringLiteral("codes")).toArray())
+        meta.codes.append(code.toString().toUpper());
+    m_meta.insert(id, meta);
+}
+
+// (#G2C7) One light listing of every session under the current filters — titles, times and
+// #card codes, no text pass — asked for when the filters change. The pane holds it, so typing
+// filters titles on the keystroke itself instead of waiting for SQLite.
+void SessionManager::requestMeta() {
+    if (!onQuery) return;
+    QJsonObject meta = queryRequest();
+    meta.remove(QStringLiteral("query"));
+    meta.remove(QStringLiteral("limit"));
+    meta.remove(QStringLiteral("offset"));
+    meta.remove(QStringLiteral("sort"));
+    meta.insert(QStringLiteral("id"), QStringLiteral("conv-meta"));
+    meta.insert(QStringLiteral("meta_only"), true);
+    meta.insert(QStringLiteral("limit"), 5000);
+    const QString signature = QString::fromUtf8(
+        QJsonDocument(meta).toJson(QJsonDocument::Compact));
+    if (signature == m_metaSignature) return;
+    m_metaSignature = signature;
+    onQuery(meta);
+}
+
+// (#G2C7) The instant pass: rank the held meta table against the box on the keystroke. Exact
+// title matches come first, then a title that starts with (or has a word that starts with)
+// the first term, then plain contains; every #code token must be one the session mentions
+// (its code set or its title). The worker's full-text rows follow whatever this shows, once
+// its reply lands, deduplicated — the SQLite pass loses nothing, it just stops holding up the
+// first answer.
+void SessionManager::applyInstant() {
+    const QString keep = m_pendingSelect.isEmpty() ? selectedId() : m_pendingSelect;
+    QStringList words, codes;
+    static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+    for (const QString &token : m_search->text().split(whitespace, Qt::SkipEmptyParts)) {
+        if (token.contains(QLatin1Char(':')) || token.startsWith(QLatin1Char('-'))) continue;
+        if (token.startsWith(QLatin1Char('#')) && token.size() >= 2) {
+            codes.append(token.mid(1).toUpper());
+            continue;
+        }
+        words.append(token);
+    }
+    const int letters = words.join(QString()).size();
+    m_instant.clear();
+    m_instantIds.clear();
+    m_instantArmed = (letters >= 3 || !codes.isEmpty()) && !(words.isEmpty() && codes.isEmpty());
+    if (m_instantArmed) {
+        const QString flat = words.join(QLatin1Char(' '));
+        const QRegularExpression wordStart(words.isEmpty() ? QString()
+                                                           : QStringLiteral("\\b") + QRegularExpression::escape(words.first()),
+                                           QRegularExpression::CaseInsensitiveOption);
+        for (auto it = m_meta.cbegin(); it != m_meta.cend(); ++it) {
+            const Meta &meta = it.value();
+            bool ok = true;
+            for (const QString &code : codes)
+                if (!meta.codes.contains(code)
+                        && !meta.title.contains(code, Qt::CaseInsensitive)) { ok = false; break; }
+            if (!ok) continue;
+            for (const QString &word : words)
+                if (!meta.title.contains(word, Qt::CaseInsensitive)) { ok = false; break; }
+            if (!ok) continue;
+            int rank = 2;
+            if (!flat.isEmpty() && meta.title.trimmed().compare(flat, Qt::CaseInsensitive) == 0)
+                rank = 0;
+            else if (!words.isEmpty() && (meta.title.startsWith(words.first(), Qt::CaseInsensitive)
+                                          || wordStart.match(meta.title).hasMatch()))
+                rank = 1;
+            m_instant.append(qMakePair(it.key(), rank));
+        }
+        std::sort(m_instant.begin(), m_instant.end(), [this](const auto &a, const auto &b) {
+            if (a.second != b.second) return a.second < b.second;
+            const Meta &x = m_meta.value(a.first), &y = m_meta.value(b.first);
+            const int pinned = x.item.value(QStringLiteral("pinned")).toInt()
+                             - y.item.value(QStringLiteral("pinned")).toInt();
+            if (pinned != 0) return pinned > 0;
+            return x.updated > y.updated;
+        });
+        if (m_instant.size() > 100) m_instant.erase(m_instant.begin() + 100, m_instant.end());
+        for (const auto &entry : std::as_const(m_instant)) m_instantIds.insert(entry.first);
+    }
+    rebuildTree(keep);
+}
+
+// (#G2C7) Whose cards' codes count as claimed: the board root for this project, handed over
+// when the pane is linked into the window.
+void SessionManager::setBoardRoot(const QString &root) {
+    if (m_boardRoot == root) return;
+    m_boardRoot = root;
+    m_codesAgeMs = 0;
+    refreshBoardCodes();
+}
+
+// (#G2C7) Read the board's cards once: a code is claimed-or-was-claimed when its card carries
+// a live `session:` or its thread records a claim (the `agent claimed this card` events and
+// the `Claimed (<token>)` progress lines the board writes). A few hundred small files, read
+// at most every ten seconds and only while a #code is being typed.
+void SessionManager::refreshBoardCodes() {
+    m_codesAgeMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_boardRoot.isEmpty()) return;
+    QSet<QString> ever;
+    QDir threads(QDir(m_boardRoot).filePath(QStringLiteral("threads")));
+    for (const QFileInfo &info : threads.entryInfoList({QStringLiteral("*.md")}, QDir::Files)) {
+        QFile file(info.absoluteFilePath());
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QByteArray blob = file.readAll();
+        if (blob.contains("claimed this card") || blob.contains("Claimed (")) {
+            const QString code = info.completeBaseName();
+            if (code.size() == 4) ever.insert(code.toUpper());
+        }
+    }
+    QDirIterator cards(m_boardRoot, {QStringLiteral("*.md")}, QDir::Files,
+                       QDirIterator::Subdirectories);
+    while (cards.hasNext()) {
+        QFile file(cards.next());
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        QString id, session;
+        int seen = 0;
+        while (seen < 40 && !file.atEnd()) {
+            const QString line = QString::fromUtf8(file.readLine());
+            if (line.startsWith(QLatin1String("---"))) { if (++seen > 1) break; else continue; }
+            if (line.startsWith(QLatin1String("id: "))) id = line.mid(4).trimmed();
+            if (line.startsWith(QLatin1String("session:"))
+                    && !line.contains(QLatin1String("null"))) session = line.mid(8).trimmed();
+            ++seen;
+        }
+        if (id.size() == 4 && !session.isEmpty()) ever.insert(id.toUpper());
+    }
+    if (ever != m_codesEver) {
+        m_codesEver = ever;
+        const QString keep = m_pendingSelect.isEmpty() ? selectedId() : m_pendingSelect;
+        rebuildTree(keep);   // the bold chips changed
+    }
+}
+
 QTreeWidgetItem *SessionManager::addSessionRow(QTreeWidgetItem *parent, const QJsonObject &item) {
     const bool terminal = isTerminal(item);
     const QString source = item.value(QStringLiteral("source")).toString();
@@ -2051,6 +2350,54 @@ void SessionManager::decorate(QTreeWidgetItem *row, const QJsonObject &item) {
                        tip);
     tip.prepend(QStringLiteral("Session ID: %1\n").arg(sessionId));
     const QJsonArray rowMatches = item.value(QStringLiteral("matches")).toArray();
+    // (#G2C7) A full-text match shows the piece that matched, in place of the opening prompt:
+    // the first hit's line with its matched ranges; the line is a single line by construction,
+    // so the ranges index what is drawn. The #card codes sit ahead of it, the claimed ones
+    // boxed and bold.
+    if (!thread && !rowMatches.isEmpty()) {
+        for (const auto &value : rowMatches) {
+            const QJsonObject match = value.toObject();
+            const QString line = match.value(QStringLiteral("line")).toString();
+            if (line.isEmpty()) continue;
+            QVariantList runs;
+            for (const auto &span : match.value(QStringLiteral("ranges")).toArray()) {
+                const QJsonArray pair = span.toArray();
+                if (pair.size() == 2) {
+                    runs.append(pair.at(0).toInt());
+                    runs.append(pair.at(1).toInt());
+                }
+            }
+            row->setData(0, kSubRole, line);
+            if (!runs.isEmpty()) row->setData(0, kSubRangesRole, runs);
+            break;
+        }
+    }
+    if (!thread) {
+        QStringList codes;
+        for (const auto &code : item.value(QStringLiteral("codes")).toArray())
+            codes.append(code.toString().toUpper());
+        if (!codes.isEmpty()) {
+            row->setData(0, kCodesRole, codes);
+            QStringList claimed;
+            for (const QString &code : codes)
+                if (m_codesEver.contains(code)) claimed.append(code);
+            if (!claimed.isEmpty()) row->setData(0, kCodesClaimedRole, claimed);
+        }
+    }
+    // (#G2C7) While the instant filter is armed, every occurrence of a term is highlighted in
+    // the title — prefix included, since it is part of what is read.
+    if (instantActive() && !thread) {
+        QVariantList runs;
+        for (const QString &word : instantWords(m_search->text())) {
+            int at = 0;
+            while ((at = title.indexOf(word, at, Qt::CaseInsensitive)) >= 0) {
+                runs.append(at);
+                runs.append(at + word.size());
+                at += word.size();
+            }
+        }
+        if (!runs.isEmpty()) row->setData(0, kTitleRangesRole, runs);
+    }
     if (!rowMatches.isEmpty()) {
         const QJsonObject match = rowMatches.first().toObject();
         tip += QStringLiteral("\nturn %1 · %2").arg(match.value(QStringLiteral("turn")).toInt())
@@ -2118,6 +2465,30 @@ void SessionManager::rebuildTree(const QString &keep) {
         if (!keep.isEmpty() && item.value(QStringLiteral("session_id")).toString() == keep) wanted = row;
     };
 
+    // (#G2C7) The instant pass comes first and flat — no date or project groups — because the
+    // split it makes (title matches here, full-text below) is the point. Where the worker also
+    // matched the same session its row is used, so the matched line and its runs show on the
+    // row that is kept; the worker loop below skips what this pass already placed. While that
+    // reply is still out, the worker's rows are stale and are left off entirely.
+    QHash<QString, QJsonObject> workerById;
+    if (instantActive() && !m_awaitingResults)
+        for (const auto &value : std::as_const(m_items)) {
+            const QJsonObject item = value.toObject();
+            if (!isThread(item)) workerById.insert(item.value(QStringLiteral("session_id")).toString(), item);
+        }
+    if (instantActive()) {
+        for (const auto &entry : std::as_const(m_instant)) {
+            const Meta meta = m_meta.value(entry.first);
+            if (meta.item.isEmpty()) continue;
+            if (m_open->isChecked() && !m_openSessions.contains(openSessionKey(meta.item))) continue;
+            const QJsonObject item = workerById.contains(entry.first) ? workerById.value(entry.first) : meta.item;
+            QTreeWidgetItem *row = addSessionRow(nullptr, item);
+            row->setData(0, kInstantRole, entry.second);
+            note(row, item);
+            ++sessions;
+        }
+    }
+
     // Grouped by date the buckets read in their own order, not in the order the rows arrive.
     if (grouping == QLatin1String("date")) {
         QSet<QString> used;
@@ -2131,6 +2502,8 @@ void SessionManager::rebuildTree(const QString &keep) {
     for (const auto &value : std::as_const(m_items)) {
         const QJsonObject item = value.toObject();
         if (isThread(item)) continue;
+        if (m_awaitingResults) break;   // (#G2C7) stale until this query's reply lands
+        if (m_instantIds.contains(item.value(QStringLiteral("session_id")).toString())) continue;
         if (m_open->isChecked() && !m_openSessions.contains(openSessionKey(item))) continue;
         ++sessions;
         matches += item.value(QStringLiteral("match_count")).toInt();
@@ -2146,6 +2519,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     for (const auto &value : std::as_const(m_items)) {
         const QJsonObject item = value.toObject();
         if (!isSignalThread(item)) continue;
+        if (m_awaitingResults) break;   // (#G2C7) stale until this query's reply lands
         if (m_open->isChecked() && !m_openSessions.contains(openSessionKey(item))) continue;
         ++threads;
         matches += item.value(QStringLiteral("match_count")).toInt();
@@ -2162,7 +2536,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     // The user's own, so the unticked "Subagent threads" box drops them here — the request always
     // asks for threads, because a signal thread is listed whatever the box says.
     QList<QJsonObject> pending;
-    if (m_threads->isChecked())
+    if (m_threads->isChecked() && !m_awaitingResults)   // (#G2C7) not from a stale reply
         for (const auto &value : std::as_const(m_items)) {
             const QJsonObject item = value.toObject();
             if (isThread(item) && !isSignalThread(item)
@@ -2241,10 +2615,7 @@ void SessionManager::rebuildTree(const QString &keep) {
     m_threadCount = threads;
     const QSet<QString> collapsedGroups = m_collapsedGroups.value(grouping);
     m_filling = false;
-    for (int column = 1; column < m_tree->columnCount(); ++column)
-        header->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(5, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(6, QHeaderView::Stretch);
+    fitHeaderSections();
     if (QTreeWidgetItem *select = wanted ? wanted : first) m_tree->setCurrentItem(select);
     // Selecting a session under a collapsed group can expand its parent in Qt. Restore the
     // reader's group choice after restoring the current row, including when that row is hidden.
@@ -2254,6 +2625,28 @@ void SessionManager::rebuildTree(const QString &keep) {
     updateStatus();
     updateEmptyState();
     updateButtons();
+}
+
+// (#G2C7) The column values live on the delegate's columns line, not in the cells, so Qt's
+// ResizeToContents would size every section to its label alone. Measure what is actually
+// shown and size each section to it (capped, so a long model name cannot eat the title);
+// the user can still drag a section, and the next fill re-fits it. Recap keeps stretching.
+void SessionManager::fitHeaderSections() {
+    QHeaderView *header = m_tree->header();
+    const QFontMetrics metrics(m_tree->font());
+    for (int column = 1; column < m_tree->columnCount() - 1; ++column) {
+        int width = header->sectionSizeHint(column) + 16;
+        for (auto it = m_rows.cbegin(); it != m_rows.cend(); ++it) {
+            const QTreeWidgetItem *row = it.value();
+            if (row->data(0, kKindRole).toString() != QLatin1String("session")) continue;
+            const QString value = row->text(column);
+            if (value.isEmpty()) continue;
+            width = qMax(width, metrics.horizontalAdvance(value) + 16);
+        }
+        header->setSectionResizeMode(column, QHeaderView::Interactive);
+        header->resizeSection(column, qMin(width, 150));
+    }
+    header->setSectionResizeMode(m_tree->columnCount() - 1, QHeaderView::Stretch);
 }
 
 void SessionManager::updateStatus() {

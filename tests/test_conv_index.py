@@ -16,7 +16,7 @@ from unittest import mock
 
 from relay_core import conv_index
 from relay_core.agent import Agent
-from relay_core.conv_index import ConversationIndex
+from relay_core.conv_index import ConversationIndex, MAX_CODES
 from relay_core.provider import ProviderConfig
 from relay_core.queue import TurnSupervisor
 from relay_core.session_protocol import SessionCommands
@@ -242,6 +242,61 @@ class IndexTests(unittest.TestCase):
 
     def test_database_file_is_private(self):
         self.assertEqual(os.stat(self.root / "index.db").st_mode & 0o777, 0o600)
+
+    def test_card_codes_are_collected_and_returned(self):
+        # (#G2C7) The #card codes a conversation mentions ride every item, so the Sessions pane
+        # can filter by a code and draw its chips without reading the conversation.
+        data = session()
+        data["messages"].append({"role": "user", "content": "this is #G2C7 and #pv7w work"})
+        data["title"] = "sorting for #MDSG"
+        self.index.update_session(data, self.root)
+        for result in (self.index.search("", scope="all"),
+                       self.index.search("", scope="all", meta_only=True),
+                       self.index.search("G2C7", scope="all")):
+            self.assertEqual(result["items"][0]["codes"], ["G2C7", "MDSG", "PV7W"], result)
+        # A paste of an index cannot balloon the set.
+        flooded = session()
+        flooded["messages"] = [{"role": "user",
+                                "content": " ".join(f"#A{i:03d}" for i in range(400))}]
+        self.index.update_session(flooded, self.root)
+        codes = [item["codes"] for item in self.index.search("", scope="all")["items"]
+                 if item["session_id"] == flooded["id"]][0]
+        self.assertEqual(len(codes), MAX_CODES)
+
+    def test_meta_only_lists_every_conversation_once(self):
+        # (#G2C7) The instant filter's light listing: every conversation under the same filters
+        # the pane uses, no text pass, no matches, codes included.
+        self.index.update_session(session(), self.root)
+        other = session()
+        other["id"] = "f" * 32
+        other["title"] = "another one"
+        self.index.update_session(other, self.root)
+        meta = self.index.search("", scope="all", meta_only=True)
+        self.assertEqual(len(meta["items"]), 2)
+        self.assertEqual([item["matches"] if "matches" in item else [] for item in meta["items"]],
+                         [[], []])
+        self.assertEqual(meta["total"], 2)
+        # A source filter still applies to the meta listing.
+        threads = self.index.search("", scope="all", meta_only=True, sources=["agent"])
+        self.assertEqual(len(threads["items"]), 2)
+
+    def test_v8_database_gains_its_codes_in_place(self):
+        # (#G2C7) A v8 index opens as v9 without being discarded: the codes are backfilled from
+        # the entries it already holds, so the terminal history (which has no file to rebuild
+        # from) survives the upgrade.
+        data = session()
+        data["messages"].append({"role": "user", "content": "see #G2C7"})
+        self.index.update_session(data, self.root)
+        self.index.close()
+        connection = sqlite3.connect(self.root / "index.db")
+        connection.execute("ALTER TABLE conversations DROP COLUMN codes")
+        connection.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+        connection.commit()
+        connection.close()
+        index = ConversationIndex(self.root / "index.db")
+        self.addCleanup(index.close)
+        self.assertEqual(index.migrated_from, 8)
+        self.assertEqual(index.search("", scope="all")["items"][0]["codes"], ["G2C7"])
 
     def test_prefix_and_phrase_queries(self):
         self.index.update_session(session(), self.root)

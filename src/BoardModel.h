@@ -469,6 +469,20 @@ public:
     // ---- filtering
     void setFilter(const QString &text);
     QString filter() const { return m_filter; }
+    // (#G2C7) While the text filter is on, the list answers in the Sessions list's voice:
+    // matched terms are marked where they landed, a text-only match shows the line that
+    // matched, and each section's cards answer in relevance order (exact id, exact title,
+    // title matches, then what only the body matched). All of it is local — the same terms
+    // the fallback already scans with.
+    struct FilterMark {
+        QVector<QPair<int, int>> runs;   // [start, end) pairs in the string asked about
+        QString snippet;                 // the line of `text` a term landed in, or empty
+        QVector<QPair<int, int>> snippetRuns;   // the terms' runs inside `snippet`
+    };
+    bool textFilterActive() const { return !m_filter.trimmed().isEmpty(); }
+    FilterMark filterMark(const QString &title, const QString &text) const;
+    int filterRank(const Card &card) const;
+    QList<Card> rankedForFilter(const QList<Card> &cards) const;
     // The label chips beside the section checkboxes (#VKFV): a card is on the page only when it
     // carries every ticked label, composing with the text filter and the section checkboxes the
     // way `label:` terms do. Labels compare case-insensitively, as the filter terms do.

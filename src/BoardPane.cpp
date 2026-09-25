@@ -368,6 +368,12 @@ struct CardShape {
     QString title, created, updated, stage;   // `stage` is empty but in a flat list (#ESDF)
     bool dates = false;                 // the two date columns are on this row
     QList<QPair<board::Badge, QRect>> badges;
+    // (#G2C7) While the text filter is on: the runs its terms make in the title, and the
+    // matched line from the card's text as one small line of its own under the row.
+    QVector<QPair<int, int>> titleRuns;
+    QString snippet;
+    QVector<QPair<int, int>> snippetRuns;
+    QRect snippetRect;
     int height = 0;
 };
 
@@ -375,7 +381,10 @@ struct CardShape {
 // changes what the claim chip says, but it is measured with the rest of the badges, so it has to
 // be known before the row is laid out.
 CardShape cardShape(const board::Card &card, bool showStatus, const QString &stage,
-                    const QFont &font, int width, bool sessionLive = true)
+                    const QFont &font, int width, bool sessionLive = true,
+                    const QVector<QPair<int, int>> &titleRuns = {},
+                    const QString &snippet = QString(),
+                    const QVector<QPair<int, int>> &snippetRuns = {})
 {
     CardShape shape;
     const QFontMetrics metrics(font);
@@ -468,6 +477,17 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QString &sta
                                      Qt::ElideRight, titleWidth);
     const int drawn = qMin(titleWidth, metrics.horizontalAdvance(shape.title));
     shape.titleRect = QRect(x, 0, drawn, shape.height);
+    // (#G2C7) The filter's marks ride the row: the title's runs are clamped to the elided
+    // title when they are painted, and a card the text matched grows one small line under
+    // the row for the line that matched — its runs index the snippet as laid out.
+    shape.titleRuns = titleRuns;
+    if (!snippet.isEmpty()) {
+        const QFontMetrics small(smaller(font, 0.85));
+        shape.snippet = snippet;
+        shape.snippetRuns = snippetRuns;
+        shape.snippetRect = QRect(x, shape.height, width - kRowPadX - x, small.height());
+        shape.height += small.height() + 4;
+    }
     return shape;
 }
 
@@ -629,8 +649,8 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QSize(width, 0);
-        return QSize(width, cardShape(*card, row->showStatus, row->stage, option.font, width,
-                                     sessionLive(*card)).height);
+        return QSize(width, filteredShape(*card, row->showStatus, row->stage, option.font, width,
+                                          sessionLive(*card)).height);
     }
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option,
@@ -713,8 +733,8 @@ public:
         const board::Card *card = m_model->card(row->cardId);
         if (!card)
             return QString();
-        const CardShape shape = cardShape(*card, row->showStatus, row->stage, m_list->font(), rowWidth(),
-                                          sessionLive(*card));
+        const CardShape shape = filteredShape(*card, row->showStatus, row->stage, m_list->font(),
+                                              rowWidth(), sessionLive(*card));
         for (const auto &placed : shape.badges)
             if (placed.first.kind == board::Badge::Label
                 && placed.second.translated(itemRect.topLeft()).contains(at))
@@ -724,6 +744,19 @@ public:
 
     // Nothing is created straight into Done: a card gets there by being closed.
     std::function<bool(const QString &columnId)> adds = [](const QString &) { return true; };
+
+    // (#G2C7) The row as the current filter answers it: the terms marked in the title and,
+    // for a card its own text matched, the line that matched under the row. Without a text
+    // filter this is the plain shape and costs nothing extra.
+    CardShape filteredShape(const board::Card &card, bool showStatus, const QString &stage,
+                            const QFont &font, int width, bool live) const
+    {
+        if (!m_model->textFilterActive())
+            return cardShape(card, showStatus, stage, font, width, live);
+        const board::Model::FilterMark mark = m_model->filterMark(card.title, card.text);
+        return cardShape(card, showStatus, stage, font, width, live, mark.runs, mark.snippet,
+                         mark.snippetRuns);
+    }
 
 private:
     const board::Row *rowAt(int index) const
@@ -941,6 +974,54 @@ private:
         painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
         painter->drawText(shape.titleRect.translated(origin), Qt::AlignLeft | Qt::AlignVCenter,
                           shape.title);
+        // (#G2C7) The filter's marks: a soft wash behind each run in the title, and the line
+        // of the card's text that matched, under the row, washed the same way — the board
+        // answers the filter in the same voice the Sessions list does.
+        if (!shape.titleRuns.isEmpty() || !shape.snippet.isEmpty()) {
+            QColor wash = theme::TextMuted;
+            wash.setAlpha(40);
+            const QFontMetrics titleMetrics(option.font);
+            for (const auto &run : shape.titleRuns) {
+                const int start = qBound(0, run.first, shape.title.length());
+                const int stop = qBound(start, run.second, shape.title.length());
+                if (stop <= start)
+                    continue;
+                const int advance = titleMetrics.horizontalAdvance(shape.title.left(start));
+                const int runWidth = titleMetrics.horizontalAdvance(shape.title.mid(start, stop - start));
+                const QRectF bar(shape.titleRect.left() + advance - 1 + origin.x(),
+                                 shape.titleRect.top() + 2 + origin.y(), runWidth + 2,
+                                 titleMetrics.height() - 4);
+                painter->setPen(Qt::NoPen);
+                painter->setBrush(wash);
+                painter->drawRoundedRect(bar, 3, 3);
+                painter->setBrush(Qt::NoBrush);
+                painter->setPen(card->closed() ? theme::TextMuted : theme::Text);
+            }
+            if (!shape.snippet.isEmpty()) {
+                const QFont small = smaller(option.font, 0.85);
+                const QFontMetrics smallMetrics(small);
+                const QRect box = shape.snippetRect.translated(origin);
+                for (const auto &run : shape.snippetRuns) {
+                    const int start = qBound(0, run.first, shape.snippet.length());
+                    const int stop = qBound(start, run.second, shape.snippet.length());
+                    if (stop <= start)
+                        continue;
+                    const QRectF bar(box.left()
+                                         + smallMetrics.horizontalAdvance(shape.snippet.left(start)) - 1,
+                                     box.top() + 1,
+                                     smallMetrics.horizontalAdvance(
+                                         shape.snippet.mid(start, stop - start)) + 2,
+                                     smallMetrics.height() - 2);
+                    painter->setPen(Qt::NoPen);
+                    painter->setBrush(wash);
+                    painter->drawRoundedRect(bar, 3, 3);
+                    painter->setBrush(Qt::NoBrush);
+                }
+                painter->setFont(small);
+                painter->setPen(theme::TextMuted);
+                painter->drawText(box, Qt::AlignLeft | Qt::AlignVCenter, shape.snippet);
+            }
+        }
 
         // The two date columns, in the same mono as the id: a column of dates reads as a column.
         // A cell the card has nothing to say in stays blank rather than wrong (board::dateCell).

@@ -113,7 +113,7 @@ from .presets import model_name as _model_name
 # v1–v5 migrate in place and the rows are backfilled by the next `reconcile()`, as v3's were.
 # v7 (2026-09-23, #D2PX): link Relay sessions to the guest transcripts they wrap.
 # v8 (2026-09-23, #K9QA): mark native guest transcripts launched by Relay, including subagents.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 MAX_TEXT = 4000              # per-entry cap for replies and tool output
 MAX_PROMPT = 8000            # per-entry cap for user prompts
 MAX_SUMMARY = 4000           # per-conversation cap for a summary
@@ -196,7 +196,8 @@ CREATE TABLE IF NOT EXISTS conversations(
     entry_digest TEXT NOT NULL DEFAULT '',
     guest_source TEXT NOT NULL DEFAULT '',
     guest_session TEXT NOT NULL DEFAULT '',
-    relay_launched INTEGER NOT NULL DEFAULT 0
+    relay_launched INTEGER NOT NULL DEFAULT 0,
+    codes        TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS conversations_by_owner ON conversations(owner_session);
 CREATE TABLE IF NOT EXISTS entries(
@@ -334,10 +335,20 @@ V5_COLUMNS = (("entry_count", "INTEGER NOT NULL DEFAULT 0"), ("entry_digest", "T
 V7_COLUMNS = (("guest_source", "TEXT NOT NULL DEFAULT ''"),
               ("guest_session", "TEXT NOT NULL DEFAULT ''"))
 V8_COLUMNS = (("relay_launched", "INTEGER NOT NULL DEFAULT 0"),)
+# v9 (#G2C7): the #card codes a conversation mentions, so the Sessions pane can filter by a
+# code and show code chips without reading a conversation's entries. Backfilled in place from
+# the entries the index already holds; writers keep it from the text they are writing anyway.
+V9_COLUMNS = (("codes", "TEXT NOT NULL DEFAULT '[]'"),)
 # v6 (#0TJ9) adds no column: its rows are entries, and `session_sidecars` is a table the schema
 # creates on its own. What it does ask for is the v3 backfill — every agent and subagent row is
 # marked behind, so the next reconcile reads each conversation's sidecars once.
 MAX_MATCHES_LIMIT = 20
+# The most codes one conversation may record (#G2C7): enough for any real conversation, and a
+# bound on what a paste of a card index can do to a row.
+MAX_CODES = 200
+# The meta listing (#G2C7) is one SELECT of every conversation's light fields; past this many
+# conversations the pane filters over what it has and the count is honest about the rest.
+MAX_META_LIMIT = 5000
 THREAD_KIND = "relay_subagent_thread"
 # The guest rows' `<id>.meta.json` (see the module docstring): one file beside the database for
 # every guest row, because there is nowhere else to put a guest session's pin.
@@ -1213,7 +1224,7 @@ class ConversationIndex:
         except sqlite3.DatabaseError:
             version = None
         self.migrated_from = None
-        if version in (1, 2, 3, 4, 5, 6, 7) and version < SCHEMA_VERSION:
+        if version in (1, 2, 3, 4, 5, 6, 7, 8) and version < SCHEMA_VERSION:
             try:
                 self._migrate(db, version)
                 self.migrated_from = version
@@ -1258,7 +1269,7 @@ class ConversationIndex:
 
     @staticmethod
     def _migrate(db, version: int) -> None:
-        """v1..v7 -> v8 in place, because terminal-history rows have no file to be rebuilt
+        """v1..v8 -> v9 in place, because terminal-history rows have no file to be rebuilt
         from — and, since v4, neither have the guest rows.
 
         v1 -> v2 adds the thread columns and moves user titles and pins to the session files, where
@@ -1270,12 +1281,23 @@ class ConversationIndex:
         `session_sidecars` is created with the schema, empty, and the rows the sidecars hold are
         backfilled by the next reconcile the way v3's columns were. v6 -> v7 adds the Relay
         session's linked guest source and id, also backfilled from its file on reconcile. v7 -> v8
-        adds native guest provenance, filled by the next guest reconcile.
+        adds native guest provenance, filled by the next guest reconcile. v8 -> v9 adds the
+        #card codes (#G2C7), backfilled here from the entries in place.
         """
         columns = {row[1] for row in db.execute("PRAGMA table_info(conversations)").fetchall()}
-        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS + V7_COLUMNS + V8_COLUMNS:
+        for name, kind in V2_COLUMNS + V3_COLUMNS + V4_COLUMNS + V5_COLUMNS + V7_COLUMNS + V8_COLUMNS + V9_COLUMNS:
             if name not in columns:
                 db.execute(f"ALTER TABLE conversations ADD COLUMN {name} {kind}")
+        if version < 9:
+            # v9's codes are backfilled from the entries the index already holds (#G2C7): a full
+            # re-read of every session file is the slow thing this index exists to avoid, and the
+            # entries carry the text. Titles and summaries are entries too, so nothing is missed.
+            for row in db.execute("SELECT session_id FROM conversations").fetchall():
+                texts = db.execute("SELECT text FROM entries WHERE session_id=?",
+                                   (row["session_id"],)).fetchall()
+                codes = code_tokens(*[(entry["text"] or "") for entry in texts])
+                db.execute("UPDATE conversations SET codes=? WHERE session_id=?",
+                           (json.dumps(codes), row["session_id"]))
         if version < 2:
             rows = db.execute("SELECT session_id, session_dir, custom_title, pinned FROM conversations"
                               " WHERE source='agent' AND (custom_title IS NOT NULL OR pinned != 0)").fetchall()
@@ -1583,12 +1605,17 @@ class ConversationIndex:
                 summary = derived["summary"] or previous_summary
                 added, digest = self._entries_to_write(db, session_id, rows, indexed, stored_digest)
                 tokens, cost = _usage_tokens(data)
+                # The #card codes this conversation mentions (#G2C7), from everything being
+                # indexed in this save — rows, title, custom title and summary are all text a
+                # code can be mentioned in.
+                codes = code_tokens(title, (keep["custom_title"] or "") if keep else "", summary,
+                                    *[row["text"] for row in rows])
                 db.execute(
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
                     " model, preset, created, updated, turns, open_requests, session_dir, pinned, models, tokens, cost,"
                     " summary, first_prompt, last_prompt, files, files_count, has_edits, branch, unfinished, mode,"
-                    " todos, indexed_version, entry_count, entry_digest, guest_source, guest_session)"
-                    " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " todos, indexed_version, entry_count, entry_digest, guest_source, guest_session, codes)"
+                    " VALUES(?,'agent',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (session_id, workspace, project_name(workspace), title,
                      keep["custom_title"] if keep else None,
                      str(data.get("model") or ""), str(data.get("preset") or ""),
@@ -1598,7 +1625,7 @@ class ConversationIndex:
                      summary, derived["first_prompt"], derived["last_prompt"], derived["files"],
                      derived["files_count"], derived["has_edits"], derived["branch"], derived["unfinished"],
                      derived["mode"], derived["todos"], SCHEMA_VERSION, len(rows), digest,
-                     guest_source, guest_session))
+                     guest_source, guest_session, json.dumps(codes)))
                 written = header_entries((keep["custom_title"] if keep else None) or title, summary) + added
                 db.executemany(
                     "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
@@ -1609,6 +1636,19 @@ class ConversationIndex:
                 raise
             return len(rows)
         return self._run(work)
+
+    def _merge_codes(self, db, session_id: str, added: list[str]) -> None:
+        """Add to a conversation's #card codes (#G2C7) without re-reading anything. For the
+        writers that append (sidecars, summaries, threads): a code once mentioned stays
+        mentioned — the next full re-index of the session recomputes the whole set anyway."""
+        if not added:
+            return
+        row = db.execute("SELECT codes FROM conversations WHERE session_id=?", (session_id,)).fetchone()
+        if not row:
+            return
+        merged = sorted(set(_json_list(row["codes"])) | set(added))[:MAX_CODES]
+        db.execute("UPDATE conversations SET codes=? WHERE session_id=?",
+                   (json.dumps(merged), session_id))
 
     def set_summary(self, session_id: str, summary: str) -> None:
         """Store (or clear) a conversation's summary and its searchable entry, without re-reading
@@ -1624,6 +1664,7 @@ class ConversationIndex:
             if summary:
                 db.execute("INSERT INTO entries(session_id, turn, seq, kind, time, text)"
                            " VALUES(?,0,0,'summary',NULL,?)", (session_id, summary))
+            self._merge_codes(db, session_id, code_tokens(summary))
             db.commit()
         self._run(work)
 
@@ -1658,6 +1699,7 @@ class ConversationIndex:
                 "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
                 [(session_id, int(row["turn"]), int(row["seq"]), str(row["kind"]), row["time"],
                   str(row["text"])) for row in rows])
+            self._merge_codes(db, session_id, code_tokens(*[str(row["text"]) for row in rows]))
             if stamp:
                 db.execute("INSERT OR REPLACE INTO session_sidecars(session_id, stamp) VALUES(?,?)",
                            (session_id, stamp))
@@ -1775,6 +1817,9 @@ class ConversationIndex:
                 [(session_id, int(row.get("turn") or 0), int(row.get("seq") or 0),
                   str(row.get("kind") or "reply"), row.get("time"),
                   _clean(str(row.get("text") or ""), MAX_PROMPT)) for row in written])
+            # Guests append their transcript incrementally, so their codes grow the same way
+            # (#G2C7); the headers ride `written`, which is why the title's codes count too.
+            self._merge_codes(db, session_id, code_tokens(*[str(row.get("text") or "") for row in written]))
             if cursor is not None:
                 db.execute("INSERT OR REPLACE INTO guest_files(session_id, source, path, size, mtime_ns,"
                            " read_to, state) VALUES(?,?,?,?,?,?,?)",
@@ -1848,14 +1893,16 @@ class ConversationIndex:
                     "INSERT OR REPLACE INTO conversations(session_id, source, workspace, project, title, custom_title,"
                     " model, preset, created, updated, turns, open_requests, session_dir, pinned, owner_session,"
                     " parent_thread, agent_id, agent_type, spawn_turn, status, models, tokens, cost, file_mtime,"
-                    " indexed_version, entry_count, entry_digest)"
-                    " VALUES(?,'subagent',?,?,?,?,?,'',?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " indexed_version, entry_count, entry_digest, codes)"
+                    " VALUES(?,'subagent',?,?,?,?,?,'',?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (thread_id, workspace, project_name(workspace), title, keep["custom_title"] if keep else None,
                      str(data.get("model") or ""), data.get("created"), data.get("updated") or time.time(),
                      max(1, runs), str(session_dir or ""), int(keep["pinned"]) if keep else 0, owner, parent,
                      str(data.get("agent_id") or ""), str(data.get("type") or ""), spawn_turn,
                      str(data.get("status") or ""), _models(data), tokens, cost, file_mtime, SCHEMA_VERSION,
-                     len(rows), digest))
+                     len(rows), digest,
+                     json.dumps(code_tokens((keep["custom_title"] or "") if keep else "", title,
+                                            *[row["text"] for row in rows]))))
                 written = header_entries((keep["custom_title"] if keep else None) or title, "") + added
                 db.executemany(
                     "INSERT INTO entries(session_id, turn, seq, kind, time, text) VALUES(?,?,?,?,?,?)",
@@ -2348,8 +2395,14 @@ class ConversationIndex:
                pinned: bool | None = None, file: str | None = None, branch: str | None = None,
                has_summary: bool | None = None, now: float | None = None,
                project: str | None = None, outside_projects: list[str] | None = None,
-               session_ids: list[str] | None = None) -> dict:
+               session_ids: list[str] | None = None, meta_only: bool = False) -> dict:
         """Conversations matching `query`, each with its matching turns.
+
+        With `meta_only` (#G2C7) the query text is ignored and the reply is every
+        conversation's light listing — no full-text pass, no matches — as one SELECT the
+        Sessions pane holds so its filter can work over titles and #card codes on the
+        keystroke itself, while the full-text query is still running. Filters still apply,
+        and the reply is capped at MAX_META_LIMIT.
 
         The query may carry operators (`project:`, `file:`, `model:`, `branch:`, `before:`,
         `after:`, `has:`, `is:`, `in:`, and `-word` to exclude); `parse_query` takes them out and
@@ -2423,6 +2476,18 @@ class ConversationIndex:
                  "relevance": "best DESC, hits DESC, COALESCE(c.updated, 0) DESC"}[sort]
 
         def work(db):
+            if meta_only:
+                # (#G2C7) Every conversation's light listing in one SELECT: the filters still
+                # apply (they are column conditions), the text does not — the pane holds this
+                # reply and does the text itself, on the keystroke.
+                sql = "SELECT c.* FROM conversations c"
+                args: list = []
+                if clause:
+                    sql += " WHERE " + clause
+                    args += params
+                sql += " ORDER BY c.pinned DESC, COALESCE(c.updated, 0) DESC LIMIT ?"
+                rows = db.execute(sql, [*args, MAX_META_LIMIT]).fetchall()
+                return [_item(row) for row in rows], len(rows), False, {}
             if parts:
                 any_part = " OR ".join(parts)
                 # Every part somewhere in the conversation: one set of conversations per part,
@@ -2652,6 +2717,9 @@ def _item(row) -> dict:
             "agent_id": row["agent_id"], "agent_type": row["agent_type"], "spawn_turn": row["spawn_turn"],
             "status": row["status"], "models": _json_list(row["models"]), "tokens": row["tokens"] or 0,
             "cost": row["cost"],
+            # The #card codes this conversation mentions (#G2C7), for the pane's code chips and
+            # its instant code filter. Rows that predate v9 (or hand-built test rows) carry none.
+            "codes": _json_list(row["codes"]) if "codes" in row.keys() else [],
             # v3: what the list row and the inline preview show without opening the session.
             "summary": row["summary"] or "", "first_prompt": row["first_prompt"] or "",
             "last_prompt": row["last_prompt"] or "",
@@ -2667,6 +2735,27 @@ def _json_list(text) -> list:
     except ValueError:
         return []
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+CODE_TOKEN = re.compile(r"#([A-Za-z0-9]{4})\b")
+
+
+def code_tokens(*texts: str | None) -> list[str]:
+    """The Board card codes the given text mentions (#G2C7): a `#` followed by four
+    alphanumeric characters, as a card id is written. Uppercased and deduplicated, capped at
+    MAX_CODES so a pasted card index cannot balloon a conversation's row. The board's ids are
+    four characters of `[A-Za-z0-9]`, which is what keeps this from harvesting every hashtag
+    in casual prose — a plain word after a # of any other shape is left alone.
+    """
+    found: set[str] = set()
+    for text in texts:
+        if not text:
+            continue
+        for match in CODE_TOKEN.finditer(text):
+            found.add(match.group(1).upper())
+            if len(found) >= MAX_CODES:
+                return sorted(found)
+    return sorted(found)
 
 
 def _json_list_of_dicts(text) -> list[dict]:

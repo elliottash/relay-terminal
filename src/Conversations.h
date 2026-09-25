@@ -239,6 +239,8 @@ public:
     // Fed by the window, which knows what is open and what was closed; the manager never looks at
     // a window itself. `closed` maps a session id to {closed-list id, closed-at in milliseconds}.
     void setProject(const QString &project);
+    // (#G2C7) Whose cards' codes count as claimed: the board root for this project.
+    void setBoardRoot(const QString &root);
     // The projects Relay knows (card #916B), as {name, folder} pairs, most recently attached first:
     // the "Project" chooser lists them between "Any project" and "No project". A chosen folder goes
     // on the request as `project`; "No project" sends every folder as `outside_projects`
@@ -328,6 +330,8 @@ private:
     void scheduleQuery();
     QJsonObject queryRequest() const;
     void rebuildTree(const QString &keep);
+    // (#G2C7) Size the header sections to the values the delegate paints under them.
+    void fitHeaderSections();
     QTreeWidgetItem *addSessionRow(QTreeWidgetItem *parent, const QJsonObject &item);
     // A group row or a quick-look placeholder spans the whole width. While the list is being
     // filled the request is held back and every span is set at the end (#MDSG, see the .cpp).
@@ -441,6 +445,31 @@ private:
     double m_elapsed = 0;
     QTimer *m_debounce = nullptr, *m_ages = nullptr;
     bool m_filling = false, m_batchRunning = false;
+
+    // (#G2C7) The instant filter: the pane holds every session's light listing — the meta
+    // reply, plus every item it has ever seen — and filters titles and #card codes on the
+    // keystroke itself, while the full-text query is still running. Instant rows show first
+    // (exact title matches ahead of the rest) and the worker's rows follow, deduplicated.
+    struct Meta {
+        QJsonObject item;     // the light listing as the worker sends it (resumes from it)
+        QString title;        // the title the filter matches (a custom title wins)
+        double updated = 0;
+        QStringList codes;    // the #card codes this session mentions
+    };
+    void requestMeta();       // one light listing for the current filters, id "conv-meta"
+    void applyInstant();      // rank m_meta against the search text and rebuild
+    bool instantActive() const { return m_instantArmed; }
+    void refreshBoardCodes();
+    void rememberMeta(const QJsonObject &item);
+    QHash<QString, Meta> m_meta;
+    QString m_metaSignature;                 // the filters the meta reply was asked with
+    bool m_awaitingResults = false;          // the worker's full-text reply is still out
+    QList<QPair<QString, int>> m_instant;    // session id, rank — best first
+    QSet<QString> m_instantIds;
+    bool m_instantArmed = false;             // the text is long enough (or a #code) to filter
+    QString m_boardRoot;
+    QSet<QString> m_codesEver;               // card codes claimed now or once
+    qint64 m_codesAgeMs = 0;
 
     // The context reads the query, the filters and the selection through agentScreen(), and
     // reveals a `session:` link through revealSession(); both are the pane's own.

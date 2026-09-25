@@ -4140,6 +4140,9 @@ public:
         // The label names the project the scope actually narrows to, so it follows the live
         // terminal directory first (card #7QSK) — `workspace()` is the frozen launch dir.
         view->setProject(QFileInfo(owner->cwd().isEmpty() ? owner->workspace() : owner->cwd()).fileName());
+        // (#G2C7) The #card codes' claimed-or-was-claimed state is read from the board this
+        // project runs on, so the pane knows whose chips to bold.
+        view->setBoardRoot(relay::boardRootFor({owner->workspace(), owner->cwd()}));
         // Bind requests to the initiating pane; Resume resolves its destination below.
         owner->bindSessionManager(view);
         QPointer<ToolPane> guard(tool);

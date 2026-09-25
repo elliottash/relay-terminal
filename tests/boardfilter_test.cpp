@@ -60,6 +60,7 @@ private slots:
     void theFilterAsksTheWorkerAboutItsPlainWords();
     void theRestOfAChunkedBoardOpenPatchesTheRowsIn();
     void aWorkerFailureReplacesTheLoadingLine();
+    void theFilterRanksItsMatchesAndMarksWhereTheyLanded();
 };
 
 // The filter bar (#7M6E). Each card's whole body and thread used to ride on every row for one
@@ -201,6 +202,50 @@ void BoardFilterTests::aWorkerFailureReplacesTheLoadingLine()
                               {"text", "The Board worker exited."}});
     QCOMPARE(a.model().total(), 1);
     QVERIFY(a.notice().contains(QStringLiteral("exited")));
+}
+
+// (#G2C7) The filter answers in the Sessions list's voice: each section's cards in relevance
+// order — an exact title leads, then a title that carries the term, then what only the body
+// matched — and the marks the row paints come from the model: where the term landed in the
+// title, and the line of the body it landed in for a text-only match.
+void BoardFilterTests::theFilterRanksItsMatchesAndMarksWhereTheyLanded()
+{
+    relay::BoardView a(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    a.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QJsonObject textOnly = row(QStringLiteral("M3XJ"), QStringLiteral("ready"));
+    textOnly.insert(QStringLiteral("text"),
+                    QStringLiteral("intro\nthe hotline question was asked\noutro"));
+    QJsonObject contains = row(QStringLiteral("Q9W1"), QStringLiteral("ready"));
+    contains.insert(QStringLiteral("title"), QStringLiteral("hotline outage"));
+    QJsonObject exact = row(QStringLiteral("B2N4"), QStringLiteral("ready"));
+    exact.insert(QStringLiteral("title"), QStringLiteral("hotline"));
+    a.handleEvent(opened({textOnly, contains, exact}));
+    a.setCollapsedSections(QJsonArray{});
+    auto *filter = a.findChild<QLineEdit *>(QStringLiteral("boardFilter"));
+    QVERIFY(filter);
+    filter->setText(QStringLiteral("hotline"));
+
+    // Answered from the rows, before the worker has said a word: all three matched, ranked.
+    QCOMPARE(a.model().openCount(), 3);
+    const QList<relay::board::Card> ready = a.model().cards(QStringLiteral("ready"));
+    QCOMPARE(ready.size(), 3);
+    QCOMPARE(ready.at(0).title, QStringLiteral("hotline"));          // exact title
+    QCOMPARE(ready.at(1).title, QStringLiteral("hotline outage"));   // the term is in the title
+    QCOMPARE(ready.at(2).id, QStringLiteral("M3XJ"));                // only the body matched
+
+    // The marks: the run in a title, and the matched line of the text-only card.
+    const auto titleMark = a.model().filterMark(QStringLiteral("hotline outage"), QString());
+    QCOMPARE(titleMark.runs.size(), 1);
+    QCOMPARE(titleMark.runs.at(0).second - titleMark.runs.at(0).first, 7);
+    const auto textMark = a.model().filterMark(
+        QString(), textOnly.value(QStringLiteral("text")).toString());
+    QCOMPARE(textMark.snippet, QStringLiteral("the hotline question was asked"));
+    QVERIFY(!textMark.snippetRuns.isEmpty());
+
+    // Cleared, the ranking goes with it: no terms, nothing to rank by.
+    filter->setText(QString());
+    QCOMPARE(a.model().filterRank(ready.at(0)), 9);
 }
 
 QTEST_MAIN(BoardFilterTests)
