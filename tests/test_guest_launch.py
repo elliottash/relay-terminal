@@ -13,7 +13,7 @@ import shlex
 import tempfile
 import unittest
 
-from relay_core import guest_codex, guest_install, guest_launch
+from relay_core import guest_codex, guest_home, guest_install, guest_launch
 
 
 class ClaudeSettingsFile(unittest.TestCase):
@@ -23,6 +23,8 @@ class ClaudeSettingsFile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = guest_launch.write_claude_settings(root, cwd=None, home=root)
             settings = json.loads(Path(path).read_text(encoding="utf-8"))
+        # Plus the retention that keeps claude from pruning Relay's transcripts (#5A37).
+        self.assertEqual(settings.pop("cleanupPeriodDays"), guest_home.RETENTION_DAYS)
         self.assertEqual(guest_install.relay_entries(), settings)
         self.assertEqual(sorted(guest_install.HOOK_EVENTS), sorted(settings["hooks"]))
         for event, groups in settings["hooks"].items():

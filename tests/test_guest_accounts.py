@@ -276,6 +276,20 @@ class OwnHomePathsTests(unittest.TestCase):
 
     def setUp(self):
         self.reg = Registry(self)
+        # Run from a Relay pane, the process names the Relay-owned home (#5A37); these cases are
+        # about a machine without it, and the next one about a machine with it.
+        env = mock.patch.dict(os.environ, {"RELAY_GUEST_HOME": "", "RELAY_USER_CLAUDE_CONFIG_DIR": "",
+                                           "RELAY_USER_CODEX_HOME": ""})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_the_relay_home_and_the_users_own_are_both_owned(self):
+        relay = os.path.join(self.reg.root, "data", "guests")
+        with mock.patch.dict(os.environ, {"HOME": self.reg.root, "RELAY_GUEST_HOME": relay,
+                                          "CLAUDE_CONFIG_DIR": os.path.join(relay, "claude")}):
+            paths = ghp.own_home_paths(self.config("harness://claude"))
+        self.assertIn(os.path.join(relay, "claude"), paths)
+        self.assertIn(os.path.join(self.reg.root, ".claude"), paths)
 
     def config(self, url):
         return ProviderConfig(url, "m", "", {}, 1)

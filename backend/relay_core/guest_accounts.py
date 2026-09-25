@@ -218,10 +218,13 @@ def save(spec: dict) -> Account:
     if spec.get("guest") in GUESTS and valid_id(spec.get("id")) and not spec.get("config_dir"):
         spec["config_dir"] = default_config_dir(spec["guest"], spec["id"])
     entry = _from_dict(spec)
-    default_dir = os.path.abspath(guest.config_dir(entry.guest))
-    if entry.config_dir == default_dir:
-        raise ValueError(f"{entry.config_dir} is {guest.spec(entry.guest).name}'s default login; "
-                         f"it is already the preset guest:{entry.guest}.")
+    # Neither the default login's home nor, beside a Relay-owned one (#5A37), the user's own
+    # directory: both are already read as the preset guest:<guest>.
+    for default_dir in {os.path.abspath(guest.config_dir(entry.guest)),
+                        os.path.abspath(guest.user_config_dir(entry.guest))}:
+        if entry.config_dir == default_dir:
+            raise ValueError(f"{entry.config_dir} is {guest.spec(entry.guest).name}'s default login; "
+                             f"it is already the preset guest:{entry.guest}.")
     items = accounts()
     for other in items:
         if other.config_dir == entry.config_dir and other.key != entry.key:

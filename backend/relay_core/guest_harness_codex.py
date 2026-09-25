@@ -90,6 +90,7 @@ from .guest_harness import (Emit, HarnessError, HarnessSteerUncertain, HarnessEv
                             TurnResult, approval_scope, chunk_tool_output, map_tool_name,
                             validate_effort, validate_permissions,
                             window_kind_for_minutes)
+from . import guest_home
 from .guest_launch import codex_memory_overrides
 from .presets import model_name
 
@@ -240,6 +241,19 @@ class CodexHarness:
         self._dead = False
         self._dead_reason = ""
 
+    def _use_home(self, resume: str | None) -> None:
+        """The Relay-owned home (#5A37): prepared before a real codex starts in it, and left for
+        the user's own directory by a resume of a thread whose rollout exists only there."""
+        if "CODEX_HOME" in self._env_overrides or self._spawn is not _spawn_codex:
+            return
+        try:
+            guest_home.ensure("codex")
+        except OSError as exc:
+            log.debug("codex's Relay home could not be prepared: %s", exc)
+        legacy = guest_home.home_for_resume("codex", resume)
+        if legacy:
+            self._env_overrides["CODEX_HOME"] = legacy
+
     def _child_env(self) -> dict:
         env = dict(os.environ)
         for key in self._env_remove:
@@ -266,6 +280,7 @@ class CodexHarness:
             raise HarnessNotAvailable(
                 f"Codex is not installed here: {self._codex_path!r} is not on PATH. "
                 "Install it with `npm i -g @openai/codex` and sign in with `codex login`.")
+        self._use_home(resume)
         try:
             argv = [exe, "app-server"]
             if not self._own_memory:

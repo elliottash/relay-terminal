@@ -444,6 +444,13 @@ int main(int argc, char **argv) {
         const QString scripts = dataRoot() + QStringLiteral("/scripts");
         qputenv("RELAY_OPEN_HELPER", (scripts + QStringLiteral("/relay-open")).toUtf8());
         qputenv("PATH", (scripts + QDir::listSeparator() + qEnvironmentVariable("PATH")).toUtf8());
+        // Before any worker or shell starts, so each inherits the guests' Relay-owned home
+        // (#5A37); the links into it are made in the background, long before a guest is typed.
+        if (relay::guesthome::exportEnvironment())
+            QProcess::startDetached(relayPython(),
+                {QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"),
+                 QStringLiteral("relay_core.guest_home"), QStringLiteral("ensure")},
+                dataRoot() + QStringLiteral("/backend"));
         WindowManager manager(path, parser.isSet(clean));
         manager.setUpLayoutSaving();
         installQuitSignals(app);   // SIGTERM, SIGINT and SIGHUP become an ordinary quit

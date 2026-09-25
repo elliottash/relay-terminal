@@ -268,12 +268,15 @@ class HarnessClaude(unittest.TestCase):
         seen = self.spawned(False)
         argv = seen["argv"]
         self.assertEqual(json.loads(argv[argv.index("--settings") + 1]),
-                         {"autoMemoryEnabled": False, "autoDreamEnabled": False})
+                         {"autoMemoryEnabled": False, "autoDreamEnabled": False,
+                          "cleanupPeriodDays": 36500})
         self.assertEqual(seen["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1")
 
     def test_own_memory_passes_neither(self):
         seen = self.spawned(True)
-        self.assertNotIn("--settings", seen["argv"])
+        # Only the retention (#5A37) rides `--settings`; nothing about memory does.
+        argv = seen["argv"]
+        self.assertEqual(json.loads(argv[argv.index("--settings") + 1]), {"cleanupPeriodDays": 36500})
         self.assertNotIn("CLAUDE_CODE_DISABLE_AUTO_MEMORY", seen["env"])
 
     def test_a_settings_file_of_the_callers_is_not_doubled(self):

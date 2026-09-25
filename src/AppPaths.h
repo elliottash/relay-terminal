@@ -131,6 +131,49 @@ inline QString keepRoot(const QString &project) {
 }
 }  // namespace relay::scratchpaths
 
+// The guests' Relay-owned home (card #5A37). Every Claude Code and Codex this process starts — the
+// headless harnesses, the model picker's launch line, and whatever is typed into a pane shell —
+// inherits CLAUDE_CONFIG_DIR / CODEX_HOME pointing at <data>/relay/guests/<guest>, so transcripts
+// and state land under Relay and claude's 30-day cleanup does not reach them. The user's own
+// directories are recorded first (RELAY_USER_CLAUDE_CONFIG_DIR / RELAY_USER_CODEX_HOME), because
+// backend/relay_core/guest_home.py links their settings, skills and login into the new homes and
+// guest_sessions.py keeps reading the conversations already there. backend/relay_core/guest.py
+// reads the same variables; RELAY_GUEST_HOME=off in Relay's own environment turns all of it off.
+namespace relay::guesthome {
+inline bool exportEnvironment() {
+    const QString inherited = qEnvironmentVariable("RELAY_GUEST_HOME").trimmed();
+    const QString lowered = inherited.toLower();
+    if (lowered == QLatin1String("off") || lowered == QLatin1String("0")
+        || lowered == QLatin1String("false") || lowered == QLatin1String("no"))
+        return false;
+    // Inherited when this Relay was started from another one's pane: the same homes, then.
+    const QString root = !inherited.isEmpty() && QDir::isAbsolutePath(inherited)
+        ? QDir::cleanPath(inherited)
+        : QDir(scratchpaths::xdgBase("XDG_DATA_HOME", "XDG_DATA_HOME", QStringLiteral(".local/share"),
+                                     QStandardPaths::GenericDataLocation))
+              .filePath(QStringLiteral("relay/guests"));
+    struct Guest { const char *name, *variable, *saved, *dotDir; };
+    const Guest guests[] = {{"claude", "CLAUDE_CONFIG_DIR", "RELAY_USER_CLAUDE_CONFIG_DIR", ".claude"},
+                            {"codex", "CODEX_HOME", "RELAY_USER_CODEX_HOME", ".codex"}};
+    for (const Guest &guest : guests) {
+        const QString owned = QDir(root).filePath(QString::fromLatin1(guest.name));
+        if (qEnvironmentVariableIsEmpty(guest.saved)) {
+            const QString current = qEnvironmentVariable(guest.variable).trimmed();
+            const QString user = !current.isEmpty() && QDir::isAbsolutePath(current)
+                    && QDir::cleanPath(current) != owned
+                ? QDir::cleanPath(current)
+                : QDir(QDir::homePath()).filePath(QString::fromLatin1(guest.dotDir));
+            qputenv(guest.saved, user.toUtf8());
+        }
+        if (!QDir().mkpath(owned)) return false;   // no home to point at: leave the CLIs' own
+        QFile::setPermissions(owned, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        qputenv(guest.variable, owned.toUtf8());
+    }
+    qputenv("RELAY_GUEST_HOME", root.toUtf8());
+    return true;
+}
+}  // namespace relay::guesthome
+
 // Case-insensitive subsequence score; 0 means no match. Contiguous and earlier matches score higher.
 inline int relayFuzzyScore(const QString &needle, const QString &haystack) {
     if (needle.isEmpty()) return 1;

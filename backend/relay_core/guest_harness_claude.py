@@ -93,6 +93,7 @@ import uuid
 from .guest_harness import (HarnessError, HarnessSteerUncertain, HarnessEvent, HarnessNotAvailable, HarnessStart,
                             TurnResult, approval_scope, map_tool_name, validate_effort,
                             validate_permissions)
+from . import guest_home
 from .guest_launch import CLAUDE_MEMORY_OFF_ENV, CLAUDE_MEMORY_OFF_SETTINGS
 from .presets import model_name
 
@@ -348,10 +349,15 @@ class ClaudeHarness:
         argv += list(PERMISSION_FLAGS[permissions])
         if self._settings:
             argv += ["--settings", self._settings]
-        elif not self._own_memory:
+        else:
             # `--settings` takes a file or inline JSON; one is enough, and a settings file of the
-            # caller's own is left alone (the environment variable below turns it off regardless).
-            argv += ["--settings", json.dumps(CLAUDE_MEMORY_OFF_SETTINGS)]
+            # caller's own is left alone (the environment variable below turns memory off
+            # regardless). Relay, not claude's 30-day default, decides when a transcript is
+            # forgotten (#5A37) — in an account's directory too, which has no generated settings.
+            inline = {"cleanupPeriodDays": guest_home.RETENTION_DAYS}
+            if not self._own_memory:
+                inline.update(CLAUDE_MEMORY_OFF_SETTINGS)
+            argv += ["--settings", json.dumps(inline)]
         if getattr(self, "_board_bridge", None):
             argv += ["--mcp-config", json.dumps({"mcpServers": {"relay_board": self._board_bridge}})]
         argv += self._extra_args
@@ -379,6 +385,7 @@ class ClaudeHarness:
         self._permissions = permissions
         self._model = model or ""
         self._effort = effort or ""
+        self._use_home(resume)
         # A fork gets its id from the CLI (it makes a new one); everything else we name ourselves,
         # so the pane has a session id to file the transcript under before the first turn.
         new_id = "" if resume else str(uuid.uuid4())
@@ -389,6 +396,19 @@ class ClaudeHarness:
         self._handshake()
         self._refresh_resets()
         return HarnessStart(session_id=self._session_id, model=self._model)
+
+    def _use_home(self, resume: str | None) -> None:
+        """The Relay-owned home (#5A37): prepared before a real claude starts in it, and left for
+        the user's own directory by a resume of a conversation that exists only there."""
+        if "CLAUDE_CONFIG_DIR" in self._env_overrides or self._spawn is not _spawn:
+            return
+        try:
+            guest_home.ensure("claude")
+        except OSError as exc:
+            log.debug("claude's Relay home could not be prepared: %s", exc)
+        legacy = guest_home.home_for_resume("claude", resume)
+        if legacy:
+            self._env_overrides["CLAUDE_CONFIG_DIR"] = legacy
 
     def _refresh_resets(self) -> None:
         # Only for the real CLI: a harness on a stand-in process (the tests) has no login whose

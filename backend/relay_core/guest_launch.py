@@ -12,7 +12,7 @@ one command:
   installer used to write (`guest_install.relay_entries()` — one source, so the shim's contract in
   26.4 is unchanged: the same guard, the same absolute path, the same `--relay-guest` token) and
   is read by this one claude only. `--dangerously-skip-permissions` goes with it: Relay's own
-  agent runs without per-action approvals (WARP.md), and the owner wants the guest to move around
+  agent runs without per-action approvals (RELAY.md), and the owner wants the guest to move around
   the file system the same way. The IDE bridge's two variables are prefixed to the command line
   rather than exported into the shell, so no other program in that shell — and no shell started
   later — ever sees a port that may since have gone away.
@@ -55,7 +55,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from . import guest, guest_codex, guest_install
+from . import guest, guest_codex, guest_home, guest_install
 from .guest_instructions import memory_instructions, memory_mode, own_memory
 
 SETTINGS_DIR = "guest"                        # under the pane's runtime dir, mode 0700
@@ -121,6 +121,8 @@ def claude_settings(keep_user_statusline: bool = False, own_memory: bool = True)
         entries.pop("statusLine", None)
     if not own_memory:
         entries.update(CLAUDE_MEMORY_OFF_SETTINGS)
+    # Relay decides when a transcript is forgotten (#5A37, #HEY7), not claude's 30-day default.
+    entries["cleanupPeriodDays"] = guest_home.RETENTION_DAYS
     return entries
 
 
@@ -365,6 +367,38 @@ def clean_legacy(cwd: str | None, home: str | None = None) -> list[str]:
 # ----- the command line ---------------------------------------------------------------------
 
 
+def resumed_id(guest_id: str, extra=()) -> str:
+    """The conversation `extra` resumes or forks: claude's `-r`/`--resume <id>`, codex's
+    `resume <id>` / `fork <id>`. "" for a new one."""
+    extra = list(extra)
+    if guest_id == "codex":
+        if len(extra) >= 2 and extra[0] in CODEX_SUBCOMMANDS and not extra[-1].startswith("-"):
+            return extra[-1]
+        return ""
+    for index, word in enumerate(extra):
+        if word in ("-r", "--resume") and index + 1 < len(extra) and not extra[index + 1].startswith("-"):
+            return extra[index + 1]
+        if word.startswith("--resume="):
+            return word.split("=", 1)[1]
+    return ""
+
+
+def home_environment(guest_id: str, extra=(), home: str | None = None) -> dict[str, str]:
+    """What this launch prefixes to point the guest at the right home (#5A37): nothing for a new
+    conversation (the pane's environment already names the Relay-owned home), the user's own
+    directory for one that is resumed from there."""
+    if home is not None:
+        return {}
+    try:
+        guest_home.ensure(guest_id)
+    except OSError:
+        pass                         # an unprepared home still runs; it only misses the links
+    legacy = guest_home.home_for_resume(guest_id, resumed_id(guest_id, extra))
+    if not legacy:
+        return {}
+    return {"CLAUDE_CONFIG_DIR" if guest_id == "claude" else "CODEX_HOME": legacy}
+
+
 def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: int = 0,
                  extra=(), home: str | None = None, python: str | None = None,
                  model: str | None = None, effort: str | None = None,
@@ -373,8 +407,9 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
 
         {"guest", "argv", "env", "command", "settings", "legacy", "session_id"}
 
-    `env` is the IDE bridge's two variables for claude when `port` names a live bridge (empty
-    otherwise, and always empty for codex); `command` is the one shell line — the assignments
+    `env` is the IDE bridge's two variables for claude when `port` names a live bridge, plus the
+    guest's home variable when the conversation resumed lives in the user's own directory rather
+    than the Relay-owned home (`home_environment`, #5A37); empty otherwise; `command` is the one shell line — the assignments
     prefixed, every word quoted for the shell — that the pane types; `settings` is the claude
     settings file's path (empty for codex); `legacy` lists the stopgap files that were cleaned;
     `session_id` is the guest session this launch will write (`claude_session`; a resumed codex
@@ -392,7 +427,7 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
     spec = guest.spec(guest_id)   # ValueError for anything the registry does not know
     mode = memory_mode(memory)
     legacy = clean_legacy(cwd, home)
-    env: dict[str, str] = {}
+    env: dict[str, str] = home_environment(spec.id, extra, home)
     settings = ""
     session_id = ""
     block = tui_memory_instructions(spec.id, cwd, mode, python)
@@ -404,7 +439,7 @@ def command_line(guest_id: str, runtime_dir: str, cwd: str | None = None, port: 
         extra, session_id = claude_session(extra)
         argv = claude_argv(settings, extra, model, effort, memory_file or None)
         if port:
-            env = guest.bridge_env("claude", port)
+            env.update(guest.bridge_env("claude", port))
     else:
         pointer: list[str] = []
         if block:

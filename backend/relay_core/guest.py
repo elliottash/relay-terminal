@@ -190,10 +190,48 @@ def _version(binary: str) -> str | None:
 # ----- well-known paths --------------------------------------------------------------------
 
 
-def config_dir(guest_id: str, home: str | None = None) -> str:
-    """The guest's config directory, absolute (it need not exist)."""
+# The Relay-owned home (#5A37). Relay's `main()` exports `RELAY_GUEST_HOME=<data>/relay/guests` and
+# points `CLAUDE_CONFIG_DIR` / `CODEX_HOME` at `<it>/claude` and `<it>/codex`, so every guest Relay
+# starts (headless, from the model picker, or typed into a pane) keeps its transcripts and state
+# there; `guest_home.ensure()` links the user's own settings, skills and login into it. The user's
+# own directory, where every conversation from before lives, is `user_config_dir()`.
+RELAY_HOME_ENV = "RELAY_GUEST_HOME"
+# What `main()` saved of the user's own directories before pointing the variables at Relay's.
+USER_DIR_ENV = {"claude": "RELAY_USER_CLAUDE_CONFIG_DIR", "codex": "RELAY_USER_CODEX_HOME"}
+
+
+def relay_home_root() -> str:
+    """`$RELAY_GUEST_HOME` when Relay owns the guests' homes, else "" (unset, `off`, relative)."""
+    value = os.environ.get(RELAY_HOME_ENV, "").strip()
+    if not value or value.lower() in ("off", "0", "false", "no") or not os.path.isabs(value):
+        return ""
+    return os.path.normpath(value)
+
+
+def relay_home(guest_id: str) -> str:
+    """This guest's Relay-owned home, or "" when Relay does not own the guests' homes."""
+    root = relay_home_root()
+    return os.path.join(root, spec(guest_id).id) if root else ""
+
+
+def user_config_dir(guest_id: str, home: str | None = None) -> str:
+    """The user's own directory for this guest: what `main()` recorded, else `~/.<guest>`."""
+    if home is None:
+        saved = os.environ.get(USER_DIR_ENV[spec(guest_id).id], "").strip()
+        if saved and os.path.isabs(saved):
+            return os.path.normpath(saved)
     root = home if home is not None else os.path.expanduser("~")
     return os.path.join(root, spec(guest_id).config_dir)
+
+
+def config_dir(guest_id: str, home: str | None = None) -> str:
+    """The guest's config directory, absolute (it need not exist): the Relay-owned home when there
+    is one (#5A37), else `~/.<guest>`. A given `home` (tests, an import) is always `<home>/.<guest>`."""
+    if home is None:
+        owned = relay_home(guest_id)
+        if owned:
+            return owned
+    return user_config_dir(guest_id, home)
 
 
 def claude_ide_lock_dir(home: str | None = None) -> str:

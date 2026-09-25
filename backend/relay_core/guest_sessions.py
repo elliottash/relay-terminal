@@ -910,6 +910,15 @@ def source_root(source: str, home: str | None = None) -> Path:
                 else guest.codex_sessions_dir(home))
 
 
+def _user_root(source: str, home: str | None) -> str:
+    """The user's own directory for `source` when it is not the one guests run in (the Relay-owned
+    home, #5A37): the conversations from before it are there. "" otherwise."""
+    if home is not None or not guest.relay_home(source):
+        return ""
+    user_dir = guest.user_config_dir(source)
+    return "" if os.path.normpath(user_dir) == os.path.normpath(guest.config_dir(source)) else user_dir
+
+
 def account_roots(source: str, home: str | None = None) -> list[tuple[str, str]]:
     """`(account id, config directory)` of each registered account of `source` (#M8S2). Only for
     the real home: a scan of another `home` (tests, an import) has no registry of its own."""
@@ -999,6 +1008,13 @@ def _scan(source: str, home: str | None, *, limit: int | None,
     guest.spec(source)
     records, kept = _scan_root(source, home, None, limit=limit, known=known, skip=skip,
                                cursors=cursors)
+    user_dir = _user_root(source, home)
+    if user_dir:
+        # The user's own login, as before the Relay-owned home: read, never written.
+        more, more_kept = _scan_root(source, home, user_dir, limit=limit, known=known, skip=skip,
+                                     cursors=cursors)
+        records += more
+        kept |= more_kept
     for account, directory in account_roots(source, home):
         more, more_kept = _scan_root(source, home, directory, limit=limit, known=known, skip=skip,
                                      cursors=cursors)
@@ -1153,8 +1169,10 @@ def reconcile(index: conv_index.ConversationIndex, home: str | None = None,
         # nothing; a root that is there and empty still does.
         # With accounts (#M8S2) every login's directory has to be there: a session of an account
         # whose directory is momentarily unreachable is not a session that went away.
+        # The same goes for the user's own directory beside the Relay-owned home (#5A37).
         if source_root(source, home).is_dir() and all(
-                os.path.isdir(directory) for _, directory in account_roots(source, home)):
+                os.path.isdir(directory) for _, directory in account_roots(source, home)) and (
+                not _user_root(source, home) or os.path.isdir(_user_root(source, home))):
             prunable |= {identifier for identifier, row in known.items() if row[0] == source}
         else:
             log.debug("guest reconcile: %s has no session directory; nothing pruned", source)
@@ -1330,8 +1348,15 @@ def live_transcript(source: str, workspace: str | None = None, home: str | None 
     sessions are there and nowhere else. An unknown source is a ValueError."""
     guest.spec(source)
     if source == "claude":
-        return claude_live_transcript(workspace, home, session_id=session_id, account_dir=account_dir)
-    return codex_live_rollout(workspace, home, thread_id=session_id, account_dir=account_dir)
+        found = claude_live_transcript(workspace, home, session_id=session_id, account_dir=account_dir)
+    else:
+        found = codex_live_rollout(workspace, home, thread_id=session_id, account_dir=account_dir)
+    # A conversation from before the Relay-owned home (#5A37) is resumed in the user's own
+    # directory and keeps being written there.
+    user_dir = _user_root(source, home)
+    if found is None and session_id and account_dir is None and user_dir:
+        return live_transcript(source, workspace, home, session_id=session_id, account_dir=user_dir)
+    return found
 
 
 def guess_source(path: str | Path) -> str:

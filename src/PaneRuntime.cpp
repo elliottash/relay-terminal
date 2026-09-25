@@ -948,8 +948,12 @@ void Pane::startTerminal(bool cleanShell) {
             // The process-wide RELAY_* words a shell needs, from this pane's own Relay: the tmux
             // server's environment is the first client's, which is another pane's.
             const QProcessEnvironment system = QProcessEnvironment::systemEnvironment();
+            // The guests' Relay-owned home too (#5A37), or a tmux server a Relay without it
+            // started would send `claude` in this pane back to ~/.claude.
             for (const char *name : {"RELAY_SESSION_TOKEN", "RELAY_RUNTIME_DIR", "RELAY_SHELL_EVENT",
-                                     "RELAY_SHELL_INTEGRATION", "RELAY_CLEAN_SHELL", "RELAY_SSH_NEVER"}) {
+                                     "RELAY_SHELL_INTEGRATION", "RELAY_CLEAN_SHELL", "RELAY_SSH_NEVER",
+                                     "RELAY_GUEST_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME",
+                                     "RELAY_USER_CLAUDE_CONFIG_DIR", "RELAY_USER_CODEX_HOME"}) {
                 const QString value = system.value(QLatin1String(name));
                 if (!value.isEmpty()) quoted(QLatin1String(name) + QLatin1Char('=') + value);
             }

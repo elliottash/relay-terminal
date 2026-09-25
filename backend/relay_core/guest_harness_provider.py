@@ -166,8 +166,9 @@ def own_home_paths(config) -> list[str]:
     paths: list[str] = []
     # Both candidate locations, unconditionally: the account's dir (which itself falls back to
     # the CONFIG_ENV var) and the harness's default, so the skip holds on any machine.
+    # And the user's own directory beside the Relay-owned home (#5A37), which a resume can run in.
     for directory in (guest_accounts.config_dir(guest_id, config_account(config)),
-                      guest.config_dir(guest_id)):
+                      guest.config_dir(guest_id), guest.user_config_dir(guest_id)):
         if directory and directory not in paths:
             paths.append(directory)
     for name in _OWN_HOME_FILES.get(guest_id, ()):
