@@ -9,7 +9,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: decision, primary: person, also: [ai-text], human: required, criteria: 'the design page answers which object kinds get a tab, how links are addressed and stored, and what changes on #9FX8 step 2; the owner''s seven decisions are recorded', sign_off: none, effort: medium, stakes: rework, blast: capability}
 source: 'owner, Relay conversation, 2026-09-25, while #9FX8 was executing'
-links: {plans: [], commits: [], evidence: [], related: [9FX8, 1QKM, FVVY, V3R3, P2W8, 7BM4, G9ZD], github: null}
+links: {plans: [], commits: [0157252fdc6f692595d7d445ddf30e0e7d2057c5], evidence: [docs/PROJECT-BOARD-DESIGN.md, docs/research/project-board/a-single-project-object-models.md, docs/research/project-board/b-agent-era-project-state.md, docs/research/project-board/c-link-models-and-backlinks.md], related: [9FX8, 1QKM, FVVY, V3R3, P2W8, 7BM4, G9ZD], github: null}
 ---
 # The Board as the project's manager: objects (cards, skills, memories, artifacts), a Live strip instead of a pane list, and computed links among them
 
