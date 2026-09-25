@@ -116,7 +116,7 @@ QString statusTitle(const QString &status)
         {QStringLiteral("waiting"), QStringLiteral("Waiting")},
         {QStringLiteral("draft"), QStringLiteral("Draft")},
         {QStringLiteral("approved"), QStringLiteral("Approved")},
-        {QStringLiteral("executing"), QStringLiteral("Executing")},
+        {QStringLiteral("executing"), QStringLiteral("Running")},
         {QStringLiteral("active"), QStringLiteral("Active")},
         {QStringLiteral("retired"), QStringLiteral("Retired")}};
     const QString known = names.value(status);

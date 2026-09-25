@@ -4691,7 +4691,7 @@ def _column_label(status: str) -> str:
             "needs-qa-human": "Needs QA (human)", "needs-review": "Needs review",
             "needs-labels": "Needs labels", "needs-ab": "Needs A/B", "deferred": "Deferred",
             "done": "Done", "dropped": "Dropped", "draft": "Draft", "approved": "Approved",
-            "executing": "Executing", "active": "Active", "retired": "Retired"}.get(status, status)
+            "executing": "Running", "active": "Active", "retired": "Retired"}.get(status, status)
 
 
 #: The deterministic stage moves (#3XZV): what each stage event does to a work card's status.

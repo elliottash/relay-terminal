@@ -10083,7 +10083,7 @@ void BoardView::executeCard(const QString &note, bool background)
                                                      QJsonObject{{QStringLiteral("assignee"), QStringLiteral("agent")}}}}}});
     if (status != QStringLiteral("executing") && status != QStringLiteral("in-progress")) {
         const QString id = nextRequestId();
-        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to Executing · Run").arg(card));
+        m_pendingNotes.insert(id, QStringLiteral("Moved #%1 to Running · Run").arg(card));
         send({{QStringLiteral("type"), QStringLiteral("board_move")}, {QStringLiteral("id"), id},
               {QStringLiteral("card"), card}, {QStringLiteral("status"), QStringLiteral("executing")},
               {QStringLiteral("reason"), QStringLiteral("Run: handed to a terminal pane")}});
