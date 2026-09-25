@@ -285,6 +285,10 @@ class ToolTests(unittest.TestCase):
         (self.root / 'small.h').write_text('    int value_50 = compute(50);\n    int value_51_is_the_longest_line = compute(51);\n')
         with self.assertRaisesRegex(ValueError, r'line 1, column 4: the file has " int value_50.* has "\\tint'):
             self.tools.prepare('edit_file', {'path': 'small.h', 'old_string': old, 'new_string': 'x'})
+        # The difference is inside the only line: half of that line anchors it.
+        with self.assertRaisesRegex(ValueError, r'line 8000, column 35: the file has ";\\n .* has "\);"'):
+            self.tools.prepare('edit_file', {'path': 'big.h', 'old_string': '    int value_8000 = compute(8000));',
+                                             'new_string': 'x'})
         # Nothing to anchor on: today's message, no position.
         with self.assertRaises(ValueError) as caught:
             self.tools.prepare('edit_file', {'path': 'big.h', 'old_string': 'no such text anywhere', 'new_string': 'x'})

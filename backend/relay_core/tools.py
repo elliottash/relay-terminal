@@ -1207,12 +1207,15 @@ def command_env() -> dict:
 
 def _closest_mismatch(text: str, old_string: str) -> str:
     """Where a missed edit_file old_string first stops matching the file (card #XG2G), so the retry
-    is one step: its longest line that does occur anchors it, the match is grown back and forward
-    from there, and the first differing character is named by line and column. Empty when no line
-    of old_string is distinctive enough to anchor on."""
-    keys = sorted({line.strip() for line in old_string.split("\n") if len(line.strip()) >= 8}, key=len, reverse=True)
+    is one step: its longest line that does occur anchors it — or, when the difference is inside
+    the only line, that line's first or second half — the match is grown back and forward from
+    there, and the first differing character is named by line and column. Empty when nothing in
+    old_string is distinctive enough to anchor on."""
+    lines = sorted({line.strip() for line in old_string.split("\n")}, key=len, reverse=True)
+    halves = [part.strip() for line in lines for part in (line[:len(line) // 2], line[len(line) // 2:])]
+    keys = [key for key in lines[:8] + halves[:16] if len(key) >= 8]
     best = None
-    for key in keys[:8]:
+    for key in keys:
         at_old, at_file, seen = old_string.find(key), text.find(key), 0
         while at_file != -1 and seen < 50:
             back = 0
