@@ -4037,4 +4037,3 @@ class CaseLedgerTests(BoardToolsTest):
         self.assertNotIn("error", second, second)
         self.assertIn("names no verifier outside the author's lineage", " ".join(second["qa_policy"]))
         self.assertNotIn("AI gating is off", " ".join(second["qa_policy"]))
-
