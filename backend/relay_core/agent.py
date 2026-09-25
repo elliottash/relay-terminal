@@ -2548,16 +2548,37 @@ class Agent:
         history. A guest harness keeps its own context, so there is nothing of ours to clear."""
         if not self.clear_tool_results or self._guest_harness():
             return
-        messages, count, chars = compaction.clear_stale_tool_results(self.messages)
+        stats = {}
+        messages, count, chars = compaction.clear_stale_tool_results(self.messages, stats=stats)
         if not count:
             return
         self.messages = messages
         self.expect_prefix_change("tool_results_cleared")
         self.context.invalidate()
         self.emit({"event": "tool_results_cleared", "turn_id": turn_id, "count": count, "chars": chars,
-                   "keep_groups": compaction.CLEAR_KEEP_GROUPS})
+                   "keep_groups": compaction.CLEAR_KEEP_GROUPS, "protected": stats.get("protected", 0)})
         self.emit(self.context_event())
         self._autosave_soon()
+
+    def _note_reread(self, turn_id, tool: str, arguments, call_id) -> None:
+        """Card #5NDQ: count a read of a file range this turn already read (read_file, or `sed -n`
+        through run_command) as a `reread_same_range` event, saying whether the earlier result had
+        been cleared by then — the measure of what clearing costs in steps."""
+        key = compaction.read_key(tool, arguments)
+        if not key:
+            return
+        if getattr(self, "_turn_reads", (None, None))[0] != turn_id:
+            self._turn_reads = (turn_id, {})
+        earlier = self._turn_reads[1].setdefault(key, [])
+        if earlier:
+            cleared = any(m.get("role") == "tool" and m.get("tool_call_id") in earlier
+                          and str(m.get("content") or "").startswith(compaction.CLEARED_PREFIX)
+                          for m in self.messages)
+            first, last = key[1], key[2]
+            self.emit({"event": "reread_same_range", "turn_id": turn_id, "tool": tool, "path": key[0],
+                       "range": f"{first or 1}-{last or 'end'}" if (first or last) else "whole file",
+                       "times": len(earlier) + 1, "earlier_cleared": cleared})
+        earlier.append(call_id)
 
     def _maybe_compact(self) -> None:
         if not self.context.over(self.messages, self.tools()):
@@ -3004,6 +3025,7 @@ class Agent:
                     if label_diff:
                         event["diff"] = label_diff
                     self.emit(event)
+                    self._note_reread(turn_id, func["name"], func.get("arguments"), call["id"])
                     # The tool budget's own refusal is not the model repeating itself: it is the same
                     # synthetic error for every remaining call of the batch, and the limit check at
                     # the top of the loop ends the turn before any nudge could be read.

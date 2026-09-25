@@ -19,6 +19,8 @@ replaced, in one batch, by a one-line stub. See clear_stale_tool_results.
 from __future__ import annotations
 
 import json
+import os
+import re
 import threading
 
 from . import sidecall
@@ -216,6 +218,50 @@ def _stubbed(content: str) -> bool:
     return content.startswith(CLEARED_PREFIX) or '"elided": true' in content[:40]
 
 
+# Card #5NDQ: recency alone cleared the agent's working set — session 3f4a20ad lost its reads of
+# the file it was editing and re-read src/Pane.h 38 times with `sed -n`, each re-read another step at
+# ~100k prompt tokens. So the newest read of a file the agent has since written, and the newest read
+# of a range it asked for more than once, survive a clear. At most CLEAR_PROTECT_MAX of them, newest
+# first, so a turn that touches many files still sheds its oldest churn.
+CLEAR_PROTECT_MAX = 6
+WRITE_TOOLS = ("write_file", "edit_file")
+_SED_RANGE = re.compile(r"""^\s*sed\s+-n\s+(['"]?)(\d+)(?:,(\d+))?p\1\s+(['"]?)([^\s'";|&<>]+)\4\s*$""")
+
+
+def _args(arguments) -> dict:
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments or {})
+    except (ValueError, TypeError):
+        args = {}
+    return args if isinstance(args, dict) else {}
+
+
+def _line(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def read_key(tool: str, arguments) -> tuple[str, int | None, int | None] | None:
+    """(path, from_line, to_line) of a call that reads part of a file — read_file, or a plain
+    `sed -n 'A,Bp' path` through run_command — or None. A whole-file read_file is (path, None, None)."""
+    args = _args(arguments)
+    if tool == "read_file" and isinstance(args.get("path"), str):
+        return (os.path.normpath(args["path"]), _line(args.get("from_line")), _line(args.get("to_line")))
+    if tool == "run_command" and isinstance(args.get("command"), str):
+        match = _SED_RANGE.match(args["command"])
+        if match:
+            first = int(match.group(2))
+            return (os.path.normpath(match.group(5)), first, int(match.group(3) or first))
+    return None
+
+
+def _written_path(tool: str, arguments) -> str | None:
+    if tool in WRITE_TOOLS:
+        path = _args(arguments).get("path")
+        if isinstance(path, str):
+            return os.path.normpath(path)
+    return None
+
+
 def _reread(tool: str, args: dict, content: str) -> str | None:
     """The call that brings a cleared result back, when there is one."""
     if tool in ("run_command", "command_output", "stop_command"):
@@ -226,28 +272,83 @@ def _reread(tool: str, args: dict, content: str) -> str | None:
         if isinstance(job, str):
             return f'command_output(job_id="{job}", from_line=1) while the job is kept'
     if tool == "read_file" and isinstance(args.get("path"), str):
-        return f"read_file(path={json.dumps(args['path'])})"
+        call = f"path={json.dumps(args['path'])}"
+        for name in ("host", "from_line", "to_line"):
+            if args.get(name) is not None:
+                call += f", {name}={json.dumps(args[name])}"
+        return f"read_file({call})"
     return None
 
 
-def _stub(tool: str, arguments, content: str) -> str:
+def _read_stub(args: dict, content: str, edited: bool) -> dict:
+    """The index a cleared read_file result leaves behind (card #5NDQ): which file, which lines,
+    the file's hash when it was read, and whether Relay wrote to it afterwards — enough to tell
+    whether reading it again would show anything new."""
     try:
-        args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments or {})
-    except (ValueError, TypeError):
-        args = {}
-    if not isinstance(args, dict):
-        args = {}
+        data = json.loads(content)
+    except ValueError:
+        data = None
+    data = data if isinstance(data, dict) else {}
+    stub = {"cleared": True, "tool": "read_file", "path": args.get("path")}
+    first, last = _line(data.get("from_line")), _line(data.get("to_line"))
+    if first is None:
+        first, last = _line(args.get("from_line")), _line(args.get("to_line"))
+    stub["range"] = f"{first or 1}-{last if last is not None else 'end'}" if (first or last) else "whole file"
+    if isinstance(data.get("sha256"), str):
+        stub["sha256"] = data["sha256"]
+    stub["edited_since"] = edited
+    return stub
+
+
+def _stub(tool: str, arguments, content: str, edited: bool = False) -> str:
+    args = _args(arguments)
+    how = _reread(tool, args, content)
+    if tool == "read_file" and isinstance(args.get("path"), str):
+        stub = _read_stub(args, content, edited)
+        stub["chars"] = len(content)
+        state = ("the file was edited after this read, so a re-read shows the new text"
+                 if edited else "no write_file/edit_file to it since this read")
+        stub["note"] = f"Old read cleared by Relay to save context; {state}. {how} reads it again."
+        return json.dumps(stub, ensure_ascii=False)
     shown = json.dumps(args, ensure_ascii=False)
     stub = {"cleared": True, "tool": tool, "args": shown if len(shown) <= 160 else shown[:157] + "...",
             "chars": len(content)}
-    how = _reread(tool, args, content)
     stub["note"] = ("Old tool result cleared by Relay to save context; "
                     + (f"{how} reads it again." if how else "rerun the tool if you need it."))
     return json.dumps(stub, ensure_ascii=False)
 
 
+def _working_set(messages: list[dict], calls: dict) -> tuple[set[int], dict[int, bool]]:
+    """Which tool-result messages hold the agent's working set (card #5NDQ), and for every read
+    whether a write_file/edit_file to its path came after it. Protected: the newest read of each
+    path written later, and the newest read of each range read more than once."""
+    reads, writes = [], {}
+    for i, message in enumerate(messages):
+        if message.get("role") != "tool":
+            continue
+        tool, arguments = calls.get(message.get("tool_call_id"), ("tool", None))
+        key = read_key(tool, arguments)
+        if key:
+            reads.append((i, key))
+        written = _written_path(tool, arguments)
+        if written:
+            writes[written] = i
+    edited = {i: writes.get(key[0], -1) > i for i, key in reads}
+    seen, newest_edited, newest_repeat = {}, {}, {}
+    for i, key in reads:
+        seen[key] = seen.get(key, 0) + 1
+        if edited[i]:
+            newest_edited[key[0]] = i
+    for i, key in reads:
+        if seen[key] > 1:
+            newest_repeat[key] = i
+    chosen = sorted(set(newest_edited.values()) | set(newest_repeat.values()), reverse=True)
+    return set(chosen[:CLEAR_PROTECT_MAX]), edited
+
+
 def clear_stale_tool_results(messages: list[dict], keep_groups: int = CLEAR_KEEP_GROUPS,
-                             over_chars: int = CLEAR_OVER_CHARS) -> tuple[list[dict], int, int]:
+                             over_chars: int = CLEAR_OVER_CHARS,
+                             stats: dict | None = None) -> tuple[list[dict], int, int]:
     """Replace the tool results older than the last `keep_groups` assistant tool-call groups with
     one-line stubs — all of them or none: only when they add up to `over_chars` characters, so one
     clear frees a lot and the cache is rebuilt once for it. Returns (messages, count, characters
@@ -255,22 +356,31 @@ def clear_stale_tool_results(messages: list[dict], keep_groups: int = CLEAR_KEEP
 
     Every tool message stays where it is with its tool_call_id, so each assistant tool call keeps
     its result for every provider; only the content changes. Results already stubbed (here or by
-    compaction's trim) are neither counted nor touched again."""
+    compaction's trim) are neither counted nor touched again, and neither are the working-set reads
+    `_working_set` protects (card #5NDQ); `stats["protected"]` is set to how many were spared."""
     groups = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("tool_calls")]
     if len(groups) <= keep_groups:
         return messages, 0, 0
     cutoff = groups[-keep_groups] if keep_groups > 0 else len(messages)
-    calls, stale = {}, []
-    for i in range(1, cutoff):
-        message = messages[i]
+    calls = {}
+    for message in messages:
         if message.get("role") == "assistant":
             for call in message.get("tool_calls") or ():
                 function = call.get("function") or {}
                 calls[call.get("id")] = (function.get("name") or "tool", function.get("arguments"))
-        elif message.get("role") == "tool":
+    protected, edited = _working_set(messages, calls)
+    stale, spared = [], 0
+    for i in range(1, cutoff):
+        message = messages[i]
+        if message.get("role") == "tool":
             content = message.get("content")
             if isinstance(content, str) and len(content) > CLEAR_MIN_CHARS and not _stubbed(content):
-                stale.append(i)
+                if i in protected:
+                    spared += 1
+                else:
+                    stale.append(i)
+    if stats is not None:
+        stats["protected"] = spared
     total = sum(len(messages[i]["content"]) for i in stale)
     if total < over_chars:
         return messages, 0, 0
@@ -278,7 +388,7 @@ def clear_stale_tool_results(messages: list[dict], keep_groups: int = CLEAR_KEEP
     for i in stale:
         tool, arguments = calls.get(out[i].get("tool_call_id"), ("tool", None))
         content = out[i]["content"]
-        stub = _stub(tool, arguments, content)
+        stub = _stub(tool, arguments, content, edited.get(i, False))
         out[i] = {**out[i], "content": stub}
         freed += len(content) - len(stub)
     return out, len(stale), freed

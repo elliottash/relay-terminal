@@ -264,6 +264,87 @@ class ClearingUnit(unittest.TestCase):
         self.assertIn('read_file(path="src/f0.py")', json.loads(out[2]["content"])["note"])
 
 
+def read_result(path, sha, first=None, last=None, size=15_000):
+    data = {"path": path, "content": "x" * size, "sha256": sha}
+    if first is not None:
+        data.update({"from_line": first, "to_line": last, "total_lines": 20_000})
+    return json.dumps(data)
+
+
+class WorkingSetClearing(unittest.TestCase):
+    """Card #5NDQ: clearing spares the working set and leaves an index, not a bare stub."""
+
+    def build(self, steps):
+        messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "go", "relay_kind": "prompt"}]
+        for n, (name, args, content) in enumerate(steps):
+            messages.append(call(n, name, args))
+            messages.append({"role": "tool", "tool_call_id": f"call-{n}", "content": content})
+        return messages
+
+    def test_edited_file_and_repeated_range_survive_and_stubs_name_path_range_hash(self):
+        messages = self.build([
+            ("read_file", {"path": "src/other.h", "from_line": 1, "to_line": 400}, read_result("src/other.h", "a" * 64, 1, 400)),
+            ("read_file", {"path": "src/Pane.h", "from_line": 1690, "to_line": 1800}, read_result("src/Pane.h", "b" * 64, 1690, 1800)),
+            ("read_file", {"path": "src/Edit.h"}, read_result("src/Edit.h", "c" * 64)),
+            ("run_command", {"command": "make a"}, json.dumps({"output": "y" * 15_000, "job_id": "job-a"})),
+            ("run_command", {"command": "make b"}, json.dumps({"output": "y" * 15_000, "job_id": "job-b"})),
+            ("read_file", {"path": "src/Pane.h", "from_line": 1690, "to_line": 1800}, read_result("src/Pane.h", "b" * 64, 1690, 1800)),
+            ("edit_file", {"path": "src/Edit.h", "old": "a", "new": "b"}, json.dumps({"path": "src/Edit.h", "sha256": "d" * 64})),
+            ("run_command", {"command": "make c"}, json.dumps({"output": "y" * 15_000, "job_id": "job-c"})),
+            ("run_command", {"command": "make d"}, json.dumps({"output": "y" * 15_000, "job_id": "job-d"})),
+            ("run_command", {"command": "make e"}, json.dumps({"output": "y" * 15_000, "job_id": "job-e"})),
+        ])
+        stats = {}
+        out, count, _ = context.clear_stale_tool_results(messages, stats=stats)
+        tools = [m["content"] for m in out if m["role"] == "tool"]
+        cleared = [i for i, c in enumerate(tools) if c.startswith(context.CLEARED_PREFIX)]
+        # other.h, the first of the two identical Pane.h reads, and the old commands go; the edited
+        # file's read and the newest read of the twice-read range stay whole.
+        self.assertEqual(cleared, [0, 1, 3, 4])
+        self.assertEqual((count, stats["protected"]), (4, 2))
+        self.assertTrue(pairing_valid(out))
+        stub = json.loads(tools[1])
+        self.assertEqual((stub["path"], stub["range"], stub["sha256"], stub["edited_since"]),
+                         ("src/Pane.h", "1690-1800", "b" * 64, False))
+        self.assertIn('read_file(path="src/Pane.h", from_line=1690, to_line=1800)', stub["note"])
+        self.assertIn("no write_file/edit_file to it since", stub["note"])
+        self.assertNotIn("\n", tools[1])
+
+    def test_stub_says_when_the_file_changed_after_the_read(self):
+        messages = self.build(
+            [("read_file", {"path": f"src/f{n}.py"}, read_result(f"src/f{n}.py", str(n) * 64)) for n in range(4)]
+            + [("write_file", {"path": "src/f0.py", "content": "new"}, json.dumps({"path": "src/f0.py"}))]
+            + [("run_command", {"command": f"make {n}"}, json.dumps({"output": "y" * 15_000, "job_id": f"j{n}"}))
+               for n in range(3)])
+        with mock.patch.object(context, "CLEAR_PROTECT_MAX", 0):
+            out, count, _ = context.clear_stale_tool_results(messages)
+        stub = json.loads(out[3]["content"])
+        self.assertEqual((stub["range"], stub["edited_since"]), ("whole file", True))
+        self.assertIn("edited after this read", stub["note"])
+        self.assertFalse(json.loads(out[5]["content"])["edited_since"])
+
+    def test_protection_is_capped_newest_first(self):
+        steps = []
+        for n in range(8):
+            args = {"path": f"src/f{n}.py", "from_line": 1, "to_line": 50}
+            steps += [("read_file", args, read_result(f"src/f{n}.py", "e" * 64, 1, 50))] * 2
+        steps += [("run_command", {"command": f"make {n}"}, json.dumps({"output": "y" * 15_000})) for n in range(3)]
+        messages = self.build(steps)
+        stats = {}
+        out, count, _ = context.clear_stale_tool_results(messages, stats=stats)
+        self.assertEqual(stats["protected"], context.CLEAR_PROTECT_MAX)
+        tools = [m["content"] for m in out if m["role"] == "tool"]
+        kept = [i for i, c in enumerate(tools[:16]) if not c.startswith(context.CLEARED_PREFIX)]
+        self.assertEqual(kept, [5, 7, 9, 11, 13, 15])
+
+    def test_read_key_knows_read_file_and_plain_sed(self):
+        self.assertEqual(context.read_key("run_command", {"command": "sed -n '1690,1800p' src/Pane.h"}),
+                         ("src/Pane.h", 1690, 1800))
+        self.assertEqual(context.read_key("run_command", {"command": 'sed -n 12p ./a.py'}), ("a.py", 12, 12))
+        self.assertIsNone(context.read_key("run_command", {"command": "sed -n '1,5p' a.py | grep x"}))
+        self.assertEqual(context.read_key("read_file", json.dumps({"path": "a.py"})), ("a.py", None, None))
+
+
 class ClearingInTheAgent(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -305,6 +386,25 @@ class ClearingInTheAgent(unittest.TestCase):
         self.assertTrue(all(r.startswith('{"cleared": true') for r in results[:4]))
         self.assertFalse(any(r.startswith('{"cleared": true') for r in results[4:]))
         self.assertIn('command_output(job_id="job-1", from_line=1)', json.loads(results[0])["note"])
+
+    def test_reread_same_range_is_counted_and_says_whether_it_was_cleared(self):
+        path = Path(self.tmp.name, "big.txt")
+        path.write_text("".join(f"line {n} " + "q" * 10 + "\n" for n in range(1, 3001)))
+        rng = {"path": "big.txt", "from_line": 1, "to_line": 400}
+        steps = [call(0, "read_file", rng), call(1, "read_file", {"path": "big.txt", "from_line": 401, "to_line": 800})]
+        steps += [call(n, "run_command", {"command": self.SEQ}) for n in range(2, 7)]
+        steps += [call(7, "run_command", {"command": "sed -n '1,400p' big.txt"}), call(8, "read_file", rng)]
+        agent, provider, events = self.agent(steps)
+        agent.ask("go")
+        cleared = [e for e in events if e["event"] == "tool_results_cleared"]
+        self.assertTrue(cleared)
+        self.assertIn("protected", cleared[0])
+        rereads = [e for e in events if e["event"] == "reread_same_range"]
+        self.assertEqual([(e["tool"], e["path"], e["range"], e["times"], e["earlier_cleared"]) for e in rereads],
+                         [("run_command", "big.txt", "1-400", 2, True), ("read_file", "big.txt", "1-400", 3, True)])
+        stub = json.loads([m for m in provider.seen[-1] if m.get("role") == "tool"][0]["content"])
+        self.assertEqual((stub["path"], stub["range"], stub["edited_since"]), ("big.txt", "1-400", False))
+        self.assertEqual(len(stub["sha256"]), 64)
 
     def test_clear_tool_results_false_keeps_everything(self):
         steps = [call(n, "run_command", {"command": self.SEQ}) for n in range(8)]
