@@ -385,6 +385,10 @@ public:
     // Re-render from the model; public so a test can drive it without the worker.
     void rebuild();
 
+    // The card page's action row as `Action`s — the same list its console renders. Public for the
+    // same reason `rebuild()` is: boardexecute_test asserts the row without hosting a console (#DEH6).
+    QList<relay::agent::Action> cardActions() const;
+
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
@@ -441,7 +445,6 @@ private:
     // (#FEJQ, §30.4, and the link kinds step 8 landed). True means handled.
     bool resolveAgentLink(const relay::links::Target &target);
     QString openCardId() const;
-    QList<relay::agent::Action> cardActions() const;
     // Enter, Ctrl+Enter and Ctrl+Shift+Enter in the card page's console, offered to `CardContext`
     // before the pane routes the line (#AGNT step 5): a card's submit travels as `board_ask`
     // (19.10), which writes the thread and advances the stage. Always true.

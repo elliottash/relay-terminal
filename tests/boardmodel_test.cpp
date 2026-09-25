@@ -2039,8 +2039,9 @@ void BoardModelTests::theThinkingTraceRunsInTheCardsConsole()
     QCOMPARE(console->liveSpec().surface, QStringLiteral("card:K7Q2"));
     QCOMPARE(console->liveSpec().persistScope, QStringLiteral("helper"));
     QCOMPARE(console->liveSpec().persistKey, QStringLiteral("tab-7/card:K7Q2"));
-    // The transcript *is* the live view of the turn, so it is never hidden until a byte arrives.
-    QCOMPARE(console->hideCalls, 0);
+    // The transcript *is* the live view of the turn (#CTRN) — and an empty one starts collapsed
+    // (#9A8B): the console asks to hide until first use, and the first byte answers.
+    QCOMPARE(console->hideCalls, 1);
 
     QPlainTextEdit *reply = replyBox(view);
     QVERIFY(reply);
@@ -3796,8 +3797,10 @@ void BoardModelTests::theBoardsRowIsHygieneTestsAndPerformance()
     QStringList labels;
     for (const relay::agent::Action &action : console->actions())
         labels << action.fullLabel();
-    QCOMPARE(labels, QStringList({QStringLiteral("Hygiene (k)"),
-                                  QStringLiteral("Tests"), QStringLiteral("Performance")}));
+    QCOMPARE(labels, QStringList({QStringLiteral("Hygiene (k)"), QStringLiteral("Tests"),
+                                  QStringLiteral("Review"), QStringLiteral("Performance")}));
+    // Review (boardReview) opens the cards that need the owner's judgement in a pane beside the
+    // board; it joined this row after the list was first pinned (#KQ1T re-pins it).
 
     // Each button carries the action's key as its object name, which is what the theme and the
     // tests find it by; Tests and Profile are keyless, and the row does not invent a letter.
@@ -4116,9 +4119,9 @@ void BoardModelTests::theCardPageAsksForACardConsoleAndItsActionsFollowTheCard()
     QCOMPARE(spec.persistScope, QStringLiteral("helper"));
     QCOMPARE(spec.persistKey, QStringLiteral("tab-7/card:K7Q2"));
     QVERIFY(spec.persistId() != consoles.board()->liveSpec().persistId());
-    // And the transcript is the live view of a card turn since #CTRN, so it is not hidden until
-    // something prints in it.
-    QCOMPARE(console->hideCalls, 0);
+    // And the transcript is the live view of a card turn since #CTRN — an empty one starts
+    // collapsed (#9A8B), so it is hidden until something prints in it.
+    QCOMPARE(console->hideCalls, 1);
     QVERIFY(console->context()->placeholder().contains(QStringLiteral("Ctrl+Shift+Enter only comments")));
 
 
@@ -4239,7 +4242,7 @@ void BoardModelTests::theCardsRowCarriesVerifyOnlyInAQaLane()
     for (const relay::agent::Action &action : consoles.card()->actions())
         labels << action.fullLabel();
     QCOMPARE(labels, QStringList({QStringLiteral("Plan (p)"), QStringLiteral("Refine (f)"), QStringLiteral("Run (r)"),
-                                  QStringLiteral("Run in pane"), QStringLiteral("Verify (v)"), QStringLiteral("Try it (y)")}));
+                                  QStringLiteral("Run in pane"), QStringLiteral("Verify (v)"), QStringLiteral("Stage review (y)")}));
     QVERIFY(consoles.card()->actions().at(4).leaves);
     QVERIFY(!consoles.card()->actions().at(5).leaves);
 

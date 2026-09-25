@@ -30,9 +30,20 @@ void makeBoard(const QString &root, const QString &folder = QStringLiteral("issu
 // settingspane_test.cpp reads settingsSections().
 QString windowSource()
 {
-    QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
-    if (!source.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
-    return QString::fromUtf8(source.readAll());
+    // Since the #243T split the window's bodies live in RelayWindow.h and the RelayWindow*.cpp
+    // files, out-of-line and qualified. Read them all, stripping the qualification, so a body
+    // greps under the in-class signature the assertions were written against.
+    QString text;
+    QFile header(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.h"));
+    if (!header.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+    text = QString::fromUtf8(header.readAll());
+    QDir dir(QStringLiteral(RELAY_SOURCE_DIR "/src"));
+    for (const QFileInfo &file : dir.entryInfoList({QStringLiteral("RelayWindow*.cpp")}, QDir::Files, QDir::Name)) {
+        QFile part(file.absoluteFilePath());
+        if (!part.open(QIODevice::ReadOnly | QIODevice::Text)) continue;
+        text += '\n' + QString::fromUtf8(part.readAll());
+    }
+    return text.remove(QStringLiteral("RelayWindow::"));
 }
 
 QString bodyOf(const QString &text, const QString &signature)
@@ -568,7 +579,10 @@ void BoardWorkspaceTests::aCardTurnsEventsReachThatCardsConsoleAndNoOther()
     // The event's card, and the console's own surface — the same string its `configure` carried,
     // read through the wrapper rather than guessed from the pane.
     QVERIFY2(deliver.contains(QStringLiteral("const QString card = cardSurfaceOf(event);")), qPrintable(deliver));
-    QVERIFY2(deliver.contains(QStringLiteral("entry.context->spec().surface != card")), qPrintable(deliver));
+    // Since #KSKH the surface is read once, through a null-safe local: a console without a
+    // context is not the card's console either.
+    QVERIFY2(deliver.contains(QStringLiteral("const QString mine = entry.context ? entry.context->spec().surface : QString();")), qPrintable(deliver));
+    QVERIFY2(deliver.contains(QStringLiteral("mine != card")), qPrintable(deliver));
     // A card's event skips every other console; everything untagged still reaches them all, so
     // the tab's one conversation is drawn in each of its consoles exactly as before.
     QVERIFY2(deliver.contains(QStringLiteral("if (!card.isEmpty()")), qPrintable(deliver));
@@ -799,7 +813,8 @@ void BoardWorkspaceTests::anOptionOrSessionLinkOpensWhereItNames()
     QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/Pane.h"));
     QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
     const QString pane = QString::fromUtf8(source.readAll());
-    const QString open = bodyOf(pane, QStringLiteral("void openOutputTarget(const QString &target, int line, bool fromMouse) {"));
+    const QString open = bodyOf(pane, QStringLiteral(
+        "void openOutputTarget(const QString &target, int line, bool fromMouse,"));
     QVERIFY2(!open.isEmpty(), "Pane::openOutputTarget() is gone");
     QVERIFY2(open.contains(QStringLiteral("relay::links::optionOf(target, &section, &row) && onOpenOption")), qPrintable(open));
     QVERIFY2(open.contains(QStringLiteral("relay::links::sessionIdOf(target)")), qPrintable(open));
@@ -863,7 +878,7 @@ void BoardWorkspaceTests::tabMetersGiveWayOnlyWhenFullLabelsDoNotFit()
     const QString label = bodyOf(text, QStringLiteral("QString tabLabelText(QWidget *page, const QStringList &titles) const {"));
     QVERIFY2(!label.isEmpty(), "RelayWindow::tabLabelText() is gone");
     QVERIFY(label.contains(QStringLiteral("if (tabMetersHaveRoom()) title += tabUsageSuffix(page);")));
-    const QString eventFilter = bodyOf(text, QStringLiteral("bool eventFilter(QObject *object, QEvent *event) override {"));
+    const QString eventFilter = bodyOf(text, QStringLiteral("bool eventFilter(QObject *object, QEvent *event) {"));
     QVERIFY(eventFilter.contains(QStringLiteral("if (resized) relabelTabsForWidth();")));
 }
 

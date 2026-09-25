@@ -13,7 +13,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QPushButton>
 #include <QtTest>
 
 namespace {
@@ -73,19 +72,25 @@ private slots:
     void theVerifyButtonNamesTheVerifyingPaneAndRevealsIt();
 };
 
-// The one open-card button whose label starts with `prefix` — Execute and Verify share the
-// `boardExecute` object name, and the Plan button shares `boardReplyButton` with others, so the
-// text is what tells them apart.
-static QPushButton *actionButton(const relay::BoardView &view, const QString &prefix)
+// The open card's action with this key, out of the same list the card page's agent console
+// draws its buttons from (#DEH6). Since #BGRN the row is not `QPushButton`s the test can find:
+// `CardContext::actions()` answers `relay::agent::Action`s — `BoardView::cardActions()` →
+// `CardDetail::cardActions()` — and the console renders each one, with `key` as the button's
+// object name, `fullLabel()` ("Run (r)") as its text and `run()` as its click. Testing the list
+// tests the buttons, minus the paint.
+static relay::agent::Action cardAction(const relay::BoardView &view, const QString &key)
 {
-    for (QPushButton *button : view.findChildren<QPushButton *>()) {
-        if (button->objectName() != QStringLiteral("boardExecute")
-            && button->objectName() != QStringLiteral("boardReplyButton"))
-            continue;
-        if (button->text().startsWith(prefix))
-            return button;
-    }
-    return nullptr;
+    for (const relay::agent::Action &action : view.cardActions())
+        if (action.key == key)
+            return action;
+    return {};
+}
+
+// Whether the row carries the key at all — an action the row must not draw (Verify outside a QA
+// lane, "Run in pane" while a pane already executes the card) is an action the list must not carry.
+static bool hasCardAction(const relay::BoardView &view, const QString &key)
+{
+    return cardAction(view, key).key == key;
 }
 
 void BoardExecuteTests::theButtonNamesTheExecutingPaneAndRevealsIt()
@@ -105,34 +110,36 @@ void BoardExecuteTests::theButtonNamesTheExecutingPaneAndRevealsIt()
         answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
         view.paneExists = [paneOpen](const QString &) { return paneOpen; };
         view.handleEvent(answer);
-        QList<QPushButton *> buttons =
-            view.findChildren<QPushButton *>(QStringLiteral("boardExecute"));
-        for (QPushButton *button : buttons)
-            if (button->text() == QStringLiteral("Execute (x)"))
-                return button;
-        return buttons.value(0);
+        return cardAction(view, QStringLiteral("boardExecute"));
     };
 
-    // Executing, pane open: the button names the pane and the click reveals it — no second
-    // `board_execute` goes out and the focus lands on the pane that already has the card.
-    QPushButton *button = openCard(QStringLiteral("EX31"), QStringLiteral("executing"), true);
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Executing (abcdef12)"));
-    button->click();
+    // Executing, pane open: the Run action names the pane (#BGRN renamed Execute to Run) and
+    // running it reveals the pane — no second `board_execute` goes out and the focus lands on
+    // the pane that already has the card.
+    relay::agent::Action action = openCard(QStringLiteral("EX31"), QStringLiteral("executing"), true);
+    QCOMPARE(action.key, QStringLiteral("boardExecute"));
+    QCOMPARE(action.label, QStringLiteral("Running (abcdef12)"));
+    action.run();
     QCOMPARE(revealed, token);
+    // While a pane executes the card there is no second way in: no "Run in pane" (#BGRN).
+    QVERIFY(!hasCardAction(view, QStringLiteral("boardRunInPane")));
 
-    // A closed pane's claim is only a record (#R9G7): the button is Execute again.
+    // A closed pane's claim is only a record (#R9G7): the action is Run again.
     revealed.clear();
-    button = openCard(QStringLiteral("EX32"), QStringLiteral("executing"), false);
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Execute (x)"));
-    button->click();
+    action = openCard(QStringLiteral("EX32"), QStringLiteral("executing"), false);
+    QCOMPARE(action.key, QStringLiteral("boardExecute"));
+    QCOMPARE(action.fullLabel(), QStringLiteral("Run (r)"));
+    action.run();
     QVERIFY(revealed.isEmpty());
 
     // So is a live claim on a card that has already landed out of Executing.
-    button = openCard(QStringLiteral("EX33"), QStringLiteral("needs-verification"), true);
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Execute (x)"));
+    action = openCard(QStringLiteral("EX33"), QStringLiteral("needs-verification"), true);
+    QCOMPARE(action.key, QStringLiteral("boardExecute"));
+    // A landed card is not being run by any pane, so the row carries the second way in.
+    QVERIFY(hasCardAction(view, QStringLiteral("boardRunInPane")));
+    QCOMPARE(cardAction(view, QStringLiteral("boardRunInPane")).label,
+             QStringLiteral("Run in pane"));
+    QCOMPARE(action.fullLabel(), QStringLiteral("Run (r)"));
 }
 
 // The Plan button in the same states (#48S3): while a pane is planning the card it names the pane
@@ -154,20 +161,20 @@ void BoardExecuteTests::thePlanButtonNamesThePlanningPaneAndRevealsIt()
         answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
         view.paneExists = [paneOpen](const QString &) { return paneOpen; };
         view.handleEvent(answer);
-        return actionButton(view, QStringLiteral("Plan"));
+        return cardAction(view, QStringLiteral("boardReplyButton"));
     };
 
-    QPushButton *button = openCard(QStringLiteral("PL41"), QStringLiteral("planning"), true);
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Planning (abcdef12)"));
-    button->click();
+    relay::agent::Action action = openCard(QStringLiteral("PL41"), QStringLiteral("planning"), true);
+    QCOMPARE(action.key, QStringLiteral("boardReplyButton"));
+    QCOMPARE(action.label, QStringLiteral("Planning (abcdef12)"));
+    action.run();
     QCOMPARE(revealed, token);
 
     revealed.clear();
-    button = openCard(QStringLiteral("PL42"), QStringLiteral("planning"), false);
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Plan (p)"));
-    button->click();
+    action = openCard(QStringLiteral("PL42"), QStringLiteral("planning"), false);
+    QCOMPARE(action.key, QStringLiteral("boardReplyButton"));
+    QCOMPARE(action.fullLabel(), QStringLiteral("Plan (p)"));
+    action.run();
     QVERIFY(revealed.isEmpty());
 }
 
@@ -191,21 +198,26 @@ void BoardExecuteTests::theVerifyButtonNamesTheVerifyingPaneAndRevealsIt()
         answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
         view.paneExists = [paneOpen](const QString &) { return paneOpen; };
         view.handleEvent(answer);
-        return actionButton(view, QStringLiteral("Verif"));
+        return cardAction(view, QStringLiteral("boardVerify"));
     };
 
-    QPushButton *button = openCard(QStringLiteral("VQ51"), QStringLiteral("needs-qa-llm"), true);
-    QVERIFY(button);
-    QVERIFY(button->isVisibleTo(button->parentWidget()));
-    QCOMPARE(button->text(), QStringLiteral("Verifying (abcdef12)"));
-    button->click();
+    // The action's key is boardVerify since #BGRN, and its presence in the list is the old
+    // visibility assertion: CardDetail only carries it in a QA lane ("an action the row must
+    // not draw is an action the list must not carry").
+    relay::agent::Action action =
+        openCard(QStringLiteral("VQ51"), QStringLiteral("needs-qa-llm"), true);
+    QCOMPARE(action.key, QStringLiteral("boardVerify"));
+    QCOMPARE(action.label, QStringLiteral("Verifying (abcdef12)"));
+    action.run();
     QCOMPARE(revealed, token);
 
     revealed.clear();
-    button = openCard(QStringLiteral("VQ52"), QStringLiteral("needs-qa-llm"), false);
-    QVERIFY(button);
-    QCOMPARE(button->text(), QStringLiteral("Verify (v)"));
-    button->click();
+    action = openCard(QStringLiteral("VQ52"), QStringLiteral("needs-qa-llm"), false);
+    QCOMPARE(action.key, QStringLiteral("boardVerify"));
+    QCOMPARE(action.fullLabel(), QStringLiteral("Verify (v)"));
+    // The card names no verifier, so the action is disabled — the old click was a no-op because
+    // the button was greyed, and `enabled` is what greys it now.
+    QVERIFY(!action.enabled);
     QVERIFY(revealed.isEmpty());
 }
 
