@@ -327,6 +327,16 @@ class BundledSkillTests(unittest.TestCase):
             self.assertIn(path, loaded['content'], path)
         self.assertLessEqual(len(index.skills['local-model-setup'].description), skills.MAX_DESCRIPTION)
 
+    def test_disk_hygiene_is_bundled_and_names_the_tool_that_checks_before_it_deletes(self):
+        # Card #SZHQ: every agent on every machine gets the scratch rules, not only this repo's.
+        index = skills.SkillIndex.load([skills.bundled_dir()])
+        self.assertIn('disk-hygiene', index.skills)
+        self.assertLessEqual(len(index.skills['disk-hygiene'].description), skills.MAX_DESCRIPTION)
+        content = index.load_skill('disk-hygiene')['content']
+        for needle in ('relay-scratch check', 'relay-scratch gc --apply', 'live process',
+                       'Never delete what you did not make'):
+            self.assertIn(needle, content)
+
     def test_the_deliver_skill_is_the_switchboard_procedure_and_is_offered_as_a_command(self):
         # The policy in every pane agent's prompt says "load the `deliver` skill" (#R9G7), and
         # `/deliver <request>` runs it by hand: both need the bundled skill to be indexed, named
