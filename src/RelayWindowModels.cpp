@@ -241,12 +241,9 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                 return order.indexOf(str(a, "id")) < order.indexOf(str(b, "id"));
             });
         }
-        // Read once for the whole loop, not once per entry: every `isAvailable` would otherwise be
-        // its own QSettings lookup (the same trap as `shown`, #PPR4).
-        const QStringList availableKeys = relay::models::curation::availableKeys();
-        // A provider is three rows on a good day — its key, its "models… (N of M)" link and, for a
-        // guest, what it may do with a tool — and they ran into the next provider's as one wall of
-        // text (owner, 2026-09-21: "tab 1: add horizontal line dividers between providers"). The
+        // A provider is a single row — its key (card #WBFM retired the "models… (N of M)" link
+        // and the guest tool-permission row) — and the rows ran into the next provider's as one
+        // wall of text (owner, 2026-09-21: "tab 1: add horizontal line dividers between providers"). The
         // rule goes on each provider's own row but the first's, in the theme's `@border`, which is
         // the colour a section heading is underlined in.
         bool firstProvider = true;
@@ -453,75 +450,10 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
                 };
             }
             models.rows << row;
-            // ----- step 2, one click from step 1 (card #MDL1, design 5.7) ----------------------
-            // "there need to be 4 steps of model availability: 1 add provider, 2 add model as
-            // available, 3 add model to priority list, 4 include model in box picker." Step 1 is
-            // this row; step 2 is the models pane's **available** tab, and nothing on this page
-            // said so. The link opens that tab with this provider's name already typed, and its
-            // own count is the answer to "how many of this provider's models am I offering".
-            {
-                const QList<relay::models::Entry> ofPreset = catalog.ofPreset(id);
-                int usable = 0, available = 0;
-                for (const relay::models::Entry &entry : ofPreset) {
-                    if (!entry.usable) continue;
-                    ++usable;
-                    if (relay::models::curation::isAvailable(entry, availableKeys)) ++available;
-                }
-                if (usable > 0) {
-                    const QString provider = str(preset, "provider").toLower();
-                    relay::SettingRow link = buttonRow(QStringLiteral("models.available:") + id,
-                        inModelsPane ? QStringLiteral("Enabled models") : QStringLiteral("models"),
-                        inModelsPane
-                            ? QStringLiteral("Choose which of this source's models appear in lists and the Alt+M picker.")
-                            : QStringLiteral("Which of this provider's models your lists, the alt+m box and its filter may "
-                                             "offer. Opens the models pane's available tab on this provider"),
-                        inModelsPane ? QStringLiteral("%1 of %2 enabled…").arg(available).arg(usable)
-                                     : QStringLiteral("models… (%1 of %2 available)").arg(available).arg(usable),
-                        [this, provider, label, target = QPointer<Pane>(pane)] {
-                            // Follow the provider page's target even if focus moved meanwhile.
-                            Pane *on = target ? target.data() : focusedConsole();
-                            if (on) on->openModelPicker(QStringLiteral("all"), provider.isEmpty() ? label : provider);
-                            else notice(QStringLiteral("Focus a pane first: the models pane always serves one."));
-                        });
-                    link.aliases = QStringLiteral("available models uncheck enable disable which models step 2 ") + id;
-                    link.indent = 1;
-                    link.tooltip = link.detail;
-                    link.detail.clear();
-                    models.rows << link;
-                }
-            }
-            if (guest && str(preset, "account").isEmpty()) {
-                // What the guest does when it wants to run a command or change a file. One setting
-                // per CLI, so it sits under the default login's row and covers its accounts too. Relay's own
-                // agent has no per-action approvals and neither does a guest by default (the
-                // owner's rule, 29.1) — but a pane watching a guest work in somebody else's checkout
-                // is a fair reason to want the question, so it is offered rather than assumed. It
-                // sat under the guest's models until the checklist left the page (t:a10); it is a
-                // statement about the provider, so it belongs under the provider's own row.
-                const QString cli = id.mid(6);
-                const QString key = guestSettingKey(cli, QStringLiteral("permissions"));
-                const QString current = QSettings().value(key).toString().trimmed();
-                relay::SettingRow ask = choiceRow(QStringLiteral("option:") + key,
-                    QStringLiteral("when it wants to use a tool"),
-                    QStringLiteral("%1 runs with no per-action approvals, like Relay's own agent. "
-                                   "Ask me puts each one to you: Allow, Allow for session, "
-                                   "Deny, or Deny and stop the turn").arg(str(preset, "provider").toLower()),
-                    {QStringLiteral("bypass"), QStringLiteral("ask"), QStringLiteral("deny")},
-                    {QStringLiteral("just run it"), QStringLiteral("ask me"), QStringLiteral("refuse it")},
-                    current.isEmpty() ? QStringLiteral("bypass") : current, QStringLiteral("bypass"),
-                    [this, key, cli](const QString &value) {
-                        if (value.isEmpty() || value == QStringLiteral("bypass")) QSettings().remove(key);
-                        else QSettings().setValue(key, value);
-                        for (Pane *each : allPanes()) each->guestOptionsChanged(cli);
-                        refreshSettingsPanes();
-                    });
-                ask.aliases = QStringLiteral("claude codex guest permissions approval ask bypass yolo tools sandbox");
-                ask.indent = 1;
-                // One line like the provider row above it: the explanation is the hover.
-                ask.tooltip = ask.detail;
-                ask.detail.clear();
-                models.rows << ask;
-            }
+            if (guest && str(preset, "account").isEmpty())
+                // The permissions choice row is gone (card #WBFM; rule 29.1 says a guest always
+                // just runs it): drop any value a user stored while the row was offered.
+                QSettings().remove(guestSettingKey(id.mid(6), QStringLiteral("permissions")));
         }
         {
             // The providers without a key, one pick away — and "custom endpoint…" first, always

@@ -12188,22 +12188,15 @@ private:
         m_guestRequest = QJsonObject();
         const QString guest = guestOfPreset(presetId);
         if (guest.isEmpty()) return QJsonObject();
-        if (!staged.contains(QStringLiteral("permissions")))
-            staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
-        // Options › Claude Code and Codex: the model, the reasoning effort and the permission
-        // posture this guest starts with, unless the pick named its own (`/model claude opus`).
-        for (const QString &key : {QStringLiteral("model"), QStringLiteral("effort"),
-                                   QStringLiteral("permissions")})
+        // Options › Claude Code and Codex: the model and the reasoning effort this guest starts
+        // with, unless the pick named its own (`/model claude opus`). No `permissions` any more
+        // (card #WBFM): the key stays absent, and absent is the worker's bypass — rule 29.1.
+        for (const QString &key : {QStringLiteral("model"), QStringLiteral("effort")})
             if (!staged.contains(key))
                 if (const QString value = guestSetting(guest, key); !value.isEmpty()) staged.insert(key, value);
         // "Guests use memory from" (#MEMS), one setting for both guests; unset is the worker's `relay`.
         if (const QString memory = QSettings().value(QStringLiteral("guests/memory")).toString().trimmed(); !memory.isEmpty())
             staged.insert(QStringLiteral("memory"), memory);
-        // The owner's rule is the default (29.1): a guest moves around the file system like
-        // Relay's own agent. `permissions` is only ever in the request when the user chose
-        // otherwise, and `bypass` above is what the worker assumes when it is absent.
-        if (staged.value(QStringLiteral("permissions")).toString() == QStringLiteral("bypass"))
-            staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
         // The previous guest session, restored with the pane (#PCJY): rides the first configure
         // of that same guest (account included in the key), unless the pick named its own resume
         // or fork — a fork starts from the session but files a new one, `resumeGuestPreset`

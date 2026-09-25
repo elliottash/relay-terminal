@@ -955,7 +955,9 @@ private slots:
                                     QStringLiteral("curation::setShown("), QStringLiteral("curation::isShown("),
                                     QStringLiteral("curation::isCollapsed("), QStringLiteral("models/add/")})
             QVERIFY2(!page.contains(gone), qPrintable(gone + QStringLiteral(" is still on the Models page")));
-        // What stays: the providers, their keys, the guest permission row and the profiles.
+        // What stays: the providers, their keys and the profiles. Card #WBFM removed the guest
+        // permission row (a guest always just runs it, rule 29.1); what remains of it is the
+        // cleanup of any value a user stored while the row was offered.
         QVERIFY(page.contains(QStringLiteral("headingRow(QStringLiteral(\"providers\"))")));
         QVERIFY(page.contains(QStringLiteral("headingRow(QStringLiteral(\"profiles\"))")));
         QVERIFY(page.contains(QStringLiteral("QStringLiteral(\"Guest Agents\")")));
@@ -964,7 +966,7 @@ private slots:
         QVERIFY(page.contains(QStringLiteral("if (!inModelsPane) {\n            arranged << original.mid(defaultsAt);")));
         QVERIFY(page.contains(QStringLiteral("fill.id = QStringLiteral(\"models.tier.defaults\")")));
         QVERIFY(page.contains(QStringLiteral("\"type\", \"store_key\"")));
-        QVERIFY(page.contains(QStringLiteral("guestSettingKey(cli, QStringLiteral(\"permissions\"))")));
+        QVERIFY(page.contains(QStringLiteral("QSettings().remove(guestSettingKey(id.mid(6), QStringLiteral(\"permissions\")))")));
     }
 
     // The one row that replaced them opens the models pane (card #MDL1 t:a11: it was a modal
@@ -999,36 +1001,36 @@ private slots:
             QVERIFY2(terms.contains(word), qPrintable(word));
     }
 
-    // Step 2 of four is reachable from step 1 (card #MDL1, design 5.7). The owner: "there need to
-    // be 4 steps of model availability: 1 add provider, 2 add model as available, 3 add model to
-    // priority list, 4 include model in box picker." Step 1 is a provider row on this page; the
-    // link under it says how many of that provider's models are available and opens the models
-    // pane's available tab on that provider, which is where step 2 is edited.
-    void everyProviderRowHasAModelsLinkIntoTheAvailableTab() {
+    // Card #WBFM retired both per-provider accessory rows: the "x of n enabled…" link into the
+    // models pane's available tab was duplicative with the Enabled tab, and the guest "when it
+    // wants to use a tool" choice contradicted the owner's rule 29.1 — a guest always just runs
+    // it, like Relay's own agent. Neither may come back onto this page.
+    void theModelsPageHasNoEnabledCountLinkOrGuestPermissionRow() {
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowModels.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
         const QString text = QString::fromUtf8(source.readAll());
         const int start = text.indexOf(QStringLiteral("relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {"));
         QVERIFY2(start > 0, "modelsSection() is gone");
         const int end = text.indexOf(QStringLiteral("return models;"), start);
+        QVERIFY(end > start);
         const QString page = text.mid(start, end - start);
-        const int row = page.indexOf(QStringLiteral("QStringLiteral(\"models.available:\")"));
-        QVERIFY2(row > 0, "the per-provider models link is gone from the Models page");
-        const QString block = page.mid(row, 1800);
-        // Its own count, and the models pane's available tab filtered to this provider.
-        QVERIFY2(block.contains(QStringLiteral("of %2 available")), qPrintable(block.left(600)));
-        QVERIFY2(block.contains(QStringLiteral("openModelPicker(QStringLiteral(\"all\")")), qPrintable(block.left(900)));
-        QVERIFY(page.contains(QStringLiteral("curation::isAvailable(")));
-        // It sits under the provider it is about, indented, and the page reads the stored list
-        // once rather than once per model.
-        QVERIFY(block.contains(QStringLiteral("link.indent = 1")));
-        QVERIFY(page.contains(QStringLiteral("curation::availableKeys()")));
-        // Searching Options for "available models" finds it.
-        const int aliases = page.indexOf(QStringLiteral("link.aliases = "), row);
-        QVERIFY(aliases > row);
-        const QString terms = page.mid(aliases, 300);
-        for (const QString &word : {QStringLiteral("available"), QStringLiteral("uncheck")})
-            QVERIFY2(terms.contains(word), qPrintable(word));
+        for (const QString &gone : {QStringLiteral("QStringLiteral(\"models.available:\")"),
+                                    QStringLiteral("of %2 enabled"), QStringLiteral("of %2 available"),
+                                    QStringLiteral("when it wants to use a tool"),
+                                    QStringLiteral("choiceRow(QStringLiteral(\"option:\")")})
+            QVERIFY2(!page.contains(gone), qPrintable(gone + QStringLiteral(" is back on the Models page")));
+        // The stored key is still cleaned up where the row used to read it.
+        QVERIFY(page.contains(QStringLiteral("QSettings().remove(guestSettingKey(")));
+        // And Pane no longer reads or stages a guest permission either: absent is the worker's
+        // bypass, which is exactly rule 29.1.
+        QFile paneSource(QStringLiteral(RELAY_SOURCE_DIR "/src/Pane.h"));
+        QVERIFY2(paneSource.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(paneSource.fileName()));
+        const QString paneText = QString::fromUtf8(paneSource.readAll());
+        const int take = paneText.indexOf(QStringLiteral("QJsonObject takeGuestRequest("));
+        QVERIFY2(take > 0, "Pane::takeGuestRequest is gone");
+        const QString takeBody = paneText.mid(take, 2200);
+        QVERIFY2(!takeBody.contains(QStringLiteral("QStringLiteral(\"permissions\")")),
+                 "takeGuestRequest still reads or stages a guest permission");
     }
 
     // ----- the owner's review of the providers tab (card #MDL1, 2026-09-21) --------------------
@@ -1071,10 +1073,10 @@ private slots:
                 && appendProfiles > localMore);
     }
 
-    // "tab 1: add horizontal line dividers between providers." One provider is up to three rows —
-    // its key, its "models… (N of M)" link and, for a guest, what it may do with a tool — and they
-    // ran into the next provider's as one wall of text. The rule is `SettingRow::ruleAbove`, drawn
-    // by the pane in the theme's `@border`.
+    // "tab 1: add horizontal line dividers between providers." One provider is a single row — its
+    // key, since card #WBFM retired the "models… (N of M)" link and the guest tool-permission row —
+    // and the rows ran into the next provider's as one wall of text. The rule is
+    // `SettingRow::ruleAbove`, drawn by the pane in the theme's `@border`.
     void everyProviderButTheFirstDrawsARuleAboveIt() {
         QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowModels.cpp"));
         QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
