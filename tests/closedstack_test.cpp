@@ -114,20 +114,24 @@ private slots:
         QCOMPARE(out.slot, -1);
     }
 
-    void fileRoundTripIsPrivateAndCapped() {
+    void fileRoundTripIsPrivateAndUncapped() {
         QTemporaryDir dir;
         const QString path = dir.filePath(QStringLiteral("state/closed.json"));
         QList<Record> records;
-        for (int i = 0; i < kMaxItems + 5; ++i) push(&records, paneRecord(QStringLiteral("/p/%1").arg(i)));
-        QCOMPARE(records.size(), kMaxItems);
-        QCOMPARE(place(records.first(), QString()), QStringLiteral("/p/5"));   // the oldest five went
+        for (int i = 0; i < 60; ++i) push(&records, paneRecord(QStringLiteral("/p/%1").arg(i)));
+        QCOMPARE(records.size(), 60);                                           // nothing falls off
+        QCOMPARE(place(records.first(), QString()), QStringLiteral("/p/0"));
+        // An explicit limit still trims from the front.
+        QList<Record> capped = records;
+        QCOMPARE(push(&capped, paneRecord(QStringLiteral("/p/x")), 10).size(), 51);
+        QCOMPARE(capped.size(), 10);
         QString error;
         QVERIFY2(save(path, records, &error), qPrintable(error));
         QCOMPARE(QFile::permissions(path) & (QFile::ReadGroup | QFile::ReadOther | QFile::WriteGroup | QFile::WriteOther),
                  QFile::Permissions());
         const QList<Record> back = load(path, &error);
         QVERIFY2(error.isEmpty(), qPrintable(error));
-        QCOMPARE(back.size(), kMaxItems);
+        QCOMPARE(back.size(), 60);
         QCOMPARE(back.last().id, records.last().id);
         // An empty list removes the file rather than leaving "nothing closed" on disk.
         QVERIFY(save(path, {}, &error));

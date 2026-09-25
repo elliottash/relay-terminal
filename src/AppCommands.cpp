@@ -18,7 +18,7 @@ namespace appcommands {
 namespace {
 
 // `closed:<id>` is the Recently-closed submenu's child: one named pane, tab or window out of the
-// last 25 (src/ClosedStack.h). It cannot be a set entry, because the id is minted when the thing
+// list of closed ones (src/ClosedStack.h). It cannot be a set entry, because the id is minted when the thing
 // is closed and there is no list of them to write down — so it is matched by prefix, and by a
 // prefix that `closed.list` and `closed.restore` cannot collide with (they use a dot).
 bool isOneNamedClosedPane(const QString &key) {
@@ -81,7 +81,7 @@ const QSet<QString> &readActions() {
         QStringLiteral("pane.splitRight"), QStringLiteral("pane.splitDown"),
         QStringLiteral("pane.splitLeft"), QStringLiteral("pane.splitUp"),
         QStringLiteral("closed.restore"),  // puts a closed pane back; the undo of a close
-        // …and `menu:closed` is the list of the last 25 to put back one by one. The submenu itself
+        // …and `menu:closed` is the list of closed ones to put back one by one. The submenu itself
         // has no `run` and cannot be run (§30.2); it is named here so that the agent reading the
         // catalog is not told the group is off while every child of it is on.
         QStringLiteral("menu:closed"),

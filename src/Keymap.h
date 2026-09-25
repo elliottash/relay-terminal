@@ -304,7 +304,7 @@ private:
         add("workspace.layoutEditorOverConsole", "pane",
             "Workspace: artifact layout 2:1 (editor over console | preview)", {});
         add("closed.restore", "pane", "Restore the last closed pane, tab or window", {QStringLiteral("Ctrl+Shift+Z")});
-        add("closed.list", "pane", "Recently closed: the last 25 panes, tabs and windows, any of them reopened", {});
+        add("closed.list", "pane", "Recently closed: every closed pane, tab and window, any of them reopened", {});
         add("windows.fresh", "window", "Start a fresh window set (forget the saved window layout)", {});
         // Jump to the newest notification's pane (#NQP9): 1 is the newest entry, again within the
         // window walks to the 2nd, and so on. Ctrl+Shift because a program that owns the terminal

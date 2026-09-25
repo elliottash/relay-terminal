@@ -2,7 +2,8 @@
 #pragma once
 // Recently closed panes, tabs and windows.
 //
-// Closing something in Relay is undoable: the last 25 closed items are kept, newest last, and
+// Closing something in Relay is undoable: every closed item is kept, newest last, until the owner
+// drops it or clears the list (owner, 2026-09-25: "remove the max 25 cap"), and
 // `closed.restore` brings the newest back while the "Recently closed" list offers any of them. The
 // list outlives the process (owner, 2026-09-18: "persist it and save it"), in
 // `$XDG_DATA_HOME/relay/state/closed.json` (0600), beside the saved window layout and written the
@@ -15,7 +16,7 @@
 // that text and the conversation (`session_id`); the shell itself is new, and programs that were
 // running in it are gone.
 //
-// This header is the part that needs no window: the record, its JSON, the file, the cap, and the
+// This header is the part that needs no window: the record, its JSON, the file, and the
 // words a list shows for a record. RelayWindow.h keeps the live side (which window, which sibling).
 #include <QJsonArray>
 #include <QJsonObject>
@@ -29,8 +30,6 @@ namespace closed {
 
 // Bumped when the file's meaning changes; a file with another version is ignored and replaced.
 constexpr int kSchemaVersion = 1;
-// How many closed items are kept. The oldest goes first.
-constexpr int kMaxItems = 25;
 
 struct Record {
     enum Kind { Pane, Tab, Window };
@@ -80,14 +79,14 @@ bool fromJson(const QJsonObject &object, Record *record);
 QJsonObject document(const QList<Record> &records, qint64 savedAt = 0);
 
 // A missing file is an empty list and no error; an unreadable, malformed or foreign-version file
-// is an empty list and a one-line message. Unusable records are dropped, and at most kMaxItems
-// (the newest) are returned.
+// is an empty list and a one-line message. Unusable records are dropped; every other one is returned.
 QList<Record> load(const QString &path, QString *error = nullptr);
 // Atomic and 0600 (windowstate::write). An empty list removes the file.
 bool save(const QString &path, const QList<Record> &records, QString *error = nullptr);
 
-// Append and keep the newest `maxItems`. Returns the records that fell off the front.
-QList<Record> push(QList<Record> *records, Record record, int maxItems = kMaxItems);
+// Append, and when `maxItems` is positive keep only the newest that many. Returns the records that
+// fell off the front. The list itself is uncapped: nothing passes a limit.
+QList<Record> push(QList<Record> *records, Record record, int maxItems = 0);
 
 // Every `scrollback` id the records name: the terminal text that must outlive the layout's prune.
 QStringList scrollbackIds(const QList<Record> &records);

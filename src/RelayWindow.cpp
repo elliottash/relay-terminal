@@ -553,7 +553,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
         items << actionItem(panes, QStringLiteral("Move pane up"), QString(), QStringLiteral("pane.moveUp"));
         items << actionItem(panes, QStringLiteral("Move pane down"), QStringLiteral("Straight after a left/right move, beneath that neighbor"), QStringLiteral("pane.moveDown"));
         items << actionItem(panes, QStringLiteral("Restore closed"), QStringLiteral("Last closed pane, tab or window"), QStringLiteral("closed.restore"));
-        items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("Choose from the last 25 closed panes, tabs and windows"), QStringLiteral("closed.list"));
+        items << actionItem(panes, QStringLiteral("Recently closed…"), QStringLiteral("Choose from every closed pane, tab and window"), QStringLiteral("closed.list"));
         // "Reopen windows on start" is a row in Options › General.
         items << actionItem(panes, QStringLiteral("Start a fresh window set"),
                             QStringLiteral("Forget the saved layout; the next start opens one new window"),

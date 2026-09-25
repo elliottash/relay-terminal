@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
-// The "Recently closed" list: the last 25 closed panes, tabs and windows (src/ClosedStack.h),
-// newest first, with a filter. It is the session manager pane's second tab (card #R6J0 mounts it
+// The "Recently closed" list: every closed pane, tab and window (src/ClosedStack.h), newest first,
+// with a filter and a check box per kind (Windows, Tabs, Panes). It is the session manager pane's second tab (card #R6J0 mounts it
 // through RelayWindow::addSessionsTab), and it knows nothing about windows: it is fed records with
 // setRecords() and asks through onReopen / onDiscard / onClear, so it is built and tested alone.
 //
@@ -17,6 +17,7 @@
 
 #include <functional>
 
+class QCheckBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -43,6 +44,9 @@ public:
     // was unfolded, by record id.
     void setRecords(const QList<Record> &records);
     void setFilter(const QString &text);
+    // The Windows / Tabs / Panes check boxes: whether rows of that kind are shown. All start on.
+    void setKindShown(Record::Kind kind, bool shown);
+    bool kindShown(Record::Kind kind) const;
     // The rows when there are any (↓ ↑ → Enter work at once; typing starts the filter), else the filter.
     void focusInput();
 
@@ -72,7 +76,9 @@ private:
 
     QList<Record> m_records;
     QString m_filter;
+    bool m_shown[3] = {true, true, true};   // by Record::Kind
     QLineEdit *m_search = nullptr;
+    QCheckBox *m_kinds[3] = {nullptr, nullptr, nullptr};
     QTreeWidget *m_tree = nullptr;
     QLabel *m_empty = nullptr;
     QLabel *m_hint = nullptr;

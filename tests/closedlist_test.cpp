@@ -3,6 +3,7 @@
 // keys. It is fed records and a fake scrollback reader, so no window and no state directory.
 #include "ClosedList.h"
 
+#include <QCheckBox>
 #include <QTreeWidget>
 #include <QUuid>
 #include <QtTest>
@@ -63,6 +64,29 @@ private slots:
         view.setFilter(QStringLiteral("nothing like it"));
         QCOMPARE(view.visibleCount(), 0);
         QVERIFY(view.selectedId().isEmpty());
+    }
+
+    void kindCheckBoxesHideRows() {
+        ListView view;
+        const Record paneRow = paneRecord(QStringLiteral("/home/u/relay"), QStringLiteral("Shell"), uuid(), 1000);
+        Record tabRow = paneRecord(QStringLiteral("/srv/www"), QStringLiteral("Deploy"), uuid(), 2000);
+        tabRow.kind = Record::Tab;
+        view.setRecords({paneRow, tabRow});
+        QCOMPARE(view.visibleCount(), 2);
+        auto *panes = view.findChild<QCheckBox *>(QStringLiteral("closedShowPanes"));
+        auto *tabs = view.findChild<QCheckBox *>(QStringLiteral("closedShowTabs"));
+        QVERIFY(panes && tabs && view.findChild<QCheckBox *>(QStringLiteral("closedShowWindows")));
+        QVERIFY(panes->isChecked() && tabs->isChecked());
+        panes->setChecked(false);
+        QCOMPARE(view.visibleCount(), 1);
+        QCOMPARE(view.selectedId(), tabRow.id);
+        QVERIFY(!view.kindShown(Record::Pane));
+        view.setKindShown(Record::Tab, false);                // the box follows the call
+        QVERIFY(!tabs->isChecked());
+        QCOMPARE(view.visibleCount(), 0);
+        panes->setChecked(true);
+        QCOMPARE(view.visibleCount(), 1);
+        QCOMPARE(view.selectedId(), paneRow.id);
     }
 
     void unfoldingReadsTheTextOnce() {

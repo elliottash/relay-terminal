@@ -444,7 +444,6 @@ inline void WindowManager::remember(ClosedItem item) {
     const bool isWindow = item.record.kind == relay::closed::Record::Window;
     if (isWindow) m_pendingWindowCloses.append(item.record.id);
     m_closed.append(std::move(item));
-    while (m_closed.size() > relay::closed::kMaxItems) m_closed.removeFirst();
     // A window is written once it is known not to be part of a quit: settleClosed().
     if (!isWindow) saveClosed();
     closedChanged();

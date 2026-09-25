@@ -232,7 +232,7 @@ public:
     bool lastVisibleWindow(const RelayWindow *window) const;
     void cycle(RelayWindow *from, int delta);
     // ----- recently closed (src/ClosedStack.h) --------------------------------------------------
-    // The last 25 closed panes, tabs and windows, newest last. `restore` brings the newest back
+    // Every closed pane, tab and window, newest last. `restore` brings the newest back
     // (closed.restore); the "Recently closed" list and the palette reopen any of them by id.
     void remember(ClosedItem item);
     void restore(RelayWindow *requester);

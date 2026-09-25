@@ -3,6 +3,7 @@
 
 #include "WindowState.h"
 
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDir>
 #include <QFontDatabase>
@@ -96,6 +97,25 @@ ListView::ListView(QWidget *parent) : QWidget(parent) {
     m_search->installEventFilter(this);
     connect(m_search, &QLineEdit::textChanged, this, [this](const QString &text) { setFilter(text); });
 
+    // Which kinds to list: a check box each, beside the filter.
+    auto *filters = new QHBoxLayout;
+    filters->addWidget(m_search, 1);
+    const struct { Record::Kind kind; const char *text; const char *name; } kinds[] = {
+        {Record::Window, "Windows", "closedShowWindows"},
+        {Record::Tab, "Tabs", "closedShowTabs"},
+        {Record::Pane, "Panes", "closedShowPanes"},
+    };
+    for (const auto &kind : kinds) {
+        auto *box = new QCheckBox(QString::fromLatin1(kind.text));
+        box->setObjectName(QString::fromLatin1(kind.name));
+        box->setChecked(true);
+        box->setFocusPolicy(Qt::TabFocus);   // a click leaves the keyboard on the rows
+        const Record::Kind which = kind.kind;
+        connect(box, &QCheckBox::toggled, this, [this, which](bool on) { setKindShown(which, on); });
+        m_kinds[which] = box;
+        filters->addWidget(box);
+    }
+
     m_tree = new QTreeWidget;
     m_tree->setObjectName(QStringLiteral("closedTree"));
     m_tree->setColumnCount(3);
@@ -137,7 +157,7 @@ ListView::ListView(QWidget *parent) : QWidget(parent) {
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(8, 8, 8, 8);
-    layout->addWidget(m_search);
+    layout->addLayout(filters);
     layout->addWidget(m_tree, 1);
     layout->addWidget(m_empty, 1);
     layout->addLayout(buttons);
@@ -161,6 +181,15 @@ void ListView::setFilter(const QString &text) {
     if (m_search->text() != text) m_search->setText(text);
     rebuild();
 }
+
+void ListView::setKindShown(Record::Kind kind, bool shown) {
+    if (m_shown[kind] == shown) return;
+    m_shown[kind] = shown;
+    if (m_kinds[kind]->isChecked() != shown) m_kinds[kind]->setChecked(shown);
+    rebuild();
+}
+
+bool ListView::kindShown(Record::Kind kind) const { return m_shown[kind]; }
 
 void ListView::focusInput() {
     if (m_tree->isVisible() && m_tree->topLevelItemCount() > 0) m_tree->setFocus(Qt::OtherFocusReason);
@@ -202,7 +231,7 @@ void ListView::rebuild() {
     QTreeWidgetItem *reselect = nullptr;
     for (auto it = m_records.crbegin(); it != m_records.crend(); ++it) {
         const Record &record = *it;
-        if (!matches(record, m_filter)) continue;
+        if (!m_shown[record.kind] || !matches(record, m_filter)) continue;
         auto *row = new QTreeWidgetItem(m_tree);
         row->setData(0, kRecordId, record.id);
         row->setText(0, QStringLiteral("%1 · %2").arg(kindName(record.kind), label(record)));
@@ -233,7 +262,11 @@ void ListView::rebuild() {
     m_tree->setVisible(any);
     m_empty->setVisible(!any);
     m_empty->setText(m_records.isEmpty()
-                         ? QStringLiteral("Nothing has been closed yet.\nPanes, tabs and windows you close are kept here, the last %1 of them, across restarts.").arg(kMaxItems)
+                         ? QStringLiteral("Nothing has been closed yet.\nPanes, tabs and windows you close are kept here, across restarts, until you clear the list.")
+                         : !m_shown[Record::Window] && !m_shown[Record::Tab] && !m_shown[Record::Pane]
+                         ? QStringLiteral("Tick Windows, Tabs or Panes to list what was closed.")
+                         : m_filter.isEmpty()
+                         ? QStringLiteral("Nothing of the ticked kinds has been closed.")
                          : QStringLiteral("Nothing closed matches “%1”.").arg(m_filter));
     m_clear->setEnabled(!m_records.isEmpty());
     if (!reselect && any) reselect = m_tree->topLevelItem(0);

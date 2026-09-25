@@ -196,7 +196,6 @@ QList<Record> load(const QString &path, QString *error) {
         Record record;
         if (value.isObject() && fromJson(value.toObject(), &record)) records.append(record);
     }
-    if (records.size() > kMaxItems) records = records.mid(records.size() - kMaxItems);
     return records;
 }
 
@@ -220,7 +219,7 @@ QList<Record> push(QList<Record> *records, Record record, int maxItems) {
     QList<Record> dropped;
     if (!records) return dropped;
     records->append(std::move(record));
-    while (records->size() > std::max(1, maxItems)) dropped.append(records->takeFirst());
+    while (maxItems > 0 && records->size() > maxItems) dropped.append(records->takeFirst());
     return dropped;
 }
 
