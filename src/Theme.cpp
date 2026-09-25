@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Theme.h"
+#include "SourceDir.h"
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
@@ -25,9 +26,6 @@
 
 #ifndef RELAY_DATA_DIR
 #define RELAY_DATA_DIR "/usr/local/share/relay"
-#endif
-#ifndef RELAY_SOURCE_DIR
-#define RELAY_SOURCE_DIR "."
 #endif
 
 namespace relay::theme {
@@ -1029,7 +1027,7 @@ QString themeDataDir() {
     const QString appDir = QFileInfo(QFileInfo(QStringLiteral("/proc/self/exe")).symLinkTarget()).absolutePath();
     const QStringList choices{qEnvironmentVariable("RELAY_THEME_DIR"),
         appDir + QStringLiteral("/../share/relay/theme"),
-        QStringLiteral(RELAY_DATA_DIR "/theme"), QStringLiteral(RELAY_SOURCE_DIR "/data/theme")};
+        QStringLiteral(RELAY_DATA_DIR "/theme"), QString::fromUtf8(relaySourceDir()) + QStringLiteral("/data/theme")};
     for (const auto &path : choices) {
         if (!path.isEmpty() && QFileInfo::exists(path + QStringLiteral("/themes/relay-dark.toml")))
             return QDir(path).absolutePath();

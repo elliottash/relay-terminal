@@ -9,7 +9,7 @@ on:
         required: false
         default: ""
   push:
-    paths: ['engine/**', 'src/**', 'backend/**', 'shell/**', 'CMakeLists.txt', 'packaging/windows/**', '.github/workflows/windows.yml']
+    paths: ['engine/**', 'src/**', 'backend/**', 'shell/**', 'CMakeLists.txt', 'cmake/**', 'packaging/windows/**', '.github/workflows/windows.yml']
 permissions:
   contents: read
 jobs:
@@ -51,14 +51,59 @@ jobs:
       - run: cmake --build build-windows --config Release --parallel
       - name: Exercise native Windows process and console lifecycle
         run: ctest --test-dir build-windows -C Release --output-on-failure
+      - name: Configure compiler cache
+        # #V52P. A Visual Studio generator ignores CMAKE_CXX_COMPILER_LAUNCHER, so this is
+        # ccache's MSBuild recipe: ccache.exe copied as cl.exe, named through CMAKE_VS_GLOBALS.
+        # When the download fails the build runs uncached rather than not at all.
+        id: ccache
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'relay-ccache'
+          "CCACHE_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CCACHE_MAXSIZE=500M" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CCACHE_COMPRESS=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CCACHE_BASEDIR=$env:GITHUB_WORKSPACE" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $v = '4.10.2'
+          $zip = Join-Path $env:RUNNER_TEMP 'ccache.zip'
+          try {
+            Invoke-WebRequest "https://github.com/ccache/ccache/releases/download/v$v/ccache-$v-windows-x86_64.zip" -OutFile $zip
+            Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP -Force
+            $exe = Join-Path $env:RUNNER_TEMP "ccache-$v-windows-x86_64/ccache.exe"
+            $tool = Join-Path $env:RUNNER_TEMP 'ccache-cl'
+            New-Item -ItemType Directory -Force $tool | Out-Null
+            Copy-Item $exe (Join-Path $tool 'cl.exe')
+            Split-Path $exe | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $tool = $tool -replace '\\', '/'
+            "globals=-DCMAKE_VS_GLOBALS=CLToolExe=cl.exe;CLToolPath=$tool;TrackFileAccess=false;UseMultiToolTask=true;DebugInformationFormat=OldStyle" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } catch {
+            Write-Warning "ccache download failed, building uncached: $_"
+          }
+      - name: Restore compiler objects
+        id: compiler-cache
+        if: ${{ steps.ccache.outputs.globals != '' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/relay-ccache
+          key: ccache-windows2022-msvc-qt6.8.3-v1-${{ hashFiles('src/**', 'engine/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: ccache-windows2022-msvc-qt6.8.3-v1-
       - name: Configure Windows desktop
         id: configure
         if: ${{ !cancelled() }}
-        run: cmake -S . -B build-app -A x64 -DRELAY_QT_MAJOR=6 -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+        shell: pwsh
+        run: cmake -S . -B build-app -A x64 -DRELAY_QT_MAJOR=6 -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64 -DRELAY_COMPILER_CACHE=OFF "${{ steps.ccache.outputs.globals }}"
       - name: Build Windows desktop
         id: desktop
         if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
         run: cmake --build build-app --config Release --parallel 4
+      - name: Report compiler cache
+        if: ${{ !cancelled() && steps.ccache.outputs.globals != '' }}
+        run: ccache --show-stats
+      - name: Save compiler objects
+        if: ${{ !cancelled() && steps.desktop.outcome == 'success' && steps.ccache.outputs.globals != '' && steps.compiler-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/relay-ccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
       - name: Package native installer with private runtimes
         env:
           RELEASE_VERSION: ${{ inputs.version }}

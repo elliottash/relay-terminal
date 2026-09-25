@@ -215,6 +215,11 @@ It does three things:
   recompiles it — which is what make would have done if compiling were instantaneous. Everything
   gets the *same* timestamp, so no binary looks older than the objects it was linked from.
 
+With `ccache` installed, every Relay configure (`build/`, `build-fast/`, the verify slots)
+compiles through one shared cache in `~/.cache/relay/ccache` (card #V52P,
+`cmake/CompilerCache.cmake`; `docs/BUILDING.md` has the switches), so a header state one session's
+verify slot compiled is mostly cache hits for the next one's.
+
 `RELAY_JOBS` (default 8) is the parallelism, clamped to what the memory limit the
 build runs under allows (about one 2 GiB compile job per 2 GiB, so a default build
 fits an agent pane's 8 GiB MemoryMax instead of being OOM-killed, card #04EC), and

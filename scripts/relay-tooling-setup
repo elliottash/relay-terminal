@@ -11,7 +11,7 @@
 #
 # What it installs, and nothing else:
 #   apt (needs passwordless sudo; skipped with a sentence when sudo asks for a password):
-#       linux-tools (perf), hotspot, heaptrack, hyperfine, clang, ninja-build
+#       linux-tools (perf), hotspot, heaptrack, hyperfine, clang, ninja-build, ccache
 #   into ~/.local (no root):
 #       py-spy                      uv tool / pipx / a private venv, whichever exists
 #       FlameGraph's perl scripts   stackcollapse-perf.pl, flamegraph.pl
@@ -54,6 +54,7 @@ if (( install )); then
     have hyperfine || want+=(hyperfine)
     have clang     || want+=(clang)
     have ninja     || want+=(ninja-build)
+    have ccache    || want+=(ccache)
     have unzip     || want+=(unzip)
     have git       || want+=(git)
     if (( ${#want[@]} )); then
@@ -136,6 +137,7 @@ row heaptrack             optional "heap profile target"
 row hyperfine             optional "compare a command across two commits"
 row clang                 optional "-ftime-trace: per-header, per-template build report"
 row ClangBuildAnalyzer    optional "ranks the -ftime-trace output"
+row ccache                optional "one compiler cache for build/, build-fast/ and the land.py verify slots"
 if [[ -f $share/speedscope/index.html ]]; then printf '  %-22s ok       %s\n' speedscope "flame-graph viewer ($share/speedscope)"
 else printf '  %-22s MISSING  %s\n' speedscope "flame-graph viewer (optional)"; fi
 say "  perf_event_paranoid=$(cat /proc/sys/kernel/perf_event_paranoid 2>/dev/null) · ptrace_scope=$(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null) · sudo: $([[ $sudo_ok == 1 ]] && echo passwordless || echo 'asks for a password')"

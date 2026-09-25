@@ -35,8 +35,10 @@ class ScratchCase(unittest.TestCase):
         self.root.mkdir()
         self.env = {k: os.environ.get(k) for k in ("RELAY_SCRATCH_ROOTS",
                                                    "RELAY_SCRATCH_BUDGET_GB",
-                                                   "RELAY_SCRATCH_MIN_FREE_GB")}
+                                                   "RELAY_SCRATCH_MIN_FREE_GB",
+                                                   "RELAY_CCACHE_DIR")}
         os.environ["RELAY_SCRATCH_ROOTS"] = str(self.root)
+        os.environ.pop("RELAY_CCACHE_DIR", None)
         os.environ.pop("RELAY_SCRATCH_BUDGET_GB", None)
         os.environ.pop("RELAY_SCRATCH_MIN_FREE_GB", None)
         self.cwd = os.getcwd()
@@ -94,6 +96,48 @@ class Report(ScratchCase):
         (self.root / "link").symlink_to(target)
         scratch.gc(apply=True, log=lambda *_: None)
         self.assertTrue((target / "keep.txt").exists())
+
+
+class CompilerCache(ScratchCase):
+    """The shared ccache dir (#V52P): listed and counted, never removed."""
+
+    def cache(self, hours_old=500):
+        cache = Path(self.temp.name) / "xdg" / "relay" / "ccache"
+        make(cache / "a" / "b" / "obj.o", size=64 * 1024, hours_old=hours_old)
+        os.environ["RELAY_CCACHE_DIR"] = str(cache)
+        return cache
+
+    def test_it_is_its_own_kind_and_never_removable(self):
+        cache = self.cache()
+        e = self.entry(scratch.report(), "ccache")
+        self.assertEqual(e.kind, "compiler-cache")
+        self.assertFalse(e.removable)
+        self.assertIn("max_size", e.why_kept)
+        scratch.gc(idle_hours=0, apply=True, log=lambda *_: None)
+        self.assertTrue((cache / "a" / "b" / "obj.o").exists())
+
+    def test_it_counts_against_the_budget(self):
+        self.cache()
+        os.environ["RELAY_SCRATCH_BUDGET_GB"] = str(32 / (1024 * 1024))    # 32 KB
+        os.environ["RELAY_SCRATCH_MIN_FREE_GB"] = "0"
+        verdict = scratch.check()
+        self.assertFalse(verdict.ok)
+        self.assertGreaterEqual(verdict.scratch_bytes, 64 * 1024)
+        self.assertEqual(verdict.reclaimable_bytes, 0)
+
+    def test_the_default_dir_follows_xdg_cache_home(self):
+        old = os.environ.get("XDG_CACHE_HOME")
+        os.environ["XDG_CACHE_HOME"] = "/x/cache"
+        try:
+            self.assertEqual(scratch.compiler_cache_dir(), Path("/x/cache/relay/ccache"))
+        finally:
+            if old is None:
+                os.environ.pop("XDG_CACHE_HOME", None)
+            else:
+                os.environ["XDG_CACHE_HOME"] = old
+
+    def test_a_narrowed_report_leaves_the_real_cache_out(self):
+        self.assertNotIn("compiler-cache", [e.kind for e in scratch.report()])
 
 
 class Gc(ScratchCase):

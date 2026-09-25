@@ -48,7 +48,10 @@ python3 scripts/land.py gc --dry-run        # Relay repo: land.py's own snapshot
 `gc` only removes entries owned by this user, never follows a symlink, never touches an entry a
 live process has as its working directory, holds open, or names on its command line, never one
 written in the last `--idle-hours`, and leaves `land/` to `land.py gc` (which knows which
-snapshots are live). Budget and floor: `RELAY_SCRATCH_BUDGET_GB` (default the smaller of 20 GB and
+snapshots are live). It also lists the shared compiler cache (`~/.cache/relay/ccache`, kind
+`compiler-cache`) and counts it against the budget, but never removes it: ccache evicts its own
+objects at the cap in its `ccache.conf` (`RELAY_CCACHE_MAX`, default 10G). To empty it on purpose,
+`CCACHE_DIR=~/.cache/relay/ccache ccache -C`. Budget and floor: `RELAY_SCRATCH_BUDGET_GB` (default the smaller of 20 GB and
 5% of the disk) and `RELAY_SCRATCH_MIN_FREE_GB` (default the larger of 5 GB and 5%).
 
 The Relay app runs the same check itself, a few minutes after launch and then every six hours, and

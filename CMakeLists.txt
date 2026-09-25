@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(Relay VERSION 0.1.0 LANGUAGES CXX)
+# One shared ccache/sccache for build/, build-fast/ and the land.py verify slots (#V52P).
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerCache.cmake)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -48,6 +50,13 @@ find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
 
 # The prompt box's history files: `$XDG_DATA_HOME/relay/state/prompt-history/<pane-id>.txt`, one
 # per pane and kept across restarts. QtCore only, so it is tested headless.
+# The one translation unit that sees RELAY_SOURCE_DIR (#V52P): the path differs between the
+# checkout and every land.py verify slot, and on the compile line of each AppPaths.h includer it
+# made all of them compiler-cache misses in every tree. Everything else calls relaySourceDir().
+add_library(relay-sourcedir STATIC src/SourceDir.cpp src/SourceDir.h)
+target_include_directories(relay-sourcedir PUBLIC src)
+target_compile_definitions(relay-sourcedir PRIVATE RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
 add_library(relay-prompthistory STATIC src/PromptHistory.cpp src/PromptHistory.h)
 target_include_directories(relay-prompthistory PUBLIC src)
 target_link_libraries(relay-prompthistory PUBLIC ${RELAY_QT}::Core)
@@ -76,6 +85,7 @@ add_library(relay-board STATIC src/BoardModel.cpp src/BoardModel.h src/BoardPane
     # the remote sidecar. Widget-free and RemoteShare-free; the window hands both in as functions.
     src/BoardRemote.cpp src/BoardRemote.h)
 target_include_directories(relay-board PUBLIC src)
+target_link_libraries(relay-board PUBLIC relay-sourcedir)
 # relay-projects: boardRootFor() asks projects::boardDirOf() which folder of a directory is a board,
 # so the GUI's walk and the registry's can never disagree (#JN7X). The dependency only goes this
 # way; relay-projects stays QtCore-only and knows nothing about panes.
@@ -107,6 +117,7 @@ target_compile_options(relay-projects PRIVATE ${RELAY_WARNINGS})
 # project here" on top, for a tab that has no project when a Switchboard is reached for. Widgets
 # over relay-projects; the window feeds it and takes its answer, so it is tested offscreen.
 add_library(relay-projectpicker STATIC src/ProjectPicker.cpp src/ProjectPicker.h src/PaneView.h)
+target_link_libraries(relay-projectpicker PUBLIC relay-sourcedir)
 target_include_directories(relay-projectpicker PUBLIC src)
 target_link_libraries(relay-projectpicker PUBLIC relay-projects ${RELAY_QT}::Widgets)
 target_compile_options(relay-projectpicker PRIVATE ${RELAY_WARNINGS})
@@ -130,6 +141,7 @@ target_compile_options(relay-modelrows PRIVATE ${RELAY_WARNINGS})
 # tests/filterpopup_test.cpp can drive it without a window. relay-theme is for the tokens it
 # paints with (src/Theme.h's inline colours); it pulls in no stylesheet.
 add_library(relay-filterpopup STATIC src/FilterPopup.cpp src/FilterPopup.h)
+target_link_libraries(relay-filterpopup PUBLIC relay-sourcedir)
 target_include_directories(relay-filterpopup PUBLIC src)
 target_link_libraries(relay-filterpopup PUBLIC relay-theme ${RELAY_QT}::Widgets)
 target_compile_options(relay-filterpopup PRIVATE ${RELAY_WARNINGS})
@@ -213,10 +225,9 @@ target_link_libraries(relay-textmerge PUBLIC ${RELAY_QT}::Core)
 target_compile_options(relay-textmerge PRIVATE ${RELAY_WARNINGS})
 
 add_library(relay-filepanes STATIC src/FilePanes.cpp src/FilePanes.h src/DocxEditor.cpp src/DocxEditor.h)
-target_compile_definitions(relay-filepanes PRIVATE
-    RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay" RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(relay-filepanes PRIVATE RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay")
 target_include_directories(relay-filepanes PUBLIC src)
-target_link_libraries(relay-filepanes PUBLIC relay-remotefiles relay-hints relay-textmerge ${RELAY_QT}::Widgets)
+target_link_libraries(relay-filepanes PUBLIC relay-sourcedir relay-remotefiles relay-hints relay-textmerge ${RELAY_QT}::Widgets)
 target_compile_options(relay-filepanes PRIVATE ${RELAY_WARNINGS})
 find_package(${RELAY_KF}SyntaxHighlighting QUIET)
 if(TARGET ${RELAY_KF}::SyntaxHighlighting)
@@ -552,7 +563,7 @@ target_compile_options(relay-theme PRIVATE ${RELAY_WARNINGS})
 # prompt, and the caret colour that shows which (owner design, 2026-09-17).
 add_library(relay-highlight STATIC src/ShellHighlighter.cpp src/ShellHighlighter.h src/Theme.cpp src/Theme.h)
 target_include_directories(relay-highlight PUBLIC src)
-target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets relay-theme)
+target_link_libraries(relay-highlight PUBLIC ${RELAY_QT}::Gui ${RELAY_QT}::Widgets relay-theme relay-sourcedir)
 target_compile_options(relay-highlight PRIVATE ${RELAY_WARNINGS})
 
 # Unified diffs from the agent's file tools: the parser the concise tool-call notification and the
@@ -618,9 +629,8 @@ target_compile_options(relay-remotesettings PRIVATE ${RELAY_WARNINGS})
 # screen painter, the pane_state view, and the `remote/viewer.py` sidecar that holds the session.
 add_library(relay-remotepane STATIC src/RemotePane.cpp src/RemotePane.h)
 target_include_directories(relay-remotepane PUBLIC src)
-target_link_libraries(relay-remotepane PUBLIC relay-highlight relay-hints ${RELAY_QT}::Widgets)
-target_compile_definitions(relay-remotepane PRIVATE
-    RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay" RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(relay-remotepane PUBLIC relay-highlight relay-hints relay-sourcedir ${RELAY_QT}::Widgets)
+target_compile_definitions(relay-remotepane PRIVATE RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay")
 target_compile_options(relay-remotepane PRIVATE ${RELAY_WARNINGS})
 
 # Relay's own terminal engine (engine/, docs/ENGINE.md). The library is built and linked
@@ -665,9 +675,9 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     target_link_libraries(relay PRIVATE relay-actionpalette)
     target_link_libraries(relay PRIVATE relay-scratchmonitor)   # agent scratch on the bell (#SZHQ)
+    # No RELAY_SOURCE_DIR here: relay-sourcedir holds it (#V52P).
     target_compile_definitions(relay PRIVATE
         RELAY_DATA_DIR="${CMAKE_INSTALL_FULL_DATADIR}/relay"
-        RELAY_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         RELAY_VERSION="${PROJECT_VERSION}")
     target_compile_options(relay PRIVATE ${RELAY_WARNINGS})
     # -rdynamic puts the app's own symbols in the dynamic table, which is the difference between a

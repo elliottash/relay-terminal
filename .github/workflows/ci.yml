@@ -26,11 +26,34 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build \
             python3 python3-cryptography bash qtbase5-dev libkf5syntaxhighlighting-dev qtpdf5-dev \
-            appstream desktop-file-utils
+            appstream desktop-file-utils ccache
+      - name: Configure compiler cache
+        # The same ccache the desktop uses (#V52P); CI keeps its own dir and a smaller cap.
+        run: |
+          echo "CCACHE_DIR=$RUNNER_TEMP/relay-ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Restore compiler objects
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/relay-ccache
+          key: ccache-ubuntu24.04-qt5-gcc-v1-${{ hashFiles('src/**', 'engine/**', 'tests/**', 'CMakeLists.txt', 'cmake/**') }}
+          restore-keys: ccache-ubuntu24.04-qt5-gcc-v1-
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRELAY_QT_MAJOR=5 -DBUILD_TESTING=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DRELAY_QT_MAJOR=5 -DBUILD_TESTING=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build
         run: cmake --build build --parallel
+      - name: Report compiler cache
+        if: ${{ !cancelled() }}
+        run: ccache --show-stats
+      - name: Save compiler objects
+        if: ${{ !cancelled() && steps.compiler-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/relay-ccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
       - name: Test
         run: ctest --test-dir build --output-on-failure
       - name: Install layout

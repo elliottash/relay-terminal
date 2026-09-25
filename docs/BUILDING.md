@@ -48,6 +48,16 @@ scripts/relay-build --fast --target relay
 for performance checks, release preparation and full validation; the fast binary runs without
 optimization. Both directories are ignored by Git and protected by separate build locks.
 
+**Compiler cache.** Install `ccache` (`sudo apt install ccache`, or `scripts/relay-tooling-setup
+--install`) and every configure — `build/`, `build-fast/`, each `land.py` verify slot — compiles
+through one shared cache in `$XDG_CACHE_HOME/relay/ccache` (default `~/.cache/relay/ccache`, capped
+at `RELAY_CCACHE_MAX`, default 10G). `cmake/CompilerCache.cmake` sets it up: `ccache` first, then
+`sccache` (`-DRELAY_COMPILER_CACHE_TOOL=` picks one), `-DRELAY_COMPILER_CACHE=OFF` turns it off,
+and a launcher given on the command line wins. Check it with
+`CCACHE_DIR=~/.cache/relay/ccache ccache -s`. Trees built with different flags never share objects:
+`build/` is RelWithDebInfo, `build-fast/` is `-O0 -g1`, verify slots use no build type, so it is
+the slots that share with each other.
+
 Ubuntu 26.04 and Debian 13 use Qt 6 packages such as `qt6-base-dev` and
 `libkf6syntaxhighlighting-dev`. KSyntaxHighlighting and Qt PDF are optional. A normal local install
 uses `cmake --install build` and defaults to `~/.local` when configured through `scripts/build.sh`.
@@ -135,6 +145,12 @@ Use the native workflows for checks without publication:
 gh workflow run windows.yml --ref main
 gh workflow run macos.yml --ref main -f version=0.1.0-beta.4
 ```
+
+All three platforms keep a ccache between runs with `actions/cache` and print `ccache
+--show-stats` after the build: `ci.yml`'s Qt 5 job and `macos.yml` through
+`-DCMAKE_CXX_COMPILER_LAUNCHER=ccache`, `windows.yml` through ccache's MSBuild recipe
+(`ccache.exe` copied as `cl.exe`, named in `CMAKE_VS_GLOBALS`), because a Visual Studio generator
+ignores compiler launchers. A Windows run whose ccache download fails builds uncached.
 
 Windows uploads `windows-installer` and `windows-evidence`; macOS uploads an installer and evidence
 artifact for each architecture. A versioned, publishable set must come from one successful combined

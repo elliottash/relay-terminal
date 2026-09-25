@@ -438,9 +438,7 @@ QString viewerRoot()
 {
     const QStringList candidates{
         QString::fromLocal8Bit(qgetenv("RELAY_REMOTE_DIR")),
-#ifdef RELAY_SOURCE_DIR
-        QStringLiteral(RELAY_SOURCE_DIR),
-#endif
+        QString::fromUtf8(relaySourceDir()),
 #ifdef RELAY_DATA_DIR
         QStringLiteral(RELAY_DATA_DIR),
 #endif

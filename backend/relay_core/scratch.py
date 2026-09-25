@@ -18,7 +18,9 @@ Three verbs, used by `scripts/relay-scratch`, the `disk-hygiene` skill and the a
 Safety rules for `gc`, each one an easy way to delete someone's work: only entries owned by this
 user; never through a symlink; never an entry a live process has as its cwd, holds open or names
 on its command line; never one written to within `idle_hours`; never land.py's root (it has its
-own gc, which knows which snapshots are live).
+own gc, which knows which snapshots are live); never the shared compiler cache (card #V52P: ccache
+evicts its own objects at the `max_size` that cmake/CompilerCache.cmake writes). That cache lives
+outside the temp directory, so it is listed as its own kind and counted against the budget.
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ MANAGED = {"land": "land.py gc"}
 @dataclass
 class Entry:
     path: str
-    kind: str                  # claude-session, claude-scratch, loose, managed
+    kind: str                  # claude-session, claude-scratch, loose, managed, compiler-cache
     bytes: int = 0
     idle_hours: float = 0.0
     in_use: bool = False
@@ -80,6 +82,19 @@ def default_roots() -> list[Path]:
     if env:
         return [Path(p) for p in env.split(os.pathsep) if p]
     return [temp_dir() / uid_suffix()]
+
+
+def compiler_cache_dir() -> Path:
+    """The shared ccache dir, found the way cmake/CompilerCache.cmake finds it."""
+    env = os.environ.get("RELAY_CCACHE_DIR")
+    if env:
+        return Path(env)
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return Path(xdg) / "relay" / "ccache"
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        return Path(os.environ["LOCALAPPDATA"]) / "relay" / "ccache"
+    return Path.home() / ".cache" / "relay" / "ccache"
 
 
 def human(n: float) -> str:
@@ -200,6 +215,11 @@ def candidates(roots: list[Path], include_loose: bool = True) -> list[tuple[Path
                     and child.is_dir() and not child.is_symlink() and _mine(child)
                     and child not in roots):
                 out.append((child, "loose"))
+    # With RELAY_SCRATCH_ROOTS set (tests, a narrowed report) only an explicitly named cache.
+    if not os.environ.get("RELAY_SCRATCH_ROOTS") or os.environ.get("RELAY_CCACHE_DIR"):
+        cache = compiler_cache_dir()
+        if cache.is_dir() and not cache.is_symlink() and str(cache) not in seen:
+            out.append((cache, "compiler-cache"))
     return out
 
 
@@ -217,6 +237,8 @@ def report(roots: list[Path] | None = None, idle_hours: float = DEFAULT_IDLE_HOU
         entry.in_use = _used(str(path), used) or _used(str(path), [here])
         if kind == "managed":
             entry.why_kept = "managed by %s" % MANAGED[path.name]
+        elif kind == "compiler-cache":
+            entry.why_kept = "ccache evicts it at its max_size"
         elif not _mine(path):
             entry.why_kept = "not owned by this user"
         elif entry.in_use:

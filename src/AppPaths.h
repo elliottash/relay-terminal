@@ -6,6 +6,7 @@
 // everything else in main.cpp reaches for, so they come first and depend on nothing of Relay's.
 // The RELAY_* fallbacks live here because dataRoot() is what reads them.
 
+#include "SourceDir.h"
 #include <QDir>
 #include <QStandardPaths>
 #include <QFileInfo>
@@ -24,9 +25,6 @@
 #endif
 #ifndef RELAY_DATA_DIR
 #define RELAY_DATA_DIR "/usr/local/share/relay"
-#endif
-#ifndef RELAY_SOURCE_DIR
-#define RELAY_SOURCE_DIR "."
 #endif
 
 // Packaged Windows runtimes are private to Relay; never rely on the Store alias.
@@ -72,7 +70,7 @@ inline QString dataRoot() {
         QCoreApplication::applicationDirPath() + QStringLiteral("/../Resources/relay"),
 #endif
         QCoreApplication::applicationDirPath() + QStringLiteral("/../share/relay"),
-        QStringLiteral(RELAY_DATA_DIR), QStringLiteral(RELAY_SOURCE_DIR)};
+        QStringLiteral(RELAY_DATA_DIR), QString::fromUtf8(relaySourceDir())};
     for (const auto &path : choices) {
         if (!path.isEmpty() && QFileInfo::exists(path + QStringLiteral("/backend/worker.py")))
             return QDir(path).absolutePath();

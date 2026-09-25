@@ -34,7 +34,7 @@ QString sidecarRoot()
 {
     const QStringList candidates{
         QString::fromLocal8Bit(qgetenv("RELAY_REMOTE_DIR")),
-        QStringLiteral(RELAY_SOURCE_DIR),
+        QString::fromUtf8(relaySourceDir()),
         QStringLiteral(RELAY_DATA_DIR),
     };
     for (const QString &candidate : candidates) {
