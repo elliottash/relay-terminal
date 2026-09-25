@@ -118,7 +118,7 @@ string everywhere. Front matter values are single-line; prose belongs in the bod
 Parsing preserves the front matter bytes: a card that is read and written back without a field
 change is byte-identical. The first field change re-emits the whole block in canonical order
 (`id, type, status, section, name, description, kind, topic, scope, private, labels, component, milestone, due, snooze,
-workstream, assignee, owner, implemented_by, verified_by, session, waiting_on, parent, blocked_by, resolution, duplicate_of, aliases, paths, pinned,
+workstream, assignee, owner, implemented_by, verified_by, session, waiting_on, parent, blocked_by, resolution, duplicate_of, discovered_from, aliases, paths, pinned,
 reviewed, author, supersedes, label_count, label_output, codebook, priority,
 rank, created, acceptance, source, links`, then any other key, sorted).
 
@@ -133,7 +133,7 @@ outside the range is clamped on every write.
 
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|
-| `work` (default) | `component`, `milestone`, `due`, `snooze`, `workstream`, `owner`, `resolution`, `duplicate_of`, `acceptance`, `implemented_by`, `verified_by`, `session`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
+| `work` (default) | `component`, `milestone`, `due`, `snooze`, `workstream`, `owner`, `resolution`, `duplicate_of`, `discovered_from`, `supersedes`, `acceptance`, `implemented_by`, `verified_by`, `session`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
 
@@ -199,6 +199,17 @@ outside the range is clamped on every write.
   (or moving to another project) drops it from every card it holds in `executing`/`in-progress`,
   leaving the status and `assignee` alone and writing `Released (<first eight>) · <why>` on the
   thread. So a `session` on an open card always names a pane that was live when it was written.
+- **Links between cards** are stored once, forward, in fields whose name is the relation
+  (`docs/PROJECT-BOARD-DESIGN.md` §4.2): `parent`, `blocked_by`, `links.related`, and on a work
+  card `duplicate_of` (one id; set through `board_update_card` it closes the card to `dropped`
+  with `resolution: duplicate`), `discovered_from` (one id, 2026-09-25, #EE42: the card an agent
+  was holding when it filed this one — `board_create_card` fills it from the pane's one claimed
+  card when the caller names none) and `supersedes` (an id or a list of ids, #EE42: the card(s)
+  this one rewrites; a memory card's `supersedes` may name a memory by `name` instead). Every one
+  names a card on this board; writers refuse anything else, and `check` warns `dangling_link` on a
+  file that names a missing card. The reverse is never stored in a card: the worker computes it
+  from the files on every `board_links` request (protocol 19.24), and a prose mention (`#ID`,
+  `skill:<id>`, `case:c-…`, `run:r-…`, `<path>@<sha>`, outside code spans) counts as a link too.
 - A **memory** card is one fact per file. `kind` is `convention | fact | lesson | reference |
   preference` (the memory design called this field `type`; it is `kind` here because `type` names
   the card type), `scope` is `project | team | user`, `paths` auto-attaches the body when a matching
@@ -466,6 +477,12 @@ where should transcription run? cheap is fine
   that a merge interleaved.
 - `kind` is `comment | question | decision | evidence | progress | note | event | task | plan |
   rewrite`. Attributes are `key=value`, quoted with `"` when the value contains spaces.
+- **`mentioned in #X · YYYY-MM-DD · who`** (2026-09-25, #EE42) is the one reverse link a file
+  stores. When a Board write gives card X a reference to this card that X did not hold before,
+  the worker appends one `kind=event` entry here carrying `mention=X` — once per X, checked under
+  the threads lock — so `rg --hidden 'mention=' .board/threads/<ID>.md` answers "what points
+  here" without Relay. It is never edited or removed; when it and the computed index disagree,
+  the index wins. Entries with `mention=` and `event` entries are not read as links themselves.
 - `pane_token=<session token>` on a `progress` entry is the terminal pane the card was handed to
   or claimed by (#HKAP, #R9G7): the Board draws such an entry as a link that reveals that
   pane. At most 64 characters, and neither whitespace nor `>` — a value the entry marker could

@@ -53,6 +53,7 @@ from . import qa_verifiers as QA
 from .skills import PROFILE_VERIFY_KEYS
 from . import qa_policy as QP
 from . import cases as CASES
+from . import board_links as BL
 from .provider import Cancelled
 
 AUTONOMY = ("off", "suggest", "auto")
@@ -114,7 +115,10 @@ UNDO_SECONDS = 30
 #: `session` joins them (#R9G7): the pane token that holds the card is the tool's to write, from
 #: the pane's own `configure`, so a model can neither invent one nor take a card by typing it.
 #: Card metadata keys `_meta_value` normalizes (#MJ76): the linked ids, and the values.
-META_LINK_FIELDS = ("parent", "blocked_by", "duplicate_of", "links")
+META_LINK_FIELDS = ("parent", "blocked_by", "duplicate_of", "links",
+                    # #EE42: provenance and rewrite links on work cards (a memory's
+                    # `supersedes` may name a memory by name, and is left as written).
+                    "discovered_from", "supersedes")
 META_VALUE_FIELDS = ("owner", "resolution", "due", "snooze")
 
 IMMUTABLE_FIELDS = frozenset({"id", "type", "created", "source", "rank", "status", "private",
@@ -1910,7 +1914,10 @@ class BoardTools:
                        "board_case": self._case,
                        "board_signals": self._signals,
                        "board_import_items": self._import_items}[name]
-            return handler(dict(args))
+            before = self._refs_before(name, args)
+            result = handler(dict(args))
+            self._note_mentions(name, args, result, before)
+            return result
         except BoardToolError as exc:
             # A dry run's refusals are the plan, not a problem: they are already recorded as
             # proposed changes, so they do not also go into the refusal list.
@@ -1923,6 +1930,46 @@ class BoardTools:
             if self.cleanup is not None:
                 self.cleanup.refusals.append({"tool": name, "error": str(exc), "code": "board_error"})
             return {"error": str(exc), "code": "board_error"}
+
+    # ---- the mentioned-in line (#EE42) ---------------------------------------------------------
+    MENTION_TOOLS = frozenset({"board_create_card", "board_update_card", "board_move_card",
+                               "board_comment", "board_claim", "board_merge_cards",
+                               "board_split_card"})
+
+    def _refs_before(self, name: str, args: dict) -> dict:
+        """What each card a write is about links to before it runs, so `_note_mentions` can tell
+        the cross-references the write added from the ones it found there."""
+        if name not in self.MENTION_TOOLS:
+            return {}
+        out = {}
+        for key in ("id", "into"):
+            try:
+                card_id = normalize_id(args.get(key)) if args.get(key) else None
+                card = self.board.card_by_id(card_id) if card_id else None
+                out[card_id] = BL.refs_of_card(self.board, card) if card is not None else set()
+            except (BoardToolError, B.BoardError, OSError):
+                continue
+        return out
+
+    def _note_mentions(self, name: str, args: dict, result, before: dict) -> None:
+        """One `mentioned in #X · date · who` line on the thread of each card this write newly
+        links to (PROJECT-BOARD-DESIGN §4.3), deduplicated per pair under the threads lock.
+        Never fails the write it follows: the index is the truth, the line a convenience."""
+        if name not in self.MENTION_TOOLS or not isinstance(result, dict) or result.get("error"):
+            return
+        ids = set(before) | {result.get("id")} | {c.get("id") if isinstance(c, dict) else c
+                                                   for c in result.get("children") or []}
+        for card_id in {i for i in ids if isinstance(i, str) and i}:
+            try:
+                card = self.board.card_by_id(card_id)
+                if card is None:
+                    continue
+                new = BL.refs_of_card(self.board, card) - before.get(card_id, set())
+                if new:
+                    BL.note_mentions(self.board, card, new, self.context.actor,
+                                     **self.context.attrs())
+            except Exception:                          # pragma: no cover - never fail the write
+                continue
 
     def _import_items(self, args: dict) -> dict:
         """`board_import_items`: cards from tracking the project already has (protocol 19.18).
@@ -2239,7 +2286,9 @@ class BoardTools:
         reverse = {"child_of": str(card.front.get("parent") or "").lstrip("#").upper() or None,
                    "blocks": links["blocks"].get(card.id or "", []),
                    "duplicated_by": links["duplicated_by"].get(card.id or "", []),
-                   "related_from": links["related_from"].get(card.id or "", [])}
+                   "related_from": links["related_from"].get(card.id or "", []),
+                   "discovered": links["discovered"].get(card.id or "", []),
+                   "superseded_by": links["superseded_by"].get(card.id or "", [])}
         commits = B.commit_details(self.board.repo,
                                   B.card_links(card).get("commits") or [])
         return {**({"qa": qa} if qa else {}),
@@ -2422,7 +2471,8 @@ class BoardTools:
 
     def _create(self, args: dict) -> dict:
         allowed = {"tab", "status", "section", "title", "request", "summary", "type", "labels",
-                   "source", "related", "not_duplicate_of", "parent", "blocked_by"}
+                   "source", "related", "not_duplicate_of", "parent", "blocked_by",
+                   "discovered_from"}
         if set(args) - allowed:
             raise BoardToolError(f"board_create_card takes {', '.join(sorted(allowed))}.")
         card_type = args.get("type") or "work"
@@ -2453,8 +2503,13 @@ class BoardTools:
         parent = normalize_id(args["parent"], "parent") if args.get("parent") else None
         blocked_by = list(dict.fromkeys(normalize_id(b, "blocked_by")
                                         for b in _string_list(args.get("blocked_by"), "blocked_by")))
+        # Provenance (#EE42): the card this pane was holding when it filed this one, unless the
+        # caller named one — the deliver flow's "an unrelated fault becomes a card" rule.
+        discovered = (normalize_id(args["discovered_from"], "discovered_from")
+                      if args.get("discovered_from") else self._held_card_id(cards))
         for what, other in [("parent", parent)] + [("blocked_by", b) for b in blocked_by] \
-                + [("related", r) for r in related]:
+                + [("related", r) for r in related] \
+                + [("discovered_from", discovered if args.get("discovered_from") else None)]:
             if other and other not in known:
                 raise BoardToolError(f"{what} names #{other}, which is not a card on this board.",
                                      code="board_refused", field=what)
@@ -2483,6 +2538,8 @@ class BoardTools:
             card.set("parent", parent)
         if blocked_by:
             card.set("blocked_by", blocked_by)
+        if discovered and card_type == "work":
+            card.set("discovered_from", discovered)
         try:
             path = B.write_new_card(self.board, card, category)
         except B.BoardError as exc:
@@ -2506,6 +2563,16 @@ class BoardTools:
                 "tab": self._tab_of(card),
                 "hash": B.file_hash(path), "write_id": write_id, "created": True,
                 **({"warnings": warnings} if warnings else {})}
+
+    def _held_card_id(self, cards: Sequence[B.Card]) -> str | None:
+        """The one work card this pane holds (claimed, with this pane's `session`), or None when
+        it holds none or several — a guess between two is not provenance."""
+        token = self.pane_token or ""
+        if not token:
+            return None
+        held = [c.id for c in cards if c.type == "work" and c.status in CLAIMED_STATUSES
+                and str(c.front.get("session") or "").strip() == token]
+        return held[0] if len(held) == 1 else None
 
     def duplicates(self, title: str, request: str, cards: Sequence[B.Card] | None = None,
                    excused: set[str] = frozenset(), threshold: float = 0.66) -> list[dict]:
@@ -2573,9 +2640,11 @@ class BoardTools:
             raise refuse(f"{exc}.") from exc
         if key == "owner":
             return _one_line(value, "owner", 80)
-        if key in ("parent", "duplicate_of"):
+        if key in ("parent", "duplicate_of", "discovered_from"):
             return self._linked_id(card, key, value)
-        if key == "blocked_by":
+        if key == "supersedes" and card.type != "work":
+            return value
+        if key in ("blocked_by", "supersedes"):
             ids = [self._linked_id(card, key, v) for v in _string_list(value, key)]
             return list(dict.fromkeys(ids)) or None
         if key == "links":
@@ -2784,6 +2853,7 @@ class BoardTools:
         for what, old, new in rewrites:
             self._append(card, _rewrite_entry(what, old, new), kind="rewrite")
         write_id = self._record("update", card, summary, before, size)
+        closed = self._close_as_duplicate(card, fields)
         # A verifier's `## Verdict` is a case decided (#95VZ): one ledger row naming the server
         # that served the card, with the verdict's first decisive word as its result.
         case = None
@@ -2792,12 +2862,30 @@ class BoardTools:
                                     signal={"mode": _primary_mode(card),
                                             "result": CASES.verdict_from_text(verdict_text)},
                                     input=f"card #{card.id}")
-        return {"id": card.id, "hash": B.file_hash(card.path), "changes": changes,
+        return {"id": card.id, "hash": closed.get("hash") or B.file_hash(card.path), "changes": changes,
                 "write_id": write_id, "logged_rewrites": [w for w, _, _ in rewrites],
                 **({"case": case["id"]} if case else {}),
+                **closed,
                 **({"qa_policy": qa_notes} if qa_notes else {}),
                 **({"verify_defaulted_from": defaulted_from} if defaulted_from else {}),
                 **({"note": verify_note} if verify_note else {})}
+
+    def _close_as_duplicate(self, card: B.Card, fields) -> dict:
+        """`duplicate_of` set on an open work card closes it (#EE42, PROJECT-BOARD-DESIGN §4.2):
+        a move to `dropped` with `resolution: duplicate`, through `_move` so every gate a move
+        has still applies.  A refused close leaves the pointer and says why under
+        `close_refused`; the result of a close is under `closed`."""
+        target = (fields or {}).get("duplicate_of") if isinstance(fields, dict) else None
+        if not target or card.type != "work" or card.status in ("done", "dropped"):
+            return {}
+        dup = card.front.get("duplicate_of")
+        try:
+            moved = self._move({"id": card.id, "status": "dropped", "duplicate_of": dup,
+                                "reason": f"duplicate of #{dup}"})
+        except BoardToolError as exc:
+            return {"close_refused": str(exc)}
+        return {"closed": {"status": moved["status"], "path": moved["path"]},
+                "hash": moved["hash"]}
 
     def _move(self, args: dict) -> dict:
         allowed = {"id", "status", "section", "tab", "before", "after", "reason", "evidence",

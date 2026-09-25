@@ -24,6 +24,7 @@ from pathlib import Path
 from . import agent_context
 from . import board as B
 from . import board_chat
+from . import board_links as BL
 from . import board_turns
 from . import guest_harness_provider as GHP
 from . import logs
@@ -77,6 +78,8 @@ TYPES = {"board_open", "board_refresh", "board_card_get", "board_triage", "board
          "board_cancel", "board_resume", "board_check",
          # The pane's filter bar, answered here over the text the rows stopped carrying (#7M6E).
          "board_search",
+         # The computed link index, both directions, per address (19.25, #EE42).
+         "board_links",
          # Execute's hand-off in one message (19.19, #R9G7): the three writes it used to send
          # by hand, plus the pane session token the card records as `session`.
          "board_claim",
@@ -152,6 +155,11 @@ MAX_ROW_BYTES_PER_MESSAGE = 512 * 1024
 FORGE_ERROR_CODES = {"ForgeAuthError": "forge_auth", "ForgeRateLimited": "forge_rate_limited",
                      "ForgeUnavailable": "forge_unavailable", "ForgePrivacyError": "forge_privacy",
                      "ForgeError": "forge_failed"}
+
+#: `board_links` (19.25, #EE42): how many addresses one request may ask about, and how many
+#: dangling edges one answer carries.
+MAX_LINK_ADDRESSES = 200
+MAX_DANGLING = 500
 
 #: How much of a card the Board agent is seeded with (design 5, "Attach").
 SEED_BODY_BYTES = 16384
@@ -1553,10 +1561,61 @@ class BoardCommands:
         query = request.get("query")
         if query is not None and not isinstance(query, str):
             raise ValueError("board_search query must be text.")
-        terms = str(query or "").lower().split()
+        terms = str(query or "").split()
+        # Link terms (#EE42, PROJECT-BOARD-DESIGN §4.3): `links:#ID`, `skill:x`, `case:c-…`,
+        # `run:r-…` select through the link index, not the text. The pane sends them here as
+        # plain words already (`board::Model::plainTerms` scopes only label:/status:/…).
+        linked: set[str] | None = None
+        words = []
+        for term in terms:
+            chosen = (self._link_index().matching(term)
+                      if term.startswith(BL.FILTER_PREFIXES) else None)
+            if chosen is None:
+                words.append(term.lower())
+            else:
+                linked = chosen if linked is None else linked & chosen
         ids = [card_id for card_id, parts in self._search_index.items()
-               if all(any(term in part for part in parts) for term in terms)]
+               if all(any(term in part for part in parts) for term in words)
+               and (linked is None or card_id in linked)]
         self._send({"event": "board_search", "id": rid, "query": query or "", "ids": sorted(ids)})
+
+    def _link_index(self) -> "BL.LinkIndex":
+        """The link index for the filter box, rebuilt when the snapshot moved (`rev`). The
+        `board_links` request itself always rebuilds it from the files."""
+        cached = getattr(self, "_link_cache", None)
+        if cached is None or cached[0] != self.rev:
+            cached = (self.rev, BL.build(self._need().board))
+            self._link_cache = cached
+        return cached[1]
+
+    def _links(self, request: dict, rid) -> None:
+        """`board_links` (protocol 19.25, #EE42): both directions of every link an address
+        takes part in, from an index computed from the board's files on this call and written
+        nowhere. `address` or `addresses` (≤ MAX_LINK_ADDRESSES) ask per address; `dangling:
+        true`, or no address at all, adds every edge whose target resolves to nothing."""
+        addresses = request.get("addresses")
+        if request.get("address") is not None:
+            addresses = [request.get("address")]
+        if addresses is None:
+            addresses = []
+        if (not isinstance(addresses, list) or len(addresses) > MAX_LINK_ADDRESSES
+                or not all(isinstance(a, str) and a.strip() for a in addresses)):
+            raise ValueError(f"board_links takes `address`, or `addresses`: at most "
+                             f"{MAX_LINK_ADDRESSES} non-empty strings.")
+        wanted = []
+        for raw in addresses:
+            address = BL.normalize(raw)
+            if address is None:
+                raise ValueError(f"board_links: {raw!r} is not an address (#ID, skill:<id>, "
+                                 "case:<id>, run:<id>, <path>@<sha>, a commit or a path).")
+            wanted.append(address)
+        index = BL.build(self._need().board)
+        self._link_cache = (self.rev, index)
+        event = {"event": "board_links", "id": rid, "edges": len(index.edges),
+                 "items": [index.query(address) for address in dict.fromkeys(wanted)]}
+        if request.get("dangling") or not wanted:
+            event["dangling"] = index.dangling()[:MAX_DANGLING]
+        self._send(event)
 
     def _triage(self, request: dict, rid) -> None:
         """Local suggestions now; an optional chores-role answer later, never a write."""
@@ -1799,6 +1858,8 @@ class BoardCommands:
             self._emit_changed(rid=rid)
         elif kind == "board_search":
             self._search(request, rid)
+        elif kind == "board_links":
+            self._links(request, rid)
         elif kind == "board_triage":
             self._triage(request, rid)
         elif kind == "board_check":

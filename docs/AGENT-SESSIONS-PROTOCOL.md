@@ -3061,6 +3061,7 @@ no key — that window used to show "Loading the Board…" forever.
 | `board_open {id?}` | `board {id, rev, root, workspace, project, state, exists, config, cards: [row], cards_total, more, problems}`, then a `board_cards` per further batch |
 | `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}`, then a `board_cards` per further batch |
 | `board_search {id?, query}` | `board_search {id, root, query, ids: [card_id]}` |
+| `board_links {id?, address? \| addresses?≤200, dangling?}` | `board_links {id, edges, items: [{address, kind, exists, title?, status?, forward, reverse}], dangling?}` (19.24) |
 | `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, children, reverse, commits, thread, thread_total}` |
 | `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
 
@@ -4402,17 +4403,77 @@ in `board.yaml` supplies a soft effective due date to cards in that milestone wi
 read time, never stored. Snoozed open cards are hidden from active rows until their date and
 appear under the Snoozed filter.
 
-Forward links are stored once: `parent`, `blocked_by`, `duplicate_of` and `links.related`.
+Forward links are stored once: `parent`, `blocked_by`, `duplicate_of`, `links.related`, and
+since #EE42 `discovered_from` and `supersedes` (19.24).
 Writers require existing card ids, refuse self links and parent/blocking cycles. `board_card`
 computes `children` (id, title, status, done) and `reverse` (child_of, blocks,
-duplicated_by, related_from). A dangling link already in a file is a `board_check` warning and
-renders as missing; it does not stop reading the board.
+duplicated_by, related_from, discovered, superseded_by). A dangling link already in a file is a
+`board_check` warning (`dangling_link`) and renders as missing; it does not stop reading the board.
 
 `links.commits` is an oldest-first sequence of short commit hashes, de-duplicated by prefix and
 sorted by commit date when written. `land.py commit` appends the landed hash to each existing
 card named `#ID` in its message unless `--no-cards` is passed. `board_card.commits` resolves at
 most 20 rows with hash, date, subject, author and `Implemented-By` trailer; the newest entry of
 the stored sequence is the QA revision under test.
+
+### 19.24 `board_links`: the computed link index (#EE42, 2026-09-25)
+
+`docs/PROJECT-BOARD-DESIGN.md` §4. Links are stored once, forward; the reverse is computed.
+`backend/relay_core/board_links.py` builds the index from the board's files **on every request**
+and writes it nowhere. Its edges are `{from, relation, to, where}`: `relation` is the name of the
+field the edge was read from (`parent`, `blocked_by`, `duplicate_of`, `discovered_from`,
+`supersedes`, `links.related`, `links.commits`, `links.evidence`, `links.plans`, `server`,
+`card`), or `mention` for an address in prose; `where` is `front matter`, `body`,
+`thread <entry id>` or `cases.jsonl`. Sources are every card's front matter, body and thread
+(not `event` entries, which echo writes, and not mentioned-in lines, which are reverses), and the
+case ledger's rows (`case:<id>` → its `card` and its `server`). Prose inside code spans and
+fenced blocks is not scanned.
+
+Addresses (§4.1 of the design): `#ID` (a card or memory card), `skill:<id>` (an `@sha256:…` pin
+rides on the edge as `version`), `case:c-<hex>`, `run:r-<hex>` (a `#path` artifact rides as
+`artifact`), `<path>@<sha>` and `<path>:<line>@<sha>` (the line rides as `line`), a commit (7–40
+hex, from `links.commits`), or a repository path. `links:<address>` is accepted as the address.
+
+```
+→ board_links {id, address: "#EA37"}                  or  {addresses: [...], dangling: true}
+← board_links {id, edges: 4710,
+    items: [{address: "#EA37", kind: "card", exists: true, title, status,
+             forward: [{relation, to, kind, where, exists, title?, status?, version?, artifact?, line?}],
+             reverse: [{relation, name, from, kind, where, title?, status?}]}],
+    dangling?: [{from, relation, to, where}]}
+```
+
+`exists` is `true`, `false` (the address names nothing: a card not on this board, a case not in
+the ledger, a skill no skill directory or ledger row knows, a commit or `path@sha` git does not
+have, a missing path) or `null` when the board cannot tell (a `run:` address before the runs
+ledger of #FVVY exists; no git). `name` is the reverse's name for a page to draw: `children`,
+`blocks`, `duplicated_by`, `related_from`, `discovered`, `superseded_by`, `mentioned_in`,
+`commit_of`, `evidence_of`, `plan_of`, `cases` (a case row naming the card, or served by the
+skill), `built_by` (a card whose `server` names the skill). `dangling` (every edge whose target is
+`exists: false`, ≤ 500) comes with `dangling: true`, or when no address is given.
+`relay-board.py check` reports `dangling_link` for the front-matter fields only: prose quotes
+example ids (`#AAAA`), and those stay in this list rather than in the problems strip.
+
+**New work-card fields.** `discovered_from` (one id): `board_create_card` accepts it, and when the
+caller names none and the pane holds exactly one claimed card, it is set to that card — the
+deliver flow's "an unrelated fault becomes a card". `supersedes` (an id or ids) on a work card
+names the card(s) this one rewrites. Both must name cards on this board. `duplicate_of` set through
+`board_update_card` on an open work card closes it: a `board_move_card` to `dropped` with
+`resolution: duplicate`, with every gate a move has; the result carries `closed {status, path}`,
+or `close_refused` with the gate's sentence when a gate refused (the pointer stays).
+
+**The mentioned-in line.** After a Board write (`board_create_card`, `board_update_card`,
+`board_move_card`, `board_comment`, `board_claim`, `board_merge_cards`, `board_split_card`,
+from an agent or the pane) adds a reference from card S to card T that S did not hold before, T's
+thread gets one entry `mentioned in #S · YYYY-MM-DD · <actor>`, `kind=event`, with the attribute
+`mention=S`. It is appended under the threads directory's lock after checking that no entry with
+`mention=S` is already there, so a pair gets one line whoever races. It never fails the write it
+follows. When a line and the index disagree, the index wins.
+
+**The filter box.** `board_search`'s `query` accepts `links:<address>` (cards with any edge to the
+address), and `skill:<id>`, `case:<id>`, `run:<id>` (cards linked to that address either way;
+for a skill also the cards its case rows name). They are ANDed with the plain words. The pane
+already sends them as plain words, so no GUI change was needed.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

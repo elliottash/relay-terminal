@@ -1,0 +1,64 @@
+# #EE42 board_links — implementer test evidence, 2026-09-25T20:31Z
+# tree: main at 7c92c065 plus the #EE42 working-tree hunks
+
+$ PYTHONPATH=backend:. python3 -m unittest tests.test_board_links
+Ran 19 tests in 0.444s
+OK
+
+$ PYTHONPATH=backend:. python3 -m unittest tests.test_board_links_shape
+Ran 1 test in 0.000s
+OK
+
+$ PYTHONPATH=backend:. python3 -m unittest tests.test_board
+Ran 157 tests in 2.297s
+OK
+
+$ PYTHONPATH=backend:. python3 -m unittest tests.test_board_tools
+Ran 329 tests in 7.093s
+OK
+
+$ PYTHONPATH=backend:. python3 -m unittest tests.test_board_protocol
+FAIL: test_the_owners_first_card_asks_first_and_lands_on_a_yes (tests.test_board_protocol.InitTests.test_the_owners_first_card_asks_first_and_lands_on_a_yes)
+Ran 183 tests in 19.948s
+FAILED (failures=1)
+
+# test_board_protocol's one failure (InitTests ... RELAY.md vs AGENTS.md) is not this card's:
+# it is filed as .board/changes/2026-09-25-board-scaffold-inittests-failure-files-list-expe.md
+
+$ PYTHONPATH=backend:. python3 -m unittest -v tests.test_board_links
+test_code_colours_anchors_and_digits_are_not_links (tests.test_board_links.AddressTests.test_code_colours_anchors_and_digits_are_not_links) ... ok
+test_mentions_reads_every_address_form_once (tests.test_board_links.AddressTests.test_mentions_reads_every_address_form_once) ... ok
+test_normalize (tests.test_board_links.AddressTests.test_normalize) ... ok
+test_prose_and_git_addresses_that_name_nothing (tests.test_board_links.DanglingTests.test_prose_and_git_addresses_that_name_nothing) ... ok
+test_check_warns_dangling_link_on_the_new_fields (tests.test_board_links.FieldTests.test_check_warns_dangling_link_on_the_new_fields) ... ok
+test_discovered_from_is_the_card_this_pane_holds (tests.test_board_links.FieldTests.test_discovered_from_is_the_card_this_pane_holds) ... ok
+test_duplicate_of_through_update_closes_the_card (tests.test_board_links.FieldTests.test_duplicate_of_through_update_closes_the_card) ... ok
+test_memory_supersedes_is_left_as_written (tests.test_board_links.FieldTests.test_memory_supersedes_is_left_as_written) ... ok
+test_new_fields_must_name_cards_on_this_board (tests.test_board_links.FieldTests.test_new_fields_must_name_cards_on_this_board) ... ok
+test_board_read_reverse_and_links_index_share_one_table (tests.test_board_links.IndexTests.test_board_read_reverse_and_links_index_share_one_table) ... ok
+test_forward_and_reverse_typed_by_field (tests.test_board_links.IndexTests.test_forward_and_reverse_typed_by_field) ... ok
+test_index_is_a_function_of_the_files (tests.test_board_links.IndexTests.test_index_is_a_function_of_the_files) ... ok
+test_ledger_rows_link_cases_to_cards_and_skills (tests.test_board_links.IndexTests.test_ledger_rows_link_cases_to_cards_and_skills) ... ok
+test_a_new_reference_leaves_one_line_on_the_target (tests.test_board_links.MentionLineTests.test_a_new_reference_leaves_one_line_on_the_target) ... ok
+test_create_with_a_mention_notes_it_and_existing_refs_do_not (tests.test_board_links.MentionLineTests.test_create_with_a_mention_notes_it_and_existing_refs_do_not) ... ok
+test_note_mentions_is_idempotent_per_pair (tests.test_board_links.MentionLineTests.test_note_mentions_is_idempotent_per_pair) ... ok
+test_unknown_targets_and_self_get_nothing_and_writes_never_fail (tests.test_board_links.MentionLineTests.test_unknown_targets_and_self_get_nothing_and_writes_never_fail) ... ok
+test_board_links_answers_per_address_and_dangling (tests.test_board_links.ProtocolLinkTests.test_board_links_answers_per_address_and_dangling) ... ok
+test_board_search_follows_link_terms (tests.test_board_links.ProtocolLinkTests.test_board_search_follows_link_terms) ... ok
+
+# Live, against this repository's own .board/ (read-only request):
+board_links {address: '#EA37'} answered in 0.52s; 4724 edges on the board
+  forward edges: 29
+  reverse: #9FX8 mentioned_in ( mention · thread 20260925T154828Z-ym )
+  reverse: #EE42 mentioned_in ( mention · body )
+  reverse: #EE42 related_from ( links.related · front matter )
+  reverse: #FVVY mentioned_in ( mention · thread 20260925T154831Z-cp )
+  reverse: #TBRH mentioned_in ( mention · body )
+  reverse: #TBRH related_from ( links.related · front matter )
+  reverse: #Y0QQ children ( parent · front matter )
+  reverse: #Y0QQ mentioned_in ( mention · body )
+board_links {} dangling edges: 60 e.g. [{'from': '#ZGF5', 'relation': 'mention', 'to': '#AAAA', 'where': 'body'}, {'from': '#ZGF5', 'relation': 'mention', 'to': '#BBBB', 'where': 'body'}, {'from': '#BMS1', 'relation': 'links.related', 'to': 'MDL1', 'where': 'front matter'}]
+board_search {query: 'links:#EA37'} -> ['9FX8', 'EE42', 'FVVY', 'TBRH', 'Y0QQ']
+
+$ python3 scripts/relay-board.py --board .board check | grep -c dangling_link
+0

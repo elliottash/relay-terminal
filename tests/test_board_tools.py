@@ -1630,7 +1630,9 @@ class ReleaseOnCloseTests(BoardToolsTest):
         card = self.board.card_by_id(self.card_id)
         self.assertEqual(card.status, "dropped")
         self.assertNotIn("session", card.front)
-        entries = [e for e in self.board.thread(self.card_id) if e.kind == "event"]
+        # The pieces name the card they came from, so each leaves a mentioned-in line (#EE42).
+        entries = [e for e in self.board.thread(self.card_id)
+                   if e.kind == "event" and not e.attrs.get("mention")]
         self.assertIn(f"session {self.pane_token[:8]} released", entries[-1].text)
 
     def test_a_split_that_leaves_the_card_open_keeps_the_claim(self):

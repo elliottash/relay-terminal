@@ -235,7 +235,11 @@ WORK_FIELDS = ("component", "milestone", "workstream", "acceptance", "implemente
                # `resolution` is the close reason on a done/dropped card, with `duplicate_of`
                # naming the card a duplicate closed for; `due` and `snooze` are the dates —
                # see `validate_due` / `validate_date`.
-               "owner", "resolution", "duplicate_of", "due", "snooze")
+               "owner", "resolution", "duplicate_of", "due", "snooze",
+               # The two links the phase-2 object model adds (#EE42, PROJECT-BOARD-DESIGN §4.2):
+               # the card an agent was working when it filed this one, and the card(s) this one
+               # rewrites.  Both name cards on this board; `links_index` computes their reverse.
+               "discovered_from", "supersedes")
 MEMORY_FIELDS = ("name", "description", "kind", "topic", "scope", "paths", "pinned",
                  "supersedes", "reviewed", "author",
                  "origin", "suggested", "rejected", "reason")
@@ -255,7 +259,7 @@ FIELD_ORDER = ("id", "type", "status", "section", "name", "description", "kind",
                "private", "labels", "component", "milestone", "due", "snooze", "workstream",
                "assignee", "owner",
                "implemented_by", "verified_by", "session", "waiting_on", "parent", "blocked_by",
-               "resolution", "duplicate_of",
+               "resolution", "duplicate_of", "discovered_from",
                "aliases",
                "paths", "pinned", "reviewed", "author", "supersedes",
                "label_count", "label_output", "codebook", "shell", "priority", "rank", "created",
@@ -385,31 +389,47 @@ def card_links(card: "Card") -> dict:
     return links if isinstance(links, dict) else {}
 
 
+#: Every front-matter field that links a card to another card, with the name its reverse goes
+#: by (#MJ76, #EE42).  The field name *is* the relation (PROJECT-BOARD-DESIGN §4.2), so this one
+#: table is what `links_index`, `check_links` and `board_links.build` all read.  `supersedes`
+#: on a memory card may name a memory by `name` rather than id; only a work card's is checked.
+CARD_LINK_FIELDS = (("parent", "children"), ("blocked_by", "blocks"),
+                    ("duplicate_of", "duplicated_by"), ("links.related", "related_from"),
+                    ("discovered_from", "discovered"), ("supersedes", "superseded_by"))
+
+
+def card_link_edges(card: "Card") -> list[tuple[str, str]]:
+    """`(field, target id)` for every card-to-card link `card` stores, in `CARD_LINK_FIELDS`
+    order, self-links dropped.  Read-path tolerant, like `_link_ids`."""
+    out: list[tuple[str, str]] = []
+    for field, _ in CARD_LINK_FIELDS:
+        key, _, sub = field.partition(".")
+        raw = card_links(card).get(sub) if sub else card.front.get(key)
+        for other in _link_ids(raw):
+            if other and other != card.id:
+                out.append((field, other))
+    return out
+
+
 def links_index(cards: Iterable["Card"]) -> dict:
     """The reverse of every card-to-card link, computed in one pass and never written (#MJ76):
     `children[id]` (cards whose `parent` is id), `blocks[id]` (cards blocked_by id),
-    `duplicated_by[id]`, `related_from[id]` (cards whose `links.related` names id).  Each list
-    holds `{id, title, status}` rows in id order.  Dangling targets are simply absent."""
-    index = {"children": {}, "blocks": {}, "duplicated_by": {}, "related_from": {}}
+    `duplicated_by[id]`, `related_from[id]` (cards whose `links.related` names id), and since
+    #EE42 `discovered[id]` (cards whose `discovered_from` is id) and `superseded_by[id]`.  Each
+    list holds `{id, title, status}` rows in id order.  Dangling targets are simply absent."""
+    index: dict = {reverse: {} for _, reverse in CARD_LINK_FIELDS}
+    reverse_of = dict(CARD_LINK_FIELDS)
 
     def _add(kind: str, target: str, card: "Card") -> None:
-        index[kind].setdefault(target, []).append(
-            {"id": card.id, "title": card.title, "status": card.status,
-             "done": card.status in ("done", "dropped")})
+        rows = index[kind].setdefault(target, [])
+        if any(row["id"] == card.id for row in rows):
+            return
+        rows.append({"id": card.id, "title": card.title, "status": card.status,
+                     "done": card.status in ("done", "dropped")})
 
     for card in cards:
-        parent = str(card.front.get("parent") or "").strip().lstrip("#").upper()
-        if parent and parent != card.id:
-            _add("children", parent, card)
-        for other in _link_ids(card.front.get("blocked_by")):
-            if other != card.id:
-                _add("blocks", other, card)
-        dup = str(card.front.get("duplicate_of") or "").strip().lstrip("#").upper()
-        if dup and dup != card.id:
-            _add("duplicated_by", dup, card)
-        for other in _link_ids(card_links(card).get("related")):
-            if other != card.id:
-                _add("related_from", other, card)
+        for field, other in card_link_edges(card):
+            _add(reverse_of[field], other, card)
     for kind in index.values():
         for rows in kind.values():
             rows.sort(key=lambda row: row["id"])
@@ -1520,6 +1540,8 @@ def append_to_thread(path: Path, add: Callable[[bytes], tuple[str, object]]) -> 
         fcntl.flock(lock, fcntl.LOCK_EX)
         body = path.read_bytes() if path.exists() else b""
         text, result = add(body)
+        if not text:
+            return result      # `add` decided under the lock that there is nothing to add
         prefix = ""
         if body:
             tail = body[-2:]
@@ -1897,20 +1919,19 @@ class Board:
         edges: dict[str, list[str]] = {}
         for card in cards:
             rel = card.path.name
-            links = [("parent", [str(card.front.get("parent") or "")]),
-                     ("blocked_by", card.front.get("blocked_by")),
-                     ("duplicate_of", [str(card.front.get("duplicate_of") or "")])]
             targets: list[str] = []
-            for what, raw in links:
-                for other in _link_ids(raw):
-                    if not other:
-                        continue
-                    if what != "duplicate_of":
-                        targets.append(other)
-                    if other not in known:
-                        problems.append(Problem("dangling_link", rel,
-                                                f"{what} names {other}, which is not a card on this board",
-                                                "warning"))
+            for what, other in card_link_edges(card):
+                if what in ("parent", "blocked_by"):
+                    targets.append(other)
+                # `links.related` held paths on boards older than #MJ76, and a memory's
+                # `supersedes` may name a memory by name: `board_links` lists those as dangling
+                # rather than every old board carrying warnings here.
+                if what == "links.related" or (what == "supersedes" and card.type != "work"):
+                    continue
+                if other not in known:
+                    problems.append(Problem("dangling_link", rel,
+                                            f"{what} names {other}, which is not a card on this board",
+                                            "warning"))
             edges[card.id] = targets
         reported: set[str] = set()
         for card in cards:
