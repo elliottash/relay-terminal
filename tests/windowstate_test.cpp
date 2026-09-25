@@ -798,6 +798,33 @@ private slots:
         QVERIFY(st::hasContent({QStringLiteral("root@box:/tmp# ls"), QStringLiteral("a.txt")}, marks));
     }
 
+    void repeatedRestoreChromeIsRemovedAcrossWrappedRows() {
+        const QStringList marks{QStringLiteral("— scrollback from this pane's previous shell —"),
+                                QStringLiteral("— end of restored scrollback; this shell is new —")};
+        QStringList lines{QStringLiteral("✦ original request"),
+                          QStringLiteral("agent answer"),
+                          QString(),
+                          QStringLiteral("\x1b[38;5;8m— scrollback from this pane's pre\x1b[0m"),
+                          QStringLiteral("vious shell —"),
+                          QStringLiteral("Session loaded: “Investigating un"),
+                          QStringLiteral("l"),
+                          QStringLiteral("edgered relay scratch folder” · 1"),
+                          QStringLiteral("turn(s)"),
+                          QStringLiteral("— end of restored scrollback; thi"),
+                          QStringLiteral("s shell is new —"),
+                          QStringLiteral("✦ later request"),
+                          QStringLiteral("Session loaded is a phrase in this answer, not a notice"),
+                          QStringLiteral("Session loaded: “Investigating unledgered relay scratch folder” · 2 turn(s)")};
+        removeRestoreChrome(&lines, marks);
+        QCOMPARE(lines, (QStringList{QStringLiteral("✦ original request"),
+                                     QStringLiteral("agent answer"),
+                                     QStringLiteral("✦ later request"),
+                                     QStringLiteral("Session loaded is a phrase in this answer, not a notice")}));
+        const QStringList once = lines;
+        removeRestoreChrome(&lines, marks);
+        QCOMPARE(lines, once);
+    }
+
     // What a rewind undid starts at the turn's own first line — the ✦ the pane printed the prompt
     // behind — and the pane's other ✦ lines are not turns.
     void turnStartFindsThePromptLine() {

@@ -16,3 +16,10 @@ Validation on 2026-09-25: `scripts/relay-build --target relay` succeeded, and
 `ctest --test-dir build -R '^transcriptreplay$' --output-on-failure` passed (1/1).
 The running desktop app has not been restarted onto this build; an independent reload check
 should confirm the restored display.
+
+## Repeated reload example
+
+Pane `97149268` maps to `state/scrollback/d0d996b2-de76-404a-8903-c38c30208f92.txt`.
+Before cleanup, its saved file had 736 text rows, including five wrapped `Session loaded`
+notices and six wrapped restore dividers. The cleanup recognized all 11 generated blocks and
+left 691 rows. The file remains untouched until Relay restarts on the new build and saves it.

@@ -512,6 +512,56 @@ QVector<ProseBlock> readScrollbackProse(const QString &id) {
     return readProseFile(scrollbackPath(id));
 }
 
+void removeRestoreChrome(QStringList *lines, const QStringList &marks) {
+    if (!lines || lines->isEmpty()) return;
+    static const QRegularExpression sgr(QStringLiteral("\\x1b\\[[0-9;:]*m"));
+    static const QRegularExpression osc8(QStringLiteral("\\x1b\\]8;[^\\x1b\\x07]*(?:\\x07|\\x1b\\\\)"));
+    static const QRegularExpression space(QStringLiteral("\\s+"));
+    static const QRegularExpression loaded(
+        QStringLiteral("^Sessionloaded(?::“.*”)?·[0-9]+turn\\(s\\)$"));
+    auto compact = [&](QString text) {
+        text.remove(osc8);
+        text.remove(sgr);
+        text.remove(space);
+        return text;
+    };
+    QStringList compactMarks;
+    for (const QString &mark : marks) compactMarks.append(compact(mark));
+    const QString loadedStart = QStringLiteral("Sessionloaded");
+    QStringList kept;
+    kept.reserve(lines->size());
+    for (int i = 0; i < lines->size();) {
+        QString joined = compact(lines->at(i));
+        bool possibleMark = false;
+        for (const QString &mark : compactMarks)
+            if (mark.startsWith(joined)) { possibleMark = true; break; }
+        const bool possibleLoaded = loadedStart.startsWith(joined) || joined.startsWith(loadedStart);
+        int matchedEnd = -1;
+        if (!joined.isEmpty() && (possibleMark || possibleLoaded)) {
+            for (int j = i; j < lines->size() && j < i + 32; ++j) {
+                if (j > i) joined += compact(lines->at(j));
+                if (compactMarks.contains(joined) || loaded.match(joined).hasMatch()) {
+                    matchedEnd = j;
+                    break;
+                }
+                bool markPrefix = false;
+                for (const QString &mark : compactMarks)
+                    if (mark.startsWith(joined)) { markPrefix = true; break; }
+                if (!markPrefix && !(loadedStart.startsWith(joined) || joined.startsWith(loadedStart))) break;
+                if (joined.size() > 4096) break;
+            }
+        }
+        if (matchedEnd >= 0) {
+            while (!kept.isEmpty() && kept.constLast().trimmed().isEmpty()) kept.removeLast();
+            i = matchedEnd + 1;
+            while (i < lines->size() && lines->at(i).trimmed().isEmpty()) ++i;
+        } else {
+            kept.append(lines->at(i++));
+        }
+    }
+    *lines = kept;
+}
+
 namespace {
 
 void collectScrollbackIds(const QJsonObject &node, QStringList *ids, int depth) {

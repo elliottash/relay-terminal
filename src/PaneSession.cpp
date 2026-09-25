@@ -573,7 +573,7 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             syncSessionText();   // the conversation this pane's text belongs to, from here on (#0TJ9)
             // The saved pane text was replayed before the worker loaded this session. The normal
             // adoption boundary would put all of it before the conversation and overwrite its
-            // sidecar with only the new "Session loaded" recap at the next save.
+            // sidecar with only the new shell's rows at the next save.
             if (restoring) m_sessionTextMark = 0;
             // A fork's id exists only now: the text its parent stashed is written under it and
             // replayed here, so the fork opens showing what it was forked from (#0TJ9).
@@ -582,14 +582,12 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             // A resumed session whose last turn never ended: the pane may offer to continue it (#SXF1).
             m_turnCutOff = event.value(QStringLiteral("turn_open")).toBool();
             const QString title = event.value(QStringLiteral("title")).toString();
-            ensureLineStart();
-            if (m_forkLoadPending)
+            if (m_forkLoadPending) {
+                ensureLineStart();
                 printInline(QStringLiteral("Forked from “%1” · %2 turn(s)\n").arg(m_forkTitle.isEmpty() ? title : m_forkTitle).arg(m_turnsCompleted), Ink::Note);
-            else
-                printInline(QStringLiteral("Session loaded%1 · %2 turn(s)\n").arg(title.isEmpty() ? QString() : QStringLiteral(": “") + title + QStringLiteral("”"))
-                            .arg(m_turnsCompleted), Ink::Note);
+                closeInline();
+            }
             m_forkLoadPending = false;
-            closeInline();
             clearAgentQueue();
             return true;
         }
@@ -719,6 +717,9 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
             m_recapManual = false;
             m_recapInFlight = false;
             m_lastRecapTurns = event.value(QStringLiteral("turns_covered")).toInt();
+            // The pane already replayed what was on screen before a restart. Printing the
+            // worker's resume recap here appends another summary on every reload.
+            if (reason == QStringLiteral("resume")) return true;
             ensureLineStart();
             // The block opens by marking where the agent's last message ended and when it
             // finished (owner request, 2026-09-19, #MVGR), then states the stretch of work the

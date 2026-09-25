@@ -1363,6 +1363,7 @@ public:
         if (relay::windowstate::isScrollbackId(scrollback)) {
             m_scrollbackId = scrollback;
             m_restoredScrollback = relay::windowstate::readScrollback(scrollback);
+            dropRestoreMarks(&m_restoredScrollback);
             // The rows' word wrap travels with them: the prose trailer is handed back to the
             // backend after the rows are replayed, so a restored pane re-wraps its own output
             // when it is resized (#MTCS).
@@ -1407,8 +1408,8 @@ public:
     // The file this pane's prompt-box Up/Down history lives in, under the same id (owner report,
     // 2026-09-19: "i want pane histories for up/down"). Empty only without a data location.
     QString promptHistoryPath() const { return relay::prompthistory::pathFor(m_scrollbackId); }
-    // The two rules the replay prints around the restored block. They are also what the save
-    // filters out, so a pane that has been restored twice does not stack them.
+    // Legacy rules once printed around restored blocks. They are filtered from old saved files,
+    // including files where a narrow pane wrapped them across physical rows.
     // True of both ways a pane comes back: Relay restarted, or the pane was closed and reopened.
     static QString scrollbackOpenMark() { return QStringLiteral("— scrollback from this pane's previous shell —"); }
     // What the rule said until 2026-09-18; still filtered, for text saved under it.
@@ -1439,20 +1440,10 @@ public:
     // Which pair of rules a queued replay is printed between.
     enum class RestoredKind { Scrollback, Conversation, Surface };
 
-    // Everything this pane is holding, oldest first. Relay's own restore rules are dropped: saving
-    // them would stack one set per restore inside the history, and each run prints its own.
+    // Everything this pane is holding, oldest first. Drop old restore chrome before saving it
+    // again, so panes restored by earlier versions lose their stacked notices too.
     static void dropRestoreMarks(QStringList *lines) {
-        lines->erase(std::remove_if(lines->begin(), lines->end(), [](const QString &line) {
-                         QString plain = stripSgr(line);
-                         static const QRegularExpression osc8(QStringLiteral("\\x1b\\]8;[^\\x1b\\x07]*(?:\\x07|\\x1b\\\\)"));
-                         plain.remove(osc8);
-                         return plain == scrollbackOpenMark() || plain == scrollbackLegacyOpenMark()
-                                || plain == scrollbackCloseMark() || plain == sessionTextOpenMark()
-                                || plain == sessionTextCloseMark() || plain == surfaceTextOpenMark()
-                                || plain == surfaceTextCloseMark() || plain == transcriptFillOpenMark()
-                                || plain == transcriptFillCloseMark();
-                     }),
-                     lines->end());
+        relay::windowstate::removeRestoreChrome(lines, restoreMarks());
     }
     // Strip CSI SGR sequences (ESC [ ... m) from text. Used when comparing replayed lines that
     // may have picked up Relay's own ink against the plain restore-mark strings.
@@ -1622,7 +1613,8 @@ public:
     // False when there is nothing saved, which is what sends the caller to the transcript.
     // Text with nothing of the conversation in it (sessiontext::hasContent) counts as none.
     bool queueSessionTextReplay(const QString &path, const QString &sessionId = QString()) {
-        const QStringList lines = relay::sessiontext::read(path);
+        QStringList lines = relay::sessiontext::read(path);
+        dropRestoreMarks(&lines);
         const bool queued = relay::sessiontext::hasContent(lines, restoreMarks()) &&
                             queueTextReplay(lines, RestoredKind::Conversation, relay::sessiontext::readProse(path));
         // The file is a window of the conversation's newest lines, not the conversation: one
@@ -1660,8 +1652,9 @@ public:
     }
     bool queueTextReplay(const QStringList &lines, RestoredKind kind = RestoredKind::Conversation,
                          const QVector<relay::ProseBlock> &prose = {}) {
-        if (lines.isEmpty()) return false;
         m_restoredScrollback = lines;
+        dropRestoreMarks(&m_restoredScrollback);
+        if (m_restoredScrollback.isEmpty()) return false;
         m_restoredProse = prose;   // registered again once the rows are on screen (#MTCS)
         m_restoredKind = kind;
         m_scrollbackReplayed = false;
@@ -1767,8 +1760,7 @@ public:
               {"session_id", sessionId}, {"limit", relay::windowstate::kScrollbackMaxLines}});
     }
 
-    // The transcript, between the same rules the saved text is replayed between, through the same
-    // inline printer a live turn writes with — so the two fallbacks look like one feature. The
+    // The transcript, through the same inline printer a live turn writes with. The
     // ink mapping lives in this body rather than in a function of its own: `Ink` is declared
     // further down the class, and only a body is read in the complete-class context.
     void printSavedTranscript(const QJsonArray &items) {
@@ -1776,18 +1768,13 @@ public:
         if (rows.isEmpty()) return;
         using L = relay::transcriptreplay::Line;
         ensureLineStart();
-        printInline(sessionTextOpenMark() + '\n', Ink::Note);
         for (const auto &row : rows)
             printInline(row.text + '\n',
                         row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
-        printInline(sessionTextCloseMark() + '\n', Ink::Note);
         closeInline();
-        status(QStringLiteral("No saved terminal text for this conversation · replayed %1 line(s) of its transcript.")
-                   .arg(rows.size()));
     }
-    // The turns a truncated saved text no longer covers (#KDB4): drawn by the same renderer, in
-    // the same inks, between rules of its own so it reads as the rendering it is — the saved text
-    // below it is still the conversation's own terminal output, and that pair of rules says so.
+    // The turns a truncated saved text no longer covers (#KDB4): drawn above the saved text in
+    // the same inks, with no restore dividers added to the conversation.
     // Printed before the replay runs: replayRestoredScrollback is held while the fill request is
     // outstanding, so the pane ends at the conversation's end, through the window, through the
     // fill, down to the new shell.
@@ -1797,20 +1784,10 @@ public:
         if (rows.isEmpty()) return;
         using L = relay::transcriptreplay::Line;
         ensureLineStart();
-        printInline(transcriptFillOpenMark() + '\n', Ink::Note);
         for (const auto &row : rows)
             printInline(row.text + '\n',
                         row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
-        printInline(transcriptFillCloseMark() + '\n', Ink::Note);
         closeInline();
-        if (coveredFromTurn < 0)
-            status(QStringLiteral("The saved text had no matching turn · replayed %1 line(s) of the transcript.")
-                       .arg(rows.size()));
-        else
-            status(QStringLiteral("The saved text covers from turn %1 · replayed %2 line(s) of the %3 earlier turn(s) above it.")
-                       .arg(coveredFromTurn)
-                       .arg(rows.size())
-                       .arg(coveredFromTurn));
     }
     void focusInput() {
         if (m_native) { focusTerminal(); return; }
@@ -13038,8 +13015,8 @@ private:
     // The pane's text from before the last quit (src/WindowState.h), printed once, at the
     // restarted shell's first prompt. The idle prompt line is erased the way inline agent output
     // erases it and a fresh one is asked for below, so the restored lines land above the prompt in
-    // the order they were written. They print plain — no saved colours, so they take the live
-    // theme — between two muted rules, because the shell under them is new and nothing was re-run.
+    // the order they were written. Nothing is added around the old text: repeated reloads should
+    // show the conversation, not a stack of restore notices.
     void replayRestoredScrollback() {
         if (m_restoredScrollback.isEmpty() || m_scrollbackReplayed || !m_backend) return;
         // A fill is outstanding for the conversation this replay belongs to: hold the replay so
@@ -13052,23 +13029,17 @@ private:
         // asks exactly what it asked before.
         if (m_inlineOpen || (hasShell() && !shellIdleAtPrompt())) return;   // busy: the next prompt tries again
         m_scrollbackReplayed = true;
-        // Two blocks can be replayed into one pane, and they are not the same thing: the pane's
-        // own text from before the restart, and a conversation's text, which followed the
-        // conversation here and was printed in some other pane (#0TJ9). Each wears its own rule.
+        // A surface switch inside a console keeps its own boundary. Restart and conversation
+        // replay add none; the pane's title and session state already identify the conversation.
         const RestoredKind kind = m_restoredKind;
         m_restoredKind = RestoredKind::Scrollback;
-        const QString openMark = kind == RestoredKind::Surface      ? surfaceTextOpenMark()
-                               : kind == RestoredKind::Conversation ? sessionTextOpenMark()
-                                                                    : scrollbackOpenMark();
-        const QString closeMark = kind == RestoredKind::Surface      ? surfaceTextCloseMark()
-                                : kind == RestoredKind::Conversation ? sessionTextCloseMark()
-                                                                     : scrollbackCloseMark();
         const QStringList lines = m_restoredScrollback;
         m_restoredScrollback.clear();
         const QVector<relay::ProseBlock> prose = m_restoredProse;
         m_restoredProse.clear();
         QByteArray out = "\r\x1b[2K";
-        out += inkCode(Ink::Note) + openMark.toUtf8() + "\x1b[0m\r\n";
+        if (kind == RestoredKind::Surface)
+            out += inkCode(Ink::Note) + surfaceTextOpenMark().toUtf8() + "\x1b[0m\r\n";
         // Saved output is replayed as text: any escape sequence left in the file is stripped, so
         // a hand-edited (or truncated) file cannot drive the terminal. When the backend produced
         // ANSI-formatted scrollback we keep the SGR sequences and strip everything else.
@@ -13076,25 +13047,29 @@ private:
             const QString safe = line.contains(QLatin1Char('\x1b')) ? sanitizeSgrOnly(line) : sanitize(line);
             out += safe.toUtf8() + "\r\n";
         }
-        out += inkCode(Ink::Note) + closeMark.toUtf8() + "\x1b[0m\r\n";
+        if (kind == RestoredKind::Surface)
+            out += inkCode(Ink::Note) + surfaceTextCloseMark().toUtf8() + "\x1b[0m\r\n";
         writeTerminal(out);
         // The rows carry each block's OSC 8 run (relay::restorableAnsi above keeps them), and the
         // saved prose holds what the run covers: handing it back now re-registers the block, so
         // the restored pane re-wraps its own output the moment it is resized (#MTCS). At the
         // width the text was saved at this stands aside and shows the rows just replayed.
-        for (const relay::ProseBlock &block : prose)
-            m_backend->setProseBlock(block.uri, block.lines, block.printColumns);
+        for (const relay::ProseBlock &block : prose) {
+            // A legacy restore notice can have a prose record of its own. Once its wrapped
+            // rows are removed above, that record has no anchor and must not return on resize.
+            bool anchored = false;
+            for (const QString &line : lines)
+                if (line.contains(block.uri)) { anchored = true; break; }
+            if (anchored) m_backend->setProseBlock(block.uri, block.lines, block.printColumns);
+        }
         // Not redrawPrompt(): Readline still believes its prompt is where it drew it, and the
         // restored block has just scrolled the screen out from under it, so the repaint is a no-op
         // and the pane is left with no prompt at all (the same trap clearTerminal() documents).
         // An empty line is the shell's own way of printing a fresh prompt where the cursor now is.
         // A console has no shell to print one.
         if (hasShell()) sendShellInput(QStringLiteral("\n"));
-        status(kind == RestoredKind::Surface
-                   ? QStringLiteral("Drew back %1 line(s) of what was said here before.").arg(lines.size())
-               : kind == RestoredKind::Conversation
-                   ? QStringLiteral("Restored %1 line(s) of this conversation's saved terminal text.").arg(lines.size())
-                   : QStringLiteral("Restored %1 line(s) of scrollback from this pane's previous shell.").arg(lines.size()));
+        if (kind == RestoredKind::Surface)
+            status(QStringLiteral("Drew back %1 line(s) of what was said here before.").arg(lines.size()));
     }
 
     // Where inline output may go now: a local shell idle at its prompt, or a remote one (#S5SH).

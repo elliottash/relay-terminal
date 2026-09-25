@@ -204,6 +204,11 @@ QStringList readScrollback(const QString &id, int maxLines = kScrollbackMaxLines
 // and every record whose URI is not under kProsePrefix is dropped rather than trusted.
 QVector<ProseBlock> readScrollbackProse(const QString &id);
 
+// Remove Relay's old restore dividers and "Session loaded" notices from saved terminal rows.
+// Narrow panes wrapped these across several physical rows, so the match must span rows. `marks`
+// is the list of historical divider texts the caller recognizes. Pure and idempotent.
+void removeRestoreChrome(QStringList *lines, const QStringList &marks);
+
 // Every `scrollback` id in a saved layout's window records (pane nodes at any depth).
 QStringList scrollbackIds(const QJsonArray &windows);
 // Delete the stored scrollback of every pane that is not in `keep`; returns how many files went.
