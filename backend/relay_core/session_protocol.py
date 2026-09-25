@@ -540,6 +540,14 @@ class SessionCommands:
         event = agent.load_state(request.get("state"))
         event["id"] = request.get("id")
         self.emit(event)
+        # A conversation that ran on a guest (#PCJY) gets the same bookkeeping a `resume` gets:
+        # `load_state` is the other way a pane lands on a saved conversation, and without this
+        # the guest cursor never loads, so the harness started for the preset afterwards is fresh.
+        if agent.store is not None:
+            try:
+                guest_harness_provider.resume_session(agent, agent.store.load(agent.session_id), self.emit)
+            except (OSError, ValueError):
+                pass
         agent.announce_requests()
         self.emit({"event": "mode_changed", "mode": agent.mode})
         self.emit(agent.context_event())

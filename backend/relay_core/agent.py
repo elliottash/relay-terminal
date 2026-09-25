@@ -4967,8 +4967,19 @@ class Agent:
                 self.autosave()
             else:
                 raise ValueError("Unsupported agent state.")
-            return {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
-                    "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count()}
+            event = {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
+                     "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count()}
+            # The conversation's own guest, when it ran on one (#PCJY), for the same reason
+            # `resume()` reports it: the pane, not the worker, resumes the guest's own session
+            # when the preset is applied afterwards.
+            if data.get("guest"):
+                from . import guest_harness_provider
+                event["guest"] = data["guest"]
+                if data.get("guest_session"):
+                    event["guest_session"] = data["guest_session"]
+                if guest_harness_provider.session_account(data):
+                    event["guest_account"] = guest_harness_provider.session_account(data)
+            return event
 
     def adopt_session(self, session_id: str) -> bool:
         """Take over a session id the caller knows, loading its file when there is one.
@@ -5002,9 +5013,21 @@ class Agent:
             data = self.store.load(check_session_id(session_id))
             turn_open = conv_index.turn_left_open(data)  # read before _apply_session replaces the checkpoint list
             self._apply_session(data, keep_id=True)
-            return {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
-                    "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count(),
-                    "turn_open": turn_open}
+            event = {"event": "state_loaded", "session_id": self.session_id, "turns": self.turns,
+                     "model": data.get("model"), "title": self.title, "open_requests": self.requests.open_count(),
+                     "turn_open": turn_open}
+            # The conversation's own guest, when it ran on one (#PCJY): a pane that resumes a
+            # guest conversation learns here which of the guest's sessions to resume, because the
+            # GUI — not the worker — restarts the harness when the preset is applied afterwards.
+            # `guest_account` says which login ran it, so the pane can match the preset id.
+            if data.get("guest"):
+                from . import guest_harness_provider
+                event["guest"] = data["guest"]
+                if data.get("guest_session"):
+                    event["guest_session"] = data["guest_session"]
+                if guest_harness_provider.session_account(data):
+                    event["guest_account"] = guest_harness_provider.session_account(data)
+            return event
 
     def _apply_session(self, data: dict, keep_id: bool) -> None:
         messages = validate_messages(data.get("messages"))

@@ -1248,6 +1248,14 @@ public:
     // in the saved layout throughout that wait and the asynchronous resume, rather than saving
     // the new worker's empty session over it after a crash restart.
     QString sessionIdForLayout() const { return m_restoreSession.isEmpty() ? m_sessionId : m_restoreSession; }
+    // The guest's own session id while the pane runs a guest preset (#PCJY); empty otherwise —
+    // `m_guestSession` also holds a Tier B codex thread, which the layout must not file here.
+    // A restore still waiting to be applied keeps naming the session it is about to resume,
+    // like `sessionIdForLayout` does through its own wait.
+    QString guestSessionForLayout() const {
+        if (!m_restoreGuestSession.isEmpty()) return m_restoreGuestSession;
+        return onGuestPreset() ? m_guestSession : QString();
+    }
     QString guestSessionId() const { return m_guestSession; }
     QString sessionDir() const { return m_sessionDir; }
 
@@ -1297,6 +1305,11 @@ public:
         m_modePick = relay::modelrows::modePicksFromJson(spec.value(QStringLiteral("mode_picks")));
         m_modePicksChecked = m_modePick.isEmpty();
         m_restoreSession = spec.value(QStringLiteral("session_id")).toString();
+        // The guest session this pane ran (#PCJY): `serializeNode` writes it while the pane is on
+        // a guest preset, so a pane whose conversation could not be resumed (a hard kill leaves
+        // the layout pointing at nothing loadable) still names the guest session to resume.
+        m_restoreGuestSession = spec.value(QStringLiteral("guest_session")).toString();
+        m_restoreGuestKey = preset.startsWith(QStringLiteral("guest:")) ? preset.mid(6) : QString();
         // A restored queue waits for the person to resume it. A shell command from yesterday
         // must not execute merely because the new shell reached its first prompt.
         for (const QJsonValue &value : spec.value(QStringLiteral("queue")).toArray()) {
@@ -12010,6 +12023,19 @@ private:
         // otherwise, and `bypass` above is what the worker assumes when it is absent.
         if (staged.value(QStringLiteral("permissions")).toString() == QStringLiteral("bypass"))
             staged.insert(QStringLiteral("permissions"), QStringLiteral("bypass"));
+        // The previous guest session, restored with the pane (#PCJY): rides the first configure
+        // of that same guest (account included in the key), unless the pick named its own resume
+        // or fork — a fork starts from the session but files a new one, `resumeGuestPreset`
+        // stages it, and a plain pick of another guest starts fresh. Consumed here: the next
+        // configure of this guest begins a new session, which is what a "New chat" means.
+        if (m_restoreGuestSession.isEmpty() || m_restoreGuestKey != presetId.mid(6)) return staged;
+        if (!staged.contains(QStringLiteral("resume")) && !staged.value(QStringLiteral("fork")).toBool()) {
+            staged.insert(QStringLiteral("resume"), m_restoreGuestSession);
+            relay::log::info(QStringLiteral("guest_restore_resume pane=%1 guest=%2 session=%3")
+                                 .arg(paneLogId(), guest, m_restoreGuestSession));
+        }
+        m_restoreGuestKey.clear();
+        m_restoreGuestSession.clear();
         return staged;
     }
 
@@ -17488,6 +17514,12 @@ private:
     QJsonObject m_initialState;
     // saved window layout: the preset and conversation this pane was restored with
     QString m_restorePreset, m_restoreModel, m_restoreSession, m_restoreRequest;
+    // The guest the restored conversation/preset ran on, spelled as a preset id spells it after
+    // "guest:" ("claude", or "claude:work" for an account), and that guest's own session id
+    // (#PCJY): a restored guest pane resumes the previous guest session instead of starting
+    // fresh. Filled from the saved layout, replaced by whatever a `state_loaded` resume names
+    // (the conversation's own guest, more precise), and consumed by the first guest configure.
+    QString m_restoreGuestKey, m_restoreGuestSession;
     // What this pane's own agent runs on, and /swap's memory (card #MDL1). `m_paneModel` is the
     // pane's model as against `m_model`, the last model the worker named for anything at all;
     // `m_swapFrom` is where the last /swap (or a pick that landed on rank 1) came from, and

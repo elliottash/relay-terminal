@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 from relay_core import instructions, presets
-from relay_core.agent import Agent
+from relay_core.agent import Agent, STATE_VERSION
 from relay_core.provider import ChatProvider, ProviderConfig, ProviderError
 from relay_core.queue import TurnSupervisor
 from relay_core import session_protocol
@@ -302,6 +302,30 @@ class ProtocolHandlerTests(unittest.TestCase):
         with mock.patch.object(self.cmds, 'index', return_value=index):
             with self.assertRaisesRegex(ValueError, 'No saved conversation'):
                 self.cmds.handle('conversation_open', {'session_id': session_id})
+
+    def test_load_state_of_a_guest_conversation_keeps_the_guest_cursor(self):
+        """`load_state` is the other way a pane lands on a saved conversation (#PCJY).
+
+        The guest-cursor bookkeeping a `resume` gets has to run here too: without it the
+        conversation opens, but the harness started for the guest preset afterwards is fresh
+        and the guest's own session — the agent's actual memory — is lost.
+        """
+        agent = self.make_agent(ScriptedProvider())
+        self.run_turn('fix the login bug')
+        path = Path(agent.store.directory) / f'{agent.session_id}.json'
+        saved = json.loads(path.read_text())
+        cursors = {'claude:': {'session': '2cc05b69-81a5-45e7-87f9-f2dda8132f49', 'messages': 192}}
+        saved.update({'guest': 'claude', 'guest_session': '2cc05b69-81a5-45e7-87f9-f2dda8132f49',
+                      'guest_cursors': cursors})
+        path.write_text(json.dumps(saved))
+        fresh = self.make_agent(ScriptedProvider(name='B'))
+        ref = {'version': STATE_VERSION, 'kind': 'relay_agent_state_ref',
+               'session_id': agent.session_id, 'session_dir': str(agent.store.directory)}
+        self.cmds.handle('load_state', {'id': 'ls', 'state': ref})
+        loaded = self.rec.wait(lambda e: e['event'] == 'state_loaded')
+        self.assertEqual(loaded['guest'], 'claude')
+        self.assertEqual(loaded['guest_session'], '2cc05b69-81a5-45e7-87f9-f2dda8132f49')
+        self.assertEqual(getattr(fresh, '_guest_cursors', None), cursors)
 
     def test_compact_resume_recap_and_plan_execute(self):
         provider = ScriptedProvider(side_reply='{"summary": "Did three things.", "next_action": "Ship it"}')

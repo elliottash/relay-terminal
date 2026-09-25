@@ -557,6 +557,18 @@ bool Pane::handleSessionEvent(const QString &type, const QJsonObject &event) {
                 m_restoreRequest.clear();
                 m_restoreSession.clear();
             }
+            // The conversation's own guest, when it ran on one (#PCJY): more precise than the
+            // layout's copy, and it is what a later guest configure resumes. A conversation that
+            // ran on no guest releases whatever the layout remembered.
+            if (const QString guest = event.value(QStringLiteral("guest")).toString(); !guest.isEmpty()) {
+                m_restoreGuestKey = guest;
+                if (const QString account = event.value(QStringLiteral("guest_account")).toString(); !account.isEmpty())
+                    m_restoreGuestKey += QLatin1Char(':') + account;
+            } else {
+                m_restoreGuestKey.clear();
+            }
+            m_restoreGuestSession = event.value(QStringLiteral("guest_session")).toString();
+            if (m_restoreGuestSession.isEmpty()) m_restoreGuestKey.clear();
             syncSessionText();   // the conversation this pane's text belongs to, from here on (#0TJ9)
             // A fork's id exists only now: the text its parent stashed is written under it and
             // replayed here, so the fork opens showing what it was forked from (#0TJ9).

@@ -383,6 +383,49 @@ class SessionTests(Base):
         path.write_text(json.dumps(old))
         self.assertFalse(self.agent(ScriptedProvider(name='D')).resume(agent.session_id)['turn_open'])
 
+    def test_resume_names_the_conversations_own_guest_session(self):
+        """`state_loaded` tells the pane which guest session to resume (#PCJY).
+
+        A pane that resumes a conversation which ran on a guest harness has to resume the
+        guest's own session when its preset is applied afterwards — the worker cannot do it,
+        because at configure time it does not know the conversation. The event carries the
+        guest, its session id and the account, and stays silent for a native conversation.
+        """
+        agent = self.agent(ScriptedProvider())
+        agent.ask('Fix the login bug')
+        path = self.sessions / f'{agent.session_id}.json'
+        saved = json.loads(path.read_text())
+        saved.update({'guest': 'claude', 'guest_session': '6f3c8a24-2c8d-4d61-9856-50ddc861b242',
+                      'guest_account': 'work',
+                      'guest_cursors': {'claude:work': {'session': '6f3c8a24-2c8d-4d61-9856-50ddc861b242', 'messages': 4}}})
+        path.write_text(json.dumps(saved))
+        event = self.agent(ScriptedProvider(name='B')).resume(agent.session_id)
+        self.assertEqual(event['guest'], 'claude')
+        self.assertEqual(event['guest_session'], '6f3c8a24-2c8d-4d61-9856-50ddc861b242')
+        self.assertEqual(event['guest_account'], 'work')
+
+    def test_resume_of_a_native_conversation_names_no_guest(self):
+        agent = self.agent(ScriptedProvider())
+        agent.ask('Fix the login bug')
+        event = self.agent(ScriptedProvider(name='B')).resume(agent.session_id)
+        self.assertNotIn('guest', event)
+        self.assertNotIn('guest_session', event)
+        self.assertNotIn('guest_account', event)
+
+    def test_load_state_of_a_guest_conversation_names_its_guest_session(self):
+        agent = self.agent(ScriptedProvider())
+        agent.ask('Fix the login bug')
+        path = self.sessions / f'{agent.session_id}.json'
+        saved = json.loads(path.read_text())
+        saved.update({'guest': 'claude', 'guest_session': '6f3c8a24-2c8d-4d61-9856-50ddc861b242'})
+        path.write_text(json.dumps(saved))
+        other = self.agent(ScriptedProvider(name='C'))
+        ref = {'version': agent_module.STATE_VERSION, 'kind': 'relay_agent_state_ref',
+               'session_id': agent.session_id, 'session_dir': str(self.sessions)}
+        event = other.load_state(ref)
+        self.assertEqual(event['guest'], 'claude')
+        self.assertEqual(event['guest_session'], '6f3c8a24-2c8d-4d61-9856-50ddc861b242')
+
     def test_a_running_turn_is_written_so_it_can_be_found(self):
         """The file the sessions list and the full-text index are built from appears mid-turn.
 
