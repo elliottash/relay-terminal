@@ -429,6 +429,54 @@ def _read_login_status(guest_id: str, binary: str, env: dict | None = None) -> b
     return bool(module.parse_login_status(out.returncode, out.stdout or "", out.stderr or ""))
 
 
+_emails: dict[str, tuple[float, str]] = {}
+
+
+def login_email(guest_id: str, config_dir: str = "") -> str:
+    """The address a Claude Code or Codex login is signed in as, or "" (#EQH0).
+
+    Read from the login's own files, never from the network and never logged: Claude Code keeps
+    `oauthAccount.emailAddress` in `.claude.json` (inside CLAUDE_CONFIG_DIR when one is set, else
+    in the home directory), and Codex's `auth.json` carries an OpenID `id_token` whose `email`
+    claim is the ChatGPT account. Cached per file by modification time: `presets` is answered
+    often and a sign-in rewrites the file.
+    """
+    family = guest_id.split(":", 1)[0]
+    if family == "claude":
+        base = config_dir or os.environ.get("CLAUDE_CONFIG_DIR", "")
+        path = os.path.join(base, ".claude.json") if base else os.path.expanduser("~/.claude.json")
+    elif family == "codex":
+        base = config_dir or os.environ.get("CODEX_HOME", "") or os.path.expanduser("~/.codex")
+        path = os.path.join(base, "auth.json")
+    else:
+        return ""
+    try:
+        mtime = os.stat(path).st_mtime
+    except OSError:
+        return ""
+    held = _emails.get(path)
+    if held and held[0] == mtime:
+        return held[1]
+    email = ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if family == "claude":
+            email = str(((data.get("oauthAccount") or {}).get("emailAddress")) or "")
+        else:
+            token = str(((data.get("tokens") or {}).get("id_token")) or "")
+            if token.count(".") == 2:
+                part = token.split(".")[1]
+                claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+                email = str(claims.get("email") or "") if isinstance(claims, dict) else ""
+    except (OSError, ValueError, AttributeError, TypeError):
+        email = ""
+    if not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,255}", email):
+        email = ""
+    _emails[path] = (mtime, email)
+    return email
+
+
 def login_status(guest_id: str) -> bool | None:
     """`logged_in` for a guest's row: True/False once known, None until the scan has said.
     `guest_id` may be an account key (`claude:work`): each account is signed in or not alone."""
@@ -645,6 +693,8 @@ def preset_rows() -> list[dict]:
                      # Whether the CLI is signed in: null until the background scan has asked
                      # it, and always null for a guest that is not installed (29.3).
                      "logged_in": login_status(guest_id) if state["installed"] else None,
+                     # The account it is signed in as, from its own files (#EQH0); "" unknown.
+                     "email": login_email(guest_id) if state["installed"] else "",
                      "has_stored_key": False, "key_source": "guest",
                      "model": "", "base_url": base_url(guest_id),
                      "local": False, "hosted": False,
@@ -674,7 +724,8 @@ def preset_rows() -> list[dict]:
                         "login_command": guest_accounts.login_command(guest_id, entry.id),
                         "base_url": base_url(guest_id, entry.id),
                         "logged_in": (_account_login_status(entry, state["binary"])
-                                      if state["installed"] else None)})
+                                      if state["installed"] else None),
+                        "email": login_email(guest_id, entry.config_dir)})
             held = last_limits(entry.key)
             if held:
                 row["limits"] = held

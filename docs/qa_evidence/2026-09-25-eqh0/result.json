@@ -1,0 +1,15 @@
+{
+ "emails_before": [
+  "elliott.ash@gess.ethz.ch",
+  "e@elliottash.com",
+  "ashe@ethz.ch"
+ ],
+ "refresh_row_before": true,
+ "usage_refresh_sent": true,
+ "codex_left_before": [
+  "left, resets sat (24.0 h)"
+ ],
+ "codex_left_after": [
+  "left, resets sat (24.0 h)"
+ ]
+}

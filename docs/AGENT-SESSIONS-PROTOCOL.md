@@ -7108,6 +7108,13 @@ set and never handles the credentials, which stay where the CLI puts them inside
   removed}` then `guest_accounts`. A save or delete pushes `presets`. `guest_logins_refresh` asks
   every login again (the pane sends it when a sign-in it typed exits 0). `test_key {preset:
   "guest:claude:work"}` tests that account and its answer carries `account`.
+* **Email and a usage refresh (#EQH0).** Every guest row — the CLI's default login and each
+  account — carries `email`, the address the login is signed in as, read from its own files
+  (Claude Code's `.claude.json` `oauthAccount.emailAddress`, in CLAUDE_CONFIG_DIR or the home
+  directory; Codex's `auth.json` `id_token` `email` claim); `""` when unknown. Never fetched, never
+  logged. `usage_refresh {id?}` runs the guest subscription poll and the Z.AI / Kimi Code plan poll
+  now, on a thread: their answers are the usual `usage_limits` events and a fresh `presets`, then
+  `usage_refreshed {id, at}`. Options › Models › Sources' "usage · refresh" row sends it.
 * **Sessions.** `configured` / `model_changed` add `guest_account`, and so does the saved Relay
   session; a resume only restarts a harness that is on the same account. The guest sessions index
   reads each account's `projects/` (claude) or `sessions/` and `state_*.sqlite` (codex) besides the

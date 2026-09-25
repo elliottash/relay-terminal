@@ -246,6 +246,15 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
         // wall of text (owner, 2026-09-21: "tab 1: add horizontal line dividers between providers"). The
         // rule goes on each provider's own row but the first's, in the theme's `@border`, which is
         // the colour a section heading is underlined in.
+        // Usage is read every 15 minutes and after each guest turn; this reads every subscription
+        // now — Claude Code and Codex logins and accounts, the Z.AI Coding Plan, Kimi Code (#EQH0).
+        // The answers arrive as the usual usage_limits events and redraw the rows below.
+        models.rows << buttonRow(QStringLiteral("models.refreshUsage"), QStringLiteral("usage"),
+            QStringLiteral("each subscription's 5-hour and weekly use, read every 15 minutes"),
+            QStringLiteral("refresh"), [this, request] {
+                request({{"type", "usage_refresh"}});
+                notice(QStringLiteral("Asking every subscription for its usage…"));
+            });
         bool firstProvider = true;
         for (const QJsonObject &preset : std::as_const(listed)) {
             const QString id = str(preset, "id");
@@ -267,11 +276,15 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             } else if (guest) {
                 const QJsonValue loggedIn = preset.value(QStringLiteral("logged_in"));
                 const bool account = !str(preset, "account").isEmpty();   // #M8S2
-                status = loggedIn.isBool() ? (loggedIn.toBool() ? QStringLiteral("logged in on this machine")
+                // Which account it is (#EQH0): the address the login's own files name.
+                const QString email = str(preset, "email");
+                status = loggedIn.isBool() ? (loggedIn.toBool() ? (email.isEmpty() ? QStringLiteral("logged in on this machine")
+                                                                                  : QStringLiteral("logged in as ") + email)
                                                                 : account ? QStringLiteral("not logged in: sign in runs the CLI's own sign-in for this account")
                                                                           : QStringLiteral("not logged in: change login runs the CLI's own sign-in"))
                                            : account ? QStringLiteral("a separate login of this CLI, in its own directory")
                                                      : QStringLiteral("on this machine, runs with your own login");
+                if (!email.isEmpty() && !(loggedIn.isBool() && loggedIn.toBool())) status += QStringLiteral(" · ") + email;
             } else if (source == QStringLiteral("env")) {
                 status = QStringLiteral("key from RELAY_%1_API_KEY").arg(id.toUpper().replace(QLatin1Char('-'), QLatin1Char('_')));
             } else if (source == QStringLiteral("local")) {
@@ -295,6 +308,7 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             row.detail = status;
             if (stableStatus != status) row.agentDetail = stableStatus;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
+            if (!str(preset, "email").isEmpty()) row.aliases += QStringLiteral(" email ") + str(preset, "email");
             row.infoUrl = guest ? (id.startsWith(QStringLiteral("guest:claude")) ? QStringLiteral("https://docs.claude.com/en/docs/claude-code")
                                                                          : QStringLiteral("https://developers.openai.com/codex"))
                         : preset.value(QStringLiteral("custom")).toBool() ? str(preset, "base_url")
@@ -791,7 +805,8 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             } else if (row.id == QStringLiteral("models.importKeys")) {
                 flushProvider();
                 afterGroups << row;
-            } else if (row.id == QStringLiteral("models.addProvider") || row.id == QStringLiteral("info:models/none")) {
+            } else if (row.id == QStringLiteral("models.addProvider") || row.id == QStringLiteral("info:models/none")
+                       || row.id == QStringLiteral("models.refreshUsage")) {   // #EQH0: above the groups
                 flushProvider();
                 beforeGroups << row;
             } else {

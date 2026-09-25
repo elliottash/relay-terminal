@@ -515,6 +515,24 @@ def main():
                 emit_presets(request.get("id"))
             elif kind in localmodels.TYPES:
                 localmodels.handle(request, emit)
+            elif kind == "usage_refresh":
+                # Models › Sources' "refresh usage" (#EQH0): every subscription's quota read now
+                # rather than at the next 15-minute poll — Claude Code / Codex logins and accounts,
+                # the Z.AI Coding Plan and Kimi Code. On a thread; each answer is the usual
+                # `usage_limits` event and a fresh `presets`, then one `usage_refreshed`.
+                request_id = request.get("id")
+
+                def refresh_usage(request_id=request_id):
+                    import time
+                    try:
+                        guest_usage_poll.poll_once(emit=emit, changed=lambda: emit_presets())
+                        provider_limits.poll_once(key_lookup=keystore.lookup, emit=emit)
+                    except Exception as exc:                # never lets a thread die silently
+                        logs.event(log, "usage_refresh_failed", level_name="warning",
+                                   error=type(exc).__name__)
+                    emit({"event": "usage_refreshed", "id": request_id, "at": int(time.time())})
+
+                threading.Thread(target=refresh_usage, name="relay-usage-refresh", daemon=True).start()
             elif kind == "guest_logins_refresh":
                 # A guest sign-in the pane typed has finished (#M8S2): every login is asked again,
                 # and the rows are pushed once the answers are in.
