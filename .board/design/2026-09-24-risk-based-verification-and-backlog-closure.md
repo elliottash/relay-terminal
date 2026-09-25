@@ -10,7 +10,7 @@ waiting_on: owner
 rank: zzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-24'
 verify: {artifact: text, primary: person, also: [], human: optional, criteria: 'The research accurately distinguishes evidence of a pass from mere backlog status, and the proposal is actionable.', sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [], evidence: [], related: [C3Q2, EE11], github: null}
+links: {plans: [], commits: [39b82175e4dc3f20795cbeb2c8106a9d33bd595d], evidence: [reports/AI software verification policy.md, research_notes/AI software verification policy/], related: [C3Q2, EE11], github: null}
 ---
 # Risk based verification and backlog closure
 
