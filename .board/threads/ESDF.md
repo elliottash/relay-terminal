@@ -153,3 +153,7 @@ Re-verified at today's tip (main 0fc83778, 2026-09-24), since later commits had 
 - Phone: the whole `tests/test_board_view` suite was red at tip — 29/34 failures — but the cause is *not* this card: 14d7f422 (#SAW4, landed after #ESDF) added the `pairedHint` import to app/app.js without updating tests/fixtures/board/fake_rrp.js, so the app died at module load in every browser test. Filed as #N7RJ, fixed in 0fc83778 (one name in the fixture's re-export list). After that fix the suite is **34/34 OK in 24s**, including this card's five phone tests (Recent view, stage chips, Stages↔Recent return, saved choice, filter).
 
 So both Done-means test paths are green again at tip; no #ESDF code needed to change. The card stays here in needs-verification with its staged Try it (docs/qa_evidence/2026-09-24-esdf-try-it/).
+
+<!-- relay:entry 20260925T011610Z-a2 author=claude-code kind=progress -->
+### Claude Code · 2026-09-25 01:16
+Salvage (#3BM5): the Try-it staging file docs/qa_evidence/2026-09-23-tryit-ESDF/STAGED.json, left untracked by a stopped session, landed in 87bf2f6d.

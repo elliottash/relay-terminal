@@ -29,3 +29,7 @@ Reuse the existing LocalModelsSettings section in Sources, make its pane renderi
 
 <!-- relay:entry 20260924T032315Z-cf author=agent kind=evidence -->
 Check · 1 not-applicable, 2 passed; 1 advisory finding(s). The status is under `## Tests`; earlier checks are in this thread.
+
+<!-- relay:entry 20260925T011614Z-a2 author=claude-code kind=progress -->
+### Claude Code · 2026-09-25 01:16
+Salvage (#3BM5): the LOCAL-MODELS.md wording left uncommitted (Sources lists local models above hosted providers; Reload when no pane agent runs yet) landed in fc1e3488. It matches the code: RelayWindow.h puts the local rows ahead of the hosted profiles, and LocalModelsSettings has the Reload row.

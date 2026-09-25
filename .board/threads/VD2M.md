@@ -77,3 +77,7 @@ Re-claiming after another pane restart. Resuming the zellij passthrough probe (a
 
 <!-- relay:entry 20260924T222346Z-qn author=agent kind=progress model=glm-5.3 pane=8c549c94 turn=ff5289b78ec24f1b99f57162e21ff33a/1927799a538844c089d07c114f89db6f -->
 - ✦ agent is preparing Try it for this card
+
+<!-- relay:entry 20260925T011613Z-a2 author=claude-code kind=progress -->
+### Claude Code · 2026-09-25 01:16
+Salvage (#3BM5): expected.md and stage.sh for the zellij Try it (docs/qa_evidence/2026-09-24-zellij-VD2M/), left untracked, landed in 87bf2f6d beside the evidence already committed in 68a9a730.

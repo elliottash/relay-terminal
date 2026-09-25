@@ -46,3 +46,7 @@ Delivering per the card's plan: git-history check, the two blocked label fixes, 
 
 <!-- relay:entry 20260924T224311Z-xy author=agent kind=event model=glm-5.3 pane=40bcc267 turn=b3c46c7f1ac9492083b3371d4688d8cd/0c818bb5ad25477184674801ffc07be7 -->
 - ✦ agent moved this card · Executing → Needs verification · All four planned steps done: history check (transcription, not code), labels applied, regression test, self-diagnosing error; landed a14aca14d338, 312 tests OK. · implemented_by glm/glm-5.3
+
+<!-- relay:entry 20260925T011616Z-a2 author=claude-code kind=progress -->
+### Claude Code · 2026-09-25 01:16
+Salvage (#3BM5): the leftover trailing-blank-line fix in tests/test_board_tools.py landed in 41cb44db. python3 -m unittest tests.test_board_tools ran 312 tests, OK.

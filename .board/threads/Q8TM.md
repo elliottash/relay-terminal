@@ -48,3 +48,7 @@ Taking #Q8TM from Codex planning: implement guest-session resume cursors and swi
     else — the suite, the fallbacks, the restart case — is covered by the automated tests and
     was not asked of the person. Saw what was expected: AFTER resumes codex-1 and sends only
     the GLM turn; BEFORE re-sends everything including the guest's own turn.
+
+<!-- relay:entry 20260925T011611Z-a2 author=claude-code kind=progress -->
+### Claude Code · 2026-09-25 01:16
+Salvage (#3BM5): the Try-it staging for the switch-back (docs/qa_evidence/2026-09-24-tryit-Q8TM/: stage.sh, expected.md, capture.txt, staging-notes.md), left untracked by a stopped session, landed in 87bf2f6d.
