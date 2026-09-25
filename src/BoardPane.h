@@ -658,6 +658,7 @@ private:
     QWidget *m_toolsWrapRow = nullptr;  // where those two buttons go when the row is too narrow
     QHBoxLayout *m_toolsWrap = nullptr;
     QToolButton *m_add = nullptr;
+    QToolButton *m_snoozed = nullptr;
     // The list's own column header (board::Sort): the Card, Created and Updated cells a click
     // sorts by, over the rows and under the tools.
     ColumnHeader *m_columnHeader = nullptr;

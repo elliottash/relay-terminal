@@ -378,6 +378,7 @@ private slots:
     void aFlatListIsEveryShownCardInOneOrder();
     void theStageHeaderTogglesTheFlatListAndTheChoiceIsKept();
     void badgesSayWhatTheCardCarries();
+    void metadataRowsSortAndFilterSnoozedCards();
     void aClaimedCardCarriesThePanesSession();
     void aClaimedRowSaysWhichPaneHoldsItAndWhetherItIsStillOpen();
     void theCardPageLinksTheClaimToThePaneAndMutesAClosedOne();
@@ -1058,6 +1059,35 @@ void BoardModelTests::badgesSayWhatTheCardCarries()
     QCOMPARE(all.at(3).kind, relay::board::Badge::Waiting);
     // In a section of one status, and on a plain card, there is nothing to repeat.
     QVERIFY(relay::board::badges(Card::fromJson(row("M3XJ", "ready", "features")), false).isEmpty());
+}
+
+void BoardModelTests::metadataRowsSortAndFilterSnoozedCards()
+{
+    Model model;
+    model.setConfig(config());
+    QJsonObject normal = row("K7Q2", "ready", "features", "a");
+    QJsonObject overdue = row("M3XJ", "ready", "features", "z");
+    overdue.insert(QStringLiteral("overdue"), true);
+    overdue.insert(QStringLiteral("effective_due"), QStringLiteral("2026-09-20"));
+    overdue.insert(QStringLiteral("owner"), QStringLiteral("Elliott"));
+    overdue.insert(QStringLiteral("children_total"), 5);
+    overdue.insert(QStringLiteral("children_done"), 2);
+    QJsonObject snoozed = row("P9AB", "ready", "features", "b");
+    snoozed.insert(QStringLiteral("snoozed"), true);
+    model.reset(rows({normal, overdue, snoozed}));
+    QCOMPARE(model.cards(QStringLiteral("ready")).size(), 2);
+    QCOMPARE(model.cards(QStringLiteral("ready")).first().id, QStringLiteral("M3XJ"));
+    const Card *card = model.card(QStringLiteral("M3XJ"));
+    QVERIFY(card);
+    QStringList badges;
+    for (const auto &badge : relay::board::badges(*card, false))
+        badges << badge.text;
+    QVERIFY(badges.contains(QStringLiteral("Elliott")));
+    QVERIFY(badges.contains(QStringLiteral("⮋ 2/5")));
+    QVERIFY(badges.contains(QStringLiteral("2026-09-20")));
+    model.setSnoozedOnly(true);
+    QCOMPARE(model.cards(QStringLiteral("ready")).size(), 1);
+    QCOMPARE(model.cards(QStringLiteral("ready")).first().id, QStringLiteral("P9AB"));
 }
 
 // A pane claims a card (#R9G7): `board_claim` writes its session token into the front matter and

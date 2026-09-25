@@ -22,8 +22,8 @@ namespace board {
 
 // One card as `board`/`board_changed` send it (protocol 19.2, "a row").
 struct Card {
-    QString id, title, status, tab, assignee, waitingOn, rank, path, implementedBy, milestone,
-            created, topic;
+    QString id, title, status, tab, assignee, owner, waitingOn, rank, path, implementedBy,
+            milestone, created, topic, resolution, dueDate, snooze, parent;
     // When the card last changed on disk — its file's mtime, or its thread file's if that is
     // later — as an ISO timestamp from the worker (protocol 19.2 `updated`). Empty from an older
     // worker or a card with no file, and then the RecentlyUpdated sort falls back to `created`.
@@ -52,7 +52,8 @@ struct Card {
     QString text;
     QString type = QStringLiteral("work");
     QStringList labels;
-    int threadEntries = 0, tasksDone = 0, tasksTotal = 0;
+    int threadEntries = 0, tasksDone = 0, tasksTotal = 0, childrenDone = 0, childrenTotal = 0;
+    bool overdue = false, dueSoon = false, snoozed = false;
     // The row's flag (#VKFV): −1…+3, 0 unflagged. The worker clamps what it sends; this side
     // clamps again so a hostile or stale row can never paint a colour that does not exist.
     int priority = 0;
@@ -176,8 +177,8 @@ QString issueHeading();
 
 // One badge on a card row (design 4.2): what it says and how the pane colours it.
 struct Badge {
-    enum Kind { Label, Agent, Assignee, Waiting, Status, Tasks, TasksDone, Thread, Private,
-                Verified, Session, SessionClosed };
+    enum Kind { Label, Agent, Assignee, Owner, Waiting, Status, Tasks, TasksDone, Children,
+                Due, Overdue, Resolution, Thread, Private, Verified, Session, SessionClosed };
     Kind kind;
     QString text;
 };
@@ -469,6 +470,8 @@ public:
     // ---- filtering
     void setFilter(const QString &text);
     QString filter() const { return m_filter; }
+    void setSnoozedOnly(bool value) { m_snoozedOnly = value; }
+    bool snoozedOnly() const { return m_snoozedOnly; }
     // (#G2C7) While the text filter is on, the list answers in the Sessions list's voice:
     // matched terms are marked where they landed, a text-only match shows the line that
     // matched, and each section's cards answer in relevance order (exact id, exact title,
@@ -525,6 +528,7 @@ private:
     QStringList m_statusChoices;                 // every status a section may collect
     QMap<QString, Card> m_cards;                 // by id
     QString m_filter;
+    bool m_snoozedOnly = false;
     // The plain words of `m_filter`, and the worker's answer for them (#7M6E). The answer is
     // used only while `m_searchTerms` still equals `m_plainTerms`: the moment another key is
     // typed the held ids are one query out of date, and the fields alone answer until the new

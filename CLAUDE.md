@@ -80,9 +80,11 @@ What it refuses to do, and why each refusal is an incident from the list above:
   scripts/land.py hook install` puts a `pre-commit` hook in place that makes git itself refuse a
   commit whose index is the shared one, saying so in a sentence; `begin` installs it if it is
   missing. The owner's escape hatch is `RELAY_ALLOW_SHARED_COMMIT=1 git commit …`.
-- **It never runs `git checkout`, `git stash` or `git reset`, and never writes a working-tree
-  file.** The one exception is `doctor --fix` on a path whose index entry *and* working copy are
-  both byte-for-byte an older commit's blob — provably nobody's edit.
+- **It never runs `git checkout`, `git stash` or `git reset`.** It does not rewrite a landing
+  path in the working tree. The exceptions are `doctor --fix` on a provably stale path and
+  `commit` appending the landed hash to `links.commits` of each existing `#ID` card named in
+  its message (unless `--no-cards` is passed). The latter stays as an uncommitted Board edit
+  until a following landing includes the card file.
 - **It merges through real temporary files**, never process substitution.
 - **It reads the tip once per attempt** and passes that same sha to `commit-tree -p` and to
   `update-ref`'s old-value argument. It never re-reads the branch between building and swapping.

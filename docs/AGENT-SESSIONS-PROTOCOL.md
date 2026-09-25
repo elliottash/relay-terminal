@@ -3061,7 +3061,7 @@ no key — that window used to show "Loading the Board…" forever.
 | `board_open {id?}` | `board {id, rev, root, workspace, project, state, exists, config, cards: [row], cards_total, more, problems}`, then a `board_cards` per further batch |
 | `board_refresh {id?}` | `board_changed {id?, rev, upserts: [row], removed: [card_id], problems}`, then a `board_cards` per further batch |
 | `board_search {id?, query}` | `board_search {id, root, query, ids: [card_id]}` |
-| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, thread, thread_total}` |
+| `board_card_get {id?, card, thread_entries?≤50}` | `board_card {id, card_id, hash, path, front, title, body, sections, issue, issue_heading, tasks, children, reverse, commits, thread, thread_total}` |
 | `board_check {id?}` | `board_problems {id, items: [{code, path, message, severity}]}` |
 
 `config` is `{tabs, columns, autonomy, statuses, column_statuses, labels}`: `tabs` as `board.yaml`
@@ -3069,8 +3069,9 @@ lists them (each names a `folder` or a `filter`), `columns` as the board configu
 `column_statuses` mapping each column to the statuses it collects, so the pane's column model needs
 no table of its own.
 
-A **row** is `{id, title, type, status, section, tab, labels, assignee, waiting_on, rank, private,
-priority, path, thread_entries, tasks_done, tasks_total, created, updated, milestone, topic,
+A **row** is `{id, title, type, status, section, tab, labels, assignee, owner, waiting_on, rank, private,
+priority, path, thread_entries, tasks_done, tasks_total, children_done, children_total, parent,
+resolution, due, effective_due, overdue, due_soon, snooze, snoozed, blocked_by, created, updated, milestone, topic,
 implemented_by, verified_by, session, review_priority}` — enough to draw a card without reading the file.
 `session` (2026-09-20, #R9G7) is the pane session token holding the card (19.19): the pane draws
 its first eight characters as a chip that reveals that pane, and an agent's `board_list` sees from
@@ -3145,9 +3146,9 @@ a reload. `rev` increases on every `board_changed`; a GUI that has missed revisi
 | Message | Reply |
 |---|---|
 | `board_triage {id?, text, title?, semantic?}` | `board_triage` local, then optional semantic |
-| `board_create {id?, tab, status, section?, text, title?, card_type?, labels?, related?, source?, author?}` | `board_written` + `board_changed` |
+| `board_create {id?, tab, status, section?, text, title?, card_type?, labels?, related?, parent?, blocked_by?, source?, author?}` | `board_written` + `board_changed` |
 | `board_update {id?, card, base_hash, patch, author?}` | `board_written` + `board_changed` |
-| `board_move {id?, card, status?, tab?, section?, before?, after?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
+| `board_move {id?, card, status?, tab?, section?, before?, after?, resolution?, duplicate_of?, reason?, evidence?, author?}` | `board_written` + `board_changed` |
 | `board_priority {id?, card, priority, author?}` | `board_written` + `board_changed` |
 | `board_delete {id?, card, reason?, author?}` | `board_written` + `board_changed` |
 | `board_comment {id?, card, text, kind?, author?, pane_token?}` | `board_written` + `board_changed` |
@@ -4376,6 +4377,33 @@ when they were left out. `skills_list` items with a `profile` carry `cases`, `la
 skill with no row is not stale) from the workspace's board ledger — `cases.stats`. The QA policy
 floor's `ai_may_gate_after` / `sample_after` numbers (19.21) count passing rows the same way
 (`cases.verified_count`, docs/BOARD-FORMAT.md §4).
+
+### 19.23 Card metadata: dates, resolution, owner, hierarchy (#MJ76)
+
+All these front matter keys are optional and absent when unset. `assignee` names the agent doing
+the work; `owner` names the accountable person. A closed card's `resolution` is `done`,
+`not-planned`, `duplicate`, `obsolete` or `cannot-reproduce`; `duplicate` requires an existing
+`duplicate_of` card. Moving to done defaults to `done`, dropping defaults to `not-planned`, and
+reopening clears both close fields.
+
+`due` accepts `YYYY-MM-DD` (meaning `{date: YYYY-MM-DD, whose: mine}`) or that object with
+`whose: mine|external`. `snooze` is an ISO date. A dated `milestones: {name: YYYY-MM-DD}` entry
+in `board.yaml` supplies a soft effective due date to cards in that milestone without their own
+`due`. `effective_due`, `overdue`, `due_soon` (within seven days) and `snoozed` are computed at
+read time, never stored. Snoozed open cards are hidden from active rows until their date and
+appear under the Snoozed filter.
+
+Forward links are stored once: `parent`, `blocked_by`, `duplicate_of` and `links.related`.
+Writers require existing card ids, refuse self links and parent/blocking cycles. `board_card`
+computes `children` (id, title, status, done) and `reverse` (child_of, blocks,
+duplicated_by, related_from). A dangling link already in a file is a `board_check` warning and
+renders as missing; it does not stop reading the board.
+
+`links.commits` is an oldest-first sequence of short commit hashes, de-duplicated by prefix and
+sorted by commit date when written. `land.py commit` appends the landed hash to each existing
+card named `#ID` in its message unless `--no-cards` is passed. `board_card.commits` resolves at
+most 20 rows with hash, date, subject, author and `Implemented-By` trailer; the newest entry of
+the stored sequence is the QA revision under test.
 
 ## 20. Aliases: saved commands and prompts (v2.0, 2026-09-17)
 

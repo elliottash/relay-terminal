@@ -87,9 +87,35 @@ private slots:
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
     void theCardPagesFlagClicksThroughToBoardPriority();
+    void metadataPageListsChildrenReverseLinksAndCommits();
     void hygieneChecksBeforeCleanup();
     void emptyAgentTranscriptDoesNotReserveConversationHeight();
 };
+
+void BoardPaneTests::metadataPageListsChildrenReverseLinksAndCommits()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-board-metadata-test"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("ready")),
+                             row(QStringLiteral("M3XJ"), QStringLiteral("ready"))}));
+    view.openCard(QStringLiteral("K7Q2"));
+    QJsonObject answer = cardArrived(QStringLiteral("K7Q2"));
+    answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+    answer.insert(QStringLiteral("children"), QJsonArray{QJsonObject{
+        {"id", "M3XJ"}, {"title", "A child"}, {"status", "done"}, {"done", true}}});
+    answer.insert(QStringLiteral("reverse"), QJsonObject{{"blocks", QJsonArray{QJsonObject{
+        {"id", "M3XJ"}, {"title", "A child"}}}}});
+    answer.insert(QStringLiteral("commits"), QJsonArray{QJsonObject{
+        {"hash", "abcdef123456"}, {"date", "2026-09-25"},
+        {"subject", "A change"}, {"author", "Test"}, {"signature", "openai/gpt-6-sol"}}});
+    view.handleEvent(answer);
+    auto *meta = view.findChild<QLabel *>(QStringLiteral("boardCardMeta"));
+    QVERIFY(meta);
+    QVERIFY(meta->text().contains(QStringLiteral("Children 1/1")));
+    QVERIFY(meta->text().contains(QStringLiteral("blocks")));
+    QVERIFY(meta->text().contains(QStringLiteral("relay-commit:abcdef123456")));
+}
 
 void BoardPaneTests::emptyAgentTranscriptDoesNotReserveConversationHeight()
 {

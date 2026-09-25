@@ -117,8 +117,8 @@ string everywhere. Front matter values are single-line; prose belongs in the bod
 
 Parsing preserves the front matter bytes: a card that is read and written back without a field
 change is byte-identical. The first field change re-emits the whole block in canonical order
-(`id, type, status, section, name, description, kind, topic, scope, private, labels, component, milestone,
-workstream, assignee, implemented_by, verified_by, session, waiting_on, parent, blocked_by, aliases, paths, pinned,
+(`id, type, status, section, name, description, kind, topic, scope, private, labels, component, milestone, due, snooze,
+workstream, assignee, owner, implemented_by, verified_by, session, waiting_on, parent, blocked_by, resolution, duplicate_of, aliases, paths, pinned,
 reviewed, author, supersedes, label_count, label_output, codebook, priority,
 rank, created, acceptance, source, links`, then any other key, sorted).
 
@@ -133,7 +133,7 @@ outside the range is clamped on every write.
 
 | Type | Extra fields | `status` | Folder |
 |---|---|---|---|
-| `work` (default) | `component`, `milestone`, `workstream`, `acceptance`, `implemented_by`, `verified_by`, `session`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
+| `work` (default) | `component`, `milestone`, `due`, `snooze`, `workstream`, `owner`, `resolution`, `duplicate_of`, `acceptance`, `implemented_by`, `verified_by`, `session`, `label_count`, `label_output`, `codebook`, `section` | `inbox`, `discussing`, `planning`, `planned`, `ready`, `executing`, `in-progress`, `needs-verification`, `needs-review`, `needs-labels`, `needs-ab`, `needs-qa-llm`, `needs-qa-human`, `deferred`, `done`, `dropped` | `<category>/` plus the state subfolder |
 | `memory` | `name`, `description`, `kind`, `topic`, `scope`, `paths`, `pinned`, `supersedes`, `reviewed`, `author` | `active`, `retired` | `memory/`, `memory/archive/` |
 | `alias` | `name`, `kind`, `shell` | `active`, `retired` | `aliases/`, `aliases/archive/` |
 
@@ -502,7 +502,11 @@ tabs: [{id: features, folder: features}, {id: bugs, folder: changes},
 columns: [inbox, discussing, planning, planned, executing, needs-verification, needs-qa, done]
 agent: {autonomy: auto, max_creates_per_turn: 5}
 memory: {autonomy: auto}
+# Optional: a card in beta with no due date inherits this date for display.
+milestones: {beta: '2026-11-01'}
 ```
+
+`milestones` maps names to ISO dates. It is optional; an undated milestone remains a label only.
 
 A tab names either a `folder` (a category) or a `filter` across categories. Its presence is also
 the switch that tells Relay and the agents that this repository has a Board.

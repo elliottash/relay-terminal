@@ -150,6 +150,10 @@ QPair<QColor, QColor> badgeInk(board::Badge::Kind kind)
         return {theme::Agent, mix(theme::Agent, theme::Surface, 0.55)};
     case board::Badge::Waiting:
         return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
+    case board::Badge::Due:
+        return {theme::Warning, mix(theme::Warning, theme::Surface, 0.5)};
+    case board::Badge::Overdue:
+        return {theme::Error, mix(theme::Error, theme::Surface, 0.5)};
     case board::Badge::TasksDone:
         return {theme::Success, mix(theme::Success, theme::Surface, 0.6)};
     // The same green as a finished checklist, and for the same reason: something that had to be
@@ -2407,6 +2411,19 @@ public:
         connect(m_openFile, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_path); });
         connect(m_meta, &QLabel::linkActivated, this, [this](const QString &link) {
             const QUrl url(link);
+            if (url.scheme() == QStringLiteral("card")) {
+                if (onOpenCard)
+                    onOpenCard((url.path().isEmpty() ? url.host() : url.path()).toUpper());
+                return;
+            }
+            if (url.scheme() == QStringLiteral("relay-commit")
+                || url.scheme() == QStringLiteral("relay-commits")) {
+                const QString hashes = url.path();
+                static const QRegularExpression safe(QStringLiteral("^[0-9a-fA-F]+(?: [0-9a-fA-F]+)*$"));
+                if (safe.match(hashes).hasMatch() && onOpenCommits)
+                    onOpenCommits(QStringLiteral("git show --no-ext-diff ") + hashes);
+                return;
+            }
             // The claim chip (#R9G7) is the thread's own `relay-pane:` anchor, so it goes to the
             // same handler: a click on the session reveals the pane that took the card.
             if (url.scheme() == QStringLiteral("relay-pane")) {
@@ -2574,6 +2591,7 @@ public:
     std::function<void(int step)> onPriority;
     // A path relative to the workspace (the card file) or to the card (a link in its body).
     std::function<void(const QString &path)> onOpenPath;
+    std::function<void(const QString &command)> onOpenCommits;
     // A `board_update` patch and the hash the edit started from, so the worker can refuse a
     // write over a file that changed meanwhile. The GUI never writes the file itself.
     std::function<void(const QJsonObject &patch, const QString &baseHash)> onEdit;
@@ -3163,9 +3181,83 @@ public:
         // the status still says the pane is building the card, Execute is not on offer.
         m_sessionToken = sessionToken;
         m_sessionLive = !sessionToken.isEmpty() && (!paneExists || paneExists(sessionToken));
-        const QString meta = metaText(front, card.value(QStringLiteral("tasks")).toArray(), m_path,
+        QString meta = metaText(front, card.value(QStringLiteral("tasks")).toArray(), m_path,
                                       sessionToken.isEmpty() || !paneExists
                                           || paneExists(sessionToken));
+        const auto cardLink = [this](const QString &raw) {
+            const QString id = raw.trimmed().remove(QLatin1Char('#')).toUpper();
+            if (id.isEmpty()) return QString();
+            if (hasCard && !hasCard(id))
+                return QStringLiteral("#%1 (missing)").arg(id.toHtmlEscaped());
+            return QStringLiteral("<a href=\"card:%1\">#%2</a>")
+                .arg(id.toHtmlEscaped(), id.toHtmlEscaped());
+        };
+        QStringList extra;
+        const QJsonArray children = card.value(QStringLiteral("children")).toArray();
+        if (!children.isEmpty()) {
+            int done = 0;
+            QStringList rows;
+            for (const QJsonValue &value : children) {
+                const QJsonObject child = value.toObject();
+                done += child.value(QStringLiteral("done")).toBool() ? 1 : 0;
+                rows << QStringLiteral("%1 %2 · %3")
+                            .arg(cardLink(child.value(QStringLiteral("id")).toString()),
+                                 child.value(QStringLiteral("title")).toString().toHtmlEscaped(),
+                                 child.value(QStringLiteral("status")).toString().toHtmlEscaped());
+            }
+            extra << QStringLiteral("<b>Children %1/%2</b><br>%3")
+                         .arg(done).arg(children.size()).arg(rows.join(QStringLiteral("<br>")));
+        }
+        QStringList relations;
+        const QJsonObject reverse = card.value(QStringLiteral("reverse")).toObject();
+        const QString parent = reverse.value(QStringLiteral("child_of")).toString();
+        if (!parent.isEmpty()) relations << QStringLiteral("child of %1").arg(cardLink(parent));
+        const auto forward = [&](const QString &key, const QString &label) {
+            const QJsonValue value = front.value(key);
+            const QJsonArray ids = value.isArray() ? value.toArray() : QJsonArray{value};
+            for (const QJsonValue &id : ids)
+                if (id.isString() && !id.toString().isEmpty())
+                    relations << QStringLiteral("%1 %2").arg(label, cardLink(id.toString()));
+        };
+        forward(QStringLiteral("blocked_by"), QStringLiteral("blocked by"));
+        forward(QStringLiteral("duplicate_of"), QStringLiteral("duplicate of"));
+        for (const QString &key : {QStringLiteral("blocks"), QStringLiteral("duplicated_by"),
+                                   QStringLiteral("related_from")}) {
+            const QString label = key == QStringLiteral("blocks") ? QStringLiteral("blocks")
+                : key == QStringLiteral("duplicated_by") ? QStringLiteral("duplicated by")
+                : QStringLiteral("related from");
+            for (const QJsonValue &row : reverse.value(key).toArray())
+                relations << QStringLiteral("%1 %2").arg(label,
+                    cardLink(row.toObject().value(QStringLiteral("id")).toString()));
+        }
+        const QJsonObject storedLinks = front.value(QStringLiteral("links")).toObject();
+        for (const QJsonValue &id : storedLinks.value(QStringLiteral("related")).toArray())
+            relations << QStringLiteral("related %1").arg(cardLink(id.toString()));
+        if (!relations.isEmpty())
+            extra << QStringLiteral("<b>Links</b><br>%1").arg(relations.join(QStringLiteral(" · ")));
+        const QJsonArray commits = card.value(QStringLiteral("commits")).toArray();
+        if (!commits.isEmpty()) {
+            QStringList rows, hashes;
+            for (const QJsonValue &value : commits) {
+                const QJsonObject commit = value.toObject();
+                const QString hash = commit.value(QStringLiteral("hash")).toString();
+                hashes << hash;
+                rows << QStringLiteral("<a href=\"relay-commit:%1\">%1</a> %2 %3 "
+                                       "<span style=\"color:%4\">%5 · %6</span>")
+                            .arg(hash.toHtmlEscaped(),
+                                 commit.value(QStringLiteral("date")).toString().toHtmlEscaped(),
+                                 commit.value(QStringLiteral("subject")).toString().toHtmlEscaped(),
+                                 theme::TextMuted.name(),
+                                 commit.value(QStringLiteral("author")).toString().toHtmlEscaped(),
+                                 commit.value(QStringLiteral("signature")).toString().toHtmlEscaped());
+            }
+            extra << QStringLiteral("<b>Commits</b> · <a href=\"relay-commits:%1\">diff of these %2 commits</a><br>%3")
+                         .arg(hashes.join(QStringLiteral("%20"))).arg(commits.size())
+                         .arg(rows.join(QStringLiteral("<br>")));
+        }
+        if (!extra.isEmpty())
+            meta += (meta.isEmpty() ? QString() : QStringLiteral("<br>"))
+                    + extra.join(QStringLiteral("<br>"));
         m_meta->setText(meta);
         m_meta->setVisible(!meta.isEmpty());
         m_qa = card.value(QStringLiteral("qa")).toObject();
@@ -4278,7 +4370,18 @@ private:
             parts << QStringLiteral("<span style=\"color:%1\">labels</span>&nbsp;%2")
                          .arg(theme::TextMuted.name(), shown.join(QStringLiteral(", ")));
         }
+        add("owner", QStringLiteral("owner"));
         add("assignee", QStringLiteral("assignee"));
+        const QString resolution = front.value(QStringLiteral("resolution")).toString();
+        if (!resolution.isEmpty()) {
+            QString closed = resolution.toHtmlEscaped();
+            const QString duplicate = front.value(QStringLiteral("duplicate_of")).toString();
+            if (!duplicate.isEmpty())
+                closed += QStringLiteral(" of <a href=\"card:%1\">#%2</a>")
+                              .arg(duplicate.toHtmlEscaped(), duplicate.toHtmlEscaped());
+            parts << QStringLiteral("<span style=\"color:%1\">resolution</span>&nbsp;%2")
+                         .arg(theme::TextMuted.name(), closed);
+        }
         // Which pane claimed the card (#R9G7), beside who it is assigned to: the same chip the
         // row wears, and — while that pane is open — the same `relay-pane:` anchor the thread's
         // "Executing (xxxxxxxx)" entry carries, in the link colour, so a click reveals the pane.
@@ -4298,6 +4401,14 @@ private:
         }
         add("waiting_on", QStringLiteral("waiting on"));
         add("milestone", QStringLiteral("milestone"));
+        const QJsonValue due = front.value(QStringLiteral("due"));
+        if (due.isObject()) {
+            const QJsonObject obj = due.toObject();
+            parts << item(QStringLiteral("due"), obj.value(QStringLiteral("date")).toString());
+        } else if (due.isString()) {
+            parts << item(QStringLiteral("due"), due.toString());
+        }
+        add("snooze", QStringLiteral("snooze until"));
         add("component", QStringLiteral("component"));
         add("implemented_by", QStringLiteral("implemented by"));
         // Who closed it out of a QA lane, stamped by the worker (#T71W). Beside the implementer,
@@ -4311,7 +4422,8 @@ private:
         }
         const QJsonObject links = front.value(QStringLiteral("links")).toObject();
         for (auto it = links.begin(); it != links.end(); ++it) {
-            if (!it.value().isArray() || it.value().toArray().isEmpty())
+            if (it.key() == QStringLiteral("commits") || !it.value().isArray()
+                || it.value().toArray().isEmpty())
                 continue;
             QStringList items;
             for (const QJsonValue &entry : it.value().toArray())
@@ -5327,6 +5439,12 @@ void BoardView::buildChrome(QVBoxLayout *layout)
             onHint(QStringLiteral("copyId"), QStringLiteral("y"));
     };
     m_detail->onOpenCard = [this](const QString &id) { openCard(id); };
+    m_detail->onOpenCommits = [this](const QString &command) {
+        if (onRunCommand)
+            onRunCommand(command);
+        else
+            showNotice(QStringLiteral("Run it yourself: %1").arg(command), false);
+    };
     // Try it (#JNYN, 31.10). `try_run` and `try_answer` go to the worker like any other message;
     // the "open" line the section names is opened here, by what it is: a command runs in a
     // terminal pane beside the board (the window's `onRunCommand`), and a path or a `relay://`
@@ -5549,6 +5667,13 @@ void BoardView::buildListTools(QVBoxLayout *layout)
     m_filter->setClearButtonEnabled(true);
     m_filter->setMinimumWidth(60);      // it gives way to the buttons rather than pushing them out
     m_listTools->addWidget(m_filter, 1);
+    m_snoozed = new QToolButton(tools);
+    m_snoozed->setObjectName(QStringLiteral("boardSnoozedFilter"));
+    m_snoozed->setText(QStringLiteral("Snoozed"));
+    m_snoozed->setCheckable(true);
+    m_snoozed->hide();
+    m_snoozed->setToolTip(QStringLiteral("Show snoozed cards until their date"));
+    m_listTools->addWidget(m_snoozed);
     // There is no sort control in this row any more (owner, 2026-09-19: "change switchboard
     // sorting from a sort button to adding header columns that you click on"): the order is the
     // list's own column header, built with the list under these tools.
@@ -5612,6 +5737,10 @@ void BoardView::buildListTools(QVBoxLayout *layout)
         // thread per key.
         rebuild();
         startSearch();
+    });
+    connect(m_snoozed, &QToolButton::toggled, this, [this](bool checked) {
+        m_model.setSnoozedOnly(checked);
+        rebuild();
     });
     connect(m_add, &QToolButton::clicked, this, [this] {
         if (onHint)
@@ -8166,6 +8295,22 @@ void BoardView::rebuild()
         return;
     }
     m_rebuildPending = false;
+    bool hasSnoozed = false;
+    for (const QString &id : m_model.allIds()) {
+        const board::Card *card = m_model.card(id);
+        if (card && card->snoozed && !card->closed()) {
+            hasSnoozed = true;
+            break;
+        }
+    }
+    if (m_snoozed) {
+        if (!hasSnoozed && m_snoozed->isChecked()) {
+            const QSignalBlocker blocker(m_snoozed);
+            m_snoozed->setChecked(false);
+            m_model.setSnoozedOnly(false);
+        }
+        m_snoozed->setVisible(hasSnoozed);
+    }
     syncSectionChecks();   // before the refill: the boxes decide which sections it puts in
     syncLabelChecks();     // and the chips which labels it keeps
     refill();

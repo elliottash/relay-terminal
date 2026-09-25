@@ -803,6 +803,12 @@ QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive)
             {QStringLiteral("dropped"), QStringLiteral("dropped")}};
         out << Badge{Badge::Status, shortNames.value(card.status, statusTitle(card.status))};
     }
+    if (card.closed() && !card.resolution.isEmpty() && card.resolution != QStringLiteral("done")) {
+        const QString label = card.resolution == QStringLiteral("duplicate")
+            ? QStringLiteral("dup") : card.resolution == QStringLiteral("not-planned")
+            ? QStringLiteral("not planned") : card.resolution;
+        out << Badge{Badge::Resolution, label};
+    }
     // Who checked it, on the row itself (#T71W): in the Verified section every row has one, so
     // the section header cannot say it and the badge must. A card the agent closed itself is
     // stamped with its own signature (#93WR) and wears no tick: nobody checked it, and the row
@@ -811,6 +817,8 @@ QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive)
         out << Badge{Badge::Verified, QStringLiteral("✓ ") + signatureLabel(card.verifiedBy)};
     for (const QString &label : card.labels)
         out << Badge{Badge::Label, label};
+    if (!card.owner.isEmpty())
+        out << Badge{Badge::Owner, card.owner};
     if (card.assignee == QStringLiteral("agent"))
         out << Badge{Badge::Agent, QStringLiteral("✦ agent")};
     else if (!card.assignee.isEmpty())
@@ -820,6 +828,11 @@ QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive)
     if (card.tasksTotal > 0)
         out << Badge{card.tasksDone >= card.tasksTotal ? Badge::TasksDone : Badge::Tasks,
                      QStringLiteral("☑ %1/%2").arg(card.tasksDone).arg(card.tasksTotal)};
+    if (card.childrenTotal > 0)
+        out << Badge{Badge::Children,
+                     QStringLiteral("⮋ %1/%2").arg(card.childrenDone).arg(card.childrenTotal)};
+    if ((card.overdue || card.dueSoon) && !card.dueDate.isEmpty())
+        out << Badge{card.overdue ? Badge::Overdue : Badge::Due, card.dueDate};
     if (card.threadEntries > 0)
         out << Badge{Badge::Thread, QStringLiteral("✎ %1").arg(card.threadEntries)};
     if (card.isPrivate)
@@ -841,7 +854,13 @@ int badgeDropOrder(Badge::Kind kind)
         return 2;
     case Badge::Tasks:
     case Badge::TasksDone:
+    case Badge::Children:
         return 4;
+    case Badge::Owner:
+    case Badge::Due:
+    case Badge::Overdue:
+    case Badge::Resolution:
+        return 6;
     case Badge::Assignee:
         return 5;
     case Badge::Agent:
@@ -1156,6 +1175,16 @@ Card Card::fromJson(const QJsonObject &object)
     card.section = object.value(QStringLiteral("section")).toString();
     card.tab = object.value(QStringLiteral("tab")).toString();
     card.assignee = object.value(QStringLiteral("assignee")).toString();
+    card.owner = object.value(QStringLiteral("owner")).toString();
+    card.resolution = object.value(QStringLiteral("resolution")).toString();
+    card.parent = object.value(QStringLiteral("parent")).toString();
+    card.dueDate = object.value(QStringLiteral("effective_due")).toString();
+    card.snooze = object.value(QStringLiteral("snooze")).toString();
+    card.overdue = object.value(QStringLiteral("overdue")).toBool();
+    card.dueSoon = object.value(QStringLiteral("due_soon")).toBool();
+    card.snoozed = object.value(QStringLiteral("snoozed")).toBool();
+    card.childrenDone = object.value(QStringLiteral("children_done")).toInt();
+    card.childrenTotal = object.value(QStringLiteral("children_total")).toInt();
     card.waitingOn = object.value(QStringLiteral("waiting_on")).toString();
     card.rank = object.value(QStringLiteral("rank")).toString();
     card.path = object.value(QStringLiteral("path")).toString();
@@ -1507,7 +1536,7 @@ int sortCompare(const Card &a, const Card &b, Sort sort)
 {
     if (sort == Sort::PriorityHigh || sort == Sort::PriorityLow) {
         if (a.priority == b.priority)
-            return 0;
+            return a.overdue == b.overdue ? 0 : (a.overdue ? -1 : 1);
         return (a.priority > b.priority) == (sort == Sort::PriorityHigh) ? -1 : 1;
     }
     if (sort == Sort::TitleAsc || sort == Sort::TitleDesc) {
@@ -1533,6 +1562,8 @@ QList<Card> Model::sorted(QList<Card> cards, bool closedSection) const
             const int byColumn = sortCompare(a, b, m_sort);
             if (byColumn != 0)
                 return byColumn < 0;
+        } else if (!closedSection && a.priority == b.priority && a.overdue != b.overdue) {
+            return a.overdue;
         } else if (closedSection && a.created != b.created) {
             return a.created > b.created;
         }
@@ -1830,6 +1861,9 @@ void Model::setSearchResult(const QString &terms, const QSet<QString> &ids)
 // words did (#VKFV).
 bool Model::shown(const Card &card) const
 {
+    const bool snoozedOpen = card.snoozed && !card.closed();
+    if (m_snoozedOnly ? !snoozedOpen : snoozedOpen)
+        return false;
     if (!m_labelFilter.isEmpty()) {
         for (const QString &label : m_labelFilter)
             if (!containsCaseless(card.labels, label))
