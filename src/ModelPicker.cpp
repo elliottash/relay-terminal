@@ -733,10 +733,12 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     // first): a row with something actually wrong says so in "via" instead, right beside the
     // provider it's wrong about. A healthy row's plain percentage stays out of sight here — it is
     // still in ColLeft (hidden on this page) and in the tooltip — since nobody needs "87% left"
-    // repeated down a page of rows that are all fine.
+    // repeated down a page of rows that are all fine. The reason goes *first*: appended, it was
+    // the part the column elided, and "kimi · pay-as-you-go · no …" at rank 1 of main read as
+    // the Kimi coding plan while every draw skipped it (#QTW1).
     QString via = entry ? providerText(*entry) : QString();
     if (sectionsPage() && dead && !left.isEmpty())
-        via = via.isEmpty() ? left : via + QStringLiteral(" · ") + left;
+        via = via.isEmpty() ? left : left + QStringLiteral(" · ") + via;
     // Ranked but past this class's "in box" cutoff (`setBoxCutoffFromRow`): the checkbox says so,
     // but a checkbox column alone read as nine independent ticks rather than one cutoff line, so
     // the row is muted the same way an unusable one is — a second, glance-able signal for the
@@ -835,7 +837,7 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     }
     QString tip = !entry ? QStringLiteral("%1 is not in the catalog right now: its provider has no key, or it left the listing")
                                .arg(item.key)
-                : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(entry->provider)
+                : !entry->usable ? QStringLiteral("No key for %1 · skipped until you add one").arg(providerText(*entry))
                 : until >= 0 ? QStringLiteral("Exhausted · skipped until it resets")
                 : rank == 1 && tier == kMain
                     ? QStringLiteral("%1 · rank 1 of main: what a new pane and /swap run on").arg(entry->model)

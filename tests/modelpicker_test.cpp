@@ -1086,6 +1086,32 @@ private Q_SLOTS:
     // ColLeft has no room on the sectioned page (rule 1 protects the model column first): a row
     // with something wrong says so in "via" instead, right beside the provider it's wrong about.
     // A healthy row's plain percentage is not worth repeating down a page of rows that are fine.
+    // #QTW1: two plans of one provider serve a model of the same name. The keyless one ranked
+    // first read as the keyed one, because "no key" came last in via and the column cut it off.
+    void aKeylessPlanBesideAKeyedOneSaysNoKeyFirst() {
+        QJsonArray rows = presets();
+        rows << QJsonObject{{QStringLiteral("id"), QStringLiteral("kimi")}, {QStringLiteral("label"), QStringLiteral("kimi · k3")},
+                            {QStringLiteral("provider"), QStringLiteral("kimi")}, {QStringLiteral("plan"), QStringLiteral("pay-as-you-go")},
+                            {QStringLiteral("model"), QStringLiteral("kimi-k3")},
+                            {QStringLiteral("models"), QJsonArray{model(QStringLiteral("kimi-k3"), QStringLiteral("kimi-k3"), QStringLiteral("main"), {})}}};
+        rows << QJsonObject{{QStringLiteral("id"), QStringLiteral("kimi-code")}, {QStringLiteral("label"), QStringLiteral("kimi code · k3")},
+                            {QStringLiteral("provider"), QStringLiteral("kimi")}, {QStringLiteral("plan"), QStringLiteral("coding plan")},
+                            {QStringLiteral("model"), QStringLiteral("k3")}, {QStringLiteral("has_stored_key"), true},
+                            {QStringLiteral("models"), QJsonArray{model(QStringLiteral("k3"), QStringLiteral("kimi-k3"), QStringLiteral("main"), {})}}};
+        setList(QStringLiteral("main"), {{QStringLiteral("kimi|kimi-k3"), QString()},
+                                         {QStringLiteral("kimi-code|k3"), QString()}});
+        ModelPicker::Context ctx = context();
+        ctx.catalog = catalogFrom(rows);
+        ctx.tier = ModelPicker::classesTier();
+        ModelPicker picker(ctx);
+        QTreeWidgetItem *keyless = rowFor(picker.list(), QStringLiteral("kimi|kimi-k3"));
+        QTreeWidgetItem *keyed = rowFor(picker.list(), QStringLiteral("kimi-code|k3"));
+        QVERIFY(keyless && keyed);
+        QCOMPARE(keyless->text(ColVia), QStringLiteral("no key · kimi · pay-as-you-go"));
+        QCOMPARE(keyed->text(ColVia), QStringLiteral("kimi · coding plan"));
+        QVERIFY(keyless->toolTip(ColModel).contains(QStringLiteral("No key for kimi · pay-as-you-go")));
+    }
+
     void onTheSectionedPageAWrongRowSaysWhyInViaAndColLeftHides() {
         setList(QStringLiteral("main"), {{QStringLiteral("glm-coding|glm-5.3"), QString()},
                                          {QStringLiteral("anthropic|claude-opus-5-5"), QString()}});
@@ -1100,7 +1126,8 @@ private Q_SLOTS:
         QCOMPARE(healthy->text(ColVia), QStringLiteral("z.ai (glm) · coding plan"));   // nothing appended
         QTreeWidgetItem *spent = rowFor(picker.list(), QStringLiteral("anthropic|claude-opus-5-5"));
         QVERIFY(spent->text(ColVia).contains(QStringLiteral("anthropic (claude)")));
-        QVERIFY(spent->text(ColVia).contains(QStringLiteral("resets 14:30")));
+        // The reason leads, so an elided column still shows it (#QTW1).
+        QVERIFY(spent->text(ColVia).startsWith(QStringLiteral("0% · resets 14:30 · ")));
         QCOMPARE(spent->text(ColLeft), QStringLiteral("0% · resets 14:30"));   // still there, just not drawn
         // The same row via `addGroupRow` on the `all` tab: its own column is back, so nothing
         // needs folding into "via" there.
