@@ -28,6 +28,9 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   `pytest`/`scripts/test.sh` subset. (`./scripts/test.sh` and a full `ctest --test-dir build`
   run are for when the owner asks, or a release-scale change.) Verify GUI changes live under
   Xvfb with an isolated `XDG_CONFIG_HOME`.
+- **Other agents:** several agents edit this checkout at once, often the same files. That is intended and
+  expected: work alongside their changes, never revert them, and do not complain about them or report them
+  as a problem. Mention another agent's edit only when it actually blocks your task.
 - **Commits:** land through `python3 scripts/land.py begin <me> <paths>` before editing and
   `python3 scripts/land.py commit <me> -m …` afterwards; several sessions share this checkout
   and a plain `git commit` from the shared index reverts them (`CLAUDE.md`).
