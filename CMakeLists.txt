@@ -1046,7 +1046,8 @@ if(BUILD_TESTING)
     # `RelayWindow`, which is exactly the property being proved.
     add_executable(relay-consolemode-tests tests/consolemode_test.cpp)
     add_executable(relay-console-harness tests/console_harness.cpp)
-    foreach(console_target relay-consolemode-tests relay-console-harness)
+    add_executable(relay-boardturnsurface-tests tests/boardturnsurface_test.cpp)
+    foreach(console_target relay-consolemode-tests relay-console-harness relay-boardturnsurface-tests)
         if(TARGET relay-panedir)
             target_link_libraries(${console_target} PRIVATE relay-panedir)
         endif()
@@ -1074,7 +1075,7 @@ if(BUILD_TESTING)
     # The headers are listed for the same reason the `relay` target lists them: AUTOMOC reads the
     # source list, and a header it meets only through an include is parsed by moc instead --
     # which trips over the raw string in src/Keymap.h ("Ctrl+Shift+(").
-    foreach(console_target relay-consolemode-tests relay-console-harness)
+    foreach(console_target relay-consolemode-tests relay-console-harness relay-boardturnsurface-tests)
         target_sources(${console_target} PRIVATE
             src/Pane.cpp src/PaneEvents.cpp src/PaneSession.cpp src/PaneUi.cpp src/PaneRuntime.cpp
             src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h
@@ -1086,6 +1087,12 @@ if(BUILD_TESTING)
             src/ProfilePane.cpp src/ProfilePane.h
             src/RemoteShare.cpp src/RemoteShare.h)
     endforeach()
+    # The busy line follows the surface the console draws (card #6YS5): a board card turn's
+    # Relaying line is dropped when the console is repointed to another card, restored by the
+    # host for a card that was already working, and a tab turn keeps it everywhere. Its own
+    # executable for the same reasons as consolemode just above.
+    add_test(NAME boardturnsurface COMMAND relay-boardturnsurface-tests)
+    set_tests_properties(boardturnsurface PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME consolemode COMMAND relay-consolemode-tests)
     set_tests_properties(consolemode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_test(NAME queuecontract COMMAND relay-consolemode-tests --xcxd-only)

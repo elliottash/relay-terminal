@@ -400,6 +400,11 @@ struct ConsoleHandle {
     // surface is passed rather than read back off the context; called with the surface the
     // console already holds, it does nothing.
     std::function<void(const QString &surface)> clearTranscript;
+    // "The surface you now hold already has a turn running" — card #6YS5. A card's turn that
+    // started while this console was pointed elsewhere sent its `agent_started` to a surface
+    // this console no longer holds, so the console cannot know; the host does, from the
+    // board's per-card facts. Calling it for a surface with no turn running is a no-op.
+    std::function<void()> turnRunning;
     explicit operator bool() const { return widget != nullptr; }
 };
 

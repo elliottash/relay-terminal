@@ -452,6 +452,7 @@ void Pane::handle(const QJsonObject &event) {
             if (m_runningItem.isEmpty() && m_workerItems.isEmpty() && m_workerSteering.isEmpty()
                 && m_agentBusy) {
                 m_agentBusy = false;
+                m_busySurface.clear();
                 m_currentItem.clear();
                 stopTurnClock();
                 m_idleTip.start();
@@ -474,6 +475,11 @@ void Pane::handle(const QJsonObject &event) {
         } else if (type == QStringLiteral("agent_started")) {
             // Busy follows agent_started/agent_finished: the next queued turn may start right after done.
             m_agentBusy = true; m_turnHeader = false; m_turnText.clear();
+            // The busy line belongs to the surface this turn runs on (card #6YS5): a board card
+            // turn carries `surface: card:<ID>` and its agent_finished is routed there too, so a
+            // console that has since been pointed at another card would never see the finish.
+            // An empty surface is the tab's own conversation, which prints on every console.
+            m_busySurface = event.value(QStringLiteral("surface")).toString();
             m_idleRecap.stop(); m_idleSince.invalidate();   // a running turn is not idle work to recap
             relay::panedir::Directory::instance().rosterChanged();   // busy now: peers' pane_list sees it (#R5TC)
             m_shareFailed = m_shareFinished = false;   // the pane is in use again; the last turn is history
@@ -540,6 +546,7 @@ void Pane::handle(const QJsonObject &event) {
             m_runCommands.clear();
             if (m_currentItem == event.value(QStringLiteral("id")).toString()) m_currentItem.clear();
             m_agentBusy = !m_runningItem.isEmpty() && m_runningItem != event.value(QStringLiteral("id")).toString();
+            m_busySurface.clear();   // the next agent_started re-stamps it (card #6YS5)
             // Read before the idle reset below: a turn a peer's message started names that pane
             // in its unwatched-finish notice (#R5TC §7) — work happened here with nobody asking.
             const bool wokenTurn = m_paneWakeTurn;

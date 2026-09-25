@@ -5086,6 +5086,10 @@ void BoardView::handleEvent(const QJsonObject &event)
         if (const QString id = event.value(QStringLiteral("card_id")).toString();
             m_cardTurns.contains(id)) {
             m_detail->setBusy(true, m_cardTurns.value(id).mode);
+            // The console's own "Relaying · …" line too (card #6YS5): the turn's agent_started
+            // was routed to this card's surface, which this console holds only if it was already
+            // on this card when the turn began — arriving mid-turn, it never saw the start.
+            if (m_cardConsoleHandle.turnRunning) m_cardConsoleHandle.turnRunning();
         } else {
             m_detail->setBusy(false);
         }

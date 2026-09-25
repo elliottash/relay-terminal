@@ -4634,6 +4634,23 @@ public:
         m_proseUri.clear();
         m_lastBlock = relay::gaps::Block::None;   // a cleared screen does not open with a blank line
         resetTranscript();
+        // The busy line goes with the surface it belongs to (card #6YS5): a turn on card A
+        // finishes with an `agent_finished` routed to `card:A`, and this console now holds
+        // another card's surface, so nothing would ever clear it — the console would sit on
+        // "Relaying · thinking…" while the agent works on a card the user is not looking at.
+        // Drop it here; the card page's own strip carries the board's per-card facts. A turn
+        // with no surface is the tab's conversation, which prints on every console and keeps
+        // its busy line across the switch.
+        if (m_agentBusy && !m_busySurface.isEmpty() && m_busySurface != now) {
+            m_agentBusy = false;
+            m_busySurface.clear();
+            m_turnText.clear();
+            m_turnHeader = false;
+            m_currentItem.clear();
+            stopTurnClock();
+            m_idleTip.start();
+            relay::panedir::Directory::instance().rosterChanged();   // the console is idle now
+        }
         if (m_backend) { m_backend->clearScrollback(); m_backend->clear(); }
         m_restoredScrollback.clear();
         m_restoredProse.clear();
@@ -4644,6 +4661,23 @@ public:
         // still re-wraps when the pane is resized. Nothing banked: nothing is replayed.
         queueTextReplay(replay, RestoredKind::Surface, m_bankedProse.value(now));
         rebuildQueueStrip();                        // the strip is the new surface's too
+    }
+
+    // The other half of the busy line following the surface (card #6YS5): the host says the
+    // surface just taken already has a turn running — one whose `agent_started` was routed to
+    // a surface this console did not hold at the time, so it never arrived. Restore what
+    // agent_started would have set (the line, the clock, the gates busy holds) and stamp the
+    // busy line with the surface it now belongs to, so a later switch drops it again. The
+    // mode is not kept: `status` events of this turn are routed here now and carry the real
+    // text, and m_turnText is the transcript's answer text, not a status line.
+    void consoleTurnRunning() {
+        if (m_agentBusy) return;
+        m_agentBusy = true;
+        m_turnHeader = false;
+        m_busySurface = m_transcriptSurface;
+        startTurnClock();
+        relay::panedir::Directory::instance().rosterChanged();   // busy now: peers' pane_list sees it (#R5TC)
+        refreshBusyLine();
     }
 
     void applyTranscriptVisibility() {
@@ -17659,6 +17693,9 @@ private:
     QJsonObject m_lastConfigure;
     QString m_pendingAgentMode;
     bool m_seenShell = false, m_refocus = true, m_configured = false, m_agentBusy = false;
+    // The surface the busy line's turn runs on (card #6YS5): empty for the tab's own
+    // conversation, `card:<ID>` for a board card turn, set by agent_started.
+    QString m_busySurface;
     // agent sessions UI
     QToolButton *m_planChip = nullptr;
     QLabel *m_ctxLabel = nullptr;

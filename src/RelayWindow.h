@@ -6083,6 +6083,7 @@ private:
         handle.runActionLetter = [guard](const QString &letter) { return guard && guard->runActionLetter(letter); };
         handle.setTranscriptHiddenUntilUsed = [guard](bool on) { if (guard) guard->setTranscriptHiddenUntilUsed(on); };
         handle.clearTranscript = [guard](const QString &surface) { if (guard) guard->clearTranscript(surface); };
+        handle.turnRunning = [guard] { if (guard) guard->consoleTurnRunning(); };
         return handle;
     }
 
