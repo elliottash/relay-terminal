@@ -1,0 +1,20 @@
+# DVV2 evidence — generated 2026-09-25T05:10:31Z against landed 0da66145
+
+## python tests
+................
+----------------------------------------------------------------------
+Ran 16 tests in 0.803s
+
+OK
+......................s....
+----------------------------------------------------------------------
+Ran 27 tests in 0.500s
+
+OK (skipped=1)
+
+## ctest -R scratchmonitor
+1/1 Test #66: scratchmonitor ...................   Passed    1.48 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   1.48 sec

@@ -1,0 +1,23 @@
+# DVV2 end-to-end smoke (sandboxed: HOME, ledger, all three roots pinned away from the real ones)
+/tmp/dvv2-ev.iGFS/home/.cache/scratch/relay/scratch/adhoc/tree-export-for-card-EV-sc86b3f
+/tmp/dvv2-ev.iGFS/proj/.relay/work/draft-report-sc90c3f
+/tmp/dvv2-ev.iGFS/home/.local/tools/relay/tools/tool-install-probe-scb4102
+== release scratch (reclaims)
+sc6b3a6 reclaimed /tmp/dvv2-ev.iGFS/home/.cache/scratch/relay/scratch/adhoc/gone-soon-sc6b3a6
+ls: cannot access '/tmp/dvv2-ev.iGFS/home/.cache/scratch/relay/scratch/adhoc/gone-soon-sc6b3a6': No such file or directory
+== keep must not be silently deleted
+relay-scratch release: keep must be promoted (promote_to=...) or explicitly dropped (drop=True); it is never silently deleted
+exit=2
+== guard refuses /tmp write with the scratch_dir call (unit-covered; here the sweep scan):
+  20.5 GB     102h  claude-scratch      /tmp/claude-1000/pf4k  (a live process uses it)
+  13.2 GB     145h  claude-session      /tmp/claude-1000/-home-elliott-repos-relay-terminal/03963045-a3a1-4d7c-b75c-10642a44a6d0  (a live process uses it)
+   3.3 GB       0h  managed             /tmp/claude-1000/land  (managed by land.py gc)
+== ledger
+sc86b3f live      scratch         0 B    tree export for card EV
+sc90c3f live      keep            0 B    draft report
+scb4102 live      install         0 B    tool install probe
+scc773f live      keep            0 B    keepme
+class   install                 1 rows  0 B
+class   keep                    2 rows  0 B
+class   scratch                 1 rows  0 B
+session unknown                 4 rows  0 B
