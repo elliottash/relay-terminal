@@ -5127,10 +5127,10 @@ public:
         if (fresh && m_agentBusy) { status(QStringLiteral("Stop the agent turn before executing in a fresh context.")); return; }
         send({{"type", "plan_execute"}, {"path", path}, {"fresh", fresh},
               {"when", m_agentBusy ? QStringLiteral("queue") : QStringLiteral("now")}});
-        // An agent-bound action the user took, so it gets the agent echo: violet, and the ✦ glyph
-        // the site and BoardPane already use for agent lines (› is the shell glyph).
+        // An agent-bound action the user took, so it gets the agent echo: violet, starting at the
+        // beginning of the line (› is the shell glyph).
         ensureLineStart();
-        printInline(QStringLiteral("✦ Run the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::UserAgent);
+        printInline(QStringLiteral("Run the plan %1%2\n").arg(QFileInfo(path).fileName(), fresh ? QStringLiteral(" (fresh context)") : QString()), Ink::UserAgent);
         focusInput();
     }
     void keepPlanning() {
@@ -5508,7 +5508,7 @@ private:
         ensureLineStart();
         // Signed when it came from somewhere else: on a shared or paired pane the person at the
         // desk should be able to see that the answer in their transcript is not theirs.
-        printInline(QStringLiteral("✦ %1: %2%3\n").arg(question.value(QStringLiteral("header")).toString(),
+        printInline(QStringLiteral("%1: %2%3\n").arg(question.value(QStringLiteral("header")).toString(),
                                                      answer.isEmpty() ? QStringLiteral("skipped")
                                                                       : answer.join(QStringLiteral(", ")),
                                                      author.trimmed().isEmpty()
@@ -5543,7 +5543,7 @@ private:
         const QJsonObject question = questionAt(0);
         ensureLineStart();
         // Signed when it came from somewhere else, like every answer.
-        printInline(QStringLiteral("✦ %1: %2%3\n").arg(question.value(QStringLiteral("header")).toString(), decision,
+        printInline(QStringLiteral("%1: %2%3\n").arg(question.value(QStringLiteral("header")).toString(), decision,
                                                      author.trimmed().isEmpty()
                                                          ? QString()
                                                          : QStringLiteral(" · from %1").arg(author.trimmed())),
