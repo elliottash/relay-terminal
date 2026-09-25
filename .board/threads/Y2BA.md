@@ -38,3 +38,17 @@ Blocked before A0 implementation: the board layout restore branch is in src/Rela
 ### Umbrella session · 2026-09-25 (paused, not abandoned)
 
 Holding this slice at the owner's pause. On resume the builder relaunches with `src/RelayWindowCore.cpp` added to its permitted files (the A0 restore branch at :1187); everything else in the recorded plan stands. No code has been changed for this card yet.
+
+<!-- relay:entry 20260925T160500Z-a0 author=y2ba-cards kind=progress -->
+### y2ba-cards · 2026-09-25 16:05
+Step 1 (A0 solo card panes) landed in 0e198884: `BoardView::pinSolo`, `RelayWindow::openBoardCardInNewPane`, Shift+Enter on a row, the page's ⤴ Own pane button, a new card created while another card's page is open opens in its own pane, `#ID` links prefer a solo pane on that card, layout node `{"board": {workspace, solo: true, card}}` and restore re-pins it (src/RelayWindowCore.cpp restore branch). `ctest -R boardsolo` passes (5 cases); land.py's gate built the exact landed tree. Starting step 2 (Kind::Card / CardController).
+
+<!-- relay:entry 20260925T191737Z-2c author=agent kind=progress model=glm-5.3 pane=22f05421 turn=46dc7f7d90f746138bbd7773c040726f/b5e58fcd7c594b2ca928c9cdc4b4fe32 -->
+Builder died at the guest restart. Landed earlier: steps 1–2 (0e198884, 459c2e59). Still uncommitted in the tree from the killed builder (verified by git status, never begun under land.py): the Shift+Enter hint in src/BoardPane.cpp and the stronger tests/boardsolo_test.cpp — the resume builder must review those hunks (`git diff -- src/BoardPane.cpp tests/boardsolo_test.cpp`) and land them via `land.py begin --from-head` + the confirm review. The task checkboxes are stale relative to the commits: the resume builder verifies which of t:ss/t:wb the two commits actually cover and ticks only those. Remaining after that: the live pass in docs/qa_evidence/2026-09-25-card-panes/ scored 8 pass / 8 fail with three named failures — second card pane shows Alpha not the clicked Bravo, layout.json saves only one card-pane node, Plan turns never stream into the card pane — then re-drive the pass, docs (t:g5), needs-verification.
+
+<!-- relay:entry 20260925T191737Z-dv author=agent kind=event model=glm-5.3 pane=22f05421 turn=46dc7f7d90f746138bbd7773c040726f/b5e58fcd7c594b2ca928c9cdc4b4fe32 -->
+- ✦ agent moved this card · Executing → Planned · Builder session died at the guest restart; steps 1-2 are on main, leftovers and the live-pass failures remain. Back to planned for the re-queued builder.
+
+<!-- relay:entry 20260925T203000Z-r1 author=y2ba-fix2 kind=progress -->
+### y2ba-fix2 · 2026-09-25 20:30
+Resumed. The killed builder's `BoardPane.cpp` hint and `boardsolo_test.cpp` landed in d850939f (`boardsolo` passes). The three live failures are gone at HEAD: re-drove `docs/qa_evidence/2026-09-25-card-panes/drive.sh` on a clean `git archive` build under Xvfb, **16 passed, 0 failed** — two card panes on Alpha and Bravo, both Plan turns streamed at once, `layout.json` holds 2 card nodes, both panes come back after a restart. The earlier failures were fixed by 459c2e59/d850939f plus OCR/check fixes in the drive script. Docs: `docs/ARCHITECTURE.md` Board section, "Several cards open at once: card panes". Removed b48afea2 (#9FX8) from links.commits, where it had been appended by mistake. Still open: t:wb's remainder — `CardDetail` in `src/CardPane.{h,cpp}` behind a `CardController`; `Kind::Card` itself landed in 459c2e59.

@@ -1762,6 +1762,29 @@ From the terminal: `#` after a space opens a card picker in agent or auto mode (
 `#` stays a Bash comment), a resolved `#K7Q2` travels with the prompt as `ask {cards: […]}`, and
 every agent card write prints one line in the pane that caused it.
 
+**Several cards open at once: card panes** (card #Y2BA). The list Board opens one card at a time
+in its own splitter, so a second card goes to a pane of its own: `ToolPane::Kind::Card`, a
+`BoardView` pinned to that card by `BoardView::pinSolo(id)`, made by
+`RelayWindow::openBoardCardInNewPane(id, anchor)` and docked beside the pane that asked. Three ways
+in: **Shift+Enter** on a list row, the open page's **⤴ Own pane** button (the list goes back to its
+rows), and a new card created while another card's page is open — pressing "New card" again splits
+rather than replacing the page, the owner's ask on the card. A card pane never shows its list,
+filter or page agent: Esc, the page's × and the header's "Close pane" close the *pane*
+(`onClosePane`, queued, because it can come from inside the view's own event handling), `n` hands
+the new card to the tab's list Board (`onQuickAddElsewhere`), `/` does nothing, and a `#ID` link on
+the page moves the pane to that card. Each pane's card has its own docked conversation, keyed
+`<tab>/card:<ID>` as before; the same card in two panes shares one (the tab rule). Routing: a `#ID`
+link (`openBoardCard`) goes to a card pane already on that card, else the tab's list Board;
+Ctrl+Shift+A, notifications and `boardPaneFor` skip card panes. A card pane watches only the board
+folder and its own card's files — the list Board watches the tree and the tab's one worker sends
+every view of the tab what changed. It is saved as `{"card": {"workspace", "id"}}`
+(`relay::windowstate::isUsableNode` accepts it) and restored pinned, opening the card once the
+rows arrive; a card that is not among the rows that did arrive closes its pane. The first release
+saved `{"board": {"workspace", "solo": true, "card"}}`, which restore still reads.
+`tests/boardsolo_test.cpp`, `tests/windowstate_test.cpp`. What is still ahead (the card's step 2
+remainder): `CardDetail` in `src/CardPane.{h,cpp}` behind a `CardController` so a card pane need
+not carry a whole `BoardView` and its own copy of the model.
+
 Memory is a card type, not a work card: the Memory tab is one list per topic. There is no
 plan card type — card #X7NB dropped it on 2026-09-20 — so `planning/` is an ordinary tab of
 work cards and a plan is the `## Plan` section of the card it plans.

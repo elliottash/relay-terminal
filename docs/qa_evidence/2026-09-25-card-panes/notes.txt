@@ -1,0 +1,19 @@
+PASS a1 the Board is open ("Board" in 00-board.png)
+PASS a2 Shift+Enter put a card in a pane of its own (its header says Close pane) ("^close$" read in 01-one-card-pane.png)
+PASS a3 that pane is on the card ("Alpha first card" in 01-one-card-pane.png)
+PASS a4 the list is still a list beside it (its rows) ("^bravo$" read in 01-one-card-pane.png)
+PASS b1 the list's open page offers "⤴ Own pane" (01b-second-card-on-the-list.png)
+PASS b2 two card panes open at once (4 "Close pane" headers in 02-two-card-panes.png)
+PASS b3 one is on Alpha ("Alpha first card" in 02-two-card-panes.png, spaces as read)
+PASS b4 the other on Bravo ("Bravo second card" in 02-two-card-panes.png, spaces as read)
+issue headings read at: 1217 335 892 353
+PASS c1 Plan pressed in 2 card panes
+PASS c2 both busy strips running at once (03-both-planning.png: )
+PASS c3 the plans streamed in ("Read the files" in 04-both-planned.png)
+PASS c4 both card panes show their plan turn's answer (2 in 04-both-planned.png)
+PASS d1 the saved layout holds 2 card nodes (layout.json)
+PASS d2 after the restart both card panes are back (4 "Close pane" headers in 05-restored.png)
+PASS d3 back on Alpha ("alpha-first-card.md" in 05-restored.png)
+PASS d4 and on Bravo ("bravo-second-" in 05-restored.png)
+
+16 passed, 0 failed
