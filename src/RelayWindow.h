@@ -4720,18 +4720,17 @@ public:
         if (!boardInTab()) toggleBoardPane();
         ToolPane *tool = boardInTab();
         if (!tool) return;
-        tool->board()->selectCard(id);
-        tool->board()->openSelected();
+        tool->board()->openCardSolo(id);
         setActiveLeaf(tool);
         focusLeaf(tool);
-        // A Switchboard this call just opened has no rows yet, so openSelected() had nothing to
+        // A Switchboard this call just opened has no rows yet, so openCardSolo(id) had nothing to
         // open and only the selection survives (the pane restores it when the rows land). Keep
         // asking while they arrive, so one click on a `#K7Q2` in the output really does end on
         // the card and not merely near it (2026-09-18).
         if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
     }
 
-    // Retries openSelected() every 250 ms for up to 6 s, which covers the worker's first answer
+    // Retries the reveal every 250 ms for up to 6 s, which covers the worker's first answer
     // on a large tree. It stops as soon as a card detail is open, so a card the *user* opened in
     // the meantime is never yanked out from under them.
     void waitForBoardCard(ToolPane *tool, const QString &id, int attempt) {
@@ -4746,8 +4745,7 @@ public:
             ToolPane *pane = guard.data();
             if (!pane || !pane->board() || pane->board()->detailOpen()) return;
             if (!pane->board()->model().card(id)) { waitForBoardCard(pane, id, attempt + 1); return; }
-            pane->board()->selectCard(id);
-            pane->board()->openSelected();
+            pane->board()->openCardSolo(id);
         });
     }
 
@@ -4794,12 +4792,11 @@ public:
         return nullptr;
     }
 
-    // Select and open a card in a board pane, and keep asking while its rows are still loading
-    // (waitForBoardCard). Used by openNotificationSource and openBoardCard's paths.
+    // Open a card in a board pane on the card alone (#K4SQ), and keep asking while its rows are
+    // still loading (waitForBoardCard). Used by openNotificationSource and openBoardCard's paths.
     void revealBoardCard(ToolPane *tool, const QString &id) {
         if (!tool || !tool->board()) return;
-        tool->board()->selectCard(id);
-        tool->board()->openSelected();
+        tool->board()->openCardSolo(id);
         setActiveLeaf(tool);
         focusLeaf(tool);
         if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);

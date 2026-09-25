@@ -8233,6 +8233,7 @@ void BoardView::closeSignal()
 {
     if (m_signalDetail->isHidden())
         return;
+    m_soloReveal = false;   // back to the list, so the list is what comes back (#K4SQ)
     m_signalDetail->hide();
     updateDetailLayout();
     focusInput();
@@ -8459,7 +8460,9 @@ void BoardView::updateDetailLayout()
         "<b>Esc</b> back to the board &nbsp; <b>e</b> edit &nbsp; <b>d</b> done &nbsp; <b>Tab</b> reply &nbsp; "
         "<b>Enter</b> discuss &nbsp; <b>p</b> or <b>Ctrl+Enter</b> plan &nbsp; <b>r</b> run "
         "&nbsp; <b>v</b> verify &nbsp; <b>Del</b> delete &nbsp; <b>Ctrl+Shift+Enter</b> comment only");
-    const bool stacked = width() < board::kCardSplitWidth;
+    // A link's reveal (#K4SQ) gives the open page the pane to itself at any width; otherwise only
+    // a narrow pane stacks the page over the list.
+    const bool stacked = width() < board::kCardSplitWidth || m_soloReveal;
     const QString keys = detailOpen() && stacked ? cardKeys : boardKeys;
     // Wherever the board's own line is the one on screen, it ends with the Switchboard agent's
     // action row — read off the context's own `actions()` (agentActionKeyLine) rather than
@@ -8874,6 +8877,7 @@ void BoardView::saveCardEdit(const QJsonObject &patch, const QString &baseHash)
 
 void BoardView::closeDetail()
 {
+    m_soloReveal = false;   // back to the list, so the list is what comes back (#K4SQ)
     m_follow->stop();
     m_detail->hide();
     m_signalDetail->hide();
@@ -8986,6 +8990,19 @@ void BoardView::openCard(const QString &id)
     selectCard(id);
     m_selected = id;
     openSelected();
+}
+
+// A card link clicked outside the board (#K4SQ) — a `#ID` in chat or a notification — opens the
+// board on the card alone: the reveal marks the pane solo and openCard opens the card, so the
+// page that lands takes the whole pane at any width. Only closing the page (closeDetail,
+// closeSignal) drops the solo; opening another card from the one on screen keeps it, so an
+// in-board link does not pop the list back in beside the next card.
+void BoardView::openCardSolo(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    m_soloReveal = true;
+    openCard(id);
 }
 
 void BoardView::sendSelectionToTerminal()

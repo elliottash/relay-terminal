@@ -316,6 +316,9 @@ public:
     // `m_rows`, which the rebuild replaces (the section handlers copy for the same reason).
     void setCardPriority(QString id, int step);
     bool detailOpen() const;
+    // Whether the list page is on screen: false while a page has the whole pane to itself — a
+    // narrow pane's open card, and a link's reveal at any width (#K4SQ). For tests.
+    bool listPaneVisible() const { return m_listPane && !m_listPane->isHidden(); }
     void focusFilter();
     // "Clean up" (protocol 19.9): hands the whole board to the agent to tidy — merge or split
     // sections and cards, review statuses. The first click is always a **preview** (`dry_run`),
@@ -360,6 +363,10 @@ public:
     // Zoom to a card by id (#3ZAP): a `#ID` reference in a card's text, and the cleanup panel's
     // `card:` anchors, land here.
     void openCard(const QString &id);
+    // A card link clicked outside the board (#K4SQ) — a `#ID` in chat or a notification — opens
+    // the board *on* that card: the page takes the whole pane whatever the width, and the list is
+    // one Esc away. In-board links (openCard) keep the layout the pane already had.
+    void openCardSolo(const QString &id);
     void sendSelectionToTerminal();
     void openSelectedFile();
     void selectCard(const QString &id);
@@ -775,6 +782,10 @@ private:
     // would delete the items under it, so a rebuild waits for the drag to end.
     bool m_dragActive = false, m_rebuildPending = false;
     bool m_detailSized = false;     // the split was sized for the open card already
+    // The open page was reached from outside the board (#K4SQ): a link's reveal, so the page has
+    // the pane to itself in a wide pane too, until the page closes and the list comes back. Set
+    // by openCardSolo alone — in-board navigation keeps whatever layout the pane already had.
+    bool m_soloReveal = false;
     // Which of the two pages that sizing was for (#AQ6X): the card's or the signal's, so opening
     // the other one re-divides the splitter instead of leaving it sized for the first.
     bool m_sizedForSignal = false;

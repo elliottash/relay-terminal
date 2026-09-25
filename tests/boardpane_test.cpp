@@ -83,6 +83,7 @@ private slots:
     void theVerifyStripReadsTheCardsVerifyBlock();
     void doneButtonAndKeyOfferUndo();
     void navigationSurvivesReload();
+    void aCardLinkOpensTheBoardOnTheCardAlone();
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
     void theCardPagesFlagClicksThroughToBoardPriority();
@@ -269,6 +270,63 @@ void BoardPaneTests::navigationSurvivesReload()
     QVERIFY(!missing.detailOpen());
     for (const auto &message : sent)
         QVERIFY(message.value(QStringLiteral("type")) != QStringLiteral("board_card_get"));
+}
+
+// #K4SQ: a card link clicked outside the board — a `#ID` in chat, a notification — opens the
+// board *on* the card, not the card squeezed beside the list. At 995 the pane is wide
+// (kCardSplitWidth is 900), so an ordinary open still splits list and card; the link's reveal
+// gives the page the whole pane, an in-board link keeps it (the list does not pop back in beside
+// the next card), and closing the page puts the list back for ordinary opens again.
+void BoardPaneTests::aCardLinkOpensTheBoardOnTheCardAlone()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.resize(995, 900);
+    view.show();
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox")),
+                              row(QStringLiteral("M3XJ"), QStringLiteral("ready"))}));
+    QCoreApplication::processEvents();
+    const auto answer = [&sent](const QString &id) {
+        QJsonObject reply = cardArrived(id);
+        reply.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")));
+        return reply;
+    };
+
+    // By hand (Enter, a row click) the card sits beside the list, as it always has.
+    view.openCard(QStringLiteral("K7Q2"));
+    view.handleEvent(answer(QStringLiteral("K7Q2")));
+    QVERIFY(view.detailOpen());
+    QVERIFY(view.listPaneVisible());
+    // #K4SQ evidence: the same width with the list beside the card, against the solo shot below
+    // (RELAY_SHOT_DIR set writes it, the navigation test's own pattern).
+    const QString shotDir = qEnvironmentVariable("RELAY_SHOT_DIR");
+    if (!shotDir.isEmpty())
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-card-split.png")));
+    view.closeDetail();
+    QVERIFY(!view.detailOpen());
+
+    // The link's reveal at the same width: the card has the pane to itself.
+    view.openCardSolo(QStringLiteral("M3XJ"));
+    view.handleEvent(answer(QStringLiteral("M3XJ")));
+    QVERIFY(view.detailOpen());
+    QVERIFY(!view.listPaneVisible());
+    if (!shotDir.isEmpty())
+        QVERIFY(view.grab().save(shotDir + QStringLiteral("/board-card-solo.png")));
+
+    // A `#ID` clicked inside that page keeps the pane to itself — no list beside the next card.
+    view.openCard(QStringLiteral("K7Q2"));
+    view.handleEvent(answer(QStringLiteral("K7Q2")));
+    QVERIFY(view.detailOpen());
+    QVERIFY(!view.listPaneVisible());
+
+    // Esc back to the board: the list is what comes back, and ordinary opens split again.
+    view.closeDetail();
+    QVERIFY(view.listPaneVisible());
+    view.openCard(QStringLiteral("M3XJ"));
+    view.handleEvent(answer(QStringLiteral("M3XJ")));
+    QVERIFY(view.detailOpen());
+    QVERIFY(view.listPaneVisible());
 }
 
 // The report behind the card: two tabs, one Switchboard each, the same project. A card opened in
