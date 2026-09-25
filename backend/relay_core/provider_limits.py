@@ -102,21 +102,17 @@ def _count_window(kind: str, row) -> dict | None:
 
 
 def parse_kimi(payload) -> list[dict]:
-    """Accept the current ratio pools and the older count-based /usages response."""
+    """Count-based rows of /usages first; the ratio pools only fill gaps.
+
+    On 2026-09-25 a live response carried `usages.limit_5h.used_ratio: 0` and `limit_7d: 0`
+    while its own count rows said 13 of 100 weekly and 16 of 100 five-hour (matching the kimi.ai
+    console's 12%/13%): the ratio pools lag the counts. Taking them first, as this did, showed a
+    spent-looking plan as 0% used — and a truly spent plan would have been drawn into every
+    failover at full weight.
+    """
     if not isinstance(payload, dict) or payload.get("error"):
         return []
     found = {}
-    pools = payload.get("usages")
-    if isinstance(pools, dict):
-        for field, kind in (("limit_5h", "5h"), ("limit_7d", "weekly"),
-                            ("limit_month_total", "monthly")):
-            pool = pools.get(field)
-            if isinstance(pool, dict):
-                ratio = _number(pool.get("used_ratio"))
-                window = _window(kind, ratio * 100 if ratio is not None else None,
-                                 pool.get("reset_time"))
-                if window:
-                    found[kind] = window
     for row in payload.get("limits") or ():
         if not isinstance(row, dict):
             continue
@@ -125,17 +121,31 @@ def parse_kimi(payload) -> list[dict]:
                 or duration.get("timeUnit") != "TIME_UNIT_MINUTE":
             continue
         found.setdefault("5h", _count_window("5h", row.get("detail")))
-    if "weekly" not in found:
-        weekly = _count_window("weekly", payload.get("usage"))
-        if weekly:
-            found["weekly"] = weekly
+    weekly = _count_window("weekly", payload.get("usage"))
+    if weekly:
+        found["weekly"] = weekly
+    pools = payload.get("usages")
+    if isinstance(pools, dict):
+        for field, kind in (("limit_5h", "5h"), ("limit_7d", "weekly"),
+                            ("limit_month_total", "monthly")):
+            if kind in found:
+                continue
+            pool = pools.get(field)
+            if isinstance(pool, dict):
+                ratio = _number(pool.get("used_ratio"))
+                window = _window(kind, ratio * 100 if ratio is not None else None,
+                                 pool.get("reset_time"))
+                if window:
+                    found[kind] = window
     return [found[k] for k in ("5h", "weekly", "monthly") if found.get(k)]
 
 
 def fetch(preset: str, key: str, *, opener=None) -> list[dict]:
     url = ZAI_URL if preset == "glm-coding" else KIMI_URL
+    # Kimi 403s a request without a User-Agent (its WAF); z.ai accepts one, so send it to both.
     request = urllib.request.Request(url, headers={"Authorization": "Bearer " + key,
-                                                    "Accept": "application/json"})
+                                                    "Accept": "application/json",
+                                                    "User-Agent": "Relay/0.1"})
     opener = opener or urllib.request.urlopen
     with opener(request, timeout=TIMEOUT_SECONDS) as response:
         payload = json.loads(response.read(1024 * 1024))

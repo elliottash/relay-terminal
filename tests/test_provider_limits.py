@@ -36,6 +36,20 @@ class ProviderLimitsTests(unittest.TestCase):
                          [("5h", 20.0), ("weekly", 75.0)])
         self.assertTrue(all(r["resets_at"] for r in rows))
 
+    def test_kimi_count_rows_beat_stale_ratio_pools(self):
+        # Live response, 2026-09-25: ratio pools said 0 while counts said 13% weekly / 16% 5h,
+        # matching the kimi.ai console. Counts win.
+        rows = limits.parse_kimi({
+            "usage": {"limit": "100", "used": "13", "remaining": "87",
+                      "resetTime": "2026-09-30T03:44:41.119407Z"},
+            "limits": [{"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                        "detail": {"limit": "100", "used": "16", "remaining": "84",
+                                   "resetTime": "2026-09-26T01:44:41.119407Z"}}],
+            "usages": {"limit_5h": {"used_ratio": 0, "reset_time": "2026-09-26T01:44:41Z"},
+                       "limit_7d": {"used_ratio": 0, "reset_time": "2026-09-30T03:44:41Z"}}})
+        self.assertEqual({r["kind"]: r["used_percent"] for r in rows},
+                         {"5h": 16.0, "weekly": 13.0})
+
     def test_kimi_ratio_pools_with_optional_monthly_window(self):
         rows = limits.parse_kimi({"usages": {
             "limit_5h": {"used_ratio": 0.4, "reset_time": "2026-09-23T21:00:00Z"},
