@@ -1,0 +1,37 @@
+### BEFORE — switch back starts a fresh Codex session (main before this card)
+harness start: fresh session (resume=None)
+pane status  : Handed the conversation so far to Codex.
+prompt sent  :
+[Relay context: added by Relay, not typed by the user]
+You are taking over this conversation from another model in Relay. Everything below happened earlier in this session, and you are continuing it: treat it as your own context, not as a task list.
+
+User:
+Start on codex.
+
+Assistant:
+ok
+
+User:
+Remember the codeword PELICAN-42 for later.
+
+Assistant:
+Noted: the codeword is PELICAN-42.
+[End of Relay context]
+
+What was the codeword?
+
+### AFTER — switch back resumes this pane's own Codex session (this card)
+harness start: resumed session 'codex-1'
+pane status  : Resumed Codex session codex-1; sent the 2 messages that ran while it was away.
+prompt sent  :
+[Relay context: added by Relay, not typed by the user]
+You ran this conversation earlier in Relay as Codex session codex-1; that session has been resumed, so everything up to your last turn is already yours. Below is only what happened in Relay while you were switched away — continue from it.
+
+User:
+Remember the codeword PELICAN-42 for later.
+
+Assistant:
+Noted: the codeword is PELICAN-42.
+[End of Relay context]
+
+What was the codeword?

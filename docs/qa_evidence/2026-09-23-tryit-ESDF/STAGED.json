@@ -1,0 +1,15 @@
+{
+  "project": "/home/elliott/relay-qa/esdf-notes",
+  "cards": {
+    "Export wizard loses the last page on iPad": "8M74",
+    "Decide whether reminders sync to the phone": "3T8Q",
+    "Search should rank open cards above done ones": "GRGN",
+    "Fix the double scrollbar in Options": "P3W5",
+    "Should the queue keep folded rows on restart?": "KTPA",
+    "Rounding on the invoice preview": "G25Z",
+    "Offline mode for the phone board": "ZSNX",
+    "Rename 'closed' to 'archived' in the docs": "59Y5",
+    "The tray menu forgets its checkmarks": "6VCE",
+    "Bring the old shortcuts cheat sheet back": "B0R7"
+  }
+}
