@@ -50,6 +50,22 @@ class ProviderLimitsTests(unittest.TestCase):
         self.assertEqual({r["kind"]: r["used_percent"] for r in rows},
                          {"5h": 16.0, "weekly": 13.0})
 
+    def test_kimi_spent_count_row_has_no_remaining(self):
+        # Live response, 2026-09-25 23:49Z: the 5-hour row was spent and carried limit+used with
+        # no `remaining`, and its ratio pool still said 0 — the poll then reported only the weekly
+        # window, the plan looked free, and api.kimi.ai refused every request (#P004).
+        rows = limits.parse_kimi({
+            "usage": {"limit": "100", "used": "30", "remaining": "70",
+                      "resetTime": "2026-09-30T03:44:41.119407Z"},
+            "limits": [{"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                        "detail": {"limit": "100", "used": "100",
+                                   "resetTime": "2026-09-26T01:44:41.119407Z"}}],
+            "usages": {"limit_5h": {"used_ratio": 0, "reset_time": "2026-09-26T01:44:41Z"}}})
+        self.assertEqual(rows, [
+            {"kind": "5h", "used_percent": 100.0, "resets_at": 1790387081},
+            {"kind": "weekly", "used_percent": 30.0, "resets_at": 1790739881},
+        ])
+
     def test_kimi_ratio_pools_with_optional_monthly_window(self):
         rows = limits.parse_kimi({"usages": {
             "limit_5h": {"used_ratio": 0.4, "reset_time": "2026-09-23T21:00:00Z"},

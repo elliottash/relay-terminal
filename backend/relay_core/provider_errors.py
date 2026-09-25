@@ -305,7 +305,11 @@ def classify(exc, *, host: str = "", api_key: str = "", poll: dict | None = None
             break
     if status == 402 and not kind:
         kind, source = "balance", "status"
-    if status in (401, 403) and kind not in ("token_expired", "account", "balance", "plan_expired"):
+    # Kimi Code types its spent-window refusal `access_terminated_error` over HTTP 403
+    # (2026-09-25): the message names the 5-hour limit, a quota kind was recognised above, and the
+    # status does not outvote that. Only an unexplained 401/403 is an auth failure.
+    if status in (401, 403) and kind not in ("token_expired", "account", "balance", "plan_expired") \
+            and kind not in QUOTA_KINDS:
         kind, source = "auth", source or "status"
     if status in (401, 403) and api_key:
         expiry = jwt_expiry(api_key)

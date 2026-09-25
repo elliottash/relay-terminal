@@ -1017,6 +1017,37 @@ class CodingQuotaTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'provider_quota_exhausted')
         self.assertTrue(body.closed)
 
+    def test_kimi_spent_window_403_is_a_quota_refusal_not_an_auth_one(self):
+        # #P004: Kimi Code answers a spent 5-hour window with 403 typed access_terminated_error.
+        # The turn says which limit and is suppressed, instead of re-reading the keyring and
+        # failing over on every turn until the window resets.
+        import urllib.error
+        from unittest import mock
+        provider = ChatProvider(ProviderConfig('https://api.kimi.ai/coding/v1', 'k3', 'fixture'))
+        body = io.BytesIO(json.dumps({'error': {
+            'type': 'access_terminated_error',
+            'message': "You've reached your 5-hour usage limit. Your quota will reset when the "
+                       "current 5-hour window ends."}}).encode())
+        error = urllib.error.HTTPError(provider.config.base_url, 403, 'Forbidden', {}, body)
+        opener = mock.Mock()
+        opener.open.side_effect = error
+        events = []
+        with self.assertRaises(ProviderError) as caught:
+            provider._open(opener, mock.Mock(), events.append, threading.Event(), time.monotonic())
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertEqual(caught.exception.code, 'provider_quota_exhausted')
+        self.assertIn('5-hour', str(caught.exception))
+        self.assertTrue(body.closed)
+
+    def test_a_key_rejected_403_keeps_the_retry_and_failover_path(self):
+        import urllib.error
+        provider = ChatProvider(ProviderConfig('https://api.kimi.ai/coding/v1', 'k3', 'fixture'))
+        error = urllib.error.HTTPError(provider.config.base_url, 403, 'Forbidden', {},
+                                       io.BytesIO(b'{"error":{"message":"invalid key"}}'))
+        self.assertIsNone(provider._coding_quota_error(error))
+        # Final for the retry policy too: no in-place retries, the turn fails over at once.
+        self.assertIsNone(provider._http_retry_delay(error, 1))
+
     def test_transient_coding_429_keeps_retry_policy(self):
         import urllib.error
         provider = ChatProvider(ProviderConfig('https://api.z.ai/api/coding/paas/v4', 'glm-5.3', 'fixture'))

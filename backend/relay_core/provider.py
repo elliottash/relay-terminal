@@ -1237,13 +1237,16 @@ class ChatProvider:
         window, an empty balance, an expired plan — as ProviderQuotaExhausted, or None.
 
         This began as Z.AI's 1310 alone (#YJG7); #QK2Q found its 5-hour limit, code 1308, being
-        retried six times a turn. Classification is `provider_errors.classify`, and the body is
-        matched, never echoed. When the provider's zone is known (Z.AI's X-LOG-ID header, or the
-        quota poll naming the same reset) the refusal carries the instant and holds until then,
-        re-asked every 15 minutes; otherwise the old rule stands — provider time has no zone, so
-        suppress for at most a minute and never beyond the earliest possible reset (UTC+14).
+        retried six times a turn; #P004 met Kimi's spent window answering 403 typed
+        `access_terminated_error`, so a 403 counts too — gated on the refusal being final, which a
+        key-rejected 403, classified auth, is not. Classification is `provider_errors.classify`,
+        and the body is matched, never echoed. When the provider's zone is known (Z.AI's X-LOG-ID
+        header, or the quota poll naming the same reset) the refusal carries the instant and holds
+        until then, re-asked every 15 minutes; otherwise the old rule stands — provider time has
+        no zone, so suppress for at most a minute and never beyond the earliest possible reset
+        (UTC+14).
         """
-        if exc.code not in (402, 429) or self.config.local:
+        if exc.code not in (402, 403, 429) or self.config.local:
             return None
         refusal = self._refusal(exc)
         if not refusal.final:

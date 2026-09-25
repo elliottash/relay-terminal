@@ -95,10 +95,18 @@ def _count_window(kind: str, row) -> dict | None:
     if not isinstance(row, dict):
         return None
     limit = _number(row.get("limit"))
-    remaining = _number(row.get("remaining"))
-    if limit is None or remaining is None or limit <= 0:
+    if limit is None or limit <= 0:
         return None
-    return _window(kind, (1 - remaining / limit) * 100, row.get("resetTime"))
+    # A spent row carries no `remaining` (kimi, 2026-09-25: limit 100, used 100, ratio pool still
+    # 0) — read `used` first and clamp at the limit, or the spent window most needing a cooldown
+    # is dropped and the plan looks free while its host refuses every request (#P004).
+    used = _number(row.get("used"))
+    remaining = _number(row.get("remaining"))
+    if used is None and remaining is not None:
+        used = limit - remaining
+    if used is None:
+        return None
+    return _window(kind, min(used, limit) / limit * 100, row.get("resetTime"))
 
 
 def parse_kimi(payload) -> list[dict]:

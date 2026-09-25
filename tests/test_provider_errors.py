@@ -104,6 +104,33 @@ class ClassifyTests(unittest.TestCase):
         got = pe.classify(refusal(429, b'{}', url=KIMI), host='api.kimi.ai', poll=poll, now=NOW)
         self.assertEqual((got.kind, got.resets_at, got.source), ('quota_weekly', NOW + 7200, 'poll'))
 
+    def test_kimi_sends_its_spent_window_as_a_403_and_it_is_not_auth(self):
+        # Live refusal, 2026-09-25 23:49Z: HTTP 403 typed `access_terminated_error`, whose
+        # message says 5-hour usage limit. Before #P004 the status outvoted the message, the
+        # pane was told its key was rejected, and every turn failed over until the window reset.
+        got = pe.classify(refusal(403, {'error': {
+            'type': 'access_terminated_error',
+            'message': "You've reached your 5-hour usage limit. Your quota will reset when the "
+                       "current 5-hour window ends. To continue now, purchase extra usage or "
+                       "upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota"}},
+            url=KIMI), host='api.kimi.ai', now=NOW)
+        self.assertEqual((got.kind, got.source), ('quota_5h', 'message'))
+        self.assertTrue(got.final)
+
+    def test_the_same_403_with_a_spent_poll_carries_the_reset(self):
+        poll = {'updated_at': NOW - 60, 'windows': [
+            {'kind': '5h', 'used_percent': 100.0, 'resets_at': 1790387081},
+            {'kind': 'weekly', 'used_percent': 30.0, 'resets_at': 1790739881}]}
+        got = pe.classify(refusal(403, {'error': {
+            'type': 'access_terminated_error',
+            'message': "You've reached your 5-hour usage limit."}}, url=KIMI),
+            host='api.kimi.ai', poll=poll, now=NOW)
+        self.assertEqual((got.kind, got.resets_at), ('quota_5h', 1790387081))
+
+    def test_an_unexplained_403_is_still_an_auth_failure(self):
+        got = pe.classify(refusal(403, b'{}', url=KIMI), host='api.kimi.ai', now=NOW)
+        self.assertEqual((got.kind, got.source), ('auth', 'status'))
+
     def test_an_expired_login_token_is_named_as_one(self):
         got = pe.classify(refusal(401, b'{"error":{"message":"unauthorized"}}', url=KIMI),
                           host='api.kimi.ai', api_key=jwt(NOW - 60), now=NOW)
