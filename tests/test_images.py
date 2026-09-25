@@ -27,6 +27,8 @@ JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 20
 GLM = ProviderConfig("https://api.z.ai/api/paas/v4", "glm-5.3", "key",
                      {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}, 8192)
 KIMI = ProviderConfig("https://api.moonshot.ai/v1", "kimi-k3", "key", {"reasoning_effort": "high"}, 8192)
+# The Kimi Code subscription preset: same family, but the coding endpoint's bare model id is `k3`.
+KIMI_CODE = ProviderConfig("https://api.kimi.ai/coding/v1", "k3", "key", {"reasoning_effort": "high"}, 8192)
 # MiniMax M3 is text-only, so it stands in wherever a test needs a model that cannot read images.
 MINIMAX = ProviderConfig("https://api.minimax.io/v1", "MiniMax-M3", "key", {}, 8192)
 OPENAI = ProviderConfig("https://api.openai.com/v1", "gpt-6-astra", "key", {"reasoning_effort": "high"}, 8192)
@@ -204,7 +206,14 @@ class VisionCapabilityTests(unittest.TestCase):
         self.assertFalse(presets.model_supports_vision("kimi-k2-thinking"))
         self.assertFalse(presets.model_supports_vision("kimi-k2-0905"))
         self.assertTrue(presets.PRESETS["kimi"].vision)
-        self.assertFalse(presets.PRESETS["kimi-code"].vision)   # the "k3" id is unverified
+
+    def test_kimi_code_ids_read_images(self):
+        # Card #H92C: the subscription preset's bare ids regressed to text-only after #W56B. Kimi
+        # Code's model table lists image input for every one of them.
+        for name in ("k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"):
+            with self.subTest(name=name):
+                self.assertTrue(presets.model_supports_vision(name))
+        self.assertTrue(presets.PRESETS["kimi-code"].vision)     # the preset's default model is k3
 
     def test_openrouter_style_slugs_match_on_their_last_segment(self):
         self.assertTrue(presets.model_supports_vision("google/gemini-3.8-flash"))
@@ -212,9 +221,9 @@ class VisionCapabilityTests(unittest.TestCase):
         self.assertFalse(presets.model_supports_vision("deepseek/deepseek-v4.1-pro"))
 
     def test_presets_report_their_image_support(self):
-        for preset_id in ("openai", "anthropic", "gemini", "kimi", "openrouter"):
+        for preset_id in ("openai", "anthropic", "gemini", "kimi", "kimi-code", "openrouter"):
             self.assertTrue(presets.PRESETS[preset_id].to_dict()["vision"], preset_id)
-        for preset_id in ("kimi-code", "minimax"):
+        for preset_id in ("minimax",):
             self.assertFalse(presets.PRESETS[preset_id].to_dict()["vision"], preset_id)
 
     def test_the_vision_role_defaults_to_glm_flash_on_glm_and_to_nothing_elsewhere(self):
@@ -280,6 +289,18 @@ class ImageTurnTests(unittest.TestCase):
         agent.ask("what is this?", attachments=self.attachment())
         model, messages = RecordingProvider.served[-1]
         self.assertEqual(model, "kimi-k3")
+        self.assertIsInstance(messages[-1]["content"], list)
+        self.assertIsNone(self.event("vision_unavailable"))
+        self.assertNotIn("vision_route", self.kinds())
+        self.assertEqual(self.events[-1]["event"], "done")
+
+    def test_an_image_reaches_kimi_code_k3_directly(self):
+        # Card #H92C: the subscription preset's bare `k3` id read as text-only and the turn was
+        # refused ("k3 cannot read images"); k3 takes image input, so it must serve the turn.
+        agent = self.build(KIMI_CODE, "kimi-code")
+        agent.ask("what is this?", attachments=self.attachment())
+        model, messages = RecordingProvider.served[-1]
+        self.assertEqual(model, "k3")
         self.assertIsInstance(messages[-1]["content"], list)
         self.assertIsNone(self.event("vision_unavailable"))
         self.assertNotIn("vision_route", self.kinds())

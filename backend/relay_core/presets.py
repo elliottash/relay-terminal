@@ -118,6 +118,11 @@ VISION_MODELS: tuple[str, ...] = (
     "gemini-",                                                   # Google: the Gemini family
     "glm-5.3-flash", "glm-4.5v", "glm-4.6v", "glm-5v",           # Z.AI: the Flash and V models
     "kimi-k3", "kimi-k2.",                                       # Moonshot: K3 and K2.5+ read images
+    # Kimi Code's bare ids: its model table (https://www.kimi.com/code/docs/en/kimi-code/models.html,
+    # checked 2026-09-25) lists Multimodal input = Image for k3, k3-256k, kimi-for-coding and
+    # kimi-for-coding-highspeed (card #H92C: without these, an image turn on the subscription
+    # preset was refused as text-only, regressing #W56B).
+    "kimi-for-coding", "k3",
     # DeepSeek: the Flash line only. "deepseek-flash" is the first-party id and its moving
     # -latest alias; "deepseek-v4.1-flash" is the same model's name and OpenRouter's slug.
     "deepseek-flash", "deepseek-v4.1-flash", "deepseek-v4-flash",
