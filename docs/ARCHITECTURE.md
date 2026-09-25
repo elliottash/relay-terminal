@@ -1997,7 +1997,8 @@ than a fence around a surface: no board means no `board_*` tools (there is nothi
 own tools, so a helper never runs on one and never starts one (#GH5T, #4NXH); and a card's Plan turn
 may write only its own `## Plan`, which is the stage machine of protocol 19.20 and is refused **when
 the tool is called**, in a sentence that names Run, rather than by narrowing what the turn was
-offered. What came **down** with
+offered — commands excluded (card #NXN0: a card turn verifies by running them, writers only are
+refused). What came **down** with
 this card was the fences: `ChatScope`'s "no shell, no file writes" (owner decision 3 — yes, with the
 workspace it has, and never for a card's Plan turn), `session_info` and `activity` being the pane
 agent's alone, `track_requests` / `todo_tool` / `completion_check` forced off, and `_deferred_groups`
