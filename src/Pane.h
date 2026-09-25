@@ -1957,7 +1957,8 @@ public:
         send(queueOp(QStringLiteral("cancel"))); clearFix();
         status(QStringLiteral("Stopping. Commands that already ran may have changed files; a network read can take up to its timeout to stop."));
         hint(QStringLiteral("agent.recall"), relay::ShortcutHints::nextTime(
-            QStringLiteral("↑ or Esc"), QStringLiteral("stops the agent and brings its prompt back to an empty composer")));
+            QStringLiteral("↑ or Esc"),
+            QStringLiteral("stops the agent and brings its prompt back, until the turn runs a tool call")));
     }
     bool agentPromptInFlight() const { return m_agentBusy || !m_recallPrompt.text.isEmpty(); }
     bool restoreAgentPrompt();
@@ -14307,8 +14308,15 @@ private:
             && !m_recallPrompt.taken) {
             if (key->isAutoRepeat()) return true;
             if (restoreAgentPrompt()) {
-                stopAgent();
-                toast(QStringLiteral("Stopping · prompt restored for editing"));
+                // Before the turn's first tool call the words come back and the turn is
+                // cancelled with them; after one the turn has touched the world, so Up only
+                // brings the words back and lets the turn keep running.
+                if (m_recallPrompt.toolsRun) {
+                    toast(QStringLiteral("Prompt back in the composer · the turn keeps running"));
+                } else {
+                    stopAgent();
+                    toast(QStringLiteral("Stopping · prompt restored for editing"));
+                }
                 return true;
             }
         }
@@ -14335,7 +14343,9 @@ private:
             // the shell's stop has Alt+Esc all to itself. An autorepeat is swallowed so a held
             // key cannot spill the stop onto the shell once the agent has stopped.
             if (key->isAutoRepeat()) return true;
-            const bool restored = restoreAgentPrompt();
+            // The same gate as Up: once the turn has run a tool call there is nothing to undo,
+            // so Esc stops the agent and leaves the prompt out of the composer.
+            const bool restored = !m_recallPrompt.toolsRun && restoreAgentPrompt();
             stopAgent();
             toast(restored ? QStringLiteral("Stopping · prompt restored for editing") : QStringLiteral("Agent interrupted"));
             return true;
@@ -17227,7 +17237,14 @@ private:
     QPlainTextEdit *m_transcriptView = nullptr;
     QString m_transcriptProgram;
     QHash<QString, PendingPrompt> m_pendingPrompts, m_itemPrompts;   // request id / queue item id -> prompt
-    struct RecallPrompt { QString text, request, item; bool taken = false; };
+    struct RecallPrompt {
+        QString text, request, item;
+        bool taken = false;
+        // True once the turn this prompt launched has run a tool call: the world has been
+        // touched, so "take the prompt back and stop the turn" is no longer offered — Up only
+        // brings the words back, Esc only stops the turn.
+        bool toolsRun = false;
+    };
     RecallPrompt m_recallPrompt;  // local full text, never a worker's truncated preview (#7Z08)
     // The worker's own queue, exactly as its last `queue_changed` reported it — every surface's
     // rows, in the worker's order, because `queue_move`'s `to` is a position in *that* list.

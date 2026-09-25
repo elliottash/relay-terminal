@@ -38,6 +38,12 @@ void Pane::trackRecallEvent(const QString &type, const QJsonObject &event) {
                 : prompt.text.isEmpty() ? m_workerPrompts.value(item).text : prompt.text;
             m_recallPrompt = {text, QString(), item, false};
         }
+    } else if (type == QStringLiteral("tool_started")) {
+        // The turn this recall tracks has run a tool call: the world has been touched, so the
+        // combined "take the prompt back and stop the turn" stops being offered from here on.
+        if (!m_recallPrompt.item.isEmpty()
+            && event.value(QStringLiteral("turn_id")).toString() == m_recallPrompt.item)
+            m_recallPrompt.toolsRun = true;
     } else if ((type == QStringLiteral("agent_finished") && item == m_recallPrompt.item)
                || (type == QStringLiteral("error") && !m_recallPrompt.request.isEmpty()
                    && item == m_recallPrompt.request)

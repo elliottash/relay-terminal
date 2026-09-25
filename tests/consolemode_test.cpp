@@ -1941,6 +1941,7 @@ int main(int argc, char **argv)
     if (app.arguments().contains(QStringLiteral("--recall-only"))) {
         relay::theme::applyTheme(app);
         cases::recallPromptCases();
+        cases::recallAfterAToolCallCases();
         if (!failures) std::fprintf(stdout, "recall: all cases passed\n");
         return failures ? 1 : 0;
     }
@@ -2000,6 +2001,7 @@ int main(int argc, char **argv)
     cases::aContextWithoutAShellStartsNoProgram();
     cases::thinkingRowsSitWithToolRowsAndApartFromProse();
     cases::recallPromptCases();
+    cases::recallAfterAToolCallCases();
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
     cases::aTerminalPaneIsUnchanged();

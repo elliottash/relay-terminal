@@ -135,4 +135,49 @@ void recallPromptCases() {
     // Existing queued recall wins over the active turn.
     aLineThisConsoleSentComesBackWithUpAsAnUnsentDraft();
 }
+
+// Once the running turn has made a tool call, the combined undo is gone: Up brings the words
+// back and stops nothing, Esc stops the turn and brings nothing back.
+void recallAfterAToolCallCases()
+{
+    const auto key = [](Pane &pane, int code) {
+        auto *editor = pane.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+        CHECK(editor);
+        QKeyEvent event(QEvent::KeyPress, code, Qt::NoModifier, QString(), false);
+        QCoreApplication::sendEvent(editor, &event);
+    };
+    const auto cancels = [](const QList<QJsonObject> &sent) {
+        int n = 0;
+        for (const auto &line : sent) if (line.value("type") == "cancel") ++n;
+        return n;
+    };
+    StubContext context;
+    context.workspace = home->path();
+    Pane pane(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QJsonObject> sent;
+    pane.onWorkerLine = [&](const QJsonObject &line) { sent << line; };
+    pane.deliverWorkerEvent({{"event", "configured"}, {"model", "fixture"}});
+    const QString original = QStringLiteral("Rewrite the release notes");
+    pane.draftInComposer(original); key(pane, Qt::Key_Return); pane.draftInComposer({});
+    const QJsonObject ask = [&] {
+        QJsonObject a;
+        for (const auto &line : sent) if (line.value("type") == "ask") a = line;
+        return a;
+    }();
+    CHECK(!ask.isEmpty());
+    pane.deliverWorkerEvent({{"event", "queued"}, {"id", "q1"}, {"request_id", ask.value("id")}});
+    pane.deliverWorkerEvent({{"event", "agent_started"}, {"id", "q1"}});
+    pane.deliverWorkerEvent({{"event", "tool_started"}, {"call_id", "c1"}, {"turn_id", "q1"},
+                             {"tool", "run_command"}, {"label", QStringLiteral("ls")}});
+    sent.clear();
+    key(pane, Qt::Key_Up);
+    CHECK_EQ(pane.composerText(), original);
+    CHECK_EQ(cancels(sent), 0);  // a turn that has acted is not stopped by Up
+    pane.draftInComposer({});
+    key(pane, Qt::Key_Escape);
+    CHECK_EQ(cancels(sent), 1);  // Esc still stops the turn...
+    CHECK(pane.composerText().isEmpty());  // ... and puts no prompt back in the composer
+    pane.deliverWorkerEvent({{"event", "agent_finished"}, {"id", "q1"}, {"outcome", "cancelled"}});
+    CHECK(pane.composerText().isEmpty());
+}
 } // namespace cases
