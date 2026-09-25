@@ -5255,6 +5255,13 @@ public:
                                  relay::ShortcutHints::nextTime(QStringLiteral("Esc"),
                                                                 QStringLiteral("back to the main agent")));
         };
+        // The subagent pane's model picker (owner, 2026-09-21: "add the model picker in the
+        // subagent pane"): the pane's own rows in a subagent's hand. Its picks go to the agent on
+        // the current tab; the box's collapsed text follows the roster (refreshSubagentModelBox).
+        wireSubagentModelBox(tabs->modelBox());
+        tabs->onCurrentTab = [self](const QString &id) {
+            if (self) self->refreshSubagentModelBox(id);
+        };
         const QObject *gone = tabs;
         connect(tabs, &QObject::destroyed, this, [this, gone] {
             if (m_closing || (m_subagentTabs && m_subagentTabs.data() != gone)) return;
@@ -9322,6 +9329,7 @@ private:
         };
         m_subagents.onChanged = [this] {
             if (m_subagentTabs) m_subagentTabs->syncRows(m_subagents);   // tabs follow the list's rows
+            refreshSubagentModelBox();   // the pane's model box follows the current tab's model
             m_agentsPanel->refresh();
             placeSubagentsPanel();
             for (const auto &view : std::as_const(m_subagentViews))
@@ -9417,39 +9425,157 @@ private:
         QAction *inherit = menu.addAction(QStringLiteral("Same as the main agent"));
         inherit->setData(QStringLiteral("inherit"));
         menu.addSeparator();
-        for (const auto &model : std::as_const(m_stored)) {
-            if (!guestOfPreset(model.first).isEmpty()) continue;   // a guest runs no subagent (29.3)
-            // The model's name and its provider (card #MDL1, rule 1), not the preset's label.
-            const QString named = presetModelDisplay(model.first);
-            QAction *action = menu.addAction(named.isEmpty() ? model.second : named);
-            action->setData(model.first);
+        // Every class's models — the same rows this pane's own model box draws (owner, 2026-09-21:
+        // "allow all models as choices for subagents"), not only the stored presets the menu once
+        // listed. The menu is the short form a click can hold; the subagent pane's picker carries
+        // the same list with "all models" and its type-to-filter for the rest of the catalog.
+        for (const relay::modelrows::Row &model : relay::modelrows::box(subagentRowsContext()).rows) {
+            if (model.header) { menu.addSection(model.text); continue; }
+            if (model.data.startsWith(QStringLiteral("gear:"))) continue;   // no filter row, no settings door in a menu
+            QAction *action = menu.addAction(model.text);
+            action->setData(subagentModelSpec(model.data));
+            action->setEnabled(model.enabled);
             action->setCheckable(true);
-            action->setChecked(presetById(model.first).value(QStringLiteral("model")).toString() == current);
+            action->setChecked(model.data.endsWith(QLatin1Char('|') + current));
         }
-        if (m_stored.isEmpty()) menu.addAction(QStringLiteral("No stored keys"))->setEnabled(false);
         const QAction *chosen = menu.exec(at);
         if (!chosen || chosen->data().toString().isEmpty()) { if (m_agentsPanel) m_agentsPanel->setFocus(); return; }
-        const QString model = chosen->data().toString();
-        const QString label = chosen->text();
-        QString target = id;
-        const int count = int(m_subagents.rows().size());
-        if (count > 1) {
-            QMessageBox box(window());
-            box.setIcon(QMessageBox::Question);
-            box.setWindowTitle(QStringLiteral("Change subagent model"));
-            box.setText(QStringLiteral("Change all subagents to %1?").arg(label));
-            box.setInformativeText(QStringLiteral("All %1 subagents in the list can switch to %2, or only %3. "
-                                                  "A running agent switches before its next step.").arg(count).arg(label, id));
-            QPushButton *all = box.addButton(QStringLiteral("Change all"), QMessageBox::AcceptRole);
-            QPushButton *one = box.addButton(QStringLiteral("Only ") + id, QMessageBox::ActionRole);
-            box.addButton(QMessageBox::Cancel);
-            box.setDefaultButton(all);
-            box.exec();
-            if (box.clickedButton() == all) target = QStringLiteral("all");
-            else if (box.clickedButton() != one) { if (m_agentsPanel) m_agentsPanel->setFocus(); return; }
-        }
-        send({{"type", "agent_set_model"}, {"id", target}, {"model", model}});
+        const QString target = subagentModelTarget(id, chosen->text());
+        if (target.isEmpty()) { if (m_agentsPanel) m_agentsPanel->setFocus(); return; }
+        send({{"type", "agent_set_model"}, {"id", target}, {"model", chosen->data().toString()}});
         if (m_agentsPanel && m_agentsPanel->isVisible()) m_agentsPanel->setFocus();
+    }
+
+    // ----- the subagent model pickers (owner, 2026-09-21) ----------------------------------------
+    // "Allow all models as choices for subagents": both pickers — the strip chip's menu above and
+    // the subagent pane's model box — draw the same class lists this pane's own box draws (card
+    // #PK5Q: one list, built once in modelrows, every box calls it), with nothing of this pane's
+    // own in them: no guest rows (a guest runs no subagent, § 29.3) and none of this pane's
+    // per-class picks. Every row maps onto agent_set_model's `model` and the worker resolves
+    // "<preset>/<model>" for any catalog entry, so every model the catalog offers is a choice.
+    relay::modelrows::Context subagentRowsContext() const {
+        relay::modelrows::Context rows = modelRowsContext();
+        rows.mode.clear();
+        rows.modeRole.clear();
+        rows.modePick.clear();
+        rows.roleModel.clear();
+        rows.roleNote.clear();
+        rows.guests.clear();
+        rows.guestText.clear();
+        rows.current.clear();
+        rows.expanded = m_subagentBoxExpanded;
+        return rows;
+    }
+    // The value to hand agent_set_model for a picker row: "inherit", a role name, or
+    // "<preset>/<model>" for the entry the row names — the forms SubagentFactory.choose() takes.
+    QString subagentModelSpec(const QString &data) const {
+        if (data == QStringLiteral("inherit")) return data;
+        if (data.startsWith(QStringLiteral("role:"))) return data.mid(5);
+        QString key = data;
+        if (key.startsWith(QStringLiteral("pick:"))) key = key.mid(key.indexOf(QLatin1Char('|')) + 1);
+        else if (key.startsWith(QStringLiteral("entry:"))) key = key.mid(6);
+        else if (!key.contains(QLatin1Char('|'))) return QString();
+        QString preset, model;
+        if (!relay::models::Catalog::splitKey(key, &preset, &model)) return QString();
+        return preset + QLatin1Char('/') + model;
+    }
+    // The "all subagents?" question both pickers ask when the pane holds more than one: this id,
+    // "all", or nothing when cancelled. A running agent switches before its next step.
+    QString subagentModelTarget(const QString &id, const QString &label) {
+        const int count = int(m_subagents.rows().size());
+        if (count <= 1) return id;
+        QMessageBox box(window());
+        box.setIcon(QMessageBox::Question);
+        box.setWindowTitle(QStringLiteral("Change subagent model"));
+        box.setText(QStringLiteral("Change all subagents to %1?").arg(label));
+        box.setInformativeText(QStringLiteral("All %1 subagents in the list can switch to %2, or only %3. "
+                                              "A running agent switches before its next step.").arg(count).arg(label, id));
+        QPushButton *all = box.addButton(QStringLiteral("Change all"), QMessageBox::AcceptRole);
+        QPushButton *one = box.addButton(QStringLiteral("Only ") + id, QMessageBox::ActionRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(all);
+        box.exec();
+        if (box.clickedButton() == all) return QStringLiteral("all");
+        if (box.clickedButton() == one) return id;
+        return QString();
+    }
+    // The subagent pane's model box, wired like the pane's own (applyModelBox) on the subagent
+    // flavour of the rows: no modes and no guests, and a first row the pane's box never has —
+    // "Same as the main agent", the inherit choice the strip chip's menu opens with.
+    QList<relay::FilterRow> subagentModelBoxRows(int *current) {
+        QList<relay::FilterRow> rows = m_subagentBoxAll
+            ? filterRowsOf(relay::modelrows::filtered(subagentRowsContext()), current)
+            : filterRowsOf(relay::modelrows::box(subagentRowsContext()), current);
+        relay::FilterRow inherit;
+        inherit.text = QStringLiteral("Same as the main agent");
+        inherit.data = QStringLiteral("inherit");
+        relay::FilterRow rule;
+        rule.separator = true;
+        rule.enabled = false;
+        rows.prepend(rule);
+        rows.prepend(inherit);
+        if (current && *current >= 0) *current += 2;   // the two rows came in above the highlighted one
+        return rows;
+    }
+    void wireSubagentModelBox(CurrentTextComboBox *box) {
+        if (!box) return;
+        box->onRows = [this](int *current) {
+            // Every opening is the short list again unless it is the one "all models" asked for.
+            m_subagentBoxAll = m_subagentBoxAllPending;
+            m_subagentBoxAllPending = false;
+            if (m_subagentBoxAll) m_subagentBoxExpanded.clear();
+            return subagentModelBoxRows(current);
+        };
+        box->onQueryRows = [this](const QString &) {
+            return filterRowsOf(relay::modelrows::filtered(subagentRowsContext()), nullptr);
+        };
+        box->onExpandKey = [this](const QString &klass, int delta) {
+            if (klass.isEmpty() || !m_subagentTabs || m_subagentBoxAll) return false;   // "all" is already whole
+            const bool open = delta > 0;
+            if (open == m_subagentBoxExpanded.contains(klass)) return false;
+            if (open && !relay::modelrows::expandable(subagentRowsContext(), klass)) return false;
+            if (open) m_subagentBoxExpanded.insert(klass); else m_subagentBoxExpanded.remove(klass);
+            int current = -1;
+            m_subagentTabs->modelBox()->replaceRows(subagentModelBoxRows(&current), current);
+            return true;
+        };
+    }
+    // A pick from the subagent pane's box, for the agent on the current tab: the gear rows are the
+    // pane's own two doors (all models, the models pane); a model row ends in the same message
+    // and the same "all subagents?" question the strip chip's menu ends with.
+    void subagentModelPicked(const QString &id, const QString &data) {
+        if (data == relay::modelrows::allModelsData()) {
+            // "all models" (card #BXMS) for a subagent: the box again on every model, opened now.
+            m_subagentBoxAllPending = true;
+            QTimer::singleShot(0, this, [this] {
+                if (!m_subagentTabs || !m_subagentTabs->modelBox()) return;
+                m_subagentTabs->modelBox()->setFocus(Qt::ShortcutFocusReason);
+                m_subagentTabs->modelBox()->showPopup();
+            });
+            return;
+        }
+        if (data == QStringLiteral("gear:picker")) {
+            openModelPicker();   // the models pane, the same door the pane's own box has
+            return;
+        }
+        const QString model = subagentModelSpec(data);
+        if (model.isEmpty() || !m_subagents.row(id)) return;
+        const QString label = model == QStringLiteral("inherit") ? QStringLiteral("the main agent's model")
+                                                                 : model;
+        const QString target = subagentModelTarget(id, label);
+        if (target.isEmpty()) return;
+        send({{"type", "agent_set_model"}, {"id", target}, {"model", model}});
+    }
+    // The box's collapsed text is the current tab's model — the same string the chip under the
+    // prompt shows, so the two never disagree — and its tooltip says what picking does.
+    void refreshSubagentModelBox(const QString &forcedId = QString()) {
+        if (!m_subagentTabs || !m_subagentTabs->modelBox()) return;
+        const QString id = forcedId.isEmpty() ? m_subagentTabs->currentId() : forcedId;
+        const auto *row = m_subagents.row(id);
+        CurrentTextComboBox *box = m_subagentTabs->modelBox();
+        box->setCollapsedText(row ? row->model : QString());
+        box->setToolTip(QStringLiteral("The model this subagent runs on; every model the model picker "
+                                       "offers is a choice here too"));
     }
 
     // The strip under the prompt (subagents on the left, the open tasks on the right) shows only
@@ -10828,11 +10954,15 @@ private:
             const QString who = program.isEmpty() ? QStringLiteral("the program") : program;
             // Card #H2KQ: the stop key sits next to the name. A full-screen program keeps Esc,
             // so its key is Alt+Esc; a shell command's is Esc (no agent is running here).
+            // Card #234Z: a session client (ssh, mosh) before its login line appears is named the
+            // exit key from the first beat — Esc would only send a ^C to the far side.
+            const bool session = remoteSessionProgram(program) || relay::panestatus::isRemoteProgram(program);
             const QString bound = Keymap::instance().shortcutText(QStringLiteral("terminal.interrupt"));
-            const QString key = m_altScreen ? (bound.isEmpty() ? QStringLiteral("Alt+Esc") : bound)
-                                            : QStringLiteral("Esc");
+            const QString exitKey = bound.isEmpty() ? QStringLiteral("Alt+Esc") : bound;
+            const QString key = session ? exitKey : (m_altScreen ? exitKey : QStringLiteral("Esc"));
             m_busyLine->setBusy(relay::panestatus::State::Running,
-                                QStringLiteral("Relaying · %1… · %2 stops").arg(who, key),
+                                session ? QStringLiteral("Relaying · %1… · %2 exits").arg(who, key)
+                                        : QStringLiteral("Relaying · %1… · %2 stops").arg(who, key),
                                 QStringLiteral("%1 owns this terminal; prompts queue until it exits. %2 closes it.")
                                     .arg(program.isEmpty() ? QStringLiteral("This program") : program, key));
             return;
@@ -16704,6 +16834,12 @@ private:
     relay::JobsPanel *m_jobsPanel = nullptr;
     QList<QPointer<relay::SubagentTranscriptView>> m_subagentViews;
     QPointer<relay::SubagentTabsView> m_subagentTabs;   // this pane's subagent pane, while open
+    // The subagent pane's model box, in the pane's own box's words: the classes Right has expanded
+    // while it is open, and whether it opened on "all models" (pending: asked for, drawn at the
+    // next open). Beside the pane's own m_boxExpanded/m_boxAll so the two never share one state.
+    QSet<QString> m_subagentBoxExpanded;
+    bool m_subagentBoxAll = false;
+    bool m_subagentBoxAllPending = false;
 
     // The agent surface this pane hosts (#AGNT step 1). It is held by value and takes the pane as
     // its relay::agent::Host, so the reference is bound before the pane's own body runs; the

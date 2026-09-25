@@ -25,6 +25,7 @@
 #include <memory>
 
 class QHBoxLayout;
+class CurrentTextComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -164,6 +165,12 @@ public:
     std::function<void()> onTitleChanged;
     // A tab was closed with its × (before it goes): the owner dismisses a finished agent's row.
     std::function<void(const QString &id)> onUserClosed;
+    // A row of the model picker was picked (its `data`, the same strings the pane's own model box
+    // carries). The box itself is the pane's to fill — Pane::refreshSubagentModelBox.
+    std::function<void(const QString &data)> onModelPicked;
+    // The current tab changed (id empty when the last tab closed): the pane refreshes the model
+    // picker's collapsed text for the agent now in front. The view hides the box itself.
+    std::function<void(const QString &id)> onCurrentTab;
 
     // Opens (or selects) the tab for `id`; returns its view. `live`: the owner's list has this row,
     // so a restored tab with the same id (an earlier agent) is replaced by a live one.
@@ -172,6 +179,10 @@ public:
     SubagentTranscriptView *current() const;
     QString currentId() const;
     QStringList ids() const;
+    // The header's model picker (owner, 2026-09-21: "add the model picker in the subagent pane"):
+    // the same CurrentTextComboBox every pane header carries, for the subagent on the current tab.
+    // Null only before the constructor returns; hidden while no tab is current.
+    CurrentTextComboBox *modelBox() const { return m_modelBox; }
     int count() const;
     void closeTab(const QString &id);
     // The tab's ×: onUserClosed, then closeTab.
@@ -184,6 +195,11 @@ public:
     void dropEnded();
     // Tooltip text for the ← control, with the live key (set by the owner).
     void setBackKeys(const QString &keys);
+    // The picker and its owner follow the tab in front: the box is shown for a tab's view and
+    // hidden without one, and the owner is told the current id when it changes (empty when none).
+    // Deduped: syncRows calls it after every roster pass, and addTab's own currentChanged spike
+    // (fired before the tab's data lands) reaches here with no view.
+    void notifyCurrentTab(SubagentTranscriptView *view, const QString &id);
 
     QString title() const;
     QString agentId() const { return currentId(); }
@@ -209,6 +225,8 @@ private:
     QHBoxLayout *m_header = nullptr;
     QToolButton *m_back = nullptr;
     QTabBar *m_bar = nullptr;
+    CurrentTextComboBox *m_modelBox = nullptr;
+    QString m_notifiedCurrent;   // the id the picker's owner was last told is in front
     QStackedWidget *m_stack = nullptr;
     QHash<QString, QPointer<SubagentTranscriptView>> m_views;
     QHash<QString, bool> m_seen;   // the owner's model has had this row

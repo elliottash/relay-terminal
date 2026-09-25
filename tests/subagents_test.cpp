@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SubagentTranscript.h"
+#include "CurrentTextComboBox.h"
 #include "SubagentsPanel.h"
 
 #include <QJsonArray>
@@ -674,6 +675,34 @@ private slots:
         emit bar->tabCloseRequested(0);
         QCOMPARE(tabs.count(), 0);
         QCOMPARE(empties, 1);
+    }
+
+    void tabsCarryTheModelPicker() {
+        // Owner, 2026-09-21: "add the model picker in the subagent pane". The header carries the
+        // pane's own box, hidden while no tab is current and shown with one; tab changes and picks
+        // reach the owner (the pane fills the rows with every model and answers the picks).
+        Harness h;
+        SubagentTabsView tabs;
+        QVERIFY(tabs.modelBox());
+        QVERIFY(tabs.modelBox()->isHidden());   // isHidden, not isVisible: the pane is not on screen here
+        QStringList currents, picks;
+        tabs.onCurrentTab = [&](const QString &id) { currents << id; };
+        tabs.onModelPicked = [&](const QString &data) { picks << data; };
+        h.start("a1");
+        tabs.syncRows(h.model);   // opens a1's tab, as the owner's adoptSubagentTabs does
+        QCOMPARE(currents, QStringList{QStringLiteral("a1")});
+        QVERIFY(!tabs.modelBox()->isHidden());
+        // A pick forwards the row's data untouched — the same strings the pane's own box carries.
+        tabs.modelBox()->onPickedData(QStringLiteral("pick:high|glm-coding|glm-5.3"));
+        tabs.modelBox()->onPickedData(QStringLiteral("inherit"));
+        QCOMPARE(picks, (QStringList{QStringLiteral("pick:high|glm-coding|glm-5.3"), QStringLiteral("inherit")}));
+        // The last tab closing hides the box and says the current id went empty.
+        auto *bar = tabs.findChild<QTabBar *>(QStringLiteral("subagentTabBar"));
+        QVERIFY(bar);
+        emit bar->tabCloseRequested(0);
+        QCOMPARE(tabs.count(), 0);
+        QCOMPARE(currents, (QStringList{QStringLiteral("a1"), QString()}));
+        QVERIFY(tabs.modelBox()->isHidden());
     }
 
     void tabsAutomaticallyIncludeEveryAgentWithoutStealingFocus() {

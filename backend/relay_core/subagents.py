@@ -41,9 +41,12 @@ from typing import Callable
 from . import prompt_profiles
 from .agent import CONTEXT_CLOSE, CONTEXT_OPEN, Agent, transcript_items
 from .agents_defs import DEFAULT_ALIASES, EFFORTS, MAX_STEPS, AgentCatalog, AgentDefinition
-from .presets import PRESETS, TIER_DEFAULTS, apply_effort, match_preset
+from . import customproviders
+from .presets import PRESETS, TIER_DEFAULTS, apply_effort, catalog_rows, match_preset, model_extra
 from .provider import Cancelled, ProviderConfig
 from .roles import ROLES, canonical_role
+from .roles import _preset as preset_of   # the pickers' universe: a built-in, a saved model server
+# (localmodels.py) or a saved custom provider (customproviders.py), in one Preset shape
 from . import sessions as session_files
 from .tools import ToolExecutor, spec
 
@@ -262,7 +265,7 @@ class SubagentFactory:
         spec_ = self.aliases.get(spec_.lower(), spec_)
         if spec_ == "inherit" or spec_ == base_config.model:
             return base
-        preset = PRESETS.get(spec_)
+        preset = preset_of(spec_)   # a built-in, a saved model server or a saved custom provider
         if preset is None:
             preset = next((p for p in PRESETS.values()
                            if spec_ == p.model or spec_.endswith("/" + p.model) or spec_ == f"{p.id}/{p.model}"), None)
@@ -272,6 +275,14 @@ class SubagentFactory:
             # any preset's default model, but a delegating agent names them (card #D09N).
             tier_model = self._tier_model(spec_)
             preset = PRESETS.get(tier_model[0]) if tier_model else None
+        if preset is None:
+            # Any other catalog entry ("kimi/kimi-k2.7-code-highspeed",
+            # "openrouter/qwen/qwen3-coder"): the subagent pickers offer every model the catalog
+            # does (owner, 2026-09-21: "allow all models as choices for subagents"), so the
+            # factory runs what they name. catalog_rows includes OpenRouter's live listing, so a
+            # model that appeared after this Relay shipped resolves too.
+            tier_model = self._catalog_model(spec_)
+            preset = preset_of(tier_model[0]) if tier_model else None
         if preset is None:
             warnings.append(f"model {spec_!r} is not a Relay preset; using the main model")
             return base
@@ -290,6 +301,22 @@ class SubagentFactory:
         found = [(preset_id, model, extra) for tiers in TIER_DEFAULTS.values()
                  for preset_id, model, extra in tiers.values()
                  if preset_id in PRESETS and spec_ in (model, f"{preset_id}/{model}")]
+        keyed = [row for row in found if self.key_lookup and self.key_lookup(row[0])]
+        return (keyed or found or [None])[0]
+
+    def _catalog_model(self, spec_: str) -> tuple[str, str, dict] | None:
+        """(preset, model, extra) for a catalog entry "<preset>/<model>", preferring a keyed
+        provider. A bare model name is not one: two presets often serve the same model, and bare
+        names are the preset-default and tier-table forms choose() already resolved above."""
+        found = []
+        customs = customproviders.catalog()
+        for preset_id in list(PRESETS) + list(customs):
+            if not spec_.startswith(preset_id + "/"):
+                continue
+            model = spec_[len(preset_id) + 1:]
+            rows = catalog_rows(preset_id) if preset_id in PRESETS else customs[preset_id].catalog_rows()
+            if any(row["id"] == model for row in rows):
+                found.append((preset_id, model, model_extra(preset_id, model)))
         keyed = [row for row in found if self.key_lookup and self.key_lookup(row[0])]
         return (keyed or found or [None])[0]
 
@@ -526,7 +553,7 @@ def delegation_tool_specs(catalog=None, max_concurrent=MAX_CONCURRENT) -> list[d
         spec("agent_set_model", "Switch one subagent, or all subagents, to another model. A running agent "
              "switches before its next model call; a waiting or finished agent switches immediately.",
              {"id": {"type": "string", "description": "Subagent id, or 'all'."},
-              "model": {"type": "string", "description": "Model name or role; 'opus' selects Claude Code Opus."}},
+              "model": {"type": "string", "description": "Model name or role; '<preset>/<model>' names any catalog entry; 'opus' selects Claude Code Opus."}},
              ["id", "model"]),
     ]
 

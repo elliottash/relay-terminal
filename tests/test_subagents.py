@@ -838,6 +838,24 @@ class ModelChoiceTests(unittest.TestCase):
         config, _preset, _tier = factory.choose('high', [], self.general)
         self.assertEqual(config.model, 'kimi-k3')
 
+    def test_any_catalog_entry_is_a_valid_subagent_model(self):
+        # Owner, 2026-09-21: "allow all models as choices for subagents". The pickers hand the
+        # factory "<preset>/<model>" for every row the catalog draws; a model that is neither a
+        # preset's default nor a tier default must still run — and a provider with no stored key
+        # still falls back to main, naming the preset in the warning.
+        factory = self.factory(keys=('kimi', 'openai'))
+        config, preset, tier = factory.choose('openai/gpt-5.6-terra', [], self.general)
+        self.assertEqual((preset, config.model), ('openai', 'gpt-5.6-terra'))
+        self.assertIsNone(tier)
+        warnings = []
+        config, _preset, _tier = factory.choose('deepseek/deepseek-v4-pro', warnings, self.general)
+        self.assertIs(config, self.KIMI)
+        self.assertTrue(any('key' in w for w in warnings), warnings)
+        factory2 = self.factory(keys=('kimi',))   # no openai key: the entry itself is unusable
+        warnings = []
+        self.assertIs(factory2.choose('openai/gpt-5.6-terra', warnings, self.general)[0], self.KIMI)
+        self.assertTrue(any('key' in w for w in warnings), warnings)
+
     def test_spawn_passes_no_model_when_none_is_named(self):
         seen = []
         manager = SubagentManager(lambda e: None)

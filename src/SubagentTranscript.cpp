@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SubagentTranscript.h"
 #include "CopyOnSelect.h"
+#include "CurrentTextComboBox.h"
 #include "Theme.h"
 #include <QApplication>
 #include <QFontDatabase>
@@ -694,12 +695,27 @@ SubagentTabsView::SubagentTabsView(QWidget *parent) : QWidget(parent) {
     m_bar->setDrawBase(false);
     m_bar->setFocusPolicy(Qt::NoFocus);
     m_header->addWidget(m_bar, 1);
+    // The subagent pane's model picker (owner, 2026-09-21: "add the model picker in the subagent
+    // pane"): the same box the pane header carries, for the subagent on the current tab. Its rows
+    // are the Pane's to fill; it opens with the subagent's model and every catalog model in it.
+    m_modelBox = new CurrentTextComboBox;
+    m_modelBox->setObjectName(QStringLiteral("statusPicker"));
+    m_modelBox->setAccessibleName(QStringLiteral("Subagent model"));
+    m_modelBox->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    m_modelBox->setFocusPolicy(Qt::TabFocus);
+    m_modelBox->hide();
+    connect(m_modelBox, qOverload<int>(&QComboBox::activated), this, [this](int index) {
+        if (onModelPicked) onModelPicked(m_modelBox->itemData(index).toString());
+    });
+    m_modelBox->onPickedData = [this](const QString &data) { if (onModelPicked) onModelPicked(data); };
+    m_header->addWidget(m_modelBox);
     layout->addWidget(head);
     m_stack = new QStackedWidget;
     layout->addWidget(m_stack, 1);
     connect(m_bar, &QTabBar::currentChanged, this, [this](int index) {
         const QString id = index >= 0 ? m_bar->tabData(index).toString() : QString();
         auto *view = m_views.value(id).data();
+        notifyCurrentTab(view, id);
         if (!view) return;
         const bool hadFocus = isAncestorOf(QApplication::focusWidget());
         m_stack->setCurrentWidget(view);
@@ -852,6 +868,19 @@ void SubagentTabsView::syncRows(const SubagentModel &model) {
         }
     }
     for (const QString &id : std::as_const(gone)) closeTab(id);
+    // The first tab lands through addTab's auto-selection, whose currentChanged fires before the
+    // tab's data does, so that spike reached nobody: reconcile the picker with the tab in front.
+    const int index = m_bar->currentIndex();
+    const QString id = index >= 0 ? m_bar->tabData(index).toString() : QString();
+    notifyCurrentTab(m_views.value(id).data(), id);
+}
+
+void SubagentTabsView::notifyCurrentTab(SubagentTranscriptView *view, const QString &id) {
+    m_modelBox->setVisible(view != nullptr);
+    const QString now = view ? id : QString();
+    if (now == m_notifiedCurrent) return;
+    m_notifiedCurrent = now;
+    if (onCurrentTab) onCurrentTab(now);
 }
 
 void SubagentTabsView::dropEnded() {

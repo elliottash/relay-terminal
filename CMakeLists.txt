@@ -242,7 +242,7 @@ target_include_directories(relay-subagents PUBLIC src)
 # relay-toollabel: the transcript draws one concise line per tool call (protocol section 23).
 # relay-requests: the strip under the composer pairs the running agents with the open task list
 # (owner, 2026-09-19), so it reads the same RequestLedgerModel the task list panel does.
-target_link_libraries(relay-subagents PUBLIC relay-toollabel relay-requests ${RELAY_QT}::Widgets)
+target_link_libraries(relay-subagents PUBLIC relay-toollabel relay-requests relay-filterpopup ${RELAY_QT}::Widgets)   # CurrentTextComboBox (the subagent pane's model picker) carries FilterPopup
 target_compile_options(relay-subagents PRIVATE ${RELAY_WARNINGS})
 
 # Terminal engine settings (--engine-core / RELAY_ENGINE_CORE) and the pane's right-click menu:
