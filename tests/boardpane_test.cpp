@@ -88,6 +88,7 @@ private slots:
     void aCardOpenedInOnePaneDoesNotOpenInTheOther();
     void boardDataStillReachesBothPanes();
     void theCardPagesFlagClicksThroughToBoardPriority();
+    void theCardPagesLabelsEditInPlace();
     void metadataPageListsChildrenReverseLinksAndCommits();
     void hygieneChecksBeforeCleanup();
     void emptyAgentTranscriptDoesNotReserveConversationHeight();
@@ -502,6 +503,71 @@ void BoardPaneTests::theCardPagesFlagClicksThroughToBoardPriority()
     QCOMPARE(prioritySent(), -1);
     press(Qt::RightButton);
     QCOMPARE(prioritySent(), -1);
+}
+
+// The labels editor (#E0Y0): × takes one label off the card, + opens a one-line field that
+// saves the whole list on Enter and nothing on Esc; the label word itself still only copies.
+void BoardPaneTests::theCardPagesLabelsEditInPlace()
+{
+    relay::BoardView a(QStringLiteral("/tmp/workspace"));
+    QList<QJsonObject> sent;
+    a.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    a.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("inbox"))}));
+    a.setCollapsedSections(QJsonArray{});
+    a.selectCard(QStringLiteral("K7Q2"));
+    a.openSelected();
+    QJsonObject answer = cardArrived(QStringLiteral("K7Q2"));
+    answer.insert(QStringLiteral("id"), sent.last().value(QStringLiteral("id")).toString());
+    answer.insert(QStringLiteral("front"),
+                  QJsonObject{{QStringLiteral("labels"), QJsonArray{QStringLiteral("bug"),
+                                                                    QStringLiteral("voice")}}});
+    a.handleEvent(answer);
+    QVERIFY(a.detailOpen());
+
+    QLabel *meta = a.findChild<QLabel *>(QStringLiteral("boardCardMeta"));
+    QVERIFY(meta);
+    QVERIFY(meta->text().contains(QStringLiteral("tagx:bug")));
+    QVERIFY(meta->text().contains(QStringLiteral("tagadd:")));
+
+    // × writes the list without the clicked label, through the hash-checked board_update
+    // the title saves with.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tagx:bug")));
+    QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_update"));
+    QCOMPARE(sent.last().value(QStringLiteral("card")).toString(), QStringLiteral("K7Q2"));
+    QCOMPARE(sent.last().value(QStringLiteral("base_hash")).toString(), QStringLiteral("h1"));
+    const QJsonArray rest = sent.last().value(QStringLiteral("patch")).toObject()
+                                .value(QStringLiteral("fields")).toObject()
+                                .value(QStringLiteral("labels")).toArray();
+    QCOMPARE(rest.size(), 1);
+    QCOMPARE(rest.first().toString(), QStringLiteral("voice"));
+
+    // + opens the field pre-filled with the card's labels; Enter saves the edited list.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tagadd:")));
+    QLineEdit *edit = a.findChild<QLineEdit *>(QStringLiteral("boardCardLabelEdit"));
+    QVERIFY(edit);
+    QVERIFY(!edit->isHidden());
+    QCOMPARE(edit->text(), QStringLiteral("bug, voice"));
+    edit->setText(QStringLiteral("voice, remote"));
+    QTest::keyClick(edit, Qt::Key_Return);
+    const QJsonArray saved = sent.last().value(QStringLiteral("patch")).toObject()
+                                 .value(QStringLiteral("fields")).toObject()
+                                 .value(QStringLiteral("labels")).toArray();
+    QCOMPARE(saved.size(), 2);
+    QCOMPARE(saved.first().toString(), QStringLiteral("voice"));
+    QCOMPARE(saved.last().toString(), QStringLiteral("remote"));
+    QVERIFY(edit->isHidden());
+
+    // Esc closes the field and writes nothing.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tagadd:")));
+    QVERIFY(!edit->isHidden());
+    const int before = sent.size();
+    QTest::keyClick(edit, Qt::Key_Escape);
+    QVERIFY(edit->isHidden());
+    QCOMPARE(sent.size(), before);
+
+    // The plain label link is still only the board filter term (#3ZAP), not an edit.
+    QMetaObject::invokeMethod(meta, "linkActivated", Q_ARG(QString, QStringLiteral("tag:voice")));
+    QCOMPARE(sent.size(), before);
 }
 
 void BoardPaneTests::doneButtonAndKeyOfferUndo()

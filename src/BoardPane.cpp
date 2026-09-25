@@ -2080,6 +2080,15 @@ public:
         m_meta->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
         m_meta->setObjectName(QStringLiteral("boardCardMeta"));
         layout->addWidget(m_meta);
+        // The one-line labels field (#E0Y0): opened by the + in the labels row, it shows the
+        // card's labels comma separated; Enter saves the whole list, Esc closes it.
+        m_labelEdit = new QLineEdit(this);
+        m_labelEdit->setObjectName(QStringLiteral("boardCardLabelEdit"));
+        m_labelEdit->setPlaceholderText(QStringLiteral("labels, comma separated"));
+        m_labelEdit->setClearButtonEnabled(true);
+        m_labelEdit->installEventFilter(this);
+        m_labelEdit->hide();
+        layout->addWidget(m_labelEdit);
 
         // Cross-provider QA (#T71W): one line under the fields, in the same muted ink, naming the
         // verifier the worker recommends for this card and what it skipped to get there. It is
@@ -2424,6 +2433,16 @@ public:
         connect(m_openFile, &QToolButton::clicked, this, [this] { if (onOpenPath) onOpenPath(m_path); });
         connect(m_meta, &QLabel::linkActivated, this, [this](const QString &link) {
             const QUrl url(link);
+            // The labels editor (#E0Y0): × removes one label, + opens the labels field.
+            // Both write through the same hash-checked onEdit patch the title saves with.
+            if (url.scheme() == QStringLiteral("tagx")) {
+                removeLabel(url.path().isEmpty() ? url.host() : url.path());
+                return;
+            }
+            if (url.scheme() == QStringLiteral("tagadd")) {
+                beginLabels();
+                return;
+            }
             if (url.scheme() == QStringLiteral("card")) {
                 if (onOpenCard)
                     onOpenCard((url.path().isEmpty() ? url.host() : url.path()).toUpper());
@@ -3214,6 +3233,7 @@ public:
             else
                 m_drafts.remove(id);
             m_error->hide();
+            m_labelEdit->hide();   // the labels field (#E0Y0) belongs to the previous card
             m_executeArmed.clear();
         }
         m_id = id;
@@ -3575,6 +3595,69 @@ public:
         onEdit(patch, m_hash);
     }
 
+    // The card's labels, however the front matter carries them (an array or one string).
+    QStringList currentLabels() const
+    {
+        QStringList labels;
+        const QJsonValue value = m_front.value(QStringLiteral("labels"));
+        if (value.isArray())
+            for (const QJsonValue &entry : value.toArray())
+                labels << entry.toString();
+        else if (value.isString())
+            labels << value.toString();
+        labels.removeAll(QString());
+        return labels;
+    }
+
+    // × on a label in the meta line (#E0Y0): take that one word off the card and leave the
+    // rest of the front matter to the worker, exactly as saveEdit writes the title.
+    void removeLabel(const QString &raw)
+    {
+        const QString label = QUrl::fromPercentEncoding(raw.toUtf8());
+        QStringList labels = currentLabels();
+        if (!labels.removeOne(label) || !onEdit)
+            return;
+        QJsonObject fields;
+        fields.insert(QStringLiteral("labels"), QJsonArray::fromStringList(labels));
+        QJsonObject patch;
+        patch.insert(QStringLiteral("fields"), fields);
+        onEdit(patch, m_hash);
+    }
+
+    // + at the end of the labels row (#E0Y0): the card's labels, comma separated, edited
+    // in place under the meta line.
+    void beginLabels()
+    {
+        if (m_hash.isEmpty())
+            return;
+        m_labelEdit->setText(currentLabels().join(QStringLiteral(", ")));
+        m_labelEdit->show();
+        m_labelEdit->raise();
+        m_labelEdit->setFocus();
+        m_labelEdit->end(false);
+    }
+
+    // Enter on the labels field: split on commas, drop empties and duplicates, and save
+    // the list only when it actually changed.
+    void applyLabels()
+    {
+        QStringList labels;
+        const QStringList words = m_labelEdit->text().split(QLatin1Char(','));
+        for (QString word : words) {
+            word = word.trimmed();
+            if (!word.isEmpty() && !labels.contains(word))
+                labels << word;
+        }
+        m_labelEdit->hide();
+        if (!onEdit || labels == currentLabels())
+            return;
+        QJsonObject fields;
+        fields.insert(QStringLiteral("labels"), QJsonArray::fromStringList(labels));
+        QJsonObject patch;
+        patch.insert(QStringLiteral("fields"), fields);
+        onEdit(patch, m_hash);
+    }
+
     // The bottom of the card is a different height now: the notice that floats over it has to be
     // placed again.
     std::function<void()> onControlsResized;
@@ -3676,6 +3759,18 @@ protected:
                     remove();
                     return true;
                 }
+            }
+            // The labels field (#E0Y0) saves on Enter and closes on Esc, like the title's.
+            if (object == m_labelEdit) {
+                if (key->key() == Qt::Key_Escape) {
+                    m_labelEdit->hide();
+                    return true;
+                }
+                if (enter && mods == Qt::NoModifier) {
+                    applyLabels();
+                    return true;
+                }
+                return QWidget::eventFilter(object, event);
             }
             if (m_editing && (object == m_titleEdit || object == m_issueEdit)) {
                 if (key->key() == Qt::Key_Escape) {
@@ -4634,7 +4729,9 @@ private:
             }
         };
         // Labels render as bare words and copy a filter term (#S53Z): the muted key
-        // stays the meta's, the words take the pane's link colour.
+        // stays the meta's, the words take the pane's link colour. Each word is followed
+        // by a muted × that removes it and the row ends in a + that opens the labels
+        // field (#E0Y0); the word itself still only copies.
         QStringList labelWords;
         const QJsonValue labelsValue = front.value(QLatin1String("labels"));
         if (labelsValue.isArray())
@@ -4643,12 +4740,19 @@ private:
         else if (labelsValue.isString())
             labelWords << labelsValue.toString();
         labelWords.removeAll(QString());
-        if (!labelWords.isEmpty()) {
+        {
             QStringList shown;
             for (const QString &label : std::as_const(labelWords))
-                shown << QStringLiteral("<a href=\"tag:%1\" style=\"color:%2\">%3</a>")
+                shown << QStringLiteral(
+                                 "<a href=\"tag:%1\" style=\"color:%2\">%3</a>"
+                                 "&nbsp;<a href=\"tagx:%1\" title=\"remove label\" "
+                                 "style=\"color:%4;text-decoration:none\">×</a>")
                                  .arg(QString::fromUtf8(QUrl::toPercentEncoding(label)),
-                                      theme::Link.name(), label.toHtmlEscaped());
+                                      theme::Link.name(), label.toHtmlEscaped(),
+                                      theme::TextMuted.name());
+            shown << QStringLiteral("<a href=\"tagadd:\" title=\"edit labels\" "
+                                    "style=\"color:%1;text-decoration:none\">+</a>")
+                         .arg(theme::Link.name());
             parts << QStringLiteral("<span style=\"color:%1\">labels</span>&nbsp;%2")
                          .arg(theme::TextMuted.name(), shown.join(QStringLiteral(", ")));
         }
@@ -5016,6 +5120,7 @@ private:
     QLabel *m_ref = nullptr, *m_title = nullptr, *m_meta = nullptr, *m_error = nullptr;
     QToolButton *m_refCopy = nullptr;   // the ⧉ beside the ref (#FT77)
     QLabel *m_verifyLine = nullptr;   // the cross-provider QA recommendation (#T71W)
+    QLineEdit *m_labelEdit = nullptr;   // the one-line labels field (#E0Y0)
     // The `## Tests` strip (#7BM4): the header line, the Check button, the findings rows the
     // last `tests_check` drew, and the action buttons it offered. `m_checkFiles`,
     // `m_checkIds` and `m_checkFailing` are that answer's three machine keys (31.2), kept so
