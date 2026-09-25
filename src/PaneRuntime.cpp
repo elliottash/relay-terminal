@@ -1307,19 +1307,29 @@ void Pane::dispatch(const QJsonObject &decision, const QString &mode) {
                 }
                 if (!valid) {
                     const QString command = text.trimmed().section(QLatin1Char(' '), 0, 0);
-                    const QStringList commands = knownCommandNames();
-                    QString suggestion = relay::slash::closest(command, commands, 1).value(0);
-                    // A transposed pair is the common short typo (`gti` for `git`), while the
-                    // slash ranker allows only one edit for names this short.
-                    if (suggestion.isEmpty()) {
-                        for (int i = 0; i + 1 < command.size(); ++i) {
-                            QString swapped = command;
-                            const QChar first = swapped.at(i);
-                            swapped[i] = swapped.at(i + 1);
-                            swapped[i + 1] = first;
-                            if (commands.contains(swapped)) { suggestion = swapped; break; }
-                        }
+                    // The shell's `ready` event lists only its aliases and functions, so the
+                    // programs on its PATH (`git` for `gti`) are read here, once per typo, and
+                    // only names within two characters of the typed length can be close.
+                    QStringList commands = knownCommandNames();
+                    for (const QString &dir : m_shellPath.split(QLatin1Char(':'), Qt::SkipEmptyParts)) {
+                        const QFileInfoList entries = QDir(dir).entryInfoList(QDir::Files | QDir::Executable);
+                        for (const QFileInfo &entry : entries)
+                            if (std::abs(int(entry.fileName().size() - command.size())) <= 2)
+                                commands << entry.fileName();
                     }
+                    commands.removeDuplicates();
+                    // A transposed pair is the common short typo (`gti` for `git`), and it goes
+                    // first: the slash ranker allows one edit for names this short, which on a
+                    // real PATH also reaches `gio`.
+                    QString suggestion;
+                    for (int i = 0; i + 1 < command.size(); ++i) {
+                        QString swapped = command;
+                        const QChar first = swapped.at(i);
+                        swapped[i] = swapped.at(i + 1);
+                        swapped[i + 1] = first;
+                        if (swapped != command && commands.contains(swapped)) { suggestion = swapped; break; }
+                    }
+                    if (suggestion.isEmpty()) suggestion = relay::slash::closest(command, commands, 1).value(0);
                     ensureLineStart();
                     printInline(relay::input::invalidTerminalLine(problem, suggestion), Ink::Error);
                     closeInline();

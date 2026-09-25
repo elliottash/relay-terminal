@@ -16191,8 +16191,11 @@ private:
                 text = QStringLiteral("The agent is driving %1 · %2 takes it back")
                            .arg(driven, Keymap::instance().shortcutText(QStringLiteral("control.human")));
                 state = QStringLiteral("agent");
-            } else if (m_screenPrompt.actionable()) {
-                // Read off the screen, so it names the question: "apt is asking: … [Y/n]".
+            } else if (m_screenPrompt.actionable()
+                       && (m_screenPrompt.masked || loginTakesLines() || terminalMode() != TerminalMode::Raw)) {
+                // Read off the screen, so it names the question: "apt is asking: … [Y/n]". Not
+                // for a line editor's own prompt (`>>>`, `sqlite>`): Enter only reaches it in
+                // PROGRAM mode, so the branch below says that instead (#S976).
                 text = relay::screen::waitingLine(program, m_screenPrompt);
                 state = QStringLiteral("needs-you");
             } else if (m_waiting) {
