@@ -90,3 +90,28 @@ Continuation verification at current shared-checkout HEAD d30cb637 (source inclu
 
 <!-- relay:entry 20260926T010043Z-pr author=agent kind=event mention=WK7C model=gpt-6-luna pane=296d1b26 turn=6173581165764472b6c340786cfdcc26/e640a286e6b34dd1b7ddd4a736082925 -->
 mentioned in #WK7C · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T024350Z-pn author=agent kind=event model=gpt-6-luna pane=269e2839 turn=6173581165764472b6c340786cfdcc26/143b678f74d84352b3262d835f7d4591 -->
+- ✦ agent claimed this card · Needs verification → Running, implemented_by openai/gpt-6-luna via codex:elliott-t-ash-gmail-com, session 269e2839
+
+<!-- relay:entry 20260926T024350Z-po author=agent kind=progress model=gpt-6-luna pane=269e2839 turn=6173581165764472b6c340786cfdcc26/143b678f74d84352b3262d835f7d4591 pane_token=269e2839-f83f-41fc-a404-2ac9e9442cf1 -->
+Claimed (269e2839) · working on it from a terminal pane
+
+Resume the Jobs tab portion: remove the pane-specific live report so Job rules presents only the shared rules it edits, per the owner’s clarification.
+
+<!-- relay:entry 20260926T025852Z-k8 author=agent kind=evidence model=gpt-6-sol pane=269e2839 turn=6173581165764472b6c340786cfdcc26/de5eab23456c4a58ac8f4647bb032d56 -->
+Current-model trace (2026-09-25): ModelsPane passes its served pane's currentEntryKey into ModelPicker; Enabled/Pick order/Effort append '· current' for that key. It is a pane state label, not a global selection. New pane startEntry draws among usable Main rank-1 ties; routing-draws.jsonl records kimi-code|k3 chosen at 22:31:15 EDT for pane 6ad44757 (26.2% draw probability), followed by configure_sent; no model_pick for that event. Remaining first-row/sticky paths: mainDefault and ModelRows::modeKey use first usable row for display/swap; RoleResolver.summary resolves High/Flash without a draw; PaneSession stores every non-main model_changed as a per-pane mode pick, reused on later mode switches. User asks to resolve current-model framing and rank-1 selection across Main/High/Flash.
+
+<!-- relay:entry 20260926T034227Z-d7 author=agent kind=event mention=D49C model=claude-opus-5-5 pane=269e2839 turn=6173581165764472b6c340786cfdcc26/5cf2d2908f984b848503f12052a6d41f -->
+mentioned in #D49C · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T034443Z-13 author=owner kind=event pane=269e2839 -->
+Released (269e2839) · the pane closed
+
+<!-- relay:entry 20260926T034531Z-nf author=agent kind=event model=claude-opus-5-5 pane=cae84571 turn=258ff0e9de5540e09f638ed1541c9168/978abc26046f49f194a85b9aefacbda7 -->
+- ✦ agent claimed this card · implemented_by anthropic/claude-opus-5-5 via claude:ashe-ethz-ch, session cae84571
+
+<!-- relay:entry 20260926T034531Z-ng author=agent kind=progress model=claude-opus-5-5 pane=cae84571 turn=258ff0e9de5540e09f638ed1541c9168/978abc26046f49f194a85b9aefacbda7 pane_token=cae84571-aa12-45d5-b3a2-881fb1298087 -->
+Claimed (cae84571) · working on it from a terminal pane
+
+Picking up from closed pane 269e2839: finish the Jobs tab follow-up (drop the pane-specific live report so Job rules shows only the shared rules), then back to needs-verification.

@@ -1,10 +1,11 @@
 ---
 id: WBFM
 type: work
-status: needs-verification
+status: executing
 labels: [feature, models, ui, design]
 assignee: agent
-implemented_by: openai/gpt-6-luna via codex
+implemented_by: anthropic/claude-opus-5-5 via claude:ashe-ethz-ch
+session: cae84571-aa12-45d5-b3a2-881fb1298087
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, sign_off: none, effort: medium, stakes: rework, blast: capability}
