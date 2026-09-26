@@ -38,6 +38,7 @@ class QToolButton;
 class QTreeView;
 
 namespace relay {
+class AgentSplit;
 class DocxEditor;
 
 // ----- right-click menus (issues #D60R, V9V1) ---------------------------------------------------
@@ -213,6 +214,9 @@ public:
     void focusHelper();                 // Alt+Q and a click on the row: build, open, focus
     void helperDraft(const QString &text);
     void fold();                        // back to the one row; the conversation is kept
+    // Told on every fold and unfold, so the pane's divider (AgentSplit, #ZPHJ) can give the row
+    // its own height and the open agent its chosen share.
+    std::function<void(bool folded)> onFoldChanged;
     bool expanded() const { return !m_collapsed; }
     const relay::agent::ConsoleHandle &agentConsole() const { return m_console; }
     // The header follows the file: "README.md agent".
@@ -412,6 +416,8 @@ public:
     // Text and Markdown files get an `ArtifactDock` at the foot of the pane; every other kind has
     // none (a picture has no buffer for an agent to edit).
     ArtifactDock *artifactDock() const;
+    // The draggable divider between the file and its docked agent (card #ZPHJ).
+    AgentSplit *agentSplit() const;
     // Where the task plugins are looked for, for every preview in this process: the window sets
     // it once, from the installed `plugins_bundled/`. Unset, a file has no plugin.
     static void setPluginSearch(const relay::agent::PluginSearch &search);
@@ -547,6 +553,8 @@ public:
     // The docked agent (card #PBZ4). A plan's edits by the agent go to the disk, which this
     // editor reloads when it is clean; the change list is the preview's alone.
     ArtifactDock *artifactDock() const;
+    // The draggable divider between the file and its docked agent (card #ZPHJ).
+    AgentSplit *agentSplit() const;
 
     std::function<void(bool fresh)> onExecute;
     std::function<void()> onKeepPlanning;

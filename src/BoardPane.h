@@ -45,6 +45,7 @@ class RichEditor;
 
 namespace relay {
 
+class AgentSplit;
 class CardDetail;
 class ColumnHeader;
 class RowList;
@@ -402,6 +403,8 @@ public:
     void pinSolo(const QString &id);
     bool pinned() const { return m_pinned; }
     QString pinnedCard() const { return m_pinnedCard; }
+    // The divider between the open card and its console (card #ZPHJ); a Card pane saves its share.
+    AgentSplit *cardSplit() const;
     std::function<void()> onClosePane;
     // Shift+Enter on a row, the page's ⤴ button, and a new card created while another card's
     // page is already open (the owner's "pressing new card again splits"): open `id` in a pane of

@@ -16,6 +16,7 @@
 #include "SubagentTranscript.h"
 #include "OutputLinks.h"
 #include "PaneView.h"
+#include "AgentSplit.h"   // the artifact/agent divider whose share a card, plan or preview leaf saves (#ZPHJ)
 #include "ModelsPane.h"   // the models pane is a hosted PaneView, and node() saves which tab it is on
 #include "ReviewPane.h"
 #include "PaneDimming.h"
@@ -522,7 +523,7 @@ public:
         // A card pane (#Y2BA) is the project and the card it is on; restore pins it again. The
         // first release of these wrote `{"board": {solo, card}}`, which the restore still reads.
         if (m_board && m_board->pinned())
-            return {{"card", QJsonObject{{"workspace", m_board->workspace()}, {"id", m_board->pinnedCard()}}}};
+            return {{"card", withAgentShare({{"workspace", m_board->workspace()}, {"id", m_board->pinnedCard()}})}};
         if (m_board) return {{"board", QJsonObject{{"workspace", m_board->workspace()},
                                                    {"collapsed", m_board->collapsedSections()},
                                                    {"hidden", m_board->hiddenSections()},
@@ -588,8 +589,24 @@ public:
             return {{QStringLiteral("sessions"), saved}};
         }
         if (m_turn || m_diff || m_hosted) return {};
-        if (m_plan) return {{"plan", QJsonObject{{"path", path()}}}};
-        return {{m_explorer ? "explorer" : "preview", QJsonObject{{"path", path()}}}};
+        if (m_plan) return {{"plan", withAgentShare({{"path", path()}})}};
+        if (m_preview) return {{"preview", withAgentShare({{"path", path()}})}};
+        return {{"explorer", QJsonObject{{"path", path()}}}};
+    }
+    // The divider between an artifact and its docked agent (card #ZPHJ): a file editor or preview,
+    // a plan, or the card in a Card pane. Null for every other pane.
+    relay::AgentSplit *agentSplit() const {
+        if (m_board) return m_board->pinned() ? m_board->cardSplit() : nullptr;
+        if (m_plan) return m_plan->agentSplit();
+        if (m_preview) return m_preview->agentSplit();
+        return nullptr;
+    }
+    // The leaf with the agent's share as `agent` once the reader has dragged it; a pane left at
+    // its default saves nothing, and restores to whatever the default is then.
+    QJsonObject withAgentShare(QJsonObject leaf) const {
+        if (relay::AgentSplit *split = agentSplit(); split && split->agentShare() > 0)
+            leaf.insert(QStringLiteral("agent"), split->agentShare());
+        return leaf;
     }
     void focusInput() {
         if (m_settingsView) m_settingsView->focusSearch();

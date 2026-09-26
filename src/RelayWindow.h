@@ -5486,7 +5486,13 @@ public:
 
     // A card pane (#Y2BA): a Board view that pinSolo will pin to one card, in a Kind::Card pane.
     ToolPane *createCardPane(const QString &workspace) {
-        return createBoardPane(workspace, {}, {}, QString(), {}, {}, QString(), ToolPane::Kind::Card);
+        ToolPane *tool = createBoardPane(workspace, {}, {}, QString(), {}, {}, QString(), ToolPane::Kind::Card);
+        // A drag of the card/console divider is part of the layout (#ZPHJ).
+        if (relay::AgentSplit *split = tool->board()->cardSplit()) {
+            QPointer<ToolPane> guard(tool);
+            split->onUserMoved = [guard] { if (auto *w = windowOf(guard)) w->m_manager->scheduleSave(); };
+        }
+        return tool;
     }
 
     ToolPane *createBoardPane(const QString &workspace, const QJsonArray &collapsed = {},
@@ -5893,6 +5899,9 @@ private:
             Q_UNUSED(searched);
             wireConsoleHost(dock, tool, QStringLiteral("artifact.ask"));
         }
+        // A drag of the file/agent divider is part of the layout (#ZPHJ).
+        if (relay::AgentSplit *split = tool->agentSplit())
+            split->onUserMoved = [guard] { if (auto *w = windowOf(guard)) w->m_manager->scheduleSave(); };
         relay::theme::polishWindow(tool);
         tool->setObjectName(QStringLiteral("pane"));
         return tool;

@@ -1305,6 +1305,9 @@ QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
                 }
                 ToolPane *tool = createCardPane(workspace);
                 tool->board()->pinSolo(id);
+                // The card's share of the pane against its console, as it was dragged (#ZPHJ).
+                if (relay::AgentSplit *split = tool->board()->cardSplit())
+                    split->setAgentShare(card.value(QStringLiteral("agent")).toDouble(-1));
                 QPointer<ToolPane> guard(tool);
                 QTimer::singleShot(0, tool, [guard, workspace, id] {
                     auto *w = windowOf(guard);
@@ -1419,14 +1422,28 @@ QWidget *RelayWindow::buildNodeWidget(const QJsonObject &node) {
             return tool;
         }
         if (node.contains(QStringLiteral("plan"))) {
-            const QString path = node.value(QStringLiteral("plan")).toObject().value(QStringLiteral("path")).toString();
-            if (QFileInfo::exists(path)) return createToolPane(ToolPane::Kind::Plan, path);
+            const QJsonObject plan = node.value(QStringLiteral("plan")).toObject();
+            const QString path = plan.value(QStringLiteral("path")).toString();
+            if (QFileInfo::exists(path)) {
+                ToolPane *tool = createToolPane(ToolPane::Kind::Plan, path);
+                // The docked agent's share of the pane, as it was dragged (#ZPHJ).
+                if (relay::AgentSplit *split = tool->agentSplit())
+                    split->setAgentShare(plan.value(QStringLiteral("agent")).toDouble(-1));
+                return tool;
+            }
             return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
         }
         if (node.contains(QStringLiteral("explorer")) || node.contains(QStringLiteral("preview"))) {
             const bool explorer = node.contains(QStringLiteral("explorer"));
-            const QString path = node.value(explorer ? QStringLiteral("explorer") : QStringLiteral("preview")).toObject().value(QStringLiteral("path")).toString();
-            if (QFileInfo::exists(path)) return createToolPane(explorer ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview, path);
+            const QJsonObject leaf = node.value(explorer ? QStringLiteral("explorer") : QStringLiteral("preview")).toObject();
+            const QString path = leaf.value(QStringLiteral("path")).toString();
+            if (QFileInfo::exists(path)) {
+                ToolPane *tool = createToolPane(explorer ? ToolPane::Kind::Explorer : ToolPane::Kind::Preview, path);
+                // The docked agent's share of the pane, as it was dragged (#ZPHJ).
+                if (relay::AgentSplit *split = tool->agentSplit())
+                    split->setAgentShare(leaf.value(QStringLiteral("agent")).toDouble(-1));
+                return tool;
+            }
             return createPane({{"cwd", m_manager->workspace()}, {"workspace", m_manager->workspace()}});
         }
         return createPane(node.value(QStringLiteral("pane")).toObject());

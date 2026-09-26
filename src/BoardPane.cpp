@@ -3425,19 +3425,28 @@ void BoardView::ensureConsole()
 
 // A live turn needs the old 20-line floor for its transcript and queue strip. Before the first
 // byte, the hidden terminal host needs no floor; the composer supplies its own size hint.
+//
+// The card page's console has no cap of its own since card #ZPHJ: the divider above it
+// (CardDetail::agentSplit) decides its share, 40 % until the reader drags it. Its floor is lower,
+// so the divider can hand most of the page back to the card.
 void BoardView::updateConsoleHeight()
 {
     const int line = QFontMetrics(font()).lineSpacing();
     const int cap = std::max(10 * line, height() * 2 / 5);
     const int floor = std::min(cap, 20 * line);
-    for (const auto &[console, host] : {std::pair<QWidget *, QWidget *>{m_console, m_listTranscriptHost},
-                                        {m_detail != nullptr ? m_detail->console() : nullptr,
-                                         m_cardTranscriptHost}}) {
-        if (console == nullptr)
-            continue;
-        console->setMaximumHeight(cap);
-        console->setMinimumHeight(host && host->isHidden() ? 0 : floor);
+    if (m_console != nullptr) {
+        m_console->setMaximumHeight(cap);
+        m_console->setMinimumHeight(m_listTranscriptHost && m_listTranscriptHost->isHidden() ? 0 : floor);
     }
+    if (QWidget *card = m_detail != nullptr ? m_detail->console() : nullptr) {
+        card->setMaximumHeight(QWIDGETSIZE_MAX);
+        card->setMinimumHeight(m_cardTranscriptHost && m_cardTranscriptHost->isHidden() ? 0 : std::min(floor, 8 * line));
+    }
+}
+
+AgentSplit *BoardView::cardSplit() const
+{
+    return m_detail != nullptr ? m_detail->agentSplit() : nullptr;
 }
 
 // The open card's console (card #AGNT step 6). A second console, not the list page's one: the

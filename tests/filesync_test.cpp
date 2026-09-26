@@ -4,8 +4,12 @@
 // its three answers, and a save that races an external write. Runs offscreen; the watcher is the
 // real QFileSystemWatcher, so every wait is a QTRY on what the pane shows.
 #include "FilePanes.h"
+#include "AgentSplit.h"
 
+#include <QApplication>
 #include <QCryptographicHash>
+#include <QMouseEvent>
+#include <QSplitterHandle>
 #include <QDir>
 #include <QImage>
 #include <QJsonArray>
@@ -24,6 +28,27 @@
 #include <QToolButton>
 
 using relay::ArtifactDock;
+using relay::AgentSplit;
+
+namespace {
+// A drag of the divider by hand: press, move, release on the handle, with the button held
+// (QTest's mouseMove does not carry it on every Qt), which is what makes QSplitter emit
+// `splitterMoved` — the one signal AgentSplit remembers.
+void dragHandle(QSplitterHandle *handle, int dy) {
+    const QPointF from = QRectF(handle->rect()).center();
+    const QPointF to = from + QPointF(0, dy);
+    auto send = [handle](QEvent::Type type, const QPointF &at, Qt::MouseButton button, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, at, QPointF(handle->mapToGlobal(at.toPoint())), button, buttons, Qt::NoModifier);
+        QApplication::sendEvent(handle, &event);
+    };
+    send(QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseMove, (from + to) / 2, Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
+}
+int agentHeight(const AgentSplit *split) { return split->sizes().value(1); }
+int splitTotal(const AgentSplit *split) { return split->sizes().value(0) + split->sizes().value(1); }
+}  // namespace
 using relay::FilePreview;
 using relay::PlanEditor;
 
@@ -439,6 +464,112 @@ private slots:
         QCOMPARE(dock->context()->spec().plugin, QStringLiteral("relay.markdown"));
         QCOMPARE(dock->context()->slashCommands().size(), 1);
         FilePreview::setPluginSearch({});
+    }
+
+    // #ZPHJ: the divider between the file and its agent drags both ways, only a drag is
+    // remembered, folding keeps the one-row foot, and unfolding and resizing come back to the
+    // share that was chosen. A second pane given the saved share opens at it.
+    void theAgentDividerDragsFoldsAndRestores() {
+        FilePreview preview;
+        preview.resize(800, 900);
+        preview.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&preview));
+        QVERIFY(preview.open(m_path));
+        ArtifactDock *dock = preview.artifactDock();
+        AgentSplit *split = preview.agentSplit();
+        QVERIFY(split);
+        QWidget body;
+        dock->onCreateConsole = [&body](relay::agent::Context *, QWidget *) {
+            relay::agent::ConsoleHandle handle;
+            handle.widget = new QPlainTextEdit(&body);   // stands in for the transcript
+            return handle;
+        };
+        QTRY_VERIFY(dock->isVisible());
+        // Folded: the one row, and a handle that does not move.
+        QVERIFY(split->agentFolded());
+        QVERIFY(!split->handle(1)->isEnabled());
+        QTRY_VERIFY(agentHeight(split) < 80);
+        int saves = 0;
+        split->onUserMoved = [&saves] { ++saves; };
+
+        dock->focusHelper();
+        QVERIFY(!split->agentFolded());
+        QVERIFY(split->handle(1)->isEnabled());
+        QTRY_VERIFY(qAbs(agentHeight(split) - qRound(0.45 * splitTotal(split))) <= 2);
+        QCOMPARE(split->agentShare(), -1.0);   // the default is not a choice
+        QCOMPARE(saves, 0);
+
+        // Up: more of the thread.
+        const int before = agentHeight(split);
+        dragHandle(split->handle(1), -200);
+        QVERIFY2(agentHeight(split) > before + 150, qPrintable(QStringLiteral("%1 -> %2").arg(before).arg(agentHeight(split))));
+        QVERIFY(saves >= 1);
+        const double tall = split->agentShare();
+        QVERIFY(tall > 0.6);
+        // Down: less.
+        dragHandle(split->handle(1), 300);
+        QVERIFY(split->agentShare() < tall - 0.2);
+        const double chosen = split->agentShare();
+        const int savesBefore = saves;
+
+        // Fold: one row again, the choice kept; unfold: back to it. Nothing of this is saved.
+        dock->fold();
+        QVERIFY(split->agentFolded());
+        QTRY_VERIFY(agentHeight(split) < 80);
+        QCOMPARE(split->agentShare(), chosen);
+        dock->focusHelper();
+        QTRY_VERIFY(qAbs(agentHeight(split) - qRound(chosen * splitTotal(split))) <= 2);
+        // A resize keeps the share, not the pixels.
+        preview.resize(800, 600);
+        QTRY_VERIFY(qAbs(agentHeight(split) - qRound(chosen * splitTotal(split))) <= 2);
+        QCOMPARE(saves, savesBefore);
+
+        // What a restored pane is given: set before it is shown, applied once it has a height.
+        FilePreview again;
+        again.agentSplit()->setAgentShare(chosen);
+        again.resize(800, 900);
+        again.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&again));
+        QVERIFY(again.open(m_path));
+        QWidget body2;
+        again.artifactDock()->onCreateConsole = [&body2](relay::agent::Context *, QWidget *) {
+            relay::agent::ConsoleHandle handle;
+            handle.widget = new QPlainTextEdit(&body2);
+            return handle;
+        };
+        again.artifactDock()->focusHelper();
+        QTRY_VERIFY(qAbs(agentHeight(again.agentSplit()) - qRound(chosen * splitTotal(again.agentSplit()))) <= 2);
+        // …and one pane's drag is its own.
+        dragHandle(again.agentSplit()->handle(1), -120);
+        QCOMPARE(split->agentShare(), chosen);
+        // A share out of range is the default again.
+        again.agentSplit()->setAgentShare(3.0);
+        QCOMPARE(again.agentSplit()->agentShare(), -1.0);
+    }
+
+    // The plan editor has the same divider, over the editor and its plan buttons.
+    void thePlanEditorsAgentDividerDrags() {
+        const QString plan = m_dir.filePath(QStringLiteral("divider-plan.md"));
+        writeInPlace(plan, "# Plan\n");
+        PlanEditor editor;
+        editor.resize(800, 900);
+        editor.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&editor));
+        QVERIFY(editor.open(plan));
+        QWidget body;
+        editor.artifactDock()->onCreateConsole = [&body](relay::agent::Context *, QWidget *) {
+            relay::agent::ConsoleHandle handle;
+            handle.widget = new QPlainTextEdit(&body);
+            return handle;
+        };
+        AgentSplit *split = editor.agentSplit();
+        QVERIFY(split && split->agentFolded());
+        editor.artifactDock()->focusHelper();
+        QTRY_VERIFY(!split->agentFolded() && agentHeight(split) > 200);
+        const int before = agentHeight(split);
+        dragHandle(split->handle(1), -150);
+        QVERIFY(agentHeight(split) > before + 100);
+        QVERIFY(split->agentShare() > 0.5);
     }
 
     // U5: the file's record is the undo steps plus a per-turn change list, named by the words

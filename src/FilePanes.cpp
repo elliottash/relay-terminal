@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "FilePanes.h"
+#include "AgentSplit.h"
 #include "DocxEditor.h"
 #include "CopyOnSelect.h"
 #include "Hints.h"
@@ -1130,6 +1131,7 @@ void ArtifactDock::applyCollapsed() {
     if (m_body) m_body->setVisible(!m_collapsed);
     if (m_console.setCollapsed) m_console.setCollapsed(m_collapsed);
     if (!m_collapsed) updateHeight();
+    if (onFoldChanged) onFoldChanged(m_collapsed);
 }
 
 void ArtifactDock::updateRow() {
@@ -1143,16 +1145,13 @@ void ArtifactDock::updateRow() {
     if (m_head) m_head->setText(m_context->title());
 }
 
-// At most ~45 % of the host, and never so little that the transcript is a slot: the editor above
-// is what the person came for.
+// How much of the pane the open agent takes is the divider's (AgentSplit, card #ZPHJ): 45 % until
+// the reader drags it. Here only a floor, so the transcript and the composer are never a slot.
 void ArtifactDock::updateHeight() {
     if (!m_body) return;
-    const QWidget *host = parentWidget();
     const int line = QFontMetrics(font()).lineSpacing();
-    const int total = host ? host->height() : 600;
-    const int cap = std::max(10 * line, total * 9 / 20);
-    m_body->setMaximumHeight(cap);
-    m_body->setMinimumHeight(std::min(cap, 14 * line));
+    m_body->setMaximumHeight(QWIDGETSIZE_MAX);
+    m_body->setMinimumHeight(6 * line);
 }
 
 void ArtifactDock::showEvent(QShowEvent *event) {
@@ -1288,6 +1287,7 @@ struct FilePreview::Private {
 
     // ----- the docked agent (card #PBZ4) ---------------------------------------------------------
     ArtifactDock *dock = nullptr;
+    AgentSplit *split = nullptr;   // the file above, the dock below (#ZPHJ)
     QVector<QJsonObject> held;         // patches waiting for Apply while "Review before apply" is on
     QToolButton *agentApply = nullptr, *agentDiscard = nullptr;
 };
@@ -1508,7 +1508,11 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
     layout->addWidget(m_noticeLabel);
 
     m_stack = new QStackedWidget;
-    layout->addWidget(m_stack, 1);
+    // The viewers share the pane's height with the docked agent through a divider the reader can
+    // drag (card #ZPHJ); the dock is added under them once it is built.
+    d->split = new AgentSplit(0.45, this);
+    d->split->setContent(m_stack);
+    layout->addWidget(d->split, 1);
 
     m_textView = new QPlainTextEdit;
     m_textView->setObjectName(QStringLiteral("filePreviewText"));
@@ -1693,7 +1697,9 @@ FilePreview::FilePreview(QWidget *parent) : QWidget(parent), d(new Private) {
             d->dock->context()->changed();   // Save and Revert light up with something to save
         });
     }
-    layout->addWidget(d->dock, 0);
+    d->split->setAgent(d->dock);
+    d->split->setAgentFolded(!d->dock->expanded());
+    d->dock->onFoldChanged = [split = d->split](bool folded) { split->setAgentFolded(folded); };
 }
 
 FilePreview::~FilePreview() {
@@ -3019,6 +3025,7 @@ bool FilePreview::undoAgentChange() {
 // ----- the docked agent (card #PBZ4) -------------------------------------------------------------
 
 ArtifactDock *FilePreview::artifactDock() const { return d->dock; }
+AgentSplit *FilePreview::agentSplit() const { return d->split; }
 
 void FilePreview::setPluginSearch(const relay::agent::PluginSearch &search) { pluginSearch() = search; }
 
@@ -3488,6 +3495,7 @@ struct PlanEditor::Private {
     // The docked agent (card #PBZ4), and the watch that shows its writes: a plan's edits by the
     // agent go to the disk, so a clean editor follows the file as one undo step.
     ArtifactDock *dock = nullptr;
+    AgentSplit *split = nullptr;   // the file above, the dock below (#ZPHJ)
     QFileSystemWatcher *watcher = nullptr;
     QString loaded;   // what was last read from or written to the disk
 };
@@ -3509,7 +3517,13 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
     m_editor->setObjectName(QStringLiteral("planText"));
     m_editor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     m_editor->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    layout->addWidget(m_editor, 1);
+    // The editor and its plan buttons over the docked agent, with a divider the reader can drag
+    // (card #ZPHJ).
+    auto *artifact = new QWidget;
+    auto *artifactColumn = new QVBoxLayout(artifact);
+    artifactColumn->setContentsMargins(0, 0, 0, 0);
+    artifactColumn->setSpacing(6);
+    artifactColumn->addWidget(m_editor, 1);
     m_planActions = new QWidget;
     auto *actions = new QHBoxLayout(m_planActions); actions->setContentsMargins(0, 0, 0, 0);
     auto *execute = new QPushButton(QStringLiteral("Run"));
@@ -3519,7 +3533,10 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
     fresh->setToolTip(QStringLiteral("Start a new conversation that only has this plan"));
     auto *keep = new QPushButton(QStringLiteral("Keep planning"));
     actions->addWidget(execute); actions->addWidget(fresh); actions->addStretch(1); actions->addWidget(keep);
-    layout->addWidget(m_planActions);
+    artifactColumn->addWidget(m_planActions);
+    d->split = new AgentSplit(0.45, this);
+    d->split->setContent(artifact);
+    layout->addWidget(d->split, 1);
     d->dock = new ArtifactDock(this);
     {
         relay::agent::ArtifactContext *context = d->dock->context();
@@ -3556,7 +3573,9 @@ PlanEditor::PlanEditor(QWidget *parent) : QWidget(parent), d(new Private) {
             if (self) self->d->dock->nameTurn(record.turnId, record.prompt);
         };
     }
-    layout->addWidget(d->dock, 0);
+    d->split->setAgent(d->dock);
+    d->split->setAgentFolded(!d->dock->expanded());
+    d->dock->onFoldChanged = [split = d->split](bool folded) { split->setAgentFolded(folded); };
     d->watcher = new QFileSystemWatcher(this);
     connect(d->watcher, &QFileSystemWatcher::fileChanged, this, [this](const QString &) {
         QTimer::singleShot(80, this, [this] {
@@ -3614,6 +3633,7 @@ PlanEditor::~PlanEditor() {
 }
 
 ArtifactDock *PlanEditor::artifactDock() const { return d->dock; }
+AgentSplit *PlanEditor::agentSplit() const { return d->split; }
 
 bool PlanEditor::open(const QString &path) {
     QFile file(path);

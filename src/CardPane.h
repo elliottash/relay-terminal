@@ -6,6 +6,7 @@
 // host it without this file. BoardView remains the host that sets every callback.
 
 #include "AgentContext.h"   // relay::agent::Action, the card's action row
+#include "AgentSplit.h"     // the divider between the card and its console (#ZPHJ)
 #include "AppPaths.h"       // dataRoot, relayPython
 #include "BoardModel.h"     // relay::board::{VerifyPlan, sessionChip, statusTitle, ...}
 #include "BoardSignals.h"
@@ -176,9 +177,20 @@ public:
         setObjectName(QStringLiteral("boardDetail"));
         setAttribute(Qt::WA_StyledBackground);
         setMinimumWidth(320);
-        auto *layout = new QVBoxLayout(this);
-        layout->setContentsMargins(12, 10, 12, 10);
+        // The card over its console, with a divider the reader can drag (card #ZPHJ): everything
+        // read or edited goes in `reading`, the reply frame under the handle. The widgets below
+        // are made with this page as parent; `layout` puts them in `reading` as it takes them.
+        auto *outer = new QVBoxLayout(this);
+        outer->setContentsMargins(12, 10, 12, 10);
+        outer->setSpacing(0);
+        m_split = new AgentSplit(0.4, this);
+        outer->addWidget(m_split);
+        auto *reading = new QWidget(m_split);
+        reading->setObjectName(QStringLiteral("boardCardReading"));
+        auto *layout = new QVBoxLayout(reading);
+        layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(8);
+        m_split->setContent(reading);
 
         auto *top = new QHBoxLayout;
         top->setSpacing(6);
@@ -642,7 +654,8 @@ public:
         // used to: the box is a console the window embeds after the page is built, and the
         // splitter sizes the card page again a turn later.
         m_replyFrame->installEventFilter(this);
-        layout->addWidget(m_replyFrame);
+        m_split->setAgent(m_replyFrame);
+        m_split->setAgentFolded(true);   // opens with the console (setConsole)
         setModeTips();
 
         connect(m_stop, &QToolButton::clicked, this, [this] {
@@ -764,6 +777,7 @@ public:
         if (console == nullptr || m_consoleBox == nullptr)
             return;
         m_consoleBox->addWidget(console);
+        m_split->setAgentFolded(false);
         // The console's pane header is not drawn here, and not because this page hides it: a
         // console draws none at all (`Pane::applyContextHeader`). Its transcript is hidden until
         // it has something to show, which `ensureCardConsole` asks for — so the page reads
@@ -820,6 +834,9 @@ public:
         return true;
     }
     RichEditor *replyEditor() const { return m_reply; }
+    // The divider between the card and its console (card #ZPHJ). Its share is saved with a Card
+    // pane's layout leaf.
+    AgentSplit *agentSplit() const { return m_split; }
     // The console embedded in this page, or null before the view has one.
     QWidget *console() const
     {
@@ -3426,6 +3443,7 @@ private:
     QLabel *m_busyLabel = nullptr;
     QToolButton *m_stop = nullptr;
     QFrame *m_replyFrame = nullptr, *m_editFrame = nullptr;
+    AgentSplit *m_split = nullptr;
     // The `## Try it` strip (#JNYN): the header line with the unanswered question, the button
     // that opens what the turn staged, and the one line the person answers in. Nothing of the
     // run is kept here — the section on the card is the state, and the notice area is the run.

@@ -4,6 +4,7 @@
 // hands a card to a pane of its own on Shift+Enter, on the page's ⤴ button, and when a new card is
 // created while another card's page is still open (the owner's "pressing new card again splits").
 #include "BoardPane.h"
+#include "AgentSplit.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -15,6 +16,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QListWidget>
+#include <QMouseEvent>
+#include <QPlainTextEdit>
+#include <QSplitterHandle>
 #include <QToolButton>
 #include <QtTest>
 
@@ -75,6 +79,22 @@ void pressOn(QWidget *target, int key, Qt::KeyboardModifiers mods = Qt::NoModifi
     QApplication::sendEvent(target, &press);
 }
 
+// A drag of a splitter handle with the button held, as the mouse does it (#ZPHJ).
+void dragHandle(QSplitterHandle *handle, int dy)
+{
+    const QPointF from = QRectF(handle->rect()).center();
+    const QPointF to = from + QPointF(0, dy);
+    auto send = [handle](QEvent::Type type, const QPointF &at, Qt::MouseButton button,
+                         Qt::MouseButtons buttons) {
+        QMouseEvent event(type, at, QPointF(handle->mapToGlobal(at.toPoint())), button, buttons, Qt::NoModifier);
+        QApplication::sendEvent(handle, &event);
+    };
+    send(QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseMove, (from + to) / 2, Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
+}
+
 }  // namespace
 
 class BoardSoloTests : public QObject {
@@ -88,7 +108,85 @@ private slots:
     void thePopOutButtonHandsTheCardOverAndGoesBackToTheList();
     void aNewCardWhileOneIsOpenGoesToItsOwnPane();
     void aPinnedPaneLeavesTheTreeWatchToTheList();
+    void theCardPanesAgentDividerDragsAndRestores();
 };
+
+// #ZPHJ, the owner's "thats not working in the card pane": a Card pane's console sits under a
+// divider that drags both ways, is not capped at 40 % any more, and a second Card pane given the
+// saved share opens at it while the first keeps its own.
+void BoardSoloTests::theCardPanesAgentDividerDragsAndRestores()
+{
+    auto openPinned = [](relay::BoardView &view, QList<QJsonObject> &sent, QWidget &consoles) {
+        view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+        view.onClosePane = [] {};
+        view.onCreateConsole = [&consoles](relay::agent::Context *, QWidget *) {
+            relay::agent::ConsoleHandle handle;
+            auto *transcript = new QPlainTextEdit(&consoles);   // the thread and its chain of thought
+            transcript->setPlainText(QStringLiteral("thinking…\n").repeated(200));
+            handle.widget = transcript;
+            return handle;
+        };
+        view.resize(900, 1000);
+        view.show();
+        view.handleEvent(opened({QStringLiteral("K7Q2")}));
+        view.pinSolo(QStringLiteral("K7Q2"));
+        view.handleEvent(cardEvent(QStringLiteral("K7Q2"), lastId(sent)));
+    };
+    auto agentHeight = [](const relay::AgentSplit *split) { return split->sizes().value(1); };
+    auto total = [](const relay::AgentSplit *split) { return split->sizes().value(0) + split->sizes().value(1); };
+
+    QWidget consoles;
+    QList<QJsonObject> sent;
+    relay::BoardView view(QStringLiteral("/tmp/relay-card-solo-test"));
+    openPinned(view, sent, consoles);
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QVERIFY(view.detailOpen());
+    relay::AgentSplit *split = view.cardSplit();
+    QVERIFY(split);
+    QTRY_VERIFY(!split->agentFolded());   // the console is there, so the handle is live
+    QVERIFY(split->handle(1)->isEnabled());
+    QTRY_VERIFY(qAbs(agentHeight(split) - qRound(0.4 * total(split))) <= 2);
+    int saves = 0;
+    split->onUserMoved = [&saves] { ++saves; };
+
+    // Up, past the old 40 % cap: more of the thread in place.
+    const int before = agentHeight(split);
+    dragHandle(split->handle(1), -250);
+    QVERIFY2(agentHeight(split) > before + 200,
+             qPrintable(QStringLiteral("%1 -> %2").arg(before).arg(agentHeight(split))));
+    QVERIFY(agentHeight(split) > total(split) / 2);
+    QVERIFY(saves >= 1);   // once per step of the drag; the window's save is debounced
+    // Down: the card gets it back.
+    dragHandle(split->handle(1), 400);
+    QVERIFY(agentHeight(split) < before);
+    const double chosen = split->agentShare();
+    QVERIFY(relay::AgentSplit::validShare(chosen));
+    // A window resize keeps the share — held up by the console's own minimum when the pane is
+    // too short for it, and kept, so a taller pane has it back.
+    view.resize(900, 700);
+    QTRY_VERIFY2(qAbs(agentHeight(split) - qMax(split->widget(1)->minimumSizeHint().height(),
+                                                 qRound(chosen * total(split)))) <= 2,
+                 qPrintable(QStringLiteral("agent %1 of %2, share %3, content min %4, agent min %5")
+                                .arg(agentHeight(split)).arg(total(split)).arg(chosen)
+                                .arg(split->widget(0)->minimumSizeHint().height())
+                                .arg(split->widget(1)->minimumSizeHint().height())));
+    QCOMPARE(split->agentShare(), chosen);
+    view.resize(900, 1000);
+    QTRY_VERIFY(qAbs(agentHeight(split) - qRound(chosen * total(split))) <= 2);
+
+    // The restored pane.
+    QWidget consoles2;
+    QList<QJsonObject> sent2;
+    relay::BoardView again(QStringLiteral("/tmp/relay-card-solo-test"));
+    again.cardSplit()->setAgentShare(chosen);
+    openPinned(again, sent2, consoles2);
+    QVERIFY(QTest::qWaitForWindowExposed(&again));
+    relay::AgentSplit *second = again.cardSplit();
+    QTRY_VERIFY(!second->agentFolded());
+    QTRY_VERIFY(qAbs(agentHeight(second) - qRound(chosen * total(second))) <= 2);
+    dragHandle(second->handle(1), -150);
+    QCOMPARE(split->agentShare(), chosen);   // one pane's drag is its own
+}
 
 void BoardSoloTests::aPinnedPaneShowsOneCardAndClosesAsAPane()
 {
