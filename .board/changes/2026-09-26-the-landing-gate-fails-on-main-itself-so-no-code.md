@@ -1,7 +1,7 @@
 ---
 id: BP15
 type: work
-status: inbox
+status: discussing
 labels: [bug, landing, tests]
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-26'
