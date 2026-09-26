@@ -1774,15 +1774,17 @@ QList<Row> Model::rows(const QSet<QString> &collapsed, const QSet<QString> &hidd
         out << header;
         if (header.collapsed)
             continue;
-        // A section that collects several statuses (Waiting, Needs QA, Done) names each card's
-        // exact one; the one whose status is the section's own repeats nothing.
-        const bool multi = column.statuses.size() > 1;
-        const auto cardRow = [&column, multi](const Card &card) {
+        // Every card row names its stage in the Stage column, as in the flat list (#YN4D): the
+        // column under the STAGE header is never empty. The pill replaces the status badge a
+        // multi-status section (Waiting, Needs QA, Done) used to add; a row too narrow for the
+        // column gets that badge back from cardShape.
+        const auto cardRow = [this, &column](const Card &card) {
             Row row;
             row.kind = Row::Card;
             row.columnId = column.id;
             row.cardId = card.id;
-            row.showStatus = multi && card.status != column.id;
+            row.stage = column.id == verifiedSection() ? sectionTitle(verifiedSection())
+                                                       : statusTitle(card.status);
             return row;
         };
         // The cards the agent closed itself come out of the run of rows and stand behind one fold

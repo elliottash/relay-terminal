@@ -375,7 +375,7 @@ CardShape cardShape(const board::Card &card, bool showStatus, const QString &sta
         shape.updated = board::dateCell(card.updated);
         contentRight = shape.createdRect.left() - kDateGap;
     }
-    // The Stage column, left of the dates, when the list is flat (#ESDF) and the row is wide
+    // The Stage column, left of the dates, on every card row (#ESDF, #YN4D) that is wide
     // enough; otherwise the stage rides the badges as the status one.
     if (!stage.isEmpty()) {
         if (stageColumnFits(font, stageWidth)) {
@@ -1020,10 +1020,12 @@ private:
             const QString text = stageMetrics.elidedText(
                 shape.stage.toUpper(), Qt::ElideRight, shape.stageRect.width() - 12);
             const auto [ink, edge] = stageInk(row.stage);
+            // In the row's own place, like the date cells: an untranslated rect painted every
+            // row's pill over the first row's, so only the top card showed a stage (#YN4D).
+            const QRect stageRect = shape.stageRect.translated(origin);
             const qreal pillWidth = qMin<qreal>(stageMetrics.horizontalAdvance(text) + 12,
-                                                shape.stageRect.width());
-            const QRectF pill(shape.stageRect.left(), shape.stageRect.center().y() - 8.5,
-                              pillWidth, 17.0);
+                                                stageRect.width());
+            const QRectF pill(stageRect.left(), stageRect.center().y() - 8.5, pillWidth, 17.0);
             painter->save();
             painter->setFont(stageFont);
             painter->setPen(QPen(edge, 1.0));

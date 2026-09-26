@@ -26,6 +26,8 @@
 #include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QImage>
+#include <QSet>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
@@ -389,6 +391,7 @@ private slots:
     void theRowListIsHeadersThenCards();
     void aFlatListIsEveryShownCardInOneOrder();
     void theStageHeaderTogglesTheFlatListAndTheChoiceIsKept();
+    void everyCardRowPaintsItsOwnStagePill();
     void theViewedHeaderSortsByLastOpenedAndTheStampsSurviveAReopen();
     void badgesSayWhatTheCardCarries();
     void metadataRowsSortAndFilterSnoozedCards();
@@ -1030,10 +1033,12 @@ void BoardModelTests::theRowListIsHeadersThenCards()
     QVERIFY(at > 0);
     QCOMPARE(list.at(at).count, 2);
     QCOMPARE(list.at(at).title, QStringLiteral("Needs QA"));
-    // A section that collects several statuses names each card's exact one; a single-status
-    // section has nothing to repeat.
-    QVERIFY(list.at(at + 1).showStatus);
-    QVERIFY(!list.at(relay::board::rowOfCard(list, QStringLiteral("P9AB"))).showStatus);
+    // Every card row names its exact stage (#YN4D), a multi-status section's and a single-status
+    // one's alike; the Stage pill replaces the status badge.
+    QCOMPARE(list.at(at + 1).stage, QStringLiteral("Needs QA (LLM)"));
+    QVERIFY(!list.at(at + 1).showStatus);
+    QCOMPARE(list.at(relay::board::rowOfCard(list, QStringLiteral("P9AB"))).stage,
+             QStringLiteral("Ready to start"));
     QCOMPARE(relay::board::cardsInSection(list, QStringLiteral("needs-qa")),
              (QStringList{"K7Q2", "M3XJ"}));
     QCOMPARE(relay::board::rowOfCard(list, QStringLiteral("nope")), -1);
@@ -1095,12 +1100,21 @@ void BoardModelTests::aFlatListIsEveryShownCardInOneOrder()
     QCOMPARE(sketch(model.rows({})), (QStringList{"AAA1"}));
     model.setFilter(QString());
     model.setLabelFilter({});
-    // Sections is the board as it was, with no stage cell: its header already says it.
+    // Sections keeps its headers and still names every card's stage (#YN4D): the Stage column
+    // is never a column of empty cells.
     model.setGrouping(Grouping::Sections);
     const QList<Row> sectioned = model.rows({});
     QCOMPARE(sectioned.first().kind, Row::Section);
-    for (const Row &r : sectioned)
-        QVERIFY(r.stage.isEmpty());
+    for (const Row &r : sectioned) {
+        if (r.kind == Row::Card)
+            QVERIFY2(!r.stage.isEmpty(), qPrintable(r.cardId));
+        else
+            QVERIFY(r.stage.isEmpty());
+    }
+    QCOMPARE(sectioned.at(relay::board::rowOfCard(sectioned, QStringLiteral("AAA1"))).stage,
+             QStringLiteral("Inbox"));
+    QCOMPARE(sectioned.at(relay::board::rowOfCard(sectioned, QStringLiteral("CCC3"))).stage,
+             QStringLiteral("Needs QA (human)"));
 }
 
 void BoardModelTests::badgesSayWhatTheCardCarries()
@@ -1597,6 +1611,47 @@ void BoardModelTests::theStageHeaderTogglesTheFlatListAndTheChoiceIsKept()
     QCOMPARE(sent.last().value(QStringLiteral("type")).toString(), QStringLiteral("board_move"));
     QCOMPARE(sent.last().value(QStringLiteral("before")).toString(), QStringLiteral("AAA1"));
     QVERIFY(!sent.last().contains(QStringLiteral("status")));
+}
+
+// #YN4D: the owner saw the Stage column empty for most cards. The pill was painted at the row's
+// relative rect, so every row drew it over the first row and only the top card showed a stage.
+// Each card row must carry ink in its own Stage cell, sectioned and flat.
+void BoardModelTests::everyCardRowPaintsItsOwnStagePill()
+{
+    relay::BoardView view(QStringLiteral("/tmp/workspace"));
+    view.restoreGrouping(QStringLiteral("sections"));
+    view.handleEvent(opened({row("AAA1", "inbox", "features", "a"),
+                             row("BBB2", "ready", "features", "b"),
+                             row("CCC3", "needs-qa-human", "features", "c")}));
+    view.setCollapsedSections(QJsonArray{});
+    view.resize(1100, 600);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    auto *stage = view.findChild<QToolButton *>(QStringLiteral("boardHeaderStage"));
+    QVERIFY(stage);
+    QListWidget *list = listOf(view);
+    for (const QString &grouping : {QStringLiteral("sections"), QStringLiteral("flat")}) {
+        view.restoreGrouping(grouping);
+        QCoreApplication::processEvents();
+        const QImage shot = list->viewport()->grab().toImage();
+        const int left = list->viewport()->mapFrom(&view, stage->mapTo(&view, QPoint(0, 0))).x();
+        int painted = 0;
+        for (int i = 0; i < list->count(); ++i) {
+            const relay::board::Row &r = view.rows().at(i);
+            if (r.kind != Row::Card)
+                continue;
+            const QRect cell = QRect(left, list->visualItemRect(list->item(i)).top(),
+                                     stage->width(), list->visualItemRect(list->item(i)).height())
+                                   .intersected(shot.rect());
+            QSet<QRgb> colours;
+            for (int y = cell.top(); y <= cell.bottom(); ++y)
+                for (int x = cell.left(); x <= cell.right(); ++x)
+                    colours.insert(shot.pixel(x, y));
+            QVERIFY2(colours.size() > 2, qPrintable(grouping + QLatin1Char(' ') + r.cardId));
+            ++painted;
+        }
+        QCOMPARE(painted, 3);
+    }
 }
 
 void BoardModelTests::theColumnHeaderSortsTheListWithinASection()

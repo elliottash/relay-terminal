@@ -196,8 +196,8 @@ struct Badge {
     Kind kind;
     QString text;
 };
-// The badges a card carries, in reading order. `showStatus` is for sections that collect several
-// statuses (Waiting, Needs QA, Done), where the exact one is otherwise invisible. `sessionLive`
+// The badges a card carries, in reading order. `showStatus` adds the exact status, for a row too
+// narrow to show its Stage column, where the stage would otherwise be invisible. `sessionLive`
 // is whether the pane the card's `session` names is still open (#R9G7): a closed one still shows
 // its token — the thread's link is the history of who took the card — but says so and is muted.
 QList<Badge> badges(const Card &card, bool showStatus, bool sessionLive = true);
@@ -353,16 +353,17 @@ struct Row {
                               // Fold: how many self-closed cards it stands for.
                               // SignalFold/DismissedFold: how many signals. Signal: its failures
     bool collapsed = false;   // Section, Fold, SignalFold, DismissedFold: its rows are not in the list
-    bool showStatus = false;  // Card: its section holds several statuses, so the row names this one
+    bool showStatus = false;  // Card: add the status badge. The model leaves it off since #YN4D —
+                              // `stage` names the status — and cardShape sets it for a row too
+                              // narrow for the Stage column
     // The signal fields come last on purpose: a `Row{Row::Card, "ready", {}, "A", 0, false,
     // false}` in a test names its members by position, so a field inserted above would silently
     // shift what those braces mean.
     QString signalKey;        // Signal: the signal's key (`ctest:panelayout`), never a card id
     int indent = 0;           // Signal: 1 for a member of a group, or a dismissed signal under
                               // its toggle — the row is drawn one step in from its parent
-    QString stage;            // Card, flat list only (#ESDF): the Stage column's text — the
-                              // card's exact status, or "Verified". Empty under sections, whose
-                              // header already says it
+    QString stage;            // Card (#ESDF, #YN4D): the Stage column's text — the card's
+                              // exact status, or "Verified" — in flat and sections grouping alike
 };
 
 // The card rows of one section, top to bottom.
