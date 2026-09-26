@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzw
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [], human: none, criteria: 'Focused real-Git tests prove private native and guest workspace routing, canonical Board, resume, legacy behavior and failure refusal', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [f5606d58d763], evidence: [], related: [], github: null}
+links: {plans: [], commits: [f5606d58d763, bf6231c20a65, 5d40b83c2239], evidence: [], related: [], github: null}
 ---
 # B2: Native and guest pane workspace integration
 
@@ -32,4 +32,5 @@ Added pre-launch workspace preparation, worker and guest routing, private child 
 ### Check
 Pass: `python3 scripts/land.py try b2-80x1 --verify-cmd "PYTHONPATH=backend python3 -m pytest -q tests/test_workspace_context.py tests/test_guest_launch.py tests/test_subagents.py tests/test_board_tools.py tests/test_tools.py tests/test_guest_harness_provider.py -k not\ test_preset_rows"` — exact tree verified.
 Pass: `PYTHONPATH=backend python3 -m pytest -q tests/test_workspace_context.py` (2 tests, real temporary Git repo).
+Pass: `python3 scripts/land.py try b2-80x1-policy --verify-cmd "PYTHONPATH=backend python3 -m pytest -q tests/test_workspace_context.py"` — exact tree after B1 landed; test changes target config after activation and proves the accepted quota still governs two workspaces.
 Independent C1 verification should stage native and guest pane launch in an isolated profile after B3 wiring.
