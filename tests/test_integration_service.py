@@ -396,21 +396,37 @@ class FlowTests(ServiceCase):
         ts = service.tree_status(alice["workspace_id"])
         self.assertEqual(ts["board_root"], str(self.board))
         self.assertEqual(ts["job"]["status"], "landed")
-        self.assertTrue(ts["unlanded"], "the workspace tip is past its base until removed")
+        self.assertFalse(ts["unlanded"], "the landing receipt covers the tip: nothing is retained")
+        self.assertEqual(ts["receipt_job"], ajob["id"])
+        self.assertEqual(ts["landed_sha"], service.queue.receipt(ajob["id"])["published_sha"])
+        (apath / "more.txt").write_text("after the landing\n")
+        run_git(apath, "add", "more.txt")
+        run_git(apath, "commit", "-q", "-m", "more")
+        later = service.tree_status(alice["workspace_id"])
+        self.assertTrue(later["unlanded"], "a commit past the receipt is unlanded work")
+        self.assertIsNone(later["pending_job"])
+        queued = service.submit(workspace_id=alice["workspace_id"], request_id="alice-2")
+        self.assertEqual(service.tree_status(alice["workspace_id"])["pending_job"], queued["id"])
+        service.queue.cancel(queued["id"])
+        run_git(apath, "reset", "-q", "--hard", "HEAD~1")
+        self.assertFalse(service.tree_status(alice["workspace_id"])["unlanded"])
         qs = service.queue_status()
-        self.assertEqual([j["status"] for j in qs["jobs"]], ["landed", "landed"])
+        self.assertEqual([j["status"] for j in qs["jobs"]], ["landed", "landed", "cancelled"])
         self.assertEqual(qs["main_release"]["installed_sha"], self.tip())
+        service.deliver_handoffs()                 # the cancelled job's notification
         snap = service.snapshot()
         self.assertEqual(snap["mode"], "queue")
         self.assertEqual(len(snap["workspaces"]), 2)
         self.assertEqual(snap["outbox_pending"], 0)
+        self.assertEqual(snap["handoffs_pending"], 2, "one actionable handoff per author, cancelled acked-less but not actionable")
         # Cleanup with the receipt the service finds itself.
         service.release_workspace(alice["workspace_id"], owner="alice")
         removed = service.remove_workspace(alice["workspace_id"])
         self.assertEqual(removed["status"], "removed")
 
     def test_failed_gate_keeps_main_and_hands_off_to_the_author_session(self):
-        service = self.service()
+        wakes = []
+        service = self.service(wake=wakes.append)
         ws, path, sha = self.author(service, "broken", "line 2\n", "candidate\n", card="AA11")
         (path / "shared.txt").write_text("only one line\n")   # the gate wants 40 lines
         run_git(path, "commit", "-q", "-am", "break the invariant")
@@ -419,13 +435,21 @@ class FlowTests(ServiceCase):
         self.assertEqual(result["job"]["status"], "failed")
         self.assertEqual(self.tip(), self.base)
         self.assertIsNone(service.queue.receipt(job["id"]))
-        handoffs = service.handoffs(session="broken")
-        # The one repair round ran (the stub model declined), so the author gets the failed
-        # gate and the author_required handoff with both gate results; nobody else does.
-        self.assertEqual(sorted(h["kind"] for h in handoffs), ["author_required", "failed"])
-        handoff = [h for h in handoffs if h["kind"] == "failed"]
-        self.assertIn("target was not moved", handoff[0]["text"])
-        self.assertEqual({h["session"] for h in service.handoffs()}, {"broken"})
+        # The one repair round ran (the stub model declined): the queue wrote `failed` and
+        # `author_required`, but the author is handed exactly one actionable thing.
+        pending = service.handoffs(session="broken")
+        self.assertEqual([h["kind"] for h in pending], ["author_required"])
+        history = service.handoffs(session="broken", pending_only=False)
+        self.assertEqual(sorted(h["kind"] for h in history), ["author_required", "failed"])
+        failed = [h for h in history if h["kind"] == "failed"][0]
+        self.assertIsNotNone(failed["superseded_at"])
+        self.assertIn("target was not moved", failed["text"])
+        self.assertEqual({h["session"] for h in history}, {"broken"})
+        self.assertEqual(len(wakes), 1, "the author was woken once: %s" % wakes)
+        self.assertEqual(wakes[0]["kind"], "author_required")
+        # Both events are in the history; only one was actionable.
+        events = [(e["handoff_kind"], e["superseded"]) for e in service.events() if e["kind"] == "handoff"]
+        self.assertEqual(sorted(events), [("author_required", False), ("failed", True)])
         self.assertIn("landq:%s:failed" % job["id"], (self.board / "threads" / "AA11.md").read_text())
         self.assertEqual(service.main_status()["installed_sha"], self.base,
                          "the runnable main follows the target, which did not move")
@@ -687,9 +711,10 @@ class ReconcileTests(ServiceCase):
         self.assertEqual(self.tip(), self.base)
         verifications = service.queue.verifications(job["id"])
         self.assertEqual([v["ok"] for v in verifications], [False, False], "exactly one repair round")
-        kinds = [h["kind"] for h in service.handoffs(session="stuck")]
-        self.assertEqual(sorted(kinds), ["author_required", "failed"])
-        author = [h for h in service.handoffs(session="stuck") if h["kind"] == "author_required"][0]
+        self.assertEqual([h["kind"] for h in service.handoffs(session="stuck")], ["author_required"])
+        self.assertEqual(sorted(h["kind"] for h in service.handoffs(session="stuck", pending_only=False)),
+                         ["author_required", "failed"])
+        author = service.handoffs(session="stuck")[0]
         self.assertEqual(len(author["payload"]["verifications"]), 2, "both gate results ride along")
         self.assertIn("Gate log", author["text"])
 
@@ -778,6 +803,43 @@ class LegacyGuardTests(ServiceCase):
         landed = self.land("commit", "legacy-session", "-m", "legacy landing")
         self.assertEqual(landed.returncode, 0, landed.stdout + landed.stderr)
         self.assertIn("legacy edit", git_out(self.repo, "show", "main:shared.txt"))
+
+    def test_sync_board_writes_reaches_the_queue_without_project_files_and_refuses_when_paused(self):
+        service = self.service(activate=False)
+        card = ".board/features/2026-09-25-aa11.md"
+        (self.repo / card).write_text((self.repo / card).read_text() + "\nedited by a pane\n")
+        # Legacy with this repository's land.py: the legacy route (its own refusal/landing).
+        legacy = S.sync_board_writes(self.repo, [card], session="pane", state_root=self.state,
+                                     land_script=self.LAND)
+        self.assertEqual(legacy["route"], "legacy")
+        self.assertEqual(legacy["code"], 0, legacy)
+        self.assertIn("edited by a pane", git_out(self.repo, "show", "main:" + card))
+        # Legacy without land.py (a second project): nothing to hand to, said so, no error.
+        (self.repo / card).write_text((self.repo / card).read_text() + "again\n")
+        skipped = S.sync_board_writes(self.repo, [card], session="pane", state_root=self.state,
+                                      land_script=self.root / "absent-land.py")
+        self.assertEqual(skipped["route"], "skipped")
+        # Queue mode: a metadata job through the installed module; no scripts/, no backend/.
+        service.activate()
+        os.unlink(self.repo / "backend" / "relay_core")
+        (self.repo / "backend").rmdir()
+        queued = S.sync_board_writes(self.repo, [card], session="pane-2", state_root=self.state,
+                                     land_script=self.root / "absent-land.py")
+        self.assertEqual(queued["route"], "queue", queued)
+        self.assertTrue(queued["submitted"])
+        self.assertEqual(service.run_once()["job"]["id"], queued["job_id"])
+        self.assertIn("again", git_out(self.repo, "show", "main:" + card))
+        self.assertEqual(service.handoffs(session="pane-2")[0]["kind"], "landed")
+        same = S.sync_board_writes(self.repo, [card], session="pane-2", state_root=self.state)
+        self.assertEqual((same["route"], same["submitted"]), ("queue", False))
+        # Paused: refused with the reason; the edit stays in the canonical Board.
+        service.pause(reason="hold")
+        (self.repo / card).write_text((self.repo / card).read_text() + "while paused\n")
+        held = S.sync_board_writes(self.repo, [card], session="pane-2", state_root=self.state)
+        self.assertEqual(held["route"], "refused")
+        self.assertIn("paused", held["reason"])
+        self.assertIn("while paused", (self.repo / card).read_text())
+        self.assertEqual(len(service.queue.status()), 1)
 
     def test_a_corrupt_or_unknown_marker_fails_closed_in_both_publishers(self):
         service = self.service(activate=False)
@@ -944,6 +1006,38 @@ class CliTests(ServiceCase):
         code = landq.main(["--repo", str(self.repo), "--state-root", str(self.state), "submit",
                            tree_head, "--request-id", "legacy-1"], out=io.StringIO())
         self.assertEqual(code, 0)
+
+    def test_paused_refuses_allocation_and_every_submission_path_consistently(self):
+        self.cli("activate")
+        code, ws = self.cli("workspace", "create", "held-session")
+        path = Path(ws["execution_cwd"])
+        (path / "shared.txt").write_text(self.original.replace("line 2\n", "held\n"))
+        run_git(path, "commit", "-q", "-am", "held")
+        code, paused = self.cli("pause")
+        self.assertEqual(paused["mode"], "paused")
+        service = self.service(activate=False)
+        for call, what in ((lambda: service.allocate_workspace("another"), "workspace allocation"),
+                           (lambda: service.submit(workspace_id=ws["workspace_id"], request_id="p-1"),
+                            "submission"),
+                           (lambda: service.submit_board_snapshot([".board/features/2026-09-25-aa11.md"],
+                                                                  session="s"), "a Board snapshot")):
+            with self.assertRaises(S.ModeError) as caught:
+                call()
+            self.assertIn("paused", str(caught.exception))
+            self.assertIn(what, str(caught.exception))
+            self.assertIn("relay-land activate", str(caught.exception))
+        out = io.StringIO()
+        code = landq.main(["--repo", str(path), "--state-root", str(self.state), "submit", "HEAD",
+                           "--request-id", "p-2"], out=out)
+        self.assertEqual(code, 2, out.getvalue())
+        self.assertIn("paused", json.loads(out.getvalue())["error"])
+        self.assertEqual(service.queue.status(), [], "nothing was recorded while paused")
+        self.assertEqual(service.tree_status(ws["workspace_id"])["state"], "active", "kept")
+        self.cli("activate")
+        out = io.StringIO()
+        code = landq.main(["--repo", str(path), "--state-root", str(self.state), "submit", "HEAD",
+                           "--request-id", "p-3"], out=out)
+        self.assertEqual(code, 0, out.getvalue())
 
     def test_accepted_config_accessor_is_read_only(self):
         self.assertIsNone(S.accepted_config(self.repo, state_root=self.state), "unregistered")

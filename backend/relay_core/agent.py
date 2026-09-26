@@ -4592,11 +4592,14 @@ class Agent:
     def _sync_board_writes(self, record: dict) -> None:
         """Board-sync this turn's board writes in the background (card #FYEY, decision 6).
 
-        Spawns `<repo>/scripts/land.py board-sync <token> -m "board: <pane> <turn>" <paths>`
-        as a daemon thread and returns at once; the thread logs the sync's one-line output and
-        swallows everything, because a landing that fails or a land script that is missing must
+        Hands the `.board/` paths this turn wrote to `integration_service.sync_board_writes`
+        on a daemon thread and returns at once (card #AMQQ): in queue mode that is a metadata
+        job through the installed module on the canonical project — no `scripts/land.py` or
+        `<repo>/backend` needed, so a second project's pane writes reach its queue too; in
+        legacy mode it is this repository's `scripts/land.py board-sync` when there is one.
+        The thread logs one line and swallows everything, because a landing that fails must
         not fail the turn it serves. Does nothing when this agent has no board, wrote no board
-        paths this turn, holds no pane token, or the repo has no `scripts/land.py`.
+        paths this turn, or holds no pane token.
         """
         try:
             board = self.board
@@ -4604,30 +4607,25 @@ class Agent:
             paths = list(getattr(board, "paths_this_turn", None) or [])
             if board is None or engine is None or not paths:
                 return
-            land = Path(engine.repo) / "scripts" / "land.py"
-            if not land.is_file():
-                return
             token = (getattr(board, "pane_token", "") or os.environ.get("RELAY_SESSION_TOKEN", "")).strip()
             if not token:
                 return
             pane = (getattr(board.context, "pane", "") or "").strip()
             turn_id = str(record.get("turn_id") or "")
-            argv = [sys.executable, str(land), "board-sync", token, "-m",
-                    f"board: {pane} {turn_id}".strip(), *paths]
-            # The canonical project repository, explicitly (card #AMQQ): a pane whose cwd is
-            # a sparse development workspace has no Board there, and land.py resolves the
-            # repository from its cwd.
-            repo_cwd = str(engine.repo)
+            repo = str(engine.repo)                        # the canonical project repository
+            message = f"board: {pane} {turn_id}".strip()
 
             def run_sync() -> None:
                 try:
-                    run = subprocess.run(argv, capture_output=True, text=True, timeout=120,
-                                         cwd=repo_cwd)
-                    detail = ((run.stdout or "") + (run.stderr or "")).strip().splitlines()
+                    from .integration_service import sync_board_writes
+                    result = sync_board_writes(repo, paths, session=token, message=message)
+                    ok = result.get("route") in ("queue", "skipped") or result.get("code") == 0
                     logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
-                               level_name="info" if run.returncode == 0 else "warning",
-                               code=run.returncode, paths=len(paths),
-                               result=detail[0][:200] if detail else "")
+                               level_name="info" if ok else "warning",
+                               route=result.get("route"), code=result.get("code"),
+                               paths=len(paths),
+                               result=str(result.get("job_id") or result.get("result")
+                                          or result.get("reason") or "")[:200])
                 except Exception as exc:                    # never fails the turn
                     logs.event(_log, "board_sync", session=self.session_id, turn=turn_id,
                                level_name="warning", error=str(exc)[:200], paths=len(paths))

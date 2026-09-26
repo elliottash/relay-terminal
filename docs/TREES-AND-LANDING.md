@@ -275,6 +275,9 @@ so ordinary commits in private worktrees succeed; keep the shared-index refusal 
 non-Relay project hook. Board CLI fallback resolves the canonical Board too.
 Rollback pauses admission, drains/stops the publisher, retains jobs and branches, and only then
 restores the legacy publication mode. Test with pending work; do not reset a dirty checkout.
+`paused` is a hold: nothing publishes, and new workspace allocations, submissions (service API
+and `relay-land submit` alike) and Board snapshots are refused with the reason, while every
+workspace and recorded job is kept; `activate` resumes, `rollback` returns to legacy.
 
 ## Verification and ownership handoff
 

@@ -40,7 +40,10 @@ so submissions and publications keep flowing while a release builds. `main_statu
 installed sha and how far it lags the target.
 
 **Transitions.** Activation is a registry `mode` plus a publication marker in the Git common
-directory (`relay-publication.json`) — separate from the config file, default `legacy`. The
+directory (`relay-publication.json`) — separate from the config file, default `legacy`.
+`paused` is a hold, not a half-open state: nothing publishes, nothing new is allocated or
+submitted (service API, `relay-land submit`, Board snapshots and legacy `board-sync` all refuse
+with the reason), workspaces and recorded jobs are kept, and `activate` resumes. The
 marker is what legacy `scripts/land.py` reads before any of its three publishers moves the
 target, under a shared `relay-publication.lock`; `activate`/`pause`/`rollback` take that lock
 exclusively, which drains in-flight legacy landings. Cutover creates a human branch at the target
@@ -88,7 +91,7 @@ from pathlib import Path
 
 from . import landq, projectconf, trees
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2                           # 2: handoffs.superseded_at (#AMQQ, one per job)
 MODES = trees.REPO_MODES                     # legacy, queue, paused
 MARKER_NAME = "relay-publication.json"
 LOCK_NAME = "relay-publication.lock"
@@ -105,6 +108,10 @@ HOOK_PROJECT_NAME = "pre-commit.project"
 NOTE_AUTHOR = "landq"
 KIND_TITLES = {"landed": "landed", "failed": "failed the gate", "conflict": "conflicted",
                "cancelled": "was cancelled", "author_required": "needs its author"}
+# One actionable handoff per job: when a job's outcome arrives as several outbox rows (the
+# queue writes `failed` and then `author_required` for one refused gate), the most actionable
+# kind is the one the author is woken for; the rest stay as history, superseded.
+HANDOFF_PRIORITY = {"author_required": 4, "conflict": 3, "failed": 2, "cancelled": 1, "landed": 1}
 
 # The Relay-owned pre-commit hook, version 2 (card #AMQQ). Version 1 (scripts/land.py before
 # this card) refused *every* default index, including a linked worktree's private one, so an
@@ -263,6 +270,22 @@ def publication_marker(repo) -> dict:
                          % (data.get("mode") if isinstance(data, dict) else data)}
     data.update({"path": str(path), "present": True})
     return data
+
+
+def mode_refusal(repo_id, mode, reason, what, allowed=("queue",)) -> str:
+    """One sentence for every surface that refuses on mode (service API, CLI, legacy
+    board-sync), so a pane, a script and a person read the same thing."""
+    if mode == "paused":
+        tail = ("the project is paused%s: nothing new is allocated or submitted and nothing "
+                "publishes until `relay-land activate` resumes it or `relay-land rollback` "
+                "returns it to legacy; workspaces and recorded jobs are kept"
+                % (" (%s)" % reason if reason else ""))
+    elif mode == "legacy":
+        tail = ("the project publishes through scripts/land.py (legacy mode); `relay-land "
+                "activate` is the cutover")
+    else:
+        tail = "mode %s%s" % (mode, " (%s)" % reason if reason else "")
+    return "%s is refused for %s: %s (needs %s)" % (what, repo_id, tail, " or ".join(allowed))
 
 
 def _require_posix_locks(what="the publication lock"):
@@ -450,7 +473,8 @@ CREATE TABLE IF NOT EXISTS handoffs (
     text TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    acked_at TEXT
+    acked_at TEXT,
+    superseded_at TEXT
 );
 CREATE INDEX IF NOT EXISTS handoffs_session ON handoffs(session);
 CREATE TABLE IF NOT EXISTS events (
@@ -544,6 +568,9 @@ class IntegrationService:
                 for statement in SCHEMA.split(";"):
                     if statement.strip():
                         conn.execute(statement)
+                columns = {r["name"] for r in conn.execute("PRAGMA table_info(handoffs)")}
+                if "superseded_at" not in columns:          # a version-1 database
+                    conn.execute("ALTER TABLE handoffs ADD COLUMN superseded_at TEXT")
                 conn.execute("PRAGMA user_version=%d" % SCHEMA_VERSION)
 
     def _setting(self, key, default=None):
@@ -567,8 +594,13 @@ class IntegrationService:
         with self._tx() as conn:
             rows = conn.execute("SELECT * FROM events WHERE id>? ORDER BY id LIMIT ?",
                                 (int(since_id), int(limit))).fetchall()
-        return [{"id": r["id"], "kind": r["kind"], "created_at": r["created_at"],
-                 **json.loads(r["payload_json"])} for r in rows]
+        out = []
+        for r in rows:
+            record = json.loads(r["payload_json"])
+            # The event's own fields win over a payload key of the same name.
+            record.update({"id": r["id"], "kind": r["kind"], "created_at": r["created_at"]})
+            out.append(record)
+        return out
 
     # ----------------------------------------------------------------- collaborators
 
@@ -724,10 +756,9 @@ class IntegrationService:
     # ----------------------------------------------------------------- workspaces (B2 API)
 
     def _require_mode(self, *allowed, what):
-        mode = self.mode()
+        mode, reason = self.mode_detail()
         if mode not in allowed:
-            raise ModeError("%s is refused while %s is in %s mode (needs %s)"
-                            % (what, self.repo_id, mode, " or ".join(allowed)))
+            raise ModeError(mode_refusal(self.repo_id, mode, reason, what, allowed))
         return mode
 
     def allocate_workspace(self, session, *, card=None, base=None, includes=(),
@@ -771,19 +802,31 @@ class IntegrationService:
         proc = git(self.repo, "rev-parse", "--verify", "--quiet",
                    "refs/heads/%s" % record["branch"], check=False)
         tip = proc.stdout.strip() or None
-        latest = None
+        latest, receipt, pending = None, None, None
         for job in reversed(self.queue.status()):
-            if job.get("workspace_id") == workspace_id:
+            if job.get("workspace_id") != workspace_id:
+                continue
+            if latest is None:
                 latest = self._job_row(job)
-                break
+            if job["status"] in landq.PICKABLE + landq.IN_FLIGHT and job["submitted_sha"] == tip:
+                pending = pending or job["id"]
+            if job["status"] == "landed" and receipt is None:
+                found = self.queue.receipt(job["id"])
+                if found and found["submitted_sha"] == tip:
+                    receipt = found
+        # Unlanded means work the target does not hold: a tip past the base with no landing
+        # receipt covering that very tip (the receipt is what `remove` will ask for too).
+        unlanded = bool(tip and tip != record["base_sha"] and receipt is None)
         state = record["status"]
         reason = record.get("init_error") or ""
         recoverable = state in ("creating", "init_failed")
         return {"project_root": str(self.project_root), "board_root": str(self.board_root),
                 "repo_id": self.repo_id, "workspace_id": record["id"],
                 "execution_cwd": record["path"], "branch": record["branch"],
-                "base_sha": record["base_sha"], "tip": tip,
-                "unlanded": bool(tip and tip != record["base_sha"]),
+                "base_sha": record["base_sha"], "tip": tip, "unlanded": unlanded,
+                "landed_sha": receipt["published_sha"] if receipt else None,
+                "receipt_job": receipt["job_id"] if receipt else None,
+                "pending_job": pending,
                 "session": record["session"], "card": record["card"], "owner": record["owner"],
                 "state": state, "recoverable": recoverable, "reason": reason, "job": latest,
                 "mode": self.mode()}
@@ -1386,22 +1429,38 @@ class IntegrationService:
         handoff = {"delivery_key": record["delivery_key"], "job_id": job["id"], "kind": kind,
                    "session": session, "workspace_id": workspace_id, "card": card, "text": text,
                    "payload": payload}
+        # Collapse to one actionable handoff per job: a pending row of a lower-priority kind
+        # for this job is superseded by this one; this one is superseded on arrival when a
+        # higher-priority kind for the job is already pending or due in the same batch.
+        rank = HANDOFF_PRIORITY.get(kind, 0)
+        outranked = any(HANDOFF_PRIORITY.get(r["kind"], 0) > rank for r in self.queue.outbox()
+                        if r["job_id"] == job["id"] and r["delivery_key"] != record["delivery_key"])
+        now = _now()
         with self._tx() as conn:
+            for other in conn.execute("SELECT id, kind FROM handoffs WHERE job_id=? AND acked_at IS NULL"
+                                      " AND superseded_at IS NULL AND delivery_key!=?",
+                                      (job["id"], record["delivery_key"])).fetchall():
+                if HANDOFF_PRIORITY.get(other["kind"], 0) > rank:
+                    outranked = True
+                else:
+                    conn.execute("UPDATE handoffs SET superseded_at=? WHERE id=?", (now, other["id"]))
             cur = conn.execute(
                 "INSERT OR IGNORE INTO handoffs(delivery_key, job_id, kind, session, workspace_id,"
-                " card, text, payload_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                " card, text, payload_json, created_at, superseded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (record["delivery_key"], job["id"], kind, session, workspace_id, card, text,
-                 json.dumps(payload, sort_keys=True, default=str), _now()))
-            row = conn.execute("SELECT id FROM handoffs WHERE delivery_key=?",
+                 json.dumps(payload, sort_keys=True, default=str), now, now if outranked else None))
+            row = conn.execute("SELECT id, superseded_at FROM handoffs WHERE delivery_key=?",
                                (record["delivery_key"],)).fetchone()
             handoff["id"] = row["id"] if row else cur.lastrowid
+            handoff["superseded"] = bool(row and row["superseded_at"])
             self._event(conn, "handoff", {"repo_id": self.repo_id, "job_id": job["id"],
-                                          "kind": kind, "session": session,
+                                          "handoff_kind": kind, "session": session,
                                           "workspace_id": workspace_id, "card": card,
-                                          "handoff_id": handoff["id"]})
+                                          "handoff_id": handoff["id"],
+                                          "superseded": handoff["superseded"]})
         if card:
             self._note_card(card, job["id"], kind, text)
-        if self.wake is not None:
+        if self.wake is not None and not handoff["superseded"]:
             self.wake(handoff)
 
     def _note_card(self, card, job_id, kind, text):
@@ -1420,7 +1479,9 @@ class IntegrationService:
             return
 
     def deliver_handoffs(self, *, limit=50) -> list[dict]:
-        """Drain the queue's due outbox rows through `_deliver`. Safe to call any time."""
+        """Drain the queue's due outbox rows through `_deliver`. Safe to call any time. Every
+        row becomes a durable handoff and a card note (the history); the author is woken
+        once per job, for the most actionable kind (`HANDOFF_PRIORITY`)."""
         results = self.queue.deliver_outbox(self._deliver, limit=limit)
         return [{"delivery_key": r["delivery_key"], "kind": r["kind"], "job_id": r["job_id"],
                  "delivered": r["delivered"], "attempts": r.get("attempts"),
@@ -1436,7 +1497,7 @@ class IntegrationService:
             where.append("workspace_id=?")
             args.append(workspace_id)
         if pending_only:
-            where.append("acked_at IS NULL")
+            where.append("acked_at IS NULL AND superseded_at IS NULL")
         if where:
             sql += " WHERE " + " AND ".join(where)
         with self._tx() as conn:
@@ -1954,8 +2015,9 @@ class IntegrationService:
                     "marker": marker, "hook": hook, "plan": plan}
 
     def pause(self, *, wait_seconds=0.0, reason="") -> dict:
-        """Stop publication without leaving queue mode: the run loop idles, submissions and
-        workspaces continue, legacy publishers still refuse."""
+        """Hold the project: the run loop idles, new allocations, submissions and Board
+        snapshots are refused with the reason, legacy publishers still refuse, and every
+        workspace and recorded job is kept. `activate` resumes; `rollback` goes to legacy."""
         with transition_lock(self.repo, exclusive=True, timeout=wait_seconds, what="transition"):
             from_mode = self.mode()
             if from_mode == "legacy":
@@ -2279,6 +2341,55 @@ def _build_parser() -> _Parser:
     return parser
 
 
+def sync_board_writes(repo, paths, *, session, message=None, state_root=None,
+                      land_script=None, timeout=120) -> dict:
+    """A pane's end-of-turn Board writes, wherever the project is and whatever files it has:
+
+    * queue mode — a metadata job through this installed module, in process, on the canonical
+      project (`trees.resolve_project`); no `scripts/land.py` and no `<repo>/backend` needed;
+    * paused / invalid — refused with the reason (the edits stay in the canonical Board and
+      become a later job);
+    * legacy — the repository's own `scripts/land.py board-sync` when it has one (this
+      repository), else nothing: a legacy project without land.py has no publisher to hand to.
+
+    Returns `{"route": queue|legacy|skipped|refused, ...}` and never raises on a refusal.
+    """
+    paths = [str(p) for p in paths]
+    record = trees.resolve_project(repo, state_root=state_root)
+    mode = str(record.get("mode") or "legacy") if record else "legacy"
+    if record is not None:
+        marker = publication_marker(record.get("project_root") or repo)
+        if marker.get("mode") == "invalid":
+            return {"route": "refused", "mode": "paused", "reason": marker.get("error")}
+        if mode == "queue" and marker.get("mode") != "queue":
+            return {"route": "refused", "mode": "paused",
+                    "reason": "registry says queue but %s says %s" % (MARKER_NAME, marker.get("mode"))}
+    if mode == "queue":
+        service = IntegrationService(record.get("project_root") or repo, state_root=state_root,
+                                     register=False)
+        try:
+            job = service.submit_board_snapshot(paths, session=session, message=message)
+        except ServiceError as exc:
+            return {"route": "refused", "mode": service.mode(), "reason": str(exc)}
+        if job is None:
+            return {"route": "queue", "mode": "queue", "submitted": False,
+                    "reason": "paths already match the target"}
+        return {"route": "queue", "mode": "queue", "submitted": True, "job_id": job["id"],
+                "submitted_sha": job["submitted_sha"]}
+    if mode == "paused":
+        return {"route": "refused", "mode": "paused",
+                "reason": mode_refusal(record["id"], "paused", "", "a Board snapshot")}
+    land = Path(land_script) if land_script else Path(repo) / "scripts" / "land.py"
+    if not land.is_file():
+        return {"route": "skipped", "mode": "legacy", "reason": "no scripts/land.py in %s" % repo}
+    argv = [sys.executable, str(land), "board-sync", session, "-m",
+            message or "board: %s" % session, *paths]
+    run = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, cwd=str(repo))
+    detail = ((run.stdout or "") + (run.stderr or "")).strip().splitlines()
+    return {"route": "legacy", "mode": "legacy", "code": run.returncode,
+            "result": detail[0][:200] if detail else ""}
+
+
 def accepted_config(repo, *, state_root=None) -> dict | None:
     """The accepted policy's normalized config for the registered project containing `repo`,
     or None when the project is unregistered or never activated. Read-only: registers nothing.
@@ -2302,8 +2413,10 @@ def resolve_submission(cwd, ref, *, state_root=None, workspace_id=None) -> dict 
     project is not in queue mode (the caller falls back to the plain queue), a dict
     `{sha, workspace, record, project_root}` otherwise."""
     record = trees.resolve_project(cwd, state_root=state_root)
-    if record is None or record.get("mode") != "queue":
+    if record is None or record.get("mode") == "legacy":
         return None
+    if record.get("mode") != "queue":
+        raise ModeError(mode_refusal(record["id"], str(record.get("mode")), "", "submission"))
     proc = git(cwd, "rev-parse", "--verify", "--quiet", "--end-of-options",
                "%s^{commit}" % ref, check=False)
     if proc.returncode != 0:
@@ -2541,7 +2654,8 @@ def main(argv=None, *, out=None, err=None) -> int:
 
 __all__ = ["IntegrationService", "MainUpdater", "ServiceError", "ServiceUsageError", "ModeError",
            "TransitionRefused", "ServiceBusy", "GateFailed", "AdmissionUnavailable",
-           "accepted_config", "resolve_submission", "cli_submit", "publication_marker",
+           "accepted_config", "resolve_submission", "cli_submit", "sync_board_writes",
+           "mode_refusal", "publication_marker",
            "transition_lock", "hook_state", "install_hook", "project_init", "render_config_toml",
            "HOOK", "HOOK_VERSION", "HOOK_REFUSAL", "MARKER_NAME", "LOCK_NAME", "SERVICE_VERBS",
            "main"]
