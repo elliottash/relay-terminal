@@ -14,6 +14,8 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 
+#include <lzma.h>
+
 namespace relay {
 namespace windowstate {
 namespace {
@@ -457,14 +459,55 @@ struct ScrollbackFileText {
     QStringList records;   // the trailer's raw record lines, separator not included
 };
 
+// A scrollback file's bytes. When only `<name>.xz` is there — what the 7-day compression pass
+// (relay_core.textjournal.maintain, #HEY7) leaves of an old session sidecar — the xz stream is
+// decoded: a restore must still work. A stream has no tail to seek to, so it is decoded whole
+// (the file was capped when written) and the cut below happens on the text; `kDecodedCap` keeps a
+// corrupt or hostile file from expanding without bound.
+QByteArray readScrollbackBytes(const QString &path, qint64 maxBytes) {
+    QFile file(path);
+    if (file.exists() && file.open(QIODevice::ReadOnly)) {
+        // A file that grew past the cap (an older Relay, or an edit) is read from its tail only.
+        // The trailer sits at the tail, so its records survive the cut; the rows above may not.
+        if (file.size() > maxBytes) file.seek(file.size() - maxBytes);
+        return file.read(maxBytes + 1);
+    }
+    QFile packed(path + QStringLiteral(".xz"));
+    if (!packed.exists() || !packed.open(QIODevice::ReadOnly)) return {};
+    lzma_stream stream = LZMA_STREAM_INIT;
+    if (lzma_stream_decoder(&stream, UINT64_MAX, LZMA_CONCATENATED) != LZMA_OK) return {};
+    const qint64 decodedCap = qMax<qint64>(maxBytes * 16, qint64(16) << 20);
+    quint8 in[16384], out[65536];
+    QByteArray bytes;
+    lzma_action action = LZMA_RUN;
+    bool failed = false;
+    for (;;) {
+        if (stream.avail_in == 0 && action == LZMA_RUN) {
+            const qint64 got = packed.read(reinterpret_cast<char *>(in), sizeof(in));
+            if (got < 0) { failed = true; break; }
+            if (got == 0) action = LZMA_FINISH;
+            stream.next_in = in;
+            stream.avail_in = size_t(got);
+        }
+        stream.next_out = out;
+        stream.avail_out = sizeof(out);
+        const lzma_ret status = lzma_code(&stream, action);
+        bytes.append(reinterpret_cast<const char *>(out), int(sizeof(out) - stream.avail_out));
+        if (bytes.size() > decodedCap || (status != LZMA_OK && status != LZMA_STREAM_END)) {
+            failed = true;
+            break;
+        }
+        if (status == LZMA_STREAM_END) break;
+    }
+    lzma_end(&stream);
+    if (failed) return {};
+    if (bytes.size() > maxBytes) bytes = bytes.mid(bytes.size() - maxBytes);
+    return bytes;
+}
+
 ScrollbackFileText readScrollbackParts(const QString &path, qint64 maxBytes = kScrollbackMaxBytes) {
     if (path.isEmpty()) return {};
-    QFile file(path);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return {};
-    // A file that grew past the cap (an older Relay, or an edit) is read from its tail only. The
-    // trailer sits at the tail, so its records survive the cut; the rows above them may not.
-    if (file.size() > maxBytes) file.seek(file.size() - maxBytes);
-    QStringList lines = QString::fromUtf8(file.read(maxBytes + 1)).split(QLatin1Char('\n'));
+    QStringList lines = QString::fromUtf8(readScrollbackBytes(path, maxBytes)).split(QLatin1Char('\n'));
     if (!lines.isEmpty() && lines.constLast().isEmpty()) lines.removeLast();   // the trailing newline
     ScrollbackFileText text;
     const int separator = lines.indexOf(proseTrailerSeparator());
@@ -720,9 +763,12 @@ QStringList sidecars(const QString &sessionDir, const QString &id) {
     const QString text = sessionPath(sessionDir, id);
     if (text.isEmpty()) return {};
     QStringList found;
-    if (QFileInfo::exists(text)) found << text;
+    for (const QString &candidate : {text, text + QStringLiteral(".xz")})   // the 7-day pass (#HEY7)
+        if (QFileInfo::exists(candidate)) found << candidate;
     const auto rewound = QDir(QDir::cleanPath(sessionDir))
-                             .entryInfoList({id + QStringLiteral(".rewound-*.scrollback.txt")}, QDir::Files, QDir::Name);
+                             .entryInfoList({id + QStringLiteral(".rewound-*.scrollback.txt"),
+                                             id + QStringLiteral(".rewound-*.scrollback.txt.xz")},
+                                            QDir::Files, QDir::Name);
     for (const QFileInfo &file : rewound) found << file.absoluteFilePath();
     return found;
 }

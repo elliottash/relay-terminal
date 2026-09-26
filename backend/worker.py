@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -252,6 +253,9 @@ def main():
     # carries RELAY_BUILD_ID = the pin's content hash; a live, unpinned worker reports "live".
     emit({"event": "ready", "version": __version__,
           "backend_rev": os.environ.get("RELAY_BUILD_ID") or "live"})
+    # Journal housekeeping (#HEY7): run after a handled request, at most once an hour. The first
+    # request runs it; nothing it does may break the loop, so it is silent and fully guarded.
+    last_maintain = time.monotonic() - 3600.0
     while True:
         line = sys.stdin.buffer.readline(MAX_MESSAGE + 1)
         if not line:
@@ -940,6 +944,14 @@ def main():
             if configure_fault:
                 error.update(code="configure_failed", exception=type(exc).__name__, restart_worker=not turns.busy)
             emit(error)
+        now = time.monotonic()
+        if now - last_maintain >= 3600.0:
+            last_maintain = now
+            try:
+                from relay_core import textjournal
+                textjournal.maintain()
+            except Exception:
+                pass
     logs.event(log, "worker_stop", pid=os.getpid())
     # The guest is a process of this worker's (protocol 29.3): it goes when the worker goes.
     if turns.agent is not None:

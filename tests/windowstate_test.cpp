@@ -16,6 +16,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <lzma.h>
+
 using namespace relay::windowstate;
 // The conversation's own store (card #0TJ9) has read()/write() of its own, so it stays qualified.
 namespace st = relay::sessiontext;
@@ -797,6 +799,48 @@ private slots:
         QVERIFY(!found.contains(st::sessionPath(root, other)));
         QCOMPARE(st::read(st::rewoundPath(root, id, 2)), QStringList{QStringLiteral("undone twice")});
         QVERIFY(st::sidecars(root, QStringLiteral("bad")).isEmpty());
+    }
+
+    // The 7-day compression pass (relay_core.textjournal.maintain, #HEY7) rewrites an old sidecar
+    // as `<name>.xz` in place. A restore must still read it, and a delete must still find it.
+    void compressedSidecarStillRestores() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString root = QDir(dir.path()).absolutePath();
+        const QString id = QStringLiteral("0123456789abcdef0123456789abcdef");
+        const QString path = st::sessionPath(root, id);
+        const QStringList lines{QStringLiteral("$ make"), QStringLiteral("héllo done")};
+        QVERIFY(st::write(path, lines));
+
+        // Compress in place, the way the pass does: the plain name goes, `<name>.xz` stays.
+        QFile raw(path);
+        QVERIFY(raw.open(QIODevice::ReadOnly));
+        const QByteArray plain = raw.readAll();
+        raw.close();
+        QByteArray packed(int(lzma_stream_buffer_bound(size_t(plain.size()))), Qt::Uninitialized);
+        size_t packedSize = 0;
+        QCOMPARE(lzma_easy_buffer_encode(9 | LZMA_PRESET_EXTREME, LZMA_CHECK_CRC64, nullptr,
+                                         reinterpret_cast<const uint8_t *>(plain.constData()), size_t(plain.size()),
+                                         reinterpret_cast<uint8_t *>(packed.data()), &packedSize, size_t(packed.size())),
+                 LZMA_OK);
+        packed.truncate(int(packedSize));
+        const QString xzPath = path + QStringLiteral(".xz");
+        QFile xz(xzPath);
+        QVERIFY(xz.open(QIODevice::WriteOnly));
+        QCOMPARE(xz.write(packed), qint64(packed.size()));
+        xz.close();
+        QVERIFY(QFile::remove(path));
+
+        QCOMPARE(st::read(path), lines);
+        QVERIFY(st::sidecars(root, id).contains(xzPath));
+        QVERIFY(!st::sidecars(root, id).contains(path));
+
+        // A corrupt `.xz` restores nothing rather than garbage.
+        QFile broken(xzPath);
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        QCOMPARE(broken.write("not xz at all"), qint64(13));
+        broken.close();
+        QVERIFY(st::read(path).isEmpty());
     }
 
     // A pane that came up without the conversation saved only a prompt between a replay's rules,

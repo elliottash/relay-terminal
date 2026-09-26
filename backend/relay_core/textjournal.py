@@ -377,6 +377,63 @@ def seal_idle(root: str | Path | None = None, *, idle_seconds: float = SEAL_IDLE
     return sealed
 
 
+SIDECAR_SUFFIX = ".scrollback.txt"
+
+
+def compress_xz_file(path: str | Path) -> int:
+    """``<name>`` -> ``<name>.xz``, keeping the file's times so its age holds. Returns the bytes
+    freed (negative when xz loses, say on an empty file); 0 when the file could not be read."""
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+        stat = path.stat()
+    except OSError:
+        return 0
+    target = path.with_name(path.name + ".xz")
+    packed = lzma.compress(raw, format=lzma.FORMAT_XZ, preset=XZ_PRESET)
+    _atomic_write(target, packed)
+    os.utime(target, (stat.st_atime, stat.st_mtime))
+    path.unlink(missing_ok=True)
+    return stat.st_size - len(packed)
+
+
+def _compress_old_sidecars(sessions: Path, *, older_than: float, now: float) -> tuple[int, int]:
+    """xz-compress every session-text sidecar older than `older_than` under `sessions`: the
+    ``<id>.scrollback.txt`` and ``<id>.rewound-<n>.scrollback.txt`` files of the workspace
+    folders and of ``guests/<source>/`` (the layout conv_index reads). Nothing is deleted beyond
+    the file a compressed copy replaces; readers fall back to the ``.xz``. Returns
+    ``(compressed, bytes freed)``."""
+    if not sessions.is_dir():
+        return 0, 0
+    compressed = freed = 0
+    for path in sessions.rglob("*" + SIDECAR_SUFFIX):
+        try:
+            if not path.is_file() or now - path.stat().st_mtime < older_than:
+                continue
+        except OSError:
+            continue
+        if path.with_name(path.name + ".xz").exists():
+            continue   # an earlier pass finished; the plain file is what the reader prefers
+        freed += compress_xz_file(path)
+        compressed += 1
+    return compressed, freed
+
+
+def maintain(root: str | Path | None = None, *, now: float | None = None) -> dict:
+    """The worker's housekeeping pass (card #HEY7): seal open segments idle past
+    ``SEAL_IDLE_SECONDS``, rewrite sealed segments past ``RECOMPRESS_AFTER_SECONDS`` as xz, and
+    xz-compress the legacy session sidecars that old too. It only stats and rewrites files — no
+    journal contents are read to decide anything — so it is cheap enough to run hourly. Returns a
+    small report of what it did. The sessions root is ``root``'s sibling: ``relay/sessions``
+    beside ``relay/text`` (the same layout conv_index.sessions_root() names)."""
+    now = time.time() if now is None else now
+    base = Path(root) if root else text_root()
+    sidecars, freed = _compress_old_sidecars(base.parent / "sessions",
+                                             older_than=RECOMPRESS_AFTER_SECONDS, now=now)
+    return {"sealed": seal_idle(base, now=now), "recompressed": recompress(base, now=now),
+            "sidecars_compressed": sidecars, "sidecar_bytes_freed": freed}
+
+
 def recompress(root: str | Path | None = None, *, older_than: float = RECOMPRESS_AFTER_SECONDS,
                now: float | None = None) -> int:
     """Rewrite every zlib segment sealed more than `older_than` seconds ago as xz."""

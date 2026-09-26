@@ -100,6 +100,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import lzma
 import os
 from .filelock import chmod_fd
 import re
@@ -154,6 +155,7 @@ _WORD = re.compile(r"[^\W_]+", re.UNICODE)
 SCROLLBACK_SUFFIX = ".scrollback.txt"       # <id>.scrollback.txt, and <id>.rewound-<n>.scrollback.txt
 REWOUND_SUFFIX = ".rewound.jsonl"           # <id>.rewound.jsonl
 GUESTS_DIRNAME = "guests"                   # sessions/guests/<source>/<id>.scrollback.txt
+SIDECAR_XZ = ".xz"                          # a sidecar after textjournal.maintain's 7-day pass (#HEY7)
 _REWOUND_TEXT = re.compile(r"^(?P<id>.+)\.rewound-(?P<n>\d+)\.scrollback\.txt$")
 MAX_SCROLLBACK_LINES = 5000                 # the caps the GUI writes under, applied again here
 MAX_SCROLLBACK_BYTES = 512 * 1024           # because a file in that directory is not ours to trust
@@ -1037,12 +1039,22 @@ def read_sidecar_text(path: str | Path) -> str:
     The caps are applied again here because the file is in a directory Relay writes but does not
     own the contents of: a `<id>.scrollback.txt` left by an older build, or by hand, must not be
     able to put a gigabyte into the index.
+
+    When the plain file is gone, its `<name>.xz` sibling is read: that is what the 7-day
+    compression pass (textjournal.maintain, #HEY7) leaves of an old sidecar, and a restore or an
+    index rebuild must still see the text.
     """
     try:
         with open(path, "rb") as handle:
             raw = handle.read(MAX_SCROLLBACK_BYTES)
     except OSError:
-        return ""
+        path = Path(path)
+        try:
+            decompressor = lzma.LZMADecompressor()
+            raw = decompressor.decompress(path.with_name(path.name + ".xz").read_bytes(),
+                                          max_length=MAX_SCROLLBACK_BYTES)
+        except (OSError, lzma.LZMAError):
+            return ""
     return "\n".join(raw.decode("utf-8", "replace").splitlines()[:MAX_SCROLLBACK_LINES])
 
 
@@ -1183,7 +1195,10 @@ def _entry_stamp(entry) -> str | None:
 
 
 def _sidecar_owner(name: str) -> str | None:
-    """The session id a sidecar file name belongs to, or None when it is not one of ours."""
+    """The session id a sidecar file name belongs to, or None when it is not one of ours. A
+    `.scrollback.txt.xz` is the same sidecar after the 7-day compression pass (#HEY7)."""
+    if name.endswith(SIDECAR_XZ):
+        name = name[:-len(SIDECAR_XZ)]
     match = _REWOUND_TEXT.match(name)
     if match:
         return match.group("id")
@@ -1268,11 +1283,14 @@ def guest_text_files(root: str | Path) -> list[tuple[str, Path, str]]:
             continue
         for entry in entries:
             name = entry.name
-            if not name.endswith(SCROLLBACK_SUFFIX) or len(name) <= len(SCROLLBACK_SUFFIX):
+            # A compressed one (#HEY7) is listed under its plain name: read_sidecar_text falls
+            # back to the `.xz`.
+            plain = name[:-len(SIDECAR_XZ)] if name.endswith(SIDECAR_XZ) else name
+            if not plain.endswith(SCROLLBACK_SUFFIX) or len(plain) <= len(SCROLLBACK_SUFFIX):
                 continue
             stamp = _entry_stamp(entry)
             if stamp is not None:
-                out.append((name[:-len(SCROLLBACK_SUFFIX)], Path(entry.path), stamp))
+                out.append((plain[:-len(SCROLLBACK_SUFFIX)], Path(entry.path).with_name(plain), stamp))
     return out
 
 
@@ -2455,17 +2473,18 @@ class ConversationIndex:
             # The one file of a guest's that *is* Relay's: the terminal text Relay saved for it
             # (v6). The guest's own transcript is still untouched, as it must be.
             if remove_files:
-                try:
-                    (guest_text_dir(row["source"], self.sessions_dir)
-                     / f"{session_id}{SCROLLBACK_SUFFIX}").unlink()
-                    removed["files"] += 1
-                except OSError:
-                    pass
+                for name in (f"{session_id}{SCROLLBACK_SUFFIX}", f"{session_id}{SCROLLBACK_SUFFIX}{SIDECAR_XZ}"):
+                    try:
+                        (guest_text_dir(row["source"], self.sessions_dir) / name).unlink()
+                        removed["files"] += 1
+                    except OSError:
+                        pass
         if not remove_files or row is None or row["source"] != "agent" or not row["session_dir"]:
             return removed
         directory = Path(row["session_dir"])
         for name in (f"{session_id}.json", f"{session_id}.meta.json",
-                     f"{session_id}{SCROLLBACK_SUFFIX}", f"{session_id}{REWOUND_SUFFIX}"):
+                     f"{session_id}{SCROLLBACK_SUFFIX}", f"{session_id}{SCROLLBACK_SUFFIX}{SIDECAR_XZ}",
+                     f"{session_id}{REWOUND_SUFFIX}"):
             try:
                 (directory / name).unlink()
                 removed["files"] += 1
@@ -2473,7 +2492,8 @@ class ConversationIndex:
                 pass
         # The rewind sidecars are numbered, and the record that names them has just gone, so they
         # are found by name rather than read out of the jsonl (v6).
-        for path in sorted(directory.glob(f"{session_id}.rewound-*{SCROLLBACK_SUFFIX}")):
+        for path in sorted([*directory.glob(f"{session_id}.rewound-*{SCROLLBACK_SUFFIX}"),
+                            *directory.glob(f"{session_id}.rewound-*{SCROLLBACK_SUFFIX}{SIDECAR_XZ}")]):
             try:
                 path.unlink()
                 removed["files"] += 1

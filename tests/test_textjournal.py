@@ -122,6 +122,83 @@ def test_seal_idle_and_recompress(tmp_path):
     assert [line.text for line in tj.lines(directory)] == ["a", "b"]
 
 
+def test_maintain_seals_recompresses_and_compresses_sidecars(tmp_path):
+    root = tmp_path / "text"
+    now = time.time()
+    directory = _journal(tmp_path, {
+        "seg-000001.rtj": [{"t": "a"}],      # idle: sealed by the pass
+        "seg-000002.rtj.z": [{"t": "old"}],  # sealed long ago: rewritten as xz
+        "seg-000003.rtj": [{"t": "live"}],   # fresh: left alone
+    })
+    idle = now - 2 * tj.SEAL_IDLE_SECONDS
+    os.utime(directory / "seg-000001.rtj", (idle, idle))
+    week_ago = now - tj.RECOMPRESS_AFTER_SECONDS - 60
+    os.utime(directory / "seg-000002.rtj.z", (week_ago, week_ago))
+
+    # Legacy sidecars: one Relay session's text and rewound sibling, one guest's, one too young.
+    # The sessions root is the journal root's sibling, as conv_index.sessions_root() lays out.
+    session_id, guest_id = "0" * 32, "01234567-89ab-cdef-0123-456789abcdef"
+    folder = tmp_path / "sessions" / "digest1"
+    guests = tmp_path / "sessions" / "guests" / "claude"
+    guests.mkdir(parents=True)
+    folder.mkdir()
+    sidecar = folder / f"{session_id}.scrollback.txt"
+    rewound = folder / f"{session_id}.rewound-2.scrollback.txt"
+    guest = guests / f"{guest_id}.scrollback.txt"
+    young = folder / f"{'1' * 32}.scrollback.txt"
+    body = b"line of output\n" * 4000
+    sidecar.write_bytes(body)
+    rewound.write_bytes(body)
+    guest.write_bytes(body)
+    young.write_bytes(body)
+    for old in (sidecar, rewound, guest):
+        os.utime(old, (week_ago, week_ago))
+
+    report = tj.maintain(root, now=now)
+    assert {key: report[key] for key in ("sealed", "recompressed", "sidecars_compressed")} == {
+        "sealed": 1, "recompressed": 1, "sidecars_compressed": 3}
+    assert report["sidecar_bytes_freed"] > 0
+
+    assert (directory / "seg-000001.rtj.z").exists()          # sealed, too young to recompress
+    assert (directory / "seg-000002.rtj.xz").exists()         # old enough: xz now
+    assert not (directory / "seg-000002.rtj.z").exists()
+    assert (directory / "seg-000003.rtj").exists()            # live writer: untouched
+    for old in (sidecar, rewound, guest):
+        assert not old.exists()
+        assert lzma.decompress(Path(str(old) + ".xz").read_bytes()) == body
+        # the compressed copy keeps the sidecar's age, so a later pass still knows it
+        assert Path(str(old) + ".xz").stat().st_mtime == pytest.approx(week_ago)
+    assert young.exists() and not Path(str(young) + ".xz").exists()
+
+    # The journal still reads end to end, and a second pass finds nothing to do.
+    assert [line.text for line in tj.lines(directory)] == ["a", "old", "live"]
+    again = tj.maintain(root, now=now)
+    assert again["sealed"] == again["recompressed"] == again["sidecars_compressed"] == 0
+
+
+def test_sidecar_reader_falls_back_to_xz(tmp_path):
+    from relay_core import conv_index
+    sidecar = tmp_path / ("0" * 32 + ".scrollback.txt")
+    body = "one\ntwo\nthree\n"
+    sidecar.with_name(sidecar.name + ".xz").write_bytes(lzma.compress(body.encode()))
+    assert conv_index.read_sidecar_text(sidecar) == "one\ntwo\nthree"
+    assert conv_index.read_sidecar_text(tmp_path / "missing.scrollback.txt") == ""
+    sidecar.with_name(sidecar.name + ".xz").write_bytes(b"not xz at all")
+    assert conv_index.read_sidecar_text(sidecar) == ""
+
+    # The index still attributes a compressed sidecar to its session, and still lists a guest's.
+    sid = "0" * 32
+    assert conv_index._sidecar_owner(f"{sid}.scrollback.txt.xz") == sid
+    assert conv_index._sidecar_owner(f"{sid}.rewound-3.scrollback.txt.xz") == sid
+    guests = tmp_path / "guests" / "claude"
+    guests.mkdir(parents=True)
+    gid = "01234567-89ab-cdef-0123-456789abcdef"
+    (guests / f"{gid}.scrollback.txt.xz").write_bytes(lzma.compress(b"guest text\n"))
+    [(listed, path, _stamp)] = conv_index.guest_text_files(tmp_path)
+    assert listed == gid and path.name == f"{gid}.scrollback.txt"
+    assert conv_index.read_sidecar_text(path) == "guest text"
+
+
 def test_usage_and_forget(tmp_path):
     root = tmp_path / "text"
     directory = _journal(tmp_path, {"seg-000001.rtj": [{"t": "a"}]})

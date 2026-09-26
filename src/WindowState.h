@@ -283,12 +283,16 @@ QString guestPath(const QString &source, const QString &id);
 // `prose` rides the same trailer the per-pane store carries (see windowstate above, #MTCS).
 bool write(const QString &path, const QStringList &lines, const QVector<ProseBlock> &prose = {},
            QString *error = nullptr);
-// The saved lines, oldest first; empty when there is no file. Reads only the file's tail.
+// The saved lines, oldest first; empty when there is no file. Reads only the file's tail. When
+// the plain file is gone, its `<name>.xz` sibling is decoded: that is what the 7-day compression
+// pass (relay_core.textjournal.maintain, #HEY7) leaves of an old sidecar, and a restore must
+// still see the text.
 QStringList read(const QString &path, int maxLines = windowstate::kScrollbackMaxLines);
 // The file's prose trailer, if it carries one (the per-pane store's `readScrollbackProse`).
 QVector<ProseBlock> readProse(const QString &path);
-// Every sidecar of one session: its text file and its `rewound-<n>` files. What a delete has to
-// take with it, and what a test asserts over.
+// Every sidecar of one session: its text file and its `rewound-<n>` files, plain or compressed to
+// `.xz` by the 7-day pass (#HEY7). What a delete has to take with it, and what a test asserts
+// over.
 QStringList sidecars(const QString &sessionDir, const QString &id);
 
 // Whether saved text holds anything the conversation printed. False when, with formatting,

@@ -309,7 +309,10 @@ add_library(relay-windowstate STATIC src/WindowState.cpp src/WindowState.h src/C
 # terms (#MTCS). src/ is already PUBLIC below for WordWrap.h, which TerminalBackend.h includes.
 target_include_directories(relay-windowstate PUBLIC src ${CMAKE_CURRENT_SOURCE_DIR}/engine)
 # Gui for QColor: the FoldLine/FoldSpan types the trailer is built from carry explicit inks.
-target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Gui)
+# LibLZMA decodes the `.xz` the 7-day pass (relay_core.textjournal.maintain, #HEY7) leaves of an
+# old session sidecar when a restore reads it.
+find_package(LibLZMA REQUIRED)
+target_link_libraries(relay-windowstate PUBLIC ${RELAY_QT}::Core ${RELAY_QT}::Gui LibLZMA::LibLZMA)
 target_compile_options(relay-windowstate PRIVATE ${RELAY_WARNINGS})
 
 # The "Recently closed" list widget (the session manager's second tab). Fed records and callbacks,
