@@ -7,7 +7,13 @@
 # .relay/known-failures.txt. `--no-tests=error` still fails an empty ctest run.
 set -eu
 build="$1"
+phase() { echo "== gate $(date +%H:%M:%S) $*"; }
 known=$(grep -v '^#' .relay/known-ctest-failures.txt | grep -v '^$' | paste -sd'|' -)
+phase "ctest: start ($(ctest --test-dir "$build" -N | tail -1 | tr -d '\n'))"
 ctest --test-dir "$build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}" \
     -E "^(backend-and-bash${known:+|$known})\$"
-exec python3 scripts/gate-known-failures.py
+phase "ctest: done; python suite: start"
+status=0
+python3 scripts/gate-known-failures.py || status=$?
+phase "python suite: done (exit $status)"
+exit $status

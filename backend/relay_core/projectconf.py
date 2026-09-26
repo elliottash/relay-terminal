@@ -397,14 +397,22 @@ def _scrubbed_env(extra: Mapping[str, str] | None) -> dict[str, str]:
 
 
 def _run_command(argv: Sequence[str], cwd: Path, env: Mapping[str, str],
-                 timeout: float) -> dict:
+                 timeout: float, live: Path | None = None) -> dict:
     """Run one gate command; never raises.  Timeout kills the whole process group.
 
     Output goes to a spill file, not a memory pipe: a noisy build may print gigabytes and the
-    service must not OOM capturing it.  Only a bounded head+tail is read back for the log."""
+    service must not OOM capturing it.  Only a bounded head+tail is read back for the log.
+    With `live`, the spill file is that path, so a running gate can be followed with
+    `tail -f` or `relay-land status JOB` (`progress`) instead of being silent until it ends."""
+    import contextlib
     import tempfile
     started = time.monotonic()
-    with tempfile.TemporaryFile(prefix="relay-gate-") as sink:
+    if live is not None:
+        live.parent.mkdir(parents=True, exist_ok=True)
+        opened = open(live, "w+b")
+    else:
+        opened = tempfile.TemporaryFile(prefix="relay-gate-")
+    with contextlib.closing(opened) as sink:
         proc = subprocess.Popen(
             list(argv), cwd=str(cwd), env=dict(env),
             stdout=sink, stderr=subprocess.STDOUT, start_new_session=True)
@@ -454,7 +462,7 @@ def _focused_pass(kind: str, base_argv: Sequence[str], selected_tests: Sequence[
 
 
 def run_gate(config: Mapping, cwd, *, selected_tests: Sequence[str] = (),
-             env: Mapping[str, str] | None = None) -> dict:
+             env: Mapping[str, str] | None = None, live_log: str | None = None) -> dict:
     """Run the project's verification commands in `cwd` and return the queue verifier result
     ``{ok, policy_hash, log, verified, reason?}``.
 
@@ -503,9 +511,11 @@ def run_gate(config: Mapping, cwd, *, selected_tests: Sequence[str] = (),
                              "pytest/ctest command to focus them with\n")
 
     ok, verified, reason = True, True, None
-    for argv in plan:
+    for index, argv in enumerate(plan):
         log_parts.append("$ " + " ".join(argv) + "\n")
-        rec = _run_command(argv, cwd, gate_env, ver["timeout_seconds"])
+        live = Path("%s.%d" % (live_log, index) if index and live_log else live_log) \
+            if live_log else None
+        rec = _run_command(argv, cwd, gate_env, ver["timeout_seconds"], live=live)
         commands.append({k: rec[k] for k in ("argv", "exit", "duration_seconds",
                                              "timed_out", "runner", "zero_tests")})
         log_parts.append(rec["output"])

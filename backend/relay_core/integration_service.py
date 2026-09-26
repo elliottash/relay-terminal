@@ -982,8 +982,11 @@ class IntegrationService:
         grant = self._grant
         if grant is not None and getattr(grant, "cpus", None):
             env["RELAY_JOBS"] = str(max(1, int(grant.cpus)))
+        # Followable while it runs: logs/<job>/live.log, which `status` reads for `progress`.
+        live = self.queue.logs_root / job["id"] / "live.log"
+        env["RELAY_GATE_LIVE_LOG"] = str(live)
         result = projectconf.run_gate(cfg, candidate_path, selected_tests=job.get("selected_tests")
-                                      or (), env=env)
+                                      or (), env=env, live_log=str(live))
         result["policy_hash"] = hash_
         result["log"] = "%s\n%s" % (" ".join("%s=%s" % kv for kv in sorted(env.items())),
                                     result.get("log", ""))

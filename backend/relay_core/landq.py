@@ -165,6 +165,18 @@ def git_out(cwd, *args, **kw) -> str:
     return git(cwd, *args, **kw).stdout.strip()
 
 
+def _last_line(path, limit=4096) -> str:
+    """The last non-empty line of a growing log, read from its tail only."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - limit))
+            lines = [l for l in fh.read().decode("utf-8", "replace").splitlines() if l.strip()]
+    except OSError:
+        return ""
+    return lines[-1][-300:] if lines else ""
+
+
 def _is_ancestor(repo, ancestor, descendant) -> bool:
     proc = git(repo, "merge-base", "--is-ancestor", ancestor, descendant, check=False)
     if proc.returncode in (0, 1):
@@ -446,7 +458,13 @@ class Queue:
             if job_id is None:
                 rows = conn.execute("SELECT * FROM jobs ORDER BY rowid").fetchall()
                 return [self._job(r) for r in rows]
-            return self._load(conn, job_id)
+            job = self._load(conn, job_id)
+        # A running gate writes logs/<job>/live.log as it goes; its last line is the progress.
+        live = self.logs_root / job["id"] / "live.log"
+        if job["status"] in ("verifying", "integrating") and live.is_file():
+            job["live_log"] = str(live)
+            job["progress"] = _last_line(live)
+        return job
 
     def cancel(self, job_id) -> dict:
         """Cancel a job that has not been published. A job in flight gets `cancel_requested`
