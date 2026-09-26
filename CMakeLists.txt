@@ -806,7 +806,7 @@ if(RELAY_BUILD_APP)
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
     # dataRoot() prepends <data>/scripts to PATH and points RELAY_OPEN_HELPER at relay-open.
     install(PROGRAMS scripts/relay-open scripts/relay-agent.py scripts/relay-local.py scripts/relay-update.py
-                     scripts/relay-scratch
+                     scripts/relay-scratch scripts/relay-tree scripts/relay-land
                      scripts/relay-show scripts/relay-render-math scripts/relay_mpl_backend.py
                      DESTINATION ${CMAKE_INSTALL_DATADIR}/relay/scripts)
     install(FILES packaging/org.relayterminal.Relay.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
