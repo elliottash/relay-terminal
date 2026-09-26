@@ -13,3 +13,4 @@ panestatus
 projectinit
 queuesubmit
 settings
+queuecontract
