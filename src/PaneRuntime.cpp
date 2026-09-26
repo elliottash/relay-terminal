@@ -52,12 +52,14 @@ void Pane::prepareWorkspace() {
         m_workspaceReady = true;
         if (!result.value(QStringLiteral("project_root")).toString().isEmpty())
             m_workspace = result.value(QStringLiteral("project_root")).toString();
-        if (result.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
-            m_cwd = execution;
-            m_hadActiveWorkspace = true;
-        } else if (m_hadActiveWorkspace) {
-            m_cwd = execution;
-            m_hadActiveWorkspace = false;
+        // The shell stays where the user is: only the agent works in the leased tree
+        // (executionCwd()). A cwd restored from before this rule, inside some workspace tree,
+        // goes back to the same folder of the real checkout.
+        const QString trees = QDir::cleanPath(QDir::homePath() + QStringLiteral("/.local/state/relay/trees"));
+        if (!m_workspace.isEmpty() && QDir::cleanPath(m_cwd).startsWith(trees + QLatin1Char('/'))) {
+            const QStringList parts = QDir::cleanPath(m_cwd).mid(trees.size() + 1).split(QLatin1Char('/'));
+            const QString inside = QDir(m_workspace).filePath(parts.mid(2).join(QLatin1Char('/')));
+            m_cwd = QFileInfo(inside).isDir() ? QDir::cleanPath(inside) : m_workspace;
         }
         updatePaths();
         status(result.value(QStringLiteral("state")).toString() == QStringLiteral("active")
@@ -1088,7 +1090,7 @@ void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
         // initRestore takes the saved one back for the shells that follow, so a pane restored
         // from a layout still owns the holders named after it.
         shellEnvironment << QStringLiteral("RELAY_PANE_ID=") + scrollbackId();
-        if (m_treeStatus.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
+        if (program.isValid() && m_treeStatus.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
             shellEnvironment << QStringLiteral("RELAY_PROJECT_ROOT=") + m_workspace
                              << QStringLiteral("RELAY_BOARD_ROOT=") + m_treeStatus.value(QStringLiteral("board_root")).toString()
                              << QStringLiteral("RELAY_WORKSPACE_ID=") + m_treeStatus.value(QStringLiteral("workspace_id")).toString();
@@ -1113,7 +1115,7 @@ void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
             QStringList environment = shellEnvironment;
             for (const QString &entry : program.env)
                 if (!entry.isEmpty()) environment << entry;
-            if (!m_backend->startProgram(program.argv.first(), program.argv.mid(1), m_cwd, environment))
+            if (!m_backend->startProgram(program.argv.first(), program.argv.mid(1), executionCwd(), environment))
                 throw std::runtime_error(QStringLiteral("The console program could not be started: %1.")
                                              .arg(program.argv.join(QLatin1Char(' '))).toStdString());
             m_oomKills = -1;
