@@ -1,10 +1,12 @@
 ---
 id: 736Y
 type: work
-status: planned
+status: executing
+assignee: codex
+verify: {artifact: code, primary: script, human: none, effort: medium}
 rank: zzzzzzzy
 created: '2026-09-19'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [9a57ea6202313f930577231d2786c7b84f699e5b], evidence: [], related: [], github: null}
 ---
 # check /plan behavior when you type text after.
 
@@ -21,9 +23,9 @@ This needs a behavioral test before deciding how to change the UX.
 
 ## Done means
 
-Typing `/plan` alone toggles plan mode. Typing `/plan <text>` has a clear, tested outcome and
-never silently loses the text; the composer indicates whether it will execute a command or send
-a plan-mode prompt.
+Typing `/plan` alone toggles plan mode. Typing `/plan <text>` enters plan mode and submits
+`<text>` as the plan-mode prompt, preserving multiline text. The route preview matches Enter,
+and guest CLI slash commands retain their own semantics.
 
 ## Plan
 
@@ -32,14 +34,21 @@ a plan-mode prompt.
 **Steps.**
 1. Add a focused slash-command test for `/plan`, `/plan `, `/plan inspect this`, and a multiline
    prompt starting with `/plan`, asserting both mode and submitted text.
-2. If the text is currently swallowed, choose and implement one UX: recommend toggling plan mode
-   and submitting the remaining text in that mode. If automatic submission is undesirable, reject
-   the arguments visibly and leave the draft intact. The owner should choose between these two.
+2. Implement the owner’s chosen behavior: enter plan mode and submit trailing text in that mode.
 3. Verify the route preview matches Enter's behavior and run the targeted `slashcommands` and
    `consolemode` tests.
 
-**Risk.** The slash command is also offered in guest panes; establish whether guest `/plan`
-passes through to the guest CLI before changing the native path.
+**Risk.** Preserve guest CLI `/plan` pass-through semantics.
 
 **Verify.** Focused tests plus one live composer interaction showing that text after `/plan`
 either reaches the plan agent or remains editable with an explicit explanation.
+
+## Decisions
+
+Owner chose YES: `/plan <text>` enters plan mode and submits `<text>` as its prompt; never discard the text.
+
+## Tests
+
+### Check: targeted native slash behavior
+
+Passed `QT_QPA_PLATFORM=offscreen ./build-fast/relay-consolemode-tests --plan-click-only` in queue workspace `wt47351d9b72045be8`: bare `/plan`, trailing whitespace, text submission after mode switch, multiline text, and route preview. Passed `./build-fast/relay-slash-tests` (11 tests). Publication job `cc97c4eb6e4351df` is queued; keep this card executing until its receipt lands.
