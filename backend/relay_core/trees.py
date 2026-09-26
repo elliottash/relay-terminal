@@ -741,12 +741,13 @@ class TreeManager:
 
                 count = conn.execute(
                     "SELECT COUNT(*) c FROM workspaces WHERE repo_id = ?"
-                    " AND status != 'removed'", (self.repo["id"],)).fetchone()["c"]
+                    " AND status NOT IN ('removed', 'released')",
+                    (self.repo["id"],)).fetchone()["c"]
                 if count >= max_workspaces:
                     raise TreeRefusedError(
                         f"workspace quota reached: {count} of at most "
                         f"{max_workspaces} for repository {self.repo['id']}; "
-                        f"remove released workspaces first")
+                        f"close idle panes or raise workspace.max_workspaces")
 
                 base_sha = _rev_parse(self.repo["common_dir"],
                                       base or self.repo["target"])

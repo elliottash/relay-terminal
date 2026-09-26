@@ -45,6 +45,12 @@ void Pane::prepareWorkspace() {
             const QString reason = m_treeStatus.value(QStringLiteral("reason")).toString();
             status(QStringLiteral("Workspace unavailable: ") + reason);
             showBanner(reason, QStringLiteral("Retry workspace"), [this] { hideBanner(); prepareWorkspace(); });
+            // The user's shell never waits on a tree (owner, 2026-09-26: a full quota locked
+            // the terminal). It starts where the user is; only the agent waits for the retry.
+            if (!m_shellWithoutTree && m_consolePluginRequest.isEmpty() && hasShell()) {
+                m_shellWithoutTree = true;
+                startTerminal(m_cleanShell);
+            }
             changed();
             return;
         }
@@ -85,6 +91,11 @@ void Pane::prepareWorkspace() {
 
 void Pane::launchPreparedWorkspace() {
     if (m_closing || !m_workspaceReady) return;
+    if (m_shellWithoutTree) {          // the shell already runs; the tree only adds the agent
+        m_shellWithoutTree = false;
+        if (hasShell() || !sharesWorker()) startWorker();
+        return;
+    }
     if (hasShell() || !sharesWorker()) startWorker();
     if (m_consolePluginRequest.isEmpty()) startTerminal(m_cleanShell);
     else status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
@@ -818,7 +829,7 @@ void Pane::connectWorker() {
     }
 
 void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
-        if (!m_workspaceReady) { prepareWorkspace(); return; }
+        if (!m_workspaceReady && !m_shellWithoutTree) { prepareWorkspace(); return; }
         m_terminalRecords.resetGeneration();
         m_terminalStream.clear();
         // A console program names the pane while it runs (#83YV): the header chip, the routing

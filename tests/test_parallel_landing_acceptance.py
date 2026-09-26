@@ -1741,6 +1741,19 @@ class LiveGui(AcceptanceCase):
         for token in (one, two):
             self.assertIn(self.pane_leases()[token]["status"], ("released", "retained"))
 
+    def test_the_shell_starts_when_no_workspace_can_be_had(self):
+        # A full quota refused every new pane and the terminal never came up (2026-09-26).
+        # Paused publication refuses the same way: the shell must still start, in the checkout.
+        self.p.cli("pause")
+        self.launch("--fresh")
+        shells = lambda: [line for line in subprocess.run(
+            ["tmux", "-S", str(self.socket()), "list-panes", "-a", "-F", "#{pane_pid}"],
+            capture_output=True, text=True).stdout.split() if line]
+        pids = self.wait_for(shells, timeout=60, what="a shell despite the refused workspace")
+        self.assertEqual(self.p.repo.resolve(), Path(os.readlink("/proc/%s/cwd" % pids[0])).resolve())
+        self.assertEqual(self.pane_leases(), {}, "no lease was taken while paused")
+        self.quit()
+
     def test_a_restored_pane_takes_back_its_own_workspace_with_its_work(self):
         self.launch()
         token = self.wait_for(lambda: list(self.pane_leases()), timeout=60, what="pane")[0]

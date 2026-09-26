@@ -351,15 +351,12 @@ class SubagentFactory:
 
     def __call__(self, definition: AgentDefinition, model: str | None, effort: str | None,
                  emit: Callable[[dict], None], agent_id: str):
+        # A subagent works in its parent pane's tree (owner, 2026-09-26): it is part of the
+        # pane's own change, so it neither takes a tree of its own nor counts toward the quota.
         identity = self.workspace_identity
-        child_workspace = self.workspace
-        if identity.get("state") == "active":
-            from .workspace_context import prepare
-            child_identity = prepare(identity["project_root"],
-                                     f"{identity['workspace_id']}:child:{agent_id}")
-            child_workspace = child_identity["execution_cwd"]
-        else:
-            child_identity = identity
+        child_identity = identity
+        child_workspace = (identity.get("execution_cwd") or self.workspace
+                           if identity.get("state") == "active" else self.workspace)
         warnings: list[str] = []
         config, preset_id, tier = self.choose(model, warnings, definition)
         self.tiers[agent_id] = tier

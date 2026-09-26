@@ -82,8 +82,9 @@ class WorkspaceContextTests(unittest.TestCase):
                                     lambda event: None, "one")
             child_b, _, _ = factory(AgentDefinition("developer", "Develop"), None, None,
                                     lambda event: None, "two")
-            self.assertNotEqual(str(child_a.executor.workspace.root), str(child_b.executor.workspace.root))
-            self.assertNotEqual(str(child_a.executor.workspace.root), first["execution_cwd"])
+            # Subagents work in their parent pane's tree (owner, 2026-09-26): no tree of their own.
+            self.assertEqual(str(child_a.executor.workspace.root), first["execution_cwd"])
+            self.assertEqual(str(child_b.executor.workspace.root), first["execution_cwd"])
             launch = guest_launch.command_line(
                 "codex", str(Path(self.temp.name) / "runtime"), first["execution_cwd"],
                 home=self.temp.name, tree_status=first, session="parent:child:one")

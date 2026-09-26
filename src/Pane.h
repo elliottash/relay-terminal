@@ -17840,6 +17840,7 @@ private:
 
     QString m_data, m_python, m_workspace, m_cwd, m_token, m_apiKey;
     QJsonObject m_treeStatus;
+    bool m_shellWithoutTree = false;   // shell started while the tree was refused
     QProcess *m_workspacePrepare = nullptr;
     bool m_workspaceReady = false;
     // Cross-pane messaging (#R5TC, protocol 37): this pane's address, its wake budget, and the

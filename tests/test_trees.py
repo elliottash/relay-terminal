@@ -267,6 +267,14 @@ class CreateTests(TreesTestCase):
         with self.assertRaises(trees.TreeRefusedError):
             self.mgr.create("sess-2", max_workspaces=1)
 
+    def test_released_workspaces_do_not_count_toward_the_quota(self):
+        # A full quota refused every new pane and locked its terminal (2026-09-26): only
+        # leases in use count, not trees whose panes have closed.
+        first = self.mgr.create("sess-1", max_workspaces=1)
+        self.mgr.release(first["id"], owner="sess-1")
+        second = self.mgr.create("sess-2", max_workspaces=1)
+        self.assertEqual(second["status"], "active")
+
     def test_ambient_git_env_is_scrubbed(self):
         with mock.patch.dict(os.environ, {"GIT_DIR": "/nonexistent/.git",
                                           "GIT_WORK_TREE": "/nonexistent",

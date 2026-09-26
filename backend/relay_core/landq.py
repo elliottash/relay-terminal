@@ -551,7 +551,10 @@ class Queue:
             self._recover_locked()
             with self._tx() as conn:
                 row = conn.execute(
-                    "SELECT * FROM jobs WHERE status IN (%s) ORDER BY rowid LIMIT 1"
+                    # Board snapshots first: they need no build, so one never waits behind a
+                    # code job's full build and test run.
+                    "SELECT * FROM jobs WHERE status IN (%s)"
+                    " ORDER BY (kind = 'metadata') DESC, rowid LIMIT 1"
                     % ",".join("?" * len(PICKABLE)), PICKABLE).fetchone()
                 job = self._job(row)
             if job is None:
