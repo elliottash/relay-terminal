@@ -351,6 +351,9 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             board.aliases = QStringLiteral("board switchboard issues cards todo trello kanban scratchpad tickets tracker");
             items << board;
         }
+        items << actionItem(panes, QStringLiteral("Background work"),
+                            QStringLiteral("Reopen work kept running after closing its pane, in the Board"),
+                            QStringLiteral("background.open"));
         {
             // The Board's tooling sibling (card #7BM4): the project's tests, their history
             // and their runs. No key of its own — Ctrl+Shift+T is New tab everywhere — so the

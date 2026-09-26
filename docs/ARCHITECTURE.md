@@ -194,7 +194,7 @@ Layout rules:
   delegated agents, worker jobs, foreground programs, and live shell descendants (including `&`
   and stopped jobs). The same choice protects closing a tab with active terminal panes.
   Backgrounding moves the live pane into a hidden window owned by `WindowManager`; its shell,
-  worker, output and callbacks remain alive. Sessions → Background (also in Actions) reopens that
+  worker, output and callbacks remain alive. Board → Background (Ctrl+Shift+B, also in Actions) reopens that
   same window; it does not resume a saved conversation or start a replacement process. The last
   pane leaves a fresh terminal open so background sessions remain reachable without a system tray.
   Background agents appear in four counts beside the bell: working, needs you, done and failed.

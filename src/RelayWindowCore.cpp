@@ -331,6 +331,7 @@ void RelayWindow::runActionNow(const QString &id, Pane *target) {
         }
         else if (id == QStringLiteral("files.toggleWrap")) toggleWrapNear(m_activeLeaf);
         else if (id == QStringLiteral("board.open")) toggleBoardPane();
+        else if (id == QStringLiteral("background.open")) toggleBoardPane(true);
         else if (id == QStringLiteral("review.open")) openReviewPane();
         else if (id == QStringLiteral("tests.open")) openTestSuitesPane();   // card #7BM4
         else if (id == QStringLiteral("helper.ask")) focusHelperOfActiveLeaf();

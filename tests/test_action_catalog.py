@@ -54,7 +54,10 @@ class ActionCatalogTest(unittest.TestCase):
         self.assertLessEqual(excluded, ids, 'an excluded id that is not registered is a stale entry')
         # Each has the row that stands for it.
         sessions = literals(member('sessionsMenuItems'))
-        self.assertLessEqual({'conversations.open', 'projects.open', 'globals.open', 'sessions.background'}, sessions)
+        self.assertLessEqual({'conversations.open', 'projects.open', 'globals.open'}, sessions)
+        self.assertNotIn('sessions.background', sessions)
+        self.assertIn('QStringLiteral("background.open")',
+                      (ROOT / 'src' / 'RelayWindow.cpp').read_text(encoding='utf-8'))
         root = member('rootItems')
         self.assertIn('QStringLiteral("sessions.open"), agent, QStringLiteral("Sessions & Projects")', root)
         self.assertIn('QStringLiteral("control.human"), pane && pane->isNative()', root)

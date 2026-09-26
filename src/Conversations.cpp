@@ -1322,17 +1322,12 @@ SessionManager::SessionManager(QWidget *parent) : QWidget(parent) {
     m_recentlyClosed->setObjectName(QStringLiteral("sessionsRecentlyClosed"));
     m_recentlyClosed->setVisible(false);  // The window supplies the closed-items page.
     connect(m_recentlyClosed, &QPushButton::clicked, this, [this] { showTab(QStringLiteral("closed")); });
-    m_background = new QPushButton(QStringLiteral("Background"));
-    m_background->setObjectName(QStringLiteral("sessionsBackground"));
-    m_background->setVisible(false);  // The window supplies the background-items page.
-    connect(m_background, &QPushButton::clicked, this, [this] { showTab(QStringLiteral("background")); });
     // The buttons row of #1Q5V's correction: what narrows the list sits under the field —
     // the two choosers, the Sort ▾ and More ▾ menus, the subagent switch — and the two
-    // hidden page buttons live here too, out of the search row for good.
+    // hidden page button lives here too, out of the search row for good.
     auto *filterRow = new QHBoxLayout;
     filterRow->setSpacing(6);
     filterRow->addWidget(m_recentlyClosed);
-    filterRow->addWidget(m_background);
 
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(m_status, 1);
@@ -1520,7 +1515,7 @@ void SessionManager::setQuery(const QString &text) {
 void SessionManager::focusSearch() {
     if (currentTab() == QLatin1String("sessions")) {
         QWidget *page = m_sessionPages->currentWidget();
-        if (page == m_closedPage || page == m_backgroundPage) {
+        if (page == m_closedPage) {
             if (auto *field = page->findChild<QLineEdit *>()) field->setFocus();
             else if (auto *back = page->findChild<QPushButton *>()) back->setFocus();
             return;
@@ -1546,20 +1541,19 @@ void SessionManager::addTab(const QString &id, const QString &label, QWidget *wi
 
 void SessionManager::insertTab(int index, const QString &id, const QString &label, QWidget *widget) {
     if (!widget || id.isEmpty() || id == QLatin1String("sessions")) return;
-    if (id == QLatin1String("closed") || id == QLatin1String("background")) {
-        const bool closed = id == QLatin1String("closed");
-        QWidget *&page = closed ? m_closedPage : m_backgroundPage;
+    if (id == QLatin1String("closed")) {
+        QWidget *&page = m_closedPage;
         if (page) return;
         page = new QWidget;
-        page->setObjectName(closed ? QStringLiteral("sessionsClosedPage") : QStringLiteral("sessionsBackgroundPage"));
+        page->setObjectName(QStringLiteral("sessionsClosedPage"));
         auto *layout = new QVBoxLayout(page);
         layout->setContentsMargins(8, 8, 8, 8);
         auto *back = new QPushButton(QStringLiteral("← Back to sessions"));
-        back->setObjectName(closed ? QStringLiteral("sessionsClosedBack") : QStringLiteral("sessionsBackgroundBack"));
+        back->setObjectName(QStringLiteral("sessionsClosedBack"));
         layout->addWidget(back, 0, Qt::AlignLeft);
         layout->addWidget(widget, 1);
         m_sessionPages->addWidget(page);
-        (closed ? m_recentlyClosed : m_background)->setVisible(true);
+        m_recentlyClosed->setVisible(true);
         connect(back, &QPushButton::clicked, this, [this] {
             showTab(QStringLiteral("sessions")); refresh(); focusSearch();
         });
@@ -1573,8 +1567,8 @@ void SessionManager::insertTab(int index, const QString &id, const QString &labe
 }
 
 void SessionManager::showTab(const QString &id) {
-    if (id == QLatin1String("closed") || id == QLatin1String("background")) {
-        QWidget *page = id == QLatin1String("closed") ? m_closedPage : m_backgroundPage;
+    if (id == QLatin1String("closed")) {
+        QWidget *page = m_closedPage;
         if (!page) return;
         showTab(QStringLiteral("sessions"));
         m_sessionPages->setCurrentWidget(page);
@@ -1665,10 +1659,6 @@ QString SessionManager::agentScreen() const {
         && m_sessionPages->currentWidget() == m_closedPage)
         return QStringLiteral("Recently closed windows, tabs and panes, inside Sessions. "
                               "Restore an item or return with Back to sessions.");
-    if (currentTab() == QLatin1String("sessions") && m_backgroundPage
-        && m_sessionPages->currentWidget() == m_backgroundPage)
-        return QStringLiteral("Background sessions, inside Sessions. "
-                              "Reopen a session or return with Back to sessions.");
     if (currentTab() != QLatin1String("sessions")) {
         if (onTabScreen) return onTabScreen(currentTab());
         return QStringLiteral("The %1 view").arg(paneTitle());

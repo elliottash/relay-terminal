@@ -3136,12 +3136,6 @@ private:
                             QStringLiteral("conversations.open"));
         items << actionItem(section, QStringLiteral("Projects"),
                             QStringLiteral("Known projects, active sessions and project actions"), QStringLiteral("projects.open"));
-        PaletteItem background;
-        background.key = QStringLiteral("sessions.background"); background.section = section;
-        background.label = QStringLiteral("Background sessions");
-        background.detail = QStringLiteral("Reopen work kept running after closing its pane");
-        background.run = [this] { openSessions(QStringLiteral("background")); };
-        items << background;
         items << actionItem(section, QStringLiteral("Globals"),
                             QStringLiteral("Board HQ: global memories, aliases and instructions"), QStringLiteral("globals.open"));
         return items;
@@ -4091,7 +4085,7 @@ public:
             if (!existing) return;
             auto *view = sessionsViewOf(existing);
             if (tab == QStringLiteral("projects") || tab == QStringLiteral("globals")
-                || tab == QStringLiteral("closed") || tab == QStringLiteral("background")) {
+                || tab == QStringLiteral("closed")) {
                 view->showTab(tab);
                 if (view->onTabActivated) view->onTabActivated(view->currentTab());
                 setActiveLeaf(existing); focusLeaf(existing); updateTitles();
@@ -4786,7 +4780,7 @@ public:
     // ----- Switchboard (docs/BOARD-DESIGN.md 4, protocol 17) -----------------------------
     // Ctrl+Shift+A: open the Switchboard beside the anchor, focus the one this tab already has,
     // or, pressed on it, go back to the last terminal pane.
-    void toggleBoardPane() {
+    void toggleBoardPane(bool background = false) {
         QWidget *page = m_tabs->currentWidget();
         // Pressed while the Switchboard is the pane in focus: close it through the pane's own
         // close path (closeToolPane — the title-bar button and Esc use it too). It used to hand
@@ -4806,6 +4800,7 @@ public:
         // A solo card pane (#Y2BA) is one card, not the tab's Board, so it is not what this finds.
         for (QWidget *leaf : leavesIn(page))
             if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board() && !tool->board()->pinned()) {
+                if (background) tool->board()->showBackgroundPage();
                 setActiveLeaf(tool); focusLeaf(tool);
                 const QString shown = tool->board()->workspace();
                 if (!from.isEmpty() && shown != workspace) {
@@ -4832,6 +4827,7 @@ public:
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         auto *tool = createBoardPane(workspace);
         if (!tool) return;
+        if (background) tool->board()->showBackgroundPage();
         if (anchor) dockBeside(anchor, tool);
         else if (page && page->layout()) page->layout()->addWidget(tool);
         // Opening the Switchboard is the explicit project action: from here the tab is this
@@ -5609,6 +5605,7 @@ public:
         view->onFocusPane = [guard](const QString &token) {
             if (auto *w = windowOf(guard)) w->m_manager->focusPane(token);
         };
+        view->onFocusBackground = view->onFocusPane;
         // Try it (#JNYN, §31.10): the card's `## Try it` names one line that opens what the turn
         // staged, and when that line is a command it runs in a terminal pane beside the board —
         // the same pane Execute opens, minus the agent task. `queueCommand` waits for that
@@ -5660,10 +5657,9 @@ public:
                     QString::fromLatin1(relay::projects::kReasonRestored));
                 pane->startBoardTask(task, card);
                 w->m_manager->scheduleSave();
-                w->notice(QStringLiteral("Job continues in the background. Reopen it in Sessions → Background."), 7000);
-                w->hint(QStringLiteral("sessions.background"),
-                        relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("sessions.open")),
-                                                       QStringLiteral("open Sessions, then Background")));
+                w->notice(QStringLiteral("Job continues in the background. Reopen it in Board → Background."), 7000);
+                w->hint(QStringLiteral("background.open"),
+                        relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("background.open"))));
                 return pane->sessionToken();
             }
             // The board keeps its list/card split (#BXCN): the new terminal's half comes out of
@@ -5704,6 +5700,25 @@ public:
                 }
             }
             return live;
+        };
+        view->backgroundPanes = [guard, workspace]() {
+            QJsonArray rows;
+            auto *window = windowOf(guard);
+            if (!window) return rows;
+            const QString project = QDir::cleanPath(workspace);
+            for (Pane *pane : window->m_manager->backgroundPanes()) {
+                const QString tabProject = windowOf(pane)
+                    ? windowOf(pane)->tabProject(windowOf(pane)->pageOf(pane)) : QString();
+                const bool here = (!tabProject.isEmpty() && QDir::cleanPath(tabProject) == project)
+                    || (!pane->workspace().isEmpty() && QDir::cleanPath(pane->workspace()) == project);
+                if (!here || pane->sessionToken().isEmpty()) continue;
+                const QString state = pane->property("backgroundInterrupted").toBool()
+                    ? QStringLiteral("interrupted") : pane->backgroundTaskState();
+                rows.append(QJsonObject{{"token", pane->sessionToken()},
+                    {"title", pane->paneTitle().isEmpty() ? shortPath(pane->cwd()) : pane->paneTitle()},
+                    {"model", pane->paneModel()}, {"state", state}});
+            }
+            return rows;
         };
         // A signal thread's chip (#AQ6X phase 3): the claim's token is the *thread's* id, and no
         // pane has one, so the chip opens that thread's history — the same ⓘ view the Sessions
@@ -8484,46 +8499,6 @@ public:
         addSessionsTab(QStringLiteral("closed"), QStringLiteral("Recently closed"), [](RelayWindow *window) -> QWidget * {
             return createClosedList(window);
         });
-        addSessionsTab(QStringLiteral("background"), QStringLiteral("Background"), [](RelayWindow *window) -> QWidget * {
-            auto *page = new QWidget;
-            auto *layout = new QVBoxLayout(page);
-            layout->addWidget(new QLabel(QStringLiteral("Sessions kept running after their pane closed. Reopen to view output or stop work."), page));
-            auto *list = new QListWidget(page);
-            list->setObjectName(QStringLiteral("backgroundSessions"));
-            layout->addWidget(list);
-            auto *reopen = new QPushButton(QStringLiteral("Reopen session"), page);
-            layout->addWidget(reopen);
-            WindowManager *manager = window->m_manager;
-            auto refresh = [list, manager, reopen] {
-                const QString selected = list->currentItem() ? list->currentItem()->data(Qt::UserRole).toString() : QString();
-                list->clear();
-                for (Pane *pane : manager->backgroundPanes()) {
-                    auto *item = new QListWidgetItem(QStringLiteral("%1 · %2 · %3")
-                        .arg(pane->paneTitle().isEmpty() ? pane->cwd() : pane->paneTitle(),
-                             pane->property("backgroundInterrupted").toBool() ? QStringLiteral("Interrupted")
-                                 : pane->backgroundTaskState() == QStringLiteral("done") ? QStringLiteral("Done")
-                                 : pane->backgroundTaskState() == QStringLiteral("needs-you") ? QStringLiteral("Needs you")
-                                 : pane->backgroundTaskState() == QStringLiteral("failed") ? QStringLiteral("Failed")
-                                 : QStringLiteral("Working"),
-                             pane->sessionToken().left(8)), list);
-                    item->setData(Qt::UserRole, pane->sessionToken());
-                    if (pane->sessionToken() == selected) list->setCurrentItem(item);
-                }
-                if (!list->currentItem() && list->count()) list->setCurrentRow(0);
-                reopen->setEnabled(list->count() > 0);
-            };
-            auto open = [list, manager, refresh] {
-                if (auto *item = list->currentItem()) manager->focusPane(item->data(Qt::UserRole).toString());
-                refresh();
-            };
-            connect(reopen, &QPushButton::clicked, page, open);
-            connect(list, &QListWidget::itemActivated, page, [open](QListWidgetItem *) { open(); });
-            auto *timer = new QTimer(page);
-            connect(timer, &QTimer::timeout, page, [page, refresh] { if (page->isVisible()) refresh(); });
-            timer->start(1500);
-            refresh();
-            return page;
-        });
     }
 
 private:
@@ -8617,10 +8592,9 @@ private:
         if (!project.isEmpty()) background->attachTab(background->pageOf(pane), project,
             QString::fromLatin1(relay::projects::kReasonRestored));
         m_manager->scheduleSave();
-        notice(QStringLiteral("Job continues in the background. Reopen it in Sessions → Background."), 7000);
-        hint(QStringLiteral("sessions.background"),
-             relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("sessions.open")),
-                                            QStringLiteral("open Sessions, then Background")));
+        notice(QStringLiteral("Job continues in the background. Reopen it in Board → Background."), 7000);
+        hint(QStringLiteral("background.open"),
+             relay::ShortcutHints::nextTime(Keymap::instance().shortcutText(QStringLiteral("background.open"))));
         return true;
     }
 
