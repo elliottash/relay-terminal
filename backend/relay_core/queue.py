@@ -119,6 +119,7 @@ class TurnSupervisor:
         self._agent = None
         self._running: str | None = None
         self._paused = False
+        self._user_stopped = False
         self._awaiting_reply = False
         self._closed = False
         self._outcome: str | None = None
@@ -151,6 +152,20 @@ class TurnSupervisor:
             return self._running is not None
 
     @property
+    def accepts_handoff(self) -> bool:
+        """A Relay wake must respect a person's Stop and a failed turn's pause."""
+        with self._lock:
+            return self._agent is not None and not self._closed and not self._paused and not self._user_stopped
+
+    def queue_handoff(self, prompt: str, request_id: str) -> bool:
+        """Queue a publisher note only if this queue can currently run it."""
+        with self._lock:
+            if self._agent is None or self._closed or self._paused or self._user_stopped:
+                return False
+            self.submit(prompt, "queue", request_id, origin="relay")
+            return True
+
+    @property
     def agent(self):
         return self._agent
 
@@ -160,6 +175,7 @@ class TurnSupervisor:
             if self._running is not None:
                 raise ValueError("Stop the active agent turn before changing provider or workspace.")
             self._agent = agent
+            self._user_stopped = False
             if agent is not None:
                 agent.steer_source = self.take_steer
                 agent.steer_peek = self.peek_steer
@@ -331,6 +347,8 @@ class TurnSupervisor:
             # first would make it "an agent turn is already active".
             if self._paused and origin == "user":
                 self._paused = False
+            if origin == "user":
+                self._user_stopped = False
             self._changed_locked()
             self._lock.notify_all()
             return item["id"]
@@ -551,6 +569,7 @@ class TurnSupervisor:
         an empty prompt box) or simply by submitting the next prompt, which resumes it (#7JD1).
         """
         with self._lock:
+            self._user_stopped = True
             # Drop forced items that were waiting for this turn: the user asked to stop.
             self._ledger_cancel([i for i in self._queue if i["force"]], "Dropped when the user stopped the turn.")
             self._queue = deque(i for i in self._queue if not i["force"])
@@ -583,6 +602,7 @@ class TurnSupervisor:
         with self._lock:
             was_paused = self._paused
             self._paused = False
+            self._user_stopped = False
             self._awaiting_reply = False
             self._changed_locked()
             self._lock.notify_all()

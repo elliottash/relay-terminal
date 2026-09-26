@@ -27,6 +27,7 @@ from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
 from relay_core.presets import PRESETS, model_name, tier_list_defaults
 from relay_core.queue import TurnSupervisor
+from relay_core.integration_handoffs import AuthorHandoffs
 from relay_core.router import classify
 
 MAX_MESSAGE = 2 * 1024 * 1024
@@ -122,6 +123,7 @@ def main():
 
     turns = TurnSupervisor(turn_emit)
     subagents.turns = turns
+    author_handoffs = AuthorHandoffs(turns, subagents, emit)
 
     # Protocol 36 (#C0Q8): this pane's task-plugin workspace — its router, its kernel or TeX
     # builder, and the tool group its agent may load. Outlives every `configure`: a kernel's state
@@ -294,6 +296,7 @@ def main():
                 from relay_core import workspace_context
                 if turns.busy:
                     raise ValueError("Stop the active agent turn before changing provider or workspace.")
+                author_handoffs.close()
                 # One resolved absolute workspace for the whole of `configure`. `board_workspace`
                 # is None when the GUI named none: the agent may fall back to the process's cwd
                 # (that is its sandbox), but the *board* may not — `workspace: ""` used to make
@@ -530,6 +533,8 @@ def main():
                 if skill_index is not None and skill_index.skipped:
                     event["skills_skipped"] = skill_index.skipped[:50]
                 emit(event)
+                author_handoffs.configure(identity, request.get("pane_token") or
+                                          os.environ.get("RELAY_SESSION_TOKEN") or "")
                 logs.event(log, "configured", model=config.model,
                            host=urllib.parse.urlsplit(config.base_url).hostname, role=agent_role,
                            skills=event.get("skills"), agents=event.get("agents"),
@@ -972,6 +977,7 @@ def main():
             except Exception:
                 pass
     logs.event(log, "worker_stop", pid=os.getpid())
+    author_handoffs.close()
     # The guest is a process of this worker's (protocol 29.3): it goes when the worker goes.
     if turns.agent is not None:
         guest_harness_provider.detach(turns.agent)

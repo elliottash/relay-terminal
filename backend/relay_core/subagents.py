@@ -1195,7 +1195,7 @@ class SubagentManager:
             raise ValueError("id must be a subagent id.")
         if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > MAX_TASK_BYTES:
             raise ValueError(f"text must be 1-{MAX_TASK_BYTES} bytes.")
-        who = "the user" if origin == "user" else "the main agent"
+        who = "the user" if origin == "user" else "Relay's publication queue" if origin == "relay" else "the main agent"
         labelled = f"[Message from {who} to subagent {agent_id}]\n{text}"
         with self._lock:
             sub = self._agents.get(agent_id)
@@ -1219,6 +1219,20 @@ class SubagentManager:
             self._todo_event(sub, "started")
             self._start_thread(sub, labelled)
             return {"id": agent_id, "delivered": "resumed", "status": "running", "background": True}
+
+    def deliver_workspace_handoff(self, workspace_id: str, text: str) -> bool | None:
+        """Wake this child's author; None means the workspace belongs elsewhere."""
+        with self._lock:
+            matches = [s for s in self._agents.values()
+                       if (getattr(getattr(s.agent, "executor", None), "workspace_identity", {}) or {}).get(
+                           "workspace_id") == workspace_id]
+            if not matches:
+                return None
+            if len(matches) != 1 or self._closed or matches[0].status in ("stopped", "paused", "cancelled"):
+                return False
+            agent_id = matches[0].id
+        self.send_message(agent_id, text, origin="relay")
+        return True
 
     def pause(self, target) -> list[str]:
         """``agent_pause`` (id or "all"): hold live subagents (#ZQNG).
