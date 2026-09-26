@@ -1,0 +1,27 @@
+## Before the fix (board_tools.py without cwd= and without the thread note)
+_______ LandGateTests.test_a_failed_status_is_recorded_in_the_move_event _______
+self = <test_board_tools.LandGateTests testMethod=test_a_failed_status_is_recorded_in_the_move_event>
+    def test_a_failed_status_is_recorded_in_the_move_event(self):
+E   AssertionError: 0 != 1
+E   AssertionError: 0 != 1
+E                   AssertionError: None != 'land' : {'id': 'NFQV', 'status': 'needs-verification', 'section': None, 'tab': 'features', 'rank': 'r', 'path': 'issues/features/2026-09-25-gate-from-needs-verification-git-false.md', 'hash': 'b859f346da13436933202ed89d03208e99e44a5ff2d15d00e4e8e8c97ccf86
+E   AssertionError: 0 != 1
+FAILED tests/test_board_tools.py::LandGateTests::test_a_failed_status_is_recorded_in_the_move_event
+FAILED tests/test_board_tools.py::LandGateTests::test_a_timeout_or_launch_error_is_recorded_in_the_move_event
+FAILED tests/test_board_tools.py::LandGateTests::test_status_runs_in_the_board_repo_from_any_cwd
+FAILED tests/test_board_tools.py::LandGateTests::test_unreadable_status_output_is_recorded_in_the_move_event
+4 failed, 7 passed, 329 deselected in 1.48s
+
+## After the fix
+tests/test_board_tools.py::LandGateTests::test_a_broken_land_script_warns_but_does_not_refuse PASSED [  9%]
+tests/test_board_tools.py::LandGateTests::test_a_committed_tree_moves_through_cleanly PASSED [ 18%]
+tests/test_board_tools.py::LandGateTests::test_a_failed_status_is_recorded_in_the_move_event PASSED [ 27%]
+tests/test_board_tools.py::LandGateTests::test_a_repo_without_a_land_script_moves_without_asking PASSED [ 36%]
+tests/test_board_tools.py::LandGateTests::test_a_timeout_or_launch_error_is_recorded_in_the_move_event PASSED [ 45%]
+tests/test_board_tools.py::LandGateTests::test_a_worker_without_a_token_moves_without_asking PASSED [ 54%]
+tests/test_board_tools.py::LandGateTests::test_clean_skipped_and_same_status_moves_add_no_note PASSED [ 63%]
+tests/test_board_tools.py::LandGateTests::test_moves_to_other_statuses_never_ask_the_land_script PASSED [ 72%]
+tests/test_board_tools.py::LandGateTests::test_status_runs_in_the_board_repo_from_any_cwd PASSED [ 81%]
+tests/test_board_tools.py::LandGateTests::test_uncommitted_hunks_refuse_the_move PASSED [ 90%]
+tests/test_board_tools.py::LandGateTests::test_unreadable_status_output_is_recorded_in_the_move_event PASSED [100%]
+====================== 11 passed, 329 deselected in 0.74s ======================

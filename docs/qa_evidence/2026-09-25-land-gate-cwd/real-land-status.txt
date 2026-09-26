@@ -1,0 +1,7 @@
+## Real scripts/land.py status, launched from /home/elliott
+$ cd ~ && python3 land.py status --token x --json  (no cwd)
+land.py: not inside a git repository: /home/elliott
+$ same, with cwd=<board repo> (what _land_gate now does)
+exit 0
+{"token": "x", "sessions": [], "uncommitted": 0}
+

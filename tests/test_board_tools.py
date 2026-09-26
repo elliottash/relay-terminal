@@ -5,6 +5,8 @@ Every test works in a temporary board; nothing here reads the repository's own `
 calls a model or touches the network or the keyring.
 """
 import getpass
+import os
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -4466,6 +4468,93 @@ class LandGateTests(BoardToolsTest):
         result = self.move("needs-verification")
         self.assertNotIn("error", result, result)
         self.assertFalse(calls.exists())
+
+    # ---- the status runs in the board's repository, whatever the worker's cwd (#C8Z7) ----
+    def cwd_sensitive_script(self, uncommitted):
+        """A land.py that, like the real one, fails unless it runs inside the board's repo."""
+        report = {"token": self.pane_token, "uncommitted": uncommitted,
+                  "sessions": [{"session": "c8z7", "claims": [
+                      {"path": "backend/relay_core/board_tools.py", "hunks": uncommitted}]}]}
+        self.land("import json, os, sys\n"
+                  f"if os.path.realpath(os.getcwd()) != os.path.realpath(r'{self.repo}'):\n"
+                  "    sys.stderr.write('land.py: not inside a git repository: '"
+                  " + os.getcwd() + '\\n')\n"
+                  "    sys.exit(2)\n"
+                  "print(json.dumps(%r))\n" % (report,))
+
+    def board_ids(self):
+        return [c.id for c in self.board.cards()]
+
+    def from_elsewhere(self, git):
+        """chdir into an unrelated directory (a Git repo when asked) for the rest of the test."""
+        elsewhere = Path(tempfile.mkdtemp(prefix="c8z7-cwd-"))
+        self.addCleanup(shutil.rmtree, elsewhere, ignore_errors=True)
+        if git:
+            subprocess.run(["git", "init", "-q", str(elsewhere)], check=True)
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(elsewhere)
+
+    def test_status_runs_in_the_board_repo_from_any_cwd(self):
+        for git in (False, True):
+            for status in ("needs-verification", "done"):
+                with self.subTest(git=git, status=status):
+                    self.from_elsewhere(git)
+                    card = self.create(title=f"Gate from {status} git={git}",
+                                       request=f"cwd case {status} {git}",
+                                       not_duplicate_of=self.board_ids())
+                    self.cwd_sensitive_script(2)
+                    refused = self.tools.run("board_move_card", {
+                        "id": card, "status": status, "reason": "closing it"})
+                    self.assertEqual(refused.get("requires"), "land", refused)
+                    self.assertIn("backend/relay_core/board_tools.py", refused["error"])
+                    self.assertEqual(self.board.card_by_id(card).status, "inbox")
+                    self.cwd_sensitive_script(0)
+                    moved = self.tools.run("board_move_card", {
+                        "id": card, "status": status, "reason": "closing it"})
+                    self.assertNotIn("error", moved, moved)
+                    self.assertNotIn("land_warning", moved, moved)
+                    self.assertEqual(self.board.card_by_id(card).status, status)
+
+    # ---- a status that could not answer is said in the thread too (#C8Z7) ----
+    def assert_warning_recorded_once(self, result):
+        warning = result.get("land_warning", "")
+        self.assertIn("not checked", warning, result)
+        self.assertEqual(self.thread_text(self.card_id).count(warning), 1)
+        moves = [line for line in self.thread_text(self.card_id).splitlines()
+                 if "moved this card" in line]
+        self.assertIn(warning, moves[-1])
+
+    def test_a_failed_status_is_recorded_in_the_move_event(self):
+        self.land("import sys\nsys.stderr.write('land store unreachable\\n')\nsys.exit(1)\n")
+        self.assert_warning_recorded_once(self.move("done"))
+
+    def test_unreadable_status_output_is_recorded_in_the_move_event(self):
+        self.land("print('not json')\n")
+        self.assert_warning_recorded_once(self.move("needs-verification"))
+
+    def test_a_timeout_or_launch_error_is_recorded_in_the_move_event(self):
+        self.status_script(0)
+        for exc in (subprocess.TimeoutExpired(["land.py"], 10), OSError("no interpreter")):
+            with self.subTest(exc=type(exc).__name__):
+                self.card_id = self.create(title=f"Gate {type(exc).__name__}",
+                                           request=f"land status raises {type(exc).__name__}",
+                                           not_duplicate_of=self.board_ids())
+                with unittest.mock.patch.object(T.subprocess, "run", side_effect=exc):
+                    result = self.move("needs-verification")
+                self.assertNotIn("error", result, result)
+                self.assert_warning_recorded_once(result)
+
+    def test_clean_skipped_and_same_status_moves_add_no_note(self):
+        self.status_script(0)
+        self.assertNotIn("land_warning", self.move("needs-verification"))
+        calls = self.repo / "land-calls.txt"
+        self.status_script(3, calls=calls)
+        again = self.move("needs-verification")
+        self.assertNotIn("error", again, again)
+        self.assertNotIn("land_warning", again)
+        self.assertFalse(calls.exists(), "a same-status move asked the land script")
+        self.assertNotIn("not checked", self.thread_text(self.card_id))
 
     def test_a_repo_without_a_land_script_moves_without_asking(self):
         result = self.move("needs-verification")

@@ -3132,6 +3132,10 @@ class BoardTools:
             line += f" · implemented_by {stamped}"
         if verified:
             line += f" · verified_by {verified}"
+        if land_note:
+            # A status that could not answer is part of the shared record, not only of this
+            # tool result (#C8Z7): the thread says the tree was not checked.
+            line += f" · {land_note}"
         self._append(card, line, kind="event")
         write_id = self._record("move", card, summary, before_bytes, size, moved_from)
         # The ledger (#95VZ): `done` is the case passed; a card sent back a stage from
@@ -4207,7 +4211,10 @@ class BoardTools:
         try:
             run = subprocess.run([sys.executable, str(land), "status",
                                   "--token", self.pane_token, "--json"],
-                                 capture_output=True, text=True, timeout=10)
+                                 capture_output=True, text=True, timeout=10,
+                                 # land.py finds its repo from the cwd, and a worker's cwd can be
+                                 # anywhere — outside Git or in another repository (#C8Z7).
+                                 cwd=str(self.board.repo))
         except subprocess.TimeoutExpired:
             return "land status timed out after 10 s: uncommitted work was not checked"
         except (OSError, subprocess.SubprocessError) as exc:
