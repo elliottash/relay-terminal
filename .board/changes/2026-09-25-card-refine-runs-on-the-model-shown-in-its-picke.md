@@ -9,7 +9,7 @@ session: 97e9802a-be38-415b-b81d-ddcb07e5cd62
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [probe], human: optional, criteria: 'Select a model in a card pane, press Refine, and confirm the response and provenance match that selection.', sign_off: none, effort: medium, stakes: rework, blast: capability}
-links: {plans: [], commits: [da8d8c1b43a0, fdb1e0fa5880], evidence: [tests/test_card_model_selection.py], related: [BMS1, E34S], github: null}
+links: {plans: [], commits: [da8d8c1b43a0, fdb1e0fa5880, 68e319eadda4], evidence: [tests/test_card_model_selection.py], related: [BMS1, E34S], github: null}
 ---
 # Card Refine runs on the model shown in its picker
 
