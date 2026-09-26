@@ -158,3 +158,46 @@ Owner: "how do i test out the new QA approach. is the agent going to design simu
 <!-- relay:entry 20260922T020000Z-fk author=claude-code kind=decision -->
 ### Claude Code · 2026-09-22 02:00
 Owner, on the board's tool row: "i would suggest to merge check and clean up but call it hygiene. change profile to Performance. change Tests to Validation." — then "but i dont want performance in the gear menu" — then "lets keep Tests for now. but i am thinking that should link to a broader QA system page, where agents will attack your project to find errors". Filed as #SW1D (Hygiene + Performance, scoped, `## Done means` written, sequenced after #1CXD's Area B) and #SJTR (Tests as the entry point to an agent-attack QA system — an idea, grounded in the field reports and Provenance's W7-CRITIC protocol, not yet scoped; two questions waiting on the owner).
+
+<!-- relay:entry 20260926T042800Z-b2 author=claude-code kind=comment -->
+### Claude Code · 2026-09-26 04:28
+Stale-card review (the owner asked for "freshen up their plans, tell me what questions or decisions are still needed"). No session has worked this card since the 2026-09-22 handoff. Findings at HEAD `6514be0c`:
+- The research and scoping are done. Steps 1–3 of the adopted plan have landed: #PR4Q (`60b3fa43`…`c3a88caa`, verified `fcb7fad7`) and #WC3E (`0ef3ee13`, `486852e0`, verified `eb49e562`) are both in `needs-qa-llm`. #JNYN (`03701acf`, `bca9a82e`, `1f3a7af0`, `132d3523`) is in `needs-verification` with its broader staging verdict still "PENDING a2". That verifier died in the 2026-09-22 overload and nobody has touched the card since. #74Y5 is `done`.
+- The owner's human-QA designation has also landed: `verify.human`, `verified()` (`backend/relay_core/board.py:759`, #1AA6 `c40c6695`) and #BX7B's Review pane.
+- Steps 4–7 (Compare results, Observed use, Results list, AI-verifier evaluation) have no code and no card of their own. #BX7B, #P7CF, #1QKM, #C3Q2 and #GW74 now cover the ground they would.
+- Codex's three policy contradictions are resolved in `.board/POLICY.md`.
+- I rewrote `## Plan` (step-by-step status; the adopted five-line design kept word for word) and added `## Tasks` (7 done, 5 open). I added the child and successor cards to `links.related` and moved the card Executing → Discussing, waiting on the owner. This card should build nothing further: it closes once its children close and steps 4–7 have somewhere to live.
+
+<!-- relay:entry 20260926T042801Z-b3 author=claude-code kind=question -->
+### Claude Code · 2026-09-26 04:28
+1. Should this card close as the research-and-scoping umbrella once #PR4Q, #WC3E and #JNYN close, with #BX7B, #P7CF, #SJTR and #GW74 carrying the direction? Recommendation: yes.
+2. Step 5, "observed use" (an information-only "used N times over D days; no captured faults" on QA-lane cards, from local logs): file it as its own card or drop it? Recommendation: file it, linked to #P7CF. It is cheap evidence for the ~550-card verification backlog and never closes a card by itself.
+3. Steps 4 (Compare results) and 6 (Results list): defer them to #BX7B and #1QKM until a research or analysis project on Relay needs them, rather than build them now? Recommendation: yes, defer.
+4. Step 7 (evaluate the AI verifier on planted defects and clean controls): fold it into #P7CF's stratified pilot rather than keep it here? Recommendation: yes, add planted defects and clean controls to that pilot.
+
+<!-- relay:entry 20260926T042802Z-b4 author=claude-code kind=event -->
+- ✦ claude-code updated this card · replaced `## Plan`, added `## Tasks`, links.related += PR4Q, WC3E, JNYN, 74Y5, BX7B, P7CF, SJTR, 1QKM, GW74, C3Q2, 1AA6; moved Executing → Discussing, waiting_on: owner
+
+<!-- relay:entry 20260926T050057Z-5d author=agent kind=decision model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+Owner: "yes to all. 7z8g 3 put this on another card for later". Decisions: close this umbrella after #PR4Q, #WC3E and #JNYN; file observed-use evidence separately; put Compare results and Results list on a separate later card; include planted defects and clean controls in #P7CF’s pilot.
+
+<!-- relay:entry 20260926T050156Z-nm author=agent kind=event model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+- ✦ agent updated this card · waiting_on: owner → (unset); appended to `## Decisions`
+
+<!-- relay:entry 20260926T050200Z-vf author=agent kind=event model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+- ✦ agent moved this card · Discussing → Planned · Owner answered the 2026-09-26 scope questions; refreshed plan is ready for delivery or its listed prerequisite work.
+
+<!-- relay:entry 20260926T050221Z-30 author=agent kind=event mention=SWQN model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+mentioned in #SWQN · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T050240Z-wz author=agent kind=event mention=DNYG model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+mentioned in #DNYG · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T050256Z-m4 author=agent kind=event model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+- ✦ agent updated this card · tasks: 9/12 done
+
+<!-- relay:entry 20260926T050307Z-9j author=agent kind=event mention=P7CF model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+mentioned in #P7CF · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T051436Z-ta author=agent kind=event model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
+- ✦ agent updated this card · appended to `## Plan`

@@ -1,11 +1,11 @@
 ---
 id: P2W8
 type: work
-status: executing
+status: planned
 labels: [feature, panes, files, agent-ui, switchboard, plugins]
 assignee: agent
 implemented_by: anthropic/claude-fable-5-1 via claude-code
-waiting_on: owner
+blocked_by: [2FQ9, R660, E85D, F8R7, C0Q8]
 rank: zzzzzzzzzzzzzzzzy
 created: '2026-09-23'
 verify: {artifact: code, primary: person, also: [script], human: required, criteria: 'every slice card (#Y2BA #S976 #E8V1 #6FDD #2FQ9 #83YV #PBZ4 #R660 #3B1B #6BY7) reaches needs-verification with its own evidence and the pane model still reads as one agent class across console/artifact/system panes; the owner closes the umbrella when the last slice closes', sign_off: none, effort: high, stakes: rework, blast: capability}
@@ -130,45 +130,51 @@ Owner, 2026-09-25, on the five "Decisions to settle" above, verbatim: *"i want t
 - **D6** Linked pane chains are a first-class case: a group may have more than two members and a direction (shell → TeX editor → PDF preview), each member can open the next, and the chain restores, closes and moves as one.
 
 The six questions of the unified pane model (thread, 2026-09-25) were not answered separately; "go big and build the whole thing" adopts their recommendations as working defaults, each overturnable by a comment: **U1** keep "pane", label Ctrl+E "New shell", drop "helper" from labels; **U2** the Python console is IPython in the pty attached to Relay's kernel (`jupyter console --existing`), plain `ipython` as fallback; **U3** pop-out promotes the docked console itself to a linked leaf with a pty, sharing the tab's worker, and Run stays a fresh agent on the brief; **U4** Tests and Sharing get a docked agent, Explorer/Diff/Turn/Subagent/Info do not; **U5** a card's record is its thread, a file's record is the buffer's undo steps plus a per-turn change list; **U6** cards and the Python console proceed in parallel, then file artifacts, then Stata.
+- 2026-09-26 — Owner: “yes to all.” Close this umbrella after its slice cards and one full live run pass; #WYGY and #33G0 own the later TeX and Python/Stata depth. A clear Stata-unavailable message suffices on this host. Use a separate verification session for finished slices.
 
 ## Plan
-**Goal.** Build the one pane model end to end: consoles (Shell, Python, Stata), artifact panes (cards first, then files), system panes, pop-out, and linked chains, delegated in waves to subagents, each slice on its own card.
+**Goal.** Build the one pane model end to end: consoles (Shell, Python, Stata), artifact panes (cards first, then files), system panes, pop-out, and linked chains, each slice on its own card. *(Refreshed 2026-09-26: the hold is gone, the foundation cluster and eight of ten slices are on main in `needs-verification`, #2FQ9 is being built by a live session, #R660's code landed without its card being updated. What is left is finishing #2FQ9, syncing #R660, one verifying pass, and the owner's answer on what this umbrella waits for.)*
 
-**Findings (2026-09-25).**
-- The foundation this plan stands on is **in the working tree and uncommitted under the owner's hold** ("dont commit #E85D, #F8R7, #C0Q8", salvage note 2026-09-25): `src/ArtifactWorkspace.{h,cpp}`, `src/RelayWindowWorkspace.cpp`, `backend/relay_core/workspace_plugins.py`, `backend/relay_core/open_buffers.py` are untracked; `src/FilePanes.cpp` (+722), `backend/relay_core/agent.py`, `tools.py`, `tool_groups.py`, `worker.py`, `guest_board_bridge.py`, `docs/TASK-PLUGINS.md` carry held hunks. `land.py`'s build gate materialises tip + the landing hunks, so any slice that includes those files cannot land until the cluster does. Committed already: `task_plugins.py` (ff61a838), `lang_router.py` + `py_kernel.py` (9da682de), `tex_build.py` (01e4e216), `TextMerge` + FilePreview watching (fd2b2466).
-- `scripts/land.py who` reports no sessions because the land root follows this session's private `TMPDIR`; other sessions' claims are invisible here (bug filed separately). Slices are therefore cut so no two touch the same function, and every subagent lands through `land.py` with `--dry-run` first.
+**Findings (2026-09-26, against main at 6514be0c).**
+- *The foundation is on main.* The owner lifted the hold on 2026-09-25 ("lift the whole on #E85D/#F8R7/#C0Q8 cluster , you can build those"). The thread's hashes were rewritten: 503933ca → `13909113` (worker side of #C0Q8/#F8R7 plus the #6FDD remainder), b8de6172 → `7e4e0c45` (#F8R7 open buffers), 6c4b363b → `4ad5fe87` (#E85D groups and presets). The 2026-09-25 findings about untracked files and a hidden `land.py who` are obsolete: #BHJZ gave land.py one shared root, and `who` now lists every session.
+- *Slice cards and where they are:*
 
-**Slices and waves.** One card per slice; each subagent claims its card, edits only the files named on it, lands small and often, and moves the card to needs-verification with evidence.
+| Slice | Card | State | On main |
+|---|---|---|---|
+| Cards as artifact panes | #Y2BA | needs-verification, 3/3 | `103e2f60` `64c7788d` `9a13cfe2` `0fec7afd` and follow-ups |
+| Program destination | #S976 | needs-verification, 8/8 | `98913976` and earlier |
+| Labels | #E8V1 | needs-verification, 4/4 | `e0ad8f8b` `784e91ea` `e6febb9f` |
+| Manifest v2, relay.shell | #6FDD | needs-verification | `b51072ff` `483ed807` `03c70448` `13909113` |
+| Python console | #83YV | needs-verification, 5/6; Stata t:ja deferred (no Stata on this host) | `5b9ce8cd` … `dd484d8a` |
+| Docked agent on file editors | #PBZ4 | needs-verification, 5/5 | `ab196217` `b70c33bf` `7cea51a7` `4a5a4267` |
+| Tests and Sharing agents | #3B1B | needs-verification, 3/3 | `488ff0c8` |
+| Card drawer in a terminal pane | #6BY7 | needs-verification | `f7dff8f4` `6822c9a5` `c92cdc3f` |
+| Pop-out / dock-back | #2FQ9 | executing, **live session** (`land.py who`: `2fq9`, idle minutes, uncommitted `src/LinkedAgent.h`, `src/PaneLinkedShell.cpp`, `src/RelayWindowLinkedAgent.cpp`, FilePanes ⤴ Shell button) | none yet |
+| Linked chains | #R660 | planned, 0/5 **stale**: its code landed in salvage `def2cf0b` (+431 lines in `src/RelayWindowWorkspace.cpp`), evidence `docs/qa_evidence/2026-09-25-tex-chains/` (`b52a33ad`) | `def2cf0b` |
 
-*Wave 1 — no held files, starts now, four subagents:*
-1. **#Y2BA** Cards as artifact panes: A0 (N solo Board panes per tab, layout node, Shift+Enter / pop-out button), then `ToolPane::Kind::Card` with a `CardController` seam. Files: `src/BoardPane.{h,cpp}`, `src/RelayWindow.h` (`openBoardCard`, `toggleBoardPane`, `serializeNode`), `src/PaneChrome.h`, `src/CardPane.{h,cpp}` (new), tests.
-2. **#S976** The Program destination in the GUI (its plan, steps 1–7): `foreground_program` on `route`, `program`/`incomplete` branches in `dispatch`, a fourth mode with chip and ink, raw-mode delivery, `ProgramCompletion`, typo = "did you mean". Files: `src/InputPolicy.*`, `src/PaneRuntime.cpp` (`dispatch`, `route`), `src/Pane.h` (mode), `src/ShellHighlighter.h`, `src/Keymap.h`, `src/ProgramCompletion.*` (new), tests.
-3. **#E8V1** Labels: "New shell", console kind in the header, no "helper agent". Strings and docs only.
-4. **#6FDD** Manifest v2 (additive: `console.program`, `completion`, `blocks`, `commands`) and a bundled `relay.shell`. Files: `backend/relay_core/task_plugins.py`, `plugins_bundled/{shell,python,stata,tex}/plugin.json`, `tests/test_task_plugins.py`, a new section of `docs/TASK-PLUGINS.md`.
+- *Found while checking:* `def2cf0b`'s chain registers `main.pdf` with the source's adapter (`text`/`editable`, `src/RelayWindowWorkspace.cpp:714-715`). The fix is on #E85D (t:q7). #10RD (`ef296c8d`) opens other group sources as unlinked panes, which is #E85D owner question 1.
+- *The original "what is missing" list (Discussion points 1–6), by owner:* 1 shared-file safety → #F8R7 (done except an SSH pane test); 2 linked group and presets → #E85D (done except t:q7/t:m3 and live checks) and #R660; 3 artifact runner with latexmk, diagnostics and live/stale → #WYGY (engine `01e4e216`; `tex_build` wiring in its t:qk); 4 SyncTeX both ways → #WYGY t:j2; 5 typed previews beyond PDF → #33G0 t:9h (plots/tables) and later plugins; 6 remote builds → #WYGY t:en. Packaged Qt PDF (D3) → #9Y7X (executing); the viewer install button → #7WGJ. **This umbrella owns none of 3–6 directly.** Owner question 1 asks whether its closure waits for them.
 
-*Wave 2 — after the owner lifts the hold and the #E85D/#F8R7/#C0Q8 cluster is landed by its owner or a session the owner names:*
-5. **#2FQ9** Pop-out / dock-back (mechanism c), then registered in the workspace group.
-6. **#83YV** Python console pane (IPython in the pty on `KernelRuntime`'s kernel, prompt marks, `py_*` shared), then Stata (#33G0 t:gm).
-7. **#PBZ4** `ArtifactContext` on file editors: docked agent, manifest actions and slash commands, buffer patches via `open_buffers`.
-8. **#R660** Linked chains shell → TeX → PDF on the group model, with #WYGY's bindings.
-9. **#3B1B** Docked agent on Tests and Sharing.
-10. **#6BY7** Card drawer in a terminal pane: the header chip toggles the card inline (body, `## Plan`, `## Tasks`, stage; read-only plus Done); the pane's conversation never becomes the thread (#CTRN). Reuses #Y2BA's `CardPane` content.
+**Remaining steps.** 1. #2FQ9 lands under its live session (not this card's to touch), then its group registration (#2FQ9 t:rp) on #E85D's model. 2. #R660's owner or the next session syncs that card: tasks 9s/qr/fy/vq checked against `def2cf0b`, the adapter defect handed to #E85D t:q7, and `## Execution Summary` pointing at the tex-chains evidence. 3. One separate verifying session (another model family recommended) works through the needs-verification slices against their own `## Done means` and runs the program-level scenarios below into `docs/qa_evidence/<date>-one-pane-model/`. 4. The owner closes the umbrella (`human: required`) when the slices close, with scope set by question 1.
 
-**Risks.** Landing on top of the held cluster (the 2026-09-19 class of incident) — mitigated by the wave split and `--dry-run`. `src/RelayWindow.h` and `src/Pane.h` carry held hunks; wave-1 slices touch them only in named functions. Two workers per tab (a shell pane's own and the tab's console worker) stay as they are until pop-out proves whether they should merge.
+**Risks.** #2FQ9's hunks share `src/FilePanes.cpp`, `src/RelayWindow.h`, `src/RelayWindowCore.cpp` and `src/Pane.h` with #E85D t:q7/t:m3, so land #2FQ9 first or claim with `--dry-run`. Two workers per tab remain until #2FQ9 shows whether they should merge. Verification needs a Qt-PDF build for the PDF half of scenario (d), which waits on #9Y7X.
 
-**Verify.** Per slice on its card. Program level: a live run under Xvfb of (a) two card panes planning at once, (b) a Python console where `x = 1` typed in the pty and `py_run_cell("x")` from the agent agree, (c) a card agent popped out running `git status` and docked back with its transcript intact, (d) a shell → TeX → PDF chain restored after a restart; evidence under `docs/qa_evidence/<date>-one-pane-model/`.
+**Verify.** Per slice on its card. Program level, live under Xvfb with an isolated profile: (a) two card panes planning at once; (b) a Python console where `x = 1` typed in the pty and `py_run_cell("x")` from the agent agree; (c) a card agent and a file agent popped out, running `git status`, and docked back with the transcript intact; (d) a shell → TeX → PDF chain restored after a restart, with the preview rendering the PDF (needs #9Y7X); (e) a person typing in a file while its docked agent edits it (#F8R7/#PBZ4). The owner looks at the result (`human: required`).
+**2026-09-26 scope update.** This umbrella closes on its slice cards and one full program-level run. #WYGY owns deeper TeX work; #33G0 owns Python/Stata depth. A clear Stata-unavailable state is sufficient here, and a separate session checks the finished slices.
 
 ## Tasks
 
 - [x] Wave 1: cards as artifact panes (#Y2BA) — landed, in needs-verification <!-- t:kc card=Y2BA -->
-- [ ] Wave 1: Program destination in the GUI (#S976) — steps 1/6/7 landed; 2–5 written in the tree, uncommitted <!-- t:wr s=in-progress card=S976 -->
+- [x] Wave 1: Program destination in the GUI (#S976) — landed (`98913976`), in needs-verification <!-- t:wr card=S976 -->
 - [x] Wave 1: labels for the one pane model (#E8V1) — landed, in needs-verification <!-- t:fy card=E8V1 -->
-- [ ] Wave 1: manifest v2 and relay.shell (#6FDD) — landed except python/plugin.json + docs, held on Q1 <!-- t:nb s=in-progress card=6FDD -->
-- [ ] Owner lifts the hold; the #E85D/#F8R7/#C0Q8 cluster lands <!-- t:ft s=blocked -->
-- [ ] Wave 2: pop-out / dock-back (#2FQ9) <!-- t:yf card=2FQ9 blocked_by=ft,kc -->
-- [ ] Wave 2: Python console, then Stata (#83YV) <!-- t:4q card=83YV blocked_by=ft,wr,nb -->
-- [ ] Wave 2: artifact panes on file editors (#PBZ4) <!-- t:vf card=PBZ4 blocked_by=ft,nb -->
-- [ ] Wave 2: linked chains shell → TeX → PDF (#R660) <!-- t:gf card=R660 blocked_by=ft,vf -->
-- [ ] Wave 2: docked agent on Tests and Sharing (#3B1B) <!-- t:mx card=3B1B blocked_by=ft -->
-- [ ] Program-level live verification and evidence <!-- t:7w blocked_by=yf,4q,vf,gf,mx,mj -->
-- [ ] Wave 2: card drawer in a terminal pane (#6BY7) <!-- t:mj card=6BY7 blocked_by=ft,kc -->
+- [x] Wave 1: manifest v2 and relay.shell (#6FDD) — remainder landed in `13909113`, in needs-verification <!-- t:nb card=6FDD -->
+- [x] Owner lifts the hold; the #E85D/#F8R7/#C0Q8 cluster lands — `13909113`, `7e4e0c45`, `4ad5fe87` (2026-09-25) <!-- t:ft -->
+- [ ] Wave 2: pop-out / dock-back (#2FQ9) — live session building it, nothing on main yet <!-- t:yf s=in-progress card=2FQ9 blocked_by=ft,kc -->
+- [x] Wave 2: Python console, then Stata (#83YV) — Python landed, in needs-verification; Stata t:ja deferred until a host with Stata <!-- t:4q card=83YV blocked_by=ft,wr,nb -->
+- [x] Wave 2: artifact panes on file editors (#PBZ4) — landed, in needs-verification <!-- t:vf card=PBZ4 blocked_by=ft,nb -->
+- [ ] Wave 2: linked chains shell → TeX → PDF (#R660) — code in `def2cf0b`, evidence in `docs/qa_evidence/2026-09-25-tex-chains/`; card not synced, adapter defect is #E85D t:q7 <!-- t:gf card=R660 blocked_by=ft,vf -->
+- [x] Wave 2: docked agent on Tests and Sharing (#3B1B) — landed (`488ff0c8`), in needs-verification <!-- t:mx card=3B1B blocked_by=ft -->
+- [x] Wave 2: card drawer in a terminal pane (#6BY7) — landed, in needs-verification <!-- t:mj card=6BY7 blocked_by=ft,kc -->
+- [x] Owner settled umbrella closure scope, Stata fallback and separate verification order on 2026-09-26 <!-- t:q1 -->
+- [ ] One separate session verifies the finished slice cards <!-- t:v9 blocked_by=yf,gf -->
+- [ ] Program-level live verification and evidence <!-- t:7w blocked_by=yf,4q,vf,gf,mx,mj,v9 -->
