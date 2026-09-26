@@ -592,6 +592,21 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             items << item;
         }
         {
+            // Card #05J2: move a customized profile between machines.
+            PaletteItem out; out.key = QStringLiteral("settings.export"); out.section = app;
+            out.label = QStringLiteral("Export settings…");
+            out.detail = QStringLiteral("Write your customized preferences to a bundle file");
+            out.aliases = QStringLiteral("export settings backup move profile machine bundle");
+            out.run = [this] { exportSettingsDialog(); };
+            items << out;
+            PaletteItem in; in.key = QStringLiteral("settings.import"); in.section = app;
+            in.label = QStringLiteral("Import settings…");
+            in.detail = QStringLiteral("Review and apply a settings bundle, conflict by conflict");
+            in.aliases = QStringLiteral("import settings restore bundle merge conflicts");
+            in.run = [this] { importSettingsDialog(); };
+            items << in;
+        }
+        {
             PaletteItem themes; themes.key = QStringLiteral("theme.reload"); themes.section = app;
             themes.label = QStringLiteral("Reload themes"); themes.detail = QStringLiteral("Pick up a theme file you added or edited");
             themes.run = [this] {

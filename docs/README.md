@@ -15,6 +15,10 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md) for how Relay works today and
 | [VALIDATION.md](VALIDATION.md) | Test inventory, what was verified live, what was not, QA lane status |
 | [RELEASING.md](RELEASING.md) | How to cut a Linux beta: `.deb`s, AUR, checksums, GitHub Pages, version scheme |
 | [QUEUE-INTERRUPT.md](QUEUE-INTERRUPT.md) | Agent prompt queue and interrupt protocol; design for queuing shell commands |
+| [USER-SETTINGS.md](USER-SETTINGS.md) | Moving to another machine: Export / Import settings in Options, the palette and `relay --export-settings/--import-settings`; what the bundle carries, what it never carries, and how import conflicts are resolved (#05J2) |
+| [CONFIG-FILES.md](CONFIG-FILES.md) | Every file Relay keeps outside a workspace, and which of them never move between machines |
+| [BACKUP-AND-RESTORE.md](BACKUP-AND-RESTORE.md) | The automatic backup a settings import writes before it applies, and how to restore from it |
+| [SETTINGS-SYNC-DESIGN.md](SETTINGS-SYNC-DESIGN.md) | Design only: end-to-end encrypted settings sync over the existing remote pairing, with the same merge and conflict rules as import (#05J2) |
 | [KEYBINDING-PRESETS.md](KEYBINDING-PRESETS.md) | Warp, VS Code and Konsole shortcut presets and how they map to Relay actions |
 | [F-KEYS.md](F-KEYS.md) | Proposal: what belongs on an F-key versus a Ctrl chord, which four keys to assign, and what each would cost vim, nano and mc |
 | [ENGINE.md](ENGINE.md) | Relay's own terminal engine: cores, PTY, view, `TerminalBackend`, status and plans (spike history folded in) |

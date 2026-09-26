@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RelayWindow.h"
 #include "WindowManagerImpl.h"
+#include "SettingsTransferDialog.h"
+#include "SettingsExport.h"
+#include "Keymap.h"
+#include "SettingsCache.h"
+#include "Theme.h"
+
+#include <QFileDialog>
+#include <QSet>
 
 QList<relay::SettingsSection> RelayWindow::settingsSections() {
         QList<relay::SettingsSection> sections;
@@ -139,6 +147,25 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
                                                 [](const QString &id) { relay::log::setLevel(id); });
             level.aliases = QStringLiteral("log logs diagnostics debug verbose troubleshoot");
             general.rows << level;
+        }
+
+        // Card #05J2: move a customized profile between machines. The buttons open the
+        // export / import dialogs; import shows the review screen before anything changes.
+        {
+            relay::SettingRow transfer;
+            transfer.kind = relay::SettingRow::Buttons;
+            transfer.id = QStringLiteral("settings:transfer");
+            transfer.label = QStringLiteral("Settings on other machines");
+            transfer.detail = QStringLiteral("Export your customized preferences to a file, or import and "
+                                             "review a bundle. Never carries API keys, tokens or pairing identity.");
+            transfer.aliases = QStringLiteral("export import settings backup move profile machine bundle sync transfer");
+            transfer.buttonTexts = QStringList{QStringLiteral("Export settings…"), QStringLiteral("Import settings…")};
+            transfer.agentSafeButtons = QList<int>{0};
+            transfer.onButton = [this](int index) {
+                if (index == 0) exportSettingsDialog();
+                else importSettingsDialog();
+            };
+            general.rows << transfer;
         }
         sections << general;
 
@@ -1250,3 +1277,49 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
         }
         return sections;
     }
+
+// ---------------------------------------------------------------------------
+// Export / import the settings bundle (#05J2). The dialogs carry the visible
+// review; the merge rules, staging and backup live in src/SettingsExport.cpp.
+// ---------------------------------------------------------------------------
+
+void RelayWindow::exportSettingsDialog()
+{
+    relay::SettingsExportDialog dialog(this);
+    dialog.exec();
+}
+
+void RelayWindow::importSettingsDialog()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Import settings from"), QDir::homePath(),
+        QStringLiteral("Settings bundle (*.json)"));
+    if (path.isEmpty()) return;
+
+    relay::SettingsImportDialog dialog(path, this);
+    // Model ids and hotkey actions are validated against what this window has
+    // seen from the workers: the preset mirror plus the ids already configured.
+    QSet<QString> known;
+    for (auto it = m_helperPresets.constBegin(); it != m_helperPresets.constEnd(); ++it) {
+        for (const QJsonValue &preset : it.value()) {
+            for (const QJsonValue &model : preset.toObject().value(QStringLiteral("models")).toArray())
+                known.insert(model.toObject().value(QStringLiteral("id")).toString());
+        }
+    }
+    known.remove(QString());
+    dialog.hooks.isKnownModel = [known](const QString &id) { return known.contains(id); };
+    dialog.hooks.isKnownAction = [](const QString &id) {
+        for (const ActionDef &action : Keymap::instance().actions())
+            if (action.id == id) return true;
+        return false;
+    };
+    dialog.afterApply = [this] {
+        relay::settings::invalidate();
+        Keymap::instance().reload();
+        QSettings settings;
+        const QString theme = settings.value(QStringLiteral("theme/name")).toString();
+        if (!theme.isEmpty()) relay::theme::setActiveTheme(theme, false);
+        refreshSettingsPanes();
+    };
+    dialog.exec();
+}

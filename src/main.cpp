@@ -159,6 +159,7 @@
 // in their own source files so an implementation edit need not recompile main.cpp (#243T).
 #include "AppPaths.h"
 #include "Keymap.h"
+#include "SettingsCli.h"      // --export-settings / --import-settings (#05J2)
 #include "Isolation.h"
 #include "Pane.h"
 #include "PaneChrome.h"
@@ -432,8 +433,25 @@ int main(int argc, char **argv) {
     QCommandLineOption engineCore(QStringLiteral("engine-core"), QStringLiteral("Emulator core of Relay-engine panes: ghostty or libvterm. Also RELAY_ENGINE_CORE."), QStringLiteral("name"));
     // Saved window layout: --fresh ignores it this once (the file itself is kept).
     QCommandLineOption fresh(QStringLiteral("fresh"), QStringLiteral("Start with one new window instead of reopening the saved window layout."));
+    // Card #05J2: headless settings-bundle paths. Export writes the bundle; import plans the
+    // merge, reports every conflict and stops (exit 2) instead of choosing for you.
+    QCommandLineOption exportSettings(QStringLiteral("export-settings"), QStringLiteral("Write your non-secret preferences (settings, hotkeys, aliases, local endpoints; memories only with --include-memories) to <file> and exit."), QStringLiteral("file"));
+    QCommandLineOption importSettings(QStringLiteral("import-settings"), QStringLiteral("Review a settings bundle against this install and apply it; unresolved conflicts stop the import and report instead of being chosen."), QStringLiteral("file"));
+    QCommandLineOption includeMemories(QStringLiteral("include-memories"), QStringLiteral("With --export-settings: also include global memories and the global instructions file."));
+    QCommandLineOption importResolve(QStringLiteral("import-resolve"), QStringLiteral("With --import-settings: bulk-resolve every conflict, \"keep\" or \"imported\"."), QStringLiteral("how"));
+    QCommandLineOption importAcceptAttention(QStringLiteral("import-accept-attention"), QStringLiteral("With --import-settings: apply items flagged as needing attention (unknown model ids on this install)."));
     parser.addOption(workspace); parser.addOption(clean); parser.addOption(engineCore);
-    parser.addOption(fresh); parser.process(app);
+    parser.addOption(fresh); parser.addOption(exportSettings); parser.addOption(importSettings);
+    parser.addOption(includeMemories); parser.addOption(importResolve); parser.addOption(importAcceptAttention);
+    parser.process(app);
+
+    if (parser.isSet(exportSettings) || parser.isSet(importSettings)) {
+        return relay::settingsTransferCli(parser.isSet(exportSettings),
+                                          parser.isSet(exportSettings) ? parser.value(exportSettings)
+                                                                       : parser.value(importSettings),
+                                          parser.isSet(includeMemories), parser.value(importResolve),
+                                          parser.isSet(importAcceptAttention));
+    }
     // The emulator core under Relay's engine (docs/ENGINE.md).
     relay::setDefaultEngineCore(relay::resolveEngineCore(parser.value(engineCore), qEnvironmentVariable("RELAY_ENGINE_CORE")));
     const auto path = QFileInfo(parser.value(workspace)).canonicalFilePath();

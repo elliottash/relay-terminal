@@ -1368,6 +1368,11 @@ private:
         return items;
     }
 
+    // Card #05J2: Options / palette "Export settings…" and "Import settings…"
+    // over the versioned settings bundle (src/SettingsExport.h).
+    void exportSettingsDialog();
+    void importSettingsDialog();
+
     // Open this tab's pane for that mode, or focus the one it already has; `tab` picks the
     // Options section. A pane in the *other* mode is left where it is.
     void openSettingsPane(relay::SettingsPane::Mode mode, const QString &tab = QString(), const QString &search = QString()) {

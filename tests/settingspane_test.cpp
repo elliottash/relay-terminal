@@ -874,6 +874,35 @@ private slots:
         }
     }
 
+    // Options › General carries "Settings on other machines" with Export settings… and Import
+    // settings… (#05J2), and the palette offers both. Read as text like the rows below; the
+    // bundle, merge and conflict rules behind the buttons are covered headless in
+    // tests/settingsexport_test.cpp.
+    void settingsTransferRowSitsOnGeneral() {
+        QFile source(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindowSettings.cpp"));
+        QVERIFY2(source.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(source.fileName()));
+        const QString text = QString::fromUtf8(source.readAll());
+        const int row = text.indexOf(QStringLiteral("QStringLiteral(\"settings:transfer\")"));
+        QVERIFY2(row > 0, "the settings transfer row is missing from Options");
+        const int general = text.indexOf(QStringLiteral("sections << general;"), row);
+        QVERIFY2(general > row, "the settings transfer row is not on the General page");
+        const QString body = text.mid(row, general - row);
+        QVERIFY(body.contains(QStringLiteral("\"Export settings…\"")));
+        QVERIFY(body.contains(QStringLiteral("\"Import settings…\"")));
+        QVERIFY(body.contains(QStringLiteral("exportSettingsDialog()")));
+        QVERIFY(body.contains(QStringLiteral("importSettingsDialog()")));
+        // The row says what never leaves the machine.
+        QVERIFY(body.contains(QStringLiteral("Never carries API keys")));
+        // Only Export is safe for an agent to press; Import opens the review screen for a person.
+        QVERIFY(body.contains(QStringLiteral("agentSafeButtons = QList<int>{0}")));
+
+        QFile window(QStringLiteral(RELAY_SOURCE_DIR "/src/RelayWindow.cpp"));
+        QVERIFY2(window.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(window.fileName()));
+        const QString palette = QString::fromUtf8(window.readAll());
+        QVERIFY(palette.contains(QStringLiteral("QStringLiteral(\"settings.export\")")));
+        QVERIFY(palette.contains(QStringLiteral("QStringLiteral(\"settings.import\")")));
+    }
+
     // Options › Agent › Board gains "Work signals unasked" (#AQ6X decision 9). The row needs
     // a whole window to build, so it is read as text like the two above; what it writes —
     // `signals_config` into the board's own `board.yaml` — is covered headless in

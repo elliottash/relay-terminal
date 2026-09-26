@@ -724,6 +724,8 @@ if(RELAY_BUILD_APP)
     target_link_libraries(relay PRIVATE relay-projectspane relay-globalspane)
     # Export/import settings bundle (#05J2) and the dialogs over it.
     target_link_libraries(relay PRIVATE relay-settingsexport)
+    # --export-settings / --import-settings over it; main.cpp only parses the flags.
+    target_sources(relay PRIVATE src/SettingsCli.cpp src/SettingsCli.h)
     target_link_libraries(relay PRIVATE relay-actionpalette)
     target_link_libraries(relay PRIVATE relay-scratchmonitor)   # agent scratch on the bell (#SZHQ)
     # No RELAY_SOURCE_DIR here: relay-sourcedir holds it (#V52P).
