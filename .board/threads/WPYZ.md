@@ -26,3 +26,6 @@ Committed ada6b670 (per-workspace cache and two-workspace regression); `mcpsetti
 
 <!-- relay:entry 20260926T144152Z-wq author=agent kind=event model=gpt-6-sol pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/3d7df922be4243198a60b7082d6d76ce -->
 - ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": [], "related": ["BT7C", "J0VY"], "githu… → {"plans": [], "commits": ["ada6b6705a87"], "evidence": [], "related": ["BT7C", "…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260926T145246Z-tv author=agent kind=progress model=gpt-6-sol pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/8c8bd0bd8e564278afd0b8d2be8be9e9 -->
+Queue job 8c61ac2b8362e270 is still queued behind another project's full-suite verification. Started transient user service `relay-watch-wpyz-publish.service` to check every 30 seconds and send a desktop notification on publication or failure; it exits when the queue reaches a terminal status.
