@@ -59,10 +59,11 @@ checkout and all of its files; the queue changes how future work is allocated an
 
 ## Relay's own prepared configuration
 
-This is the `.relay/project.toml` prepared for `relay-terminal`. It is **not committed and not
-active**: it lands on `main` as step 1 of the real cutover, and `activate` accepts it from the
-target tip. Validate it with the shipped `projectconf.normalize_config` and record its policy
-hash at cutover. Its `main.install` and `main.smoke` were rehearsed against an
+This is the `.relay/project.toml` for `relay-terminal`. It is **committed on `main`**
+(65d276e0, step 1 of the real cutover) and **not active** until `activate` accepts it from the
+target tip; until then the project publishes in legacy mode. It loads from the tip with
+`projectconf.load` (policy hash `ec5a88eada3d…` on 2026-09-26); record the hash `activate`
+returns in the rollout record. Its `main.install` and `main.smoke` were rehearsed against an
 existing `build-fast/`. `cmake --install` took 1.24 s and produced `bin/relay` plus
 `share/relay/{app,backend,remote,rendezvous,scripts,shell,theme}`, 86,294,432 bytes in all.
 `bin/relay --version` printed `relay 0.1.0` offscreen and the installed backend imported. That
@@ -244,19 +245,28 @@ promise; real projects need a matched workload and a week of measurements after 
    git -C "$project" diff --cached --stat
    ```
 
-   If `status` is empty and HEAD is an ancestor of `main`, move the checkout onto `main` in one
-   of two ways. You can run `rollback` again without `--keep-head`, which fast-forwards and
-   moves HEAD safely. Or you can run `git -C "$project" switch main`, which refuses to
-   overwrite local changes. If `status` is not empty, keep those files and use no reset. Commit
-   them on `human` and `submit` them *before* rolling back, or save them as a patch outside the
-   repository and re-apply it after `switch main`. `human` commits that are not on `main`
-   (`merge-base --is-ancestor` fails) must be submitted or merged first. Rollback refuses them
-   for the same reason. Check that the index shows no staged entries left over from the other
-   branch (`python3 /path/to/relay/scripts/land.py doctor`).
+   When HEAD is an ancestor of `main`, move the checkout onto `main` with
+   `git -C "$project" switch main`. It carries staged, unstaged, untracked and ignored files
+   across unchanged and refuses, touching nothing, when one of them collides with a file the
+   queue landed; in that case save the colliding change as a patch outside the repository (or
+   commit it on `human` and `submit` it), then switch and re-apply. Never reset. Running
+   `rollback` a second time does **not** do this: once the marker says `legacy` the command is a
+   no-op that reports "already in legacy mode" and leaves HEAD where it is. `human` commits
+   that are not on `main` (`merge-base --is-ancestor` fails) must be submitted or merged first;
+   rollback refuses them for the same reason. Then check the index with
+   `python3 /path/to/relay/scripts/land.py doctor`: read its output rather than its exit code,
+   because after any cutover it exits non-zero for report-only lines (the `human` branch, the
+   `relay/tree/*` workspace branches and their worktrees, staged work that is not in history).
+   What must be absent is a *stale* staged entry, an older commit's blob for a path; that is
+   the one shape `doctor --fix` repairs.
 4. Inspect `relay-land --repo "$project" inventory` and `status` again. Queued, failed and
    conflicted jobs, their receipts and their workspace branches are retained. Nothing is
    cancelled by rollback. Preserve them for their authors: resubmit after a later
-   re-activation, or carry the commit over by hand. Only once the marker reports `legacy`
+   re-activation, or carry the commit over by hand. A re-activation after `--keep-head` and
+   `switch main` finds the old `human` branch behind the tip and refuses ("branch human already
+   exists at …, not the target tip"): run `activate --human-branch <fresh-name>` (for example
+   `human-2`), or move the old branch first with `git -C "$project" branch -f human main` once
+   nothing on it is unpublished. The retained queued jobs then publish on the next ticks. Only once the marker reports `legacy`
    *and* the checkout is on `main` at its tip should anyone use the legacy `land.py`
    procedure. Do not blindly restart old agents because the marker changed. Restart them
    one at a time at a turn boundary, after the checkout check above. Do not silently move
