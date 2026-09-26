@@ -100,8 +100,17 @@ def run_parallel(jobs: int, timeout: float) -> str:
     outputs, durations = {}, {}
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-            for module, out, seconds in pool.map(run, modules):
+            futures = [pool.submit(run, m) for m in modules]
+            done = 0
+            for future in concurrent.futures.as_completed(futures):
+                module, out, seconds = future.result()
                 outputs[module], durations[module] = out, seconds
+                done += 1
+                bad = len(re.findall(r" \.\.\. (?:FAIL|ERROR)$", out, re.M))
+                # One line per module, flushed: the gate's live.log shows how far it has got.
+                print("== gate %s python %d/%d %s %.0fs%s" % (
+                    time.strftime("%H:%M:%S"), done, len(modules), module, seconds,
+                    " (%d failing)" % bad if bad else ""), flush=True)
     finally:
         shutil.rmtree(base, ignore_errors=True)
     try:

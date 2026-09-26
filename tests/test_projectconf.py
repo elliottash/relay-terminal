@@ -189,6 +189,24 @@ class GateTests(unittest.TestCase):
         self.assertTrue(res["ok"])
         self.assertFalse(res["verified"])  # approved, but nothing was verified
 
+    def test_a_live_log_shows_output_while_the_command_runs(self):
+        # A running gate used to be silent until it ended (#VK6J): its output now streams to
+        # live_log, so progress can be read mid-run.
+        live = self.tree / "logs" / "live.log"
+        script = ("import time, pathlib, sys\n"
+                  "print('== gate phase one', flush=True)\n"
+                  "p = pathlib.Path(sys.argv[1])\n"
+                  "for _ in range(100):\n"
+                  "    if p.is_file() and b'phase one' in p.read_bytes(): break\n"
+                  "    time.sleep(0.05)\n"
+                  "else: sys.exit(3)\n"
+                  "print('== gate phase two', flush=True)\n")
+        res = PC.run_gate(self.config([[sys.executable, "-c", script, str(live)]], ungated=False),
+                          self.tree, live_log=str(live))
+        # exit 3 would mean the command never saw its own first line in the live log
+        self.assertNotIn("exited 3", str(res.get("reason")))
+        self.assertIn("phase two", live.read_text())
+
     def test_real_pytest_pass(self):
         write(self.tree / "tests" / "test_ok.py", "def test_ok():\n    assert True\n")
         res = PC.run_gate(self.config([[sys.executable, "-m", "pytest", "-q"]]), self.tree)
