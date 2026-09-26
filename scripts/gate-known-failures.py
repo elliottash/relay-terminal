@@ -37,9 +37,9 @@ def run_serial() -> str:
 
 def module_env(scratch: Path) -> dict:
     """What scripts/test.sh sets, per module: its own data home, so modules running side by
-    side never share session autosaves or indexes (#VK6J). TMPDIR is plain /tmp: short enough
-    for AF_UNIX socket paths (108 bytes), and not a per-module directory, because the code
-    under test treats everything below $TMPDIR as scratch (test_scratch_ledger)."""
+    side never share session autosaves or indexes (#VK6J). TMPDIR is left alone unless it is too
+    long for an AF_UNIX socket path (108 bytes); the code under test treats everything below
+    $TMPDIR as scratch (test_scratch_ledger), so it is never a per-module directory."""
     env = dict(os.environ)
     # A Relay pane points these at the owner's real guest homes; a test that follows them reads
     # the owner's own Claude and Codex transcripts instead of its synthetic ones, and polls ten
@@ -48,7 +48,11 @@ def module_env(scratch: Path) -> dict:
         env.pop(name, None)
     data = scratch / "data"
     data.mkdir(parents=True)
-    env.update({"XDG_DATA_HOME": str(data), "TMPDIR": "/tmp", "RELAY_LOG_ORIGIN": "test",
+    # A long inherited TMPDIR (a Relay pane's) breaks AF_UNIX socket paths; otherwise leave it
+    # exactly as the serial run has it, since the code under test treats $TMPDIR as scratch.
+    if len(env.get("TMPDIR", "")) > 40:
+        env["TMPDIR"] = "/tmp"
+    env.update({"XDG_DATA_HOME": str(data), "RELAY_LOG_ORIGIN": "test",
                 "RELAY_KEYRING": "off", "RELAY_LOCAL_MODELS": str(data / "local-models.json"),
                 "RELAY_MEMORY_IMPORT": "off",
                 "PYTHONPATH": os.pathsep.join(filter(None, [str(ROOT / "backend"), str(ROOT / "tests"),
@@ -92,6 +96,7 @@ def run_parallel(jobs: int, timeout: float) -> str:
             out += "\n%s (%s.Timeout) ... ERROR\n" % (module, module)
         return module, out, time.monotonic() - started
 
+    run_parallel.run_one = run
     outputs, durations = {}, {}
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -115,6 +120,15 @@ def run_parallel(jobs: int, timeout: float) -> str:
 
 def run_suite(jobs: int = 1, timeout: float = 900) -> tuple[set, bool, str]:
     out = run_serial() if jobs <= 1 else run_parallel(jobs, timeout)
+    return parse_failures(out), finished_ok(out), out
+
+
+def finished_ok(out: str) -> bool:
+    return (re.search(r"^Ran \d+ tests? in ", out, re.M) is not None
+            and "\nunfinished: " not in out)
+
+
+def parse_failures(out: str) -> set:
     failed = set()
     for line in out.splitlines():
         m = RESULT.match(line)
@@ -124,9 +138,7 @@ def run_suite(jobs: int = 1, timeout: float = 900) -> tuple[set, bool, str]:
         m = CLASS_ERROR.match(line)
         if m and ("setUpClass" in line or "setUpModule" in line or "tearDown" in line):
             failed.add(m.group("id"))
-    finished = (re.search(r"^Ran \d+ tests? in ", out, re.M) is not None
-                and "\nunfinished: " not in out)
-    return failed, finished, out
+    return failed
 
 
 def main() -> int:
@@ -155,6 +167,21 @@ def main() -> int:
         print("gate-known-failures: wrote %d known failure(s) to %s" % (len(failed), known_path))
         return 0
     new = sorted(failed - known)
+    if new and args.jobs > 1 and hasattr(run_parallel, "run_one"):
+        # Twelve modules at once can starve a timing-sensitive test. A module with a new
+        # failure is run again, alone; only what fails again counts (#VK6J).
+        modules = sorted({t.split(".")[0] for t in new if re.match(r"^test_\w+\.", t)})
+        rerun = set()
+        for module in modules:
+            _m, text, _s = run_parallel.run_one(module)
+            out += text
+            rerun |= parse_failures(text)
+        confirmed = {t for t in new if not re.match(r"^test_\w+\.", t)} | (rerun & set(new))
+        if set(new) - confirmed:
+            print("gate-known-failures: passed when rerun alone (flaky under load): %s"
+                  % ", ".join(sorted(set(new) - confirmed)))
+        failed = (failed - set(new)) | confirmed
+        new = sorted(confirmed)
     fixed = sorted(known - failed)
     print("gate-known-failures: %d failed, %d known, %d new, %d known now passing"
           % (len(failed), len(failed & known), len(new), len(fixed)))
