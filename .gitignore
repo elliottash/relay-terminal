@@ -18,7 +18,8 @@ __pycache__/
 /.claude/
 
 # Switchboard worker scratch (rate-limit bookkeeping)
-/.relay/
+/.relay/*
+!/.relay/project.toml
 
 # The board's alias symlink (`issues -> .board`): a checkout convenience, never committed.
 /issues

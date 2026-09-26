@@ -1,0 +1,62 @@
+version = 1
+
+[project]
+target = "main"
+
+[workspace]
+# Board and evidence stay in the canonical project root, never in author trees.
+exclude = [".board", "docs/qa_evidence"]
+max_workspaces = 50
+init = []
+
+[verification]
+timeout_seconds = 5400
+# Queue and try candidates can have different paths, and a CMake build directory is pinned to
+# one source path. Each gate mirrors the candidate into a fixed, service-owned source directory
+# (rsync --checksum keeps the mtimes of unchanged files, so the warm build stays incremental),
+# then configures, builds and tests there. flock serializes this gate with a concurrent
+# `relay-land try`. `--no-tests=error` fails an empty ctest run.
+commands = [
+  ["sh", "-c", """
+set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
+"""],
+]
+
+[verification.environment]
+QT_QPA_PLATFORM = "offscreen"
+RELAY_KEYRING = "off"
+
+[resources]
+memory_bytes = 17179869184   # 16 GiB: optimized compile at RELAY_JOBS=8 (#04EC: ~2 GiB/job)
+disk_bytes = 21474836480     # 20 GiB: mirrored source + warm build
+cpus = 8
+
+[main]
+build = [
+  ["cmake", "-S", "{source}", "-B", "{build}", "-DCMAKE_BUILD_TYPE=Release"],
+  ["sh", "-c", "cmake --build \"{build}\" --parallel \"${RELAY_JOBS:-2}\" --target relay"],
+]
+# cmake --install copies bin/relay and every runtime asset under share/relay.
+install = [["cmake", "--install", "{build}", "--prefix", "{dest}"]]
+executable = "bin/relay"
+smoke = [
+  ["sh", "-c", "QT_QPA_PLATFORM=offscreen \"{executable}\" --version"],
+  ["sh", "-c", "test -f \"{dest}/share/relay/backend/worker.py\" && PYTHONPATH=\"{dest}/share/relay/backend\" python3 -c 'import relay_core.board, relay_core.landq'"],
+]
+keep = 3
+timeout_seconds = 7200
+
+[reconcile]
+enabled = true
+max_attempts = 2
+tokens_per_case = 200000
+tokens_per_day = 10000000
