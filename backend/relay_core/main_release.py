@@ -32,6 +32,23 @@ identity that the registry does not know.
 
 Linux/POSIX first (contract): other hosts get a clear refusal at construction.
 
+**Live release leases.**  Pruning must never delete a release a program is still running from —
+the running binary may import backend modules or read assets from its release directory long
+after start.  ``pin()`` selects a complete release and takes a lease on it: a file under
+``run/.leases/`` created under a temporary name, ``flock``-ed, and only then renamed into place,
+so every visible lease file was locked from birth.  Liveness is the kernel lock, never a PID: the
+lock belongs to the open file description, so it survives ``execve`` (the fd is made inheritable)
+and is shared by descendants that inherit the fd; it disappears when the last holder exits, and
+PID reuse cannot keep a dead lease alive or kill a live one.  Selection and pruning are atomic
+with respect to each other: ``pin`` resolves ``current`` and publishes its lease while holding
+``run/.prune.lock``, and pruning computes the pinned set under the same lock.  Pruning keeps
+``max(keep, 2)`` completed releases plus ``current`` plus every live-pinned release; a dead
+lease is detected by acquiring its lock and removed; ``reclaim()`` reclaims a release as soon as
+its last runner exits.  ``exec_release`` (``relay-land main-run``) execs the pinned executable
+with the lease fd inherited; ``spawn`` starts it as a child that holds the lease.  The channel
+build lock is never held for a program's lifetime.  A binary started directly from
+``run/<sha>/…`` without ``pin`` is unmanaged and not protected once it falls out of ``keep``.
+
 Tradeoffs, stated once: build/install/smoke commands run sequentially with per-command timeouts
 (simple, matches the gate); the smoke gate defaults to "executable exists, has the exec bit, and
 no symlink escapes the root" unless the project configures `main.smoke` commands — an unconfigured
@@ -41,9 +58,11 @@ current one, so disk use is bounded but a rollback target survives.
 """
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -133,6 +152,56 @@ def _substitute(argv: Sequence[str], mapping: Mapping[str, str]) -> list[str]:
 
 def _scrubbed_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+class ReleaseLease:
+    """A live pin on one complete release (see the module docstring, "Live release leases").
+
+    `fd` holds an exclusive ``flock`` on `path`; while it (or an inherited copy) is open the
+    release is never pruned.  `close()` drops this process's copy and removes the lease file
+    only when no other holder — e.g. a spawned child — still has it locked."""
+
+    def __init__(self, path: Path, fd: int, sha: str, release_dir: Path, executable: Path):
+        self.path, self.fd, self.sha = path, fd, sha
+        self.release_dir, self.executable = release_dir, executable
+
+    def env(self) -> dict[str, str]:
+        """Variables a launched program inherits, so it (or a supervisor) can see its pin."""
+        return {"RELAY_MAIN_LEASE": str(self.path), "RELAY_MAIN_LEASE_FD": str(self.fd),
+                "RELAY_MAIN_SHA": self.sha, "RELAY_MAIN_RELEASE": str(self.release_dir)}
+
+    def close(self) -> None:
+        if self.fd < 0:
+            return
+        os.close(self.fd)
+        self.fd = -1
+        _reap_lease_file(self.path)
+
+    def __enter__(self) -> "ReleaseLease":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
+def _reap_lease_file(path: Path) -> bool:
+    """Remove `path` if nobody holds its lock; True when the lease is (now) dead."""
+    try:
+        fd = os.open(str(path), os.O_RDWR)
+    except FileNotFoundError:
+        return True
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False  # some live process (or its descendant) still holds it
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        return True
+    finally:
+        os.close(fd)
 
 
 class MainRelease:
@@ -346,6 +415,7 @@ class MainRelease:
                 "current": sha, "requested_sha": sha, "last_error": None,
                 "last_build": {"duration_seconds": 0.0, "bytes": existing.get("bytes"),
                                "reused": True},
+                "keep": max(int(main["keep"]), 2),
                 "updated_at": time.time()}, indent=2))
             return {"sha": sha, "path": str(self.run_dir / sha), "changed": True,
                     "reused": True, "duration_seconds": 0.0,
@@ -396,6 +466,7 @@ class MainRelease:
                 "current": sha, "requested_sha": sha, "last_error": None,
                 "last_build": {"duration_seconds": record["duration_seconds"],
                                "bytes": nbytes},
+                "keep": max(int(main["keep"]), 2),
                 "updated_at": time.time()}, indent=2))
             return {"sha": sha, "path": str(final), "changed": True,
                     "duration_seconds": record["duration_seconds"], "bytes": nbytes,
@@ -436,8 +507,156 @@ class MainRelease:
             if entry.name.startswith(".stage-") and entry.is_dir() and not entry.is_symlink():
                 shutil.rmtree(entry, ignore_errors=True)
 
-    def _prune_releases(self, *, keep: int) -> None:
+    # ------------------------------------------------------------------ live leases
+    @property
+    def leases_dir(self) -> Path:
+        return self.run_dir / ".leases"
+
+    @contextlib.contextmanager
+    def _prune_lock(self):
+        """Serialises release selection for a lease against pruning (short critical sections
+        only — never held while a program runs or a build is in progress)."""
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(self.run_dir / ".prune.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
+    def pin(self, sha: str | None = None) -> ReleaseLease:
+        """Lease a complete release (default: `current`) so pruning keeps it while any holder
+        of the returned lease's fd lives.  Raises MainReleaseError when there is none."""
+        with self._prune_lock():
+            chosen = sha or self._current_sha()
+            if not chosen:
+                raise MainReleaseError("no runnable main is installed yet; nothing to run")
+            rec = self._release_record(chosen)
+            if rec is None:
+                raise MainReleaseError(f"release {chosen} is not a complete installed release")
+            release_dir = self.run_dir / chosen
+            exe_rel = str(rec.get("executable") or "")
+            exe = release_dir / exe_rel
+            root = os.path.realpath(release_dir)
+            if (not exe_rel or os.path.isabs(exe_rel)
+                    or not os.path.realpath(exe).startswith(root + os.sep)):
+                raise MainReleaseError(f"release {chosen} records no executable inside it")
+            self.leases_dir.mkdir(parents=True, exist_ok=True)
+            name = f"{chosen}.{os.getpid()}.{secrets.token_hex(6)}"
+            tmp = self.leases_dir / f".{name}.tmp"
+            final = self.leases_dir / f"{name}.lease"
+            fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # fresh inode: cannot block
+                os.write(fd, json.dumps({"sha": chosen, "pid": os.getpid(),
+                                         "created_at": time.time()}).encode())
+                os.rename(tmp, final)  # visible only once locked, so scanners never misread it
+            except BaseException:
+                os.close(fd)
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(tmp)
+                raise
+            return ReleaseLease(final, fd, chosen, release_dir, exe)
+
+    def leases(self, *, reap: bool = False) -> list[dict]:
+        """Live leases.  With `reap`, dead lease files are removed (done under the prune lock by
+        pruning; safe anywhere because a lease file is locked before it becomes visible)."""
+        out = []
+        if not self.leases_dir.is_dir():
+            return out
+        for entry in sorted(self.leases_dir.glob("*.lease")):
+            try:
+                fd = os.open(str(entry), os.O_RDONLY)
+            except FileNotFoundError:
+                continue
+            try:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    try:
+                        meta = json.loads(os.read(fd, 4096).decode() or "{}")
+                    except ValueError:
+                        meta = {}
+                    out.append({"sha": meta.get("sha") or entry.name.split(".", 1)[0],
+                                "pid": meta.get("pid"), "created_at": meta.get("created_at"),
+                                "path": str(entry)})
+                    continue
+                if reap:
+                    with contextlib.suppress(FileNotFoundError):
+                        os.unlink(entry)
+            finally:
+                os.close(fd)
+        if reap:
+            for stale in self.leases_dir.glob(".*.tmp"):
+                _reap_lease_file(stale)  # a pin interrupted between create and rename
+        return out
+
+    def exec_release(self, args: Sequence[str] = (), *, env: Mapping[str, str] | None = None,
+                     sha: str | None = None):
+        """Replace this process with the pinned release's executable (`relay-land main-run`).
+        The lease fd is inherited across exec, so the release stays pinned for exactly the
+        program's lifetime.  Raises MainReleaseError (lease released) if exec fails."""
+        lease = self.pin(sha)
+        try:
+            os.set_inheritable(lease.fd, True)
+            full_env = dict(os.environ if env is None else env)
+            full_env.update(lease.env())
+            os.execve(str(lease.executable), [str(lease.executable), *args], full_env)
+        except OSError as exc:
+            lease.close()
+            raise MainReleaseError(f"cannot run the installed main {lease.executable}: {exc}") \
+                from exc
+
+    def spawn(self, args: Sequence[str] = (), *, sha: str | None = None,
+              env: Mapping[str, str] | None = None, **popen_kw) -> subprocess.Popen:
+        """Start the pinned release's executable as a child that holds the lease (`pass_fds`).
+        The parent's copy is closed once the child is running; the pin lasts until the child and
+        any descendant that inherited the fd exit.  `proc.release_lease` describes it."""
+        lease = self.pin(sha)
+        try:
+            full_env = dict(os.environ if env is None else env)
+            full_env.update(lease.env())
+            pass_fds = tuple(popen_kw.pop("pass_fds", ())) + (lease.fd,)
+            proc = subprocess.Popen([str(lease.executable), *args], env=full_env,
+                                    pass_fds=pass_fds, **popen_kw)
+        except (OSError, subprocess.SubprocessError) as exc:
+            lease.close()
+            raise MainReleaseError(f"cannot run the installed main {lease.executable}: {exc}") \
+                from exc
+        proc.release_lease = {"sha": lease.sha, "path": str(lease.path),
+                              "executable": str(lease.executable)}
+        lease.close()  # the child's inherited copy keeps the lock; the file stays
+        return proc
+
+    def reclaim(self, *, keep: int | None = None) -> dict:
+        """Prune releases that are neither kept, current nor live-pinned — e.g. once the last
+        program running an old release exits.  Skips (never waits) while an update holds the
+        channel lock; that update prunes when it finishes."""
+        if keep is None:
+            try:
+                keep = int(json.loads((self.tip_dir / "status.json").read_text()).get("keep", 2))
+            except (OSError, ValueError, TypeError):
+                keep = 2
+        if not self.run_dir.is_dir():
+            return {"reclaimed": [], "skipped": None}
+        lock_fd = os.open(str(self.tip_dir / "main.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return {"reclaimed": [], "skipped": "an update is in progress and prunes itself"}
+            return {"reclaimed": self._prune_releases(keep=max(int(keep), 2)), "skipped": None}
+        finally:
+            os.close(lock_fd)
+
+    def _prune_releases(self, *, keep: int) -> list[str]:
+        with self._prune_lock():
+            return self._prune_releases_locked(keep=keep)
+
+    def _prune_releases_locked(self, *, keep: int) -> list[str]:
         current = self._current_sha()
+        pinned = {lease["sha"] for lease in self.leases(reap=True)}
+        removed: list[str] = []
         releases = []
         for entry in self.run_dir.iterdir():
             # `current` is a symlink; is_dir() follows it, so exclude symlinks explicitly or
@@ -446,7 +665,7 @@ class MainRelease:
                 continue
             rec = self._release_record(entry.name)
             if rec is None:
-                if entry.name != current:
+                if entry.name != current and entry.name not in pinned:
                     shutil.rmtree(entry, ignore_errors=True)  # incomplete: never served
                 continue
             releases.append((rec.get("installed_at", 0.0), entry.name))
@@ -456,7 +675,11 @@ class MainRelease:
             if name == current or kept < keep:
                 kept += 1
                 continue
+            if name in pinned:
+                continue  # a live program runs from it; kept beyond `keep` until it exits
             shutil.rmtree(self.run_dir / name, ignore_errors=True)
+            removed.append(name)
+        return removed
 
     # ------------------------------------------------------------------ status
     def status(self) -> dict:
@@ -482,6 +705,8 @@ class MainRelease:
             last_build = saved.get("last_build")
         except (OSError, ValueError):
             pass
+        live = self.leases()
+        pinned = {lease["sha"] for lease in live}
         releases = []
         if self.run_dir.is_dir():
             for entry in sorted(self.run_dir.iterdir()):
@@ -490,6 +715,7 @@ class MainRelease:
                 rec = self._release_record(entry.name)
                 releases.append({"sha": entry.name, "path": str(entry),
                                  "complete": rec is not None, "current": entry.name == current,
+                                 "pinned": entry.name in pinned,
                                  "bytes": (rec or {}).get("bytes"),
                                  "installed_at": (rec or {}).get("installed_at")})
         current_rec = self._release_record(current) if current else None
@@ -504,4 +730,5 @@ class MainRelease:
             "error": last_error,
             "last_build": last_build,
             "releases": releases,
+            "leases": live,
         }

@@ -251,5 +251,157 @@ class MainReleaseTests(unittest.TestCase):
         self.assertEqual(MR._cache_root().name, "relay")
 
 
+
+LATE_APP = """#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+here = Path(__file__).resolve().parent.parent
+if len(sys.argv) > 2 and sys.argv[1] == "late":
+    go = Path(sys.argv[2])
+    print("started", flush=True)
+    while not go.exists():
+        time.sleep(0.02)
+    sys.path.insert(0, str(here / "assets"))
+    import late_mod  # a module imported only after several newer releases landed
+    print(late_mod.VALUE, (here / "assets" / "data.txt").read_text().strip(),
+          os.environ.get("RELAY_MAIN_SHA", ""), flush=True)
+else:
+    print("app MARK " + (sys.argv[1] if len(sys.argv) > 1 else "run"))
+"""
+
+
+class ReleaseLeaseTests(unittest.TestCase):
+    """Live leases: a running release survives pruning past `keep`, and is reclaimable after."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.fx = RepoFixture(self.root)
+        self.state = self.root / "state"
+        self.go = self.root / "go"
+        self.run = self.state / "integration" / "test-repo" / "tip" / "run"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def release(self) -> MR.MainRelease:
+        return MR.MainRelease(self.fx.repo, state_root=self.state,
+                              cache_root=self.root / "cache", repo_id="test-repo")
+
+    def commit(self, marker: str) -> str:
+        def extra(repo: Path):
+            write(repo / "app.py", LATE_APP.replace("MARK", marker))
+            write(repo / "assets" / "late_mod.py", f"VALUE = 'mod-{marker}'\n")
+        return self.fx.commit(marker, extra)
+
+    def installed(self) -> list[str]:
+        return sorted(p.name for p in self.run.iterdir()
+                      if p.is_dir() and not p.is_symlink() and not p.name.startswith("."))
+
+    def land_more(self, rel: MR.MainRelease, markers) -> list[str]:
+        shas = [self.commit(m) for m in markers]
+        for sha in shas:
+            rel.update(sha, make_config())
+        return shas
+
+    def assert_survives_then_reclaims(self, rel, old_sha, proc):
+        self.assertEqual(proc.stdout.readline().strip(), "started")
+        newer = self.land_more(rel, ("two", "three", "four"))  # > keep=2 newer releases
+        self.assertIn(old_sha, self.installed(), "a running release was pruned")
+        status = rel.status()
+        self.assertEqual([l["sha"] for l in status["leases"]], [old_sha])
+        self.assertTrue(next(r for r in status["releases"] if r["sha"] == old_sha)["pinned"])
+        # the two newest plus the pinned one; `two` (unpinned, beyond keep) was pruned
+        self.assertEqual(self.installed(), sorted([old_sha, newer[1], newer[2]]))
+        self.go.write_text("")
+        out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err)
+        self.assertEqual(out.split(), ["mod-one", "assets", "one", old_sha])
+        self.assertEqual(rel.leases(), [])  # the lock died with the process
+        self.assertEqual(rel.reclaim()["reclaimed"], [old_sha])
+        self.assertEqual(self.installed(), sorted(newer[1:]))
+        self.assertEqual(list((self.run / ".leases").glob("*.lease")), [])
+
+    def test_spawned_old_release_survives_updates_and_is_reclaimed_after_exit(self):
+        rel = self.release()
+        old = self.commit("one")
+        rel.update(old, make_config())
+        proc = rel.spawn(["late", str(self.go)], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        self.assertEqual(proc.release_lease["sha"], old)
+        self.assert_survives_then_reclaims(rel, old, proc)
+
+    def test_exec_release_keeps_lease_across_exec(self):
+        rel = self.release()
+        old = self.commit("one")
+        rel.update(old, make_config())
+        code = ("import sys; sys.path.insert(0, %r)\n"
+                "from relay_core import main_release as MR\n"
+                "MR.MainRelease(%r, state_root=%r, cache_root=%r, repo_id='test-repo')"
+                ".exec_release(['late', %r])\n" % (
+                    str(Path(__file__).resolve().parents[1] / "backend"), str(self.fx.repo),
+                    str(self.state), str(self.root / "cache"), str(self.go)))
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        self.assert_survives_then_reclaims(rel, old, proc)
+
+    def test_launch_failure_releases_the_lease(self):
+        rel = self.release()
+        sha = self.commit("one")
+        rel.update(sha, make_config())
+        (self.run / sha / "bin" / "app").chmod(0o644)  # simulate an unlaunchable binary
+        with self.assertRaises(MR.MainReleaseError):
+            rel.spawn(["x"])
+        with self.assertRaises(MR.MainReleaseError):
+            rel.exec_release(["x"])  # execve fails before replacing this process
+        self.assertEqual(rel.leases(), [])
+        self.assertEqual(list((self.run / ".leases").iterdir()), [])
+
+    def test_no_current_release_refuses(self):
+        self.commit("one")
+        with self.assertRaises(MR.MainReleaseError) as ctx:
+            self.release().pin()
+        self.assertIn("no runnable main", str(ctx.exception))
+
+    def test_dead_lease_is_reaped_even_when_its_pid_is_alive(self):
+        rel = self.release()
+        old = self.commit("one")
+        rel.update(old, make_config())
+        # an unlocked lease naming a live PID (ours) — as after PID reuse — is dead
+        leases = self.run / ".leases"
+        leases.mkdir(exist_ok=True)
+        stale = leases / f"{old}.{os.getpid()}.deadbeef.lease"
+        stale.write_text('{"sha": "%s", "pid": %d}' % (old, os.getpid()))
+        self.assertEqual(rel.leases(), [])
+        self.land_more(rel, ("two", "three"))
+        self.assertNotIn(old, self.installed())
+        self.assertFalse(stale.exists())
+
+    def test_in_process_pin_holds_until_closed(self):
+        rel = self.release()
+        old = self.commit("one")
+        rel.update(old, make_config())
+        with rel.pin() as lease:
+            self.assertEqual(lease.sha, old)
+            self.land_more(rel, ("two", "three"))
+            self.assertIn(old, self.installed())
+            self.assertEqual(rel.reclaim()["reclaimed"], [])
+        self.assertFalse(lease.path.exists())
+        self.assertEqual(rel.reclaim()["reclaimed"], [old])
+
+    def test_reclaim_skips_while_an_update_holds_the_channel(self):
+        import fcntl
+        rel = self.release()
+        rel.update(self.commit("one"), make_config())
+        fd = os.open(str(self.run.parent / "main.lock"), os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            self.assertIsNotNone(rel.reclaim()["skipped"])
+        finally:
+            os.close(fd)
+
+
 if __name__ == "__main__":
     unittest.main()

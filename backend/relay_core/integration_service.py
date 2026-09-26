@@ -2486,12 +2486,15 @@ def main(argv=None, *, out=None, err=None) -> int:
             emit(record)
             return 5 if record.get("error") else 0
         elif args.verb == "main-run":
-            exe = service.main_executable()
+            service.main_executable()  # configured/installed checks with the service's messages
             extra = list(args.args[1:]) if args.args and args.args[0] == "--" else list(args.args)
+            from . import main_release
             try:
-                os.execv(str(exe), [str(exe), *extra])
-            except OSError as exc:
-                raise ModeError("cannot run the installed main %s: %s" % (exe, exc)) from exc
+                # Pins `current` with a flock lease inherited across exec, so pruning keeps this
+                # release for exactly the program's lifetime (main_release, "Live release leases").
+                service.release.exec_release(extra)
+            except main_release.MainReleaseError as exc:
+                raise ModeError(str(exc)) from exc
         elif args.verb == "snapshot":
             emit(service.snapshot())
         elif args.verb == "events":
