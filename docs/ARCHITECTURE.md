@@ -2985,24 +2985,29 @@ Every case a profiled skill serves is one row in the board's `cases.jsonl` (#95V
 its `cases`, `last_served`, `pass_rate_30` and `stale` computed from those rows — agent-facing
 numbers the registry view below draws on the Board's Skills tab and in Globals › Skills.
 
-GUI: `src/SkillsDialog.*` (non-modal, from `/skills`, the palette or Agent options) lists
-`skills_list` items with a checkbox per skill (unchecked names go to QSettings `skills/exclude`,
-sent in `configure.skills.exclude` for new sessions), "overridden" for `shadowed_by`. Refine sends
-`refine_skills` and opens the first refined `SKILL.md` in an editable pane. Import sends
-`import_skills_preview`, shows a modal review (checkbox per skill, files as children) and sends
-`import_skills_confirm` with the checked names. Check for updates reads the repository URL from
-the imported skill's `../.relay-import.json` and sends `skills_check_updates`. Dialog requests
-use ids `skills-N` so worker `error` events route to the dialog's status line.
-
-The registry (#1QKM §5, card #9FX8) is one widget on two surfaces: `skills::SkillRegistryView`
+GUI: the registry (#1QKM §5, card #9FX8) is one widget on two surfaces: `skills::SkillRegistryView`
 (`src/SkillRegistryView.*`, library `relay-skillregistry`) draws the `skills_registry` rows as a
 list over a skill page — profile strip, provenance, stats with the stale reason ("no cases yet",
 never stale, for a skill with no rows), the last cases, linked cards, and Load / Re-verify (a
 console draft, never a send) / Exclude / Refine / Open file. The Board's Skills tab is its project
 half (`project: true`); **Globals › Skills** is the global half — every other source — with
-SkillsDialog's import-from-repository and Check-updates actions in its toolbar, whose dialogs
-`SkillsDialog` now calls from the same file. Globals lists no project-scoped memory: project
-memories are the Board's Memories tab, user memories Globals'.
+Import from repository… and Check updates in its toolbar. Globals lists no project-scoped memory:
+project memories are the Board's Memories tab, user memories Globals'.
+
+It replaced the Skills dialog (card #JVEJ), so it carries what the dialog did. A row says
+"refined" for `refined_from` and "overridden" for `shadowed_by` (greyed, the shadowing path in the
+tooltip); Globals' count line adds the index's `skipped` folders ("· N skipped", reasons in the
+tooltip); an empty scope says how to get skills. Exclude writes QSettings `skills/exclude` (and
+`skills/exclude_text`), sent in `configure.skills.exclude` for new sessions. Refine sends
+`refine_skills` for every selected row and opens the first refined `SKILL.md` in an editable pane
+(the host's `openDocument`, which Open file uses too). Import sends `import_skills_preview`, shows a
+modal review (checkbox per skill, files as children) and sends `import_skills_confirm` with the
+checked names; Check updates reads the repository URL from the imported skill's
+`../.relay-import.json` and sends `skills_check_updates`. `/skills`, the palette's Skills… and
+Options' Skills row call `Pane::openSkills`, whose `onOpenSkills` the window answers with
+`RelayWindow::openSkills`: Globals › Skills (`GlobalsPane::showSkill`), or — for `/skills <name>`
+naming a folder in the workspace's own `.relay`/`.agents`/`.claude`/`.codex`/`.warp` skills — the
+tab's Board on its Skills tab (`BoardView::showSkill`). The two slow paths teach `/skills`.
 
 ### Queue and interrupt
 
@@ -3907,7 +3912,7 @@ of the platform and of the engine itself.
 | `src/OutputLinks.*` | which spans of terminal output are files, folders, URLs or `#K7Q2` card references, what they resolve to, and the keyboard cursor over them |
 | `src/Notifications.*` | notification centre behind the header bell |
 | `src/TurnTranscript.*` | turn details pane (tool calls, transcript) |
-| `src/SkillsDialog.*` | skills list, exclude, refine, import, updates |
+| `src/SkillRegistryView.*` | the skills registry's list and skill page (Board › Skills, Globals › Skills): exclude, refine, import, updates |
 | `src/ModelSettings.*` | the API-keys modal (the per-job models modal retired to `src/JobsTab.*` on 2026-09-21) |
 | `src/JobsTab.*` | the models pane's **jobs** tab: what each job runs on, and a model of its own for one (`relay::rolestore` is its storage) |
 | `src/ModelCatalog.*` | the one model catalog behind the box, the picker and Options › Models, and what the user checked and ranked |

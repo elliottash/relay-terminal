@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "GlobalsPane.h"
 #include <QComboBox>
+#include <QDir>
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
@@ -422,7 +423,7 @@ private slots:
         QCOMPARE(drafted, QString("/skill zz-user serve one case of zz-user and record it with board_case"));
         QCOMPARE(requests.size(), before);                    // drafted, nothing sent
 
-        // Refine goes to the worker as SkillsDialog's does; its reply reloads the registry.
+        // Refine goes to the worker as `refine_skills`; its reply reloads the registry.
         pane.findChild<QPushButton *>("globalsSkillRefine")->click();
         QCOMPARE(requests.last().value("type").toString(), QString("refine_skills"));
         QCOMPARE(requests.last().value("names").toArray().first().toString(), QString("zz-user"));
@@ -431,6 +432,71 @@ private slots:
         // An error answering one of the view's own requests is said on the page.
         pane.handleEvent({{"event", "error"}, {"id", requests.last().value("id")}, {"text", "registry failed"}});
         QVERIFY(pane.findChild<QLabel *>("globalsSkillStatus")->text().contains("registry failed"));
+    }
+    // #JVEJ: what the retired Skills dialog showed is on Globals › Skills — a refined copy and an
+    // overridden skill on the row, the folders the index skipped, the empty state — Refine takes
+    // every selected skill, a refined copy opens in a pane, and `/skills <name>` (showSkill) opens
+    // the section on that skill even before the registry has arrived.
+    void skillsSectionHasTheDialogsParity() {
+        GlobalsPane pane;
+        QList<QJsonObject> requests;
+        pane.onRequest = [&](const QJsonObject &r) { requests.append(r); };
+        QStringList opened;
+        pane.setDocumentTarget([&opened](const QString &path) { opened << path; });
+        pane.showSkill("zz-refined");
+        auto *section = pane.findChild<QComboBox *>("globalsSection");
+        QCOMPARE(section->currentData().toInt(), 5);
+        QCOMPARE(requests.size(), 1);                         // asked once, not once per call
+        QCOMPARE(requests.last().value("type").toString(), QString("skills_registry"));
+
+        // The empty state first: nothing global at all (a project skill is the Board's).
+        const QJsonObject project{{"id", "zz-project"}, {"name", "zz-project"}, {"source", "project-relay"},
+                                  {"project", true}, {"path", "/w/.relay/skills/zz-project/SKILL.md"}};
+        pane.handleEvent({{"event", "skills_registry"}, {"id", requests.last().value("id")},
+                          {"items", QJsonArray{project}}, {"skipped", QJsonArray{}}});
+        auto *list = pane.findChild<QTreeWidget *>("globalsSkillList");
+        auto *title = pane.findChild<QLabel *>("globalsSkillTitle");
+        QCOMPARE(list->topLevelItemCount(), 0);
+        QVERIFY2(title->text().startsWith("No skills found. Import some from a repository"), qPrintable(title->text()));
+
+        const QString home = QDir::homePath();
+        const QJsonObject refined{{"id", "zz-refined"}, {"name", "zz-refined"}, {"source", "relay-refined"},
+            {"project", false}, {"path", home + "/.config/relay/skills/zz-refined/SKILL.md"},
+            {"refined_from", home + "/.claude/skills/zz-refined/SKILL.md"}, {"version_short", "ab12"},
+            {"stats", QJsonObject{{"cases", 0}}}};
+        const QJsonObject shadowed{{"id", "zz-refined@claude"}, {"name", "zz-refined"}, {"source", "claude"},
+            {"project", false}, {"path", home + "/.claude/skills/zz-refined/SKILL.md"},
+            {"shadowed_by", home + "/.config/relay/skills/zz-refined/SKILL.md"}, {"stats", QJsonObject{{"cases", 0}}}};
+        const QJsonObject other{{"id", "zz-other"}, {"name", "zz-other"}, {"source", "codex"}, {"project", false},
+            {"path", "/opt/zz-other/SKILL.md"}, {"stats", QJsonObject{{"cases", 0}}}};
+        pane.handleEvent({{"event", "skills_registry"}, {"id", requests.last().value("id")},
+                          {"items", QJsonArray{refined, shadowed, other}},
+                          {"skipped", QJsonArray{"broken: no description", "odd name: unsupported folder name"}}});
+        QCOMPARE(list->topLevelItemCount(), 3);
+        auto *count = pane.findChild<QLabel *>("globalsSkillCount");
+        QCOMPARE(count->text(), QString("3 skills · 0 excluded · 2 skipped"));
+        QVERIFY(count->toolTip().contains("broken: no description"));
+        QCOMPARE(list->topLevelItem(0)->text(1), QString("relay-refined · ab12 · refined"));
+        QVERIFY(list->topLevelItem(0)->toolTip(1).contains("refined from ~/.claude/skills/zz-refined/SKILL.md"));
+        QCOMPARE(list->topLevelItem(1)->text(1), QString("claude · overridden"));
+        QVERIFY(list->topLevelItem(1)->toolTip(1).contains("Not used: ~/.config/relay/skills/zz-refined/SKILL.md has the same name"));
+        QVERIFY(list->topLevelItem(1)->foreground(0).style() != Qt::NoBrush);   // greyed
+        QCOMPARE(list->topLevelItem(2)->foreground(0).style(), Qt::NoBrush);
+        // showSkill waited for the rows: the named skill's page is the one open.
+        QCOMPARE(list->currentItem(), list->topLevelItem(0));
+        QVERIFY(title->text().contains("zz-refined"));
+
+        // Refine takes every selected skill; its answer opens the copy in a pane.
+        list->topLevelItem(2)->setSelected(true);
+        pane.findChild<QPushButton *>("globalsSkillRefine")->click();
+        QCOMPARE(requests.last().value("type").toString(), QString("refine_skills"));
+        QCOMPARE(requests.last().value("names").toArray(), (QJsonArray{"zz-refined", "zz-other"}));
+        pane.handleEvent({{"event", "skills_refined"}, {"id", requests.last().value("id")},
+                          {"items", QJsonArray{QJsonObject{{"path", "/copy/zz-refined/SKILL.md"}}}}});
+        QCOMPARE(opened, QStringList{"/copy/zz-refined/SKILL.md"});
+        // Open file goes to the same pane opener, not the desktop.
+        pane.findChild<QPushButton *>("globalsSkillOpen")->click();
+        QCOMPARE(opened.last(), home + "/.config/relay/skills/zz-refined/SKILL.md");
     }
     // Project memories leave Globals (#9FX8, the owner's boundary #Y2MP/#P7SJ): a memory record
     // that is not user-scoped is listed in no section, and "All global records" says where it went.

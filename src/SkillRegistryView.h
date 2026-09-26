@@ -8,8 +8,10 @@
 // console to draft into (`draft`) and a card page to open (`openCard`); a surface without them
 // simply shows no Load/Re-verify buttons and plain card ids.
 //
-// The import-from-repository and Check-updates flows (SkillsDialog's, protocol §11) live here
-// too, as free functions SkillsDialog calls and as buttons the Globals scope puts in the toolbar.
+// The import-from-repository and Check-updates flows (protocol §11) live here too, as buttons the
+// Globals scope puts in its toolbar. This view replaced the old Skills dialog (#JVEJ): it also
+// draws what the dialog did — "refined" and "overridden" rows, the folders the index skipped,
+// the empty state — and refines several selected skills at once.
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
@@ -39,7 +41,7 @@ QString updatesText(const QJsonObject &event);
 // Step 4's Re-verify draft: the skill loaded (`/skill <name>`) and one case asked for. A draft,
 // never a send — the person presses Enter.
 QString reverifyPrompt(const QString &name);
-// The exclusion list SkillsDialog's caller keeps in QSettings (`skills/exclude`), and the write
+// The exclusion list kept in QSettings (`skills/exclude`), and the write
 // that keeps both keys in step (the joined `skills/exclude_text` copy the settings page shows).
 QStringList excludedNames();
 void setExcluded(const QString &name, bool excluded);
@@ -60,6 +62,9 @@ public:
     std::function<void(const QString &)> openCard;
     // A card's title for its chip, or empty when the host does not know it.
     std::function<QString(const QString &)> cardTitle;
+    // Open a file in an editable pane: a refined copy opens there when the refine answers, as the
+    // old dialog's did. Unset: the page's Open file hands the path to the desktop instead.
+    std::function<void(const QString &)> openDocument;
     // A transient message; unset, it goes to the page's status line.
     std::function<void(const QString &)> toast;
 
@@ -70,9 +75,12 @@ public:
     void reload();
     // Takes the events this view asked for or cares about; false for anything else.
     bool handleEvent(const QJsonObject &event);
+    // Selects the row; before the registry has arrived, the selection waits for it.
     void selectSkill(const QString &id);
     QString selectedId() const { return m_selected; }
     QString selectedName() const;
+    // Every selected row's name, the page's first — Refine takes them all.
+    QStringList selectedNames() const;
     int shownCount() const;
 
 private:
@@ -100,6 +108,8 @@ private:
                 *m_reverify = nullptr;
     QJsonArray m_items;               // the registry rows, as they arrived
     QString m_selected;               // id of the row whose page is showing
+    QString m_wanted;                 // selectSkill() before the rows arrived
+    QJsonArray m_skipped;             // folders the index passed over, with why
     QString m_linksRequest;           // the page's `board_links` question in flight (#EE42)
     QString m_linksFor;               // the skill name `m_linkedFrom` answers for
     QStringList m_linkedFrom;         // card ids whose `server:` or prose names that skill

@@ -128,8 +128,9 @@ GlobalsPane::GlobalsPane(QWidget *parent) : QWidget(parent) {
     split->setStretchFactor(0, 1); split->setStretchFactor(1, 2);
     layout->addWidget(split, 1);
     // Globals › Skills (#9FX8 step 3): the registry view the Board's Skills tab shows, over the
-    // global rows — every source that is not the project's — with SkillsDialog's import and
-    // update actions in its toolbar. It asks the tab's worker through the same `onRequest`.
+    // global rows — every source that is not the project's — with the import and update actions
+    // in its toolbar. It replaced the old Skills dialog (#JVEJ): `/skills` opens it. It asks the
+    // tab's worker through the same `onRequest`.
     m_skills = new relay::skills::SkillRegistryView(relay::skills::SkillRegistryView::Scope::Global,
                                                     QStringLiteral("globals"));
     m_skills->send = [this](const QJsonObject &body) { return request(body); };
@@ -198,6 +199,16 @@ QString GlobalsPane::request(QJsonObject body) {
 }
 int GlobalsPane::section() const { return m_section->currentData().toInt(); }
 void GlobalsPane::setSection(int section) { m_section->setCurrentIndex(m_section->findData(section)); }
+void GlobalsPane::setDocumentTarget(std::function<void(const QString &)> open) {
+    m_skills->openDocument = std::move(open);
+}
+void GlobalsPane::showSkill(const QString &name) {
+    if (protectDraft()) return;
+    setSection(kSkills);          // its currentIndexChanged asks for the registry the first time
+    m_skills->ensureLoaded();
+    if (!name.isEmpty()) m_skills->selectSkill(name);   // registry ids are the skill names
+    m_skills->setFocus();
+}
 void GlobalsPane::setDraftTarget(std::function<void(const QString &)> draft) {
     m_skills->draft = std::move(draft);
     m_skills->syncActions();

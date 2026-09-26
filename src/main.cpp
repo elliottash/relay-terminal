@@ -20,7 +20,6 @@
 #include "TurnTranscript.h"
 #include "ModelSettings.h"
 #include "SettingsPane.h"
-#include "SkillsDialog.h"
 #include "SubagentTranscript.h"   // subagents UI
 #include "SubagentsPanel.h"
 #include "RequestLedger.h"         // request ledger UI

@@ -4339,6 +4339,32 @@ public:
         if (auto *globals = view ? dynamic_cast<relay::globals::GlobalsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceGlobals"))) : nullptr)
             globals->showSuggestion(id);
     }
+    // `/skills [name]`, the palette's Skills… and Options' Skills row (#JVEJ, which retired the
+    // Skills dialog): Globals › Skills, with a global skill's page open when one is named; a
+    // project skill (`project`) opens on this tab's Board, Skills tab, instead — decision 2 on
+    // #9FX8 puts a workspace's own skills there and nowhere else.
+    void openSkills(const QString &name, bool project) {
+        if (project) {
+            auto boardInTab = [this]() -> ToolPane * {
+                for (QWidget *leaf : leavesIn(m_tabs->currentWidget()))
+                    if (auto *tool = dynamic_cast<ToolPane *>(leaf); tool && tool->board() && !tool->board()->pinned())
+                        return tool;
+                return nullptr;
+            };
+            if (!boardInTab()) toggleBoardPane();
+            if (ToolPane *tool = boardInTab()) {
+                tool->board()->showSkill(name);
+                setActiveLeaf(tool);
+                focusLeaf(tool);
+                return;
+            }
+        }
+        openSessions(QStringLiteral("globals"));
+        ToolPane *tool = sessionsPaneIn(m_tabs->currentWidget());
+        auto *view = tool ? sessionsViewOf(tool) : nullptr;
+        if (auto *globals = view ? dynamic_cast<relay::globals::GlobalsPane *>(view->findChild<QWidget *>(QStringLiteral("workspaceGlobals"))) : nullptr)
+            globals->showSkill(name);
+    }
     // A transcript's Keep or No: every Globals list on screen stops offering that suggestion.
     static void refreshVisibleGlobals() { relay::globals::GlobalsPane::refreshVisible(); }
 

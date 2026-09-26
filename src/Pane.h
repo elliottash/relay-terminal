@@ -56,7 +56,6 @@
 #include "TerminalRecords.h"
 #include "SettingsPane.h"   // SettingsWatch: a late presets event can change what an open Options pane shows
 #include "SettingsCache.h"  // the settings read per key, per event and per poll (#057J)
-#include "SkillsDialog.h"
 #include "SubagentTranscript.h"
 #include "SubagentsPanel.h"
 #include "JobsPanel.h"
@@ -5049,6 +5048,9 @@ public:
     // directory (#M8S2, "guest:claude:work"); empty for the CLI's default login.
     std::function<void(const QString &guest, const QStringList &extra, const QString &cwd, const QString &preset)> onOpenGuestPane;
     std::function<void()> onShowAgents;                                    // subagents panel (GUI E2), if present
+    // `/skills [name]`, the palette's Skills… and Options' Skills row (#JVEJ): Globals › Skills,
+    // or the Board's Skills tab when `project` — the named skill is one of this workspace's own.
+    std::function<void(const QString &name, bool project)> onOpenSkills;
 
     // ----- reasoning levels are the model's (card #MDL1, owner 2026-09-21) --------------------
     //
@@ -7722,24 +7724,22 @@ public:
         }
     }
 
-    void openSkills() {
-        if (!m_skillsDialog) {
-            m_skillsDialog = new relay::SkillsDialog(window());
-            m_skillsDialog->setAttribute(Qt::WA_DeleteOnClose);
-            m_skillsDialog->send = [this](QJsonObject request) {
-                request.insert(QStringLiteral("id"), QStringLiteral("skills-") + QString::number(++m_requestId));
-                send(request);
-            };
-            m_skillsDialog->onExcludedChanged = [](const QStringList &names) {
-                QSettings settings;
-                settings.setValue(QStringLiteral("skills/exclude_text"), names.join(QStringLiteral(", ")));
-                if (names.isEmpty()) settings.remove(QStringLiteral("skills/exclude")); else settings.setValue(QStringLiteral("skills/exclude"), names);
-            };
-        }
-        m_skillsDialog->excluded = QSettings().value(QStringLiteral("skills/exclude")).toStringList();
-        m_skillsDialog->show(); m_skillsDialog->raise(); m_skillsDialog->activateWindow();
-        if (!m_workerReady) { m_skillsDialog->handleEvent({{"event", "skills"}, {"items", QJsonArray()}}); return; }
-        m_skillsDialog->refresh();
+    // The skills registry replaced the Skills dialog (#JVEJ): global skills are managed in
+    // Globals › Skills, a project's own in its Board's Skills tab. `typed` is false for the slow
+    // paths (palette, Options), which teach `/skills`.
+    void openSkills(const QString &name = QString(), bool typed = false) {
+        if (!onOpenSkills) { status(QStringLiteral("Skills live in Globals › Skills, which this pane cannot open.")); return; }
+        onOpenSkills(name, !name.isEmpty() && isProjectSkill(name));
+        if (!typed) hint(QStringLiteral("skills.slash"), QStringLiteral("Next time: type /skills"));
+    }
+    // A skill folder in one of the workspace's project sources (`skill_manage.source_label`'s
+    // `project-*` directories), which win over a global skill of the same name.
+    bool isProjectSkill(const QString &name) const {
+        if (m_workspace.isEmpty() || name.contains(QLatin1Char('/')) || name.startsWith(QLatin1Char('.'))) return false;
+        for (const char *root : {".relay", ".agents", ".claude", ".codex", ".warp"})
+            if (QFileInfo::exists(QDir(m_workspace).filePath(QStringLiteral("%1/skills/%2/SKILL.md").arg(QLatin1String(root), name))))
+                return true;
+        return false;
     }
 
     // ----- aliases: saved commands and prompts (issue G8DK, protocol 20) ----------------------
@@ -9371,7 +9371,7 @@ private:
             {QStringLiteral("todos"), QString(), QStringLiteral("Task list (same as /tasks)"), true},
             {QStringLiteral("continue"), QString(), QStringLiteral("Continue the agent turn (after a step limit)")},
             {QStringLiteral("agents"), QString(), QStringLiteral("Subagents: definitions and running agents")},
-            {QStringLiteral("skills"), QString(), QStringLiteral("Skills: list, exclude, refine, import from a repository")},
+            {QStringLiteral("skills"), QStringLiteral("[name]"), QStringLiteral("Skills: Globals › Skills, or the Board's tab for a project skill")},
             {QStringLiteral("skill"), QStringLiteral("<name> [input]"), QStringLiteral("Run a skill (same as /name; this form wins over a built-in of the same name)")},
             {QStringLiteral("instructions"), QString(), QStringLiteral("Choose instruction files (CLAUDE.md, AGENTS.md, RELAY.md…)")},
             {QStringLiteral("rename"), QStringLiteral("[name]"), QStringLiteral("Name this pane (no name: edit it in the header; empty: back to automatic)")},
@@ -9518,7 +9518,7 @@ private:
         m_skillCommands.clear();
         for (const QJsonValue &value : items) {
             const QJsonObject item = value.toObject();
-            // A `skills_list` row (the /skills dialog) that the agent does not load.
+            // A `skills_list` row that the agent does not load.
             if (item.value(QStringLiteral("excluded")).toBool() || item.contains(QStringLiteral("shadowed_by"))) continue;
             const QString name = item.value(QStringLiteral("name")).toString();
             if (name.isEmpty()) continue;
@@ -17857,7 +17857,6 @@ private:
     relay::InputHighlighter *m_highlighter = nullptr;
     QLabel *m_toast = nullptr;
     QLabel *m_prefixChip = nullptr;
-    QPointer<relay::SkillsDialog> m_skillsDialog;
     QList<SlashCommand> m_skillCommands;   // `/name` for each skill the agent can load
     QString m_skillHintPending;            // a skill asked for in prose; hinted at the turn's end
     QPointer<relay::KeysDialog> m_keysDialog;

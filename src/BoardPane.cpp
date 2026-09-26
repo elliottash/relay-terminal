@@ -2995,6 +2995,13 @@ void BoardView::showBackgroundPage()
     setPage(Page::Background);
 }
 
+void BoardView::showSkill(const QString &name)
+{
+    setPage(Page::Skills);
+    if (m_skillsPage != nullptr && !name.isEmpty())
+        m_skillsPage->selectSkill(name);
+}
+
 // The visibility rule rebuild() re-runs. The Skills and Memories pages replace the cards list,
 // never the card page: a card opened from either — a linked chip, a memory row — takes the
 // ordinary card page solo, and Esc lands back on the tab it left. While the sections editor or
@@ -3073,6 +3080,13 @@ void BoardView::buildSkillsPage(QVBoxLayout *layout)
         return card != nullptr ? card->title : QString();
     };
     m_skillsPage->toast = [this](const QString &text) { toast(text); };
+    // Open file and a refined copy open in a pane, as the Skills dialog's did (#JVEJ).
+    m_skillsPage->openDocument = [this](const QString &path) {
+        if (onOpenFile)
+            onOpenFile(path);
+        else
+            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    };
     m_skillsPage->syncActions();
     layout->addWidget(m_skillsPage, 1);
 }

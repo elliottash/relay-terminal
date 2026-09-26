@@ -319,7 +319,7 @@ void Pane::runSlashCommand(const QString &name, const QString &args) {
             if (onShowAgents) onShowAgents();
             else { m_agentsListPending = true; send({{"type", "agents_list"}, {"workspace", m_workspace}}); }
         } else if (name == QStringLiteral("skill")) {
-            if (args.isEmpty()) { openSkills(); return; }
+            if (args.isEmpty()) { openSkills(QString(), true); return; }
             const QString text = QStringLiteral("/skill ") + args;
             if (skillFor(text).isEmpty()) {
                 const QString wanted = args.section(QRegularExpression(QStringLiteral("\\s")), 0, 0);
@@ -332,7 +332,7 @@ void Pane::runSlashCommand(const QString &name, const QString &args) {
             }
             submitAgent(text, false);
         } else if (name == QStringLiteral("skills")) {
-            openSkills();
+            openSkills(args.trimmed(), true);
         } else if (name == QStringLiteral("help")) {
             // The same popup `?` shows, never a second surface for the same list. Typing the
             // command while the popup is up must leave it up, so this shows rather than toggles.

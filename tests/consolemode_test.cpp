@@ -27,6 +27,7 @@
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QDialog>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -260,6 +261,47 @@ void aTerminalPaneIsUnchanged()
     CHECK(row != nullptr);
     CHECK(!row->isVisibleTo(&pane));
     }
+
+    // `/skills` opens the skills registry through the window, not a dialog (#JVEJ, which retired
+    // SkillsDialog): no name is Globals › Skills, a name one of the workspace's own skill folders
+    // holds is the Board's Skills tab (`project`), any other name is a global skill's page. The
+    // palette and Options call openSkills() directly and land in the same place.
+void skillsOpensTheRegistryNotADialog()
+{
+    QTemporaryDir workspace;
+    CHECK(QDir(workspace.path()).mkpath(QStringLiteral(".relay/skills/zz-project")));
+    QFile manifest(workspace.filePath(QStringLiteral(".relay/skills/zz-project/SKILL.md")));
+    CHECK(manifest.open(QIODevice::WriteOnly));
+    manifest.write("---\nname: zz-project\ndescription: a project skill\n---\n");
+    manifest.close();
+    StubContext context;
+    context.workspace = workspace.path();
+    Pane console(context.workspace, context.workspace, false, relay::defaultEngineCore(), &context);
+    QList<QPair<QString, bool>> opened;
+    console.onOpenSkills = [&opened](const QString &name, bool project) { opened.append({name, project}); };
+    auto *editor = console.findChild<QPlainTextEdit *>(QStringLiteral("composerEditor"));
+    CHECK(editor != nullptr);
+    if (editor == nullptr) return;
+    const auto type = [&](const QString &text) {
+        console.draftInComposer(text);
+        QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+        QCoreApplication::sendEvent(editor, &enter);
+    };
+    type(QStringLiteral("/skills"));
+    type(QStringLiteral("/skills zz-project"));
+    type(QStringLiteral("/skills zz-global"));
+    type(QStringLiteral("/skill"));
+    CHECK_EQ(opened.size(), 4);
+    if (opened.size() != 4) return;
+    CHECK(opened.at(0) == qMakePair(QString(), false));
+    CHECK(opened.at(1) == qMakePair(QStringLiteral("zz-project"), true));
+    CHECK(opened.at(2) == qMakePair(QStringLiteral("zz-global"), false));
+    CHECK(opened.at(3) == qMakePair(QString(), false));
+    CHECK(context.submitted.isEmpty());                       // nothing went to the agent
+    console.openSkills();                                     // the palette's Skills…
+    CHECK_EQ(opened.size(), 5);
+    CHECK(console.findChild<QDialog *>() == nullptr);          // and no dialog, ever
+}
 
     // A middle click on a pane's header closes it (#5Z6N). Nothing on the header takes a middle
     // press, so Qt carries it on up to the pane and its window; that must not undo the header's
@@ -2464,6 +2506,7 @@ int main(int argc, char **argv)
     cases::theTranscriptSurfaceIsStillThere();
     cases::theRoutingIsLockedToTheAgent();
     cases::aTerminalPaneIsUnchanged();
+    cases::skillsOpensTheRegistryNotADialog();
     cases::aMiddleClickOnTheHeaderClosesThePane();
     cases::relayingStatusSitsOutsideEveryPromptFrame();
     cases::theActionRowIsBuiltFromTheContext();

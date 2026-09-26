@@ -456,7 +456,7 @@ QList<relay::SettingsSection> RelayWindow::settingsSections() {
                                 QStringLiteral("CLAUDE.md, AGENTS.md, RELAY.md and other instruction files"),
                                 QStringLiteral("Choose…"), [this] { runAction(QStringLiteral("agent.instructions")); });
         agent.rows << buttonRow(QStringLiteral("option:skills"), QStringLiteral("Skills"),
-                                QStringLiteral("List, exclude, refine, import from a repository · /skills"),
+                                QStringLiteral("Globals › Skills: list, exclude, refine, import from a repository · /skills"),
                                 QStringLiteral("Open…"), [this] { if (m_active) m_active->openSkills(); });
         agent.rows << textRow(QStringLiteral("skills/exclude_text"), QStringLiteral("Excluded skills"),
                               QStringLiteral("Comma-separated names to skip (empty: the default Warp-app list)"),

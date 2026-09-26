@@ -88,6 +88,8 @@ public:
     // Globals › Skills' Load and Re-verify put their text in a console's composer (#9FX8 step 4):
     // the host hands in where. Without one the skill page shows neither button.
     void setDraftTarget(std::function<void(const QString &)> draft);
+    // Where Open file and a refined copy open (an editable pane beside the Sessions pane).
+    void setDocumentTarget(std::function<void(const QString &)> open);
     void handleEvent(const QJsonObject &event);
     void refresh();
     // A transcript's Keep or No (#MEMS): every Globals pane on screen, in every window, stops
@@ -96,6 +98,9 @@ public:
     // Globals › Suggestions with this suggestion selected in the editor, from a transcript's Edit;
     // an empty id opens the list with nothing selected.
     void showSuggestion(const QString &id);
+    // Globals › Skills, with `name` selected when it is a global skill (`/skills`, the palette's
+    // Skills… and Options' Skills row, #JVEJ); empty opens the list.
+    void showSkill(const QString &name);
     int pendingSuggestions() const { return m_pending.size(); }
     void setWorkspace(const QString &workspace);
     void focusSearch();

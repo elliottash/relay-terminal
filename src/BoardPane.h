@@ -200,6 +200,9 @@ public:
     void handleEvent(const QJsonObject &event);
     void focusInput();
     void showBackgroundPage();
+    // The Skills tab with that project skill's page open (`/skills <name>`, #JVEJ); the page
+    // waits for the registry when this is the tab's first showing.
+    void showSkill(const QString &name);
     void reload();                                           // board_open
 
     QString workspace() const { return m_workspace; }

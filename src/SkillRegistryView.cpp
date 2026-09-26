@@ -211,7 +211,7 @@ SkillRegistryView::SkillRegistryView(Scope scope, const QString &prefix, QWidget
     toolRow->addWidget(m_count);
     toolRow->addWidget(m_filter, 1);
     // Globals › Skills is where global skills are managed (the owner's decision 2 and 3), so the
-    // import and update actions SkillsDialog had sit in its toolbar. The Board's tab lists the
+    // import and update actions the Skills dialog had sit in its toolbar. The Board's tab lists the
     // project's own skills, which are files in the repository, not imports.
     if (m_scope == Scope::Global) {
         m_import = new QToolButton(tools);
@@ -244,7 +244,9 @@ SkillRegistryView::SkillRegistryView(Scope scope, const QString &prefix, QWidget
                              QStringLiteral("Last verified"), QStringLiteral("Stale")});
     m_list->setRootIsDecorated(false);
     m_list->setUniformRowHeights(true);
-    m_list->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Extended, as the old dialog's list was: Refine takes every selected skill (#JVEJ). The
+    // page shows the current row.
+    m_list->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_list->setColumnWidth(0, 240);
     m_list->setColumnWidth(1, 170);
 
@@ -320,7 +322,7 @@ SkillRegistryView::SkillRegistryView(Scope scope, const QString &prefix, QWidget
     m_exclude = button(QString(), "SkillExclude",
                        QStringLiteral("Add this skill to, or remove it from, the exclusion list new agent sessions apply"));
     m_refine = button(QStringLiteral("Refine"), "SkillRefine",
-                      QStringLiteral("Start a session that improves this skill from its own history"));
+                      QStringLiteral("Write an improved, editable copy of each selected skill to ~/.config/relay/skills; the original is never changed"));
     m_open = button(QStringLiteral("Open file"), "SkillOpen", QStringLiteral("Open the SKILL.md in an editor"));
     actionRow->addStretch(1);
     detailColumn->addWidget(actions);
@@ -359,15 +361,19 @@ SkillRegistryView::SkillRegistryView(Scope scope, const QString &prefix, QWidget
         refill();
     });
     connect(m_refine, &QPushButton::clicked, this, [this] {
-        const QString skill = selectedName();
-        if (skill.isEmpty() || !send)
+        const QStringList names = selectedNames();
+        if (names.isEmpty() || !send)
             return;
-        m_refineRequest = send({{"type", "refine_skills"}, {"names", QJsonArray{skill}}});
-        note(QStringLiteral("Refining %1…").arg(skill));
+        m_refineRequest = send({{"type", "refine_skills"}, {"names", QJsonArray::fromStringList(names)}});
+        note(QStringLiteral("Refining %1… the agent is rewriting a copy.").arg(names.join(QStringLiteral(", "))));
     });
     connect(m_open, &QPushButton::clicked, this, [this] {
         const QString path = rowById(m_selected).value(QStringLiteral("path")).toString();
-        if (!path.isEmpty())
+        if (path.isEmpty())
+            return;
+        if (openDocument)
+            openDocument(path);
+        else
             QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
     if (m_import != nullptr) {
@@ -403,6 +409,20 @@ QJsonObject SkillRegistryView::rowById(const QString &id) const
 QString SkillRegistryView::selectedName() const
 {
     return rowById(m_selected).value(QStringLiteral("name")).toString();
+}
+
+QStringList SkillRegistryView::selectedNames() const
+{
+    QStringList names;
+    const QString current = selectedName();
+    if (!current.isEmpty())
+        names << current;
+    for (const QTreeWidgetItem *item : m_list->selectedItems()) {
+        const QString skill = rowById(item->data(0, Qt::UserRole).toString()).value(QStringLiteral("name")).toString();
+        if (!skill.isEmpty() && !names.contains(skill))
+            names << skill;
+    }
+    return names;
 }
 
 int SkillRegistryView::shownCount() const { return m_list->topLevelItemCount(); }
@@ -442,17 +462,28 @@ bool SkillRegistryView::handleEvent(const QJsonObject &event)
         if (!m_request.isEmpty() && !id.isEmpty() && id != m_request)
             return false;
         m_items = event.value(QStringLiteral("items")).toArray();
+        m_skipped = event.value(QStringLiteral("skipped")).toArray();
         m_arrived = true;
         refill();
         return true;
     }
     if (type == QStringLiteral("skills_refined")) {
-        // Ours or a SkillsDialog's elsewhere: the version and profile reflect the refined copy.
+        // Ours or another surface's: the version and profile reflect the refined copy.
         if (m_requested)
             reload();
         if (!id.isEmpty() && id == m_refineRequest) {
             m_refineRequest.clear();
-            note(QStringLiteral("Skill refined"));
+            const QJsonArray items = event.value(QStringLiteral("items")).toArray();
+            QStringList paths;
+            for (const QJsonValue &item : items)
+                paths << tildeHome(item.toObject().value(QStringLiteral("path")).toString());
+            QString text = QStringLiteral("Refined %1 skill(s): %2").arg(items.size()).arg(paths.join(QStringLiteral(", ")));
+            for (const QJsonValue &error : event.value(QStringLiteral("errors")).toArray())
+                text += QStringLiteral("\n%1: %2").arg(error.toObject().value(QStringLiteral("name")).toString(),
+                                                       error.toObject().value(QStringLiteral("error")).toString().left(200));
+            note(text);
+            if (openDocument && !items.isEmpty())
+                openDocument(items.first().toObject().value(QStringLiteral("path")).toString());
         }
         return true;
     }
@@ -536,13 +567,13 @@ void SkillRegistryView::checkUpdates()
 
 void SkillRegistryView::refill()
 {
-    const QString keep = m_selected;
+    const QString keep = m_wanted.isEmpty() ? m_selected : m_wanted;
     QSignalBlocker block(m_list);   // non-const: refill re-selects and unblocks on purpose
     m_list->clear();
     const QString filter = m_filter->text().trimmed();
     const QBrush dim = palette().color(QPalette::Disabled, QPalette::Text);
     const QStringList excluded = excludedNames();
-    int shown = 0, excludedCount = 0;
+    int shown = 0, excludedCount = 0, listed = 0;   // listed: in this scope, before the filter
     for (const QJsonValue &value : m_items) {
         const QJsonObject row = value.toObject();
         // The owner's decision 2: the Board lists project skills (`project: true` — `.relay/skills`
@@ -550,6 +581,7 @@ void SkillRegistryView::refill()
         // all of them; the split is made here, per surface.
         if (row.value(QStringLiteral("project")).toBool() != (m_scope == Scope::Project))
             continue;
+        ++listed;
         const QString skill = row.value(QStringLiteral("name")).toString();
         const bool isExcluded = excluded.contains(skill);
         if (isExcluded)
@@ -564,8 +596,20 @@ void SkillRegistryView::refill()
         auto *item = new QTreeWidgetItem(m_list);
         item->setText(0, skill + (isExcluded ? QStringLiteral("  (excluded)") : QString()));
         const QString version = row.value(QStringLiteral("version_short")).toString();
+        // What the old dialog's Source column said (#JVEJ): a refined copy, and a skill another
+        // source's same-named one hides — greyed, because the agent never loads it.
+        const QString refinedFrom = row.value(QStringLiteral("refined_from")).toString();
+        const QString shadowedBy = row.value(QStringLiteral("shadowed_by")).toString();
         item->setText(1, row.value(QStringLiteral("source")).toString()
-                             + (version.isEmpty() ? QString() : QStringLiteral(" · ") + version));
+                             + (version.isEmpty() ? QString() : QStringLiteral(" · ") + version)
+                             + (refinedFrom.isEmpty() ? QString() : QStringLiteral(" · refined"))
+                             + (shadowedBy.isEmpty() ? QString() : QStringLiteral(" · overridden")));
+        QStringList sourceTip{tildeHome(row.value(QStringLiteral("path")).toString())};
+        if (!refinedFrom.isEmpty())
+            sourceTip << QStringLiteral("refined from ") + tildeHome(refinedFrom);
+        if (!shadowedBy.isEmpty())
+            sourceTip << QStringLiteral("Not used: %1 has the same name").arg(tildeHome(shadowedBy));
+        item->setToolTip(1, sourceTip.join(QLatin1Char('\n')));
         item->setText(2, QString::number(stats.value(QStringLiteral("cases")).toInt()));
         item->setText(3, passRateText(stats));
         const QString lastVerified = row.value(QStringLiteral("last_verified")).toString();
@@ -587,13 +631,27 @@ void SkillRegistryView::refill()
             item->setFont(0, font);
             item->setForeground(0, dim);
         }
+        if (!shadowedBy.isEmpty())
+            for (int column = 0; column < m_list->columnCount(); ++column)
+                item->setForeground(column, dim);
         ++shown;
     }
-    if (m_arrived)
-        m_count->setText(QStringLiteral("%1 skill%2 · %3 excluded")
-                             .arg(shown)
-                             .arg(shown == 1 ? QString() : QStringLiteral("s"))
-                             .arg(excludedCount));
+    if (m_arrived) {
+        QString count = QStringLiteral("%1 skill%2 · %3 excluded")
+                            .arg(shown)
+                            .arg(shown == 1 ? QString() : QStringLiteral("s"))
+                            .arg(excludedCount);
+        // The folders the index passed over, as the old dialog's status line counted them. They
+        // are the index's, not a scope's, so Globals — where skills are managed — shows them.
+        QStringList skipped;
+        for (const QJsonValue &entry : m_skipped)
+            skipped << (entry.isString() ? entry.toString()
+                                         : QString::fromUtf8(QJsonDocument(entry.toObject()).toJson(QJsonDocument::Compact)));
+        if (m_scope == Scope::Global && !skipped.isEmpty())
+            count += QStringLiteral(" · %1 skipped").arg(skipped.size());
+        m_count->setText(count);
+        m_count->setToolTip(m_scope == Scope::Global ? skipped.mid(0, 30).join(QLatin1Char('\n')) : QString());
+    }
     // The selection survives a refresh when the row is still there.
     QTreeWidgetItem *restore = nullptr;
     for (int i = 0; !keep.isEmpty() && i < m_list->topLevelItemCount(); ++i) {
@@ -604,6 +662,8 @@ void SkillRegistryView::refill()
     }
     if (restore == nullptr && shown > 0 && m_selected.isEmpty())
         restore = m_list->topLevelItem(0);
+    if (restore != nullptr && restore->data(0, Qt::UserRole).toString() == m_wanted)
+        m_wanted.clear();
     if (restore != nullptr) {
         block.unblock();
         m_list->setCurrentItem(restore);
@@ -611,16 +671,27 @@ void SkillRegistryView::refill()
     } else if (!m_selected.isEmpty()) {
         showSkill(QString());
     }
+    // The empty state (the old dialog's words, #JVEJ): nothing in this scope at all, as opposed
+    // to a filter that hides everything.
+    if (m_arrived && listed == 0 && m_selected.isEmpty())
+        m_title->setText(m_scope == Scope::Global
+                             ? QStringLiteral("No skills found. Import some from a repository, or add folders with SKILL.md to ~/.config/relay/skills.")
+                             : QStringLiteral("No project skills. Add folders with SKILL.md to .relay/skills in this workspace."));
 }
 
 void SkillRegistryView::selectSkill(const QString &id)
 {
     for (int i = 0; i < m_list->topLevelItemCount(); ++i) {
         if (m_list->topLevelItem(i)->data(0, Qt::UserRole).toString() == id) {
+            m_wanted.clear();
+            m_list->clearSelection();
             m_list->setCurrentItem(m_list->topLevelItem(i));
             return;
         }
     }
+    // Not listed (yet): the next refill selects it when the registry brings it.
+    if (!m_arrived)
+        m_wanted = id;
 }
 
 void SkillRegistryView::showSkill(const QString &id)

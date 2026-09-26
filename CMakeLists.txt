@@ -75,8 +75,8 @@ target_compile_options(relay-editor PRIVATE ${RELAY_WARNINGS})
 # them; `relay-modelrows`, the one row builder both boxes drew from, stays and is the pane's.
 
 # The skills registry's list and skill page (#9FX8): one widget the Board's Skills tab (project
-# skills) and Globals › Skills (every other source) both show, plus the import and update dialogs
-# SkillsDialog shares with it. Callback-only, so neither host's library drags in the other.
+# skills) and Globals › Skills (every other source) both show, plus the import and update dialogs.
+# It replaced the Skills dialog (#JVEJ). Callback-only, so neither host's library drags in the other.
 add_library(relay-skillregistry STATIC src/SkillRegistryView.cpp src/SkillRegistryView.h)
 target_include_directories(relay-skillregistry PUBLIC src)
 target_link_libraries(relay-skillregistry PUBLIC ${RELAY_QT}::Widgets)
@@ -706,7 +706,7 @@ if(RELAY_BUILD_APP)
         src/PaneChrome.h
         src/WindowChrome.h src/RelayWindow.h src/WindowManagerImpl.h
         src/RelayMark.h
-        src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
+        src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h src/TurnTranscript.cpp src/TurnTranscript.h
         src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
         # The Test suites pane (#7BM4): its own translation units, not included by main.cpp.
         src/TestSuitesModel.cpp src/TestSuitesModel.h src/TestSuitesPane.cpp src/TestSuitesPane.h
@@ -1109,7 +1109,7 @@ if(BUILD_TESTING)
             src/AppPaths.h src/CopyOnSelect.h src/Keymap.h src/Isolation.h src/GuestBridge.h
             src/Pane.h src/CardDrawer.h src/ApprovalsPane.h src/AgentHost.h src/TranscriptReplay.h src/RelayMark.h
             src/Theme.cpp src/Theme.h src/AgentUi.cpp src/AgentUi.h
-            src/TurnTranscript.cpp src/TurnTranscript.h src/SkillsDialog.cpp src/SkillsDialog.h
+            src/TurnTranscript.cpp src/TurnTranscript.h
             src/EngineBackend.cpp src/EngineBackend.h src/BackendFactory.cpp
             src/TestSuitesModel.cpp src/TestSuitesModel.h src/TestSuitesPane.cpp src/TestSuitesPane.h
             src/ProfilePane.cpp src/ProfilePane.h

@@ -118,7 +118,7 @@ QList<RelayWindow::PaletteItem> RelayWindow::rootItems() {
             }
             {
                 PaletteItem skills; skills.key = QStringLiteral("agent:skills"); skills.section = agent;
-                skills.label = QStringLiteral("Skills…"); skills.detail = QStringLiteral("list, exclude, refine, import · /skills");
+                skills.label = QStringLiteral("Skills…"); skills.detail = QStringLiteral("Globals › Skills: list, exclude, refine, import · /skills");
                 skills.run = [guard = QPointer<Pane>(pane)] { if (guard) guard->openSkills(); };
                 items << skills;
             }

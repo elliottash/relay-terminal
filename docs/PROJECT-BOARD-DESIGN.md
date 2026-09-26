@@ -61,7 +61,7 @@ protocol §19.22, the cards named):
 |---|---|---|---|
 | Card (work) | `.board/<category>/…md`, thread in `threads/<ID>.md` | Board list page, card page, card pane (#Y2BA) | `links: {plans, commits, evidence, related, github}`, `blocked_by`, `parent`, `session` (pane token), `links.signal`, `## Tasks` `card=` markers, `#ID` in prose |
 | Memory (project) | `.board/memory/<name>.md` (+ `archive/`, `.private/memory/`); a memory card **has a four-character id like a work card** | Globals' "All records" — wrongly, per the owner; #9FX8 moves it to the Board's Memories tab | `paths` (globs that auto-attach it), `supersedes`, `pinned`, `scope`, `reviewed` |
-| Skill (project) | `.relay/skills/<id>/SKILL.md`, workspace `.claude`/`.codex`/`.warp` | `SkillsDialog` (manager off the pane); #9FX8 step 1 landed `skills_registry` | `profile:` block; none to cards — a card names its server (`server:`, #G9ZD) |
+| Skill (project) | `.relay/skills/<id>/SKILL.md`, workspace `.claude`/`.codex`/`.warp` | Board › Skills (`SkillRegistryView`, #9FX8); the Skills dialog retired into Globals › Skills (#JVEJ) | `profile:` block; none to cards — a card names its server (`server:`, #G9ZD) |
 | Alias | `.board/aliases/`, global aliases | Globals; `/name` | `kind`, `## Run` |
 | Case | `.board/cases.jsonl`, append-only | none by design (agent-facing, owner steer 2026-09-23); the skill page will list them | `server`, `server_version`, `card`, `input`, `served_by` |
 | Run and artifact | planned: `runs.jsonl` (#FVVY steps 2–3) | none | `card`, `case`, `outputs[{path, sha256}]`, `superseded_by`; artifact address `run:<id>#<path>` |

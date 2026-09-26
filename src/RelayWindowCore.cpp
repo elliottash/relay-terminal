@@ -572,6 +572,10 @@ ToolPane *RelayWindow::createSessionsPane(const QString &cwd) {
                 if (console.draftInComposer) console.draftInComposer(text);
             });
         });
+        // Its Open file and a refined copy (#JVEJ, as the Skills dialog did) open beside it.
+        globals->setDocumentTarget([toolGuard](const QString &path) {
+            if (auto *window = windowOf(toolGuard)) window->openDocument(path, window->workspaceOwner(toolGuard), false);
+        });
         // What is open and what was closed is the window's knowledge, not the list's: it is pushed
         // in here, and again whenever the recently-closed list changes, so the "open" and
         // "closed 5 min ago" tags on the rows stay true (card #R6J0).
@@ -1053,6 +1057,9 @@ Pane *RelayWindow::createPane(const QJsonObject &spec) {
         };
         pane->onOpenSubagent = [guard](const QString &id) { if (auto *w = windowOf(guard)) w->openSubagentTab(guard, id); };   // subagents UI (#WD83)
         pane->onShowAgents = [guard] { if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openAgentsMenu(); } };   // /agents → subagents panel menu
+        pane->onOpenSkills = [guard](const QString &name, bool project) {   // /skills → the registry (#JVEJ)
+            if (auto *w = windowOf(guard)) { w->setActiveLeaf(guard); w->openSkills(name, project); }
+        };
         pane->onOpenTurn = [guard](const QString &turnId) { if (auto *w = windowOf(guard)) w->openTurnPane(guard, turnId); };
         pane->onOpenInternals = [guard] { if (auto *w = windowOf(guard)) w->openInternalsPane(guard); };
         // The share chip, once this pane is shared: who is here and what is waiting (#W5N2).
@@ -1229,6 +1236,9 @@ void RelayWindow::wireAgentConsole(Pane *console) {
             if (auto *w = windowOf(guard)) w->toggleExplorer(path, hostLeafOf(guard));
         };
         console->onShowAgents = [guard] { if (auto *w = windowOf(guard)) w->openAgentsMenu(); };
+        console->onOpenSkills = [guard](const QString &name, bool project) {
+            if (auto *w = windowOf(guard)) w->openSkills(name, project);
+        };
         console->onOpenSubagent = [guard](const QString &id) {
             if (auto *w = windowOf(guard)) w->openSubagentTab(w->paneForConsoleOpen(guard), id);
         };

@@ -280,7 +280,7 @@ bool Pane::handleObservabilityEvent(const QString &type, const QJsonObject &even
             // Errors for protocol-11 requests carry the request id; keep them out of the transcript.
             const QString id = event.value(QStringLiteral("id")).toString();
             if (id.startsWith(QStringLiteral("skills-"))) {
-                if (m_skillsDialog) m_skillsDialog->handleEvent(event); else status(event.value(QStringLiteral("text")).toString());
+                status(event.value(QStringLiteral("text")).toString());
                 return true;
             }
             if (id.startsWith(QStringLiteral("assist-"))) {
@@ -479,9 +479,8 @@ bool Pane::handleObservabilityEvent(const QString &type, const QJsonObject &even
         }
         if (type == QStringLiteral("skills") || type == QStringLiteral("skills_refined") || type == QStringLiteral("skills_import_preview")
             || type == QStringLiteral("skills_imported") || type == QStringLiteral("skills_updates")) {
-            if (m_skillsDialog) m_skillsDialog->handleEvent(event);
-            else if (type != QStringLiteral("skills")) status(QStringLiteral("Skills: ") + type);
-            // The dialog's list is the fresher one after a refine or an import: `/name` follows it.
+            // The registry views (Globals › Skills, the Board's tab) take these through their own
+            // routes; here a `skills` list is the fresher one after a refine or an import.
             if (type == QStringLiteral("skills")) setSkillCommands(event.value(QStringLiteral("items")).toArray());
             if (type == QStringLiteral("skills_refined")) {
                 const auto items = event.value(QStringLiteral("items")).toArray();
