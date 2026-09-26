@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzy
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [probe, ai-visual], human: optional, criteria: Workspace and queue state are visible; Relay (main) launches the installed release, effort: high}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [26456fb63182], evidence: [docs/qa_evidence/2026-09-25-b3-workspace-live/01-live.png], related: [], github: null}
+links: {plans: [], commits: [26456fb63182, c3134961111d], evidence: [docs/qa_evidence/2026-09-25-b3-workspace-live/01-live.png], related: [], github: null}
 ---
 # B3: Workspace visibility and main launcher in Relay
 
