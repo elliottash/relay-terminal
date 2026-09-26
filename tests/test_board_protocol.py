@@ -1137,6 +1137,37 @@ class KeylessWorkerTests(unittest.TestCase):
         self.assertEqual(len(opened), 1, names)
         self.assertEqual(opened[0]["cards"], [])
 
+    def test_direct_card_read_precedes_helper_configuration(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            issues = Path(tmp) / "issues"
+            (issues / "features").mkdir(parents=True)
+            (issues / B.BOARD_CONFIG).write_text(CONFIG, encoding="utf-8")
+            (issues / "features" / "card.md").write_text(
+                "---\nid: K7Q2\ntype: work\nstatus: inbox\nlabels: [feature]\n"
+                "rank: m\ncreated: '2026-09-25'\n---\n# Direct card\n\n## Issue\nRead me.\n",
+                encoding="utf-8")
+            requests = [
+                {"type": "configure", "workspace": tmp, "agent_role": "switchboard",
+                 "defer_agent": True, "api_key": "", "preset": "kimi"},
+                {"type": "board_card_get", "id": "card1", "card": "K7Q2"},
+                {"type": "configure", "workspace": tmp, "agent_role": "switchboard",
+                 "api_key": "k", "base_url": "http://127.0.0.1:9/v1",
+                 "model": "test/model"},
+                {"type": "shutdown"},
+            ]
+            proc = subprocess.run([sys.executable, "-S", str(root / "backend/worker.py")],
+                                  input="".join(json.dumps(m) + "\n" for m in requests),
+                                  text=True, capture_output=True, timeout=20, cwd=root,
+                                  env={**os.environ, "RELAY_KEYRING": "off"})
+        events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        detail = [e for e in events if e.get("event") == "board_card" and e.get("id") == "card1"]
+        self.assertEqual(len(detail), 1, events)
+        self.assertIn("Read me.", detail[0]["body"])
+        names = [e["event"] for e in events]
+        self.assertEqual(names.count("configured"), 1, events)
+        self.assertLess(names.index("board_card"), names.index("configured"))
+
 
 # ------------------------------------------------ board_cleanup: the whole board at once
 

@@ -4941,6 +4941,7 @@ public:
             if (anchor) dockBeside(anchor, created);
             else if (page && page->layout()) page->layout()->addWidget(created);
             attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+            if (page) page->setProperty("relayDeferBoardAgent", true);
         }
         ToolPane *tool = boardInTab();
         if (!tool) return;
@@ -5388,6 +5389,8 @@ public:
         // An attached project can have no board yet; send that state explicitly so board_open
         // returns its empty view instead of attempting to discover a nonexistent board.
         configure.insert(QStringLiteral("board"), boardSettingsFor(page));
+        if (page->property("relayDeferBoardAgent").toBool())
+            configure.insert(QStringLiteral("defer_agent"), true);
         configure.insert(QStringLiteral("app"), appCatalogFor(page));
         // The keybinding catalogue a pane's `configure` carries (§30.2), for the same reason and
         // from the same builder: the helper's Actions pane is the palette "with its keyboard
@@ -5666,6 +5669,8 @@ public:
         // this pane is not in a tab yet (insertBeside comes afterwards).
         view->onCreateConsole = [guard](relay::agent::Context *context, QWidget *parent) {
             auto *w = windowOf(guard);
+            if (w)
+                if (QWidget *page = w->pageOf(guard)) page->setProperty("relayDeferBoardAgent", false);
             return w ? w->createAgentConsole(context, parent) : relay::agent::ConsoleHandle();
         };
         QPointer<relay::BoardView> viewGuard(view);

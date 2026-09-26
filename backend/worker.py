@@ -325,6 +325,12 @@ def main():
                 # so a missing key still lets the pane open and browse the cards (only board_ask
                 # needs the agent). Before 2026-09-17 a keyless window sat on "Loading…" forever.
                 board_summary = board.configure(board_workspace, request)
+                # A card-code reveal needs only the file-backed Board. Building the helper here
+                # can start a guest process and MCP discovery before the card is read. The card
+                # page sends a normal configure after it appears, which builds the agent then.
+                if request.get("defer_agent") is True and request.get("agent_role") == "switchboard":
+                    state["workspace"] = workspace
+                    continue
                 memory_startup.configure(request.get("memory_import"))
                 # Protocol 33 (card #AGNT): what this agent is *about*. One `configure` builds a
                 # terminal pane's agent or an agent console's, and the difference is this block —
