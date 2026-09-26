@@ -1,13 +1,16 @@
 ---
 id: 3MH4
 type: work
-status: discussing
+status: executing
 labels: [feature, workflow, land, git, switchboard, design]
+assignee: agent
+implemented_by: openai/gpt-6-astra via codex
+session: 2e8d13e7-b862-4dff-b518-36ccf1658178
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [probe], human: required, criteria: Two native/guest development panes land independently through the queue; restart preserves work and Live accurately shows queued and recoverable work., sign_off: none, effort: high}
 source: Claude pane in relay-terminal, 2026-09-26, after reviewing session da8c2a806ad7450da6674120a858f773
-links: {plans: [], commits: [08e1de6e7ad7, 1d468dc76f20], evidence: [], related: [C52H, WNKN, NPCD, CBE6, FYEY, SZHQ, 76QW, AQ6X, V52P, ZPWT, HRF6, BHJZ], github: null}
+links: {plans: [], commits: [08e1de6e7ad7, 1d468dc76f20, 07edfab39c79, 41c2d09324f3, 4a66674f0728, a18f4dda86ed, bdb8c79683df, fa45e40f438f, 76e1974f0ac4, df24acbc9eaa, 423d4833ca27, 91e5d7d103ea, 373e6c959d35, 4347f4883dd6, f5606d58d763, 792cf7b18fcb, 5d40b83c2239, b2d455429dea, 9c97f2676ffd, 2da4097651d2, 7f566b388764, 26456fb63182, c459f5d603d2, 21d78d12d171, 0eebe8f437ba, 0073503a4d90, ca3c7e3187a4, c692bf221292, d95a11446dcf, 585291ffd8ed, 5d9029b33d2e, a0141e41f493, 65ca8c46204b, e7f541a44fa9, c8dce2511c2f, 9873de343f1a, f304e689cd90], evidence: [], related: [C52H, WNKN, NPCD, CBE6, FYEY, SZHQ, 76QW, AQ6X, V52P, ZPWT, HRF6, BHJZ], github: null}
 ---
 # Parallel agentic development without landing hell: isolate by construction (a workspace per session), integrate by machine (a merge queue), for any project
 
@@ -217,45 +220,45 @@ Warm builds are keyed by repository, toolchain, configuration and dependency inp
 3. **Durable queue and publication coordinator.** Add proposed `backend/relay_core/landq.py` and `scripts/relay-land`; immutable submit/status/cancel, scheduler, required gate, receipts and Board metadata jobs. Test crashes at every state boundary, duplicate submit, conflicts, tip movement and two competing service instances. Gate: the published SHA is exactly the verified candidate and restart loses no submission.
 4. **Pane/native/guest integration and visibility.** Separate canonical project/Board identity from execution cwd. Allocate before launching development processes; existing panes migrate only at a stopped turn boundary with controlled restart. Update guest context, file tools, shell, scratch and relevant protocol events together. Live shows workspace, submitted job, queue reason and recoverable work. Test native and guest parity plus a no-card pane.
 5. **Project configuration and second-project pilot.** Define versioned `.relay/project.toml` from step 2, with opt-in independent of file existence. Pilot Relay's wrapper-based CMake gate and a small Python repo. Add `docs/TREES-AND-LANDING.md` and update `docs/BUILDING.md`; demonstrate that the second repo needs config, not Relay-specific code.
-6. **Controlled cutover and rollback.** Inventory all active land sessions and preserve their dirty work; drain existing writers, record baseline refs and gate policy, switch the human checkout safely, route Board sync through the coordinator, then enable new workspace launches. Only after acceptance retire attribution machinery for tree panes; keep legacy recovery for old sessions. Rollback pauses admission, drains/stops publication and retains all refs/trees/jobs; re-enable a legacy writer only after the coordinator is stopped. Never run both writers against the same target.
-7. **Measure the pilot for a week.** Compare matched workload counts: submissions and user interventions per landing, queue wait versus verify time (p50/p95), throughput, retries, repairs, required-gate failures, actual disk and recovery outcomes. Target ≤1.2 submissions per landed change and zero lost/foreign edits; diagnose regressions before widening rollout. Historical 83 minutes/day is not directly comparable until collection covers the same guest/native population.
+6. **Finish the first milestone: cutover-ready verification.** Obtain fresh independent acceptance at the final B1 SHA, including durable handoff and Board snapshot behavior, plus an isolated migration and rollback rehearsal. Record exact SHAs and limitations. Do not activate this repository or move its checkout branch during this milestone.
+7. **Separate production cutover and pilot.** At a later authorized cutover, inventory live legacy claims and dirty work, drain writers, record baseline and accepted policy, and follow `docs/PARALLEL-DEVELOPMENT-MIGRATION.md`. After activation, measure a week of matched submissions, queue wait, gate time, repairs, disk and recovery outcomes before widening rollout. Historical 83 minutes/day is not comparable until collection covers the same guest/native population.
 
 ### Risks and later work
 
 Shared-file isolation does not resolve semantic conflicts, duplicate work or missing tests. Keep Board claims, dependency links and overlap notices. Local Git access is not a security boundary: hooks prevent accidental bypass; external writers are detected by expected-tip checks and force re-verification.
 
-Defer background auto-rebase, batching/speculative verification, graph-based test selection and autonomous reconciliation until the MVP passes. Idle is not consent to rewrite a branch: start with main-moved notices and explicit sync under the workspace lease. Replay reconciliation against independent acceptance tests and author review, not historical landed text alone; return proposed patches for acknowledgement before considering auto-publication.
+Defer background auto-rebase, batching/speculative verification and graph-based test selection. Idle is not consent to rewrite a branch: use main-moved notices and explicit sync under the workspace lease. The owner approved automatic reconciliation: a subscription-weighted High-tier model attempts a bounded repair, the required gate runs again, and unsafe or exhausted cases return to the author agent. No owner acknowledgement or replay experiment gates this flow.
 
-Q3–Q9 in the earlier thread remain proposals, not recorded owner approvals. Recommended defaults are state-owned trees, canonical Board, no-card workspace isolation and hard per-project cutover; reconciliation stays off. Actual rollout must explicitly replace the current checkout rule and settle the human-checkout transition. No decision is needed to complete this plan refinement.
+The owner approved the state-owned tree, canonical Board, no-card isolation, weighted High reconciler, runnable `main` release and first implementation milestone. The actual repository remains on its legacy publication path until a separate production cutover; the migration guide governs that transition.
 
 ### Verify
 
 Use new focused temporary-repository tests for tree lifecycle and queue state transitions, plus targeted existing land/Board/guest tests for touched adapters. Required scenarios: two same-file authors, dirty and clean-unlanded pane death, restart before/after publication, duplicate submit, competing publishers, target-tip race, Board write during a build, failed/zero-test gate, resource exhaustion across two repos, stale build artifacts, cancellation, newer edits after submit, and rollback with pending work.
 
-The implementation verifier also stages two real panes (native and guest), captures Live/queue status, and checks independent edits → one submit each → recorded verified SHAs. A second project completes the same flow using configuration only. These are planned checks; no implementation tests or migration were run in this refinement.
+The implementation verifier stages native and guest pane behavior in isolated state, captures Live/queue status, and checks independent submissions and recorded verified SHAs. C1 recorded 9 regression passes and 2 LiveGui passes at `e7f541a4`; fresh final acceptance including `c8dce251` and a separate isolated migration/rollback rehearsal remain pending. C2 exercised a second project through configuration and CLI. No production migration has run.
 
 ## Tasks
 
-- [x] Stabilize legacy slots: pool from MemTotal, poll all slots, named holders, --wait-seconds exit 7 (08e1de6e); ccache 40 GB never lowered (1d468dc7), build1/ removed. Remaining: zero-capacity admission rule moves to A3 <!-- t:6w -->
-- [ ] A1 trees: workspace lifecycle, registry, sparse excludes, init hook, sync, safe retention; temp-repo tests <!-- t:kq -->
-- [ ] A2 queue core: immutable submit, state machine, exact-candidate CAS publish, receipts, crash recovery, metadata jobs; crash/race tests <!-- t:yj blocked_by=kq -->
-- [ ] B2 backend pane integration (board root, tools env, guest_launch, scratch, protocol) + B3 GUI (launch cwd, status line, Live rows, Relay (main) launcher) <!-- t:0w blocked_by=kq,yj -->
-- [ ] After MVP: explicit safe sync first; evaluate opt-in background rebase under a workspace lease <!-- t:zp s=deferred blocked_by=z9 -->
-- [x] ~~Replay experiment — dropped by the owner 2026-09-26 ("forget the experiment")~~ <!-- t:2f s=dropped blocked_by=yj -->
-- [ ] A4 reconciler (owner, 2026-09-26): gate-passing results auto-publish (Reconciled-From trailer, notes on both cards); failures or weakened tests go to the author agent, never the owner; high effort; token cap + daily budget <!-- t:4m blocked_by=2f -->
-- [ ] Controlled migration: preserve legacy work, human-checkout transition, drain writers, coordinator-only cutover and rollback drill <!-- t:c6 blocked_by=6k -->
-- [ ] C1 independent verifier (all Verify scenarios, native+guest Xvfb) + C2 second-project pilot and docs <!-- t:6k blocked_by=yj,0w -->
-- [ ] Measure one-week pilot with comparable workload metrics (incl. reconciler tokens/day and outcomes) before widening rollout <!-- t:z9 blocked_by=c6 -->
-- [ ] Phase 0: contract doc docs/TREES-AND-LANDING.md (schemas, state machine, module APIs, CLI, project.toml v1, protocol events, test fixtures, ownership map) <!-- t:vw -->
-- [ ] A3 project config + host admission + warm tip build with runnable run/current (owner Q10) <!-- t:n6 -->
-- [ ] B1 coordinator daemon wiring A1–A4; Board metadata through the one publisher (land.py board-sync, agent.py spawn) <!-- t:er -->
+- [x] Stabilize legacy slots and preserve the 40 GB compiler cache; completed in 08e1de6e and 1d468dc7. <!-- t:6w -->
+- [x] A1 workspace lifecycle, registry, sparse exclusions, ordered init, sync and safe retention; cd788651/f4545758, 59 tests. <!-- t:kq card=RT3B -->
+- [x] A2 immutable queue, exact-candidate publication, receipts and crash recovery; 41 tests. <!-- t:yj card=FW1C blocked_by=kq -->
+- [x] B2 native/guest execution and canonical Board; B3 prelaunch allocation, Live status and Relay (main) launcher, with parent fixes `a0141e41` and `e7f541a4`. <!-- t:0w blocked_by=kq,yj -->
+- [ ] After MVP: explicit safe sync first; evaluate opt-in background rebase under a workspace lease. <!-- t:zp s=deferred blocked_by=z9 -->
+- [x] ~~Replay experiment dropped by owner: "forget the experiment".~~ <!-- t:2f s=dropped blocked_by=yj -->
+- [x] A4 weighted High-tier automatic reconciler; persistent attempt/token budgets, test-preservation checks and author handoff; 4347f488, 44 tests. <!-- t:4m card=P9ZA blocked_by=vw -->
+- [ ] Fresh final acceptance and isolated cutover/rollback rehearsal for cutover readiness; actual production cutover is separate. <!-- t:c6 s=in-progress blocked_by=6k -->
+- [ ] C1 fresh acceptance at `c8dce251` pending; prior 9 regressions and 2 LiveGui checks passed at `e7f541a4`. C2 second-project adoption and migration docs landed. <!-- t:6k s=in-progress blocked_by=yj,0w -->
+- [ ] Measure one-week pilot on comparable workloads, including reconciler tokens/day and outcomes, before widening rollout. <!-- t:z9 blocked_by=c6 -->
+- [x] Phase 0 shared contract and nine child cards; docs/TREES-AND-LANDING.md, 07edfab3/fa45e40f. <!-- t:vw -->
+- [x] A3 project config, host admission, atomic runnable-main releases and running-release pinning; `423d4833`, `c692bf22` (44 initial targeted tests; final verifier pending). <!-- t:n6 card=ASQ4 -->
+- [x] B1 coordinator, accepted policy, Board publication, CLI, transition guards, runnable-main updates and durable split-poll handoff/Board snapshot fix `c8dce251` (fresh acceptance pending). <!-- t:er card=AMQQ -->
 
 ## Done means
 - Native and guest development panes own separate workspaces; same-file edits never enter another pane's submission, and landing needs one durable submit rather than hunk attribution.
 - One coordinator publishes code and Board metadata. Every code publication has a receipt tying the landed SHA to its passing required gate and policy; tip movement triggers new verification.
 - Crashes, duplicate submissions, cancellation and pane death lose neither queued jobs nor dirty or clean-unlanded work; restart and rollback are demonstrated under a bounded host resource budget.
 - A second Git project uses the same lifecycle and queue through project configuration alone; no-config/ungated operation is never presented as verified.
-- Controlled cutover preserves existing shared-checkout work, native/guest and Live behavior passes staged review, and the pilot reports comparable throughput, wait, repair and disk metrics. Lost work, foreign edits or publication without required evidence fails acceptance.
+- First milestone is a verified cutover-ready system: native/guest and Live behavior pass staged review at the final SHA, and an isolated cutover/rollback rehearsal preserves work. Production activation and a measured pilot are subsequent work. Lost work, foreign edits or publication without required evidence fails acceptance.
 
 ## Planning notes
 ### Orchestration: building #3MH4 with subagents (owner, 2026-09-26: "forget the experiment, lets build it with subagents")
@@ -282,6 +285,10 @@ B1 goes first. B2 and B3 run in parallel, since their files do not overlap and t
 
 **Phase 3: independent verification + pilot (two agents).** C1 verifier, on a different model family from the implementers: every scenario in `### Verify`, end to end in temp repos, plus a native + guest two-pane run under Xvfb with an isolated `XDG_CONFIG_HOME`. It files bugs as child cards, and the owning agent's successor fixes them. C2 pilot: a small Python repo adopts the system with only `.relay/project.toml`, plus final `docs/TREES-AND-LANDING.md`, `docs/BUILDING.md`, and a *draft* `CLAUDE.md`/`RELAY.md` landing chapter (not activated).
 
-**Phase 4: cutover (coordinator + owner).** Task c6: preserve legacy work, move the human checkout to its own branch, drain writers, coordinator-only, rollback drill, flip `trees.per_claim` for this repo; then task z9.
+**Phase 4: first-milestone verification, then a separate production cutover.** Task c6 first verifies the final implementation and rehearses migration/rollback in isolated state. Actual checkout transition and task z9's weeklong pilot follow separately; neither is part of this first milestone.
 
 **Rules every subagent prompt carries.** Own only your file list; land your own paths through `python3 scripts/land.py begin/commit` with `--wait-seconds 900`, never piped through `tail`; targeted tests only, never the full suites; never commit, stash or revert anything you did not write; fix clear gaps rather than listing them; code against the contract, and propose contract changes in the report instead of making them; the report lists files, commits, tests run with results, deviations and open questions.
+Implementation kicked off at the owner's instruction: "we're ready. lets go ahead with implementation with the suggested subagents". Contract landed as 07edfab3 in docs/TREES-AND-LANDING.md and supersedes outdated restrictions in the earlier Plan (fixed reconciler model, replay, human acknowledgement, and unapproved-decision language). Approved child workstreams: A1 #RT3B, A2 #FW1C, A3 #ASQ4, A4 #P9ZA, B1 #AMQQ, B2 #80X1, B3 #DV5Y, C1 #8J0A, C2 #2DP8. Four Phase 1 agents started; high role for A2/A4, main for A1/A3. Production remains legacy until verified controlled cutover. Runnable-main costs will be measured, not assumed cache hits.
+
+## Execution Summary
+Foundations (#RT3B, #FW1C, #P9ZA), A3 project gates/releases (#ASQ4), B1 coordinator (#AMQQ), B2 native/guest routing (#80X1), B3 GUI (#DV5Y), and C2 second-project adoption (#2DP8) are landed. A3's running-release pinning landed as `c692bf22`; docs followed in `d95a1144`. The parent fixed the quota-interrupted B2/B3 integration in `a0141e41` and `e7f541a4`. C1's `9873de34` records 9 regressions and 2 LiveGui passes at `e7f541a4`; B1's later `c8dce251` fixes split-poll handoff identity and synchronous durable Board snapshots, and awaits fresh final acceptance. The first milestone remains pending that result and an isolated cutover/rollback rehearsal. No production activation, real-model reconciliation acceptance or production throughput measurement has occurred. The actual Relay repository remains in legacy mode.
