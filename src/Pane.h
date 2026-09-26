@@ -843,6 +843,10 @@ public:
         if (hasShell() && m_consolePluginRequest.isEmpty())
             QTimer::singleShot(5000, this, [this] {
                 if (!m_seenShell && m_backend) {
+                    // Native until the first prompt, as takeControl() before one is: a shell that
+                    // was only slow (a restart starts every pane at once) hands the prompt box and
+                    // its restored text back when it does report (#MDQ8).
+                    m_autoHuman = true;
                     setNative(true);
                     status(QStringLiteral("Shell integration did not initialize. Native terminal remains available; try --clean-shell."));
                 }
@@ -13715,7 +13719,7 @@ private:
         // always ready to be printed into, and without this a card's banked transcript (card
         // #CTRN, `clearTranscript`) waited for a prompt that never comes. A pane with a shell
         // asks exactly what it asked before.
-        if (m_inlineOpen || (hasShell() && !shellIdleAtPrompt())) return;   // busy: the next prompt tries again
+        if (m_inlineOpen || (hasShell() && !shellIdleAtPrompt())) return;   // busy: the shell poll tries again (#MDQ8)
         m_scrollbackReplayed = true;
         // A surface switch inside a console keeps its own boundary. Restart and conversation
         // replay add none; the pane's title and session state already identify the conversation.
