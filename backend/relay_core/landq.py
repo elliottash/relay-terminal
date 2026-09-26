@@ -531,14 +531,20 @@ class Queue:
             return self._recover_locked()
 
     def process_one(self, verifier, *, reconcile=None, max_attempts=5,
-                    accepted_policy_hash=None) -> dict | None:
+                    accepted_policy_hash=None, reconcile_attempts=1) -> dict | None:
         """Prepare, verify and publish the oldest pickable job. Returns its final record, or
         None when the queue is empty. Holds the publisher lock throughout.
 
         A job found already `ready` is published from its recorded verification only when
         `accepted_policy_hash` names the policy that verification was bound to and the target
         has not moved; otherwise it is rebuilt and verified again, because the policy in force
-        may have changed since the pass was recorded."""
+        may have changed since the pass was recorded.
+
+        `reconcile` is asked twice over: for a textual merge conflict, and — at most
+        `reconcile_attempts` times per candidate — for a candidate the gate failed, with the
+        gate's diagnostics in the context. A repaired candidate is a new commit that goes
+        through the same required verifier; when that fails too, the job is `failed` and an
+        `author_required` notification carries both gate results. Nothing loops beyond that."""
         if verifier is None or not callable(verifier):
             raise Refused("a verifier is required: the queue never publishes unverified work")
         with self._publisher_lock():
@@ -552,7 +558,8 @@ class Queue:
                 return None
             job_id = job["id"]
             for _attempt in range(max_attempts):
-                outcome = self._attempt(job_id, verifier, reconcile, accepted_policy_hash)
+                outcome = self._attempt(job_id, verifier, reconcile, accepted_policy_hash,
+                                        reconcile_attempts)
                 if outcome != "retry":
                     break
             else:
@@ -655,13 +662,19 @@ class Queue:
             args += ["-p", p]
         return git_out(self.repo, *args, stdin=message)
 
-    def _message(self, job, *, reconciled_from=None, trailer=None) -> str:
-        head = "Land %s onto %s" % (job["submitted_sha"][:12], self.target)
+    def _message(self, job, *, reconciled_from=None, trailer=None, repair=None) -> str:
+        if repair:
+            head = "Repair %s for %s onto %s" % (repair[0][:12], job["submitted_sha"][:12],
+                                                 self.target)
+        else:
+            head = "Land %s onto %s" % (job["submitted_sha"][:12], self.target)
         if job.get("card"):
             card = job["card"] if str(job["card"]).startswith("#") else "#%s" % job["card"]
             head += " (%s)" % card
         lines = [head, "", "Landq-Job: %s" % job["id"], "Landq-Submitted: %s" % job["submitted_sha"],
                  "Landq-Kind: %s" % job["kind"]]
+        if repair:
+            lines.append("Landq-Repair: %d of %s" % (repair[1], repair[0]))
         if reconciled_from:
             lines.append("Reconciled-From: %s %s" % reconciled_from)
         if trailer:
@@ -795,7 +808,8 @@ class Queue:
 
     # ----------------------------------------------------------------- one attempt
 
-    def _attempt(self, job_id, verifier, reconcile, accepted_policy_hash=None) -> str:
+    def _attempt(self, job_id, verifier, reconcile, accepted_policy_hash=None,
+                 reconcile_attempts=1) -> str:
         """One prepare/verify/publish pass. Returns "done" or "retry" (the target moved under a
         verified candidate: everything is rebuilt against the new tip)."""
         attached = self.target_attached()
@@ -866,12 +880,41 @@ class Queue:
                                                    trailer=trailer))
         self._retain(job_id, "candidate", candidate)
 
-        # Verify: the candidate, checked out where the verifier can build it.
-        with self._tx() as conn:
-            self._set(conn, job_id, status="verifying", candidate_sha=candidate,
-                      candidate_tree=tree)
-            job = self._load(conn, job_id)
-        path = self._service_checkout(candidate)
+        # Verify: the candidate, checked out where the verifier can build it. A failed gate may
+        # get `reconcile_attempts` repair rounds through `reconcile`; a repaired candidate is a
+        # new commit that goes through the same required gate, and when that fails too the
+        # job is failed and the author is told. It never loops beyond that.
+        repairs = 0
+        while True:
+            with self._tx() as conn:
+                self._set(conn, job_id, status="verifying", candidate_sha=candidate,
+                          candidate_tree=tree)
+                job = self._load(conn, job_id)
+            path = self._service_checkout(candidate)
+            verdict = self._verify_candidate(job, candidate, tree, tip, path, verifier)
+            if verdict["ok"]:
+                with self._tx() as conn:
+                    self._set(conn, job_id, status="ready", policy_hash=verdict["policy"],
+                              reason=None)
+                return self._publish(job_id, tip)
+            repairable = (reconcile is not None and repairs < reconcile_attempts
+                          and not verdict["raised"] and not verdict["tampered"])
+            if not repairable:
+                self._fail_gate(job, candidate, verdict, author_required=repairs > 0)
+                return "done"
+            repairs += 1
+            repaired = self._repair(job, tip, candidate, tree, path, verdict, reconcile,
+                                    fast_forward, repairs)
+            if repaired is None:
+                return "done"
+            candidate, tree = repaired
+
+    def _verify_candidate(self, job, candidate, tree, tip, path, verifier) -> dict:
+        """Run the verifier on the checked-out candidate and persist its verdict, bound to
+        the candidate's sha and tree, the tip it was built on and the policy it reported.
+        A verifier that raises records no verdict; one that altered the checkout gets ok=0."""
+        job_id = job["id"]
+        name = "verify-%d-%s.log" % (job["attempts"], candidate[:12])
         try:
             result = verifier(job, candidate, str(path))
             if not isinstance(result, dict) or "ok" not in result:
@@ -880,14 +923,12 @@ class Queue:
             raise
         except Exception as exc:  # noqa: BLE001 — a verifier that dies is a failed gate, not a loop
             reason = "verifier raised %s: %s" % (exc.__class__.__name__, exc)
-            log_path = self._log(job_id, "verify-%d.log" % job["attempts"], reason + "\n")
-            with self._tx() as conn:
-                self._set(conn, job_id, status="failed", reason=reason)
-                self._notify(conn, job_id, "failed", {"job_id": job_id, "candidate_sha": candidate,
-                                                      "reason": reason, "log": log_path})
-            return "done"
+            return {"ok": False, "verified": False, "policy": "", "reason": reason,
+                    "log_path": self._log(job_id, name, reason + "\n"), "log": reason,
+                    "raised": True, "tampered": ""}
         policy = str(result.get("policy_hash") or "")
-        log_path = self._log(job_id, "verify-%d.log" % job["attempts"], str(result.get("log", "")))
+        log = str(result.get("log", ""))
+        log_path = self._log(job_id, name, log)
         ok = bool(result["ok"])
         verified = bool(result.get("verified", ok))
         reason = result.get("reason")
@@ -904,15 +945,72 @@ class Queue:
                 " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (job_id, candidate, tree, tip, policy, int(ok), int(verified),
                  str(reason) if reason else None, log_path, _now()))
-            if not ok:
-                self._set(conn, job_id, status="failed", policy_hash=policy,
-                          reason=str(reason or "verification failed"))
+        return {"ok": ok, "verified": verified, "policy": policy,
+                "reason": str(reason or "verification failed"), "log_path": log_path,
+                "log": log, "raised": False, "tampered": tampered}
+
+    def _fail_gate(self, job, candidate, verdict, *, author_required):
+        job_id = job["id"]
+        payload = {"job_id": job_id, "card": job.get("card"),
+                   "workspace_id": job.get("workspace_id"), "candidate_sha": candidate,
+                   "reason": verdict["reason"], "log": verdict["log_path"]}
+        history = self.verifications(job_id) if author_required else None
+        with self._tx() as conn:
+            self._set(conn, job_id, status="failed", policy_hash=verdict["policy"] or None,
+                      reason=verdict["reason"])
+            self._notify(conn, job_id, "failed", payload)
+            if author_required:
+                # The repaired candidate failed the required gate too: no more rounds.
+                self._notify(conn, job_id, "author_required",
+                             {**payload, "submitted_sha": job["submitted_sha"],
+                              "target_sha": job.get("target_sha"), "conflicts": [],
+                              "verifications": history})
+        return None
+
+    def _repair(self, job, tip, candidate, tree, path, verdict, reconcile, fast_forward,
+                round_number):
+        """Ask `reconcile` to repair a candidate the gate failed. Returns (repaired_sha,
+        tree) — a new commit the required gate has yet to see — or None after recording
+        `failed` plus an `author_required` notification."""
+        job_id = job["id"]
+        submitted = job["submitted_sha"]
+        diagnostics = {"kind": "gate_failure", "round": round_number, "candidate_sha": candidate,
+                       "reason": verdict["reason"], "policy_hash": verdict["policy"],
+                       "log_path": verdict["log_path"], "log": verdict["log"][-100_000:]}
+        context = self._context(job, tip, path, conflicts=[], diagnostics=diagnostics)
+
+        def give_up(reason, extra=None):
+            full = "%s; reconcile: %s" % (verdict["reason"], reason)
+            with self._tx() as conn:
+                self._set(conn, job_id, status="failed", policy_hash=verdict["policy"] or None,
+                          reason=full)
                 self._notify(conn, job_id, "failed", {"job_id": job_id, "candidate_sha": candidate,
-                                                      "reason": str(reason or "verification failed"),
-                                                      "log": log_path})
-                return "done"
-            self._set(conn, job_id, status="ready", policy_hash=policy, reason=None)
-        return self._publish(job_id, tip)
+                                                      "reason": full, "log": verdict["log_path"]})
+                payload = {"job_id": job_id, "card": job.get("card"),
+                           "workspace_id": job.get("workspace_id"), "conflicts": [],
+                           "reason": full, "target_sha": tip, "submitted_sha": submitted,
+                           "candidate_sha": candidate, "diagnostics": diagnostics}
+                if extra:
+                    payload.update(extra)
+                self._notify(conn, job_id, "author_required", payload)
+            return None
+
+        outcome = self._resolution_tree(job, tip, context, path, tree, reconcile)
+        if outcome[0] != "ok":
+            return give_up(outcome[1], outcome[2])
+        new_tree, trailer = outcome[1], outcome[2]
+        if job["kind"] == "metadata":
+            try:
+                self._check_metadata(tip, new_tree)
+            except ConflictError as exc:
+                return give_up(str(exc))
+        parents = [submitted] if fast_forward else [tip, submitted]
+        repaired = self._commit(new_tree, parents,
+                                self._message(job, reconciled_from=(tip, submitted),
+                                              trailer=trailer, repair=(candidate, round_number)))
+        self._retain(job_id, "repair-%d" % round_number, repaired)
+        self._retain(job_id, "candidate", repaired)
+        return repaired, new_tree
 
     def _workspace_drift(self, path, candidate) -> str:
         """What differs between the service worktree and `candidate` after the verifier ran:
@@ -950,6 +1048,67 @@ class Queue:
                 (job["id"], job["candidate_sha"], job["candidate_tree"],
                  job["target_sha"])).fetchone()
 
+    def _context(self, job, tip, path, *, conflicts, diagnostics) -> dict:
+        """The A4 reconcile context (docs/TREES-AND-LANDING.md): what the job is, where the
+        editable candidate is, and what went wrong — conflicted paths, or gate diagnostics."""
+        submitted = job["submitted_sha"]
+        return {
+            "repo": str(self.repo), "repo_id": self.repo_id, "job_id": job["id"],
+            "base_sha": job.get("base_sha") or git_out(self.repo, "merge-base", tip, submitted),
+            "target_sha": tip, "submitted_sha": submitted, "candidate_path": str(path),
+            "cards": [job["card"]] if job.get("card") else [], "intents": {},
+            "conflicts": list(conflicts), "diagnostics": diagnostics,
+            "policy": job.get("policy_hash"),
+        }
+
+    def _resolution_tree(self, job, tip, context, path, original_tree, reconcile):
+        """Call `reconcile(context)` and turn its answer into a tree. Returns
+        ("ok", tree, trailer) or ("fail", reason, extra). The reconciler may edit
+        `candidate_path` in place or name a `tree` or a `candidate_sha` (whose tree is taken);
+        the queue makes every commit, so nothing it produced is published as-is."""
+        job_id = job["id"]
+        submitted = job["submitted_sha"]
+        try:
+            result = reconcile(context)
+            if inspect.isawaitable(result):
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    result = asyncio.run(result)
+                else:
+                    raise Refused("reconcile returned an awaitable inside a running event loop;"
+                                  " wrap it in a synchronous adapter")
+        except QueueError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a broken reconciler is an outcome, not a crash
+            return ("fail", "reconcile raised %s: %s" % (exc.__class__.__name__, exc), None)
+        kind = context["diagnostics"]["kind"] if isinstance(context.get("diagnostics"), dict) \
+            else "reconcile"
+        self._log(job_id, "reconcile-%s-%s.json" % (kind, original_tree[:12]),
+                  json.dumps(result if isinstance(result, dict) else {"result": str(result)},
+                             indent=1, default=str))
+        if not isinstance(result, dict) or result.get("status") != "resolved":
+            reason = result.get("reason") if isinstance(result, dict) else None
+            return ("fail", reason or "reconcile: author required",
+                    {"reconcile": result if isinstance(result, dict) else str(result)})
+        if result.get("candidate_sha"):
+            tree = self._tree_of(resolve_commit(self.repo, str(result["candidate_sha"])))
+        elif result.get("tree"):
+            proc = git(self.repo, "rev-parse", "--verify", "--quiet",
+                       str(result["tree"]) + "^{tree}", check=False)
+            if proc.returncode != 0:
+                return ("fail", "reconcile named a tree that does not exist", None)
+            tree = proc.stdout.strip()
+        else:
+            git(path, "add", "-A", "--", ".")
+            tree = git_out(path, "write-tree")
+        markers = self._conflict_markers(tree, tip, submitted)
+        if markers:
+            return ("fail", "reconcile left conflict markers in %s" % ", ".join(markers), None)
+        if tree == original_tree:
+            return ("fail", "reconcile changed nothing", None)
+        return ("ok", tree, result.get("trailer"))
+
     def _reconcile(self, job, tip, conflicted_tree, conflicted, output, reconcile):
         """Run the reconcile callback on a conflicted merge. Returns (tree, trailer) for a
         resolution that is a new candidate, or None after recording the `conflict` outcome."""
@@ -975,56 +1134,13 @@ class Queue:
                               "conflicted merge for landq job %s (not a candidate)\n" % job_id)
         self._retain(job_id, "conflicted", staged)
         path = self._service_checkout(staged)
-        context = {
-            "repo": str(self.repo), "repo_id": self.repo_id, "job_id": job_id,
-            "base_sha": job.get("base_sha") or git_out(self.repo, "merge-base", tip, submitted),
-            "target_sha": tip, "submitted_sha": submitted, "candidate_path": str(path),
-            "cards": [job["card"]] if job.get("card") else [], "intents": {},
-            "conflicts": list(conflicted), "diagnostics": output,
-            "policy": job.get("policy_hash"),
-        }
-        try:
-            result = reconcile(context)
-            if inspect.isawaitable(result):
-                try:
-                    asyncio.get_running_loop()
-                except RuntimeError:
-                    result = asyncio.run(result)
-                else:
-                    raise Refused("reconcile returned an awaitable inside a running event loop;"
-                                  " wrap it in a synchronous adapter")
-        except QueueError:
-            raise
-        except Exception as exc:  # noqa: BLE001 — a broken reconciler is a conflict, not a crash
-            return give_up("reconcile raised %s: %s" % (exc.__class__.__name__, exc))
-        self._log(job_id, "reconcile.json",
-                  json.dumps(result if isinstance(result, dict) else {"result": str(result)},
-                             indent=1, default=str))
-        if not isinstance(result, dict) or result.get("status") != "resolved":
-            reason = (result or {}).get("reason") if isinstance(result, dict) else None
-            return give_up(reason or "reconcile: author required", {"reconcile": result if
-                                                                       isinstance(result, dict)
-                                                                       else str(result)})
-        # Where did the resolution go? A commit or tree the reconciler names, else the tree it
-        # edited in place. Either way the queue makes the commit; nothing the reconciler
-        # produced is published as-is.
-        if result.get("candidate_sha"):
-            tree = self._tree_of(resolve_commit(self.repo, str(result["candidate_sha"])))
-        elif result.get("tree"):
-            proc = git(self.repo, "rev-parse", "--verify", "--quiet", str(result["tree"]) + "^{tree}",
-                       check=False)
-            if proc.returncode != 0:
-                return give_up("reconcile named a tree that does not exist")
-            tree = proc.stdout.strip()
-        else:
-            git(path, "add", "-A", "--", ".")
-            tree = git_out(path, "write-tree")
-        markers = self._conflict_markers(tree, tip, submitted)
-        if markers:
-            return give_up("reconcile left conflict markers in %s" % ", ".join(markers))
-        if tree == conflicted_tree:
-            return give_up("reconcile changed nothing")
-        return tree, result.get("trailer")
+        context = self._context(job, tip, path, conflicts=conflicted,
+                                diagnostics={"kind": "merge_conflict", "conflicts": list(conflicted),
+                                             "merge_output": output})
+        outcome = self._resolution_tree(job, tip, context, path, conflicted_tree, reconcile)
+        if outcome[0] != "ok":
+            return give_up(outcome[1], outcome[2])
+        return outcome[1], outcome[2]
 
     def _publish(self, job_id, tip) -> str:
         """Compare-and-swap the target to the verified candidate. Intent goes to SQLite first;

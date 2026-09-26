@@ -377,6 +377,8 @@ class QueueCase(unittest.TestCase):
                          (theirs, mine, self.base))
         self.assertEqual(ctx["cards"], ["#FW1C"])
         self.assertEqual(ctx["repo_id"], "test-repo")
+        self.assertEqual(ctx["diagnostics"]["kind"], "merge_conflict")
+        self.assertIn("a.txt", ctx["diagnostics"]["merge_output"])
         new = tip(self.repo)
         self.assertEqual(verifier.calls[0][1], new)
         self.assertEqual(show(self.repo, new, "a.txt"), "theirs and mine")
@@ -439,6 +441,167 @@ class QueueCase(unittest.TestCase):
         self.assertEqual(show(self.repo, new, "a.txt"), "resolved")
         parents = git_out(self.repo, "rev-list", "--parents", "-n1", new).split()[1:]
         self.assertEqual(parents, [theirs, mine])
+
+    # ------------------------------------------------------------ gate-failure repair
+
+    def test_failed_gate_is_repaired_once_and_reverified(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "brkoen\n"}, "typo")
+        job = q.submit(sha, request_id="r1", card="#FW1C")
+        contexts = []
+
+        def gate(j, candidate, path):
+            text = (Path(path) / "a.txt").read_text()
+            ok = text == "broken\n"
+            return {"ok": ok, "policy_hash": "p1", "verified": ok,
+                    "log": "spelling check on a.txt: %r" % text,
+                    **({} if ok else {"reason": "a.txt misspelt"})}
+
+        def reconcile(context):
+            contexts.append(context)
+            (Path(context["candidate_path"]) / "a.txt").write_text("broken\n")
+            return {"status": "resolved", "trailer": "Reconciled-By: fake-model"}
+
+        done = q.process_one(gate, reconcile=reconcile)
+        self.assertEqual(done["status"], "landed", done)
+        self.assertEqual(len(contexts), 1)
+        diag = contexts[0]["diagnostics"]
+        self.assertEqual((diag["kind"], diag["round"], diag["candidate_sha"], diag["reason"]),
+                         ("gate_failure", 1, sha, "a.txt misspelt"))
+        self.assertIn("spelling check", diag["log"])
+        self.assertEqual(contexts[0]["conflicts"], [])
+        new = tip(self.repo)
+        self.assertNotEqual(new, sha)
+        self.assertEqual(show(self.repo, new, "a.txt"), "broken")
+        parents = git_out(self.repo, "rev-list", "--parents", "-n1", new).split()[1:]
+        self.assertEqual(parents, [sha], "a fast-forward repair is a child of the submission")
+        message = git_out(self.repo, "log", "-1", "--format=%B", new)
+        self.assertIn("Landq-Repair: 1 of %s" % sha, message)
+        self.assertIn("Reconciled-From: %s %s" % (self.base, sha), message)
+        self.assertIn("Reconciled-By: fake-model", message)
+        rows = q.verifications(job["id"])
+        self.assertEqual([(r["candidate_sha"], r["ok"]) for r in rows],
+                         [(sha, False), (new, True)], "the repaired candidate was gated again")
+        receipt = q.receipt(job["id"])
+        self.assertEqual((receipt["published_sha"], receipt["submitted_sha"], receipt["verified"]),
+                         (new, sha, True))
+        self.assertEqual(git_out(self.repo, "rev-parse", "refs/landq/jobs/%s/repair-1" % job["id"]),
+                         new)
+        self.assertEqual([n["kind"] for n in q.outbox()], ["landed"])
+
+    def test_repair_of_a_merge_keeps_both_parents(self):
+        q = self.queue()
+        moved = plumb_commit(self.repo, self.base, {"b.txt": "moved\n"}, "other")
+        run_git(self.repo, "update-ref", "refs/heads/main", moved, self.base)
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "brkoen\n"}, "typo")
+        q.submit(sha, request_id="r1")
+        gate = lambda j, c, p: {"ok": (Path(p) / "a.txt").read_text() == "broken\n",  # noqa: E731
+                                "policy_hash": "p1", "verified": True, "log": "", "reason": "typo"}
+
+        def reconcile(context):
+            (Path(context["candidate_path"]) / "a.txt").write_text("broken\n")
+            return {"status": "resolved"}
+
+        done = q.process_one(gate, reconcile=reconcile)
+        self.assertEqual(done["status"], "landed", done)
+        new = tip(self.repo)
+        parents = git_out(self.repo, "rev-list", "--parents", "-n1", new).split()[1:]
+        self.assertEqual(parents, [moved, sha])
+        self.assertEqual(show(self.repo, new, "b.txt"), "moved")
+        self.assertEqual(show(self.repo, new, "a.txt"), "broken")
+
+    def test_repair_that_fails_the_gate_again_is_bounded(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "brkoen\n"}, "typo")
+        job = q.submit(sha, request_id="r1", card="#FW1C")
+        gate = Recorder(ok=False)
+        rounds = []
+
+        def reconcile(context):
+            rounds.append(context["diagnostics"]["round"])
+            (Path(context["candidate_path"]) / "a.txt").write_text("still wrong %d\n" % len(rounds))
+            return {"status": "resolved"}
+
+        done = q.process_one(gate, reconcile=reconcile)
+        self.assertEqual(done["status"], "failed", done)
+        self.assertEqual(rounds, [1], "one repair round by default")
+        self.assertEqual(len(gate.calls), 2, "original and repaired candidate, nothing more")
+        self.assertEqual(tip(self.repo), self.base)
+        self.assertIsNone(q.receipt(job["id"]))
+        kinds = sorted(n["kind"] for n in q.outbox())
+        self.assertEqual(kinds, ["author_required", "failed"])
+        author = [n for n in q.outbox() if n["kind"] == "author_required"][0]["payload"]
+        self.assertEqual(len(author["verifications"]), 2)
+        self.assertEqual(author["reason"], "gate said no")
+        # Not picked up again, and a wider bound is honoured exactly.
+        self.assertIsNone(q.process_one(gate, reconcile=reconcile))
+        q.submit(sha, request_id="r2")
+        gate2 = Recorder(ok=False)
+        rounds.clear()
+        done = q.process_one(gate2, reconcile=reconcile, reconcile_attempts=2)
+        self.assertEqual((done["status"], rounds, len(gate2.calls)), ("failed", [1, 2], 3))
+
+    def test_repair_refusals_end_as_failed_with_author_required(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "brkoen\n"}, "typo")
+        cases = {
+            "r1": lambda ctx: {"status": "author_required", "reason": "not sure"},
+            "r2": lambda ctx: {"status": "resolved"},  # changed nothing
+            "r3": lambda ctx: (_ for _ in ()).throw(RuntimeError("model down")),
+        }
+        for request_id, reconcile in cases.items():
+            gate = Recorder(ok=False)
+            q.submit(sha, request_id=request_id)
+            done = q.process_one(gate, reconcile=reconcile)
+            self.assertEqual(done["status"], "failed", (request_id, done))
+            self.assertTrue(done["reason"].startswith("gate said no; reconcile: "), done["reason"])
+            self.assertEqual(len(gate.calls), 1, "no second gate run without a new candidate")
+        reasons = [n["payload"]["reason"] for n in q.outbox() if n["kind"] == "author_required"]
+        self.assertEqual(len(reasons), 3)
+        self.assertTrue(any("not sure" in r for r in reasons))
+        self.assertTrue(any("changed nothing" in r for r in reasons))
+        self.assertTrue(any("model down" in r for r in reasons))
+        self.assertEqual(tip(self.repo), self.base)
+        # No reconcile at all: plain failure, no author_required.
+        q.submit(sha, request_id="r4")
+        q.process_one(Recorder(ok=False))
+        self.assertEqual(len([n for n in q.outbox() if n["kind"] == "author_required"]), 3)
+
+    def test_repair_of_a_metadata_job_cannot_escape_the_board(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {".board/card.md": "bad\n"})
+        q.submit(sha, request_id="m1", kind="metadata")
+
+        def reconcile(context):
+            (Path(context["candidate_path"]) / "a.txt").write_text("code change\n")
+            return {"status": "resolved"}
+
+        gate = Recorder(ok=False)
+        done = q.process_one(gate, reconcile=reconcile)
+        self.assertEqual(done["status"], "failed")
+        self.assertIn("a.txt: outside .board/", done["reason"])
+        self.assertEqual(len(gate.calls), 1)
+        self.assertEqual(tip(self.repo), self.base)
+
+    def test_tampering_and_raising_verifiers_are_not_repaired(self):
+        q = self.queue()
+        sha = plumb_commit(self.repo, self.base, {"a.txt": "x\n"})
+        q.submit(sha, request_id="r1")
+        q.submit(sha, request_id="r2")
+        called = []
+        reconcile = lambda ctx: called.append(ctx) or {"status": "resolved"}  # noqa: E731
+
+        def tamper(j, c, p):
+            (Path(p) / "a.txt").write_text("patched\n")
+
+        self.assertEqual(q.process_one(Recorder(on_call=tamper), reconcile=reconcile)["status"],
+                         "failed")
+
+        def explode(j, c, p):
+            raise OSError("no disk")
+
+        self.assertEqual(q.process_one(explode, reconcile=reconcile)["status"], "failed")
+        self.assertEqual(called, [])
 
     # ------------------------------------------------------------ metadata jobs
 
@@ -765,45 +928,43 @@ class QueueCase(unittest.TestCase):
 
     # ------------------------------------------------------------ identity
 
-    def test_fallback_identity_is_stable_and_trees_is_preferred(self):
+    def test_identity_comes_from_the_trees_registry(self):
+        from unittest import mock
+        import relay_core
+        from relay_core import trees
         a = Queue(self.repo, state_root=self.state)
         b = Queue(self.repo, state_root=self.state)
         self.assertEqual(a.repo_id, b.repo_id)
         self.assertEqual(a.target, "main")
-        self.assertTrue(a.identity["identity_source"] in ("trees", ) or
-                        a.identity["identity_source"].startswith("fallback-hash"))
+        self.assertEqual(a.identity["identity_source"], "trees")
+        self.assertEqual(trees.resolve_project(self.repo, state_root=self.state)["id"], a.repo_id)
         import types
         # A registry that exists but fails is a refusal, never a second identity.
         broken = types.SimpleNamespace(
             resolve_project=lambda path, state_root=None: None,
             register_repo=lambda path, state_root=None: (_ for _ in ()).throw(
                 RuntimeError("registry locked")))
-        saved = sys.modules.get("relay_core.trees")
-        sys.modules["relay_core.trees"] = broken
-        try:
+        with mock.patch.dict(sys.modules, {"relay_core.trees": broken}), \
+                mock.patch.object(relay_core, "trees", broken):
             with self.assertRaises(landq.Refused) as ctx:
                 Queue(self.repo, state_root=self.state)
-        finally:
-            if saved is None:
-                del sys.modules["relay_core.trees"]
-            else:
-                sys.modules["relay_core.trees"] = saved
         self.assertIn("registry locked", str(ctx.exception))
+        # What the registry answers is what the queue uses, target included.
         fake = types.SimpleNamespace(
             resolve_project=lambda path, state_root=None: None,
             register_repo=lambda path, state_root=None: {"id": "R1", "target": "trunk"})
-        saved = sys.modules.get("relay_core.trees")
-        sys.modules["relay_core.trees"] = fake
-        try:
+        with mock.patch.dict(sys.modules, {"relay_core.trees": fake}), \
+                mock.patch.object(relay_core, "trees", fake):
             c = Queue(self.repo, state_root=self.state)
-        finally:
-            if saved is None:
-                del sys.modules["relay_core.trees"]
-            else:
-                sys.modules["relay_core.trees"] = saved
         self.assertEqual((c.repo_id, c.target, c.identity["identity_source"]),
                          ("R1", "trunk", "trees"))
         self.assertTrue((self.state / "integration" / "R1").is_dir())
+        # Only a missing module falls back to the hashed common dir.
+        with mock.patch.dict(sys.modules, {"relay_core.trees": None}), \
+                mock.patch.object(relay_core, "trees", None):
+            d = Queue(self.repo, state_root=self.state)
+        self.assertEqual(d.identity["identity_source"], "fallback-hash: no trees module")
+        self.assertEqual(len(d.repo_id), 16)
 
     # ------------------------------------------------------------ CLI
 
