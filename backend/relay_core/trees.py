@@ -623,14 +623,38 @@ class TreeManager:
         conn.commit()
 
     @staticmethod
-    def _normalize_init(init) -> list[str]:
-        """Init is an argv array, never a shell string: lists pass through,
-        strings are shlex-split, and execution uses no implicit shell."""
+    def _normalize_init(init) -> list[list[str]]:
+        """Init is a list of argv arrays run in order, never a shell string.
+
+        Accepts the project config shape ``workspace.init`` (an array of argv
+        arrays), a single argv array, or a string (shlex-split into one argv,
+        for the CLI). Returns the steps; execution uses no implicit shell."""
         if init is None:
             return []
         if isinstance(init, str):
-            return shlex.split(init)
-        return [str(arg) for arg in init]
+            argv = shlex.split(init)
+            return [argv] if argv else []
+        items = list(init)
+        if not items:
+            return []
+        if all(isinstance(item, str) for item in items):
+            return [[str(arg) for arg in items]]
+        steps = []
+        for item in items:
+            if isinstance(item, str):
+                raise TreeUsageError(
+                    f"init mixes strings and argv arrays: {init!r}; pass either one "
+                    f"argv array or a list of argv arrays")
+            argv = [str(arg) for arg in item]
+            if not argv:
+                raise TreeUsageError(f"init has an empty argv step: {init!r}")
+            steps.append(argv)
+        return steps
+
+    @classmethod
+    def _stored_init(cls, raw: str) -> list[list[str]]:
+        """Decode ``init_cmd``; rows written before steps were nested hold one argv."""
+        return cls._normalize_init(json.loads(raw)) if raw else []
 
     def _validate_includes(self, includes):
         """Explicit includes may punch holes in exclusions but never re-include
@@ -647,31 +671,35 @@ class TreeManager:
                     f"the Board lives only in the main checkout — include your own "
                     f"evidence paths instead")
 
-    def _run_init(self, conn, row, init_argv: list[str], timeout: float) -> dict:
-        """Run the init argv in the new tree; failure is durable, not fatal.
+    def _run_init(self, conn, row, init_steps: list[list[str]], timeout: float) -> dict:
+        """Run the init steps in order in the new tree; failure is durable, not fatal.
 
-        Relay never copies secrets into workspaces; init executes in the new
-        tree with the caller's environment (ambient GIT_* scrubbed) and no
-        shell. Called with the repository lifecycle lock held."""
-        if not init_argv:
-            status, error = "active", ""
-        else:
+        Each step is one argv with no shell; the first failing step stops the
+        run and is named in ``init_error``. A retry reruns every step from the
+        first, so steps must be idempotent. ``timeout`` bounds each step. Relay
+        never copies secrets into workspaces; init runs with the caller's
+        environment (ambient GIT_* scrubbed). Called with the repository
+        lifecycle lock held."""
+        status, error = "active", ""
+        for index, argv in enumerate(init_steps, 1):
+            where = f"init step {index}/{len(init_steps)} ({shlex.join(argv)})"
             try:
-                proc = subprocess.run(init_argv, cwd=row["path"], capture_output=True,
+                proc = subprocess.run(argv, cwd=row["path"], capture_output=True,
                                       text=True, timeout=timeout, env=_clean_env())
-                if proc.returncode == 0:
-                    status, error = "active", ""
-                else:
+            except FileNotFoundError:
+                status, error = "init_failed", f"{where}: executable not found: {argv[0]}"
+            except subprocess.TimeoutExpired:
+                status, error = "init_failed", f"{where}: timed out after {timeout}s"
+            else:
+                if proc.returncode != 0:
                     tail = (proc.stderr or proc.stdout or "").strip()[-2000:]
                     status = "init_failed"
-                    error = f"exit {proc.returncode}: {tail}"
-            except FileNotFoundError:
-                status, error = "init_failed", f"init executable not found: {init_argv[0]}"
-            except subprocess.TimeoutExpired:
-                status, error = "init_failed", f"init timed out after {timeout}s"
+                    error = f"{where}: exit {proc.returncode}: {tail}"
+            if status != "active":
+                break
         conn.execute("UPDATE workspaces SET status = ?, init_cmd = ?, init_error = ?,"
                      " updated_at = ? WHERE id = ?",
-                     (status, json.dumps(init_argv), error, _now(), row["id"]))
+                     (status, json.dumps(init_steps), error, _now(), row["id"]))
         conn.commit()
         return self._record(conn, row["id"])
 
@@ -687,8 +715,10 @@ class TreeManager:
         workspace instead of resuming (and resetting) a half-finished one.
         Crash windows are recoverable: a `creating` row from this session is
         either finalized (worktree valid) or cleaned up and recreated, never
-        silently dropped. ``init`` is an argv array (strings are shlex-split)
-        executed without a shell.
+        silently dropped. ``init`` is the project config's ``workspace.init``: a
+        list of argv arrays run once, in order, without a shell (a single argv
+        array or a shlex-split string is one step). ``init_timeout`` bounds
+        each step.
         """
         if not session or not str(session).strip():
             raise TreeUsageError("create needs a non-empty session")
@@ -697,7 +727,8 @@ class TreeManager:
         self._validate_includes(includes)
         conn = self._conn()
         try:
-            lock_timeout = max(_CREATE_LOCK_TIMEOUT, init_timeout + 60)
+            lock_timeout = max(_CREATE_LOCK_TIMEOUT,
+                               init_timeout * max(1, len(init_argv)) + 60)
             with _repo_lock(_trees_dir(self.state_root, self.repo["id"]),
                             timeout=lock_timeout):
                 row = conn.execute(
@@ -747,7 +778,7 @@ class TreeManager:
         """Idempotent create: an existing live row for this session (lock held)."""
         if row["status"] == "active":
             return _workspace_record(row)
-        stored_argv = json.loads(row["init_cmd"]) if row["init_cmd"] else []
+        stored_argv = self._stored_init(row["init_cmd"])
         if row["status"] == "init_failed":
             if not retry:
                 return _workspace_record(row)

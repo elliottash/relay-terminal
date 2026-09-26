@@ -340,6 +340,52 @@ class InitTests(TreesTestCase):
         self.assertEqual(retried["status"], "active")
         self.assertEqual(retried["init_error"], "")
 
+    def test_init_nested_argv_steps_run_in_order(self):
+        # Project config shape: workspace.init is an array of argv arrays.
+        log = Path(self.tmp.name) / "init-log"
+        step = "import sys; open(sys.argv[1], 'a').write(sys.argv[2] + '\\n')"
+        ws = self.mgr.create("sess-1", init=[[sys.executable, "-c", step, str(log), "one"],
+                                             [sys.executable, "-c", step, str(log), "two"]])
+        self.assertEqual(ws["status"], "active", ws["init_error"])
+        self.assertEqual(log.read_text().split(), ["one", "two"])
+        again = self.mgr.create("sess-1", init=[[sys.executable, "-c", step, str(log), "x"]])
+        self.assertEqual(again["id"], ws["id"])
+        self.assertEqual(log.read_text().split(), ["one", "two"])  # ran once
+
+    def test_init_nested_failure_stops_and_retry_reruns_stored_steps(self):
+        log = Path(self.tmp.name) / "init-log"
+        gate = Path(self.tmp.name) / "gate"
+        step = "import sys; open(sys.argv[1], 'a').write(sys.argv[2] + '\\n')"
+        fail = f"import os, sys; sys.exit(0 if os.path.exists({str(gate)!r}) else 4)"
+        steps = [[sys.executable, "-c", step, str(log), "a"],
+                 [sys.executable, "-c", fail],
+                 [sys.executable, "-c", step, str(log), "c"]]
+        ws = self.mgr.create("sess-1", init=steps)
+        self.assertEqual(ws["status"], "init_failed")
+        self.assertIn("init step 2/3", ws["init_error"])
+        self.assertIn("exit 4", ws["init_error"])
+        self.assertEqual(log.read_text().split(), ["a"])  # step 3 never ran
+        gate.write_text("")
+        retried = self.mgr.create("sess-1", retry=True)  # persisted steps reused
+        self.assertEqual(retried["status"], "active", retried["init_error"])
+        self.assertEqual(log.read_text().split(), ["a", "a", "c"])
+
+    def test_init_mixed_or_empty_steps_refused(self):
+        with self.assertRaises(trees.TreeUsageError):
+            self.mgr.create("sess-1", init=[["/bin/echo"], "oops"])
+        with self.assertRaises(trees.TreeUsageError):
+            self.mgr.create("sess-1", init=[["/bin/echo"], []])
+        self.assertEqual(self.mgr.list(), [])
+
+    def test_legacy_single_argv_row_still_retries(self):
+        ws = self.mgr.create("sess-1", init=["/bin/sh", "-c", "exit 2"])
+        conn = sqlite3.connect(str(self.state_root / "integration" / "registry.sqlite3"))
+        conn.execute("UPDATE workspaces SET init_cmd = ? WHERE id = ?",
+                     (json.dumps(["/bin/echo", "ok"]), ws["id"]))
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.mgr.create("sess-1", retry=True)["status"], "active")
+
     def test_init_missing_executable_fails_durably(self):
         ws = self.mgr.create("sess-1", init=["/nonexistent/bin"])
         self.assertEqual(ws["status"], "init_failed")
@@ -646,6 +692,15 @@ class CliTests(TreesTestCase):
         proc = self.run_cli("remove", ws["id"], "--repo", str(self.repo))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(json.loads(proc.stdout)["status"], "removed")
+
+    def test_cli_repeated_init_runs_steps_in_order(self):
+        log = Path(self.tmp.name) / "cli-init-log"
+        proc = self.run_cli("create", "cli-2", "--repo", str(self.repo),
+                            "--init", f"/bin/sh -c 'echo one >> {log}'",
+                            "--init", f"/bin/sh -c 'echo two >> {log}'")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["status"], "active")
+        self.assertEqual(log.read_text().split(), ["one", "two"])
 
     def test_cli_remove_with_receipt_file(self):
         self._queue_db = self.make_queue_db()
