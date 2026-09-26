@@ -50,3 +50,29 @@ the tier's `gpt-6-sol` tag to match. In the real app the same draw includes the 
 
 Targeted tests: `ModelCatalogTests::usageChartRowsCarryBothWindowsAndKeepTheZeroRow` passes; the
 `modelcatalog` ctest case passes in the verify slot.
+
+## Follow-up: the main stats on the Sources rows themselves
+
+`04-sources-stats.png` is the same sandbox, run against the tree landed as `a95e79208c01`: the
+Sources rows now print the **main** stats — one short figure per window the account reports, e.g.
+`wk 32%`, `5h 75% · wk 54%` — instead of the long line with each reset (`weekly 38% left, resets
+thu (129.5 h)`). The long form moved to the row's tooltip, and the chart keeps the formula.
+
+tesseract, from that shot:
+
+```
+claude code (elliott.ash@gess.ethz.ch)
+logged in as elliott.ash@gess.ethz.ch
+...
+codex (e@elliottash.com)
+not logged in: change login runs the CLI's own sign-in · e@elliottash.com · wk 32%
+codex (ashe@ethz.ch)
+not logged in: sign in runs the CLI's own sign-in for this account · ashe@ethz.ch · wk 97%
+codex (elliott.t.ash@gmail.com)
+not logged in: sign in runs the CLI's own sign-in for this account · elliott.t.ash@gmail.com · wk 47%
+```
+
+(The Claude Code rows carry no figures in this sandbox run — its Claude quota poll does not
+authenticate there, while the Codex one does. The short form is what the rows that do have figures
+print, and `ModelCatalogTests::usageStatsTextShortensBothWindowsAndSkipsSpentOnes` covers the
+`5h 75% · wk 54%` pair.)
