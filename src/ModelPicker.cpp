@@ -740,7 +740,13 @@ QTreeWidgetItem *ModelPicker::addListRow(const QString &tier, int rank, const cu
     else if (!entry->usable) left = entry->preset == QStringLiteral("relay-pro")
         ? QStringLiteral("no access") : QStringLiteral("no key");
     else if (until >= 0) left = QStringLiteral("0%") + (until > 0 ? QStringLiteral(" · resets ") + resetText(until, now) : QString());
-    else left = percent(percentLeft(m_context.catalog, entry->preset));
+    else {
+        // Both windows, shortened (#62TG): the "left" column is where a listed model says how much
+        // of its provider's allowance is left, and one tightest-window number could not say which
+        // allowance it counted. With no figures at all the old single percentage still answers.
+        const QString stats = usageStatsText(m_context.catalog.limits.value(entry->preset), now);
+        left = stats.isEmpty() ? percent(percentLeft(m_context.catalog, entry->preset)) : stats;
+    }
     QString level;
     if (entry && !entry->efforts.isEmpty())
         level = item.effort.isEmpty() ? QStringLiteral("default") : nearestEffort(entry->efforts, item.effort);

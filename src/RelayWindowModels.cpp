@@ -471,9 +471,15 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             const bool guest = id.startsWith(QStringLiteral("guest:"));
             const QString source = str(preset, "key_source");
             const bool hasKey = preset.value(QStringLiteral("has_stored_key")).toBool();
-            const QString limits = relay::models::limitsText(catalog.limits.value(id), now,
-                                                             catalog.resetsAvailable.value(id, -1),
-                                                             catalog.resetsExpireAt.value(id));
+            // The row's own figures are the *main* stats — one short pair per window, "5h 75% · wk
+            // 54%" — so a page of providers reads at a glance next to the models each one serves.
+            // The long form, with every window's reset and everything the weight is made of, is the
+            // usage… chart's job (#62TG) and this row's tooltip; on the page it was the part that
+            // pushed the account name off the line.
+            const QString limits = relay::models::usageStatsText(catalog.limits.value(id), now);
+            const QString fullLimits = relay::models::limitsText(catalog.limits.value(id), now,
+                                                                 catalog.resetsAvailable.value(id, -1),
+                                                                 catalog.resetsExpireAt.value(id));
             QString status;
             if (id == QStringLiteral("relay-pro")) {
                 status = preset.value(QStringLiteral("access_note")).toString(QStringLiteral("enter your personal access code"));
@@ -516,6 +522,8 @@ relay::SettingsSection RelayWindow::modelsSection(bool inModelsPane) {
             if (guest && str(preset, "account").isEmpty() && !str(preset, "email").isEmpty())
                 row.label += QStringLiteral(" (") + str(preset, "email") + QLatin1Char(')');
             row.detail = status;
+            // The long usage line, resets and all, stays one hover away (#62TG).
+            if (!fullLimits.isEmpty()) row.tooltip = fullLimits;
             if (stableStatus != status) row.agentDetail = stableStatus;
             row.aliases = QStringLiteral("provider key api keyring login ") + id + QLatin1Char(' ') + str(preset, "provider").toLower();
             if (!str(preset, "email").isEmpty()) row.aliases += QStringLiteral(" email ") + str(preset, "email");

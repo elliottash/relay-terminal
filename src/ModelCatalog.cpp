@@ -1605,6 +1605,25 @@ QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvai
     return parts.join(QStringLiteral(" · "));
 }
 
+QString usageStatsText(const QList<LimitWindow> &windows, qint64 now) {
+    QStringList live;
+    QStringList stale;
+    for (const LimitWindow &window : windows) {
+        if (window.usedPercent < 0) continue;
+        // "weekly" is the one kind long enough to shorten: the column it feeds is beside a model
+        // name, not a paragraph.
+        QString kind = window.kind.isEmpty() ? QStringLiteral("quota") : window.kind;
+        if (kind == QStringLiteral("weekly")) kind = QStringLiteral("wk");
+        const QString part = QStringLiteral("%1 %2%")
+                                 .arg(kind, QString::number(qRound(qBound(0.0, 100.0 - window.usedPercent, 100.0))));
+        // A window whose reset has passed says nothing about now, so it is kept only for when it is
+        // all the account has ever reported.
+        if (window.resetsAt > 0 && window.resetsAt <= now) stale << part;
+        else live << part;
+    }
+    return (live.isEmpty() ? stale : live).join(QStringLiteral(" · "));
+}
+
 bool matches(const Entry &entry, const QString &query) {
     // The model's name, the id the API takes, the provider and its plan. The id is in there as
     // well as the name because they differ where it matters most — "k3" finds kimi-k3, and

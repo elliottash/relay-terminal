@@ -556,6 +556,12 @@ QString resetText(qint64 resetsAt, qint64 now);
 // With banked resets, "· 1 usage reset, use by 22 oct" follows (the date when known).
 QString limitsText(const QList<LimitWindow> &windows, qint64 now, int resetsAvailable = -1,
                    qint64 resetsExpireAt = 0);
+// The *main* usage stats of one account, short enough to sit beside the models a Sources row lists:
+// one figure per window it reports, "5h 75% · wk 54%" (the weekly window is shortened). Empty with
+// no figures. The long form — each window's reset, banked resets, and what the draw weighs — is the
+// usage chart's job (#62TG, models.refreshUsage's usage… button) and the row's tooltip; on the page
+// the long form was the part that pushed the account name off the line.
+QString usageStatsText(const QList<LimitWindow> &windows, qint64 now);
 // Filter as opencode does: a substring match over the model's name, its id, its provider and its
 // plan, case-insensitive, every word of the query somewhere in the row. The provider is in the
 // haystack on purpose (design edge case 11): typing "openrouter" finds the row and names the entry

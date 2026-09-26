@@ -1592,6 +1592,25 @@ private Q_SLOTS:
         QCOMPARE(split.at(1).probability, 75.0 / 95.0);
     }
 
+    // The main stats a Sources row prints beside the models it serves (#62TG): every window it
+    // reports, shortened, and no prose — the usage chart is where the explanation lives.
+    void usageStatsTextShortensBothWindowsAndSkipsSpentOnes() {
+        const qint64 now = 100000;
+        QCOMPARE(usageStatsText({LimitWindow{QStringLiteral("5h"), 25, now + 3600},
+                                 LimitWindow{QStringLiteral("weekly"), 46, now + 600}}, now),
+                 QStringLiteral("5h 75% · wk 54%"));
+        QCOMPARE(usageStatsText({}, now), QString());
+        QCOMPARE(usageStatsText({LimitWindow{QStringLiteral("weekly"), 100, now + 600}}, now),
+                 QStringLiteral("wk 0%"));
+        // A window whose reset has passed does not speak for the account while a live one does.
+        QCOMPARE(usageStatsText({LimitWindow{QStringLiteral("5h"), 0, now - 60},
+                                 LimitWindow{QStringLiteral("weekly"), 46, now + 600}}, now),
+                 QStringLiteral("wk 54%"));
+        // …but with nothing else to say, the row still says what it knows.
+        QCOMPARE(usageStatsText({LimitWindow{QStringLiteral("5h"), 10, now - 60}}, now),
+                 QStringLiteral("5h 90%"));
+    }
+
     void nearResetAllowanceWeightsOnlyTheBestLiveRank() {
         Catalog catalog = catalogFrom(presets());
         const QString tier = QStringLiteral("main");
