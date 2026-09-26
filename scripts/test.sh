@@ -25,6 +25,9 @@ export RELAY_KEYRING=off
 export RELAY_LOCAL_MODELS="$XDG_DATA_HOME/local-models.json"
 # Nor import the user's Claude Code / Codex memories into their real global Board (#MEMS).
 export RELAY_MEMORY_IMPORT=off
+# Nor read the owner's real Claude Code / Codex homes: a Relay pane points these at them, and
+# a test that follows them lists the owner's transcripts instead of its own (#VK6J).
+unset CLAUDE_CONFIG_DIR CODEX_HOME RELAY_USER_CLAUDE_CONFIG_DIR RELAY_USER_CODEX_HOME RELAY_GUEST_HOME
 trap 'rm -rf "$XDG_DATA_HOME"' EXIT
 if [[ -n "$junit" ]]; then
     PYTHONPATH="$PWD/backend${PYTHONPATH:+:$PYTHONPATH}" \

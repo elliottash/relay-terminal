@@ -664,6 +664,16 @@ class QueueCase(unittest.TestCase):
         self.assertEqual(show(self.repo, tip(self.repo), ".board/card.md"),
                          "# card\nstatus: done\nnote: both")
 
+    def test_board_snapshots_are_picked_before_waiting_code_jobs(self):
+        q = self.queue()
+        code = plumb_commit(self.repo, self.base, {"a.txt": "code\n"})
+        board = plumb_commit(self.repo, self.base, {".board/card.md": "# card\nstatus: done\n"})
+        q.submit(code, request_id="c1", kind="code")
+        q.submit(board, request_id="m1", kind="metadata")
+        first = q.process_one(Recorder())
+        self.assertEqual((first["request_id"], first["status"]), ("m1", "landed"))
+        self.assertEqual(q.process_one(Recorder())["request_id"], "c1")
+
     # ------------------------------------------------------------ cancel
 
     def test_cancel_queued_and_landed(self):
