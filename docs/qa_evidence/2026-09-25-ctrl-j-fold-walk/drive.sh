@@ -28,6 +28,7 @@ stub_pid= xvfb_pid= relay_pid=
 cleanup() {
     local pid
     for pid in $relay_pid $stub_pid $xvfb_pid; do kill "$pid" 2>/dev/null; done   # never `kill 0`
+    wait 2>/dev/null   # the app writes into the sandbox until it has exited
     rm -rf "$sandbox"
 }
 trap cleanup EXIT
