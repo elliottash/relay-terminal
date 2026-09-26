@@ -12,8 +12,10 @@
 //
 // This turns those entries into the lines a live turn prints, so the fallback reads like the
 // thing it stands in for rather than like a log dump: the user's prompt, the reply
-// as prose, one ▸ row per tool call. Tool output is left out — it is the bulk of a transcript and
-// the least of it, and a resumed pane is not a place to re-read it.
+// as prose, one ▸ row per tool call, and the call's output behind it. Output is *not* left out:
+// the owner's rule for a restored conversation is that it comes back the way it went in (card
+// #HEY7), and a live turn folds its tool output under the ▸ row, so each output block is its own
+// row, whole — the caller folds it under the ▸ row above it, collapsed, and nothing is cut here.
 //
 // Pure: QtCore only, no pane, no terminal, no colours (the caller maps `Row::kind` onto its own
 // inks), so tests/transcriptreplay_test.cpp can check what would be printed without a window.
@@ -32,6 +34,7 @@ enum class Line {
     Prompt,   // what the user sent to the agent (a live turn's first line)
     Reply,    // the agent's prose
     Call,     // one tool call, the ▸ row
+    Output,   // one call's whole output block, folded under the ▸ row above it when drawn
     Note,     // Relay's own chrome: the turn separator
 };
 
@@ -44,11 +47,13 @@ struct Row {
 // A tool-call row is one line however long its arguments were: a wrapped ▸ row would look like a
 // fold that is not there.
 inline constexpr int kCallWidth = 100;
-// Entries whose kind is not one of these are not messages (tool and command output, and anything a
-// later index adds), so they are not drawn.
+// Entries whose kind is not one of these are not conversation body — the sidecars (title,
+// summary, terminal_text, rewound) and anything a later index adds — so they are not drawn.
+// Tool and command output *is* drawn: as Output rows the caller folds, not as prose.
 inline bool isDrawn(const QString &kind) {
     return kind == QLatin1String("prompt") || kind == QLatin1String("reply")
-           || kind == QLatin1String("tool_call") || kind == QLatin1String("command");
+           || kind == QLatin1String("tool_call") || kind == QLatin1String("command")
+           || kind == QLatin1String("tool_output") || kind == QLatin1String("command_output");
 }
 
 inline QString oneLine(const QString &text, int width) {
@@ -64,6 +69,7 @@ inline QString oneLine(const QString &text, int width) {
 inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn = -1) {
     QVector<Row> rows;
     int lastTurn = -1;
+    QVector<int> pendingCalls;   // rows-positions of the turn's ▸ rows still waiting for output
     for (const QJsonValue &value : items) {
         const QJsonObject item = value.toObject();
         const QString kind = item.value(QStringLiteral("kind")).toString();
@@ -74,11 +80,31 @@ inline QVector<Row> render(const QJsonArray &items, int maxRows, int beforeTurn 
         if (beforeTurn >= 0 && turn >= beforeTurn) continue;
         // One blank line between turns, the gap a live conversation leaves; none before the first.
         if (lastTurn >= 0 && turn != lastTurn) rows.append({Line::Note, QString(), turn});
+        if (turn != lastTurn) pendingCalls.clear();   // output pairs with its own turn's call run
         lastTurn = turn;
         if (kind == QLatin1String("tool_call")) {
             rows.append({Line::Call, QStringLiteral("▸ ") + oneLine(text, kCallWidth), turn});
+            pendingCalls.append(rows.size() - 1);
             continue;
         }
+        if (kind == QLatin1String("tool_output") || kind == QLatin1String("command_output")) {
+            // One row holds the whole block, lines and all: the caller folds it under the ▸ row
+            // above, the way the live turn folds it, so it must not be flattened or cut here.
+            // The index stores a turn's call run ahead of its output run (callA, callB, outA,
+            // outB), so the next output belongs to the oldest ▸ row still without one. A block
+            // with no ▸ row in reach — a terminal conversation's command_output, or a call the
+            // budget cut away — goes after everything so far, for the caller to print plain:
+            // it is output, not chrome.
+            if (!pendingCalls.isEmpty()) {
+                const int at = pendingCalls.takeFirst() + 1;
+                rows.insert(at, {Line::Output, text, turn});
+                for (int &pos : pendingCalls) ++pos;   // the insert shifted the rest of the run
+            } else {
+                rows.append({Line::Output, text, turn});
+            }
+            continue;
+        }
+        pendingCalls.clear();   // a prompt or a reply ends the call run its outputs pair with
         const bool prompt = kind != QLatin1String("reply");
         const QStringList lines = text.split(QLatin1Char('\n'));
         for (const QString &line : lines)

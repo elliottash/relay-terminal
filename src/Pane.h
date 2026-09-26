@@ -1883,18 +1883,77 @@ public:
               {"session_id", sessionId}, {"limit", relay::windowstate::kScrollbackMaxLines}});
     }
 
-    // The transcript, through the same inline printer a live turn writes with. The
-    // ink mapping lives in this body rather than in a function of its own: `Ink` is declared
-    // further down the class, and only a body is read in the complete-class context.
+    // A ▸ row of a restored transcript, written the way drawCallRow writes a live one: the fold
+    // anchor wraps the whole row starting at column 0, and printInline's sanitize would strip the
+    // OSC 8, so this goes to the terminal itself. The fold the anchor owns is registered by
+    // printTranscriptRows once the output rows under it are known.
+    void printTranscriptCallRow(const QString &text, const QString &anchor) {
+        m_markdown.setLinkAnchor(proseUriFor(Ink::Agent));
+        const QString mdTail = m_markdown.finish();   // held prose lands before the row
+        QByteArray out = takeWrapped() + closeProseRun();
+        if (!m_inlineOpen) {
+            out += "\r\x1b[2K";
+            m_inlineOpen = true; m_atLineStart = true;
+            m_wrap.reset();
+            holdShellResize(true);
+        }
+        if (!mdTail.isEmpty()) out += agentProse(mdTail);
+        if (!m_atLineStart) { out += "\r\n"; m_atLineStart = true; }
+        out += "\x1b]8;;" + anchor.toUtf8() + "\x1b\\" + inkCode(Ink::Note)
+               + sanitize(text).toUtf8() + "\x1b[0m\x1b]8;;\x1b\\\r\n";
+        writeTerminal(out);
+    }
+
+    // The transcript's rows, drawn like the live lines they stand in for (#HEY7: a restored
+    // conversation comes back the way it went in — tool output, folds and all). A Call row
+    // carries the fold anchor a live ▸ row has, and the Output rows paired with it are
+    // registered as that fold's content, collapsed — the live turn's default — so a click
+    // unfolds the output in place without a worker. The transcript does not keep the worker's
+    // turn and call ids, so the anchor counts its own ("replay-<turn>" can never be a live turn
+    // id, and a restored fold can never answer for a live call's row). Output with no ▸ row
+    // above it — a terminal conversation's command_output, or a call the row budget cut away —
+    // prints plain, as it did live. The ink mapping lives in this body rather than in a function
+    // of its own: `Ink` is declared further down the class, and only a body is read in the
+    // complete-class context.
+    void printTranscriptRows(const QVector<relay::transcriptreplay::Row> &rows) {
+        using L = relay::transcriptreplay::Line;
+        const bool folds = m_backend && terminalFolds() && inlineReady();
+        QString anchor;        // the ▸ row taking output right now
+        QStringList output;
+        int anchorTurn = -1, anchorSeq = 0;
+        auto closeFold = [&]() {
+            if (anchor.isEmpty()) return;
+            setFold(anchor, relay::calllines::foldForReply(
+                        {{QStringLiteral("text"), output.join(QLatin1Char('\n'))}},
+                        foldPalette(), {}));
+            setFoldExpanded(anchor, false);   // setFold opens what it sets; restored starts folded
+            anchor.clear();
+            output.clear();
+        };
+        ensureLineStart();
+        for (const auto &row : rows) {
+            if (row.kind == L::Output && !anchor.isEmpty()) { output.append(row.text); continue; }
+            closeFold();
+            if (row.kind == L::Call && folds) {
+                if (row.turn != anchorTurn) { anchorTurn = row.turn; anchorSeq = 0; }
+                anchor = relay::calllines::foldUri(m_token,
+                                                   QStringLiteral("replay-%1").arg(row.turn),
+                                                   QStringLiteral("c%1").arg(++anchorSeq));
+                printTranscriptCallRow(row.text, anchor);
+                continue;
+            }
+            printInline(row.text + '\n',
+                        row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
+        }
+        closeFold();
+        closeInline();
+    }
+
+    // The transcript, through the same inline printer a live turn writes with.
     void printSavedTranscript(const QJsonArray &items) {
         const auto rows = relay::transcriptreplay::render(items, relay::windowstate::kScrollbackMaxLines);
         if (rows.isEmpty()) return;
-        using L = relay::transcriptreplay::Line;
-        ensureLineStart();
-        for (const auto &row : rows)
-            printInline(row.text + '\n',
-                        row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
-        closeInline();
+        printTranscriptRows(rows);
     }
     // The turns a truncated saved text no longer covers (#KDB4): drawn above the saved text in
     // the same inks, with no restore dividers added to the conversation.
@@ -1905,12 +1964,7 @@ public:
         const auto rows = relay::transcriptreplay::render(items, relay::windowstate::kScrollbackMaxLines,
                                                           coveredFromTurn);
         if (rows.isEmpty()) return;
-        using L = relay::transcriptreplay::Line;
-        ensureLineStart();
-        for (const auto &row : rows)
-            printInline(row.text + '\n',
-                        row.kind == L::Prompt ? Ink::UserAgent : row.kind == L::Reply ? Ink::Agent : Ink::Note);
-        closeInline();
+        printTranscriptRows(rows);
     }
     void focusInput() {
         if (m_native) { focusTerminal(); return; }

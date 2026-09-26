@@ -38,17 +38,47 @@ private slots:
         QCOMPARE(rows.at(2).kind, Line::Reply);
     }
 
-    // Tool output is the bulk of a transcript and the least of it; a resumed pane leaves it out.
-    // So are the kinds that are not messages at all.
-    void outputAndNonMessagesAreLeftOut() {
+    // Tool output comes back (#HEY7): one Output row per block, kept whole so the caller can fold
+    // it under the ▸ row above exactly the way the live turn folds it. The kinds that are not
+    // conversation body at all — the sidecars — are still left out.
+    void outputIsAnOutputRowUnderItsCall() {
         const QJsonArray items{entry(1, QStringLiteral("prompt"), QStringLiteral("run it")),
                                entry(1, QStringLiteral("tool_call"), QStringLiteral("run pytest")),
-                               entry(1, QStringLiteral("tool_output"), QStringLiteral("212 lines of pytest")),
-                               entry(1, QStringLiteral("command_output"), QStringLiteral("more output")),
+                               entry(1, QStringLiteral("tool_output"), QStringLiteral("line one\nline two")),
                                entry(1, QStringLiteral("summary"), QStringLiteral("not a message")),
                                entry(1, QStringLiteral("reply"), QStringLiteral("green"))};
+        const QVector<Row> rows = render(items, 400);
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("run it"), QStringLiteral("▸ run pytest"),
+                                             QStringLiteral("line one\nline two"), QStringLiteral("green")}));
+        QCOMPARE(rows.at(2).kind, Line::Output);
+        QCOMPARE(rows.at(2).turn, 1);
+    }
+
+    // A turn's call run is indexed ahead of its output run (callA, callB, outA, outB), so the
+    // next output belongs to the oldest ▸ row still without one.
+    void outputsPairWithTheirCallsInOrder() {
+        const QJsonArray items{entry(1, QStringLiteral("tool_call"), QStringLiteral("read a")),
+                               entry(1, QStringLiteral("tool_call"), QStringLiteral("read b")),
+                               entry(1, QStringLiteral("tool_output"), QStringLiteral("aaa")),
+                               entry(1, QStringLiteral("tool_output"), QStringLiteral("bbb"))};
         QCOMPARE(textsOf(render(items, 400)),
-                 (QStringList{QStringLiteral("run it"), QStringLiteral("▸ run pytest"), QStringLiteral("green")}));
+                 (QStringList{QStringLiteral("▸ read a"), QStringLiteral("aaa"),
+                              QStringLiteral("▸ read b"), QStringLiteral("bbb")}));
+    }
+
+    // An empty output is no row at all — the fold the caller draws for the call says no output
+    // was recorded, like the live one. Output with no ▸ row in reach (a terminal conversation's
+    // command_output) is appended as it arrived, for the caller to print plain.
+    void emptyAndOrphanOutput() {
+        const QJsonArray items{entry(1, QStringLiteral("tool_call"), QStringLiteral("write f")),
+                               entry(1, QStringLiteral("tool_output"), QStringLiteral("   ")),
+                               entry(2, QStringLiteral("command"), QStringLiteral("ls")),
+                               entry(2, QStringLiteral("command_output"), QStringLiteral("a.txt"))};
+        const QVector<Row> rows = render(items, 400);
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("▸ write f"), QString(),
+                                             QStringLiteral("ls"), QStringLiteral("a.txt")}));
+        QCOMPARE(rows.at(3).kind, Line::Output);
+        QCOMPARE(rows.at(3).turn, 2);
     }
 
     // Turns are separated by the blank line a live conversation leaves, and never opened or
@@ -103,7 +133,39 @@ private slots:
     void anEmptyConversationDrawsNothing() {
         QVERIFY(render(QJsonArray{}, 400).isEmpty());
         QVERIFY(render(QJsonArray{entry(1, QStringLiteral("reply"), QStringLiteral("   "))}, 400).isEmpty());
-        QVERIFY(render(QJsonArray{entry(1, QStringLiteral("tool_output"), QStringLiteral("x"))}, 400).isEmpty());
+        QVERIFY(render(QJsonArray{entry(1, QStringLiteral("terminal_text"), QStringLiteral("x"))}, 400).isEmpty());
+        // A lone output block is orphan, not absent: it is drawn for the caller to print plain.
+        const QVector<Row> rows = render(QJsonArray{entry(1, QStringLiteral("tool_output"), QStringLiteral("x"))}, 400);
+        QCOMPARE(rows.size(), 1);
+        QCOMPARE(rows.constFirst().kind, Line::Output);
+    }
+
+    // The fill's beforeTurn drops a turn's output with the turn, and the budget keeps the newest
+    // rows even when that leaves an output orphaned from its ▸ row.
+    void fillAndBudgetTreatOutputLikeTheRowsAroundIt() {
+        const QJsonArray items{entry(1, QStringLiteral("tool_call"), QStringLiteral("run a")),
+                               entry(1, QStringLiteral("tool_output"), QStringLiteral("out a")),
+                               entry(2, QStringLiteral("tool_call"), QStringLiteral("run b")),
+                               entry(2, QStringLiteral("tool_output"), QStringLiteral("out b"))};
+        QCOMPARE(textsOf(render(items, 400, 2)),
+                 (QStringList{QStringLiteral("▸ run a"), QStringLiteral("out a")}));
+        const QVector<Row> rows = render(items, 2);
+        QCOMPARE(textsOf(rows), (QStringList{QStringLiteral("▸ run b"), QStringLiteral("out b")}));
+    }
+
+    // The output row is not capped or split here: the live fold keeps everything and collapses
+    // visually, so the row carries the whole block — one row however many lines, so the row
+    // budget stays a budget of what is *shown* — and the cap is the fold layer's.
+    void outputIsKeptWhole() {
+        QStringList lines;
+        for (int i = 0; i < 6000; ++i) lines << QStringLiteral("l%1").arg(i);
+        const QString block = lines.join(QLatin1Char('\n'));
+        const QJsonArray items{entry(1, QStringLiteral("tool_call"), QStringLiteral("run x")),
+                               entry(1, QStringLiteral("tool_output"), block)};
+        const QVector<Row> rows = render(items, 400);
+        QCOMPARE(rows.size(), 2);
+        QCOMPARE(rows.at(1).kind, Line::Output);
+        QCOMPARE(rows.at(1).text, block);
     }
 
     // The fill a truncated saved text gets (#KDB4): `beforeTurn` drops that turn and every one
