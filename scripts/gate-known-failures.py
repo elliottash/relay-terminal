@@ -24,6 +24,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULT = re.compile(r"^(?:.*\((?P<id>[\w.]+)\)|(?P<doc>.+?)) \.\.\. (?P<outcome>ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$")
+GUEST_HOME_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "RELAY_USER_CLAUDE_CONFIG_DIR",
+                   "RELAY_USER_CODEX_HOME", "RELAY_GUEST_HOME")
 CLASS_ERROR = re.compile(r"^ERROR: (?P<id>\w+ \([\w.]+\))$")
 
 
@@ -39,6 +41,11 @@ def module_env(scratch: Path) -> dict:
     for AF_UNIX socket paths (108 bytes), and not a per-module directory, because the code
     under test treats everything below $TMPDIR as scratch (test_scratch_ledger)."""
     env = dict(os.environ)
+    # A Relay pane points these at the owner's real guest homes; a test that follows them reads
+    # the owner's own Claude and Codex transcripts instead of its synthetic ones, and polls ten
+    # seconds for a row that never comes (test_session_protocol: 176 s, 15 failures -> 48 s, 0).
+    for name in GUEST_HOME_VARS:
+        env.pop(name, None)
     data = scratch / "data"
     data.mkdir(parents=True)
     env.update({"XDG_DATA_HOME": str(data), "TMPDIR": "/tmp", "RELAY_LOG_ORIGIN": "test",
