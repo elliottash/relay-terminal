@@ -1,8 +1,12 @@
 """Board selection must name the provider serving an existing card (#BMS1)."""
 import copy
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+# The named unittest collector puts the repository, but not tests/, on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_board_protocol import ProtocolTest
 from relay_core.agent import Agent
 from relay_core.provider import ProviderConfig
