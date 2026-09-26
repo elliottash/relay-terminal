@@ -180,3 +180,36 @@ mentioned in #V3R3 · 2026-09-26 · agent
 
 <!-- relay:entry 20260926T074837Z-1x author=agent kind=progress model=claude-opus-5-5 pane=c30592c5 turn=4c2d2da03628442180f8e51eb861c141/11d72950d83b40b59c9f0d6ad06a8fda -->
 Resubmitted as job 7088516c0d55985f (7abdf201): the earlier fixes rebased onto main dd23bacc, because src/Pane.h is too big for the queue to merge automatically. That supersedes jobs 1bfc4e76 and d6c0df4f. On the rebased tree a pane reopened from Recently closed still came back blank in 3 of 8 runs: the replay backed off at the shell's first prompt and nothing retried it. It now retries when an inline note closes and every 250 ms for up to 10 s, and 8 of 8 consecutive runs pass. Evidence regenerated in docs/qa_evidence/2026-09-26-hey7-mixed; ctest textjournal, windowstate and transcriptreplay pass.
+
+<!-- relay:entry 20260926T075951Z-cp author=reconcile kind=note -->
+Landing job 7088516c0d55985f could not be reconciled automatically: the submission changed 69 files; a repair is bounded to 24. Returned to the author.. Returned to the author agent with the diagnostics. <!-- reconcile:7088516c0d55985f:author_required -->
+
+<!-- relay:entry 20260926T075951Z-cq author=landq kind=note -->
+Landing job 7088516c0d55985f (7abdf201dca6 for card #HEY7) failed the gate.
+Reason: command exited 8: sh -c set -eu
+root="${RELAY_VERIFY_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/relay/verify/relay-terminal}"
+mkdir -p "$root/src" "$root/build"
+exec 9>"$root/.lock"; flock 9
+rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
+[ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
+ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
+cd "$root/src"
+scripts/test.sh
+; reconcile: the submission changed 69 files; a repair is bounded to 24. Returned to the author.
+Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/7088516c0d55985f/verify-1-e80a91e98869.log
+Fix it in your workspace and submit a new commit; the target was not moved. <!-- landq:7088516c0d55985f:failed -->
+
+<!-- relay:entry 20260926T075951Z-cr author=landq kind=note -->
+Landing job 7088516c0d55985f (7abdf201dca6 for card #HEY7) needs its author.
+Landing job 7088516c0d55985f could not be reconciled automatically.
+Target 62885a6c8879 and your submission 7abdf201dca6 conflict in: (no paths found).
+Reason: the submission changed 69 files; a repair is bounded to 24. Returned to the author.
+Sync your workspace to the current target, resolve these files there, run the project's checks, and submit the new commit. Nothing was changed in your workspace. <!-- landq:7088516c0d55985f:author_required -->
+
+<!-- relay:entry 20260926T075953Z-ac author=landq kind=note -->
+Landing job c297d88aa1bb8b08 (da36edc478c3) landed.
+Published da36edc478c3 onto main (target was 62885a6c8879). <!-- landq:c297d88aa1bb8b08:landed -->
+
+<!-- relay:entry 20260926T080323Z-df author=agent kind=progress model=claude-opus-5-5 pane=c30592c5 turn=4c2d2da03628442180f8e51eb861c141/4607f5891c3746cc8948e6814646a975 -->
+Job 7088516c came back because a repair is capped at 24 files and it was measured as 69. The cause: this workspace's recorded base was still 053f4458, and a workspace submission takes its base from the record, so --base-sha is ignored. Fixes: squashed the change into one commit 4418e780 on main da36edc4 (src/Pane.h plus 11 evidence files; the unreferenced screenshots and logs are dropped); synced the workspace (relay-tree sync), so its base is now da36edc4; resubmitted as job 742eba28. On this base: ctest textjournal, windowstate and transcriptreplay pass; 144 pytest pass; the live shell-only and turn-then-11000 runs keep 12,000 of 12,000 lines, with the turn once and in order. Job abbc0671, the same commit with the old base, could not be cancelled while verifying; whichever job lands first carries the commit.
