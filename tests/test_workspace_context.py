@@ -94,6 +94,24 @@ class WorkspaceContextTests(unittest.TestCase):
                                   "--state-root", str(self.state)], env=cli_env,
                                  text=True, capture_output=True, check=True)
             self.assertEqual(json.loads(cli.stdout)["workspace_id"], first["workspace_id"])
+            # A controlled close releases the lease and keeps the files; unlanded work is
+            # retained, and the same session's next prepare takes that tree back.
+            work = Path(first["execution_cwd"])
+            (work / "source.txt").write_text("changed\n")
+            git(work, "-c", "core.hooksPath=/dev/null", "commit", "-am", "child work")
+            closed = workspace_context.release(str(self.root), first["workspace_id"],
+                                               "parent:child:one", state_root=self.state)
+            self.assertEqual(closed["state"], "retained")
+            self.assertTrue((work / "source.txt").is_file())
+            resumed = workspace_context.prepare(str(self.root), "parent:child:one", state_root=self.state)
+            self.assertEqual(resumed["workspace_id"], first["workspace_id"])
+            self.assertEqual(resumed["state"], "active")
+            refused = subprocess.run([sys.executable, "-m", "relay_core.workspace_context", "release",
+                                      "--project", str(self.root), "--workspace-id", "wtnone",
+                                      "--session", "x", "--state-root", str(self.state)],
+                                     env=cli_env, text=True, capture_output=True)
+            self.assertEqual(refused.returncode, 2)
+            self.assertEqual(json.loads(refused.stdout)["state"], "refused")
 
     def test_failure_closed_and_legacy(self):
         old = workspace_context.prepare(str(self.root), "", state_root=self.state)

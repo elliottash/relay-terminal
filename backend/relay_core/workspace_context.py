@@ -19,7 +19,10 @@ def prepare(project: str, session: str, *, card: str | None = None,
             planning_only: bool = False) -> dict:
     """Resolve once before launch. Never convert queue allocation failure to shared cwd."""
     root = str(Path(project).expanduser().resolve())
-    repo = trees.resolve_project(root, state_root=state_root)
+    try:
+        repo = trees.resolve_project(root, state_root=state_root)
+    except (OSError, trees.TreeError) as exc:
+        raise WorkspacePreparationError(f"project registry unreadable: {exc}") from exc
     if repo is None or repo["mode"] == "legacy":
         return dict(project_root=repo["project_root"] if repo else root,
                     board_root=repo["board_root"] if repo else "",
@@ -34,8 +37,8 @@ def prepare(project: str, session: str, *, card: str | None = None,
         from .integration_service import IntegrationService, ServiceError
     except ImportError as exc:
         raise WorkspacePreparationError("integration service is unavailable; development launch refused") from exc
-    service = IntegrationService(repo["project_root"], state_root=state_root, register=False)
     try:
+        service = IntegrationService(repo["project_root"], state_root=state_root, register=False)
         if service.mode() != "queue":
             raise WorkspacePreparationError("publication transition is paused; development launch refused")
         if workspace_id:
@@ -47,10 +50,14 @@ def prepare(project: str, session: str, *, card: str | None = None,
                         repo_id=repo["id"], workspace_id="", execution_cwd=repo["project_root"],
                         branch="", base_sha="", state="planning", recoverable=False, reason="")
         else:
-            row = service.allocate_workspace(session, card=card)
+            # A resumed session takes back the tree it released (its work is kept there)
+            # before the accepted policy allocates a new one.
+            again = service.trees.reacquire(session)
+            row = (service.tree_status(again["id"]) if again is not None
+                   else service.allocate_workspace(session, card=card))
         if row["state"] != "active":
             raise WorkspacePreparationError(row.get("reason") or f"workspace is {row['state']}")
-    except (trees.TreeError, ServiceError) as exc:
+    except (trees.TreeError, ServiceError, OSError) as exc:
         raise WorkspacePreparationError(str(exc)) from exc
     return dict(project_root=repo["project_root"], board_root=repo["board_root"],
                 repo_id=repo["id"], workspace_id=row["workspace_id"],
@@ -68,6 +75,22 @@ def validate_prepared(status: dict, project: str, session: str, *, state_root=No
         if status.get(key, "") != verified[key]:
             raise WorkspacePreparationError(f"tree_status {key} does not match the lease")
     return verified
+
+
+def release(project: str, workspace_id: str, session: str, *, state_root=None) -> dict:
+    """End a lease at a controlled close. Files and branch stay: unlanded work is `retained`,
+    and the same session's next `prepare` reacquires the tree. Removal is separate and
+    explicit (`relay-tree remove`, or the service after the workspace's job landed)."""
+    repo = trees.resolve_project(str(Path(project).expanduser().resolve()), state_root=state_root)
+    if repo is None:
+        raise WorkspacePreparationError("project is not registered")
+    try:
+        record = trees.TreeManager(repo["project_root"], state_root=state_root).release(
+            workspace_id, owner=session)
+    except (trees.TreeError, OSError) as exc:
+        raise WorkspacePreparationError(str(exc)) from exc
+    return {"workspace_id": record["id"], "state": record["status"],
+            "execution_cwd": record["path"], "branch": record["branch"]}
 
 
 def environment(status: dict) -> dict[str, str]:
@@ -98,11 +121,14 @@ def queue_status(project: str, *, state_root=None) -> dict:
     if repo["mode"] != "queue":
         return {"repo_id": repo["id"], "jobs": []}
     try:
-        from .integration_service import IntegrationService
+        from .integration_service import IntegrationService, ServiceError
     except ImportError as exc:
         raise WorkspacePreparationError("integration service is unavailable") from exc
-    return IntegrationService(repo["project_root"], state_root=state_root,
-                              register=False).queue_status()
+    try:
+        return IntegrationService(repo["project_root"], state_root=state_root,
+                                  register=False).queue_status()
+    except (ServiceError, trees.TreeError, OSError) as exc:
+        raise WorkspacePreparationError(str(exc)) from exc
 
 
 def main(argv=None) -> int:
@@ -115,18 +141,31 @@ def main(argv=None) -> int:
     p.add_argument("--state-root")
     p.add_argument("--workspace-id")
     p.add_argument("--planning-only", action="store_true")
+    r = commands.add_parser("release")
+    r.add_argument("--project", required=True)
+    r.add_argument("--workspace-id", required=True)
+    r.add_argument("--session", required=True)
+    r.add_argument("--state-root")
     q = commands.add_parser("queue-status")
     q.add_argument("--project", required=True)
     q.add_argument("--state-root")
     args = parser.parse_args(argv)
     try:
-        result = (queue_status(args.project, state_root=args.state_root)
-                  if args.command == "queue-status" else
-                  prepare(args.project, args.session, card=args.card,
-                          state_root=args.state_root, workspace_id=args.workspace_id,
-                          planning_only=args.planning_only))
+        if args.command == "queue-status":
+            result = queue_status(args.project, state_root=args.state_root)
+        elif args.command == "release":
+            result = release(args.project, args.workspace_id, args.session,
+                             state_root=args.state_root)
+        else:
+            result = prepare(args.project, args.session, card=args.card,
+                             state_root=args.state_root, workspace_id=args.workspace_id,
+                             planning_only=args.planning_only)
     except WorkspacePreparationError as exc:
         print(json.dumps({"state": "refused", "recoverable": True, "reason": str(exc)}))
+        return 2
+    except Exception as exc:  # noqa: BLE001 - the GUI reads one JSON line, never a traceback
+        print(json.dumps({"state": "refused", "recoverable": False,
+                          "reason": f"{type(exc).__name__}: {exc}"}))
         return 2
     print(json.dumps(result))
     return 0

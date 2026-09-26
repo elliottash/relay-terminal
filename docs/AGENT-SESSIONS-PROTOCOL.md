@@ -9406,6 +9406,14 @@ leased worktree. Queue agents commit normally in that worktree and submit immuta
 commits with `relay-land submit HEAD --request-id ID`; the old shared checkout
 `land.py` workflow is suppressed there. Legacy projects keep their existing behavior.
 
+`python -m relay_core.workspace_context release --project ROOT --workspace-id ID --session TOKEN`
+ends a lease at a controlled close and prints `{workspace_id, state, execution_cwd, branch}`:
+files and branch are kept, `state` is `retained` when the branch holds unlanded commits and
+`released` otherwise. The same session's next `prepare` reacquires that tree (a subagent's
+session is `<parent workspace>:child:<agent id>`, so a restored child resumes on its own tree).
+Removal is explicit (`relay-tree remove`). Every subcommand prints one JSON line; any failure
+is `{state: "refused", recoverable, reason}` with exit 2, never a traceback.
+
 `python -m relay_core.workspace_context queue-status --project ROOT` prints
 `queue_status`: `repo_id`, `jobs` with `id`, `card`, `workspace_id`, `status`,
 `reason`, `age_seconds`, `candidate_sha`, `published_sha`, and an optional

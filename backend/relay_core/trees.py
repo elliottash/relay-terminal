@@ -847,6 +847,26 @@ class TreeManager:
         finally:
             conn.close()
 
+    def reacquire(self, session) -> dict | None:
+        """Take back this session's newest released or retained workspace, so a resumed pane
+        or subagent continues on the same branch instead of stranding it. None when there is
+        none, or its worktree is gone (then the caller creates a new one)."""
+        conn = self._conn()
+        try:
+            with _repo_lock(_trees_dir(self.state_root, self.repo["id"])):
+                row = conn.execute(
+                    "SELECT * FROM workspaces WHERE repo_id = ? AND session = ?"
+                    " AND status IN ('released','retained') ORDER BY updated_at DESC, id DESC",
+                    (self.repo["id"], str(session))).fetchone()
+                if row is None or not self._worktree_valid(Path(row["path"])):
+                    return None
+                conn.execute("UPDATE workspaces SET status = 'active', owner = ?,"
+                             " updated_at = ? WHERE id = ?", (str(session), _now(), row["id"]))
+                conn.commit()
+                return self._record(conn, row["id"])
+        finally:
+            conn.close()
+
     def sync(self, workspace_id, *, owner) -> dict:
         """Explicitly rebase the workspace branch onto the target's current tip.
 

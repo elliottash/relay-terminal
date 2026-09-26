@@ -875,7 +875,9 @@ class SubagentManager:
                 items = list(main.checkpoints.items)
                 turn = items[-1].get("turn") if items and isinstance(items[-1], dict) else None
                 sub.spawn_turn = turn if type(turn) is int else None
-                sub.workspace = str(main.executor.workspace.root)
+                # The child's own root: in queue mode a development child has its own tree.
+                executor = getattr(sub.agent, "executor", None) or main.executor
+                sub.workspace = str(executor.workspace.root)
             except (AttributeError, TypeError, IndexError):
                 pass
         self._save_thread(sub)
