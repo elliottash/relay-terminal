@@ -4,9 +4,12 @@
 // itself is tested in tests/test_mcp.py (OptionsCliTests).
 #include "McpSettings.h"
 
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryDir>
 #include <QtTest>
 
 using relay::SettingRow;
@@ -45,6 +48,58 @@ class McpSettingsTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void cachesEachWorkspaceUntilItsFilesChange() {
+        QTemporaryDir temp;
+        QVERIFY(temp.isValid());
+        const QString first = temp.path() + QStringLiteral("/first");
+        const QString second = temp.path() + QStringLiteral("/second");
+        QVERIFY(QDir().mkpath(first));
+        QVERIFY(QDir().mkpath(second));
+        const QString countPath = temp.path() + QStringLiteral("/reads");
+        const QString python = temp.path() + QStringLiteral("/python3");
+        QFile launcher(python);
+        QVERIFY(launcher.open(QIODevice::WriteOnly));
+        launcher.write("#!/bin/sh\n"
+                       "printf 'read\\n' >> \"$RELAY_MCP_TEST_COUNT\"\n"
+                       "while [ \"$#\" -gt 0 ]; do\n"
+                       "  if [ \"$1\" = --workspace ]; then shift; workspace=$1; fi\n"
+                       "  shift\n"
+                       "done\n"
+                       "printf '{\"servers\":[],\"project_path\":\"%s/.mcp.json\"}\\n' \"$workspace\"\n");
+        launcher.close();
+        QVERIFY(launcher.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const QByteArray oldPath = qgetenv("PATH");
+        qputenv("PATH", temp.path().toUtf8() + ':' + oldPath);
+        qputenv("RELAY_MCP_TEST_COUNT", countPath.toUtf8());
+        auto reads = [&] {
+            QFile file(countPath);
+            if (!file.open(QIODevice::ReadOnly)) return 0;
+            return file.readAll().count('\n');
+        };
+        QWidget owner;
+        auto loaded = [&](const QString &workspace) {
+            return find(relay::mcp::settingsRows(workspace, &owner, {}), QStringLiteral("mcp:none")) != nullptr;
+        };
+        QTRY_VERIFY(loaded(first));
+        QCOMPARE(reads(), 1);
+        QTRY_VERIFY(loaded(second));
+        QCOMPARE(reads(), 2);
+        QVERIFY(loaded(first));
+        QTest::qWait(100);
+        QCOMPARE(reads(), 2);  // the second window did not evict the first window's snapshot
+
+        QFile changed(first + QStringLiteral("/.mcp.json"));
+        QVERIFY(changed.open(QIODevice::WriteOnly));
+        changed.write("{}");
+        changed.close();
+        QVERIFY(loaded(first));
+        QTRY_COMPARE_WITH_TIMEOUT(reads(), 3, 3000);
+        QVERIFY(loaded(second));
+        QCOMPARE(reads(), 3);  // a change in one project leaves the other cached
+        qputenv("PATH", oldPath);
+        qunsetenv("RELAY_MCP_TEST_COUNT");
+    }
+
     void rowsAndButtons() {
         QList<QPair<QStringList, QString>> calls;
         int adds = 0, imports = 0;
