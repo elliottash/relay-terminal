@@ -1182,10 +1182,18 @@ void Pane::askForConsoleProgram() {
                          {QStringLiteral("plugin_id"), m_consolePluginRequest},
                          {QStringLiteral("workspace"), m_workspace},
                          {QStringLiteral("console"), true}});
+        m_consoleSetup = false;
+        armConsoleAnswerTimeout();
+    }
+
+void Pane::armConsoleAnswerTimeout(int rearms) {
         // A worker that never answers must not leave the pane a blank surface forever: past this,
         // the pane becomes a shell (and the ask is rearmed, so `Restart console` tries again).
-        QTimer::singleShot(30000, this, [this] {
+        // While the worker says it is building the console's Python (a first console, relay_core
+        // py_env) the wait goes on, 30 s at a time, for up to 30 minutes (#83YV).
+        QTimer::singleShot(30000, this, [this, rearms] {
             if (m_closing || m_backend || m_consolePluginRequest.isEmpty() || m_consoleProgram.isValid()) return;
+            if (m_consoleSetup && rearms < 60) { armConsoleAnswerTimeout(rearms + 1); return; }
             status(QStringLiteral("%1 console: no answer from the workspace worker; started a shell instead. Use \"Restart shell\" to retry.")
                        .arg(consoleName(m_consolePluginRequest)));
             try {

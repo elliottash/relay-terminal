@@ -825,6 +825,8 @@ void Pane::handle(const QJsonObject &event) {
             }
         } else if (type == QStringLiteral("status")) {
             const QString text = event.value(QStringLiteral("text")).toString();
+            if (event.contains(QStringLiteral("console_setup")))   // protocol 36.5 (#83YV)
+                m_consoleSetup = event.value(QStringLiteral("console_setup")).toString() == QStringLiteral("building");
             if (m_internals && event.contains(QStringLiteral("handover_chars")))
                 m_internals->note(QStringLiteral("Guest handover: %1 characters (~%2 tokens)")
                     .arg(event.value(QStringLiteral("handover_chars")).toInt())

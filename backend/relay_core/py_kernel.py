@@ -642,8 +642,11 @@ class JupyterBackend:
     POLL = 0.05
 
     def __init__(self, kernel_name: str = "python3", cwd: str | None = None, env: dict | None = None,
-                 startup_timeout: float = 60.0):
+                 startup_timeout: float = 60.0, kernel_python: str | None = None):
         self.kernel_name = kernel_name
+        # An interpreter with ipykernel to launch instead of the named spec: the project's venv or
+        # Relay's managed one (relay_core.py_env, #83YV).
+        self.kernel_python = kernel_python
         self.cwd = cwd
         self.env = env
         self.startup_timeout = startup_timeout
@@ -661,7 +664,18 @@ class JupyterBackend:
 
     def start(self) -> None:
         from jupyter_client.manager import KernelManager
-        self.km = KernelManager(kernel_name=self.kernel_name)
+        if self.kernel_python:
+            from jupyter_client.kernelspec import KernelSpec, KernelSpecManager
+            spec = KernelSpec(argv=[self.kernel_python, "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+                              display_name="Python", language="python")
+
+            class OneSpec(KernelSpecManager):
+                def get_kernel_spec(self, kernel_name):
+                    return spec
+
+            self.km = KernelManager(kernel_name=self.kernel_name, kernel_spec_manager=OneSpec())
+        else:
+            self.km = KernelManager(kernel_name=self.kernel_name)
         kwargs: dict = {}
         if self.cwd:
             kwargs["cwd"] = self.cwd

@@ -17809,6 +17809,8 @@ private:
     QString m_consolePluginRequest;
     ConsoleProgram m_consoleProgram;
     bool m_consoleAskSent = false;   // one ask per worker lifetime; restartShell() clears it
+    bool m_consoleSetup = false;     // the worker is building the console's Python (status console_setup)
+    void armConsoleAnswerTimeout(int rearms = 0);   // askForConsoleProgram's wait, longer while it builds
     QString m_engineCore;
     QWidget *m_terminal = nullptr, *m_terminalHost = nullptr;
     // setTranscriptHiddenUntilUsed: the card page's console asks, and the first byte answers.

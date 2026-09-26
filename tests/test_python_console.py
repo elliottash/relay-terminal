@@ -117,7 +117,10 @@ class Base(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.ws = self.root / "ws"
         self.ws.mkdir()
-        env = mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.root / "cache")})
+        # Never build Relay's managed venv (relay_core.py_env) from a test, nor find the real one.
+        env = mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(self.root / "cache"),
+                                           "XDG_DATA_HOME": str(self.root / "data"),
+                                           "RELAY_PYTHON_PROVISION": "off"})
         env.start()
         self.addCleanup(env.stop)
         self.events = []

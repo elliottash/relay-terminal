@@ -143,7 +143,8 @@ def _has_module(name: str) -> bool:
 
 
 def console_command(console, package_root, connection_file: str | None, which=shutil.which,
-                    has_module=_has_module, python: str | None = None) -> dict:
+                    has_module=_has_module, python: str | None = None,
+                    console_python: str | None = None, why: str = "") -> dict:
     """What a Python console pane runs in its pty (#83YV): `{argv, program, label, shared,
     connection_file, startup, note}`.
 
@@ -166,7 +167,10 @@ def console_command(console, package_root, connection_file: str | None, which=sh
         argv = [connection_file if word == "{connection_file}" else word for word in program]
         head = None
         if argv[:2] == ["jupyter", "console"]:
-            if which("jupyter") and which("jupyter-console"):
+            if console_python:
+                # The kernel's environment has jupyter_console (relay_core.py_env): no PATH needed.
+                head = [console_python, "-m", "jupyter_console"]
+            elif which("jupyter") and which("jupyter-console"):
                 head = [which("jupyter"), "console"]
             elif has_module("jupyter_console"):
                 head = [python, "-m", "jupyter_console"]
@@ -178,8 +182,8 @@ def console_command(console, package_root, connection_file: str | None, which=sh
                 rest = rest + ["--config=" + startup]
             return {"argv": head + rest, "program": "jupyter-console", "label": "Python · ipython",
                     "shared": True, "connection_file": connection_file, "startup": startup, "note": ""}
-    why = ("the kernel runs on the stdlib server (install ipykernel and jupyter_client for a shared one)"
-           if not connection_file else "jupyter_console is not installed (pip install jupyter-console)")
+    why = why or ("the kernel runs on the stdlib server (install ipykernel and jupyter_client for a shared one)"
+                  if not connection_file else "jupyter_console is not installed (pip install jupyter-console)")
     ipython = which("ipython") or which("ipython3")
     if ipython:
         argv = [ipython] + (["--InteractiveShellApp.exec_files=" + startup] if startup else [])
@@ -239,29 +243,64 @@ class KernelRuntime:
             self.session = session_factory(cwd=workspace_dir, env=env, on_output=self._output,
                                            on_record=self._record)
         else:
-            # Jupyter (ipykernel, IPython syntax) when this Relay's Python can reach it; otherwise
-            # the stdlib server under the user's own `python3`, the one `requires` resolved — so
-            # ipykernel is an upgrade, never a requirement.
-            jupyter = py_kernel.jupyter_available()
-            python = None if jupyter else next(
+            # Jupyter (ipykernel, IPython syntax) in the Python relay_core.py_env picks — the
+            # project's venv, this worker's own, or Relay's managed one — when there is one;
+            # otherwise the stdlib server under the user's own `python3`, the one `requires`
+            # resolved. The choice is made at the kernel's first start, off the worker's loop.
+            self._fallback_python = next(
                 (d.get("path") for d in dependencies if d.get("program") in ("python3", "python")
                  and d.get("path")), None)
-            self.session = py_kernel.KernelSession("auto" if jupyter else "subprocess", cwd=workspace_dir,
-                                                   env=env, python=python, on_output=self._output,
-                                                   on_record=self._record)
+            self._cwd, self._env = workspace_dir, env
+            self.session = py_kernel.KernelSession(self._make_backend, cwd=workspace_dir, env=env,
+                                                   on_output=self._output, on_record=self._record)
+        self.workspace_dir = workspace_dir
+        self.plan = None                    # py_env.KernelEnv, once the kernel has started
+        self._plan_lock = threading.Lock()
         self.names: frozenset[str] = frozenset()
         self._jobs: queue.Queue = queue.Queue()
         self._thread = threading.Thread(target=self._serve, name=f"relay-kernel-{workspace_id}", daemon=True)
         self._thread.start()
+
+    # -- environment -----------------------------------------------------------------------------
+    def _status(self, text: str, building: bool) -> None:
+        # `console_setup` tells a console pane waiting for `workspace_console` that the answer is
+        # coming, only later: a first build can outlast its 30 s wait (protocol 36.5).
+        self.emit({"event": "status", "text": text, "workspace_id": self.workspace_id,
+                   "console_setup": "building" if building else "done"})
+
+    def resolve_env(self, build: bool = False):
+        """The kernel's Python (relay_core.py_env). `build` lets a console build Relay's managed
+        venv; a plan without Jupyter is asked again then, since that is what the build changes."""
+        from . import py_env
+        with self._plan_lock:
+            if self.plan is None or (build and not self.plan.jupyter):
+                self.plan = py_env.resolve(self.workspace_dir, build=build, status=self._status)
+                py_env.add_client_sites(self.plan.client_sites)
+            return self.plan
+
+    def _make_backend(self):
+        from . import py_kernel
+        plan = self.resolve_env()
+        if plan.source in ("project", "managed"):
+            return py_kernel.JupyterBackend(cwd=self._cwd, env=self._env, kernel_python=plan.kernel_python)
+        if plan.source == "worker":
+            return py_kernel.JupyterBackend(cwd=self._cwd, env=self._env)
+        return py_kernel.SubprocessBackend(self._fallback_python, self._cwd, self._env)
 
     # -- routing ---------------------------------------------------------------------------------
     @property
     def language(self) -> str:
         """`ipython` once the session runs on ipykernel (magics, `!cmd`, `name?`), else `python`."""
         backend = getattr(self.session, "_backend", None)
-        # Before the first cell there is no backend yet: "auto" was chosen only because Jupyter is
-        # there, so it will be ipykernel.
-        name = getattr(backend, "name", None) or getattr(self.session, "_backend_choice", "")
+        name = getattr(backend, "name", None)
+        if name is None:
+            # Before the first cell there is no backend yet. A test's session names its backend;
+            # otherwise the plan does — made here without building anything, and kept.
+            choice = getattr(self.session, "_backend_choice", "")
+            if isinstance(choice, str):
+                name = choice
+            else:
+                name = "auto" if self.resolve_env().jupyter else "subprocess"
         return "ipython" if name in ("jupyter", "auto") else "python"
 
     def info(self) -> dict:
@@ -310,10 +349,19 @@ class KernelRuntime:
         self._jobs.put(("console", "", request_id))
 
     def console_answer(self) -> dict:
+        before = self.plan
+        plan = self.resolve_env(build=True) if hasattr(self, "_fallback_python") else None
+        if plan is not None and before is not None and not before.jupyter and plan.jupyter \
+                and getattr(self.session, "_started", False):
+            # The kernel had started on the stdlib server before the console built Jupyter: move
+            # it, saying so in the history, so the console and the agent share one namespace.
+            self.session.restart(origin="system", intent="Moved to the console's Jupyter kernel.")
         self.session.start()
         info = self.info()
         return {"workspace_id": self.workspace_id, "plugin_id": self.plugin_id,
-                **console_command(self.console, self.package_root, info.get("connection_file")),
+                **console_command(self.console, self.package_root, info.get("connection_file"),
+                                  console_python=plan.console_python if plan else None,
+                                  why=plan.note if plan else ""),
                 "completions": console_completions(self.manifest),
                 "runtime": {"kind": self.kind, **info}}
 

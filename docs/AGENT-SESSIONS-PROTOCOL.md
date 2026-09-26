@@ -9383,6 +9383,22 @@ same handshake without a kernel: the answer resolves `stata`, `stata-mp` or `sta
 the manifest's `stata -q` program in the pty. A missing Stata binary produces an error and a
 shell fallback.
 
+Which Python the kernel runs in is `relay_core.py_env.resolve`, in this order: the workspace's own
+`.venv`/`venv` when it has ipykernel; the worker's own Python when it has jupyter_client and a
+python3 kernel spec; Relay's managed venv `$XDG_DATA_HOME/relay/python/kernel-py3XY` (ipykernel,
+jupyter_client, jupyter-console, numpy, pandas, matplotlib). Only `console: true` may *build* the
+managed venv (with `uv`, else `python -m venv` and pip); while it builds, the worker sends
+`status {text, workspace_id, console_setup}` events, with `console_setup` set to `"building"`
+("Setting up Python for the console…") and then `"done"` ("…is ready." or "…failed."). The
+`workspace_console` answer follows. A pane waiting for its answer keeps waiting while the last
+`console_setup` it saw is `"building"`, for up to 30 minutes, instead of falling back to a shell
+after 30 s. Once built, every kernel may use it. A worker without
+jupyter_client borrows the managed venv's site-packages to talk to the kernel. `argv` then runs
+`<that env's python> -m jupyter_console`, so nothing has to be on PATH. A kernel that had already
+started on the stdlib server moves to Jupyter when the console's build succeeds (a state-lost
+restart record, origin `system`). A failed build leaves the stdlib fallback, and `note` says why.
+`RELAY_PYTHON_PROVISION=off` disables the build.
+
 ## 37. Isolated development workspace and publication status (#80X1)
 
 Before starting a development shell, worker or guest, the launcher calls
