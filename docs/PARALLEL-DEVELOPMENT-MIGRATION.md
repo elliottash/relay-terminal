@@ -201,7 +201,12 @@ verification policy require explicit `capture-policy` after the config itself la
 accepted gate judges that config change.
 
 The release launcher resolves `tip/run/current`; `main-status` reports installed SHA and lag
-while a new build is pending. Keep at least two completed installed releases. Observe actual
+while a new build is pending. Launch through `main-run` (or the GUI's **Relay (main)** action):
+it holds a kernel file-lock lease across execution, so pruning preserves the running release's
+backend and assets even after newer builds arrive. Direct execution from `run/<sha>/` bypasses
+this protection. Programs must retain the inherited lease descriptor. Keep at least two completed
+installed releases; live pinned versions are retained in addition, so include their bytes in
+the disk budget. They become reclaimable after the last lease holder exits. Observe actual
 build duration, source tree bytes, verification cache bytes and release bytes on the host. A
 tiny independent Python fixture in `tests/test_parallel_project_adoption.py` measured, on
 2026-09-26, 2,093 source bytes (excluding `.git`), 2,205 bytes in one source tree, 6 bytes
