@@ -1,5 +1,6 @@
 """Queue workspace adapters use real Git leases and leave legacy mode alone."""
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ from relay_core.scratch import keep_root
 from relay_core.subagents import SubagentFactory
 from relay_core.agents_defs import AgentDefinition
 from relay_core.provider import ProviderConfig
+from relay_core.integration_service import IntegrationService
 
 
 def git(root, *args):
@@ -35,15 +37,25 @@ class WorkspaceContextTests(unittest.TestCase):
         (self.root / ".board" / "board.yaml").write_text("version: 1\n")
         (self.root / ".relay").mkdir()
         (self.root / ".relay" / "project.toml").write_text(
-            'version = 1\n[workspace]\nexclude = [".board"]\n')
+            'version = 1\n[workspace]\nexclude = [".board"]\n'
+            '[verification]\ncommands = [["python3", "-c", "pass"]]\n')
         (self.root / "source.txt").write_text("base\n")
         git(self.root, "add", ".")
         git(self.root, "commit", "-m", "base")
         trees.register_repo(self.root, state_root=self.state)
 
     def test_two_children_are_distinct_and_canonical(self):
-        trees.configure_repo(self.root, state_root=self.state, mode="queue")
-        with patch.dict(os.environ, {"RELAY_STATE_HOME": str(self.state.parent)}, clear=False):
+        with patch.dict(os.environ, {"RELAY_STATE_HOME": str(self.state.parent),
+                                      "RELAY_LAND_ROOT": str(Path(self.temp.name) / "land")}, clear=False):
+            IntegrationService(self.root, state_root=self.state,
+                               land_root=Path(self.temp.name) / "land").activate()
+            # A later target config cannot silently replace the accepted workspace policy.
+            (self.root / ".relay" / "project.toml").write_text(
+                'version = 1\n[workspace]\nexclude = [".board"]\nmax_workspaces = 1\n'
+                '[verification]\ncommands = [["python3", "-c", "pass"]]\n')
+            git(self.root, "add", ".relay/project.toml")
+            git(self.root, "-c", "core.hooksPath=/dev/null", "commit", "-m", "later proposed policy")
+            git(self.root, "branch", "-f", "main", "HEAD")
             # The direct adapter takes an explicit state root; environment based tools use
             # XDG_STATE_HOME/relay, which is made equivalent here.
             first = workspace_context.prepare(str(self.root), "parent:child:one", state_root=self.state)
@@ -58,6 +70,8 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(keep_root(first["execution_cwd"]), self.root / ".relay" / "work")
             self.assertFalse((Path(first["execution_cwd"]) / ".board").exists())
             self.assertEqual(first["repo_id"], second["repo_id"])
+            self.assertEqual(workspace_context.queue_status(str(self.root),
+                                                           state_root=self.state)["repo_id"], first["repo_id"])
             self.assertEqual(workspace_context.environment(first)["RELAY_WORKSPACE_ID"], first["workspace_id"])
             factory = SubagentFactory(ProviderConfig("http://127.0.0.1:12345/v1", "mock", ""),
                                       first["execution_cwd"], provider_factory=lambda config: object())
@@ -74,6 +88,12 @@ class WorkspaceContextTests(unittest.TestCase):
             self.assertEqual(launch["execution_cwd"], first["execution_cwd"])
             self.assertEqual(launch["env"]["RELAY_BOARD_ROOT"], str(self.root / ".board"))
             self.assertIn("relay-land submit", Path(launch["memory_file"]).read_text())
+            cli_env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "backend")}
+            cli = subprocess.run([sys.executable, "-m", "relay_core.workspace_context", "prepare",
+                                  "--project", str(self.root), "--session", "parent:child:one",
+                                  "--state-root", str(self.state)], env=cli_env,
+                                 text=True, capture_output=True, check=True)
+            self.assertEqual(json.loads(cli.stdout)["workspace_id"], first["workspace_id"])
 
     def test_failure_closed_and_legacy(self):
         old = workspace_context.prepare(str(self.root), "", state_root=self.state)

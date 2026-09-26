@@ -5,10 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
-from . import projectconf, trees
+from . import trees
 
 
 class WorkspacePreparationError(RuntimeError):
@@ -31,30 +30,31 @@ def prepare(project: str, session: str, *, card: str | None = None,
         raise WorkspacePreparationError(f"project is {repo['mode']}; development launch refused")
     if not session:
         raise WorkspacePreparationError("queue development requires a session token")
-    manager = trees.TreeManager(repo["project_root"], state_root=state_root)
     try:
+        from .integration_service import IntegrationService, ServiceError
+    except ImportError as exc:
+        raise WorkspacePreparationError("integration service is unavailable; development launch refused") from exc
+    service = IntegrationService(repo["project_root"], state_root=state_root, register=False)
+    try:
+        if service.mode() != "queue":
+            raise WorkspacePreparationError("publication transition is paused; development launch refused")
         if workspace_id:
-            row = manager.get(workspace_id)
-            if row["session"] != session or row["status"] != "active":
+            row = service.tree_status(workspace_id)
+            if row["session"] != session or row["state"] != "active":
                 raise WorkspacePreparationError("workspace lease does not belong to this active session")
         elif planning_only:
             return dict(project_root=repo["project_root"], board_root=repo["board_root"],
                         repo_id=repo["id"], workspace_id="", execution_cwd=repo["project_root"],
                         branch="", base_sha="", state="planning", recoverable=False, reason="")
         else:
-            # The registered target's version is the accepted launch policy. The publisher
-            # separately stores and enforces the accepted verification policy.
-            config = projectconf.load(repo["project_root"], revision=repo["target"], require_file=True)
-            settings = config["workspace"]
-            row = manager.create(session, card=card, excludes=settings["exclude"],
-                                 init=settings["init"], max_workspaces=settings["max_workspaces"])
-        if row["status"] != "active":
-            raise WorkspacePreparationError(row.get("init_error") or f"workspace is {row['status']}")
-    except (trees.TreeError, projectconf.ProjectConfigError) as exc:
+            row = service.allocate_workspace(session, card=card)
+        if row["state"] != "active":
+            raise WorkspacePreparationError(row.get("reason") or f"workspace is {row['state']}")
+    except (trees.TreeError, ServiceError) as exc:
         raise WorkspacePreparationError(str(exc)) from exc
     return dict(project_root=repo["project_root"], board_root=repo["board_root"],
-                repo_id=repo["id"], workspace_id=row["id"],
-                execution_cwd=row["path"], branch=row["branch"],
+                repo_id=repo["id"], workspace_id=row["workspace_id"],
+                execution_cwd=row["execution_cwd"], branch=row["branch"],
                 base_sha=row["base_sha"], state="active", recoverable=True, reason="")
 
 
@@ -97,29 +97,12 @@ def queue_status(project: str, *, state_root=None) -> dict:
         raise WorkspacePreparationError("project is not registered")
     if repo["mode"] != "queue":
         return {"repo_id": repo["id"], "jobs": []}
-    from .landq import Queue
-    jobs = []
-    queue = Queue(repo["project_root"], state_root=state_root)
-    for job in queue.status():
-        try:
-            created = datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
-            age = max(0, int((datetime.now(timezone.utc) - created).total_seconds()))
-        except (KeyError, ValueError, TypeError):
-            age = 0
-        receipt = queue.receipt(job["id"]) if job["status"] == "landed" else None
-        jobs.append({"id": job["id"], "card": job.get("card"),
-                     "workspace_id": job.get("workspace_id"), "status": job["status"],
-                     "reason": job.get("reason") or "", "age_seconds": age,
-                     "candidate_sha": job.get("candidate_sha") or "",
-                     "published_sha": (receipt or {}).get("published_sha") or ""})
-    result = {"repo_id": repo["id"], "jobs": jobs}
     try:
-        from .main_release import MainRelease
-        result["main_release"] = MainRelease(repo["project_root"], state_root=state_root,
-                                              repo_id=repo["id"]).status()
-    except (OSError, ValueError):
-        pass
-    return result
+        from .integration_service import IntegrationService
+    except ImportError as exc:
+        raise WorkspacePreparationError("integration service is unavailable") from exc
+    return IntegrationService(repo["project_root"], state_root=state_root,
+                              register=False).queue_status()
 
 
 def main(argv=None) -> int:
