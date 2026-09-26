@@ -70,6 +70,7 @@ class BoardGesturesTests : public QObject {
 
 private slots:
     void middleAndCtrlClickDockTheCardInItsOwnPane();
+    void aLinkOnACardPaneDocksANewPane();
 };
 
 // Every docking gesture lands in `ownPanes` (BoardView::onOpenInNewPane) and leaves this pane
@@ -190,6 +191,42 @@ void BoardGesturesTests::middleAndCtrlClickDockTheCardInItsOwnPane()
     QVERIFY(chip);
     QTest::mouseClick(chip, Qt::LeftButton, Qt::ControlModifier);
     QCOMPARE(ownPanes.last(), QStringLiteral("K7Q2"));
+}
+
+// A card pane (#Y2BA) is one card's for good: a plain click on a `#ID` link in it docks the
+// linked card beside it rather than turning this pane into that card, and a link to its own
+// card does nothing.
+void BoardGesturesTests::aLinkOnACardPaneDocksANewPane()
+{
+    relay::BoardView view(QStringLiteral("/tmp/relay-board-gestures-test"));
+    QList<QJsonObject> sent;
+    view.onSend = [&sent](const QJsonObject &message) { sent << message; };
+    QStringList ownPanes;
+    view.onOpenInNewPane = [&ownPanes](const QString &id) { ownPanes << id; };
+    view.handleEvent(opened({row(QStringLiteral("K7Q2"), QStringLiteral("ready")),
+                             row(QStringLiteral("M3XJ"), QStringLiteral("ready"))}));
+    view.pinSolo(QStringLiteral("K7Q2"));
+    QString request;
+    for (auto it = sent.crbegin(); it != sent.crend() && request.isEmpty(); ++it)
+        if (it->value(QStringLiteral("type")).toString() == QLatin1String("board_card_get"))
+            request = it->value(QStringLiteral("id")).toString();
+    QVERIFY(!request.isEmpty());
+    QJsonObject answer = cardArrived(QStringLiteral("K7Q2"));
+    answer["body"] = QStringLiteral("# K7Q2 card\n\n## Issue\nthe ask, see #M3XJ\n");
+    answer.insert(QStringLiteral("id"), request);
+    view.handleEvent(answer);
+    auto *doc = view.findChild<QTextBrowser *>();
+    QVERIFY(doc);
+    const int requests = int(sent.size());
+
+    emit doc->anchorClicked(QUrl(QStringLiteral("card:M3XJ")));
+    QCOMPARE(ownPanes, (QStringList{QStringLiteral("M3XJ")}));
+    QCOMPARE(view.pinnedCard(), QStringLiteral("K7Q2"));
+    QCOMPARE(int(sent.size()), requests);   // no board_card_get: this pane did not move
+
+    emit doc->anchorClicked(QUrl(QStringLiteral("card:K7Q2")));
+    QCOMPARE(ownPanes.size(), 1);
+    QCOMPARE(view.pinnedCard(), QStringLiteral("K7Q2"));
 }
 
 QTEST_MAIN(BoardGesturesTests)

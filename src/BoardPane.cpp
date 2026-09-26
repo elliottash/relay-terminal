@@ -7712,7 +7712,8 @@ void BoardView::openCard(const QString &id)
 {
     if (id.isEmpty())
         return;
-    // A link on a pinned page moves the pane to that card (#Y2BA): the pane is always one card's.
+    // A pinned pane is always one card's (#Y2BA). Link clicks there dock a new pane
+    // (openCardFromClick); this path is pinSolo's and a restore's.
     if (m_pinned)
         m_pinnedCard = id;
     selectCard(id);
@@ -8126,14 +8127,20 @@ void BoardView::autoScrollDuringDrag()
 }
 
 // The card in a pane of its own — #Y2BA's docking, and the one path every gesture to it
-// shares (#HKY4): Shift+Enter, middle-click and Ctrl+click. A pinned pane is already one
-// card's pane, so it keeps its card and the gesture is refused. A page here on the same card
-// closes with it — or the board would show the same card as the new pane — while a page on
-// another card stays where it is, like the browser tab the click came from.
+// shares (#HKY4): Shift+Enter, middle-click and Ctrl+click. A pinned pane keeps its own card:
+// a link to another card docks that card beside it, and a link to its own card is already
+// on screen. A page here on the same card closes with it — or the board would show the same
+// card as the new pane — while a page on another card stays where it is, like the browser tab
+// the click came from.
 bool BoardView::openInOwnPane(const QString &id)
 {
-    if (id.isEmpty() || !onOpenInNewPane || m_pinned)
+    if (id.isEmpty() || !onOpenInNewPane)
         return false;
+    if (m_pinned) {
+        if (id != m_pinnedCard)
+            onOpenInNewPane(id);
+        return true;
+    }
     if (detailOpen() && m_detail->cardId() == id)
         closeDetail();
     onOpenInNewPane(id);
@@ -8141,12 +8148,14 @@ bool BoardView::openInOwnPane(const QString &id)
 }
 
 // Every click-shaped open of a card in this pane (#HKY4): Ctrl+click takes the browser's
-// new-tab meaning and docks the card beside this one; any other state opens it here as before.
+// new-tab meaning and docks the card beside this one. A card pane never gives its card up to a
+// link, so any click there docks the linked card beside it; in the list Board a plain click
+// opens it here as before.
 void BoardView::openCardFromClick(const QString &id)
 {
     if (id.isEmpty())
         return;
-    if (QApplication::keyboardModifiers() == Qt::ControlModifier && openInOwnPane(id))
+    if ((m_pinned || QApplication::keyboardModifiers() == Qt::ControlModifier) && openInOwnPane(id))
         return;
     openCard(id);
 }
