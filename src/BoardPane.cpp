@@ -4989,6 +4989,36 @@ void BoardView::stampViewed(const QString &id)
 void BoardView::handleEvent(const QJsonObject &event)
 {
     const QString type = event.value(QStringLiteral("event")).toString();
+    if (type == QStringLiteral("tree_status")) {
+        const QJsonObject tree = event.value(QStringLiteral("tree_status")).isObject()
+            ? event.value(QStringLiteral("tree_status")).toObject() : event;
+        if (QDir::cleanPath(tree.value(QStringLiteral("project_root")).toString())
+            == QDir::cleanPath(m_workspace) && tree.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
+            m_repoId = tree.value(QStringLiteral("repo_id")).toString();
+            m_queueMode = !m_repoId.isEmpty();
+            syncLivePage();
+        }
+        return;
+    }
+    // Queue notifications are hints for this registered project; the periodic CLI read below
+    // remains the recovery path after a missed event or a restarted publisher.
+    if ((type == QStringLiteral("queue_status") || type == QStringLiteral("main_moved"))
+        && !m_repoId.isEmpty() && event.value(QStringLiteral("repo_id")).toString() == m_repoId) {
+        if (type == QStringLiteral("queue_status")) {
+            m_queueJobs = event.value(QStringLiteral("jobs")).toArray();
+            if (event.value(QStringLiteral("workspaces")).isArray())
+                m_retainedTrees = event.value(QStringLiteral("workspaces")).toArray();
+            if (event.value(QStringLiteral("main_release")).isObject())
+                m_mainRelease = event.value(QStringLiteral("main_release")).toObject();
+        } else {
+            m_mainMoved = QStringLiteral("main moved %1 → %2")
+                .arg(event.value(QStringLiteral("previous_sha")).toString().left(10),
+                     event.value(QStringLiteral("sha")).toString().left(10));
+            m_integrationPollAge.invalidate();
+        }
+        syncLivePage();
+        return;
+    }
     const QString requestId = event.value(QStringLiteral("id")).toString();
     const bool mine = !requestId.isEmpty() && requestId.startsWith(m_requestPrefix);
     // Defence in depth for the per-project Switchboard: every board event carries the `issues`
@@ -6665,6 +6695,27 @@ void BoardView::buildLivePage(QVBoxLayout *layout)
     auto *column = new QVBoxLayout(m_livePage);
     column->setContentsMargins(0, 6, 0, 0);
     column->setSpacing(4);
+    auto *channel = new QHBoxLayout;
+    m_integrationSummary = new QLabel(m_livePage);
+    m_integrationSummary->setObjectName(QStringLiteral("boardIntegrationSummary"));
+    channel->addWidget(m_integrationSummary, 1);
+    m_mainButton = new QPushButton(QStringLiteral("Relay (main)"), m_livePage);
+    m_mainButton->setObjectName(QStringLiteral("boardMainLauncher"));
+    m_mainButton->setToolTip(QStringLiteral("Open the current installed runnable-main release"));
+    connect(m_mainButton, &QPushButton::clicked, this, [this] {
+        const QString script = dataRoot() + QStringLiteral("/scripts/relay-land");
+        if (!m_queueMode || m_mainRelease.value(QStringLiteral("current")).toObject().isEmpty()
+            || !QFileInfo::exists(script)) return;
+        // main-run resolves the atomic `current` channel itself. The project is a single argv
+        // value, never text pasted into a shell or a path to the source checkout's binary.
+        qint64 pid = 0;
+        if (!QProcess::startDetached(relayPython(),
+                {script, QStringLiteral("--repo"), m_workspace, QStringLiteral("main-run")},
+                m_workspace, &pid))
+            showNotice(QStringLiteral("Could not launch the installed Relay (main) release."), false);
+    });
+    channel->addWidget(m_mainButton);
+    column->addLayout(channel);
     m_liveEmpty = new QLabel(QStringLiteral("No panes are open on this project."), m_livePage);
     m_liveEmpty->setObjectName(QStringLiteral("boardLiveEmpty"));
     column->addWidget(m_liveEmpty);
@@ -6683,9 +6734,89 @@ void BoardView::buildLivePage(QVBoxLayout *layout)
         if (isVisible()) {
             syncLivePage();
             syncBackgroundPage();
+            if (m_page == Page::Live) pollIntegrationStatus();
         }
     });
     m_liveTimer->start();
+}
+
+void BoardView::pollIntegrationStatus()
+{
+    if (m_integrationPoll || (m_integrationPollAge.isValid() && m_integrationPollAge.elapsed() < 5000))
+        return;
+    m_integrationPollAge.start();
+    pollIntegrationStatusStep(0);
+}
+
+void BoardView::pollIntegrationStatusStep(int step)
+{
+    if (step > 2) { syncLivePage(); return; }
+    const QString script = dataRoot() + (step == 0 ? QStringLiteral("/scripts/relay-tree")
+                                                  : QStringLiteral("/scripts/relay-land"));
+    if (!QFileInfo::exists(script)) {
+        m_queueProblem = QStringLiteral("Integration command is unavailable: %1").arg(script);
+        syncLivePage();
+        return;
+    }
+    QStringList args{script};
+    if (step == 0) args << QStringLiteral("resolve") << m_workspace;
+    else {
+        args << QStringLiteral("--repo") << m_workspace;
+        args << (step == 1 ? QStringLiteral("snapshot") : QStringLiteral("events"));
+        if (step == 2) args << QStringLiteral("--since") << QString::number(m_lastIntegrationEvent);
+    }
+    auto *process = new QProcess(this);
+    m_integrationPoll = process;
+    process->setWorkingDirectory(m_workspace);
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process, step](int code, QProcess::ExitStatus exit) {
+        const QByteArray output = process->readAllStandardOutput();
+        const QString error = QString::fromUtf8(process->readAllStandardError()).trimmed();
+        process->deleteLater();
+        if (m_integrationPoll != process) return;
+        m_integrationPoll = nullptr;
+        const QJsonDocument document = QJsonDocument::fromJson(output);
+        if (step == 0) {
+            m_queueMode = exit == QProcess::NormalExit && code == 0
+                          && document.object().value(QStringLiteral("mode")).toString() == QStringLiteral("queue");
+            m_repoId = m_queueMode ? document.object().value(QStringLiteral("id")).toString() : QString();
+            if (!m_queueMode) {
+                m_queueJobs = {}; m_retainedTrees = {}; m_mainRelease = {}; m_queueProblem.clear();
+                syncLivePage();
+                return;
+            }
+            m_queueProblem.clear();
+        } else if (exit != QProcess::NormalExit || code != 0) {
+            m_queueProblem = error.isEmpty() ? QStringLiteral("Integration status request failed") : error;
+        } else if (step == 1 && document.isObject()
+                   && document.object().value(QStringLiteral("repo_id")).toString() == m_repoId) {
+            QJsonObject snapshot = document.object();
+            snapshot.insert(QStringLiteral("event"), QStringLiteral("queue_status"));
+            handleEvent(snapshot);
+            m_queueProblem.clear();
+        } else if (step == 2 && document.isArray()) {
+            for (const QJsonValue &value : document.array()) {
+                const QJsonObject row = value.toObject();
+                m_lastIntegrationEvent = qMax(m_lastIntegrationEvent,
+                    qint64(row.value(QStringLiteral("id")).toDouble()));
+                if (row.value(QStringLiteral("kind")).toString() != QStringLiteral("main_moved")) continue;
+                QJsonObject notice = row;
+                notice.insert(QStringLiteral("event"), QStringLiteral("main_moved"));
+                handleEvent(notice);
+            }
+        } else {
+            m_queueProblem = QStringLiteral("Integration status returned an unexpected response");
+        }
+        pollIntegrationStatusStep(step + 1);
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart || m_integrationPoll != process) return;
+        m_integrationPoll = nullptr;
+        m_queueProblem = QStringLiteral("Integration status command could not start: ") + process->errorString();
+        process->deleteLater();
+        syncLivePage();
+    });
+    process->start(relayPython(), args);
 }
 
 void BoardView::syncLivePage()
@@ -6698,7 +6829,7 @@ void BoardView::syncLivePage()
                         && m_page == Page::Live;
     m_livePage->setVisible(onLive);
     const QJsonArray panes = onLive && livePanes ? livePanes() : QJsonArray{};
-    struct Live { QString token, title, model; bool busy; QStringList cards; };
+    struct Live { QString token, title, model; bool busy; QStringList cards; QJsonObject tree; };
     QList<Live> rows;
     QString key;
     for (const QJsonValue &value : panes) {
@@ -6706,12 +6837,14 @@ void BoardView::syncLivePage()
         Live live{pane.value(QStringLiteral("token")).toString(),
                   pane.value(QStringLiteral("title")).toString(),
                   pane.value(QStringLiteral("model")).toString(),
-                  pane.value(QStringLiteral("busy")).toBool(), {}};
+                  pane.value(QStringLiteral("busy")).toBool(), {},
+                  pane.value(QStringLiteral("tree_status")).toObject()};
         if (live.token.isEmpty())
             continue;
         live.cards = m_model.claimedBy(live.token);
         key += QStringLiteral("%1|%2|%3|%4|").arg(live.token, live.title, live.model,
                                                    live.busy ? QStringLiteral("1") : QString());
+        key += QString::fromUtf8(QJsonDocument(live.tree).toJson(QJsonDocument::Compact));
         for (const QString &id : std::as_const(live.cards)) {
             const board::Card *card = m_model.card(id);
             key += id + QLatin1Char(':') + (card ? card->title : QString()) + QLatin1Char(',');
@@ -6719,7 +6852,29 @@ void BoardView::syncLivePage()
         key += QLatin1Char('\n');
         rows << live;
     }
-    m_liveEmpty->setVisible(onLive && rows.isEmpty());
+    key += QString::fromUtf8(QJsonDocument(m_queueJobs).toJson(QJsonDocument::Compact));
+    key += QString::fromUtf8(QJsonDocument(m_retainedTrees).toJson(QJsonDocument::Compact));
+    key += QString::fromUtf8(QJsonDocument(m_mainRelease).toJson(QJsonDocument::Compact));
+    key += m_queueProblem + m_mainMoved + (m_queueMode ? QStringLiteral("queue") : QStringLiteral("legacy"));
+    m_integrationSummary->setVisible(onLive && m_queueMode);
+    m_mainButton->setVisible(onLive && m_queueMode);
+    if (m_queueMode) {
+        const QJsonObject current = m_mainRelease.value(QStringLiteral("current")).toObject();
+        const QString sha = current.value(QStringLiteral("sha")).toString();
+        QString channel = sha.isEmpty() ? QStringLiteral("Runnable main: no installed release")
+            : QStringLiteral("Runnable main %1").arg(sha.left(10));
+        if (m_mainRelease.value(QStringLiteral("lag_commits")).isDouble())
+            channel += QStringLiteral(" · %1 commits behind").arg(m_mainRelease.value(QStringLiteral("lag_commits")).toInt());
+        const QString releaseError = m_mainRelease.value(QStringLiteral("error")).toString();
+        if (!releaseError.isEmpty()) channel += QStringLiteral(" · ") + releaseError;
+        if (!m_mainMoved.isEmpty()) channel += QStringLiteral(" · ") + m_mainMoved;
+        if (!m_queueProblem.isEmpty()) channel += QStringLiteral(" · ") + m_queueProblem;
+        m_integrationSummary->setText(channel);
+        m_integrationSummary->setToolTip(channel);
+        m_mainButton->setEnabled(!sha.isEmpty());
+    }
+    m_liveEmpty->setVisible(onLive && rows.isEmpty()
+        && (!m_queueMode || (m_retainedTrees.isEmpty() && m_queueJobs.isEmpty())));
     if (key == m_liveKey)
         return;
     m_liveKey = key;
@@ -6731,9 +6886,13 @@ void BoardView::syncLivePage()
     for (const Live &live : std::as_const(rows)) {
         auto *rowWidget = new QWidget(m_livePage);
         rowWidget->setObjectName(QStringLiteral("boardLiveRow"));
-        auto *row = new QHBoxLayout(rowWidget);
+        auto *lines = new QVBoxLayout(rowWidget);
+        lines->setContentsMargins(0, 0, 0, 0);
+        lines->setSpacing(1);
+        auto *row = new QHBoxLayout;
         row->setContentsMargins(8, 3, 8, 3);
         row->setSpacing(6);
+        lines->addLayout(row);
         QString text = board::sessionChip(live.token, true);
         if (!live.model.isEmpty())
             text += QStringLiteral(" · ") + live.model;
@@ -6780,8 +6939,70 @@ void BoardView::syncLivePage()
             });
             row->addWidget(cardChip);
         }
+        const QString state = live.tree.value(QStringLiteral("state")).toString();
+        if (!state.isEmpty() && state != QStringLiteral("legacy")) {
+            const QString workspaceId = live.tree.value(QStringLiteral("workspace_id")).toString();
+            QString detail = live.tree.value(QStringLiteral("branch")).toString();
+            if (!workspaceId.isEmpty()) detail += QStringLiteral(" · workspace ") + workspaceId.left(8);
+            if (state == QStringLiteral("refused"))
+                detail = QStringLiteral("Workspace unavailable · ") + live.tree.value(QStringLiteral("reason")).toString();
+            for (int index = m_queueJobs.size() - 1; index >= 0; --index) {
+                const QJsonObject job = m_queueJobs.at(index).toObject();
+                if (workspaceId.isEmpty() || job.value(QStringLiteral("workspace_id")).toString() != workspaceId) continue;
+                detail += QStringLiteral(" · job %1: %2").arg(
+                    job.value(QStringLiteral("id")).toString().left(8),
+                    job.value(QStringLiteral("status")).toString());
+                const QString reason = job.value(QStringLiteral("reason")).toString();
+                if (!reason.isEmpty()) detail += QStringLiteral(" · ") + reason;
+                break;
+            }
+            auto *metadata = new QLabel(detail, rowWidget);
+            metadata->setObjectName(QStringLiteral("boardLiveWorkspace"));
+            metadata->setToolTip(live.tree.value(QStringLiteral("execution_cwd")).toString() + QStringLiteral("\n") + detail);
+            lines->addWidget(metadata);
+        }
         m_liveRows->addWidget(rowWidget);
         rowWidget->show();
+    }
+    if (m_queueMode) {
+        for (const QJsonValue &value : m_queueJobs) {
+            const QJsonObject job = value.toObject();
+            const QString id = job.value(QStringLiteral("id")).toString();
+            if (id.isEmpty()) continue;
+            QString detail = QStringLiteral("Job %1 · %2").arg(id.left(8), job.value(QStringLiteral("status")).toString());
+            const QString card = job.value(QStringLiteral("card")).toString();
+            if (!card.isEmpty()) detail += QStringLiteral(" · #%1").arg(card);
+            if (job.value(QStringLiteral("age_seconds")).isDouble())
+                detail += QStringLiteral(" · %1 s").arg(job.value(QStringLiteral("age_seconds")).toInt());
+            const QString reason = job.value(QStringLiteral("reason")).toString();
+            if (!reason.isEmpty()) detail += QStringLiteral(" · ") + reason;
+            auto *label = new QLabel(detail, m_livePage);
+            label->setObjectName(QStringLiteral("boardQueueJob"));
+            m_liveRows->addWidget(label);
+            label->show();
+        }
+        for (const QJsonValue &value : m_retainedTrees) {
+            const QJsonObject tree = value.toObject();
+            const QString state = tree.value(QStringLiteral("state")).toString();
+            const QString id = tree.value(QStringLiteral("workspace_id")).toString();
+            if (state == QStringLiteral("removed") || id.isEmpty()) continue;
+            bool shown = false;
+            for (const Live &live : std::as_const(rows))
+                if (live.tree.value(QStringLiteral("workspace_id")).toString() == id) { shown = true; break; }
+            if (shown) continue;
+            QString detail = QStringLiteral("Workspace %1 · %2 · %3")
+                .arg(id.left(8), tree.value(QStringLiteral("branch")).toString(), state);
+            if (tree.value(QStringLiteral("unlanded")).toBool()
+                || state == QStringLiteral("released") || state == QStringLiteral("retained"))
+                detail += QStringLiteral(" · work retained");
+            const QString error = tree.value(QStringLiteral("reason")).toString();
+            if (!error.isEmpty()) detail += QStringLiteral(" · ") + error;
+            auto *label = new QLabel(detail, m_livePage);
+            label->setObjectName(QStringLiteral("boardRetainedWorkspace"));
+            label->setToolTip(tree.value(QStringLiteral("execution_cwd")).toString());
+            m_liveRows->addWidget(label);
+            label->show();
+        }
     }
 }
 

@@ -5,6 +5,83 @@
 #include <QProcess>        // the master keepalive runs detached
 #include <QScrollArea>     // the running line opened to its whole text (#JDN4)
 
+void Pane::prepareWorkspace() {
+    if (m_closing || m_workspacePrepare) return;
+    if (m_workspaceReady) { launchPreparedWorkspace(); return; }
+    if (m_workspace.isEmpty()) m_workspace = QDir::currentPath();
+    const QString backend = m_data + QStringLiteral("/backend");
+    auto *process = new QProcess(this);
+    m_workspacePrepare = process;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    const QString existing = env.value(QStringLiteral("PYTHONPATH"));
+    env.insert(QStringLiteral("PYTHONPATH"), backend + (existing.isEmpty() ? QString() : QDir::listSeparator() + existing));
+    process->setProcessEnvironment(env);
+    process->setWorkingDirectory(m_workspace);
+    status(QStringLiteral("Preparing development workspace…"));
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process](int code, QProcess::ExitStatus exit) {
+        const QByteArray output = process->readAllStandardOutput();
+        const QString stderrText = QString::fromUtf8(process->readAllStandardError()).trimmed();
+        process->deleteLater();
+        if (m_workspacePrepare != process) return;
+        m_workspacePrepare = nullptr;
+        if (m_closing) return;
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(output, &parseError);
+        const QJsonObject result = document.object();
+        const QString execution = result.value(QStringLiteral("execution_cwd")).toString();
+        if (exit != QProcess::NormalExit || code != 0 || !document.isObject()
+            || execution.isEmpty() || !QFileInfo(execution).isDir()
+            || result.value(QStringLiteral("state")).toString() == QStringLiteral("refused")) {
+            m_treeStatus = QJsonObject{{QStringLiteral("state"), QStringLiteral("refused")},
+                {QStringLiteral("reason"), result.value(QStringLiteral("reason")).toString(
+                    stderrText.isEmpty() ? QStringLiteral("Workspace preparation failed") : stderrText)}};
+            const QString reason = m_treeStatus.value(QStringLiteral("reason")).toString();
+            status(QStringLiteral("Workspace unavailable: ") + reason);
+            showBanner(reason, QStringLiteral("Retry workspace"), [this] { hideBanner(); prepareWorkspace(); });
+            changed();
+            return;
+        }
+        m_treeStatus = result;
+        m_workspaceReady = true;
+        if (!result.value(QStringLiteral("project_root")).toString().isEmpty())
+            m_workspace = result.value(QStringLiteral("project_root")).toString();
+        if (result.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
+            m_cwd = execution;
+            m_hadActiveWorkspace = true;
+        } else if (m_hadActiveWorkspace) {
+            m_cwd = execution;
+            m_hadActiveWorkspace = false;
+        }
+        updatePaths();
+        status(result.value(QStringLiteral("state")).toString() == QStringLiteral("active")
+                   ? QStringLiteral("Workspace ready · %1").arg(result.value(QStringLiteral("branch")).toString())
+                   : QStringLiteral("Workspace ready"));
+        launchPreparedWorkspace();
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart || m_workspacePrepare != process) return;
+        m_workspacePrepare = nullptr;
+        const QString reason = QStringLiteral("Workspace helper could not start: ") + process->errorString();
+        m_treeStatus = QJsonObject{{QStringLiteral("state"), QStringLiteral("refused")},
+                                   {QStringLiteral("reason"), reason}};
+        process->deleteLater();
+        status(reason);
+        showBanner(reason, QStringLiteral("Retry workspace"), [this] { hideBanner(); prepareWorkspace(); });
+    });
+    process->start(m_python, {QStringLiteral("-S"), QStringLiteral("-m"),
+                               QStringLiteral("relay_core.workspace_context"), QStringLiteral("prepare"),
+                               QStringLiteral("--project"), m_workspace,
+                               QStringLiteral("--session"), m_token});
+}
+
+void Pane::launchPreparedWorkspace() {
+    if (m_closing || !m_workspaceReady) return;
+    if (hasShell() || !sharesWorker()) startWorker();
+    if (m_consolePluginRequest.isEmpty()) startTerminal(m_cleanShell);
+    else status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
+}
+
 bool Pane::restoreAgentPrompt() {
     if (!m_editor->toPlainText().isEmpty() || inQueueSelection()
         || m_recallPrompt.text.isEmpty() || m_recallPrompt.taken) return false;
@@ -701,6 +778,7 @@ void Pane::connectWorker() {
     }
 
 void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
+        if (!m_workspaceReady) { prepareWorkspace(); return; }
         m_terminalRecords.resetGeneration();
         m_terminalStream.clear();
         // A console program names the pane while it runs (#83YV): the header chip, the routing
@@ -971,6 +1049,11 @@ void Pane::startTerminal(bool cleanShell, const ConsoleProgram &program) {
         // initRestore takes the saved one back for the shells that follow, so a pane restored
         // from a layout still owns the holders named after it.
         shellEnvironment << QStringLiteral("RELAY_PANE_ID=") + scrollbackId();
+        if (m_treeStatus.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
+            shellEnvironment << QStringLiteral("RELAY_PROJECT_ROOT=") + m_workspace
+                             << QStringLiteral("RELAY_BOARD_ROOT=") + m_treeStatus.value(QStringLiteral("board_root")).toString()
+                             << QStringLiteral("RELAY_WORKSPACE_ID=") + m_treeStatus.value(QStringLiteral("workspace_id")).toString();
+        }
         // This pane's own scratch session (#DVV2): TMPDIR puts mktemp in this shell — and in the
         // guest CLIs typed into it — inside <scratchRoot()>/<token>/tmp, built exactly the way
         // the backend builds a session's TMPDIR (scratch.session_root(<id>) / "tmp"; this pane's
@@ -1732,6 +1815,7 @@ void Pane::refreshPickers() {
     }
 
 void Pane::launchGuest(const QString &guest, const QStringList &extra, const QString &cwd) {
+        if (!m_workspaceReady) { status(QStringLiteral("Wait for the development workspace before starting a guest.")); return; }
         if (guestDisplayName(guest) == QStringLiteral("The guest agent")) {
             status(QStringLiteral("Unknown guest agent: %1").arg(guest));
             return;
@@ -1755,6 +1839,9 @@ void Pane::launchGuest(const QString &guest, const QStringList &extra, const QSt
         QStringList arguments{QStringLiteral("-X"), QStringLiteral("utf8"), QStringLiteral("-m"), QStringLiteral("relay_core.guest_launch"), guest,
                               QStringLiteral("--runtime-dir"), m_runtime.path(), QStringLiteral("--cwd"), directory,
                               QStringLiteral("--port"), QString::number(port), QStringLiteral("--python"), m_python};
+        if (!m_treeStatus.isEmpty())
+            arguments << QStringLiteral("--tree-status")
+                      << QString::fromUtf8(QJsonDocument(m_treeStatus).toJson(QJsonDocument::Compact));
         // The same defaults as the harness route (Options › Claude Code and Codex), as the CLI's
         // own flags on the launch line; `guest_launch` leaves them out when `extra` names its own.
         // Not the permission posture: a TUI guest asks in its own terminal, where the user answers

@@ -764,8 +764,9 @@ public:
         // worker at all, was never configured, and Enter opened the provider dialog over an empty
         // transcript.
         m_consolePluginRequest = restoreSpec.value(QStringLiteral("console_plugin")).toString();
-        if (hasShell()) startWorker();
-        else QTimer::singleShot(0, this, [this] { if (!sharesWorker()) startWorker(); });
+        // Queue projects must have an execution tree before either process starts. Preparation
+        // runs off the UI thread; a refused lease leaves this pane stopped with a retry banner.
+        // Console panes may share their tab's worker, but still need the same resolved cwd.
         // A pane restoring a local holder line (#87HB) must know it before its shell starts:
         // startTerminal would otherwise run the pane under the holder directly, and the
         // re-attach line belongs at the pane's first prompt, after the restored scrollback.
@@ -779,8 +780,7 @@ public:
         // against a program that is not a shell. askForConsoleProgram() carries the fallback:
         // an error or a worker that never answers leaves the pane a plain shell, never a dead
         // surface.
-        if (m_consolePluginRequest.isEmpty()) startTerminal(cleanShell);
-        else status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
+        prepareWorkspace();
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
         connect(&m_secretPoll, &QTimer::timeout, this, [this] { checkPasswordPrompt(); checkOomKills(); });
         // Both timers watch a shell: the line discipline, the foreground process, a password
@@ -1036,6 +1036,7 @@ public:
     QString cwd() const { return m_cwd; }
     QString sessionToken() const { return m_token; }
     QString workspace() const { return m_workspace; }
+    QJsonObject treeStatus() const { return m_treeStatus; }
     bool cleanShell() const { return m_cleanShell; }
     QString engineCore() const { return m_engineCore; }
     QString mode() const { return m_modeValue; }
@@ -11111,7 +11112,11 @@ private:
     }
     // ----- end request ledger UI ------------------------------------------------------------------
 
+    void prepareWorkspace();
+    void launchPreparedWorkspace();
+
     void startWorker() {
+        if (!m_workspaceReady) { prepareWorkspace(); return; }
         if (sharesWorker()) return;   // the tab's worker is the window's; this pane has none
         if (!m_workerConnected) connectWorker();
         m_workerBuffer.clear(); m_workerPending.clear();
@@ -11136,6 +11141,11 @@ private:
         // worker's own run_command children share one ledgered TMPDIR under
         // relay::scratchpaths::sessionRoot(m_token).
         environment.insert(QStringLiteral("RELAY_SESSION_TOKEN"), m_token);
+        if (m_treeStatus.value(QStringLiteral("state")).toString() == QStringLiteral("active")) {
+            environment.insert(QStringLiteral("RELAY_PROJECT_ROOT"), m_workspace);
+            environment.insert(QStringLiteral("RELAY_BOARD_ROOT"), m_treeStatus.value(QStringLiteral("board_root")).toString());
+            environment.insert(QStringLiteral("RELAY_WORKSPACE_ID"), m_treeStatus.value(QStringLiteral("workspace_id")).toString());
+        }
         // The pin's id (card #FYEY): relay_core.logs.source_changed() sees it and stops firing
         // for a worker whose tree is frozen by design. Never set for a live, unpinned worker.
         if (!pin.hash.isEmpty()) environment.insert(QStringLiteral("RELAY_BUILD_ID"), pin.hash);
@@ -11150,6 +11160,8 @@ private:
         if (isolation::enabled() && isolation::available())
             environment.remove(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"));
         m_worker.setProcessEnvironment(environment);
+        m_worker.setWorkingDirectory(m_treeStatus.value(QStringLiteral("state")).toString()
+            == QStringLiteral("active") ? m_cwd : QString());
         relay::log::info(QStringLiteral("worker_start pane=%1 workspace_set=%2")
                              .arg(paneLogId()).arg(m_workspace.isEmpty() ? 0 : 1));
         m_agentUnit.clear();
@@ -11409,6 +11421,7 @@ public:
 
     void restartShell() {
         hideBanner();
+        if (!m_workspaceReady) { prepareWorkspace(); return; }
         if (m_backend && !m_shellStopped) return;
         if (m_backendOwned) {
             // Replace the terminal that still shows the stopped program; do not close the pane.
@@ -11424,6 +11437,14 @@ public:
         m_shellSequence.clear(); m_stateSeen = false; m_inlineOpen = false; m_atLineStart = true; m_autoHuman = false;
         m_shellResizeHeld = false;   // the new terminal starts unheld
         if (m_native) setNative(false, false);
+        if (m_worker.state() == QProcess::NotRunning && !sharesWorker()) {
+            // A registered project may have entered queue mode while this pane was running.
+            // Resolve it only when both processes are stopped, then restart them together.
+            m_workspaceReady = false;
+            m_treeStatus = {};
+            prepareWorkspace();
+            return;
+        }
         try {
             // A console pane restarts its console (#83YV): the stored argv still names the
             // kernel's connection file, which the worker keeps across kernel restarts, so the
@@ -13717,6 +13738,10 @@ private:
               {"model", model},
               {"extra", preset.value(QStringLiteral("extra")).toObject()}, {"max_tokens", tokens},
               {"api_key", QString()}, {"workspace", m_workspace}, {"keybindings", Keymap::instance().catalog()}});
+        if (!m_treeStatus.isEmpty()) {
+            request.insert(QStringLiteral("project_root"), m_workspace);
+            request.insert(QStringLiteral("tree_status"), m_treeStatus);
+        }
         // A guest preset (29.3): the harness is started with this — `permissions`, and `model`,
         // `resume` or `fork` when the pick carried them. The harness runs in `workspace`. Added
         // after the funnel, which neither reads nor writes it.
@@ -17664,6 +17689,10 @@ private:
     // worker's own preset row and which only a pre-preset "custom" install reads back.
 
     QString m_data, m_python, m_workspace, m_cwd, m_token, m_apiKey;
+    QJsonObject m_treeStatus;
+    QProcess *m_workspacePrepare = nullptr;
+    bool m_workspaceReady = false;
+    bool m_hadActiveWorkspace = false;
     // Cross-pane messaging (#R5TC, protocol 37): this pane's address, its wake budget, and the
     // state the reverse gate reads.
     int m_paneHandle = 0;

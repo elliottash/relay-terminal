@@ -108,6 +108,7 @@ private slots:
     void theMemoriesTabShowsExpiredFirstAndOpensTheCard();
     // The Live page (#TBRH as a strip, its own tab since #C52H).
     void theLivePageListsThisProjectsPanesAndTheirCards();
+    void theLivePageShowsWorkspaceQueueAndMainState();
     void theBackgroundPageListsAndReopensWork();
     // The reverse side of the Linked panels, from `board_links` (#EE42).
     void theLinkedPanelsDrawTheReverseSideFromBoardLinks();
@@ -1151,6 +1152,48 @@ void BoardPaneTests::theLivePageListsThisProjectsPanesAndTheirCards()
     pinned.pinSolo(QStringLiteral("K7Q2"));
     pinned.handleEvent(opened({held}));
     QVERIFY(pinned.findChild<QWidget *>(QStringLiteral("boardLivePage"))->isHidden());
+}
+
+void BoardPaneTests::theLivePageShowsWorkspaceQueueAndMainState()
+{
+    const QString project = QStringLiteral("/tmp/relay-live-integration-test");
+    relay::BoardView view(project);
+    view.resize(1000, 700);
+    const QJsonObject tree{{"project_root", project}, {"repo_id", "repo-1"},
+                           {"workspace_id", "tree-1"}, {"branch", "relay/dev/tree-1"},
+                           {"execution_cwd", "/tmp/relay-tree-1"}, {"state", "active"}};
+    view.livePanes = [tree] { return QJsonArray{QJsonObject{{"token", "pane-1"},
+                                                             {"title", "author"}, {"tree_status", tree}}}; };
+    view.show();
+    view.findChild<QAbstractButton *>(QStringLiteral("boardPageTabLive"))->click();
+    view.handleEvent(QJsonObject{{"event", "tree_status"}, {"tree_status", tree}});
+    view.handleEvent(QJsonObject{{"event", "queue_status"}, {"repo_id", "repo-1"},
+        {"jobs", QJsonArray{QJsonObject{{"id", "job-1"}, {"workspace_id", "tree-1"},
+                                        {"status", "verifying"}, {"reason", "waiting for host capacity"}}}},
+        {"workspaces", QJsonArray{QJsonObject{{"workspace_id", "tree-2"}, {"branch", "relay/dev/tree-2"},
+                                               {"state", "released"}, {"unlanded", true},
+                                               {"execution_cwd", "/tmp/relay-tree-2"}}}},
+        {"main_release", QJsonObject{{"current", QJsonObject{{"sha", "abcdef123456"}}},
+                                      {"lag_commits", 2}}}});
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    auto *workspace = view.findChild<QLabel *>(QStringLiteral("boardLiveWorkspace"));
+    QVERIFY(workspace);
+    QVERIFY(workspace->text().contains(QStringLiteral("relay/dev/tree-1")));
+    QVERIFY(workspace->text().contains(QStringLiteral("waiting for host capacity")));
+    auto *job = view.findChild<QLabel *>(QStringLiteral("boardQueueJob"));
+    QVERIFY(job && job->isVisibleTo(&view));
+    auto *retained = view.findChild<QLabel *>(QStringLiteral("boardRetainedWorkspace"));
+    QVERIFY(retained && retained->isVisibleTo(&view));
+    QVERIFY(retained->text().contains(QStringLiteral("work retained")));
+    auto *summary = view.findChild<QLabel *>(QStringLiteral("boardIntegrationSummary"));
+    QVERIFY(summary->text().contains(QStringLiteral("2 commits behind")));
+    auto *main = view.findChild<QPushButton *>(QStringLiteral("boardMainLauncher"));
+    QVERIFY(main->isEnabled());
+    if (const QString screenshot = qEnvironmentVariable("RELAY_B3_SCREENSHOT"); !screenshot.isEmpty())
+        QVERIFY(view.grab().save(screenshot));
+    view.handleEvent(QJsonObject{{"event", "main_moved"}, {"repo_id", "repo-1"},
+                                 {"previous_sha", "abcdef123456"}, {"sha", "fedcba987654"}});
+    QVERIFY(summary->text().contains(QStringLiteral("main moved")));
 }
 
 void BoardPaneTests::theBackgroundPageListsAndReopensWork()

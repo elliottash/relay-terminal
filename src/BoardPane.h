@@ -33,6 +33,7 @@ class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class QProcess;
 class QPushButton;
 class QListWidget;
 class QSplitter;
@@ -906,12 +907,26 @@ private:
     // visible — panes open, close and start turns without a board event. `m_liveKey` is what was
     // last drawn, so an unchanged tick touches no widget.
     void syncLivePage();
+    void pollIntegrationStatus();
+    void pollIntegrationStatusStep(int step);
     void syncBackgroundPage();
     QWidget *m_livePage = nullptr;
     QVBoxLayout *m_liveRows = nullptr; // a row widget per open pane, cleared and refilled
     QLabel *m_liveEmpty = nullptr;     // shown on the tab when no pane is open
+    QLabel *m_integrationSummary = nullptr;
+    QPushButton *m_mainButton = nullptr;
     QTimer *m_liveTimer = nullptr;
     QString m_liveKey;
+    QJsonArray m_queueJobs;
+    QJsonArray m_retainedTrees;
+    QJsonObject m_mainRelease;
+    QString m_queueProblem;
+    QString m_repoId;
+    QString m_mainMoved;
+    bool m_queueMode = false;
+    QProcess *m_integrationPoll = nullptr;
+    QElapsedTimer m_integrationPollAge;
+    qint64 m_lastIntegrationEvent = 0;
     QWidget *m_backgroundPage = nullptr;
     QVBoxLayout *m_backgroundRows = nullptr;
     QLabel *m_backgroundEmpty = nullptr;
