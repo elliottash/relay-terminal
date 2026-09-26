@@ -928,14 +928,9 @@ bool RelayWindow::openInWorkspaceEditor(const QString &path, int line, QWidget *
                             && adapter->authority == ws::Authority::Editable);
     if (!source) return false;
     relay::FilePreview *view = editor->preview();
-    if (view->path() != file) {
-        // Unsaved edits in the editor are never dropped to follow a link: the file opens the old
-        // way, in a preview beside it.
-        if (view->isDirty()) return false;
-        if (!view->open(file)) return false;
-        view->startEditing();
-        group.addSource(file);
-    }
+    // A different source opens beside this editor through openPath. Keep the linked source and
+    // its edit state in place even when it has no unsaved changes (#10RD).
+    if (view->path() != file) return false;
     if (line > 0) view->goToLine(line);
     m_tabs->setCurrentWidget(page);
     setActiveLeaf(editor);

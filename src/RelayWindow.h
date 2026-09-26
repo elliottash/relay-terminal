@@ -716,10 +716,10 @@ public:
 
     QWidget *activeLeaf() const { return m_activeLeaf; }
 
-    // Open a folder in an explorer pane or a file in a preview pane, next to `anchor`. An existing
-    // explorer or preview in the same tab is reused, the way editors reuse a preview tab — unless
-    // `newPane`, which a link followed from inside a preview passes so the file that carried the
-    // link keeps its pane (issue S1JP).
+    // Open a folder in an explorer pane or a file in a preview pane, next to `anchor`. Folder
+    // navigation reuses an explorer; a file reuses only a pane already showing that file, so an
+    // open document (and its unsaved edits) stays visible when another file is clicked (#10RD).
+    // `newPane` keeps a followed link beside its source instead of beside an explorer (#S1JP).
     // A file on the host a terminal pane is logged into (#S5SH) travels as `ssh://host/path`: it
     // has no QFileInfo here, it is never a folder, and the preview pane fetches it over that
     // pane's own ssh connection. Everything else about the pane — which one is reused, where it
@@ -748,16 +748,13 @@ public:
             auto *tool = dynamic_cast<ToolPane *>(leaf);
             if (!tool || tool->kind() != kind) continue;
             if (isWorkspaceViewer(tool)) continue;   // a workspace's editor or preview is not reused (#E85D)
-            // A followed link wants its own pane, but not a second pane on a file one of them is
-            // already showing: clicking back and forth between two documents would otherwise pile
-            // up panes. So `newPane` reuses only an exact match, and never the anchor itself.
-            if (!newPane) target = tool;
-            else if (tool != anchor && tool->path() == what) target = tool;
+            if (kind == ToolPane::Kind::Explorer || tool->path() == what) {
+                target = tool;
+                break;
+            }
         }
-        if (target) {
-            if (kind == ToolPane::Kind::Explorer) target->explorer()->setRoot(what);
-            else target->preview()->open(what);
-        } else {
+        if (target && kind == ToolPane::Kind::Explorer) target->explorer()->setRoot(what);
+        if (!target) {
             // A preview opens beside an explorer when there is one, otherwise beside the anchor.
             // A link followed from a preview opens beside that preview instead, so the two files
             // sit side by side and the reader can see where they came from.
