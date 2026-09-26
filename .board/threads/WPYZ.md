@@ -69,3 +69,17 @@ Sync your workspace to the current target, resolve these files there, run the pr
 
 <!-- relay:entry 20260926T152757Z-y7 author=agent kind=note model=claude-opus-5-5 pane=21c53ef4 turn=97d268b4846648f49e6aba30a5ebe433/6500e6123b704433b6a9007143955a57 -->
 Landing job 8c61ac2b (ada6b670) was stopped mid-gate at the owner's request, not failed by a test: the owner is switching the queue to a temporary build-only gate to drain outstanding work, with the full test suite run once afterwards. Resubmit the same commit; it will gate in a minute or two.
+
+<!-- relay:entry 20260926T152926Z-58 author=landq kind=note -->
+Landing job 09aa4baa44ea407d (5c3389a13453) landed.
+Published f85a899e46d3 onto main (target was 9ee1705e3bee). <!-- landq:09aa4baa44ea407d:landed -->
+
+<!-- relay:entry 20260926T152932Z-zw author=landq kind=note -->
+Landing job efebc7d68d1fb7e9 (b400ef61d657 for card #WPYZ) was cancelled.
+Nothing was published. <!-- landq:efebc7d68d1fb7e9:cancelled -->
+
+<!-- relay:entry 20260926T153111Z-f4 author=agent kind=event model=gpt-6-sol pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/2650e4fffc16421caa48c9c404c93185 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": ["ada6b6705a87"], "evidence": [], "related": ["BT7C", "… → {"plans": [], "commits": ["1c82a9d63a7c"], "evidence": [], "related": ["BT7C", "…; replaced `## Execution Summary`
+
+<!-- relay:entry 20260926T153115Z-c6 author=agent kind=progress model=gpt-6-sol pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/2650e4fffc16421caa48c9c404c93185 -->
+The first submission required author reconciliation after the target advanced. I synced the session workspace through relay-tree to target f85a899e46d3, verified the rebased commit 1c82a9d6 with the MCP settings test and Relay build, and submitted queue job a7c200ee83b18037. A user service checks the queue every 30 seconds and sends a desktop notification on a terminal result.
