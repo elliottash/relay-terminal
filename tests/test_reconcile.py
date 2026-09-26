@@ -651,6 +651,36 @@ class AdapterTests(ReconcileTestCase):
         self.assertIn("landing reconciler", body["messages"][0]["content"])
 
 
+class ApiRetryTests(ReconcileTestCase):
+    def test_a_refused_request_is_not_resent_behind_one_reservation(self):
+        fx = Fixture(self.root)
+        hits = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                hits.append(self.path)
+                self.send_response(429)
+                self.send_header("Retry-After", "1")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        base_url = f"http://127.0.0.1:{server.server_port}/v1"
+        rec = self.reconciler(tiers=[{"base_url": base_url, "model": "loop-model"}],
+                              key_lookup=lambda p: "", guest_check=lambda g: False)
+        result = rec.reconcile_sync(fx.context())
+        self.assertEqual(result["status"], "author_required")
+        self.assertEqual(len(hits), 1, "one reservation, one request: no retry behind it")
+        self.assertEqual(result["attempts"][0]["outcome"], "error")
+        self.assertEqual(rec.history("job-1")[0]["status"], "uncertain")
+
+
 class BoardNoteTests(ReconcileTestCase):
     def test_card_notes_are_appended_once(self):
         from relay_core.board import Board
@@ -731,6 +761,29 @@ class AssertionWeakeningTests(unittest.TestCase):
         self.assertIn("test_area_two now opens with return/raise/pass", text)
         guarded = PT_THEIRS.replace("    assert value == 12.57", "    if value != 12.57:\n        return\n    assert value == 12.57")
         self.assertIn("gained an early return", " ".join(R.review_file(self.versions(), guarded)))
+
+    def test_a_check_moved_under_a_guard_that_never_runs_is_lost(self):
+        guarded = PT_THEIRS.replace("    assert value == 12.57", "    if False:\n        assert value == 12.57")
+        text = " ".join(R.review_file(self.versions(), guarded))
+        self.assertIn("test_area_two lost or changed 1 check(s)", text)
+        self.assertIn("a guard was added to a test file", text)
+        nested = PT_THEIRS.replace("    assert value == 12.57", "    def later():\n        assert value == 12.57")
+        self.assertIn("lost or changed 1 check(s)", " ".join(R.review_file(self.versions(), nested)))
+        commented = PT_THEIRS.replace("    assert value == 12.57", "    \"\"\"\n    assert value == 12.57\n    \"\"\"")
+        text = " ".join(R.review_file(self.versions(), commented))
+        self.assertIn("lost or changed 1 check(s)", text)
+        # A check that was under a guard on both sides keeps its fingerprint.
+        looped = PT_BASE + "\n\ndef test_many():\n    for r in (1, 2):\n        assert area(r) > 0\n"
+        self.assertEqual(R.review_file(self.versions(theirs=looped), looped), [])
+        # Non-Python: the guard, return and block-comment counters.
+        base = 'TEST(Area, One) {\n  EXPECT_EQ(area(1), 3);\n}\n'
+        theirs = base + 'TEST(Area, Two) {\n  EXPECT_EQ(area(2), 12);\n}\n'
+        v = R.FileVersions("tests/area_test.cpp", base, base, theirs, "", True)
+        for label, bad in (("guard", theirs.replace("  EXPECT_EQ(area(2), 12);", "  if (false) {\n    EXPECT_EQ(area(2), 12);\n  }")),
+                           ("return", theirs.replace("  EXPECT_EQ(area(2), 12);", "  return;\n  EXPECT_EQ(area(2), 12);")),
+                           ("block comment", theirs.replace("  EXPECT_EQ(area(2), 12);", "  /*\n  EXPECT_EQ(area(2), 12);\n  */"))):
+            with self.subTest(label):
+                self.assertIn(f"a {label} was added to a test file", " ".join(R.review_file(v, bad)))
 
     def test_a_superseded_base_assertion_may_go_and_a_kept_one_may_not(self):
         ours = PT_BASE.replace("assert area(1) > 3", "assert round(area(1), 2) == 3.14")
@@ -917,6 +970,18 @@ class GuestBoundTests(ReconcileTestCase):
         self.assertGreaterEqual(rows[0]["reserved"], 210_000, "charged at what the guest reported")
         self.assertTrue(harness.closed)
         self.assertIn("<<<<<<<", (fx.candidate / "app.py").read_text())
+
+    def test_a_final_usage_report_past_the_reservation_refuses_a_complete_answer(self):
+        fx = Fixture(self.root)
+        # Claude Code reports usage once, with its result: the turn is over before any cancel
+        # could be seen, and the (complete, well-formed) answer must still not be accepted.
+        turn = {"events": [ev("usage", input_tokens=150_000, output_tokens=60_000)],
+                "result": (reply({"app.py": MERGED_APP}), "end", {})}
+        rec, result, harness = self.run_guest(fx, turn)
+        self.assertEqual(result["status"], "author_required")
+        self.assertEqual(result["attempts"][0]["outcome"], "over_budget")
+        self.assertIn("<<<<<<<", (fx.candidate / "app.py").read_text(), "nothing applied")
+        self.assertGreaterEqual(rec.history("job-1")[0]["reserved"], 210_000)
 
     def test_a_streamed_answer_past_the_completion_cap_is_cut_off(self):
         fx = Fixture(self.root)

@@ -134,6 +134,11 @@ _SKIPS = re.compile(r"(?:unittest\.skip|pytest\.mark\.skip|pytest\.mark\.xfail|p
                     r"unittest\.expectedFailure|\bDISABLED_\w+|\bQSKIP\s*\(|GTEST_SKIP|\bxit\s*\(|"
                     r"\bxdescribe\s*\(|\bit\.skip\s*\(|\btest\.skip\s*\(|\bdescribe\.skip\s*\(|"
                     r"#\[ignore\]|t\.Skip\w*\s*\()")
+# Bypass shapes a line rule can still see in any language's test file: a guard opened above an
+# assertion (`if (false) {`, `#if 0`), an early `return`, a block comment opened around it.
+_GUARD_OPENERS = re.compile(r"^\s*(?:\}?\s*else\s+)?(?:if|elif|else if|while|for|switch|unless|match|case)\b|^\s*#\s*if", re.M)
+_RETURNS = re.compile(r"^\s*return\b", re.M)
+_BLOCK_COMMENTS = re.compile(r"/\*|^\s*(?:\"\"\"|\'\'\')", re.M)
 _TRIVIAL_LINES = frozenset({"", "{", "}", "};", ")", ");", "]", "];", "end", "else", "else:", "pass",
                             "return", "return;", "break", "break;", "continue", "continue;", "fi",
                             "done", "esac", "#", "//", "/*", "*/", "*", "-", "---", "..."})
@@ -673,7 +678,10 @@ def _call_api(resolved, system: str, user: str, cancel: threading.Event,
     config = dataclasses.replace(resolved.config, max_tokens=max(MIN_OUTPUT_TOKENS,
                                                                 min(resolved.config.max_tokens, completion_tokens)))
     provider = make_provider(config, stall_timeout=max(DEFAULT_STALL_TIMEOUT, 300.0))
-    text, usage = sidecall.call(provider, system, user, cancel, retry_budget_s=120.0)
+    # One reservation is one request: a zero retry budget makes the transport treat every
+    # 429/5xx as final instead of re-sending the same prompt (and its input tokens) several
+    # times behind one ledger row. The failure excludes the provider and the loop redraws.
+    text, usage = sidecall.call(provider, system, user, cancel, retry_budget_s=0.0)
     return text, usage or {}
 
 
@@ -734,6 +742,11 @@ def _call_guest(resolved, system: str, user: str, cancel: threading.Event, cwd: 
             if over:
                 raise OverBudget(over[0], usage) from None
             raise
+        if over:
+            # The report that crossed the line was the turn's last one, and the turn ended before
+            # the cancel was seen: the answer is complete, and still not accepted — the budget
+            # was the bound, not the timing.
+            raise OverBudget(over[0], usage)
     finally:
         try:
             provider.close()
@@ -1088,24 +1101,66 @@ def _py_test_checks(text: str) -> dict[str, dict] | None:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
             continue
         checks: list[str] = []
-        for sub in ast.walk(node):
-            if isinstance(sub, ast.Assert):
-                checks.append(ast.dump(sub))
-            elif isinstance(sub, ast.Expr) and isinstance(sub.value, ast.Call) \
-                    and _PY_CHECK_NAMES.match(_call_name(sub.value)):
-                checks.append(ast.dump(sub))
-            elif isinstance(sub, (ast.With, ast.AsyncWith)):
-                for item in sub.items:
-                    if isinstance(item.context_expr, ast.Call) and _PY_CHECK_NAMES.match(_call_name(item.context_expr)):
-                        checks.append(ast.dump(item.context_expr))
-        # Every return/raise in the function, nested ones included: `if x: return` before the
-        # assertion is the bypass this exists to catch. A `raise` inside a `with assertRaises`
-        # block is on both sides already, so the max-of-sides rule keeps it legal.
-        exits = sum(isinstance(sub, (ast.Return, ast.Raise)) for sub in ast.walk(node))
+        exits = [0]
+        _walk_checks(node.body, (), checks, exits)
         first_exit = bool(node.body) and isinstance(node.body[0], (ast.Return, ast.Raise, ast.Pass))
         key = node.name if node.name not in out else f"{node.name}#{sum(k.split('#')[0] == node.name for k in out) + 1}"
-        out[key] = {"checks": sorted(checks), "exits": exits, "first_exit": first_exit, "statements": len(node.body)}
+        out[key] = {"checks": sorted(checks), "exits": exits[0], "first_exit": first_exit, "statements": len(node.body)}
     return out
+
+
+def _is_check_call(value) -> bool:
+    return isinstance(value, ast.Call) and bool(_PY_CHECK_NAMES.match(_call_name(value)))
+
+
+def _walk_checks(stmts, path: tuple, checks: list[str], exits: list[int]) -> None:
+    """Collect a test body's check statements, each fingerprinted with the control flow above
+    it: `assert x` at the top of the body and the same `assert x` under `if False:`, inside a
+    `for`, in an `except` arm or in a nested `def` are different fingerprints, so moving a check
+    under a guard that never runs is a lost check, not a kept one. Every return/raise at any
+    depth is counted: `if x: return` before the assertion is the bypass this exists to catch,
+    and a `raise` inside a `with assertRaises` block is on both sides already, so the
+    max-of-sides rule keeps it legal."""
+    here = "/".join(path)
+    for stmt in stmts:
+        if isinstance(stmt, ast.Assert) or (isinstance(stmt, ast.Expr) and _is_check_call(stmt.value)):
+            checks.append(f"{here}|{ast.dump(stmt)}")
+        elif isinstance(stmt, (ast.Return, ast.Raise)):
+            exits[0] += 1
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            for item in stmt.items:
+                if _is_check_call(item.context_expr):
+                    checks.append(f"{here}|{ast.dump(item.context_expr)}")
+            guard = "with:" + ",".join(ast.dump(item.context_expr) for item in stmt.items)
+            _walk_checks(stmt.body, path + (guard,), checks, exits)
+        elif isinstance(stmt, ast.If):
+            _walk_checks(stmt.body, path + ("if:" + ast.dump(stmt.test),), checks, exits)
+            _walk_checks(stmt.orelse, path + ("else:" + ast.dump(stmt.test),), checks, exits)
+        elif isinstance(stmt, ast.While):
+            _walk_checks(stmt.body, path + ("while:" + ast.dump(stmt.test),), checks, exits)
+            _walk_checks(stmt.orelse, path + ("whileelse:" + ast.dump(stmt.test),), checks, exits)
+        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
+            guard = "for:" + ast.dump(stmt.target) + "in" + ast.dump(stmt.iter)
+            _walk_checks(stmt.body, path + (guard,), checks, exits)
+            _walk_checks(stmt.orelse, path + ("forelse:" + guard,), checks, exits)
+        elif isinstance(stmt, ast.Try) or (hasattr(ast, "TryStar") and isinstance(stmt, ast.TryStar)):
+            _walk_checks(stmt.body, path + ("try",), checks, exits)
+            for handler in stmt.handlers:
+                kind = ast.dump(handler.type) if handler.type is not None else "*"
+                _walk_checks(handler.body, path + ("except:" + kind,), checks, exits)
+            _walk_checks(stmt.orelse, path + ("tryelse",), checks, exits)
+            _walk_checks(stmt.finalbody, path + ("finally",), checks, exits)
+        elif hasattr(ast, "Match") and isinstance(stmt, ast.Match):
+            for case in stmt.cases:
+                _walk_checks(case.body, path + ("case:" + ast.dump(case.pattern),), checks, exits)
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            _walk_checks(stmt.body, path + ("def:" + stmt.name,), checks, exits)
+        else:
+            # A statement that hides a body this walk does not know (a future node kind): count
+            # what is inside conservatively as checks under an opaque guard.
+            for child in ast.iter_child_nodes(stmt):
+                if isinstance(child, ast.stmt):
+                    _walk_checks([child], path + (type(stmt).__name__,), checks, exits)
 
 
 def _call_name(call: ast.Call) -> str:
@@ -1249,6 +1304,12 @@ def review_file(f: FileVersions, content: str, *, repair: bool = False) -> list[
         skips_after = len(_SKIPS.findall(content))
         if skips_after > skips_before:
             problems.append(f"{path}: a skip or expected-failure marker was added ({skips_before} → {skips_after})")
+        for label, pattern in (("guard", _GUARD_OPENERS), ("return", _RETURNS), ("block comment", _BLOCK_COMMENTS)):
+            before = max(len(pattern.findall(t)) for t in texts)
+            after = len(pattern.findall(content))
+            if after > before:
+                problems.append(f"{path}: a {label} was added to a test file ({before} → {after}); "
+                                f"an assertion may have been moved out of the way")
         if path.lower().endswith(".py"):
             problems.extend(_test_body_problems(path, f.base, texts, content))
     return problems

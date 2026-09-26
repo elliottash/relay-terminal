@@ -15,3 +15,7 @@ implemented backend/relay_core/reconcile.py and tests/test_reconcile.py (25 test
 <!-- relay:entry 20260926T025651Z-a6 author=claude-code kind=progress -->
 ### Claude Code · 2026-09-26 02:56
 second pass after the parent's review: landq's context shape, gate-failure repair rounds, persisted attempts per case, assertion-line and AST test-body checks (the `assert True` gap), a bounded guest turn (usage, streamed length, wall clock), cached-token accounting, `Reconciled-By:` trailer. 41 tests green, including two end-to-end runs through `landq.Queue.process_one`.
+
+<!-- relay:entry 20260926T030016Z-a7 author=claude-code kind=progress -->
+### Claude Code · 2026-09-26 03:00
+third pass: guard-aware check fingerprints (the `if False:` gap), guard/return/block-comment counters for non-Python test files, over-budget refusal after a normally ending guest turn, zero retry budget on the API path. 44 tests green.
