@@ -2,15 +2,15 @@
 id: 8J0A
 type: work
 status: executing
-assignee: claude-code
 labels: [feature, workflow, land]
+assignee: claude-code
 parent: 3MH4
 discovered_from: 3MH4
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
-source: 'Approved #3MH4 implementation workstream, 2026-09-26'
 verify: {artifact: system, primary: script, also: [probe], effort: high, criteria: The acceptance file passes on a clean export of main and the staged GUI shows real queue state; defects found are fixed by their owners and the run repeated.}
-links: {plans: [], commits: [], evidence: [docs/qa_evidence/2026-09-26-verify-3MH4/], related: [3MH4, AMQQ, 80X1, DV5Y, 2DP8, HEY7], github: null}
+source: 'Approved #3MH4 implementation workstream, 2026-09-26'
+links: {plans: [], commits: [585291ffd8ed], evidence: [docs/qa_evidence/2026-09-26-verify-3MH4/], related: [3MH4, AMQQ, 80X1, DV5Y, 2DP8, HEY7], github: null}
 ---
 # C1: Independent parallel development verification
 
