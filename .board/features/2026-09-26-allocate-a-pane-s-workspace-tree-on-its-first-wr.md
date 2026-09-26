@@ -1,11 +1,15 @@
 ---
 id: TE6D
 type: work
-status: planned
+status: executing
 labels: [feature, landing, workspaces, performance]
+assignee: agent
+implemented_by: anthropic/claude-opus-5-5 via claude:ashe-ethz-ch
+session: f864396a-45c5-4107-8b46-334e03bb9c4c
 parent: 3MH4
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-26'
+verify: {artifact: code, primary: script, also: [probe], human: optional, criteria: 'Open a pane and a Board in relay-terminal, ask a read-only question, and see no new active tree; then ask for an edit and see exactly one.', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: Claude pane 21c53ef4, 2026-09-26
 links: {plans: [], commits: [], evidence: [], related: [VK6J], github: null}
 ---
@@ -46,3 +50,11 @@ Fix, as part of this card:
 8. Closing the tab (`releaseBoardWorker`) releases the helper's lease, as closing a pane does.
 
 Tests: a worker test in which a Board `configure` plus `board_open` on a queue project allocates nothing and returns the cards; the helper's first `run_command` allocates exactly one tree under the helper token. A GUI or LiveGui check that N tabs with Boards open hold 0 leases until one of their agents writes.
+
+## Done means
+- In a queue-mode project, opening a native pane or a tab's Board holds **no** lease: `relay-land inventory` (or `TreeManager.list()`) shows no new active tree after the pane or Board opens and its agent answers read-only questions.
+- The agent's first `write_file`, `edit_file` or `run_command` allocates exactly one tree under that pane's (or tab helper's) own token, and that call and every later one run in the tree. No write ever lands in the canonical checkout, including a write to an absolute path under it.
+- If the quota refuses, the mutating call fails with the reason, and reads and the Board keep working.
+- A Board worker never allocates under a token it inherited from the GUI environment or another pane.
+- Released trees with nothing unlanded are removed periodically; retained and dirty ones are kept.
+- Failure looks like: a lease appearing at pane or tab open, two leases for one pane, or a file changed under `/home/elliott/repos/relay-terminal` by an agent.
