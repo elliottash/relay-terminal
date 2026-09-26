@@ -137,12 +137,12 @@ tokens_per_day = 10000000
 Why it looks like this:
 
 - **Source and build are split.** `verification.commands` run with the disposable candidate
-  tree as cwd. The service does not yet export a warm build path such as `VERIFY_BUILD` or
-  `RELAY_BUILD_DIR` into the gate environment. That is why the gate names its own external
-  root (`RELAY_VERIFY_ROOT`, default `~/.cache/relay/verify/relay-terminal`) instead of
-  building inside the candidate. If B1 later exports a service-owned build directory, swap
-  the default for it. Until then this root belongs to the gate: nobody edits or builds there
-  by hand. The shared checkout's `build/` is still built by `scripts/relay-build`, and
+  tree as cwd. The service exports an external warm build directory as `RELAY_BUILD_DIR`
+  (also `VERIFY_BUILD`). This Relay example uses its own fixed source-and-build mirror
+  (`RELAY_VERIFY_ROOT`, default `~/.cache/relay/verify/relay-terminal`) so queue verification
+  and interactive tries can share a stable CMake source path under the same lock. This root
+  belongs to the gate: nobody edits or builds there by hand. Other projects can use the
+  service-provided build directory directly. The shared checkout's `build/` is still built by `scripts/relay-build`, and
   `land.py try` keeps using its verify slots. There is no `relay-build --build-dir` flag, so
   none is used here.
 - **`--delete` in the mirror** keeps an ignored or deleted source file from a previous
