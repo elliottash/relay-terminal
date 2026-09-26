@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: system, primary: script, also: [probe], effort: high, criteria: The acceptance file passes on a clean export of main and the staged GUI shows real queue state; defects found are fixed by their owners and the run repeated.}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [585291ffd8ed], evidence: [docs/qa_evidence/2026-09-26-verify-3MH4/], related: [3MH4, AMQQ, 80X1, DV5Y, 2DP8, HEY7], github: null}
+links: {plans: [], commits: [585291ffd8ed, 5d9029b33d2e, 7897e1c57de2, 65ca8c46204b, c8dce2511c2f, 9873de343f1a], evidence: [docs/qa_evidence/2026-09-26-verify-3MH4/], related: [3MH4, AMQQ, 80X1, DV5Y, 2DP8, HEY7], github: null}
 ---
 # C1: Independent parallel development verification
 
