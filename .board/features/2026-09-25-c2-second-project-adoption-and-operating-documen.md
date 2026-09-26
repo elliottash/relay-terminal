@@ -3,14 +3,14 @@ id: 2DP8
 type: work
 status: needs-verification
 labels: [feature, workflow, land]
+assignee: codex
 parent: 3MH4
 discovered_from: 3MH4
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
-source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-assignee: codex
 verify: {artifact: code, primary: script, also: [probe], human: none, effort: high}
-links: {plans: [], commits: [], evidence: [tests/test_parallel_project_adoption.py], related: [], github: null}
+source: 'Approved #3MH4 implementation workstream, 2026-09-26'
+links: {plans: [], commits: [e5623581cf0a], evidence: [tests/test_parallel_project_adoption.py], related: [], github: null}
 ---
 # C2: Second-project adoption and operating documentation
 
