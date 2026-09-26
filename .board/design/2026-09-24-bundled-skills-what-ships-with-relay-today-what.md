@@ -8,7 +8,7 @@ waiting_on: owner
 rank: zzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 source: 'Claude Fable guest session in Relay, 2026-09-24, split out of #9HS0'
-links: {plans: [], commits: [], evidence: [reports/Bundled skills for Relay.md], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ], github: null}
+links: {commits: [b74afc4f68e6, c1a9585ff165], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
 ---
 # Bundled skills: what ships with Relay today, what the starter tasks need, and what the skill catalogue shows an agent
 
@@ -52,3 +52,13 @@ The survey and the measurements are in [Bundled skills for Relay](../../reports/
 **Recommendations.** *Q1:* keep the bundle to operating-Relay skills, add a Relay `skill-creator` (writes a skill with `profile`, `requires` and a `Try it` case), never bundle a skill that drives another product's UI; mail becomes a task plugin (`mail_*` tools, credential in the keystore) plus a thin bundled skill, as a design card of its own. *Q2:* identity by content hash (same hash shown once as "same as"), hide by tool availability from a declared `requires` with two inferences for undeclared skills (Warp `mcp_skills/<server>/`, `mcp__x__*` in a synced description); stop discovering Warp's `remote-server/bundled_resources` tree by default (it is Warp's product bundle, as Claude's built-ins are Claude's), which retires `DEFAULT_EXCLUDE`; omit the guest's own home tree from the guest block. *Q3:* yes, `requires: |` in the task plugin's shape (`program` with alternatives, version flag, install hint, optional; plus `env`, `secret`, `tool`), checked at index time: a missing tool hides, a missing program or secret lists with "needs X"; `money: yes` or `sign_off: send` in the profile makes a skill explicit-invocation only. *Q4:* `short:` else first sentence, `MAX_PROMPT_BYTES` to 8 KiB, and let hiding do the rest. Plus a release test for the bundle (`tests/test_bundled_skills.py`).
 
 **Suggested delivery** (report §5): (1) `requires`, tool hiding, content identity — worker, medium; (2) catalogue line, budget, guest block — worker, small; (3) the bundle as servers: profiles, `requires`, `skill-creator`, `Try it` cases, release test — worker, medium; (4) mail as a task plugin plus skill — design, large, owner's scope decision.
+
+### State refresh, 2026-09-25
+
+Re-checked after a day of other sessions' work; the recommendations stand unchanged.
+
+**Landed since the research.** #MSJ0 (skill `profile:` with the claim-time default) and #95VZ (the case ledger: `cases.jsonl`, `board_case`, and `skills_list` items carrying `cases`, `last_served`, `pass_rate_30`, `stale`) — so the report's premise "skills are servers with no case record" is half-built: the record now exists and the bundled three are exactly the servers with no cases served against them yet. #9FX8 put the registry in the Board (Cards | Skills | Memories, with a skill page; #JVEJ retires SkillsDialog), and #4YKJ extends profiles with step outcomes and the harden/soften hint. Nothing of the four recommendations has been implemented yet.
+
+**Re-measured today.** `skills.py` is unchanged where it matters: `MAX_PROMPT_BYTES` still 5 KiB, `DEFAULT_EXCLUDE` still the seven-name list, Warp's `remote-server/bundled_resources` still discovered. The catalogue is now 62 skills (one more synced from Claude) and the trigger budget settled at 60 characters — same conclusion, every line still cut before the words that say when to use it.
+
+**Still open, this card.** The five decisions in the thread question below; the four delivery cards of report §5 remain unfiled.

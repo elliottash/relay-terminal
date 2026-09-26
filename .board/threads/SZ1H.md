@@ -15,3 +15,9 @@ Decisions this research asks for (details and evidence in reports/Bundled skills
 3. `requires` on skills. Recommendation: yes, as a `requires: |` block in the task plugin's shape (program, env, secret, tool), checked at index time; a missing tool hides, a missing program or secret lists with "needs X"; a profile with `money: yes` or `sign_off: send` makes the skill explicit-invocation only.
 4. The catalogue line. Recommendation: `short:` else first sentence, `MAX_PROMPT_BYTES` to 8 KiB.
 5. Whether to file the four delivery cards in report §5 now (requires and hiding; catalogue line; the bundle as servers with a release test; mail as a plugin).
+
+<!-- relay:entry 20260926T021641Z-zh author=agent kind=event model=z-ai/glm-5.3-flashx pane=2914f43d turn=fc4b907796bb418994c523cffca15623/e1f52a7cede249a69cc58f1b36d1ba39 -->
+- ✦ agent updated this card · links: {"plans": [], "commits": [], "evidence": ["reports/Bundled skills for Relay.md"]… → {"commits": ["b74afc4f68e6", "c1a9585ff165"], "evidence": ["reports/Bundled skil…
+
+<!-- relay:entry 20260926T021701Z-tz author=agent kind=event model=z-ai/glm-5.3-flashx pane=2914f43d turn=fc4b907796bb418994c523cffca15623/e1f52a7cede249a69cc58f1b36d1ba39 -->
+- ✦ agent updated this card · appended to `## Discussion points`
