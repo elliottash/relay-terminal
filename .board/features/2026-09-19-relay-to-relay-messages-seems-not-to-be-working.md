@@ -66,3 +66,18 @@ Relay-native `pane_send` pass. Guest-to-Relay is a separate feature question if 
 
 **Verify.** The targeted `tests/test_panes.py` battery and the two live busy/idle cases. No owner
 choice of Execute card is left: #R5TC already owns and has landed the build.
+## Tests
+
+### Check: worker cross-pane battery (2026-09-26)
+`python3 -m unittest tests.test_panes` — PASS, 17 tests in 0.053 s. Covers the worker's simulated busy delivery and idle wake outcome, framing, depth rule, refusal and cap. The GUI delivery in this battery is `FakePane`, so this is not a live two-pane result.
+
+## QA checklist
+
+- [x] Verified the publication mode is legacy: no `.git/relay-publication.json`; `relay-land inventory` reports `mode: legacy`.
+- [x] Read #MJG6 and #R5TC cards and threads; #R5TC's backend and pane-side commits are landed.
+- [x] Ran the targeted worker battery (17 passing).
+- [ ] Observe an isolated live Relay with two model-backed agent panes: delivery while the card-working recipient is busy, an idle wake, and a `pane_send` answer visible to the original sender.
+
+## Verdict
+
+Open. The live busy and idle exchange, including the return answer, has not been observed in this verification run. The passing worker tests use a simulated GUI and cannot satisfy #MJG6's Done means. An isolated two-pane scripted-provider drive must be built and run, or a verifier must perform the equivalent live run, before closure.

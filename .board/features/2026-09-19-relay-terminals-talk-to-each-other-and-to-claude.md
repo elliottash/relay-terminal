@@ -375,6 +375,8 @@ Run 2026-09-24 on the exact landed trees (land.py build gate):
 - `902cbc16`: build passed; `panedirectory` and `consolemode` passed.
 - `python3 -m unittest tests.test_panes`: 17 tests OK (refusal codes, per-turn cap, a note surviving an idle gap, depth rule, frame).
 
+2026-09-26 independent check: `python3 -m unittest tests.test_panes` passed (17 tests in 0.053 s). Its `FakePane` simulates the GUI acceptance verdict; it is not evidence of a live recipient reading and replying.
+
 Not done: the Done-means live two-pane run with evidence under `docs/qa_evidence/`. It needs two model-backed agent panes in a Relay rebuilt from main, so it is left for Try it below.
 
 ## Try it

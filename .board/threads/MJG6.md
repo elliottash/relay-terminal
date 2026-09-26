@@ -125,3 +125,7 @@ It needs one decision from you, flagged in Risks: press **Execute on #R5TC** (re
 <!-- relay:entry 20260926T040615Z-xa author=codex kind=note -->
 ### Codex · 2026-09-26 04:06 UTC
 Replaced the obsolete implementation plan: #R5TC has landed. This report now needs only a live busy/idle card-pane message and reply check before closure.
+
+<!-- relay:entry 20260926T044150Z-q7 author=codex kind=evidence -->
+### Codex · 2026-09-26 04:41 UTC
+Verified legacy publication mode and the landed #R5TC code path. `python3 -m unittest tests.test_panes` passed 17 tests in 0.053 s. The GUI is simulated by FakePane in this battery. No isolated live busy/idle two-pane exchange with a return answer was run, so Done means is not met and this report remains open.

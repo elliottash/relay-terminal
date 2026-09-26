@@ -43,3 +43,7 @@ Released (2cb87486) · the pane closed
 
 <!-- relay:entry 20260925T214326Z-ph author=agent kind=event mention=NPCD model=claude-opus-5-5 pane=switchboard turn=fb227ab46bee28e017a9d94de4d7a32b/f28a275503e24af5945beb288c85386f -->
 mentioned in #NPCD · 2026-09-25 · agent
+
+<!-- relay:entry 20260926T044150Z-q8 author=codex kind=evidence -->
+### Codex · 2026-09-26 04:41 UTC
+Independent targeted recheck: `python3 -m unittest tests.test_panes` passed 17 tests in 0.053 s. This is worker coverage with FakePane; the required live two-pane busy/idle delivery and reply remains unverified. No implementation changes made.
