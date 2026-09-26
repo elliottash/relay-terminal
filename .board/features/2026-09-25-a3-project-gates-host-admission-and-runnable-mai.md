@@ -10,7 +10,7 @@ rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz
 created: '2026-09-25'
 verify: {artifact: code, primary: script, also: [ai-text], human: optional, criteria: 'pytest on the three new test modules passes and shows: a zero-test gate fails closed, over-capacity admission refuses/waits explicitly, and a main release flips the current symlink only after a smoke pass', sign_off: none, effort: medium}
 source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [423d4833ca27], evidence: [], related: [], github: null}
 ---
 # A3: Project gates, host admission and runnable main
 
