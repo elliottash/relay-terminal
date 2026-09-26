@@ -975,6 +975,29 @@ class StdinReaderTests(unittest.TestCase):
         self.assertEqual([m["t"] for m in handled], ["devices"])
         self.assertTrue(any("dropped a line" in line for line in logged.output))
 
+    def test_stdin_eof_runs_sidecar_stop(self):
+        """#265N: the GUI closing its write channel is the sidecar's graceful exit — the stdin EOF
+        that ends read_forever must run Sidecar.stop (routes and tunnels torn down) rather than
+        just ending the read loop, because RemoteShare::shutdown() on quit relies on exactly
+        that contract."""
+        stopped = []
+
+        async def fake_stop(self):
+            stopped.append(True)
+
+        async def main():
+            read_end, write_end = os.pipe()
+            os.close(write_end)   # EOF before anything was ever sent, like a quit with no share
+            stdin = os.fdopen(read_end, "rb", buffering=0)
+            with mock.patch.object(gui_host.sys, "stdin", stdin), \
+                    mock.patch.object(gui_host.Sidecar, "stop", fake_stop):
+                result = await gui_host.main_async()
+            stdin.close()
+            return result
+
+        self.assertEqual(asyncio.run(asyncio.wait_for(main(), 60)), 0)
+        self.assertEqual(stopped, [True])
+
 
 class AlwaysOnTests(unittest.TestCase):
     """Gap A of card #PH0N: "nothing is shared until the share button is pressed, in this Relay

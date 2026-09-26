@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "RemoteShare.h"
 #include "AppPaths.h"
+#include "Logging.h"
 #include "core/VtCore.h"
 #include "session/TerminalSession.h"
 #include "tools/ScreenJson.h"
@@ -24,6 +25,10 @@ namespace {
 // The most scrollback rows one `history` line may ask for, matching the protocol's page cap
 // (docs/REMOTE-PROTOCOL.md section 6.5). A phone pages; it does not download the buffer.
 constexpr int kHistoryPage = 200;
+
+// How long quitting waits for the sidecar's graceful stdin-EOF exit before SIGKILL (owner
+// decision on #265N): enough for route and tunnel teardown, short enough that quit never hangs.
+constexpr int kShutdownWaitMs = 2000;
 
 // What the sidecar calls this machine on a phone's screen. One string, because `start` is now sent
 // from two places: the first share, and the switch in Options › Remote (#PH0N).
@@ -621,6 +626,30 @@ void RemoteShare::stopAll()
     m_poll->stop();
     refreshSharedPanes();
     emit sharingChanged();
+}
+
+void RemoteShare::shutdown()
+{
+    // No sidecar was ever started, or it is already gone: quitting stays instant (#265N).
+    if (!m_process || m_process->state() != QProcess::Running)
+        return;
+    const qint64 startedAt = QDateTime::currentMSecsSinceEpoch();
+    // The graceful exit the sidecar already knows: `stop` asks it to tear its routes and tunnels
+    // down, and closing the write channel is the stdin EOF remote/gui_host.py's read_forever
+    // treats as "the GUI is gone" — Sidecar.stop runs, then it exits. Without this, ~QProcess
+    // SIGKILLs the child mid-teardown on quit.
+    stopAll();
+    m_process->closeWriteChannel();
+    while (m_process->state() == QProcess::Running
+           && QDateTime::currentMSecsSinceEpoch() - startedAt < kShutdownWaitMs)
+        m_process->waitForFinished(20);
+    const bool clean = m_process->state() != QProcess::Running;
+    if (!clean)
+        m_process->kill();
+    m_process->waitForFinished(1000);   // reap even the killed one: no "destroyed while running"
+    relay::log::info(QStringLiteral("remote_shutdown clean=%1 ms=%2")
+                         .arg(clean ? 1 : 0)
+                         .arg(QDateTime::currentMSecsSinceEpoch() - startedAt));
 }
 
 QStringList RemoteShare::panesInTab(const QString &tab) const

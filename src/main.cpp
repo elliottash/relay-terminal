@@ -470,6 +470,10 @@ int main(int argc, char **argv) {
             manager.saveScrollbacks();
             manager.flushClosed();      // before the layout's prune reads the recently-closed list
             manager.saveLayoutNow();
+            // Last, after the saves: the remote sidecar gets its graceful exit — `stop`, the
+            // stdin EOF of the closed write channel, and a bounded wait (#265N) — instead of
+            // ~QProcess SIGKILLing it mid route/tunnel teardown.
+            relay::RemoteShare::instance().shutdown();
         });
         QTimer::singleShot(1500, &app, [] { registerUrlHandler(); });
         // A crash or `kill -KILL` leaves this Relay's /tmp/relay-XXXXXX directories behind; the

@@ -127,6 +127,13 @@ public:
     void stopSharing(const QString &paneId);
     void stopAll();
 
+    // The quit path (#265N): `stop` plus closing the write channel gives the sidecar its graceful
+    // stdin-EOF exit (remote/gui_host.py read_forever → Sidecar.stop tears routes and tunnels
+    // down), then a bounded wait — 2 s, the cap the owner picked — before SIGKILL. A no-op when
+    // no sidecar is running, so quitting without sharing stays instant; without it, ~QProcess
+    // would kill the child mid-teardown.
+    void shutdown();
+
     // "Share whole tab" (owner, 2026-09-18). A tab shared whole is an id the window gives the tab
     // page; every pane in it is shared under that id, the window shares each pane added later,
     // and an invite made with the id grows with the tab (docs/REMOTE-PROTOCOL.md section 10.1).

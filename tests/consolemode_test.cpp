@@ -2011,8 +2011,71 @@ void thinkingRowsSitWithToolRowsAndApartFromProse()
     // The turn's link row stays with the last tool row (unchanged #5AWD behaviour).
     CHECK(text.contains(QStringLiteral("▸ ran ctest\n✦ 2 tool calls · 2 s")));
 }
+
+// #265N: quitting must let the remote sidecar finish its own teardown. RemoteShare::shutdown()
+// sends `stop`, closes the write channel (the stdin EOF remote/gui_host.py's read_forever treats
+// as "the GUI is gone") and waits inside the owner's 2 s cap before killing — so a quit with the
+// remote side on is graceful, and a quit with it off stays instant. The sidecar here is a stub
+// with exactly that contract: it records every line it was sent and exits on EOF.
+void remoteShutdownIsGraceful()
+{
+    QTemporaryDir scratch;
+    QDir(scratch.path()).mkpath(QStringLiteral("remote"));
+    const QString logPath = scratch.path() + QStringLiteral("/sidecar.log");
+    QFile stub(scratch.path() + QStringLiteral("/remote/gui_host.py"));
+    CHECK(stub.open(QIODevice::WriteOnly | QIODevice::Text));
+    stub.write("import os, sys\n"
+               "log = open(os.environ[\"RELAY_FAKE_SIDECAR_LOG\"], \"w\", buffering=1)\n"
+               "log.write(\"up\\n\")\n"
+               "for line in sys.stdin:\n"
+               "    log.write(\"recv \" + line)\n"
+               "log.write(\"eof\\n\")\n");
+    stub.close();
+    qputenv("RELAY_REMOTE_DIR", scratch.path().toUtf8());
+    qputenv("RELAY_FAKE_SIDECAR_LOG", logPath.toUtf8());
+    relay::remotesettings::setAlwaysOn(true);
+
+    relay::RemoteShare::instance().startAtLaunch();
+    // Wait for the stub to be up and holding the launch's `start` line, like a real sidecar
+    // before its first share (ensureSidecar allows it 5 s to start; this poll is not that clock).
+    // QProcess::write only reaches the pipe when the event loop pumps, and this filter never
+    // calls exec — so each round pumps briefly before re-reading.
+    const qint64 launch = QDateTime::currentMSecsSinceEpoch();
+    bool up = false;
+    while (QDateTime::currentMSecsSinceEpoch() - launch < 10000 && !up) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        QFile log(logPath);
+        if (log.open(QIODevice::ReadOnly)) {
+            const QByteArray sent = log.readAll();
+            up = sent.contains("up\n") && sent.contains("\"t\":\"start\"");
+        }
+        if (!up) QThread::msleep(25);
+    }
+    CHECK(up);
+
+    const qint64 began = QDateTime::currentMSecsSinceEpoch();
+    relay::RemoteShare::instance().shutdown();
+    const qint64 elapsedMs = QDateTime::currentMSecsSinceEpoch() - began;
+
+    QFile log(logPath);
+    CHECK(log.open(QIODevice::ReadOnly));
+    const QString transcript = QString::fromUtf8(log.readAll());
+    const int start = transcript.indexOf(QLatin1String("\"t\":\"start\""));
+    const int stop = transcript.indexOf(QLatin1String("\"t\":\"stop\""));
+    const int eof = transcript.indexOf(QLatin1String("eof"));
+    // The order the protocol promises: started, told to stop, then the stdin EOF of the closed
+    // write channel — the graceful exit, not a kill (a SIGKILLed child never writes "eof").
+    CHECK(start >= 0);
+    CHECK(stop >= 0);
+    CHECK(eof >= 0);
+    CHECK(start < stop);
+    CHECK(stop < eof);
+    CHECK(elapsedMs < 2000);   // inside the 2 s cap the owner picked on #265N
+    relay::remotesettings::setAlwaysOn(false);
+}
 }  // namespace cases
 
+#include "pane_waits.h"
 #include "xcxd_queue_cases.h"
 #include "xcxd_ui_cases.h"
 #include "xcxd_review_cases.h"
