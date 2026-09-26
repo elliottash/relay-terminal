@@ -3,14 +3,14 @@ id: P9ZA
 type: work
 status: needs-verification
 labels: [feature, workflow, land]
+assignee: claude-code
 parent: 3MH4
 discovered_from: 3MH4
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-25'
-source: 'Approved #3MH4 implementation workstream, 2026-09-26'
-assignee: claude-code
 verify: {artifact: code, primary: script, also: [ai-text], human: none, sign_off: none, effort: high, stakes: rework, blast: capability, criteria: 'tests/test_reconcile.py passes on the landed tree: the weighted High draw, durable case/day budgets, the two-attempt loop and every conservative refusal are each proved by a test against real Git worktrees'}
-links: {plans: [], commits: [], evidence: [], related: [RT3B, FW1C, ASQ4], github: null}
+source: 'Approved #3MH4 implementation workstream, 2026-09-26'
+links: {plans: [], commits: [bdb8c79683df], evidence: [], related: [RT3B, FW1C, ASQ4], github: null}
 ---
 # A4: Automatic AI reconciliation with weighted high models
 
