@@ -11,3 +11,7 @@ claimed this card (subagent a4 of #3MH4); wrote Done means, the verify proposal 
 <!-- relay:entry 20260926T024428Z-a5 author=claude-code kind=progress -->
 ### Claude Code · 2026-09-26 02:44
 implemented backend/relay_core/reconcile.py and tests/test_reconcile.py (25 tests green); moved to needs-verification with the Execution Summary and Tests on the card. Verify: `PYTHONPATH=backend python3 -m pytest tests/test_reconcile.py -q`.
+
+<!-- relay:entry 20260926T025651Z-a6 author=claude-code kind=progress -->
+### Claude Code · 2026-09-26 02:56
+second pass after the parent's review: landq's context shape, gate-failure repair rounds, persisted attempts per case, assertion-line and AST test-body checks (the `assert True` gap), a bounded guest turn (usage, streamed length, wall clock), cached-token accounting, `Reconciled-By:` trailer. 41 tests green, including two end-to-end runs through `landq.Queue.process_one`.

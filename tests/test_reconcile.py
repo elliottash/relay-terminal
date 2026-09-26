@@ -170,10 +170,12 @@ class ResolveTests(ReconcileTestCase):
         self.assertEqual(result["model"], "kimi-k3")
         self.assertEqual(result["preset"], "kimi")
         self.assertEqual(result["effort"], "max")               # the model's top level: high effort
-        self.assertEqual(result["tokens"], {"input": 1234, "output": 321, "total": 1555,
+        self.assertEqual(result["tokens"], {"input": 1234, "output": 321, "cached": 0, "total": 1555,
                                             "reserved": result["tokens"]["reserved"]})
         self.assertGreater(result["tokens"]["reserved"], 0)
-        self.assertEqual(result["trailer"], f"Reconciled-From: {fx.target} {fx.submitted}")
+        self.assertEqual(result["reconciled_from"], f"Reconciled-From: {fx.target} {fx.submitted}")
+        self.assertEqual(result["trailer"], "Reconciled-By: kimi-k3 (kimi) effort=max attempts=1 tokens=1234/321")
+        self.assertEqual(result["kind"], "merge_conflict")
         self.assertEqual((fx.candidate / "app.py").read_text(), MERGED_APP)
         self.assertEqual(git(fx.candidate, "ls-files", "-u"), "", "the resolution is staged")
         self.assertIn("+        raise ValueError", result["patch"])
@@ -198,7 +200,7 @@ class ResolveTests(ReconcileTestCase):
         notes = result["card_notes"]
         self.assertEqual([n["card"] for n in notes], ["AB12"])
         self.assertIn("reconcile:job-1:resolved", notes[0]["text"])
-        self.assertIn(result["trailer"], notes[0]["text"])
+        self.assertIn(result["reconciled_from"], notes[0]["text"])
 
     def test_async_entry_point_and_conflicts_read_from_the_index(self):
         fx = Fixture(self.root)
@@ -363,7 +365,8 @@ class BudgetTests(ReconcileTestCase):
         self.assertIn("195,000 tokens charged", result["reason"])
         rows = rec.history("job-1")
         self.assertEqual(len(rows), 1, "a refused reservation is never written")
-        self.assertEqual(rec.ledger.charged(case_key="repo-1:job-1"), 195_000)
+        self.assertEqual(result["case_key"], "repo-1:job-1:merge_conflict")
+        self.assertEqual(rec.ledger.charged(case_key=result["case_key"]), 195_000)
         # A new job on the same repo starts with its own case budget.
         (self.root / "two").mkdir()
         fx2 = Fixture(self.root / "two")
@@ -637,7 +640,8 @@ class AdapterTests(ReconcileTestCase):
         result = rec.reconcile_sync(ctx)
         self.assertEqual(result["status"], "resolved", result["reason"])
         self.assertEqual(result["model"], "loop-model")
-        self.assertEqual(result["tokens"], {"input": 777, "output": 88, "total": 865, "reserved": result["tokens"]["reserved"]})
+        self.assertEqual(result["tokens"], {"input": 777, "output": 88, "cached": 0, "total": 865,
+                                            "reserved": result["tokens"]["reserved"]})
         path, body = seen[0]
         self.assertEqual(path, "/v1/chat/completions")
         self.assertEqual(body["model"], "loop-model")
@@ -677,3 +681,371 @@ class BoardNoteTests(ReconcileTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ----- the second review pass (parent review, 2026-09-26) ----------------------------------------
+
+PT_BASE = """from app import area
+
+
+def test_area():
+    assert area(1) > 3
+"""
+PT_THEIRS = PT_BASE + """
+
+def test_area_two():
+    value = round(area(2), 2)
+    assert value == 12.57
+"""
+
+
+class AssertionWeakeningTests(unittest.TestCase):
+    """`review_file` alone: the count-preserving weakenings the first pass let through."""
+
+    def versions(self, ours=PT_BASE, theirs=PT_THEIRS, base=PT_BASE, path="tests/test_area.py"):
+        return R.FileVersions(path, base, ours, theirs, "", True)
+
+    def test_assert_true_with_the_same_count_is_refused(self):
+        weakened = PT_THEIRS.replace("assert value == 12.57", "assert True")
+        problems = R.review_file(self.versions(), weakened)
+        text = " ".join(problems)
+        self.assertIn("assertion line(s) changed or removed", text)
+        self.assertIn("test_area_two lost or changed 1 check(s)", text)
+        self.assertEqual(R.review_file(self.versions(), PT_THEIRS), [], "the honest merge passes")
+
+    def test_changed_expected_operand_is_refused(self):
+        changed = PT_THEIRS.replace("assert value == 12.57", "assert value == 12.5")
+        self.assertIn("assertion line(s) changed or removed", " ".join(R.review_file(self.versions(), changed)))
+        # Non-Python too: the line rule needs no parser.
+        base = 'TEST(Area, One) {\n  EXPECT_EQ(area(1), 3);\n}\n'
+        theirs = base + 'TEST(Area, Two) {\n  EXPECT_EQ(area(2), 12);\n}\n'
+        v = R.FileVersions("tests/area_test.cpp", base, base, theirs, "", True)
+        self.assertIn("assertion line(s) changed or removed",
+                      " ".join(R.review_file(v, theirs.replace("EXPECT_EQ(area(2), 12)", "EXPECT_TRUE(true)"))))
+        self.assertEqual(R.review_file(v, theirs), [])
+
+    def test_early_return_and_pass_bodies_are_refused(self):
+        bypass = PT_THEIRS.replace("def test_area_two():\n", "def test_area_two():\n    return\n")
+        text = " ".join(R.review_file(self.versions(), bypass))
+        self.assertIn("test_area_two gained an early return/raise", text)
+        self.assertIn("test_area_two now opens with return/raise/pass", text)
+        guarded = PT_THEIRS.replace("    assert value == 12.57", "    if value != 12.57:\n        return\n    assert value == 12.57")
+        self.assertIn("gained an early return", " ".join(R.review_file(self.versions(), guarded)))
+
+    def test_a_superseded_base_assertion_may_go_and_a_kept_one_may_not(self):
+        ours = PT_BASE.replace("assert area(1) > 3", "assert round(area(1), 2) == 3.14")
+        merged = PT_THEIRS.replace("assert area(1) > 3", "assert round(area(1), 2) == 3.14")
+        self.assertEqual(R.review_file(self.versions(ours=ours), merged), [], "ours changed it; the merge takes ours")
+        dropped = PT_THEIRS.replace("    assert area(1) > 3\n", "    area(1)\n")
+        text = " ".join(R.review_file(self.versions(), dropped))
+        self.assertIn("assertion line(s) changed or removed", text)
+        self.assertIn("test_area lost or changed 1 check(s)", text)
+
+    def test_files_that_no_longer_parse_are_refused(self):
+        broken = PT_THEIRS.replace("def test_area_two():", "def test_area_two(:")
+        self.assertIn("does not parse", " ".join(R.review_file(self.versions(), broken)))
+        v = R.FileVersions("conf.json", '{"a": 1}\n', '{"a": 1}\n', '{"a": 1, "b": 2}\n', "", True)
+        self.assertIn("does not parse", " ".join(R.review_file(v, '{"a": 1, "b": 2,}\n')))
+        v = R.FileVersions("x.toml", "a = 1\n", "a = 1\n", "a = 1\nb = 2\n", "", True)
+        self.assertIn("does not parse", " ".join(R.review_file(v, "a = 1\nb = \n")))
+
+
+class PersistedAttemptTests(ReconcileTestCase):
+    def test_attempts_survive_a_restart_of_the_same_case(self):
+        fx = Fixture(self.root)
+        calls = []
+        first = self.reconciler()
+        result = first.reconcile_sync(fx.context(), model_call=lambda req: calls.append(req) or ('{"give_up": "no"}', usage()))
+        self.assertEqual(len(calls), 2)
+        again = self.reconciler()                      # a restarted publisher re-runs the job
+        result = again.reconcile_sync(fx.context(), model_call=lambda req: calls.append(req))
+        self.assertEqual(len(calls), 2, "no third call, in this process or the next")
+        self.assertEqual(result["status"], "author_required")
+        self.assertIn("attempt budget: 2 attempt(s) already on record", result["reason"])
+        self.assertEqual(result["attempts"], [])
+        # One attempt used before the restart leaves exactly one.
+        (self.root / "two").mkdir()
+        fx2 = Fixture(self.root / "two")
+        calls.clear()
+
+        def one_then_crash(request):
+            calls.append(request)
+            raise ProviderError("connection reset")
+
+        rec = self.reconciler(tiers=[{"preset": "kimi", "model": "kimi-k3"}])
+        rec.reconcile_sync(fx2.context(job_id="job-2"), model_call=one_then_crash)
+        self.assertEqual(len(calls), 1, "kimi failed and nothing else is listed")
+        result = self.reconciler().reconcile_sync(fx2.context(job_id="job-2"),
+                                                  model_call=lambda req: calls.append(req) or (reply({"app.py": MERGED_APP}), usage()))
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["attempts"][0]["attempt"], 2, "numbered after the one on record")
+
+
+class RepairFixture:
+    """A clean merge whose result the gate refused: the submission added a function with a bug,
+    the target changed another part of the same file, and `candidate` is the merged commit."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.repo = root / "repo"
+        self.repo.mkdir()
+        git(self.repo, "init", "-q", "-b", "main")
+        (self.repo / "app.py").write_text(BASE_APP)
+        (self.repo / "README.md").write_text("readme\n")
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "test_app.py").write_text(BASE_TEST)
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "base")
+        self.base = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "checkout", "-q", "-b", "submitted")
+        self.theirs_app = BASE_APP.replace("import math\n", "import math\n\n\ndef diameter(r):\n    return 2 * radius\n")
+        (self.repo / "app.py").write_text(self.theirs_app)
+        (self.repo / "tests" / "test_app.py").write_text(
+            BASE_TEST.replace("from app import area, describe", "from app import area, describe, diameter")
+            + "\n    def test_diameter(self):\n        self.assertEqual(diameter(2), 4)\n")
+        git(self.repo, "commit", "-q", "-am", "theirs: diameter (buggy)")
+        self.submitted = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "checkout", "-q", "main")
+        (self.repo / "app.py").write_text(OURS_APP)
+        git(self.repo, "commit", "-q", "-am", "ours: describe shows area")
+        self.target = git(self.repo, "rev-parse", "HEAD")
+        self.candidate = root / "candidate"
+        git(self.repo, "worktree", "add", "-q", "--detach", str(self.candidate), self.target)
+        git(self.candidate, "merge", "--no-edit", self.submitted)
+        assert not git(self.candidate, "ls-files", "-u"), "the merge is clean"
+        self.merged_app = (self.candidate / "app.py").read_text()
+        assert "area={area(r):.2f}" in self.merged_app and "radius" in self.merged_app
+
+    def context(self, **extra) -> dict:
+        # The shape `landq._context` sends for a repair round: no conflicts, dict diagnostics,
+        # a policy *hash*, intents as an (empty) dict, cards as strings.
+        ctx = {"repo": str(self.repo), "repo_id": "repo-1", "job_id": "job-1", "base_sha": self.base,
+               "target_sha": self.target, "submitted_sha": self.submitted, "candidate_path": str(self.candidate),
+               "cards": ["#AB12"], "intents": {}, "conflicts": [],
+               "diagnostics": {"kind": "gate_failure", "round": 1, "candidate_sha": "c" * 40,
+                               "reason": "gate said no", "policy_hash": "policy-1", "log_path": "/x/gate.log",
+                               "log": "collecting ...\nFAILED tests/test_app.py::AreaTests::test_diameter\n"
+                                      "NameError: name 'radius' is not defined\n"},
+               "policy": "policy-1"}
+        ctx.update(extra)
+        return ctx
+
+
+class RepairTests(ReconcileTestCase):
+    def test_gate_failure_round_repairs_only_what_the_submission_touched(self):
+        fx = RepairFixture(self.root)
+        fixed = fx.merged_app.replace("return 2 * radius", "return 2 * r")
+        calls = []
+
+        def model(request):
+            calls.append(request)
+            return reply({"app.py": fixed}, "renamed the undefined name"), usage(3000, 400)
+
+        result = self.reconciler().reconcile_sync(fx.context(), model_call=model)
+        self.assertEqual(result["status"], "resolved", result["reason"])
+        self.assertEqual(result["kind"], "gate_failure")
+        self.assertEqual(result["case_key"], "repo-1:job-1:gate_failure:1")
+        self.assertEqual(result["policy_hash"], "policy-1")
+        self.assertEqual(result["conflicts"], ["app.py", "tests/test_app.py"], "what the submission changed")
+        self.assertEqual(result["resolved_paths"], ["app.py"], "a repair may return a subset")
+        self.assertEqual((fx.candidate / "app.py").read_text(), fixed)
+        self.assertIn("-    return 2 * radius\n+    return 2 * r\n", result["patch"])
+        prompt = calls[0]["user"]
+        self.assertTrue(prompt.startswith("GATE FAILURE to repair"))
+        self.assertIn("NameError: name 'radius' is not defined", prompt)
+        self.assertIn("reason: gate said no", prompt)
+        self.assertIn("the candidate as the gate saw it", prompt)
+        self.assertEqual(calls[0]["kind"], "gate_failure")
+        self.assertIn("repaired by kimi-k3", result["card_notes"][0]["text"])
+
+    def test_a_repair_may_not_touch_other_files_undo_the_target_or_weaken_tests(self):
+        fx = RepairFixture(self.root)
+        fixed = fx.merged_app.replace("return 2 * radius", "return 2 * r")
+        cases = {
+            "readme": ({"README.md": "fixed\n"}, "outside the files this repair may change"),
+            "unchanged": ({"app.py": fx.merged_app}, "returned unchanged"),
+            "undoes_target": ({"app.py": fixed.replace(' area={area(r):.2f}', "")}, "target's 1 added lines are gone"),
+            "weakens_test": ({"app.py": fixed, "tests/test_app.py": (fx.candidate / "tests" / "test_app.py").read_text()
+                              .replace("self.assertEqual(diameter(2), 4)", "self.assertTrue(True)")},
+                             "assertion line(s) changed or removed"),
+        }
+        for label, (files, expected) in cases.items():
+            with self.subTest(label):
+                ctx = fx.context(job_id=f"job-{label}")
+                result = self.reconciler().reconcile_sync(ctx, model_call=lambda req, files=files: (reply(files), usage()))
+                self.assertEqual(result["status"], "author_required", label)
+                self.assertIn(expected, " ".join(result["diagnostics"]), label)
+        self.assertEqual((fx.candidate / "app.py").read_text(), fx.merged_app, "the candidate is untouched")
+
+    def test_explicit_repair_paths_win_and_too_wide_a_submission_is_the_authors(self):
+        fx = RepairFixture(self.root)
+        self.assertEqual(R.repair_paths(fx.candidate, fx.repo, fx.context(repair_paths=["app.py"])), ["app.py"])
+        with mock.patch.object(R, "MAX_REPAIR_PATHS", 1):
+            with self.assertRaises(R.ReconcileError):
+                R.repair_paths(fx.candidate, fx.repo, fx.context())
+            result = self.reconciler().reconcile_sync(fx.context(), model_call=lambda req: self.fail("no call"))
+            self.assertIn("bounded to 1", result["reason"])
+
+
+class GuestBoundTests(ReconcileTestCase):
+    GUEST = [{"preset": "guest:claude", "model": "fable", "effort": "high", "rank": 1}]
+
+    def run_guest(self, fx, turn, **policy):
+        harness = FakeHarness([turn], guest="claude")
+        rec = self.reconciler(tiers=self.GUEST, guest_check=lambda g: True)
+        ctx = fx.context(policy={"reconcile": policy})
+        with mock.patch("relay_core.guest_harness_provider.make_harness", lambda *a, **k: harness):
+            return rec, rec.reconcile_sync(ctx), harness
+
+    def test_usage_past_the_reservation_cancels_the_turn_and_charges_at_least_what_was_seen(self):
+        fx = Fixture(self.root)
+        from relay_core.guest_harness import TurnResult
+
+        def runaway(prompt, attachments, emit, cancel, harness):
+            emit(ev("usage", input_tokens=150_000, output_tokens=60_000))   # cumulative, past the reservation
+            self.assertTrue(cancel.wait(5), "the reconciler's watch must cancel the turn")
+            return TurnResult(text="", stop_reason="interrupted")
+
+        rec, result, harness = self.run_guest(fx, runaway)
+        self.assertEqual(result["status"], "author_required")
+        self.assertEqual(result["attempts"][0]["outcome"], "over_budget")
+        self.assertIn("past the attempt's reservation", result["attempts"][0]["diagnostics"][0])
+        self.assertIn("no further usable model", result["reason"])
+        rows = rec.history("job-1")
+        self.assertEqual(rows[0]["status"], "uncertain")
+        self.assertGreaterEqual(rows[0]["reserved"], 210_000, "charged at what the guest reported")
+        self.assertTrue(harness.closed)
+        self.assertIn("<<<<<<<", (fx.candidate / "app.py").read_text())
+
+    def test_a_streamed_answer_past_the_completion_cap_is_cut_off(self):
+        fx = Fixture(self.root)
+        from relay_core.guest_harness import TurnResult
+
+        def verbose(prompt, attachments, emit, cancel, harness):
+            for _ in range(40):
+                emit(ev("delta", text="x" * 100))
+            self.assertTrue(cancel.wait(5))
+            return TurnResult(text="", stop_reason="interrupted")
+
+        rec, result, harness = self.run_guest(fx, verbose, completion_tokens=256, tokens_per_case=2000)
+        self.assertEqual(result["attempts"][0]["outcome"], "over_budget")
+        self.assertIn("answer passed 256 tokens", result["attempts"][0]["diagnostics"][0])
+
+    def test_a_guest_turn_has_a_wall_clock_deadline(self):
+        fx = Fixture(self.root)
+        from relay_core.guest_harness import TurnResult
+        import time as _time
+
+        def silent(prompt, attachments, emit, cancel, harness):
+            self.assertTrue(cancel.wait(20), "the deadline must fire")
+            return TurnResult(text="", stop_reason="interrupted")
+
+        started = _time.monotonic()
+        rec, result, harness = self.run_guest(fx, silent, guest_timeout_seconds=1)
+        self.assertLess(_time.monotonic() - started, 10)
+        self.assertEqual(result["attempts"][0]["outcome"], "timeout")
+        self.assertEqual(rec.history("job-1")[0]["outcome"], "timeout after 1s")
+
+    def test_the_callers_cancel_still_propagates(self):
+        fx = Fixture(self.root)
+        from relay_core.provider import Cancelled as _Cancelled
+        outer = threading.Event()
+
+        def model(request):
+            outer.set()
+            self.assertTrue(request["cancel"].wait(5))
+            raise _Cancelled("Stopped.")
+
+        with self.assertRaises(_Cancelled):
+            self.reconciler().reconcile_sync(fx.context(), model_call=model, cancel=outer)
+        self.assertEqual(self.reconciler().history("job-1")[0]["outcome"], "cancelled")
+
+
+class CachedTokenTests(ReconcileTestCase):
+    def test_cached_input_is_recorded_beside_input_and_output(self):
+        fx = Fixture(self.root)
+        cached = {"prompt_tokens": 5000, "completion_tokens": 300, "prompt_tokens_details": {"cached_tokens": 4200}}
+        rec = self.reconciler()
+        result = rec.reconcile_sync(fx.context(), model_call=lambda req: (reply({"app.py": MERGED_APP}), cached))
+        self.assertEqual(result["tokens"], {"input": 5000, "output": 300, "cached": 4200, "total": 5300,
+                                            "reserved": result["tokens"]["reserved"]})
+        row = rec.history("job-1")[0]
+        self.assertEqual((row["input_tokens"], row["output_tokens"], row["cached_tokens"]), (5000, 300, 4200))
+        # Anthropic's names, as the claude harness reports them (`relay_usage` completes prompt_tokens).
+        self.assertEqual(R.usage_counts({"input_tokens": 7, "output_tokens": 2}), (7, 2))
+
+
+class QueueIntegrationTests(ReconcileTestCase):
+    """The A2 queue driving this reconciler: conflict → resolved candidate → required gate →
+    receipt, and a failed gate → one repair round → landed."""
+
+    def setUp(self):
+        super().setUp()
+        from test_landq import make_repo  # noqa: F401
+        self.make_repo = make_repo
+
+    def test_conflict_is_reconciled_verified_and_landed_with_both_trailers(self):
+        from test_landq import Recorder, plumb_commit, run_git, git_out, tip, show
+        from relay_core.landq import Queue
+        repo = self.make_repo(self.root)
+        base = tip(repo)
+        theirs = plumb_commit(repo, base, {"a.txt": "theirs\n"}, "theirs")
+        run_git(repo, "update-ref", "refs/heads/main", theirs, base)
+        mine = plumb_commit(repo, base, {"a.txt": "mine\n"}, "mine")
+        q = Queue(repo, state_root=self.state / "q", repo_id="test-repo")
+        q.submit(mine, request_id="r1", card="#FW1C")
+        seen = []
+
+        def model(request):
+            seen.append(request)
+            return reply({"a.txt": "theirs\nmine\n"}), usage(500, 40)
+
+        rec = self.reconciler(model_call=model)
+        verifier = Recorder()
+        done = q.process_one(verifier, reconcile=rec.reconcile_sync)
+        self.assertEqual(done["status"], "landed", done)
+        new = tip(repo)
+        self.assertEqual(verifier.calls[0][1], new, "the required gate saw the resolved candidate")
+        self.assertEqual(show(repo, new, "a.txt"), "theirs\nmine")
+        message = git_out(repo, "log", "-1", "--format=%B", new)
+        self.assertEqual(message.count("Reconciled-From:"), 1, message)
+        self.assertIn("Reconciled-From: %s %s" % (theirs, mine), message)
+        self.assertIn("Reconciled-By: kimi-k3 (kimi) effort=max attempts=1 tokens=500/40", message)
+        self.assertEqual(seen[0]["conflicts"], ["a.txt"])
+        self.assertEqual(q.receipt(done["id"])["published_sha"], new)
+        self.assertEqual(rec.history(done["id"])[0]["outcome"], "resolved")
+
+    def test_failed_gate_gets_a_repair_round_through_the_reconciler(self):
+        from test_landq import Recorder, plumb_commit, run_git, git_out, tip, show
+        from relay_core.landq import Queue
+        repo = self.make_repo(self.root)
+        base = tip(repo)
+        mine = plumb_commit(repo, base, {"b.txt": "one\ntwo\nthree\nbug\n"}, "mine")
+        q = Queue(repo, state_root=self.state / "q", repo_id="test-repo")
+        q.submit(mine, request_id="r1", card="#FW1C")
+        contexts = []
+
+        def model(request):
+            contexts.append(request)
+            return reply({"b.txt": "one\ntwo\nthree\nfour\n"}), usage()
+
+        class Gate(Recorder):
+            def __call__(self, job, candidate_sha, candidate_path):
+                self.ok = "bug" not in (Path(candidate_path) / "b.txt").read_text()
+                out = super().__call__(job, candidate_sha, candidate_path)
+                if not self.ok:
+                    out["log"] = "FAIL: b.txt contains 'bug'"
+                return out
+
+        rec = self.reconciler(model_call=model)
+        gate = Gate()
+        done = q.process_one(gate, reconcile=rec.reconcile_sync)
+        self.assertEqual(done["status"], "landed", done)
+        self.assertEqual(len(gate.calls), 2, "the repaired candidate went through the gate again")
+        self.assertEqual(show(repo, tip(repo), "b.txt"), "one\ntwo\nthree\nfour")
+        self.assertEqual(contexts[0]["kind"], "gate_failure")
+        self.assertIn("FAIL: b.txt contains 'bug'", contexts[0]["user"])
+        self.assertIn("Reconciled-By: kimi-k3", git_out(repo, "log", "-1", "--format=%B", tip(repo)))
+        rows = rec.history(done["id"])
+        self.assertTrue(rows[0]["case_key"].endswith(":gate_failure:1"), rows[0]["case_key"])

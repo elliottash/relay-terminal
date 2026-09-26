@@ -27,18 +27,41 @@ What it does, in order, for one context:
    (Claude Code, Codex, an account of either) through `guest_harness_provider.start_provider` in
    read-only mode with the candidate as its cwd. The reply is JSON: full contents for each
    conflicted file, or a `give_up`.
-5. **Review** conservatively (`review_patch`): only the conflicted paths, no conflict markers, no
-   test function or assertion lost and no skip added, neither side's added lines and no line both
-   sides kept dropped beyond a small tolerance, nothing that reads like an elided file. A refusal
-   is cheap and routes to the author agent with the diagnostics and the rejected patch.
+5. **Review** conservatively (`review_patch`): only the allowed paths, no conflict markers,
+   every assertion-bearing line of either side kept verbatim, no test function lost, no skip or
+   early return added to a test (Python bodies are compared as syntax trees), Python, JSON and
+   TOML files still parse, neither side's added lines and no line both sides kept dropped beyond
+   a small tolerance, nothing that reads like an elided file. This is a screen, not a proof of
+   semantics: the project's required gate still runs on every resolved candidate. A refusal is
+   cheap and routes to the author agent with the diagnostics and the rejected patch.
 6. **Apply** the accepted files into the candidate, stage them, and return the unified patch, the
-   `Reconciled-From: <target-sha> <submitted-sha>` trailer and the idempotent card notes.
+   `Reconciled-By:` trailer (the queue writes `Reconciled-From: <target> <submitted>` itself;
+   `reconciled_from` carries that line for an integrator that does not) and the card notes.
+
+Two shapes of context arrive from `landq` (A2). A **merge conflict** names `conflicts` and a
+candidate holding git's markers. A **gate failure** (`diagnostics.kind == "gate_failure"`) names
+no conflicts: the candidate is the merged commit the gate refused, the diagnostics carry the
+gate's reason and log, and the files the model may touch are the ones the submission changed
+(`base..submitted`) plus any `repair_paths` the queue names. In that mode the submission's own
+lines may change — repairing them is the point — while the target's lines, every test and every
+assertion line are held as before.
+
+Bounds on one attempt: the prompt is capped (`context_tokens`), an API completion is capped by
+`max_tokens` (`completion_tokens`), and a guest turn — which has no request-body cap — is
+**cancelled** when its harness reports usage past the attempt's reservation, when its streamed
+answer runs past the completion cap, or when `guest_timeout_seconds` pass. Both guest adapters
+poll the cancel event every 0.2 s. That is a bound at report granularity, not a hard cap: Claude
+Code reports usage per result message, Codex per token-usage update, so a turn can overshoot by
+what it consumed since its last report. A cancelled turn is charged at the larger of its
+reservation and the last usage it reported. Attempts persist per case in the ledger: a restart
+that re-runs the same job does not get two more.
 
 Tests inject `model_call`, `tiers`, `key_lookup` and `guest_check`; nothing here starts a real
 guest or reads a real keyring under test (`tests/test_reconcile.py`).
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import configparser
 import dataclasses
@@ -50,6 +73,7 @@ import os
 import re
 import socket
 import sqlite3
+import tomllib
 import subprocess
 import threading
 import time
@@ -58,7 +82,7 @@ from pathlib import Path
 from . import logs, presets
 from . import roles as model_roles
 from .provider import (DEFAULT_STALL_TIMEOUT, MIN_OUTPUT_TOKENS, Cancelled, ProviderConfig,
-                       ProviderError)
+                       ProviderError, cache_counts)
 
 _log = logs.get("reconcile")
 
@@ -80,8 +104,12 @@ CHARS_PER_TOKEN = 4
 STALE_RESERVATION_S = 6 * 3600
 # The largest single file this will ask a model to rewrite whole, in bytes.
 MAX_FILE_BYTES = 400_000
-SCHEMA_VERSION = 1
+DEFAULT_GUEST_TIMEOUT_S = 900
+MAX_REPAIR_PATHS = 24
+GATE_LOG_CHARS = 16_000
+SCHEMA_VERSION = 2
 TRAILER = "Reconciled-From"
+BY_TRAILER = "Reconciled-By"
 
 _MARKER = re.compile(r"^(<{7}|={7}|>{7}|\|{7})( |$)", re.M)
 _ELISION = re.compile(r"^\s*(?:#|//|/\*|<!--)?\s*(?:\.\.\.|…)\s*(?:rest|remaining|unchanged|other|existing|"
@@ -98,9 +126,10 @@ _TEST_NAMES = [
     re.compile(r"^\s*#\[test\]\s*\n\s*fn\s+(\w+)", re.M),
     re.compile(r"^\s*func\s+(Test\w+)\s*\(", re.M),
 ]
-_ASSERTIONS = re.compile(r"\b(?:assert(?:_\w+|\w*)?\b|self\.assert\w*|ASSERT_\w+|EXPECT_\w+|QVERIFY\w*|"
-                         r"QCOMPARE\w*|QTRY_\w+|expect\s*\(|assertThat|require\.|assert\.|t\.Errorf|"
-                         r"t\.Fatal\w*|check\s*\(|REQUIRE\s*\(|CHECK\s*\()")
+_ASSERTIONS = re.compile(r"(?:^|[^\w.])assert\w*\b|self\.assert\w*|\bASSERT_\w+|\bEXPECT_\w+|\bQVERIFY\w*|"
+                         r"\bQCOMPARE\w*|\bQTRY_\w+|\bexpect\s*\(|\bassertThat\b|\brequire\.|\bt\.Errorf|"
+                         r"\bt\.Fatal\w*|\bREQUIRE(?:_\w+)?\s*\(|\bCHECK(?:_\w+)?\s*\(")
+_PY_CHECK_NAMES = re.compile(r"^(?:assert\w*|raises|warns|fail\w*|expect\w*)$")
 _SKIPS = re.compile(r"(?:unittest\.skip|pytest\.mark\.skip|pytest\.mark\.xfail|pytest\.skip\s*\(|"
                     r"unittest\.expectedFailure|\bDISABLED_\w+|\bQSKIP\s*\(|GTEST_SKIP|\bxit\s*\(|"
                     r"\bxdescribe\s*\(|\bit\.skip\s*\(|\btest\.skip\s*\(|\bdescribe\.skip\s*\(|"
@@ -122,10 +151,12 @@ class BudgetExceeded(ReconcileError):
 def normalize_policy(raw) -> dict:
     """The `[reconcile]` table as this module reads it: the contract's defaults filled in, bad
     types refused with a sentence, and `max_attempts` never above HARD_MAX_ATTEMPTS."""
-    if raw is None:
+    if raw is None or isinstance(raw, str):
+        # `landq` passes the job's accepted policy *hash* here (a string): the defaults apply and
+        # the hash is kept for the record. B1 passes the config table to change the budgets.
         raw = {}
     if not isinstance(raw, dict):
-        raise ReconcileError("policy.reconcile must be a table.")
+        raise ReconcileError("policy must be the project config table, its [reconcile] section, or a policy hash.")
     source = raw.get("reconcile") if isinstance(raw.get("reconcile"), dict) else raw
     out = dict(DEFAULT_POLICY)
     enabled = source.get("enabled", True)
@@ -148,6 +179,10 @@ def normalize_policy(raw) -> dict:
     per_case = out["tokens_per_case"]
     out["completion_tokens"] = max(MIN_OUTPUT_TOKENS, min(out["completion_tokens"], per_case // 4))
     out["context_tokens"] = max(MIN_OUTPUT_TOKENS, min(out["context_tokens"], per_case - out["completion_tokens"]))
+    timeout = source.get("guest_timeout_seconds", DEFAULT_GUEST_TIMEOUT_S)
+    if type(timeout) not in (int, float) or isinstance(timeout, bool) or timeout < 1:
+        raise ReconcileError("reconcile.guest_timeout_seconds must be a positive number.")
+    out["guest_timeout_seconds"] = float(timeout)
     return out
 
 
@@ -218,6 +253,11 @@ class BudgetLedger:
                 db.execute("INSERT INTO schema(version) VALUES (?)", (SCHEMA_VERSION,))
             elif row[0] > SCHEMA_VERSION:
                 raise ReconcileError(f"{self.path} was written by a newer Relay (schema {row[0]}).")
+            columns = {r[1] for r in db.execute("PRAGMA table_info(reservations)").fetchall()}
+            if "cached_tokens" not in columns:            # schema 1 → 2: the prefix-cache counts
+                db.execute("ALTER TABLE reservations ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
+                db.execute("ALTER TABLE reservations ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0")
+            db.execute("UPDATE schema SET version = ?", (SCHEMA_VERSION,))
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10.0, isolation_level=None)
@@ -287,6 +327,7 @@ class BudgetLedger:
         its reserved charge. `model`, when given, is what actually answered (a guest names its
         model only once started)."""
         counts = usage_counts(usage)
+        cache = cache_counts(usage) if isinstance(usage, dict) else {}
         now = self._now()
         with self._connect() as db:
             if counts is None:
@@ -294,10 +335,28 @@ class BudgetLedger:
                            " WHERE id = ?", (outcome, now, reservation_id))
             else:
                 db.execute("UPDATE reservations SET status = 'settled', input_tokens = ?, output_tokens = ?,"
-                           " outcome = ?, updated_at = ? WHERE id = ?",
-                           (counts[0], counts[1], outcome, now, reservation_id))
+                           " cached_tokens = ?, cache_write_tokens = ?, outcome = ?, updated_at = ? WHERE id = ?",
+                           (counts[0], counts[1], cache.get("cached_tokens", 0), cache.get("cache_write_tokens", 0),
+                            outcome, now, reservation_id))
             if model:
                 db.execute("UPDATE reservations SET model = ? WHERE id = ?", (model, reservation_id))
+
+    def mark_uncertain(self, reservation_id: int, outcome: str, *, at_least: int = 0, model: str = "") -> None:
+        """A call that was cut off (budget, timeout, error) with no final usage: the row stays
+        charged at its reservation, raised to `at_least` when the last usage it reported was
+        already past it — a cancelled turn may have consumed more than either."""
+        with self._connect() as db:
+            db.execute("UPDATE reservations SET status = 'uncertain', outcome = ?, updated_at = ?,"
+                       " reserved = MAX(reserved, ?) WHERE id = ?",
+                       (outcome, self._now(), int(at_least), reservation_id))
+            if model:
+                db.execute("UPDATE reservations SET model = ? WHERE id = ?", (model, reservation_id))
+
+    def attempts_made(self, case_key: str) -> int:
+        """How many attempts this case has on record, whatever became of them: a restart that
+        runs the same job again continues the count instead of starting a fresh pair."""
+        with self._connect() as db:
+            return int(db.execute("SELECT COUNT(*) FROM reservations WHERE case_key = ?", (case_key,)).fetchone()[0])
 
     def release(self, reservation_id: int, outcome: str) -> None:
         """Drop the charge of a call that provably never reached a model (the guest would not
@@ -576,6 +635,8 @@ Rules:
 - Change only the files you are given. Return each one in full, exactly as it should be on disk, with no conflict markers and nothing elided.
 - If a safe resolution is not possible from what you can see, answer {"give_up": "<why, one sentence>"} instead.
 
+When the prompt describes a GATE FAILURE instead of a merge conflict, the two sides already merged cleanly but the project's required checks (build, tests, lint) failed on the result. Read the diagnostics, find the cause in the files you are allowed to change, and return corrected versions of only the files that need to change. Fix the code, never the check: do not delete, skip, loosen or rewrite a test or an assertion to make it pass.
+
 Answer with one JSON object and nothing else:
 {"files": [{"path": "<path as given>", "content": "<the whole file>"}], "notes": "<one or two sentences>"}
 """
@@ -585,14 +646,23 @@ GUEST_INSTRUCTIONS = ("You are running one read-only reconciliation turn for Rel
                       "need from the working directory and answer with the JSON object the prompt asks for.")
 
 
-def _default_model_call(request: dict) -> tuple[str, dict]:
+def _default_model_call(request: dict):
     """The production adapter: the drawn `Resolved` to a real completion. A guest preset runs one
-    read-only harness turn with the candidate as its cwd; anything else is a no-tools completion
-    through `provider.make_provider` with the completion cap in `max_tokens`."""
+    read-only harness turn with the candidate as its cwd, bounded by `budget_tokens`,
+    `completion_tokens` and the request's `cancel`; anything else is a no-tools completion
+    through `provider.make_provider` with the completion cap in `max_tokens`.
+
+    Signature for an integrator's own adapter: `model_call(request) -> (text, usage)` or
+    `{"text", "usage", "model"?, "session_id"?}`; `request` carries `system`, `user`,
+    `resolved` (a `roles.Resolved`), `model`, `preset`, `account`, `effort`, `attempt`, `cwd`,
+    `conflicts`, `completion_tokens`, `budget_tokens`, `cancel`, `job_id`, `kind`.
+    """
     resolved = request["resolved"]
     cancel = request.get("cancel") or threading.Event()
     if model_roles.is_guest_preset(resolved.preset_id):
-        return _call_guest(resolved, request["system"], request["user"], cancel, request["cwd"])
+        return _call_guest(resolved, request["system"], request["user"], cancel, request["cwd"],
+                           budget_tokens=int(request.get("budget_tokens") or 0),
+                           completion_tokens=int(request.get("completion_tokens") or 0))
     return _call_api(resolved, request["system"], request["user"], cancel, request["completion_tokens"])
 
 
@@ -607,11 +677,29 @@ def _call_api(resolved, system: str, user: str, cancel: threading.Event,
     return text, usage or {}
 
 
-def _call_guest(resolved, system: str, user: str, cancel: threading.Event, cwd: str) -> tuple[str, dict]:
+class OverBudget(RuntimeError):
+    """A guest turn was cancelled by the reconciler's own watch: its harness reported usage past
+    the attempt's reservation, or its streamed answer ran past the completion cap. Carries the
+    last usage seen, so the charge can be raised to it."""
+
+    def __init__(self, reason: str, usage: dict | None):
+        super().__init__(reason)
+        self.usage = usage or {}
+
+
+def _call_guest(resolved, system: str, user: str, cancel: threading.Event, cwd: str, *,
+                budget_tokens: int = 0, completion_tokens: int = 0):
     """One turn of Claude Code or Codex (or a registered account of either) through the existing
     harness provider: `start_provider` builds and starts the adapter — a failure to start is its
     ValueError — and `HarnessProvider.complete` runs the turn and reports `usage`. The system text
-    rides in the prompt because a harness takes one prompt, not a message list."""
+    rides in the prompt because a harness takes one prompt, not a message list.
+
+    The turn is bounded from outside, because a harness takes no `max_tokens`: every `usage` the
+    harness reports (cumulative for the turn) is checked against `budget_tokens`, the streamed
+    answer's length against `completion_tokens`, and the first to run over sets `cancel`, which
+    both adapters poll every 0.2 s. A turn that reports usage only at its end (Claude Code's
+    result message) is bounded by the caller's wall-clock deadline and settled from that report.
+    """
     from . import guest_harness_provider as guests
     options = {"model": resolved.config.model or "", "permissions": "deny", "memory": "relay"}
     if resolved.effort:
@@ -620,13 +708,32 @@ def _call_guest(resolved, system: str, user: str, cancel: threading.Event, cwd: 
                                      skill_index=None, instruction_suffix=GUEST_INSTRUCTIONS,
                                      delegation=False)
     usage: dict = {}
+    streamed = [0]
+    over: list[str] = []
 
     def quiet(event: dict) -> None:
-        if event.get("event") == "usage" and isinstance(event.get("usage"), dict):
+        kind = event.get("event")
+        if kind == "usage" and isinstance(event.get("usage"), dict):
             usage.update(event["usage"])
+            counts = usage_counts(usage)
+            if budget_tokens and counts is not None and counts[0] + counts[1] > budget_tokens and not over:
+                over.append(f"the guest reported {counts[0] + counts[1]:,} tokens, past the attempt's "
+                            f"reservation of {budget_tokens:,}")
+                cancel.set()
+        elif kind == "delta":
+            streamed[0] += len(event.get("text") or "")
+            if completion_tokens and streamed[0] > completion_tokens * CHARS_PER_TOKEN and not over:
+                over.append(f"the guest's answer passed {completion_tokens:,} tokens "
+                            f"({streamed[0]:,} characters streamed)")
+                cancel.set()
 
     try:
-        message = provider.complete([{"role": "user", "content": system + "\n\n" + user}], [], quiet, cancel)
+        try:
+            message = provider.complete([{"role": "user", "content": system + "\n\n" + user}], [], quiet, cancel)
+        except Cancelled:
+            if over:
+                raise OverBudget(over[0], usage) from None
+            raise
     finally:
         try:
             provider.close()
@@ -675,17 +782,59 @@ def safe_relative_path(value) -> str | None:
     return "/".join(parts)
 
 
-def conflicted_paths(candidate_path, conflicts) -> list[str]:
-    """The paths to resolve: the context's `conflicts` (strings, or dicts with `path`) when the
-    queue named them, else the unmerged entries of the candidate's index."""
+def _named_paths(items, what: str) -> list[str]:
     out: list[str] = []
-    for item in conflicts or ():
+    for item in items or ():
         raw = item.get("path") if isinstance(item, dict) else item
         path = safe_relative_path(raw)
         if path is None:
-            raise ReconcileError(f"conflict path {raw!r} is not a plain relative path in the candidate.")
+            raise ReconcileError(f"{what} {raw!r} is not a plain relative path in the candidate.")
         if path not in out:
             out.append(path)
+    return out
+
+
+def context_kind(context: dict) -> str:
+    """`merge_conflict` (the default) or `gate_failure`, from `diagnostics.kind` as `landq`
+    writes it, or an explicit `kind` on the context."""
+    diagnostics = context.get("diagnostics")
+    kind = diagnostics.get("kind") if isinstance(diagnostics, dict) else None
+    kind = kind or context.get("kind") or "merge_conflict"
+    return "gate_failure" if str(kind) in ("gate_failure", "repair", "gate") else "merge_conflict"
+
+
+def repair_paths(candidate_path, repo, context: dict) -> list[str]:
+    """The files a gate repair may touch: the queue's `repair_paths` and any `conflicts` it
+    named, else what the submission changed against the base (`base..submitted`, additions
+    and modifications; a path the submission deleted has nothing to repair). Capped at
+    MAX_REPAIR_PATHS: a submission wider than that is the author's to fix."""
+    out = _named_paths(context.get("repair_paths"), "repair path")
+    out += [p for p in _named_paths(context.get("conflicts"), "conflict path") if p not in out]
+    if out:
+        return out
+    base, submitted = context.get("base_sha"), context.get("submitted_sha")
+    if not base or not submitted:
+        return []
+    listing = None
+    for cwd in (candidate_path, repo):
+        if cwd:
+            listing = _git_bytes(cwd, "diff", "--name-only", "--diff-filter=AMR", "-z", str(base), str(submitted))
+            if listing is not None:
+                break
+    for raw in (listing or b"").decode("utf-8", "replace").split("\0"):
+        path = safe_relative_path(raw)
+        if path and path not in out:
+            out.append(path)
+    if len(out) > MAX_REPAIR_PATHS:
+        raise ReconcileError(f"the submission changed {len(out)} files; a repair is bounded to "
+                             f"{MAX_REPAIR_PATHS}. Returned to the author.")
+    return out
+
+
+def conflicted_paths(candidate_path, conflicts) -> list[str]:
+    """The paths to resolve: the context's `conflicts` (strings, or dicts with `path`) when the
+    queue named them, else the unmerged entries of the candidate's index."""
+    out = _named_paths(conflicts, "conflict path")
     if out:
         return out
     listing = _git(candidate_path, "ls-files", "-u", "-z", check=False)
@@ -758,29 +907,36 @@ def build_prompt(context: dict, files: list[FileVersions], *, context_tokens: in
     even the working copies do not fit, the conflict is too large for a model — the caller
     refuses with that sentence."""
     budget = context_tokens * CHARS_PER_TOKEN
-    head = [f"Repository: {context.get('repo_id') or ''}   job: {context.get('job_id') or ''}",
+    repair = context_kind(context) == "gate_failure"
+    head = [("GATE FAILURE to repair" if repair else "MERGE CONFLICT to resolve")
+            + f" — repository: {context.get('repo_id') or ''}   job: {context.get('job_id') or ''}",
             f"base: {context.get('base_sha') or '?'}   target (ours): {context.get('target_sha') or '?'}   "
             f"submitted (theirs): {context.get('submitted_sha') or '?'}"]
     cards = context.get("cards") or []
     if cards:
         head.append("Cards: " + "; ".join(_card_line(c) for c in cards[:8]))
-    intents = context.get("intents") or []
+    intents = _lines_of(context.get("intents"), 12, 600)
     if intents:
         head.append("Intent of the submitted work:")
-        head.extend("  - " + _clip(str(i), 600) for i in intents[:12])
-    diagnostics = context.get("diagnostics") or []
-    if diagnostics:
-        head.append("Queue diagnostics:")
-        head.extend("  - " + _clip(str(d), 400) for d in diagnostics[:12])
+        head.extend("  - " + line for line in intents)
+    head.extend(_diagnostic_lines(context.get("diagnostics")))
     if feedback:
         head.append("Your previous answer was rejected by the safety review; fix these and answer again:")
         head.extend("  - " + _clip(str(f), 500) for f in feedback[:20])
-    head.append(f"Conflicted files ({len(files)}): " + ", ".join(f.path for f in files))
+    if repair:
+        head.append(f"Files you may change ({len(files)}), return only the ones that need to change: "
+                    + ", ".join(f.path for f in files))
+    else:
+        head.append(f"Conflicted files ({len(files)}), return every one of them: " + ", ".join(f.path for f in files))
     header = "\n".join(head) + "\n"
     bodies = []
     for f in files:
-        merged = f.merged if f.exists else "(no working copy in the candidate: the file was deleted on one side)"
-        bodies.append(f"\n### {f.path}\n#### merged working copy (with git's conflict markers)\n```\n{merged}\n```\n")
+        if repair:
+            merged = f.merged if f.exists else "(no working copy in the candidate)"
+            bodies.append(f"\n### {f.path}\n#### the candidate as the gate saw it\n```\n{merged}\n```\n")
+        else:
+            merged = f.merged if f.exists else "(no working copy in the candidate: the file was deleted on one side)"
+            bodies.append(f"\n### {f.path}\n#### merged working copy (with git's conflict markers)\n```\n{merged}\n```\n")
     fixed = len(SYSTEM_PROMPT) + len(header) + sum(len(b) for b in bodies)
     if fixed > budget:
         raise ReconcileError(f"the conflicted files alone are {fixed:,} characters; the reconciler's context "
@@ -796,6 +952,46 @@ def build_prompt(context: dict, files: list[FileVersions], *, context_tokens: in
             parts.append(f"#### what the target changed (base → ours)\n```diff\n{ours or '(no change)'}\n```\n")
             parts.append(f"#### what the submission changed (base → theirs)\n```diff\n{theirs or '(no change)'}\n```\n")
     return SYSTEM_PROMPT, "".join(parts)
+
+
+def _lines_of(value, limit: int, width: int) -> list[str]:
+    """Intents or diagnostics as lines, whether the queue sent a list, a dict or a string."""
+    if not value:
+        return []
+    if isinstance(value, dict):
+        items = [f"{k}: {v}" for k, v in value.items()]
+    elif isinstance(value, (list, tuple)):
+        items = [str(v) for v in value]
+    else:
+        items = [str(value)]
+    return [_clip(item, width) for item in items[:limit]]
+
+
+def _diagnostic_lines(diagnostics) -> list[str]:
+    """The queue's diagnostics: `landq` sends a dict — `kind`, and for a gate failure `reason`,
+    `round` and the gate's `log`, whose tail is what a repair needs to read."""
+    if not diagnostics:
+        return []
+    if not isinstance(diagnostics, dict):
+        return ["Queue diagnostics:"] + ["  - " + line for line in _lines_of(diagnostics, 12, 400)]
+    out = ["Queue diagnostics:"]
+    for key in ("kind", "round", "reason", "candidate_sha", "policy_hash", "merge_output"):
+        if diagnostics.get(key) not in (None, "", [], {}):
+            out.append(f"  - {key}: {_clip(str(diagnostics[key]), 600)}")
+    conflicts = diagnostics.get("conflicts")
+    if isinstance(conflicts, (list, tuple)) and conflicts:
+        out.append("  - conflicts: " + ", ".join(str(c) for c in conflicts[:30]))
+    log = diagnostics.get("log")
+    if isinstance(log, str) and log.strip():
+        tail = log[-GATE_LOG_CHARS:]
+        if len(log) > GATE_LOG_CHARS:
+            tail = f"[… {len(log) - GATE_LOG_CHARS:,} earlier characters of the gate log omitted …]\n" + tail
+        out.append("Gate log (tail):\n```\n" + tail.rstrip() + "\n```")
+    for key, value in diagnostics.items():
+        if key not in ("kind", "round", "reason", "candidate_sha", "policy_hash", "merge_output", "conflicts",
+                       "log", "log_path"):
+            out.append(f"  - {key}: {_clip(str(value), 300)}")
+    return out
 
 
 def _card_line(card) -> str:
@@ -859,10 +1055,141 @@ def is_test_path(path: str) -> bool:
     return bool(_TEST_PATH.search(path))
 
 
-def review_file(f: FileVersions, content: str) -> list[str]:
-    """The conservative checks on one resolved file. Every string is a reason to refuse."""
+def _assertion_lines(text: str) -> set[str]:
+    """The stripped lines that carry an assertion or check."""
+    return {line for line in _stripped_lines(text) if line and _ASSERTIONS.search(line)}
+
+
+def _required(base: set, sides: list[set]) -> set:
+    """What a merge must keep, out of per-side sets: everything a side added against the base,
+    and everything every side kept from the base. A base item one side changed is superseded by
+    that side's version and is not required — the honest merge takes the change."""
+    required: set = set()
+    for side in sides:
+        required |= side - base
+    kept = set(base)
+    for side in sides:
+        kept &= side
+    return required | kept
+
+
+def _py_test_checks(text: str) -> dict[str, dict] | None:
+    """Per test function (`test_*`, at module level or in a class): the multiset of its check
+    statements as `ast.dump` strings — `assert`, calls whose name starts with assert/expect/fail,
+    `with self.assertRaises(...)` / `pytest.raises(...)` items — plus how many top-level
+    `return`/`raise` statements and how many statements its body has. None when the text does
+    not parse (a side that never parsed is held to the line rules only)."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    out: dict[str, dict] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
+            continue
+        checks: list[str] = []
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Assert):
+                checks.append(ast.dump(sub))
+            elif isinstance(sub, ast.Expr) and isinstance(sub.value, ast.Call) \
+                    and _PY_CHECK_NAMES.match(_call_name(sub.value)):
+                checks.append(ast.dump(sub))
+            elif isinstance(sub, (ast.With, ast.AsyncWith)):
+                for item in sub.items:
+                    if isinstance(item.context_expr, ast.Call) and _PY_CHECK_NAMES.match(_call_name(item.context_expr)):
+                        checks.append(ast.dump(item.context_expr))
+        # Every return/raise in the function, nested ones included: `if x: return` before the
+        # assertion is the bypass this exists to catch. A `raise` inside a `with assertRaises`
+        # block is on both sides already, so the max-of-sides rule keeps it legal.
+        exits = sum(isinstance(sub, (ast.Return, ast.Raise)) for sub in ast.walk(node))
+        first_exit = bool(node.body) and isinstance(node.body[0], (ast.Return, ast.Raise, ast.Pass))
+        key = node.name if node.name not in out else f"{node.name}#{sum(k.split('#')[0] == node.name for k in out) + 1}"
+        out[key] = {"checks": sorted(checks), "exits": exits, "first_exit": first_exit, "statements": len(node.body)}
+    return out
+
+
+def _call_name(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _parse_problem(path: str, content: str) -> str | None:
+    """A file that must parse and does not: Python, JSON and TOML are cheap to check and a
+    model's whole-file rewrite loses a bracket more often than anything else."""
+    lower = path.lower()
+    try:
+        if lower.endswith((".py", ".pyi")):
+            ast.parse(content)
+        elif lower.endswith(".json") and content.strip():
+            import json
+            json.loads(content)
+        elif lower.endswith(".toml"):
+            tomllib.loads(content)
+    except (SyntaxError, ValueError, RecursionError) as exc:
+        return f"{path}: does not parse ({type(exc).__name__}: {_clip(str(exc), 120)})"
+    return None
+
+
+def _multiset_missing(needed: list[str], have: list[str]) -> list[str]:
+    counts: dict[str, int] = {}
+    for item in have:
+        counts[item] = counts.get(item, 0) + 1
+    missing = []
+    for item in needed:
+        if counts.get(item, 0) > 0:
+            counts[item] -= 1
+        else:
+            missing.append(item)
+    return missing
+
+
+def _test_body_problems(path: str, base: str, sides: list[str], content: str) -> list[str]:
+    """Python test functions compared as syntax trees: every check statement a side added, and
+    every one both sides kept, must be in the result's function (a changed operand is a
+    different statement); no test may gain an early `return`/`raise`, and none may open with
+    one."""
+    result = _py_test_checks(content)
+    if result is None:
+        return []                                  # `_parse_problem` already refused it
+    before = [checks for checks in (_py_test_checks(side) for side in sides) if checks]
+    if not before:
+        return []
+    base_checks = _py_test_checks(base) or {}
+    problems = []
+    names = sorted({name for checks in before for name in checks})
+    for name in names:
+        versions = [checks[name] for checks in before if name in checks]
+        after = result.get(name)
+        if after is None:
+            continue                               # a lost test is `test(s) removed` already
+        base_set = set(base_checks.get(name, {}).get("checks", []))
+        union = sorted(_required(base_set, [set(v["checks"]) for v in versions]))
+        missing = _multiset_missing(union, after["checks"])
+        if missing:
+            problems.append(f"{path}: {name} lost or changed {len(missing)} check(s), e.g. "
+                            + _clip(missing[0].replace("Assert(", "assert(", 1), 100))
+        if after["exits"] > max(v["exits"] for v in versions):
+            problems.append(f"{path}: {name} gained an early return/raise")
+        if after["first_exit"] and not any(v["first_exit"] for v in versions):
+            problems.append(f"{path}: {name} now opens with return/raise/pass")
+    return problems
+
+
+def review_file(f: FileVersions, content: str, *, repair: bool = False) -> list[str]:
+    """The conservative checks on one resolved file. Every string is a reason to refuse.
+
+    `repair` is a gate-failure round: the candidate (`f.merged`) is the merged result the gate
+    refused, so it counts as a side for the test and assertion rules, and the submission's own
+    added lines may change (that is the repair) while the target's may not."""
     problems: list[str] = []
     path = f.path
+    parse = _parse_problem(path, content)
+    if parse:
+        problems.append(parse)
     if _MARKER.search(content):
         problems.append(f"{path}: conflict markers remain")
     if _ELISION.search(content) and not _ELISION.search(f.ours) and not _ELISION.search(f.theirs):
@@ -877,9 +1204,11 @@ def review_file(f: FileVersions, content: str) -> list[str]:
     if shortest and len(content) < 0.5 * shortest:
         problems.append(f"{path}: {len(content):,} characters is under half of the shorter side ({shortest:,})")
     # Neither side's added lines may be dropped, beyond a small tolerance for a genuinely merged
-    # line; nor a line both sides kept from the base.
+    # line; nor a line both sides kept from the base. In a repair the submission's lines are what
+    # is being fixed, so only the target's are held.
     base_set = set(base_lines)
-    for label, side_lines in (("target", ours_lines), ("submission", theirs_lines)):
+    sides = [("target", ours_lines)] if repair else [("target", ours_lines), ("submission", theirs_lines)]
+    for label, side_lines in sides:
         added = _meaningful(set(side_lines) - base_set)
         missing = sorted(added - result_set)
         # One merged line in ten may legitimately be rewritten (both sides changed it); under
@@ -897,37 +1226,58 @@ def review_file(f: FileVersions, content: str) -> list[str]:
         sample = "; ".join(_clip(m, 80) for m in missing_kept[:4])
         problems.append(f"{path}: {len(missing_kept)} lines both sides kept are gone (allowed {allowed}), "
                         f"e.g. {sample}")
-    if is_test_path(path) or _test_names(f.ours) or _test_names(f.theirs):
-        names_before = _test_names(f.ours) | _test_names(f.theirs)
+    # Assertion-bearing lines a side added, and those both sides kept, survive verbatim, in any
+    # file: `assert value == 42` rewritten as `assert True` keeps the count and drops the check,
+    # so counts are not the test. In a repair the candidate stands in for the submission — its
+    # lines are what the repair may change, but not its assertions.
+    texts = [f.ours, f.merged] if repair and f.merged else [f.ours, f.theirs]
+    needed = _required(_assertion_lines(f.base), [_assertion_lines(t) for t in texts])
+    gone = sorted(needed - result_set)
+    if gone:
+        problems.append(f"{path}: {len(gone)} assertion line(s) changed or removed, e.g. "
+                        + "; ".join(_clip(g, 90) for g in gone[:3]))
+    if is_test_path(path) or any(_test_names(t) for t in texts):
+        names_before = set().union(*(_test_names(t) for t in texts))
         lost = sorted(names_before - _test_names(content))
         if lost:
             problems.append(f"{path}: test(s) removed: {', '.join(lost[:6])}")
-        before = max(len(_ASSERTIONS.findall(f.ours)), len(_ASSERTIONS.findall(f.theirs)))
+        before = max(len(_ASSERTIONS.findall(t)) for t in texts)
         after = len(_ASSERTIONS.findall(content))
         if after < before:
             problems.append(f"{path}: assertions fell from {before} to {after}")
-        skips_before = max(len(_SKIPS.findall(f.ours)), len(_SKIPS.findall(f.theirs)))
+        skips_before = max(len(_SKIPS.findall(t)) for t in texts)
         skips_after = len(_SKIPS.findall(content))
         if skips_after > skips_before:
             problems.append(f"{path}: a skip or expected-failure marker was added ({skips_before} → {skips_after})")
+        if path.lower().endswith(".py"):
+            problems.extend(_test_body_problems(path, f.base, texts, content))
     return problems
 
 
-def review_patch(files: dict[str, str], versions: dict[str, FileVersions]) -> list[str]:
+def review_patch(files: dict[str, str], versions: dict[str, FileVersions], *, repair: bool = False) -> list[str]:
     """Every reason to refuse the model's files, across the whole set: a path outside the
-    conflicted set, a conflicted path left out, then `review_file` on each. An empty list means
-    the patch may be applied — which is not a proof of anything; the project gate still runs."""
+    allowed set, a conflicted path left out (a repair may return a subset, but not nothing and
+    not an unchanged file), then `review_file` on each. An empty list means the patch may be
+    applied — which is not a proof of anything; the project gate still runs."""
     problems: list[str] = []
+    what = "files this repair may change" if repair else "conflicted paths"
     for path in files:
         if path not in versions:
-            problems.append(f"{path}: outside the conflicted paths ({', '.join(sorted(versions))})")
-    for path in versions:
-        if path not in files:
-            problems.append(f"{path}: not resolved (every conflicted file must be returned)")
+            problems.append(f"{path}: outside the {what} ({', '.join(sorted(versions))})")
+    if repair:
+        if not files:
+            problems.append("no file was returned")
+        for path, content in files.items():
+            if path in versions and content == versions[path].merged:
+                problems.append(f"{path}: returned unchanged")
+    else:
+        for path in versions:
+            if path not in files:
+                problems.append(f"{path}: not resolved (every conflicted file must be returned)")
     if problems:
         return problems
     for path, content in files.items():
-        problems.extend(review_file(versions[path], content))
+        problems.extend(review_file(versions[path], content, repair=repair))
     return problems
 
 
@@ -936,7 +1286,8 @@ def unified_patch(versions: dict[str, FileVersions], files: dict[str, str]) -> s
     tip), one hunk set per path, `a/` `b/` prefixed."""
     out = []
     for path in sorted(files):
-        before = versions[path].ours
+        before = versions[path].merged if versions[path].merged and not _MARKER.search(versions[path].merged) \
+            else versions[path].ours
         out.append("".join(difflib.unified_diff(before.splitlines(keepends=True),
                                                 files[path].splitlines(keepends=True),
                                                 fromfile=f"a/{path}", tofile=f"b/{path}", n=3)))
@@ -992,10 +1343,11 @@ def card_notes(context: dict, result: dict) -> list[dict]:
     if result.get("preset"):
         who += f" ({result['preset']}" + (f", account {result['account']}" if result.get("account") else "") + ")"
     paths = ", ".join(result.get("resolved_paths") or ()) or "no files"
+    what = "repaired" if result.get("kind") == "gate_failure" else "resolved"
     if result.get("status") == "resolved":
-        text = (f"Reconciled landing job {job_id} automatically: {paths} resolved by {who} at "
+        text = (f"Reconciled landing job {job_id} automatically: {paths} {what} by {who} at "
                 f"{result.get('effort') or 'default'} effort, {_tokens_line(result.get('tokens'))}. "
-                f"`{result.get('trailer')}`. The project gate still decides whether it lands. "
+                f"`{result.get('reconciled_from')}`. The project gate still decides whether it lands. "
                 f"<!-- {marker} -->")
     else:
         text = (f"Landing job {job_id} could not be reconciled automatically: {result.get('reason') or 'no reason'}. "
@@ -1032,6 +1384,47 @@ def append_card_notes(board_root, notes: list[dict], *, author: str = "reconcile
 
 
 # ----- the reconciler --------------------------------------------------------------------------------
+
+def by_trailer(result: dict) -> str:
+    """`Reconciled-By: <model> (<preset>[, account <a>]) effort=<e> attempts=<n> tokens=<in>/<out>`
+    — the attribution line the queue appends under its own `Reconciled-From:`."""
+    who = result.get("model") or "?"
+    detail = result.get("preset") or ""
+    if result.get("account"):
+        detail += f", account {result['account']}"
+    tokens = result.get("tokens") or {}
+    return (f"{BY_TRAILER}: {who}" + (f" ({detail})" if detail else "")
+            + f" effort={result.get('effort') or 'default'} attempts={len(result.get('attempts') or ())}"
+            f" tokens={tokens.get('input', 0)}/{tokens.get('output', 0)}")
+
+
+class _AttemptWatch:
+    """The thread that turns the caller's cancel and a wall-clock deadline into one attempt's
+    cancel event, which the adapters poll. `timed_out` says whether it was the deadline."""
+
+    def __init__(self, outer: threading.Event, inner: threading.Event, deadline: float | None, now):
+        self.outer, self.inner, self.deadline, self._now = outer, inner, deadline, now
+        self.timed_out = False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="reconcile-watch", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run(self) -> None:
+        started = time.monotonic()
+        while not self._stop.wait(0.1):
+            if self.outer.is_set():
+                self.inner.set()
+                return
+            if self.deadline is not None and time.monotonic() - started >= self.deadline:
+                self.timed_out = True
+                self.inner.set()
+                return
+
 
 class Reconciler:
     """`Reconciler(state_root=None).reconcile(context, model_call=None)` — the A4 contract.
@@ -1097,19 +1490,25 @@ class Reconciler:
         target_sha = str(context.get("target_sha") or "")
         submitted_sha = str(context.get("submitted_sha") or "")
         base_sha = str(context.get("base_sha") or "")
-        trailer = f"{TRAILER}: {target_sha} {submitted_sha}".rstrip()
-        result: dict = {"status": "author_required", "job_id": job_id, "repo_id": repo_id,
-                        "candidate_path": str(candidate or ""), "trailer": trailer,
+        kind = context_kind(context)
+        repair = kind == "gate_failure"
+        diagnostics = context.get("diagnostics")
+        round_number = diagnostics.get("round") if isinstance(diagnostics, dict) else None
+        result: dict = {"status": "author_required", "job_id": job_id, "repo_id": repo_id, "kind": kind,
+                        "candidate_path": str(candidate or ""),
+                        "reconciled_from": f"{TRAILER}: {target_sha} {submitted_sha}".rstrip(), "trailer": "",
                         "model": None, "preset": None, "account": "", "effort": None,
-                        "tokens": {"input": 0, "output": 0, "total": 0, "reserved": 0},
+                        "tokens": {"input": 0, "output": 0, "cached": 0, "total": 0, "reserved": 0},
                         "attempts": [], "reason": "", "patch": "", "resolved_paths": [],
-                        "files": {}, "notes": "", "diagnostics": [], "card_notes": []}
+                        "files": {}, "notes": "", "diagnostics": [], "card_notes": [],
+                        "policy_hash": context.get("policy") if isinstance(context.get("policy"), str) else None}
         try:
             policy = normalize_policy(context.get("policy"))
         except ReconcileError as exc:
             return self._finish(context, result, str(exc), board_root)
         result["policy"] = {k: policy[k] for k in ("enabled", "max_attempts", "tokens_per_case",
-                                                  "tokens_per_day", "context_tokens", "completion_tokens")}
+                                                  "tokens_per_day", "context_tokens", "completion_tokens",
+                                                  "guest_timeout_seconds")}
         if not policy["enabled"]:
             return self._finish(context, result, "reconciliation is disabled by the project's policy.", board_root)
         if not candidate or not Path(candidate).is_dir():
@@ -1117,36 +1516,55 @@ class Reconciler:
         if not target_sha or not submitted_sha:
             return self._finish(context, result, "target_sha and submitted_sha are required.", board_root)
         try:
-            paths = conflicted_paths(candidate, context.get("conflicts"))
-            if not paths:
-                return self._finish(context, result, "no conflicted paths were found in the candidate.", board_root)
+            if repair:
+                paths = repair_paths(candidate, context.get("repo"), context)
+                if not paths:
+                    return self._finish(context, result, "the submission changed no file this repair may touch.", board_root)
+            else:
+                paths = conflicted_paths(candidate, context.get("conflicts"))
+                if not paths:
+                    return self._finish(context, result, "no conflicted paths were found in the candidate.", board_root)
             versions = {p: file_versions(candidate, context.get("repo"), p, base_sha, target_sha, submitted_sha)
                         for p in paths}
+            if repair:
+                # A path the candidate does not hold (the submission deleted it, or it never
+                # existed there) has nothing to repair.
+                versions = {p: v for p, v in versions.items() if v.exists}
+                if not versions:
+                    return self._finish(context, result, "none of the submission's files exist in the candidate.", board_root)
+                paths = list(versions)
         except ReconcileError as exc:
             return self._finish(context, result, str(exc), board_root)
         result["conflicts"] = list(paths)
-        case_key = f"{repo_id}:{job_id}" if job_id else f"{repo_id}:{target_sha}:{submitted_sha}"
+        case_key = ":".join(str(part) for part in (repo_id, job_id or f"{target_sha}:{submitted_sha}", kind)
+                            + ((round_number,) if repair and round_number is not None else ()))
+        result["case_key"] = case_key
         entries, source = self._entries(context.get("policy"))
         result["list_source"] = source
         if not entries:
             return self._finish(context, result, "the high list is empty: no model is configured for reconciliation.", board_root)
+        made = self.ledger.attempts_made(case_key)
+        if made >= policy["max_attempts"]:
+            return self._finish(context, result, f"attempt budget: {made} attempt(s) already on record for this "
+                                                 f"case (max {policy['max_attempts']}); a restart does not earn more.", board_root)
         call = model_call or self.model_call or _default_model_call
-        cancel = cancel or threading.Event()
+        outer_cancel = cancel or threading.Event()
         exclude: set = set()
         feedback: list[str] | None = None
         last_patch = ""
         reason = ""
-        for attempt in range(1, policy["max_attempts"] + 1):
-            if cancel.is_set():
+        for attempt in range(made + 1, policy["max_attempts"] + 1):
+            if outer_cancel.is_set():
                 raise Cancelled("Stopped.")
             resolved = self._draw(entries, exclude, policy["completion_tokens"])
             if resolved is None:
                 reason = ("no model in the high list can take the call here (no stored key, or no guest that runs)"
                           if not exclude else f"no further usable model in the high list after {', '.join(sorted(exclude))}")
                 break
+            is_guest = model_roles.is_guest_preset(resolved.preset_id)
             record = {"attempt": attempt, "model": resolved.config.model, "preset": resolved.preset_id,
                       "account": account_of(resolved.preset_id), "effort": resolved.effort,
-                      "tokens": {"input": 0, "output": 0, "reserved": 0}, "outcome": "", "diagnostics": []}
+                      "tokens": {"input": 0, "output": 0, "cached": 0, "reserved": 0}, "outcome": "", "diagnostics": []}
             result["attempts"].append(record)
             try:
                 system, user = build_prompt(context, list(versions.values()),
@@ -1168,18 +1586,47 @@ class Reconciler:
                 reason = str(exc)
                 break
             result["tokens"]["reserved"] += estimate
+            # One cancel per attempt: the caller's cancel, the guest's wall-clock deadline and the
+            # adapter's own budget watch all set it; which one did is read back afterwards.
+            attempt_cancel = threading.Event()
+            deadline = policy["guest_timeout_seconds"] if is_guest else None
+            watcher = _AttemptWatch(outer_cancel, attempt_cancel, deadline, self._now)
             request = {"system": system, "user": user, "resolved": resolved, "model": resolved.config.model,
                        "preset": resolved.preset_id, "account": record["account"], "effort": resolved.effort,
-                       "attempt": attempt, "cwd": str(candidate), "conflicts": list(paths),
-                       "completion_tokens": policy["completion_tokens"], "cancel": cancel, "job_id": job_id}
+                       "attempt": attempt, "cwd": str(candidate), "conflicts": list(paths), "kind": kind,
+                       "completion_tokens": policy["completion_tokens"], "budget_tokens": estimate,
+                       "cancel": attempt_cancel, "job_id": job_id, "repair": repair}
             text, usage, extra = "", None, {}
+            watcher.start()
             try:
                 answer = call(request)
                 text, usage, extra = _unpack_answer(answer)
+            except OverBudget as exc:
+                watcher.stop()
+                seen = usage_counts(exc.usage)
+                self.ledger.mark_uncertain(reservation, f"over budget: {_clip(str(exc), 160)}",
+                                           at_least=(seen[0] + seen[1]) if seen else 0, model=record["model"])
+                record["outcome"], record["diagnostics"] = "over_budget", [str(exc)]
+                if seen:
+                    record["tokens"]["input"], record["tokens"]["output"] = seen
+                    result["tokens"]["input"] += seen[0]
+                    result["tokens"]["output"] += seen[1]
+                reason = f"attempt {attempt} on {resolved.config.model} was cut off: {exc}"
+                exclude.add(resolved.preset_id or resolved.config.base_url)
+                continue
             except Cancelled:
-                self.ledger.settle(reservation, None, "cancelled")
-                raise
+                watcher.stop()
+                if outer_cancel.is_set() or not watcher.timed_out:
+                    self.ledger.mark_uncertain(reservation, "cancelled", model=record["model"])
+                    raise
+                self.ledger.mark_uncertain(reservation, f"timeout after {deadline:g}s", model=record["model"])
+                record["outcome"] = "timeout"
+                record["diagnostics"] = [f"the guest turn passed {deadline:g}s and was interrupted"]
+                reason = f"attempt {attempt} on {resolved.config.model} timed out after {deadline:g}s"
+                exclude.add(resolved.preset_id or resolved.config.base_url)
+                continue
             except ValueError as exc:
+                watcher.stop()
                 # `start_provider`'s "could not be started": nothing reached a model.
                 self.ledger.release(reservation, f"start failed: {_clip(str(exc), 200)}")
                 record["outcome"], record["diagnostics"] = "unavailable", [str(exc)[:300]]
@@ -1187,15 +1634,17 @@ class Reconciler:
                 reason = f"{resolved.preset_id}: {_clip(str(exc), 200)}"
                 continue
             except Exception as exc:
+                watcher.stop()
                 # A transport or harness failure mid-call: what it consumed is unknown, so the
                 # reservation stays charged (`uncertain`), and the next draw skips this provider.
-                self.ledger.settle(reservation, None, f"error: {_clip(str(exc), 200)}")
+                self.ledger.mark_uncertain(reservation, f"error: {_clip(str(exc), 200)}", model=record["model"])
                 record["outcome"], record["diagnostics"] = "error", [f"{type(exc).__name__}: {str(exc)[:300]}"]
                 exclude.add(resolved.preset_id or resolved.config.base_url)
                 reason = f"{resolved.preset_id}: {type(exc).__name__}: {_clip(str(exc), 200)}"
                 logs.event(_log, "reconcile_call_failed", level_name="warning", job=job_id,
                            preset=resolved.preset_id, error=str(exc)[:300])
                 continue
+            watcher.stop()
             if extra.get("model"):
                 record["model"] = extra["model"]           # what the guest reported it ran
             if extra.get("session_id"):
@@ -1203,24 +1652,26 @@ class Reconciler:
             counts = usage_counts(usage)
             if counts is not None:
                 record["tokens"]["input"], record["tokens"]["output"] = counts
+                record["tokens"]["cached"] = cache_counts(usage).get("cached_tokens", 0)
                 result["tokens"]["input"] += counts[0]
                 result["tokens"]["output"] += counts[1]
+                result["tokens"]["cached"] += record["tokens"]["cached"]
             files, notes, gave_up = parse_reply(text)
             if files is None:
                 outcome = "gave_up" if gave_up else "unparseable"
                 self.ledger.settle(reservation, usage, outcome, model=record["model"])
                 record["outcome"] = outcome
                 record["diagnostics"] = [gave_up or notes]
-                reason = f"attempt {attempt} on {resolved.config.model}: " + (
+                reason = f"attempt {attempt} on {record['model']}: " + (
                     f"the model declined: {gave_up}" if gave_up else notes)
                 feedback = None if gave_up else [notes]
                 continue
-            problems = review_patch(files, versions)
+            problems = review_patch(files, versions, repair=repair)
             if problems:
                 self.ledger.settle(reservation, usage, "rejected", model=record["model"])
                 record["outcome"], record["diagnostics"] = "rejected", problems
                 last_patch = unified_patch(versions, {p: c for p, c in files.items() if p in versions})
-                reason = f"attempt {attempt} on {resolved.config.model} was rejected by the safety review: " + \
+                reason = f"attempt {attempt} on {record['model']} was rejected by the safety review: " + \
                          "; ".join(problems[:3]) + (" …" if len(problems) > 3 else "")
                 feedback = problems
                 continue
@@ -1232,18 +1683,20 @@ class Reconciler:
                 record["outcome"], record["diagnostics"] = "apply_failed", [str(exc)]
                 reason = str(exc)
                 break
+            result["tokens"]["total"] = result["tokens"]["input"] + result["tokens"]["output"]
             result.update({"status": "resolved", "model": record["model"], "preset": resolved.preset_id,
                            "account": record["account"], "effort": resolved.effort,
                            "patch": unified_patch(versions, files), "resolved_paths": sorted(files),
                            "files": hashes, "notes": notes, "reason": "",
-                           "review": "passed: only conflicted paths, no markers, tests and both sides' lines kept"})
-            result["tokens"]["total"] = result["tokens"]["input"] + result["tokens"]["output"]
+                           "review": "passed: only allowed paths, no markers, assertions and tests kept, "
+                                     + ("the target's lines kept" if repair else "both sides' lines kept")})
+            result["trailer"] = by_trailer(result)
             result["seconds"] = round(self._now() - started, 3)
             result["card_notes"] = card_notes(context, result)
             if board_root:
                 result["notes_written"] = append_card_notes(board_root, result["card_notes"])
-            logs.event(_log, "reconcile_resolved", job=job_id, model=result["model"], preset=result["preset"],
-                       attempts=attempt, tokens=result["tokens"]["total"], paths=len(files))
+            logs.event(_log, "reconcile_resolved", job=job_id, kind=kind, model=result["model"],
+                       preset=result["preset"], attempts=attempt, tokens=result["tokens"]["total"], paths=len(files))
             return result
         result["patch"] = last_patch
         result["diagnostics"] = [d for a in result["attempts"] for d in a["diagnostics"]]
@@ -1302,7 +1755,8 @@ def author_handoff(context: dict, result: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["Reconciler", "ReconcileError", "BudgetExceeded", "BudgetLedger", "normalize_policy",
+__all__ = ["Reconciler", "ReconcileError", "BudgetExceeded", "OverBudget", "BudgetLedger", "normalize_policy",
+           "context_kind", "repair_paths", "by_trailer", "BY_TRAILER",
            "high_entries", "stored_high_entries", "default_high_entries", "draw_high", "with_high_effort",
            "conflicted_paths", "file_versions", "build_prompt", "parse_reply", "review_patch", "review_file",
            "apply_files", "unified_patch", "card_notes", "append_card_notes", "author_handoff",
