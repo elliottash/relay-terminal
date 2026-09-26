@@ -2593,16 +2593,13 @@ class Agent:
 
     def _maybe_compact(self) -> dict | None:
         """The `compacted` event when an automatic compaction ran, else None."""
+        # A guest owns its live context. Relay's saved transcript uses a separate, usually much
+        # smaller native window; crossing that limit does not mean the guest needs compaction.
+        # Manual compaction and compaction for a switch to a native model still call compact().
+        if self._guest_harness():
+            return None
         if not self.context.over(self.messages, self.tools()):
             return None
-        # On a guest harness (protocol 29.3) the guest keeps its own context; Relay's transcript is a
-        # record of it. With no summaries role of its own, an automatic compaction would ask the
-        # harness for a summary it never writes and fail the turn on an empty one — so it is not
-        # attempted, and the transcript simply grows.
-        if self._guest_harness():
-            resolved = self.roles.resolve("summaries") if self.roles is not None else None
-            if resolved is None or resolved.is_main:
-                return None
         return self.compact("auto", trigger={"trigger": "window"})
 
     def _compact_after_turn(self) -> None:
