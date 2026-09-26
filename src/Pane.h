@@ -708,6 +708,7 @@ public:
         // found that out: with the question settled here instead, the harness's console had no
         // worker at all, was never configured, and Enter opened the provider dialog over an empty
         // transcript.
+        m_consolePluginRequest = restoreSpec.value(QStringLiteral("console_plugin")).toString();
         if (hasShell()) startWorker();
         else QTimer::singleShot(0, this, [this] { if (!sharesWorker()) startWorker(); });
         // A pane restoring a local holder line (#87HB) must know it before its shell starts:
@@ -723,7 +724,6 @@ public:
         // against a program that is not a shell. askForConsoleProgram() carries the fallback:
         // an error or a worker that never answers leaves the pane a plain shell, never a dead
         // surface.
-        m_consolePluginRequest = restoreSpec.value(QStringLiteral("console_plugin")).toString();
         if (m_consolePluginRequest.isEmpty()) startTerminal(cleanShell);
         else status(QStringLiteral("Starting the %1 console…").arg(consoleName(m_consolePluginRequest)));
         connect(&m_poll, &QTimer::timeout, this, [this] { pollShell(); });
@@ -10848,9 +10848,12 @@ private:
         // relay_core.logs that a changed tree is expected and stops its source_changed() nudge.
         const relay::runtimedirs::BackendPin pin = relay::runtimedirs::pinBackend(m_data);
         m_backendRev = pin.hash.isEmpty() ? QStringLiteral("live") : pin.hash;
-        const QStringList command{m_python, QStringLiteral("-X"), QStringLiteral("utf8"),
-                                  QStringLiteral("-S"), QStringLiteral("-u"),
-                                  pin.path + QStringLiteral("/worker.py")};
+        QStringList command{m_python, QStringLiteral("-X"), QStringLiteral("utf8")};
+        // The Python console's kernel runs inside this worker. It needs the selected Python's
+        // ipykernel/jupyter_client site packages; -S would hide a venv and silently force the
+        // console into a separate IPython namespace (#83YV). Other workers stay isolated.
+        if (m_consolePluginRequest != QStringLiteral("relay.python")) command << QStringLiteral("-S");
+        command << QStringLiteral("-u") << pin.path + QStringLiteral("/worker.py");
         // The worker writes worker.log itself; it needs this pane's id and the chosen detail level.
         // Passed per process rather than with qputenv, which would leak between panes.
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
