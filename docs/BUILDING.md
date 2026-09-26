@@ -51,7 +51,8 @@ optimization. Both directories are ignored by Git and protected by separate buil
 **Compiler cache.** Install `ccache` (`sudo apt install ccache`, or `scripts/relay-tooling-setup
 --install`) and every configure — `build/`, `build-fast/`, each `land.py` verify slot — compiles
 through one shared cache in `$XDG_CACHE_HOME/relay/ccache` (default `~/.cache/relay/ccache`, capped
-at `RELAY_CCACHE_MAX`, default 10G). `cmake/CompilerCache.cmake` sets it up: `ccache` first, then
+at `RELAY_CCACHE_MAX`, default 10G; a configure never lowers a cap already in `ccache.conf`,
+so `CCACHE_DIR=~/.cache/relay/ccache ccache -M 40G` sticks). `cmake/CompilerCache.cmake` sets it up: `ccache` first, then
 `sccache` (`-DRELAY_COMPILER_CACHE_TOOL=` picks one), `-DRELAY_COMPILER_CACHE=OFF` turns it off,
 and a launcher given on the command line wins. Check it with
 `CCACHE_DIR=~/.cache/relay/ccache ccache -s`. Trees built with different flags never share objects:

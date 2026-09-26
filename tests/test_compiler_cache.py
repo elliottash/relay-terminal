@@ -119,6 +119,20 @@ class CompilerCacheTest(unittest.TestCase):
         self.assertEqual(Path(self.launches()[0]["CCACHE_DIR"]), other)
         self.assertIn("max_size = 3G", (other / "ccache.conf").read_text())
 
+    def test_a_configure_never_shrinks_a_raised_cap(self):
+        # Card #3MH4: `ccache -M 40G` lasted until the next verify slot's configure wrote
+        # the 10G default back. A larger cap stays; a larger RELAY_CCACHE_MAX still wins.
+        self.fake("ccache")
+        self.cache.mkdir(parents=True, exist_ok=True)
+        conf = self.cache / "ccache.conf"
+        conf.write_text("max_size = 40.0G\ncompression = true\n")
+        self.build(self.src / "build")
+        self.assertIn("max_size = 40.0G", conf.read_text())
+        self.build(self.src / "build2", env_extra={"RELAY_CCACHE_MAX": "80G"})
+        self.assertIn("max_size = 80G", conf.read_text())
+        self.build(self.src / "build3", env_extra={"RELAY_CCACHE_MAX": "3G"})
+        self.assertIn("max_size = 80G", conf.read_text())
+
     def test_off_means_no_launcher(self):
         self.fake("ccache")
         out = self.build(self.src / "build", "-DRELAY_COMPILER_CACHE=OFF")
