@@ -51,3 +51,6 @@ Independent targeted recheck: `python3 -m unittest tests.test_panes` passed 17 t
 <!-- relay:entry 20260926T052220Z-a3 author=codex kind=evidence -->
 ### Codex · 20260926T052220Z
 Live Xvfb two-pane scripted-provider probe: p1→p2 busy delivery returned `delivered`; p2 saw BUSY-PING at its next step and sent BUSY-REPLY to p1, which displayed it. Second p1→p2 send after 20 seconds and p2 completed-turn checkmark still returned `busy: true`; no idle wake or IDLE-REPLY observed. Recipient was synthetic CARD-WORK-BUSY, not a claimed Board card. Targeted unittest: 17 passed. #MJG6 remains open; #R5TC remains needs-verification.
+
+<!-- relay:entry 20260926T052800Z-a3 author=codex kind=evidence -->
+Fresh idle control run: p1→p2 returned `woke` with p2 `busy: false`; p2 sent IDLE-REPLY; p1 displayed it as a note; reply outcome `no_wake` matched the one-wake-depth rule. Combined busy-then-idle run still has unresolved p2 busy report. Synthetic recipient, not a claimed Board card. Card stays open.

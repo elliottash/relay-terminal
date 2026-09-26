@@ -387,6 +387,9 @@ The sender in p1 called `pane_send` to p2 during the recipient's busy turn. Its 
 
 After p2 displayed its completed-turn checkmark, the drive waited 20 seconds and sent `IDLE-PING` from p1. The tool result still said `outcome: delivered` and `busy: true`, so the idle wake path was not exercised. No `IDLE-REPLY` appeared in either pane. The earlier p2 reply itself had produced a `woke` result for idle p1. That establishes wake delivery in the reverse direction, but does not satisfy this card's idle recipient reply requirement. The drive used the previously built binary and did not build current source. Screenshots and model-request trace are in `/tmp/mjg6_live/` for this session.
 
+### Fresh idle control probe (2026-09-26)
+A fresh isolated Xvfb two-pane run returned `woke` for p1→idle p2. P2 read IDLE-PING, replied with `pane_send`, and p1 displayed IDLE-REPLY as a note. The reply returned `no_wake`, as designed for a woken turn. This control passes; the earlier combined run's p2 busy state remains unresolved. The recipient used a synthetic prompt rather than a claimed Board card.
+
 ## Try it
 Rebuild first (`scripts/relay-build`) and restart Relay: the running binary predates this work.
 

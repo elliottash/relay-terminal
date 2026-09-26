@@ -79,6 +79,9 @@ The sender in p1 called `pane_send` to p2 during the recipient's busy turn. Its 
 
 After p2 displayed its completed-turn checkmark, the drive waited 20 seconds and sent `IDLE-PING` from p1. The tool result still said `outcome: delivered` and `busy: true`, so the idle wake path was not exercised. No `IDLE-REPLY` appeared in either pane. The earlier p2 reply itself had produced a `woke` result for idle p1. That establishes wake delivery in the reverse direction, but does not satisfy this card's idle recipient reply requirement. The drive used the previously built binary and did not build current source. Screenshots and model-request trace are in `/tmp/mjg6_live/` for this session.
 
+### Fresh idle control probe (2026-09-26)
+A second isolated Xvfb run sent from p1 to p2 before any p2 turn. The tool result returned `outcome: woke`, with p2 `busy: false`; p2 started an agent turn, read `IDLE-PING`, and called `pane_send` with `IDLE-REPLY received`. P1 displayed the reply as a note. P2's reply returned `no_wake`, as designed for a turn started by a message. This proves the basic idle wake and return path in the built binary. It does not resolve why p2 was still reported busy after the completed turn in the combined probe, or demonstrate a recipient working a claimed Board card. The probes used synthetic prompts and a previously built binary.
+
 ## QA checklist
 
 - [x] Rechecked publication mode: `.git/relay-publication.json` now reports `mode: queue`.
@@ -89,4 +92,4 @@ After p2 displayed its completed-turn checkmark, the drive waited 20 seconds and
 
 ## Verdict
 
-Open. The live busy-path reply passed. The idle-path reply remains unverified because p2 was still reported busy on the second send, despite a completed-turn indicator after 20 seconds. The synthetic recipient was not a claimed Board card. Keep #MJG6 open and #R5TC in needs-verification until a true idle card-working recipient wakes and replies.
+Open. The live busy-path reply passed. A fresh idle control probe passed, but the combined busy-then-idle run still reported p2 busy after a completed-turn indicator. The synthetic recipient was not a claimed Board card. Keep #MJG6 open and #R5TC in needs-verification until the combined card-working scenario is verified.
