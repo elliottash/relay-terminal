@@ -48,6 +48,17 @@ scripts/relay-build --fast --target relay
 for performance checks, release preparation and full validation; the fast binary runs without
 optimization. Both directories are ignored by Git and protected by separate build locks.
 
+For a project that has separately activated Relay's parallel-development queue, development
+work happens in its allocated source workspace. Build and test there with that project's normal
+commands from `.relay/project.toml`; the publisher reruns the accepted verification gate on the
+immutable submitted commit before moving `main`. A successful landing may then build and install
+a separate runnable-main release under Relay's state root. Those verification and release builds
+consume additional time and disk; `relay-land --repo /path/to/project main-status` reports the
+installed SHA and lag. See [the operating contract](TREES-AND-LANDING.md#operating-a-configured-project)
+and [migration guide](PARALLEL-DEVELOPMENT-MIGRATION.md). This shared Relay checkout still uses
+`scripts/land.py begin`/`try`/`commit` until its own controlled cutover; do not activate it as
+part of a developer build.
+
 **Compiler cache.** Install `ccache` (`sudo apt install ccache`, or `scripts/relay-tooling-setup
 --install`) and every configure — `build/`, `build-fast/`, each `land.py` verify slot — compiles
 through one shared cache in `$XDG_CACHE_HOME/relay/ccache` (default `~/.cache/relay/ccache`, capped

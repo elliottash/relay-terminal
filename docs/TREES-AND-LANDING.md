@@ -294,3 +294,85 @@ visible status under an isolated profile. Use a different model family where ava
 C2 (#2DP8) demonstrates a second Python project using only config, documents actual commands,
 updates BUILDING.md and prepares migration guidance. A week of matched workload measurements
 follows rollout; it is not a reason to delay the authorized implementation.
+
+## Operating a configured project
+
+The executable interface is `scripts/relay-land` (or the installed `relay-land`). These examples
+assume a **different** Git repository at `$project`, with a committed `.relay/project.toml` on
+`main`. `project-init` registers it in legacy mode and suggests a config; `--write` writes that
+suggestion for review, but neither form activates the queue. Commands return JSON except
+`main-run`, which replaces itself with the installed executable.
+
+```bash
+project=/path/to/other-project
+relay-land --repo "$project" project-init
+# Review .relay/project.toml, define a required gate and self-contained main install,
+# then commit that config on main.
+relay-land --repo "$project" inventory
+relay-land --repo "$project" activate --dry-run
+# After draining legacy writers and reviewing the dry run:
+relay-land --repo "$project" activate
+relay-land --repo "$project" run
+```
+
+`run` is a **foreground, durable-state loop**, not a daemonizing command. Run one instance per
+repository under a supervisor (for example, a user systemd service with `Restart=on-failure`)
+and stop that service before rollback. A fresh `run` resumes the persisted queue; `run --once`
+processes one tick for a controlled test. `run --no-main` leaves runnable-main updates disabled
+for that invocation. Submission only records a job and succeeds before verification. The author
+flow is:
+
+```bash
+relay-land --repo "$project" workspace create author-session --card '#ABCD'
+# Edit and commit in the returned execution_cwd; save its workspace_id and commit SHA.
+relay-land --repo "$project" try COMMIT_SHA
+relay-land --repo "$project" submit COMMIT_SHA --workspace-id WORKSPACE_ID \
+  --request-id UNIQUE_REQUEST_ID --card '#ABCD'
+relay-land --repo "$project" status JOB_ID
+relay-land --repo "$project" receipt JOB_ID
+relay-land --repo "$project" main-status
+relay-land --repo "$project" main-run -- --version
+```
+
+`try` is advisory and cannot replace the publisher's gate. A candidate changing
+`.relay/project.toml` still runs the **previously accepted** gate. After the new config lands,
+inspect it and explicitly run `relay-land --repo "$project" capture-policy` to accept it for
+later jobs. Selected `--test` values add checks; they do not remove configured commands. A
+failing or zero-test gate cannot publish. Conflict reconciliation runs only when enabled in the
+accepted config: it draws from configured High-tier candidates with subscription weighting and
+high effort, under case/day token budgets, attempt and context caps. Budget reservations cannot
+guarantee a hard spend ceiling when a guest provider reports usage late or exceeds an estimate;
+inspect provider usage. An unresolved or unsafe candidate returns to the author with diagnostics.
+
+The canonical Board remains under the registered project's `board_root`, while source-only
+workspaces exclude it. `board-submit .board/path --session SESSION` snapshots current Board
+files into a metadata job; later edits remain in the canonical Board for another job. Use
+`snapshot`, `events`, `handoffs` and `workspace status ID` to see the queue, author notices and
+retained work. `main-status` exposes installed SHA, requested SHA, lag and build errors;
+`main-run` resolves the `current` installed release. A running old executable survives an update
+because the new release is installed completely before `current` changes. The active human
+checkout is on a separate branch after cutover; `main` is the publication target, not a branch
+to attach another worktree to.
+
+`workspace release ID --owner OWNER` releases the lease; `workspace remove ID` still refuses
+unlanded commits, pending submissions, dirty files and untracked or ignored data without a
+matching landing receipt. `workspace sync` is available through `relay-tree`; do it only with a
+clean, released workspace. Workspace quotas come from `workspace.max_workspaces`, while gate
+resource requests come from `[resources]` and the host-wide admission ledger. Admission is
+Linux-first and cgroup-aware; a reservation is accounting, not a kernel memory cap. A busy or
+undersized host waits or refuses rather than building without admission. Disposable builds and
+retained runnable releases use real disk and CPU; measure them on the target host rather than
+assuming compiler-cache hits.
+
+The default state root is `$XDG_STATE_HOME/relay` (`~/.local/state/relay`); the default cache
+root is `$XDG_CACHE_HOME/relay` (`~/.cache/relay`). The registry is
+`state/integration/registry.sqlite3`; a project's queue, receipts and service policy are under
+`state/integration/<repo-id>/`, its source trees under `state/trees/<repo-id>/`, and disposable
+verification and coalesced main builds under `cache/integration/<repo-id>/`. Installed releases
+are `state/integration/<repo-id>/tip/run/<sha>/`, with `run/current` an atomic symlink. The Git
+common directory holds `relay-publication.json` and the transition lock. `--state-root` and
+`--cache-root` isolate CLI trials; they do not alter the registered default project.
+
+The [migration guide](PARALLEL-DEVELOPMENT-MIGRATION.md) gives the preservation checklist,
+supervisor example and rollback sequence. This repository remains in legacy mode until its
+separate production cutover; the active `CLAUDE.md` rule still applies here.
