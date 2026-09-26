@@ -655,6 +655,13 @@ nothing", not "unchanged", which is why the GUI sends both keys on every `config
 "Always allow" (27.6) unticks the matching row by sending both keys again. Subagents follow the
 pane's policy, at spawn and whenever it changes.
 
+An untrusted MCP server's tool (card #SSRQ, `docs/MCP.md`) draws the same `question` event with
+`kind: "approval"` and `capability: "mcp:<server>"`. That capability is no checklist row and never
+appears in `approvals_ask`: "for this turn" covers that server's tools for the turn, and "Always
+allow" is recorded by the worker as `trust: "trusted"` in the server's MCP config, so the GUI sends
+no `set_agent_options` for it. MCP tools reach the agent as `load_tools` groups named
+`mcp_<server>`, beside a task plugin's group (36); no new message is added.
+
 `configured` gains these fields. `set_agent_options` applies them to the pane's agent at once (limits are
 read at every step boundary) and `agent_options` gains them when an agent is configured (without one, only
 `max_auto_turns`/`wakeups` as before). Invalid values → `error`, nothing changed. Subagents keep their definition's `max_steps`, get

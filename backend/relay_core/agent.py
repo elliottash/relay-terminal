@@ -848,6 +848,9 @@ class Agent:
         # `workspace_plugins.PluginTools` the worker attaches, or None. Its group is loaded with
         # `load_tools` like Relay's own and exists only while the workspace has the plugin active.
         self.plugin_tools = None
+        # The user's MCP servers (card #SSRQ): a `mcp_tools.McpTools` the worker attaches, or
+        # None. Each server is one group loaded with `load_tools`, the way a plugin's group is.
+        self.mcp_tools = None
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
         # Keystrokes the agent may send into the visible program in one turn (protocol 17).
@@ -1550,7 +1553,9 @@ class Agent:
     def _plugin_groups(self) -> dict:
         """{group: (names, what, specs)} of this pane's active task-plugin workspace; {} without one."""
         tools = getattr(self, "plugin_tools", None)
-        return tools.groups() if tools is not None else {}
+        groups = tools.groups() if tools is not None else {}
+        mcp = getattr(self, "mcp_tools", None)
+        return {**groups, **mcp.groups()} if mcp is not None else groups
 
     def _with_plugin_tools(self, offered: list[dict], plugin: dict) -> list[dict]:
         """Where Relay defers nothing (a console, the Local tier, the short profile) a plugin group
@@ -2669,6 +2674,10 @@ class Agent:
         # Cross-pane messaging (#R5TC): the per-turn send cap resets, and the depth rule is read
         # from the prompt — a wake turn's prompt is wake_prompt() in this process (panes.py).
         self.executor.panes.begin_turn(prompt)
+        # Card #SSRQ: an MCP server that answered since the last turn joins now, at a turn
+        # boundary, so the prompt's group line never changes under a running turn.
+        if getattr(self, "mcp_tools", None) is not None and self.mcp_tools.take_change():
+            self.plugin_workspace_changed()
         hint = agent_context.screen_line(screen)
         context_note = format_context(context)
         excerpt = terminal_context.format_snapshot(validated.get("terminal_context"))
@@ -4633,6 +4642,24 @@ class Agent:
         group = tool_groups.group_of(name)
         if group is not None and group in self._deferred_groups() and group not in self.loaded_tool_groups:
             raise ValueError(tool_groups.refusal(name, group))
+        mcp = getattr(self, "mcp_tools", None)
+        if mcp is not None and mcp.handles(name):
+            # Card #SSRQ: an MCP server's tool — loaded group, the turn's write rules (a tool its
+            # server marks read-only passes them), then the server's trust, asked last so a call
+            # refused anyway never draws an ask.
+            if not isinstance(args, dict):
+                raise ValueError("Tool arguments must be an object.")
+            group = mcp.group_of(name)
+            if group not in self.loaded_tool_groups:
+                raise ValueError(tool_groups.refusal(name, group))
+            if self.readonly_turn and mcp.writes(name):
+                raise ValueError(READONLY_REFUSAL)
+            if self.card_turn is not None and mcp.writes(name):
+                raise ValueError(board_tools.CardScope(*self.card_turn).refusal(name))
+            mcp.approve(name, args, self.executor)
+            return Prepared(name, args, mcp.preview(name, args))
+        if mcp is not None and (gone := mcp.unavailable(name)):
+            raise ValueError(gone)
         if self.plugin_tools is not None:
             # Protocol 36: a task plugin's tool, only in the workspace that has the plugin active,
             # only once its group is loaded, and — running code or a build — never on a turn that
@@ -4723,6 +4750,8 @@ class Agent:
             return tool_groups.result(group, already, plugin[group][0] if group in plugin else None)
         if self.plugin_tools is not None and self.plugin_tools.handles(prepared.name):
             return self.plugin_tools.run(prepared.name, prepared.arguments, self.cancel_event)
+        if getattr(self, "mcp_tools", None) is not None and self.mcp_tools.handles(prepared.name):
+            return self.mcp_tools.run(prepared.name, prepared.arguments, self.cancel_event)
         if prepared.name == "type_into_program":
             ctx = self._turn_ctx or {}
             return self.executor.program.execute(prepared.arguments, ctx.get("turn_id"))

@@ -20,7 +20,7 @@ from relay_core import guest_accounts, key_accounts
 from relay_core import board_chat
 from relay_core import memory_import, openrouter_catalog, provider_limits, guest_usage_poll
 from relay_core import final_summary
-from relay_core import workspace_plugins
+from relay_core import mcp_tools, workspace_plugins
 from relay_core import request_stream, tool_stream
 from relay_core.subagents import SubagentFactory, SubagentManager
 from relay_core.keybindings import KeybindingCatalog
@@ -468,6 +468,20 @@ def main():
                 agent.plugin_tools = workspace_plugins.PluginTools(workspaces)
                 if agent.plugin_tools.groups():
                     agent.plugin_workspace_changed()   # a workspace active before this configure
+                # Card #SSRQ: the user's MCP servers, listed in the background; one that has
+                # not answered within a few seconds joins at the start of a later turn. A bad
+                # config is logged by server name and never fails the configure.
+                try:
+                    agent.mcp_tools = mcp_tools.McpTools(workspace)
+                    agent.mcp_tools.discover(wait=3.0)
+                    agent.mcp_tools.take_change()
+                    if agent.mcp_tools.groups():
+                        agent.plugin_workspace_changed()
+                    for problem in agent.mcp_tools.config.problems:
+                        logs.event(log, "mcp_config_problem", level_name="warning", problem=problem[:300])
+                except Exception as exc:
+                    agent.mcp_tools = None
+                    logs.event(log, "mcp_unavailable", level_name="warning", error=str(exc)[:300])
                 subagents.configure(agent_catalog, subagent_factory)
                 subagents.attach(agent)
                 # --- end subagents ---

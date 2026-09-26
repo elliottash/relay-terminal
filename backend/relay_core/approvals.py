@@ -177,13 +177,30 @@ def needed(policy: Policy, tool: str, arguments: dict, *, exists: bool = False,
     return [capability for capability in wanted if policy.asks(capability)]
 
 
+# Card #SSRQ: an untrusted MCP server's tool asks as its own capability, `mcp:<server>`, so a
+# "for this turn" answer covers that server's tools and no other's. It is not a checklist row —
+# a server's trust lives in its MCP config — so it is not in CAPABILITIES and `needed` never
+# returns it; `mcp_tools` asks for it directly.
+MCP_PREFIX = "mcp:"
+
+
+def mcp_capability(server: str) -> str:
+    return MCP_PREFIX + server
+
+
+def _label(capability: str) -> str:
+    if capability.startswith(MCP_PREFIX):
+        return f"use the untrusted MCP server {capability[len(MCP_PREFIX):]}"
+    return LABELS[capability]
+
+
 def prompt(capability: str, subject: str) -> tuple[str, str]:
     """The ask's header and question. `subject` is the file or the command it is about."""
-    return LABELS[capability].capitalize(), f"Allow the agent to {LABELS[capability]}?\n{subject}"
+    return _label(capability).capitalize(), f"Allow the agent to {_label(capability)}?\n{subject}"
 
 
 def refusal(capability: str) -> str:
     """What the model is told when the user denies. It must not read as a bug to route around: the
     same rule as the denylist's refusal, for the same reason."""
-    return (f"The user did not allow this ({LABELS[capability]}). Do not look for another way to do "
+    return (f"The user did not allow this ({_label(capability)}). Do not look for another way to do "
             f"it: say what you wanted to do and why, and carry on with what you can.")

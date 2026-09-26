@@ -164,6 +164,11 @@ class Bridge:
         # that workspace has the plugin active — the same object gates the native agent's list.
         plugin_tools = getattr(self.agent, 'plugin_tools', None) if self.agent is not None else None
         plugin_specs = plugin_tools.specs() if plugin_tools is not None else []
+        # Card #SSRQ: the user's MCP servers ride this bridge rather than the guest's own MCP
+        # config, so an untrusted server's call draws Relay's approval ask like a native pane's.
+        mcp_tools = getattr(self.agent, 'mcp_tools', None) if self.agent is not None else None
+        if mcp_tools is not None:
+            plugin_specs = plugin_specs + mcp_tools.specs()
         allowed = ALLOW | {spec['function']['name'] for spec in plugin_specs}
         specs = copy.deepcopy(specs + plugin_specs)
         return [{'name': f['name'], 'description': f.get('description', ''),
@@ -258,6 +263,9 @@ class Bridge:
                 plugin_tools = getattr(self.agent, 'plugin_tools', None)
                 if not group and plugin_tools is not None:
                     group = plugin_tools.group_of(name)
+                mcp_tools = getattr(self.agent, 'mcp_tools', None)
+                if not group and mcp_tools is not None:
+                    group = mcp_tools.group_of(name)
                 if group:
                     self.agent.loaded_tool_groups.add(group)
                 # Claude reports its actual model in first-turn init, after Agent.ask
@@ -354,7 +362,10 @@ class Bridge:
 def exchange(capability, method, params=None, key=None):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(LONG_CALL_SECONDS if method == 'tools/call' and isinstance(params, dict)
-                        and params.get('name') in ('tests_run', 'agent', 'agent_wait', *PLUGIN_LONG_TOOLS) else 30)
+                        and (params.get('name') in ('tests_run', 'agent', 'agent_wait', *PLUGIN_LONG_TOOLS)
+                             # An MCP call can wait on its server and on an approval ask (#SSRQ);
+                             # its own deadline lives in mcp_client, and Stop cancels it.
+                             or str(params.get('name') or '').startswith('mcp_')) else 30)
         sock.connect(capability['socket'])
         message = dict(capability, method=method, params=params, key=key)
         sock.sendall((json.dumps(message) + '\n').encode())
