@@ -1,13 +1,15 @@
 ---
 id: WYGY
 type: work
-status: planned
+status: executing
 labels: [feature, plugins, tex, pdf]
 assignee: agent
 implemented_by: anthropic/claude-opus-5-5 via claude-code
+session: b65a84fc-848b-48e8-8d87-d77e2cf7423d
 blocked_by: [E85D]
 rank: zzzzzzzzzzzzzzzzzzi
 created: '2026-09-23'
+verify: {artifact: code, primary: script, also: [person], human: required, criteria: 'Targeted pytest (test_workspace_plugins, test_tex_build) and ctest (artifactworkspace, filepanes) pass. An Xvfb run on the fixture captures: save → building → live with its revision; broken edit → failed with the last good PDF kept; a diagnostic click opening the editor line; forward and inverse SyncTeX; an \input edit marking the PDF stale; restore after relaunch. Evidence is in docs/qa_evidence/<date>-tex-workspace/.', sign_off: none, effort: high, stakes: rework, blast: capability}
 source: Owner in a Relay pane, 2026-09-23; implementation slice from reports/Editable workspaces for Relay.md
 links: {plans: [], commits: [], evidence: [], related: [MEPR, P2W8, F8R7, E85D, C0Q8], github: null}
 ---
@@ -20,58 +22,47 @@ then lets go to your reports and write detailed cards for the editable artifacts
 **First document plugin from #MEPR.** Reuse #F8R7's safe editor, #E85D's linked roles and layouts, and #C0Q8's manifest/runner contract. Start local with `latexmk` because it produces a PDF, log and SyncTeX map; Typst and Quarto become later runner definitions, not separate pane systems. Compile a saved source revision, show that revision beside the preview and mark it stale as soon as a newer edit exists. Remote compilation uses the terminal pane's SSH host and transfers PDF, log and SyncTeX data as one generation; its output must not claim to be current until all parts match. Qt PDF is optional in current packaging, so the plugin must report availability and retain an external-viewer path.
 
 ## Done means
-- Opening a `.tex` project as a document workspace fills linked source editor, full terminal/agent console and PDF preview in either requested preset (1:1:1 or 2:1); `\input`, `\include` and bibliography files open in the same group.
-- Saving a source revision debounces and invokes the configured `latexmk` build in the project root. The UI reports `building`, `live`, `stale` or `failed`, keeps the last good PDF on failure and identifies which saved revision produced it. A newer build cannot be overwritten by an older completion.
-- LaTeX errors and warnings link to the owning source file/line. Forward SyncTeX takes an editor position to the PDF; inverse SyncTeX takes a PDF location to the editor, preserving page/zoom where possible.
-- With Qt PDF built, the preview refreshes in place. Without it, the workspace says why and opens the generated PDF externally. A remote project builds on its SSH host and fetches output, map and diagnostics as one generation.
-- A fixture project verifies first build, incremental edit, failed build/last good PDF, diagnostics, both SyncTeX directions, restore, optional-PDF fallback and remote generation integrity.
+- Opening a `.tex` project as a document workspace fills a linked source editor, a full terminal/agent console and a PDF preview, in either preset (1:1:1 or 2:1). Files pulled in by `\input`, `\include` or the bibliography join the group's sources: an edit to one marks the PDF stale and triggers a build.
+- Saving a source revision debounces and runs `latexmk` in the project root. The UI reports `building`, `live`, `stale` or `failed`, keeps the last good PDF on failure, and names the saved revision that produced it. An older build finishing late never replaces a newer one.
+- LaTeX errors and warnings appear as rows that open the owning source file at the line. Forward SyncTeX takes an editor position to the PDF. Inverse SyncTeX takes a PDF location to the editor, keeping page and zoom where possible.
+- With Qt PDF built, the preview refreshes in place. Without it, the workspace says why and opens the generated PDF externally.
+- A fixture project verifies the first build, an incremental edit, a failed build with the last good PDF kept, diagnostics, both SyncTeX directions, restore, and the optional-PDF fallback. SSH builds are #CWDZ (owner decision 2026-09-26).
 
 ## Plan
-**Goal.** Deliver the local Overleaf-like TeX/PDF workspace. Save a source and the PDF beside it rebuilds; the strip says which revision it shows. Errors are clickable. SyncTeX works both ways. Build it on the shared artifact/plugin layer, not as its own pane system.
+**Goal.** Deliver the local Overleaf-like loop on the pieces that already landed: save → PDF rebuilds beside it, the strip names the revision, errors are clickable, and SyncTeX works both ways. This card adds only the TeX-specific GUI ↔ worker wiring.
 
-**State (audit 2026-09-26).** Already landed:
-- The builder, in `01e4e216`. `backend/relay_core/tex_build.py` has a debounced latexmk runner that supersedes older builds, with atomic generations, log/blg diagnostics and SyncTeX in both directions. It has a `Transport`/`PathMap` seam, but only `LocalTransport` exists (`tex_build.py:119-260`). A project `latexmkrc` is skipped with `-norc` unless `trust_project_rc` is set (`:1400-1474`). There are 34 tests in `tests/test_tex_build.py`.
-- The worker side, in `13909113`. The TeX runtime and lazy `tex_build`/`tex_diagnostics`/`tex_forward_search`/`tex_inverse_search`/`tex_dependencies` tools have native/guest parity (`workspace_plugins.py:486-630`), and the runtime emits `tex_status` (`:540`). The manifest is `plugins_bundled/tex/plugin.json` (v2), with `/build` and `/errors`.
-- The group model, in `4ad5fe87` (#E85D). Outputs carry state, generation and source revision, and `applyBuildStatus` exists (`src/ArtifactWorkspace.h:50-95`). It has the 1:1:1 and 2:1 presets and file-watch live/stale. An unavailable PDF adapter gets "Open externally" (`src/RelayWindowWorkspace.cpp:118`). The shell → TeX → PDF chain landed in `def2cf0b` (#R660 code). The docked agent on the `.tex` editor with plugin `/` commands landed in `b70c33bf` and `4a5a4267` (#PBZ4). Agent edits go into the open buffer as of `7e4e0c45` (#F8R7). Qt PDF ships in the Debian packages as of `f9c7d590` (#9Y7X).
-
-What is missing, with the evidence:
-- The GUI never consumes `tex_status`: `rg tex_status src/` is empty. A builder status reaches the group only through the test hook `driveWorkspace("status")` (`RelayWindowWorkspace.cpp:957-966`), so a real build never shows as building or failed.
-- The GUI has no way to start a build. `WorkspaceManager.TYPES` (`workspace_plugins.py:782`) has no build message. A build runs only when the agent calls `tex_build` (`:580`), so saving does not build.
-- There is no SyncTeX in the GUI: `rg -i synctex src/` finds only comments.
-- Diagnostics reach the agent only (`tex_diagnostics`). Nothing shows as clickable rows.
-- Files pulled in by `\input`, `\include` or the bibliography never join `group.sources`, so they neither open in the group nor count in its revision.
-- Remote builds have no SSH transport.
-- This host has latexmk, pdflatex and synctex, but no xelatex.
-
-**Split (non-overlapping).** Other cards own:
-- #E85D: group identity, roles, presets, preview adapters and the generation model.
-- #R660: the chain and its lifecycle.
-- #PBZ4: the docked agent and the `/` commands.
-- #F8R7: buffer safety.
-- #9Y7X and #7WGJ: Qt PDF packaging and the install-viewer button.
-- #C0Q8: the manifest and enablement.
-
-This card owns only the TeX-specific wiring listed in the steps below.
+**Findings (re-checked 2026-09-26 12:50 on `main` 3ec4c6d0).**
+- Landed, and relied on here:
+  - `backend/relay_core/tex_build.py`: `request_build` debounce `:1484`, superseding generations, diagnostics, `forward_search :1051`, `inverse_search :1072`, `dependencies :1546`, `-norc` by default.
+  - The TeX runtime in `workspace_plugins.py` emits `tex_status` (`:540`) and offers the agent `tex_*` tools.
+  - The group model in `src/ArtifactWorkspace.h` (`applyBuildStatus`, generations, presets) and `src/RelayWindowWorkspace.cpp`.
+  - The shell → TeX → PDF chain (`def2cf0b`), the docked agent with `/build` (#PBZ4), buffer safety (#F8R7) and Qt PDF in Debian packages (#9Y7X).
+- Still missing:
+  - `rg tex_status src/` is empty. `src/PaneEvents.cpp:69` routes `workspace_console` but no TeX events.
+  - `WorkspaceManager.TYPES` (`workspace_plugins.py:782`) has no GUI build or sync request, so a build runs only when the agent calls `tex_build`.
+  - `rg -i synctex src/` finds only comments.
+  - Diagnostics reach only the agent.
+  - Included files never join `group.sources`.
+- The pane that sent `workspace_activate` (`src/PaneRuntime.cpp:1213`) owns the runtime. Its worker is where `tex_build` and `tex_sync` go, and its events are what the group must follow.
+- #SJ00 (pane dc713c52, publication pending) fixes #E85D t:q7, which registers the PDF output with the PDF adapter. Step 2 builds on that fix and does not redo it.
 
 **Steps.**
-1. Protocol. Add `tex_build` (`workspace_id`, source revision) and `tex_sync` (forward/inverse) to protocol 36, both answered with `tex_status` or a location. Document them in `docs/AGENT-SESSIONS-PROTOCOL.md`.
-2. Status and save. The pane that holds a `relay.tex` group applies each `tex_status` to the group output with `ws::applyBuildStatus`. The strip then shows building/live/stale/failed and the revision, and the PDF reloads in place, keeping its page and zoom. Saving any group source sends `tex_build`, and the builder debounces.
-3. Diagnostics. Errors and warnings become clickable `file:line` rows (OutputLinks) that open the linked editor. A failed build keeps the last good PDF.
-4. SyncTeX. The editor gets "Show in PDF" (forward), and Ctrl+click in `QPdfView` jumps to the linked editor line (inverse).
-5. Included files. After a build, the `tex_dependencies` result is added to `group.sources`.
-6. Remote, only if Q1 keeps it here. Build over the pane's SSH host with an SSH `Transport`, writing output to `~/.cache/relay/tex/<hash>` on the host. `PathMap` covers the SyncTeX paths, and the PDF, log and `.synctex.gz` arrive as one generation.
-7. Test on a disposable fixture under Xvfb.
+1. **Protocol 36.** Add requests `tex_build {workspace_id, debounce?}` and `tex_sync {workspace_id, direction: forward|inverse, file,line,column | page,x,y}` to `WorkspaceManager.TYPES`. Answer with the existing `tex_status` event and a new `tex_location` event. Add a pytest for each in `tests/test_workspace_plugins.py`. Document both in `docs/AGENT-SESSIONS-PROTOCOL.md` §36.
+2. **Status strip and save.** `PaneEvents.cpp` routes `tex_status` to the window. `RelayWindowWorkspace.cpp` finds the group by `workspace_id` and calls `ws::applyBuildStatus` on its PDF output. The strip shows state and a short revision, and the `QPdfView` reloads keeping its page and zoom. A save in `FilePanes.cpp` of any path in `group.sources` sends `tex_build`, and the builder debounces. Add an `artifactworkspace_test` case feeding a recorded `tex_status` sequence, including a late older generation.
+3. **Diagnostics.** On a `failed` or warning status, show the diagnostics as a collapsible row list under the strip. Each row is an `OutputLinks` `file:line` that opens or focuses the group's editor at that line. The PDF view keeps the last live generation.
+4. **SyncTeX.** Forward: an editor action "Show in PDF" sends `tex_sync forward`, and `tex_location` scrolls the preview (`QPdfPageNavigator::jump`). Inverse: Ctrl+click in the preview maps the point to page coordinates and sends `tex_sync inverse`, and `tex_location` moves the linked editor's cursor. Add a shortcut hint for "Show in PDF" (RELAY.md rule).
+5. **Included files.** After each live build, merge `dependencies()` source files into `group.sources`, so they count in the revision and trigger builds on save. Opening them as linked editor panes is #E85D t:m3's open owner question. Until that is answered they open on demand through diagnostics and SyncTeX, not automatically.
+6. **Live verification** under Xvfb with an isolated `XDG_CONFIG_HOME` and the fixture from `tests/test_tex_build.py`. The captures are listed under Verify.
+
+**Order.** Steps 1 → 2 are one commit and unblock the rest. Steps 3, 4 and 5 are independent after that. Step 6 comes last. Publish each commit with `relay-land submit HEAD --card '#WYGY'` (queue mode, not `land.py`).
 
 **Risks.**
-- A project `latexmkrc` is Perl, which is why it stays `-norc` by default (Q2).
-- `latexmk` can finish after newer edits. Generation ids and `seq` stop a stale completion from showing as live.
-- SyncTeX paths differ between local and SSH source roots.
-- `RelayWindowWorkspace.cpp` and `FilePanes.cpp` are shared with #E85D, #R660 and #PBZ4, so land through `land.py`.
+- `RelayWindowWorkspace.cpp`, `FilePanes.cpp` and `PaneEvents.cpp` are shared with #E85D, #R660, #PBZ4 and #SJ00. Keep each hunk small and let the queue merge.
+- SyncTeX coordinates: `synctex` uses PDF points from the top-left and `QPdfView` uses widget pixels scaled by zoom. The conversion needs its own test.
+- A build that runs on every save can be heavy. The builder already debounces (0.4 s) and supersedes a running build.
+- Nothing here needs an owner decision except t:m3 (above), and step 5 has a safe default.
 
-**Verify.**
-- Protocol/runtime tests in `tests/test_workspace_plugins.py` and `tests/test_tex_build.py`, plus an `artifactworkspace_test` case for `tex_status`.
-- Under Xvfb with the fixture, capture: the first build, an edit → save → live, a broken edit → failed with the last good PDF, a diagnostic click, both SyncTeX directions, and restore. Evidence goes in `docs/qa_evidence/<date>-tex-workspace/`.
-**2026-09-26 scope update.** Deliver the local source/build/diagnostics/PDF/SyncTeX flow. SSH builds are #CWDZ. Do not run a project's `latexmkrc` by default; a project must explicitly enable its executable plugin content. Review annotations are outside this card.
+**Verify.** See `verify` and Done means. Tests: `pytest tests/test_workspace_plugins.py tests/test_tex_build.py`, `ctest -R 'artifactworkspace|filepanes'`, then the live Xvfb run. Evidence goes in `docs/qa_evidence/<date>-tex-workspace/`.
 
 ## Tasks
 

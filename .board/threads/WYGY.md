@@ -61,3 +61,17 @@ mentioned in #SJ00 · 2026-09-26 · agent
 
 <!-- relay:entry 20260926T051607Z-e0 author=agent kind=event model=gpt-6-sol pane=dc713c52 turn=54948a7060344df2abef877a514ad9bf/77d64610668645e0819475f4bc9fcb8b -->
 - ✦ agent updated this card · blocked_by: (unset) → ["E85D"]
+
+<!-- relay:entry 20260926T125128Z-ja author=agent kind=event model=claude-opus-5-5 pane=b65a84fc turn=45c2ee31a8d34d5184a33977aa649f5f/e338117fd61549edb407aca486980abf -->
+- ✦ agent claimed this card · Planned → Running, session b65a84fc
+
+<!-- relay:entry 20260926T125128Z-jb author=agent kind=progress model=claude-opus-5-5 pane=b65a84fc turn=45c2ee31a8d34d5184a33977aa649f5f/e338117fd61549edb407aca486980abf pane_token=b65a84fc-848b-48e8-8d87-d77e2cf7423d -->
+Claimed (b65a84fc) · working on it from a terminal pane
+
+Owner asked to claim and plan. Re-checked this morning's plan against main (tex_status still unconsumed in src/); adding Done-means/verify detail and an execution order. #SJ00 (pane dc713c52) owns the TeX PDF adapter defect; no overlap.
+
+<!-- relay:entry 20260926T125210Z-2p author=agent kind=event model=claude-opus-5-5 pane=b65a84fc turn=45c2ee31a8d34d5184a33977aa649f5f/e338117fd61549edb407aca486980abf -->
+- ✦ agent updated this card · verify: (unset) → {"artifact": "code", "primary": "script", "also": ["person"], "human": "required…; replaced `## Plan`
+
+<!-- relay:entry 20260926T125216Z-v0 author=agent kind=event model=claude-opus-5-5 pane=b65a84fc turn=45c2ee31a8d34d5184a33977aa649f5f/e338117fd61549edb407aca486980abf -->
+- ✦ agent updated this card · replaced `## Done means`
