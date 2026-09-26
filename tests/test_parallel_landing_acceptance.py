@@ -1045,15 +1045,24 @@ class RunnableMain(AcceptanceCase):
         out = subprocess.run(p.cli_argv("main-run"), env=p.env(), text=True,
                              capture_output=True, timeout=CLI_TIMEOUT)
         self.assertEqual("# rel21", out.stdout.strip())
-        # An executable started from release 1 keeps running across the next update.
+        # Release 1, started through main-run, keeps reading its own assets across more
+        # updates than `keep`: it is pinned while it runs, and reaped after it exits.
         go = self.root / "go"
-        old = self.spawn([first["executable"], "wait", str(go)], p.env())
+        old = self.spawn(p.cli_argv("main-run", "--", "wait", str(go)), p.env())
+        self.wait_for(lambda: any(r["sha"] == first["installed_sha"] for r in
+                                  p.cli("main-status")[1]["releases"]), what="release 1")
         land(22)
+        pinned = land(23)
+        shas = [r["sha"] for r in pinned["releases"] if r["complete"]]
+        self.assertIn(first["installed_sha"], shas, "a running release was pruned")
+        self.assertEqual(3, len(shas), pinned["releases"])
         go.write_text("")
         self.assertEqual("# rel21", old.communicate(timeout=30)[0].strip())
-        third = land(23)
+        self.assertEqual(0, old.returncode)
+        third = land(24)
         complete = [r for r in third["releases"] if r["complete"]]
         self.assertEqual(2, len(complete), third["releases"])
+        self.assertNotIn(first["installed_sha"], [r["sha"] for r in complete])
         self.assertTrue(any(r["current"] and r["sha"] == p.main() for r in complete))
         for release in complete:
             self.assertTrue((Path(release["path"]) / "release.json").exists())
@@ -1072,7 +1081,7 @@ class RunnableMain(AcceptanceCase):
         self.assertEqual(1, status["lag_commits"])
         out = subprocess.run(p.cli_argv("main-run"), env=p.env(), text=True,
                              capture_output=True, timeout=CLI_TIMEOUT)
-        self.assertIn("# rel23", out.stdout)
+        self.assertIn("# rel24", out.stdout)
         # Stop the idle daemon; a restart resumes from durable state.
         daemon.send_signal(signal.SIGTERM)
         self.assertEqual(0, daemon.wait(timeout=30))
