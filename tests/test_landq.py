@@ -929,23 +929,42 @@ class QueueCase(unittest.TestCase):
     # ------------------------------------------------------------ identity
 
     def test_identity_comes_from_the_trees_registry(self):
+        """With A1's registry importable the queue uses it; without it (a checkout where
+        trees.py has not landed) the hashed common dir stands in. Either way, a registry that
+        exists but fails is a refusal, and what the registry answers is what the queue uses."""
         from unittest import mock
         import relay_core
-        from relay_core import trees
+        try:
+            from relay_core import trees
+        except ImportError:
+            trees = None
         a = Queue(self.repo, state_root=self.state)
         b = Queue(self.repo, state_root=self.state)
         self.assertEqual(a.repo_id, b.repo_id)
         self.assertEqual(a.target, "main")
-        self.assertEqual(a.identity["identity_source"], "trees")
-        self.assertEqual(trees.resolve_project(self.repo, state_root=self.state)["id"], a.repo_id)
+        if trees is not None:
+            self.assertEqual(a.identity["identity_source"], "trees")
+            self.assertEqual(trees.resolve_project(self.repo, state_root=self.state)["id"],
+                             a.repo_id)
+        else:
+            self.assertEqual(a.identity["identity_source"], "fallback-hash: no trees module")
+            self.assertEqual(len(a.repo_id), 16)
         import types
+
+        def with_trees(module):
+            # `from relay_core import trees` reads the package attribute when the module was
+            # already imported, and sys.modules otherwise: patch both, creating the attribute
+            # when trees.py is not in this checkout.
+            return (mock.patch.dict(sys.modules, {"relay_core.trees": module}),
+                    mock.patch.object(relay_core, "trees", module, create=True))
+
         # A registry that exists but fails is a refusal, never a second identity.
         broken = types.SimpleNamespace(
             resolve_project=lambda path, state_root=None: None,
             register_repo=lambda path, state_root=None: (_ for _ in ()).throw(
                 RuntimeError("registry locked")))
-        with mock.patch.dict(sys.modules, {"relay_core.trees": broken}), \
-                mock.patch.object(relay_core, "trees", broken):
+        p1, p2 = with_trees(broken)
+        with p1, p2:
             with self.assertRaises(landq.Refused) as ctx:
                 Queue(self.repo, state_root=self.state)
         self.assertIn("registry locked", str(ctx.exception))
@@ -953,15 +972,15 @@ class QueueCase(unittest.TestCase):
         fake = types.SimpleNamespace(
             resolve_project=lambda path, state_root=None: None,
             register_repo=lambda path, state_root=None: {"id": "R1", "target": "trunk"})
-        with mock.patch.dict(sys.modules, {"relay_core.trees": fake}), \
-                mock.patch.object(relay_core, "trees", fake):
+        p1, p2 = with_trees(fake)
+        with p1, p2:
             c = Queue(self.repo, state_root=self.state)
         self.assertEqual((c.repo_id, c.target, c.identity["identity_source"]),
                          ("R1", "trunk", "trees"))
         self.assertTrue((self.state / "integration" / "R1").is_dir())
         # Only a missing module falls back to the hashed common dir.
-        with mock.patch.dict(sys.modules, {"relay_core.trees": None}), \
-                mock.patch.object(relay_core, "trees", None):
+        p1, p2 = with_trees(None)
+        with p1, p2:
             d = Queue(self.repo, state_root=self.state)
         self.assertEqual(d.identity["identity_source"], "fallback-hash: no trees module")
         self.assertEqual(len(d.repo_id), 16)
