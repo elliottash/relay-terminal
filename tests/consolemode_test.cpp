@@ -2307,6 +2307,7 @@ void aPromptOnAWorkedCardWritesNothingToTheBoard()
 #include "234z_cases.h"
 #include "recall_prompt_cases.h"
 #include "jdn4_queue_expand_cases.h"
+#include "paneinfo_chrome_cases.h"
 
 int main(int argc, char **argv)
 {
@@ -2508,6 +2509,7 @@ int main(int argc, char **argv)
     cases::theCardDrawerRendersTheHelperAnswerAndRefreshesOnChange();
     cases::theCardDrawerDoneSendsBoardMoveAndShowsRefusals();
     cases::aPromptOnAWorkedCardWritesNothingToTheBoard();
+    cases::paneInfoChromeCases();
 
     if (failures == 0)
     std::fprintf(stdout, "consolemode: 21 cases, all passed\n");
