@@ -121,3 +121,7 @@ It needs one decision from you, flagged in Risks: press **Execute on #R5TC** (re
 
 <!-- relay:entry 20260920T035712Z-fo author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260926T040615Z-xa author=codex kind=note -->
+### Codex · 2026-09-26 04:06 UTC
+Replaced the obsolete implementation plan: #R5TC has landed. This report now needs only a live busy/idle card-pane message and reply check before closure.

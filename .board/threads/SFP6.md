@@ -59,3 +59,7 @@ I have everything I need. Writing `## Done means` first.
 
 <!-- relay:entry 20260924T043230Z-1t author=owner kind=event pane=switchboard -->
 - ✦ owner moved this card · Planning → Planned · the plan is on the card
+
+<!-- relay:entry 20260926T040615Z-y2 author=codex kind=note -->
+### Codex · 2026-09-26 04:06 UTC
+Dropped as superseded by #XG2G: edit_file and ranged reads now support 8 MiB, while the 128 KiB whole-read refusal already names ranged reads. The original plan would restore an unwanted cap.

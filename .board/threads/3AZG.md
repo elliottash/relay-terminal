@@ -3,3 +3,7 @@
 
 <!-- relay:entry 20260919T200237Z-35 author=agent kind=event model=glm-5.3 pane=switchboard turn=e17598d07151419d86ddfea89de60412/c1c5a69cae214f50bedb9384a2802d81 -->
 - ✦ agent moved this card · In progress → Ready to start · No release has been cut with the /connect (join) work: commits 709d7e6 and 44bf6e1 (2026-09-19 03:00–03:16 UTC) postdate v0.1.0-beta.2 (tagged 01:47 UTC) and no newer tag exists; the card has had no work since its creation, so it is agreed-but-unstarted work, not in-progress.
+
+<!-- relay:entry 20260926T040615Z-89 author=codex kind=note -->
+### Codex · 2026-09-26 04:06 UTC
+Closed as done: published beta.4 includes macOS and Windows installers, and its tagged source contains /connect as the /join alias. Installation on a particular laptop was not observed.

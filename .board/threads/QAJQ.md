@@ -32,3 +32,7 @@ The `tabProjectChip` rule no longer appears in `src/` — let me check whether i
 
 <!-- relay:entry 20260926T003549Z-2s author=agent kind=event mention=3MH4 model=claude-fable-5-1 pane=f35051fe turn=dbc9af56def4427c91f4fecd2d277da4/1a6acee91a96495087b757d1ef3ee4e7 -->
 mentioned in #3MH4 · 2026-09-26 · agent
+
+<!-- relay:entry 20260926T040615Z-z9 author=codex kind=note -->
+### Codex · 2026-09-26 04:06 UTC
+Closed as done: #JDC5 removed tabProjectChip; the targeted buttonfit suite passed on 2026-09-26.

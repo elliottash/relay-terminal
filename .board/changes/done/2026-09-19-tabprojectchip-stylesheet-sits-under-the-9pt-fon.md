@@ -1,7 +1,7 @@
 ---
 id: QAJQ
 type: work
-status: planned
+status: done
 labels: [bug]
 rank: zzzzzzzzw
 created: '2026-09-19'
@@ -31,3 +31,10 @@ The `buttonfit` test suite passes at HEAD, in particular `ButtonFitTest::stylesh
 **Risks** — If the chip still exists but was renamed, the failing test message gives the current selector; do not guess. Raising the font size could clip the chip's text in narrow tabs — the buttonfit suite's fit/clipping checks cover exactly that, so a new failure there after step 3 means the chip's geometry needs adjusting, not the font re-shrunk. No owner decision needed.
 
 **Verify** — `./build/relay-buttonfit-tests` fully green (205/205), specifically `stylesheetFontsStayAtOrAboveTheFloor` passing in every built-in theme. Evidence for the card: the test binary's summary line plus, on the already-fixed path, the sha of the commit that removed the rule.
+
+## Resolution
+
+Fixed by removal of the attached-project tab chip in `2eabaa77` (#JDC5). On 2026-09-26,
+`rg 'tabProjectChip|font-size: 8.5pt' src/` found no match and
+`ctest --test-dir build -R '^buttonfit$' --output-on-failure` passed (1/1 suite). The old plan's
+205-case count was not reasserted; the targeted suite result is the current evidence.

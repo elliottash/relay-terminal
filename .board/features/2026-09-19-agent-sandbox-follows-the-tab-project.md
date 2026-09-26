@@ -67,6 +67,31 @@ honoured, not unevadable (`backend/relay_core/tools.py`, "the recursive-walk cos
 `docs/ARCHITECTURE.md` › Tools; protocol section 11, "Too wide to crawl").
 
 ## Plan
+**2026-09-26 refresh (supersedes stale paths and test commands below).** The core defect is
+still present: `src/Pane.h` keeps `m_workspace` from construction, `RelayWindow::paneNode` and
+several companion-pane paths still read `m_manager->workspace()`, and `src/main.cpp` restores
+windows without opening the invocation directory when restoration succeeds. The cost guard is
+already shipped. The attached-project and session-bucket design remains useful, but execute it
+against today's split `Pane*`/`RelayWindow*` sources and the current guest workspace integration.
+Use `rg` to locate each call site rather than the 2026-09-19 line numbers below.
+
+**Updated sequence.** First fix new-pane/new-window workspace selection and pin it with
+`windowstate`/workspace tests. Then make new conversations use the attached project's key and
+unattached conversations use a stable loose bucket; verify indexing before any migration. Next
+implement re-filing of an open conversation on attach under an exclusive worker operation with
+resume tests. Last, wire agent-write auto-attach, the cross-project hint, and plain `relay` restore
+plus new-directory tab. Keep the owner's existing decision that `$HOME` remains a valid wide
+sandbox with the recursive-walk cost guard.
+
+**Decision still needed.** Old saved layouts can contain the launch directory as their recorded
+workspace even when the pane's cwd differs. Recommend preserving that recorded sandbox on
+restore and correcting only newly created panes; silent remapping would change the authority of
+an existing agent. The owner has not answered this question on the card.
+
+**Verification update.** Use targeted `windowstate`, `projects`, session-protocol and hint tests,
+then an isolated live run for the attach/refile and restore scenarios. The old blanket
+`./scripts/test.sh` and full `ctest` instruction below conflicts with current project guidance.
+
 Stages 6a/6b keep their names from the #JN7X staging. The cost guard is already shipped and stays closed at the end of this plan.
 
 **Goal.** A pane's agent sandbox is its tab's project when the tab is attached, else the directory the pane was opened in — never the launch directory. Acceptance: a pane opened in `~/Downloads` cannot write into the launch project; an attached tab's new conversations use the project; the conversation list does not scatter.
@@ -101,7 +126,8 @@ Stages 6a/6b keep their names from the #JN7X staging. The cost guard is already 
 
 **Verify.**
 
-- Build with `scripts/relay-build`; run `./scripts/test.sh` and `ctest --test-dir build`.
+- Build and run the targeted `windowstate`, `projects`, session-protocol and hint tests through
+  the project's current isolated verification workflow; do not run the full suites by default.
 - Extend `tests/windowstate_test.cpp` (createPane/resolveDirectory fallbacks), `tests/projects_test.cpp` (sessions-root/keyFor helper, `loose`), `tests/test_session_protocol.py` (configure `session_dir`; the `session_refile` handler — files moved, index row's `session_dir`, reply event); hint ids in `tests/hints_test.cpp` if unit-testable.
 - Live under Xvfb with an isolated `XDG_CONFIG_HOME`, launched from project A: a new tab after `cd ~/Downloads` shows Agent workspace `~/Downloads` (cwd chip tooltip) and a `write_file ./probe.txt` lands there, not in A; its conversation is saved under `sessions/loose` and the list scopes to `~/Downloads`; opening the Switchboard attaches the tab — the open conversation's files move to `sessions/<keyFor(A)>` without a reset, and the *next* conversation configures with A as workspace; agent writes in known project B on an unattached tab attach it with reason `agent-write`; attached to A, writes in B show the hint exactly once; `relay` started in project B restores A's windows and opens one new unattached tab in B; a pane in `$HOME` still gets the recursive-walk refusal.
 

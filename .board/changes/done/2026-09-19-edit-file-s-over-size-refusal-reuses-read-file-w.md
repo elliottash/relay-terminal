@@ -1,7 +1,7 @@
 ---
 id: SFP6
 type: work
-status: planned
+status: dropped
 labels: [bug, agent-tools]
 rank: zzzzzzzzi
 created: '2026-09-19'
@@ -40,3 +40,11 @@ Calling edit_file (or read_file) on a file over 128 KiB still refuses — the ca
 **Risks.** Message text is user- and model-facing; keep it one sentence in the style of the neighbouring `_edited` errors. No behaviour change beyond the string, so blast radius is the two raise sites and their tests. Rendering of this refusal (dimmed ✗, `refused: true`) is **not** part of this card — that is #25XG.
 
 **Verify.** `python3 -m pytest tests/test_tools.py tests/test_ssh_remote.py -q` (targeted, not the full suite). Manual check: in a pane, ask the agent to edit a >128 KiB file (e.g. `src/BoardPane.cpp`, ~200 KB) and confirm the ✗ message names `run_command` as the way out.
+
+## Resolution
+
+Superseded by #XG2G. `edit_file` and ranged `read_file` now support UTF-8 files up to 8 MiB;
+only a whole-file read retains the 128 KiB preview cap, and its current refusal says to use
+`from_line/to_line` while confirming that `edit_file` works. The original requested behavior
+(refuse edits above 128 KiB and send the agent to `run_command`) would reintroduce the bug
+#XG2G corrected. No wording-only change remains useful on this card.
