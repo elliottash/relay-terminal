@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# #HEY7 live check: a shell pane prints 30,000 coloured lines (more than the terminal's 10,000-row
+# #HEY7 live check: a shell pane prints HEY7_LINES coloured lines (default 30,000, more than the terminal's 10,000-row
 # ring), Relay quits, and Relay comes back. The rows the ring let go of must be in the pane's text
 # journal, the rest in the tail file, and the restored pane must show the "earlier lines" row.
 #
@@ -17,6 +17,7 @@ Xvfb "$display" -screen 0 ${width}x${height}x24 >/dev/null 2>&1 & xvfb_pid=$!; s
 kill -0 "$xvfb_pid" || { echo "Xvfb did not start on $display" >&2; exit 1; }
 echo "display $display" > "$out/display.txt"
 export DISPLAY=$display RELAY_KEYRING=off RELAY_DATA_DIR=$repo
+export HEY7_LINES=${HEY7_LINES:-30000}
 unset RELAY_OPEN_SOCKET
 mkdir -p "$sandbox/home/.config/RelayTerminal" "$sandbox/run" "$sandbox/tmp" "$sandbox/work"; chmod 700 "$sandbox/run"
 # The user bus, so panes run as they do on the owner's machine: under systemd memory isolation,
@@ -30,14 +31,14 @@ printf '[instructions]\nonboarded=true\n[security]\napprovals_chosen=true\n' > "
 cat > "$HOME/.bashrc" <<'EOF'
 if [ ! -f "$HOME/.printed" ]; then
   touch "$HOME/.printed"
-  for i in $(seq 1 30000); do printf '\033[1;3%dmline %05d\033[0m plain tail\n' $((i % 7 + 1)) "$i"; done
+  for i in $(seq 1 "$HEY7_LINES"); do printf '\033[1;3%dmline %05d\033[0m plain tail\n' $((i % 7 + 1)) "$i"; done
 fi
 EOF
 shot() { import -window root "$out/$1.png"; }
 
 (cd "$sandbox/work" && exec "$bin" --workspace "$sandbox/work") > "$out/relay-1.log" 2>&1 & relay_pid=$!
 sleep 25
-shot 01-after-30000-lines
+shot "01-after-${HEY7_LINES}-lines"
 text=$XDG_DATA_HOME/relay/text
 {
   echo "journals after the first run (live pane, before quit):"
