@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from relay_core import session_protocol
 from relay_core.agent import Agent
@@ -130,6 +131,18 @@ class OverTokensTests(unittest.TestCase):
         agent = self.agent(GuestProvider(prompt=500_000), compact_over_tokens=10_000)
         agent.ask('hello')
         agent.ask('again')
+        self.assertEqual(self.of('compaction_started'), [])
+
+    def test_guest_transcript_above_native_limit_does_not_auto_compact(self):
+        agent = Agent(CONFIG(), str(self.root), self.events.append, provider=GuestProvider(),
+                      session_dir=str(Path(self.temp.name) / 's'), context_window=128_000)
+        # A summaries role used to make the guest eligible for Relay's native 71,232-token
+        # limit, even though its own context was managed by the guest.
+        agent.roles = SimpleNamespace(resolve=lambda role: SimpleNamespace(is_main=False))
+        agent.messages.append({'role': 'user', 'relay_kind': 'prompt', 'content': 'x' * 300_000})
+        self.assertEqual(agent.context.limit, 71_232)
+        self.assertTrue(agent.context.over(agent.messages, agent.tools()))
+        self.assertIsNone(agent._maybe_compact())
         self.assertEqual(self.of('compaction_started'), [])
 
     def test_not_after_a_cancelled_or_failed_turn(self):

@@ -6905,8 +6905,9 @@ restarts the harness with `resume` when it has a session id. Nothing is retried 
 - **Side calls never reach the guest.** `HarnessProvider.serves_side_calls = False`;
   `Agent.side_provider` then uses a role of its own (summaries, chores, route_assist…) when one is
   configured and otherwise gets an empty answer, so a guest pane has no model-written title or
-  summary unless a role serves it; `Agent._maybe_compact` skips automatic compaction on a guest
-  pane with no summaries role — the guest keeps its own context, Relay's transcript is a record.
+  summary unless a role serves it; `Agent._maybe_compact` skips automatic compaction on every
+  guest pane because the guest keeps its own context and Relay's transcript is a record. Manual
+  compaction and compaction before switching to a native model remain available.
 - `session_data` carries `guest` and `guest_session` (wrapped onto the Agent by `attach()`);
   `resume` restarts the harness on that session, `load_state` does not.
 - A change of model within the same guest keeps the harness (`set_model` on it, the guest's
