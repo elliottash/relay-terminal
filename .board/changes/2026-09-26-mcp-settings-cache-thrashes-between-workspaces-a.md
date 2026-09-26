@@ -1,11 +1,10 @@
 ---
 id: WPYZ
 type: work
-status: executing
+status: needs-verification
 labels: [bug, performance, mcp]
 assignee: agent
-implemented_by: openai/gpt-6-sol via codex
-session: f393dabe-52e4-4940-ae6b-14ad9f25c7f8
+implemented_by: kimi/k3
 rank: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzi
 created: '2026-09-26'
 verify: {artifact: code, primary: script, also: [metric], human: none, criteria: Two-workspace regression test passes and MCP refresh does not recur while files remain unchanged., sign_off: none, effort: medium, stakes: rework, blast: capability}

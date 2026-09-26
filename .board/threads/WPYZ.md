@@ -83,3 +83,21 @@ Nothing was published. <!-- landq:efebc7d68d1fb7e9:cancelled -->
 
 <!-- relay:entry 20260926T153115Z-c6 author=agent kind=progress model=gpt-6-sol pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/2650e4fffc16421caa48c9c404c93185 -->
 The first submission required author reconciliation after the target advanced. I synced the session workspace through relay-tree to target f85a899e46d3, verified the rebased commit 1c82a9d6 with the MCP settings test and Relay build, and submitted queue job a7c200ee83b18037. A user service checks the queue every 30 seconds and sends a desktop notification on a terminal result.
+
+<!-- relay:entry 20260926T153346Z-qj author=landq kind=note -->
+Landing job d4cddf1876b0cf9e (29b8f1911535) landed.
+Published a53e8678c893 onto main (target was 5628b3500141). <!-- landq:d4cddf1876b0cf9e:landed -->
+
+<!-- relay:entry 20260926T153351Z-ey author=landq kind=note -->
+Landing job a7c200ee83b18037 (1c82a9d63a7c for card #WPYZ) landed.
+Published bab85c573914 onto main (target was a53e8678c893).
+Your workspace wtc1ce3e1c5dce871a may now be released; its receipt is `relay-land receipt a7c200ee83b18037`. <!-- landq:a7c200ee83b18037:landed -->
+
+<!-- relay:entry 20260926T153909Z-vr author=owner kind=event pane=f393dabe -->
+Released (f393dabe) · the pane closed
+
+<!-- relay:entry 20260926T154101Z-5a author=agent kind=event model=k3 pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/bb2fce27921849eb8a38b8fee5dafef4 -->
+- ✦ agent moved this card · Running → Needs verification · Published to main as bab85c573914 via queue job a7c200ee83b18037; targeted test and full build pass. · implemented_by kimi/k3
+
+<!-- relay:entry 20260926T154113Z-ce author=agent kind=evidence model=k3 pane=f393dabe turn=a9db98ce062646d8acad3376b00cf347/bb2fce27921849eb8a38b8fee5dafef4 -->
+Receipt a7c200ee83b18037: landed 2026-09-26T15:33:51Z, published bab85c573914 onto main (target was a53e8678c893), verified: true. Gate log: /home/elliott/.local/state/relay/integration/12c8c9ef12cf3b12/logs/a7c200ee83b18037/. The running Relay instance still has the old binary; a restart is needed for the fix to take effect live.
