@@ -1,14 +1,13 @@
 ---
 id: SZ1H
 type: work
-status: discussing
+status: planned
 labels: [feature, design, skills, onboarding]
 component: [worker, skills]
-waiting_on: owner
 rank: zzzzzzzzzzzzzzzzzzzzr
 created: '2026-09-24'
 source: 'Claude Fable guest session in Relay, 2026-09-24, split out of #9HS0'
-links: {commits: [b74afc4f68e6, c1a9585ff165, a9870d95e14b], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
+links: {commits: [b74afc4f68e6, c1a9585ff165, a9870d95e14b, 1566435b6107, 42d1cf11c47e], evidence: [reports/Bundled skills for Relay.md], github: null, plans: [], related: [9HS0, 1QKM, XHXX, HS7V, MEPR, GSK7, MSJ0, 95VZ, 9FX8, JVEJ, 4YKJ]}
 ---
 # Bundled skills: what ships with Relay today, what the starter tasks need, and what the skill catalogue shows an agent
 
@@ -61,4 +60,8 @@ Re-checked after a day of other sessions' work; the recommendations stand unchan
 
 **Re-measured today.** `skills.py` is unchanged where it matters: `MAX_PROMPT_BYTES` still 5 KiB, `DEFAULT_EXCLUDE` still the seven-name list, Warp's `remote-server/bundled_resources` still discovered. The catalogue is now 62 skills (one more synced from Claude) and the trigger budget settled at 60 characters — same conclusion, every line still cut before the words that say when to use it.
 
-**Still open, this card.** The five decisions in the thread question below; the four delivery cards of report §5 remain unfiled.
+**Delivery approved.** The owner approved the recommendations and added semantic deduplication plus a first-run maintenance skill. Five planned child cards now hold the delivery work: #K26R, #G8JN, #4EMF, #M91Y and #1E5F.
+
+## Decisions
+
+2026-09-25 — Owner approved the research recommendations: keep bundled skills focused on Relay operations; add skill `requires` and availability checks; improve catalog text and budget; give bundled skills profiles and release cases; design mail as a task plugin with a thin skill. For identity, collapse byte-identical skills automatically and find semantic equivalents as review candidates. Add a skill-maintenance skill that runs during first-install onboarding to discover and import skills from other agents, then maintains the catalog. Keep source, version and differences visible; do not silently merge distinct instructions. See the verbatim owner decision in the thread.
