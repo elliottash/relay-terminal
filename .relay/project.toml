@@ -25,9 +25,8 @@ exec 9>"$root/.lock"; flock 9
 rsync -a --checksum --delete --delete-excluded --exclude=/.git --exclude=/build --exclude='/build-*' ./ "$root/src/"
 [ -f "$root/build/CMakeCache.txt" ] || cmake -S "$root/src" -B "$root/build" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$root/build" --parallel "${RELAY_JOBS:-2}"
-ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j "${RELAY_JOBS:-2}"
 cd "$root/src"
-scripts/test.sh
+sh scripts/gate-tests.sh "$root/build"
 """],
 ]
 

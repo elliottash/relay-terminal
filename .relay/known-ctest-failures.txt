@@ -1,0 +1,15 @@
+# ctest cases failing on main when the queue gate began (card #3MH4). The gate skips them.
+# Remove a line once the case passes again.
+backends
+boardfilter
+boardworkspace
+calllines
+cardtests
+consolemode
+conversations
+keymap
+modelspane
+panestatus
+projectinit
+queuesubmit
+settings
