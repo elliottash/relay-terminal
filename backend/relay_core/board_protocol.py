@@ -702,43 +702,54 @@ class BoardCommands:
             return
         config, preset, effort = self._console_model(main)
         agent = session.agent
-        old_preset = agent.preset.id if agent.preset else None
+        old_preset = agent.preset.id if agent.preset else GHP.config_preset(agent.config)
         if agent.config != config or old_preset != preset or agent.effort != effort:
             # set_model adapts history and token accounting while retaining the conversation.
             # Copy: effort and temporary Plan routing must not mutate the tab's config.
+            old_guest = GHP.agent_provider(agent)
+            card_config = copy.deepcopy(config)
+            guest = (self._start_card_guest(main, card_config, preset, effort)
+                     if GHP.config_guest_id(config) else None)
             agent.effort = effort
-            agent.set_model(copy.deepcopy(config), preset, main.context.window)
+            try:
+                if old_guest is not None and guest is None:
+                    GHP.detach(agent)
+                agent.set_model(card_config, preset, main.context.window, provider=guest)
+                if guest is not None:
+                    GHP.attach(agent, guest)
+            except Exception:
+                if guest is not None:
+                    guest.close()
+                raise
+            if old_guest is not None and guest is not None:
+                old_guest.close()
         agent.roles = main.roles
 
     def _console_model(self, main):
-        """(config, preset_id, effort) a card console runs on, or the sentence saying why there is none.
+        """The selected model for a card console, including a guest (#ZPSG)."""
+        preset = main.preset.id if main.preset else GHP.config_preset(main.config)
+        return main.config, preset, main.effort
 
-        A guest harness is not an endpoint, and since #E34S the guest it names is the *helper's
-        own* agent — one process, one agent — so a card console, another agent in this same
-        worker, cannot also use its ``harness://`` config. Building one anyway is what the owner
-        saw on 2026-09-20 — "The Board agent could not answer: Base URL must be an HTTPS URL
-        without credentials, query, or fragment", raised five frames down in
-        ``ProviderConfig.validate`` (card #GH5T). That console's model is the first usable entry
-        of the Options › Models priority list (`resolver.leave_guest`); when the list holds
-        nothing, this raises the one sentence a turn then answers with instead.
-        """
-        name = GHP.guest_name(main.config)
-        if not name:
-            return main.config, (main.preset.id if main.preset else None), main.effort
-        spare = main.roles.leave_guest() if main.roles is not None else None
-        if spare is None:
-            raise ValueError(GHP.helper_refusal(name))
-        return spare.config, spare.preset_id, spare.effort
+    def _start_card_guest(self, main, config, preset, effort):
+        """Start a separate guest session for this card's independent conversation."""
+        permissions = getattr(main.provider, "permissions", "bypass")
+        if not isinstance(permissions, str):
+            permissions = "bypass"
+        request = {"guest": {"model": config.model or None, "effort": effort or None,
+                             "permissions": permissions}}
+        return GHP.start_provider(preset or GHP.config_preset(config), request,
+                                  str(self.workspace), main.stall_timeout_s,
+                                  config=config, skill_index=main.executor.skills)
 
     def _build_card_console(self, card_id: str, emit):
         """Build the console one card's turns run on (19.16, card #CTRN): an ordinary console.
 
         The provider config, the skills, the roles chain and the failover switches are the pane
         agent's, so a card turn answers on the model the Board is configured with and
-        fails over the way the pane does — unless that model is the helper's own guest harness
-        (#E34S), when `_console_model` takes the console to the priority list's first usable
-        entry instead: a guest is one process running one agent, and that agent is the helper's. Everything that carries state is this card's own: its
-        conversation, its `cancel_event` (so Stop on one card cannot stop another) and its own
+        fails over the way the pane does. A selected guest gets a separate harness process for
+        this card (#ZPSG), since a guest process serves one agent. Everything that carries state
+        is this card's own: its conversation, its `cancel_event` (so Stop on one card cannot stop
+        another) and its own
         `BoardTools`, which is where `card_scope` lives — which is why enforcing what a Plan may
         touch needed no change in `board_tools.py`.
 
@@ -768,26 +779,37 @@ class BoardCommands:
         workspace = str(tools.board.repo)
         session_dir, session_id = self._card_session_file(card_id)
         config, preset_id, effort = self._console_model(main)
-        agent = Agent(copy.deepcopy(config), workspace, emit,
-                      max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
-                      skills=getattr(main.executor, "skills", None),
-                      preset_id=preset_id,
-                      roles=main.roles, board=tools, effort=effort,
+        card_config = copy.deepcopy(config)
+        guest = (self._start_card_guest(main, card_config, preset_id, effort)
+                 if GHP.config_guest_id(config) else None)
+        try:
+            agent = Agent(card_config, workspace, emit,
+                          provider=guest,
+                          max_steps=main.max_steps, max_tool_calls=main.max_tool_calls,
+                          skills=getattr(main.executor, "skills", None),
+                          preset_id=preset_id,
+                          roles=main.roles, board=tools, effort=effort,
                       # Protocol 33: the named scope. A card console is a console — one tool
                       # list, offered to every turn, with the stage's rule refused at call time
                       # (owner decision 3 on #CTRN). `card` is what this said before that.
-                      tool_scope="console",
+                          tool_scope="console",
                       # Protocol 30.4: one tool set. A card turn drives the app through the same
                       # `AppTools` the pane agent holds, so the change log is the worker's.
-                      app=getattr(main, "app", None),
-                      track_requests=getattr(main, "track_requests", True),
-                      todo_tool=getattr(main, "todo_tool", True),
-                      completion_check=getattr(main, "completion_check", True),
-                      session_dir=session_dir,
-                      stall_timeout_s=main.stall_timeout_s,
-                      first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
-                      failover=getattr(main, "failover", True),
-                      failover_hosted=getattr(main, "failover_hosted", False))
+                          app=getattr(main, "app", None),
+                          track_requests=getattr(main, "track_requests", True),
+                          todo_tool=getattr(main, "todo_tool", True),
+                          completion_check=getattr(main, "completion_check", True),
+                          session_dir=session_dir,
+                          stall_timeout_s=main.stall_timeout_s,
+                          first_token_timeout_s=getattr(main, "first_token_timeout_s", 0.0),
+                          failover=getattr(main, "failover", True),
+                          failover_hosted=getattr(main, "failover_hosted", False))
+        except Exception:
+            if guest is not None:
+                guest.close()
+            raise
+        if guest is not None:
+            GHP.attach(agent, guest)
         # A console's board tools offer the console's set (#AGNT); a card's are a console's.
         tools.begin_console()
         if session_id:

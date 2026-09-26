@@ -239,6 +239,7 @@ class CardTurns:
             turns = session.turns
         for old in evicted:                                # outside the lock: it joins a thread
             old.turns.shutdown(timeout=1.0)
+            self._close_guest(old)
         # Outside the lock too: `submit` emits `queued` and `queue_changed` through `_observe`.
         return turns.submit(prompt, "queue", request_id, surface=surface_of(card_id),
                             mode=mode, card=card_id, preview=preview)
@@ -271,6 +272,7 @@ class CardTurns:
             self._sessions.clear()
         for session in sessions:
             session.turns.shutdown(wait)
+            self._close_guest(session)
 
     def forget(self, card_id: str) -> None:
         """Drop one card's conversation (its card changed under it, or it was deleted)."""
@@ -280,6 +282,13 @@ class CardTurns:
                 return
             del self._sessions[card_id]
         session.turns.shutdown(timeout=1.0)
+        self._close_guest(session)
+
+    @staticmethod
+    def _close_guest(session: CardSession) -> None:
+        """A discarded card no longer owns its separate guest process (#ZPSG)."""
+        from .guest_harness_provider import detach
+        detach(session.agent)
 
     # ---- internals -------------------------------------------------------------
     def _new_session(self, card_id: str, evicted: list) -> CardSession:
@@ -295,7 +304,11 @@ class CardTurns:
             self._observe(session, event)
 
         session.turns = TurnSupervisor(emit)
-        agent, tools = self._build(card_id, session.turns.agent_emit)
+        try:
+            agent, tools = self._build(card_id, session.turns.agent_emit)
+        except Exception:
+            session.turns.shutdown(timeout=1.0)
+            raise
         session.agent, session.tools = agent, tools
         session.turns.set_agent(agent)
         self._sessions[card_id] = session

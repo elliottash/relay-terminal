@@ -34,8 +34,7 @@ class CardModelSelectionTests(ProtocolTest):
         self.assertIs(card.provider, same_provider)
 
     def test_guest_pick_is_allowed_now_that_the_helper_can_run_on_one(self):
-        """#E34S: the guest process is the helper's own agent, so a guest pick in its model box
-        is a real selection — a card console follows the priority list instead, not the pick."""
+        """The helper accepts a guest pick; the card starts its own guest (#ZPSG)."""
         with patch('relay_core.guest_harness_provider.start_provider') as start:
             self.assertFalse(self.commands.refuse_model_selection(
                 {'preset': 'guest:codex', 'model': 'gpt-6-astra', 'id': 'pick'}))
@@ -70,30 +69,56 @@ class CardModelSelectionTests(ProtocolTest):
                                        guest_check=lambda guest_id: True)
         self.turns.agent = self.main
 
-    def test_a_card_console_takes_the_priority_list_when_the_helper_runs_on_a_guest(self):
+    def test_a_card_console_takes_the_selected_guest_instead_of_the_priority_list(self):
         self.guest_main()
         config, preset, effort = self.commands._console_model(self.main)
-        self.assertEqual(preset, 'kimi')
-        self.assertEqual(config.model, 'kimi-k3')
-        self.assertEqual(config.base_url, 'https://api.moonshot.ai/v1')
+        self.assertEqual(preset, 'guest:claude')
+        self.assertEqual(config.model, 'claude-fake')
+        self.assertEqual(config.base_url, 'harness://claude')
 
-    def test_with_nothing_on_the_list_the_console_gets_the_refusal_sentence(self):
+    def test_a_guest_card_does_not_need_a_priority_list_fallback(self):
         self.guest_main(keys=())
-        with self.assertRaises(ValueError) as raised:
-            self.commands._console_model(self.main)
-        self.assertIn('cannot be a second', str(raised.exception))
+        config, preset, _ = self.commands._console_model(self.main)
+        self.assertEqual((config.model, preset), ('claude-fake', 'guest:claude'))
 
-    def test_a_cached_card_moves_to_the_spare_model_and_keeps_history(self):
+    def test_a_cached_card_moves_to_the_guest_and_keeps_history(self):
         self.guest_main()
+        from guest_harness_fake import FakeHarness
+        from relay_core import guest_harness_provider as ghp
         card = Agent(ProviderConfig(api_key='test', base_url='https://example.invalid',
                                     model='old-model'), str(self.repo), self.events.append)
         card.messages.append({'role': 'user', 'content': 'Remember this conversation'})
         old_provider = card.provider
-        self.commands._sync_card_model(SimpleNamespace(agent=card, idle=True))
-        self.assertEqual(card.config.model, 'kimi-k3')
-        self.assertEqual(card.config.base_url, 'https://api.moonshot.ai/v1')
+        harness = FakeHarness([], model='claude-fake')
+        with patch.object(ghp, 'make_harness', return_value=harness):
+            self.commands._sync_card_model(SimpleNamespace(agent=card, idle=True))
+        self.assertEqual(card.config.model, 'claude-fake')
+        self.assertEqual(card.config.base_url, 'harness://claude')
         self.assertIsNot(card.provider, old_provider)
+        self.assertIs(card.provider.board_bridge.agent, card)
         self.assertIn('Remember this conversation', str(card.messages))
+        self.assertEqual((card.config, card.effort), (self.main.config, self.main.effort))
+        with patch.object(ghp, 'make_harness', side_effect=AssertionError('restarted unchanged guest')):
+            self.commands._sync_card_model(SimpleNamespace(agent=card, idle=True))
+        ghp.detach(card)
+
+    def test_a_cached_card_leaves_its_guest_when_the_picker_changes_to_native(self):
+        from guest_harness_fake import FakeHarness
+        from relay_core import guest_harness_provider as ghp
+        self.guest_main()
+        harness = FakeHarness([], model='claude-fake')
+        with patch.object(ghp, 'make_harness', return_value=harness):
+            card = Agent(ProviderConfig(api_key='test', base_url='https://example.invalid',
+                                        model='old-model'), str(self.repo), self.events.append)
+            session = SimpleNamespace(agent=card, idle=True)
+            self.commands._sync_card_model(session)
+        self.main.config = ProviderConfig(api_key='test', base_url='https://native.invalid',
+                                          model='chosen-native')
+        self.main.preset = None
+        self.commands._sync_card_model(session)
+        self.assertTrue(harness.closed)
+        self.assertEqual(card.config.model, 'chosen-native')
+        self.assertEqual(card.provider.config.base_url, 'https://native.invalid')
 
     def test_busy_or_queued_card_refuses_model_selection(self):
         with patch.object(self.commands.cards, 'idle', return_value=False):
@@ -109,6 +134,33 @@ class CardModelSelectionTests(ProtocolTest):
         card = SimpleNamespace(config='untouched')
         self.commands._sync_card_model(SimpleNamespace(agent=card, idle=False))
         self.assertEqual(card.config, 'untouched')
+
+    def test_refine_runs_on_the_selected_guest_and_records_that_model(self):
+        import time
+        from guest_harness_fake import FakeHarness, ev
+        from relay_core import guest_harness_provider as ghp
+        from relay_core.board_protocol import BoardCommands
+
+        self.guest_main(keys=())  # no native model is available to fall back to
+        self.main.completion_check = False
+        self.commands._build_card_console = BoardCommands._build_card_console.__get__(self.commands)
+        harness = FakeHarness([{'events': [ev('delta', text='Refined the request.')],
+                                'result': ('Refined the request.', 'end', {})}],
+                              model='claude-fake')
+        card_id = self.make_card()
+        with patch.object(ghp, 'make_harness', return_value=harness):
+            self.commands.dispatch({'type': 'board_ask', 'card': card_id, 'mode': 'refine'})
+            deadline = time.monotonic() + 5
+            while not self.commands.cards.idle() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(self.commands.cards.idle())
+        self.assertEqual(len(harness.sent), 1)
+        self.assertIn('Refine', str(harness.sent[0]))
+        self.assertEqual(self.commands.cards.session(card_id).agent.config.model, 'claude-fake')
+        self.assertTrue(any(entry.author == 'agent' and entry.attrs.get('model') == 'claude-fake'
+                            for entry in self.board.thread(card_id)))
+        self.commands.cards.drop()
+        self.assertTrue(harness.closed)
 
     def test_two_real_card_turns_use_selected_provider(self):
         import time
