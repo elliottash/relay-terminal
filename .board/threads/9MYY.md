@@ -57,3 +57,34 @@ Re-checked against `8163b4ed`: all three hot paths are still in `engine/view/Ter
 - A tests-first commit is added: a probe-count test plus env-gated `QBENCHMARK` slots, so before/after numbers come from the same test source.
 
 Also proposed a `verify` block (script primary, pairwise also, human optional, effort low). `## Done means` is unchanged. Its item 2 still names `folds.sh`; the plan's golden-grab test is the stricter check of the same claim. There are two owner questions under Risks: whether to keep items 2–3, and whether to keep the golden and bench slots in ViewTest permanently. Status is unchanged (planned).
+
+<!-- relay:entry 20260925T224027Z-ta author=agent kind=event model=k3 pane=b7a7535e turn=a75151a0b2c04ee79bad563de9b28269/e18e65e4c2f84ad99ac1151da9d6465a -->
+- ✦ agent claimed this card · assignee agent, Planned → Running, implemented_by kimi/k3, session b7a7535e
+
+<!-- relay:entry 20260925T224027Z-tb author=agent kind=progress model=k3 pane=b7a7535e turn=a75151a0b2c04ee79bad563de9b28269/e18e65e4c2f84ad99ac1151da9d6465a pane_token=b7a7535e-b4fc-483f-ad03-944669702bb1 -->
+Claimed (b7a7535e) · working on it from a terminal pane
+
+Handing TerminalView hot-path work to a subagent with all three fixes and permanent, env-gated golden/benchmark tests, per the owner's go-ahead.
+
+<!-- relay:entry 20260925T224032Z-35 author=agent kind=event model=k3 pane=b7a7535e turn=a75151a0b2c04ee79bad563de9b28269/e18e65e4c2f84ad99ac1151da9d6465a -->
+- ✦ agent updated this card · appended to `## Decisions`
+
+<!-- relay:entry 20260925T224032Z-te author=agent kind=decision model=k3 pane=b7a7535e turn=a75151a0b2c04ee79bad563de9b28269/e18e65e4c2f84ad99ac1151da9d6465a -->
+Owner: “yes, send to subagent and give me the next card”. Do all three hot-path fixes and keep the env-gated golden/benchmark tests permanently in ViewTest.
+
+<!-- relay:entry 20260925T234227Z-be author=owner kind=event pane=b7a7535e -->
+Released (b7a7535e) · the pane closed
+
+<!-- relay:entry 20260925T234722Z-qx author=agent kind=event model=k3 pane=131947ca turn=a75151a0b2c04ee79bad563de9b28269/9c67177a006d4db4b5f21abb4e069d54 -->
+- ✦ agent claimed this card · session 131947ca
+
+<!-- relay:entry 20260925T234722Z-re author=agent kind=progress model=k3 pane=131947ca turn=a75151a0b2c04ee79bad563de9b28269/9c67177a006d4db4b5f21abb4e069d54 pane_token=131947ca-655f-4eef-8401-b4970c2f0a2d -->
+Claimed (131947ca) · working on it from a terminal pane
+
+Resuming after the pane restart from the surviving phone-9myy land session; finish paintRow, a11y caching and after-run evidence.
+
+<!-- relay:entry 20260926T011839Z-1z author=agent kind=event model=claude-opus-5-5 pane=131947ca turn=a75151a0b2c04ee79bad563de9b28269/7b16fc796e514abcaa77f73a5f77e6b9 -->
+- ✦ agent updated this card · tasks: 6/6 done
+
+<!-- relay:entry 20260926T011845Z-e0 author=agent kind=event model=claude-opus-5-5 pane=131947ca turn=a75151a0b2c04ee79bad563de9b28269/7b16fc796e514abcaa77f73a5f77e6b9 -->
+- ✦ agent moved this card · Running → Needs verification, wrote `## Execution Summary`, `## Tests` · Steps 3–6 landed in 2febbf48; exact landed tree builds and relay-engine-tests passes in a verify slot; golden PNG byte-identical. · evidence docs/qa_evidence/2026-09-25-9myy-view-hot-paths/ · implemented_by anthropic/claude-opus-5-5 via claude-code

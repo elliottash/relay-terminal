@@ -1,16 +1,16 @@
 ---
 id: 9MYY
 type: work
-status: executing
+status: needs-verification
 labels: [bug]
 assignee: agent
-implemented_by: kimi/k3
-session: b7a7535e-b4fc-483f-ad03-944669702bb1
+implemented_by: anthropic/claude-opus-5-5 via claude-code
+session: 131947ca-655f-4eef-8401-b4970c2f0a2d
 rank: zzz
 created: '2026-09-17'
 verify: {artifact: code, primary: script, also: [pairwise], human: optional, criteria: relay-engine-tests passes incl. the new hover probe-count test; before/after golden grabs are byte-identical; a person may hover a wrapped path and run a search to confirm nothing looks different, sign_off: none, effort: low}
 source: Relay pane, cleanup audit 2026-09-17
-links: {plans: [], commits: [], evidence: [], related: [], github: null}
+links: {plans: [], commits: [c8f6d92116d6, 9ddfbc8cf31b, 2febbf48ad84, 568de5c88448], evidence: [docs/qa_evidence/2026-09-25-9myy-view-hot-paths/], related: [], github: null}
 ---
 # TerminalView hot paths: linkAt rebuild per hover cell, colorsFor twice per cell, a11y allText
 
@@ -96,9 +96,24 @@ Failure would show as staleness, not slowness: a hover underline or link target 
 Owner, 2026-09-25: “yes, send to subagent and give me the next card”. Approves the recommendation: do all three fixes (hover `linkAt`, `paintRow` colours, a11y `allText`), and keep the golden-grab and benchmark slots permanently in ViewTest (env-gated, skipped by default).
 
 ## Tasks
-- [x] 1. Tests/measurement first, own commit: `hoverSweepProbesOncePerFrame`, `paintGrabGolden` (behind `RELAY_PAINT_GOLDEN`), `benchHoverSweep`/`benchPaintHighlights` (behind `RELAY_VIEW_BENCH`); before numbers, PNG, probe counts in `docs/qa_evidence/2026-09-25-9myy-view-hot-paths/before/`
-- [ ] 2. `quint64 m_frameVersion`, bumped only in `pullFrame` after `if (!changed) return;`
-- [ ] 3. Hover `linkAt`: `frameDirectory()`, one-entry per-frame row/scan cache with `idxOfCell`, cache dropped on probe/card-lookup/frame changes, `hyperlinkAt` skipped when the id is 0, per-frame id→URI memo (ids confirmed not reused within a frame), `logicalRowAt` reserve + no per-cell temporaries
-- [ ] 4. `paintRow`: per-cell `CellColors` + `highlighted` once per row paint; `colorsFor` stays the single source of the colour rules
-- [ ] 5. `TerminalAccessible`: joined text + `lineStart` offsets cached on `m_frameVersion`; `split` replaced by binary search; join/offset helper tested directly; `QAccessible::isActive()` left honest
-- [ ] 6. After-run into `docs/qa_evidence/2026-09-25-9myy-view-hot-paths/after/`; every golden PNG byte-identical under `cmp`
+- [x] 1. Tests/measurement first, own commit: `hoverSweepProbesOncePerFrame`, `paintGrabGolden` (behind `RELAY_PAINT_GOLDEN`), `benchHoverSweep`/`benchPaintHighlights` (behind `RELAY_VIEW_BENCH`); before numbers, PNG, probe counts in `docs/qa_evidence/2026-09-25-9myy-view-hot-paths/before/` <!-- t:r2 -->
+- [x] 2. `quint64 m_frameVersion`, bumped only in `pullFrame` after `if (!changed) return;` <!-- t:rj -->
+- [x] 3. Hover `linkAt`: `frameDirectory()`, one-entry per-frame row/scan cache with `idxOfCell`, cache dropped on probe/card-lookup/frame changes, `hyperlinkAt` skipped when the id is 0, per-frame id→URI memo (ids confirmed not reused within a frame), `logicalRowAt` reserve + no per-cell temporaries <!-- t:bd -->
+- [x] 4. `paintRow`: per-cell `CellColors` + `highlighted` once per row paint; `colorsFor` stays the single source of the colour rules <!-- t:xq -->
+- [x] 5. `TerminalAccessible`: joined text + `lineStart` offsets cached on `m_frameVersion`; `split` replaced by binary search; join/offset helper tested directly; `QAccessible::isActive()` left honest <!-- t:dx -->
+- [x] 6. After-run into `docs/qa_evidence/2026-09-25-9myy-view-hot-paths/after/`; every golden PNG byte-identical under `cmp` <!-- t:h1 -->
+
+## Execution Summary
+Commits: c8f6d921 (tests/measurement first), 9ddfbc8c (frame version), 2febbf48 (hover linkAt cache, paintRow colours once, accessibleText cache).
+
+- Hover: one logical-row build and one links::scan per frame version; hyperlinkAt skipped for id 0; OSC 8 URIs memoised per frame; frameDirectory() instead of currentDirectory().
+- paintRow: CellColors filled once per cell into a QVarLengthArray from colorsFor, read by the background pass, text pass and fold chevron.
+- Accessibility: free function accessibleText(frame) → joined text + lineStart; cached on m_frameVersion; rowOf() binary search replaces split.
+
+The resumed subagents (a3, then a5) wrote steps 3–6 and the after-run evidence but failed before landing; the parent session landed them unchanged after building the exact tree.
+
+## Tests
+- `land.py try phone-9myy --target relay-engine-tests --tests ^relay-engine-tests$` on tip f8359d95 + these hunks: builds, ctest passes. land.py's commit gate then built `relay` on the same tree.
+- after/evidence.md: hover sweep 1232 → 14 probe calls per 88-cell sweep; benchHoverSweep 1.6 → 0.014 ms; benchPaintHighlights 0.11 → 0.093 ms.
+- `cmp before/paint-libvterm.png after/paint-libvterm.png`: identical (re-checked by the parent session).
+- Not done: the manual smoke on a real pane (hover a wrapped path, cd + ls, search with many matches) — left for the verifier.
