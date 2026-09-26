@@ -4951,31 +4951,6 @@ public:
         updateTitles();
     }
 
-    // Retries the reveal every 250 ms for up to 6 s, which covers the worker's first answer
-    // on a large tree. It stops as soon as a card detail is open, so a card the *user* opened in
-    // the meantime is never yanked out from under them.
-    void waitForBoardCard(ToolPane *tool, const QString &id, int attempt) {
-        // Out of retries: the card is not on this board (a `#ID` from another project's output,
-        // or a card that has been removed). Say so rather than leave the click looking ignored.
-        if (attempt >= 24) {
-            statusBar()->showMessage(QStringLiteral("No card #%1 on this board.").arg(id), 9000);
-            // A card pane (#Y2BA) whose card is not among rows that did arrive has nothing to
-            // show: a card deleted while the window was closed. Rows that never came leave it be.
-            if (tool && tool->board() && tool->board()->pinned() && tool->board()->model().total() > 0
-                && !tool->board()->model().card(id))
-                closeToolPane(tool);
-            return;
-        }
-        QPointer<ToolPane> guard(tool);
-        QTimer::singleShot(250, this, [this, guard, id, attempt] {
-            ToolPane *pane = guard.data();
-            if (!pane || !pane->board() || pane->board()->detailOpen()) return;
-            if (!pane->board()->model().card(id)) { waitForBoardCard(pane, id, attempt + 1); return; }
-            if (pane->board()->pinned()) pane->board()->pinSolo(id);
-            else pane->board()->openCardSolo(id);
-        });
-    }
-
     // The solo card pane (#Y2BA) in `page` that is showing `id`, if there is one.
     ToolPane *soloCardPaneIn(QWidget *page, const QString &id) const {
         if (!page || id.isEmpty()) return nullptr;
@@ -5011,13 +4986,12 @@ public:
         else if (page->layout()) page->layout()->addWidget(tool);
         if (tabProject(page).isEmpty())
             attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+        page->setProperty("relayDeferBoardAgent", true);
         tool->board()->pinSolo(id);
         setActiveLeaf(tool);
         focusLeaf(tool);
         updateTitles();
         m_manager->scheduleSave();
-        // A new pane's rows are still on their way, exactly as for a first Switchboard.
-        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
     }
 
     // Where a notification's `source` points: a pane session token, or `board:<workspace>#<id>`
@@ -5045,10 +5019,16 @@ public:
         }
         // No window is showing that board: one beside the active leaf here, the way
         // toggleBoardPane places a first Switchboard.
-        auto *tool = createBoardPane(workspace);
+        auto *tool = createBoardPane(workspace, {}, {}, QString(), {}, {}, QString(),
+                                     ToolPane::Kind::Board, true);
         QWidget *anchor = m_activeLeaf ? m_activeLeaf.data() : static_cast<QWidget *>(m_active.data());
         if (anchor) dockBeside(anchor, tool);
         else if (QWidget *page = m_tabs->currentWidget(); page && page->layout()) page->layout()->addWidget(tool);
+        if (QWidget *page = pageOf(tool)) {
+            if (tabProject(page).isEmpty())
+                attachTab(page, workspace, QString::fromLatin1(relay::projects::kReasonSwitchboard));
+            page->setProperty("relayDeferBoardAgent", true);
+        }
         revealBoardCard(tool, id);
     }
 
@@ -5063,14 +5043,13 @@ public:
         return nullptr;
     }
 
-    // Open a card in a board pane on the card alone (#K4SQ), and keep asking while its rows are
-    // still loading (waitForBoardCard). Used by openNotificationSource and openBoardCard's paths.
+    // Open a card in a board pane on the card alone (#K4SQ). The detail request does not need
+    // a matching list row, including when the Board has never been opened in this tab.
     void revealBoardCard(ToolPane *tool, const QString &id) {
         if (!tool || !tool->board()) return;
         tool->board()->openCardSolo(id);
         setActiveLeaf(tool);
         focusLeaf(tool);
-        if (!tool->board()->model().card(id)) waitForBoardCard(tool, id, 0);
     }
 
     // The directory the Switchboard is looked for from: the pane that asked, and nothing else.
@@ -5568,7 +5547,8 @@ public:
 
     // A card pane (#Y2BA): a Board view that pinSolo will pin to one card, in a Kind::Card pane.
     ToolPane *createCardPane(const QString &workspace) {
-        ToolPane *tool = createBoardPane(workspace, {}, {}, QString(), {}, {}, QString(), ToolPane::Kind::Card);
+        ToolPane *tool = createBoardPane(workspace, {}, {}, QString(), {}, {}, QString(),
+                                         ToolPane::Kind::Card, true);
         // A drag of the card/console divider is part of the layout (#ZPHJ).
         if (relay::AgentSplit *split = tool->board()->cardSplit()) {
             QPointer<ToolPane> guard(tool);
