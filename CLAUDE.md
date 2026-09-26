@@ -7,7 +7,53 @@ Before building Relay or producing an installer/package, read `docs/BUILDING.md`
 canonical cross-platform build map used by Codex, Claude and Relay agents. Keep platform commands
 there aligned with the native CI workflows rather than copying them into agent-specific notes.
 
+## Read this first: which publication mode is the project in?
+
+Since the owner's cutover (2026-09-26, card #3MH4) this repository publishes through Relay's
+parallel-development queue (`docs/TREES-AND-LANDING.md` is the contract,
+`docs/PARALLEL-DEVELOPMENT-MIGRATION.md` the cutover and rollback guide). The mode is a fact
+you check, not a date you remember, because rollback puts the project back in legacy mode:
+
+- **You are in a queue workspace** when `RELAY_WORKSPACE_ID` is set (with `RELAY_PROJECT_ROOT`
+  and `RELAY_BOARD_ROOT`), or your cwd is a leased tree under
+  `~/.local/state/relay/trees/<repo-id>/` rather than `/home/elliott/repos/relay-terminal`.
+- **The project is in queue mode** when `$(git rev-parse --git-common-dir)/relay-publication.json`
+  says `"mode": "queue"`, or `relay-land --repo /home/elliott/repos/relay-terminal inventory`
+  reports it. No marker, or `"legacy"`, means legacy mode.
+
+**In queue mode these rules replace the three legacy sections below** ("Work in this checkout",
+"How to commit here", and the shared-`build/` parts of "Build through `scripts/relay-build`"):
+
+1. **Work only in your allocated workspace**, on its private branch. Never edit, build or
+   commit in the shared checkout: after cutover it is the owner's `human` branch and stays as
+   they left it. Do not create worktrees of `main` or attach anything to it.
+2. **Commit normally with git** in the workspace. Build and test there with the project's own
+   commands (`scripts/relay-build` inside the workspace builds that tree's own `build/`, through
+   the shared ccache), running the targeted tests as before.
+3. **Publish with `relay-land submit HEAD --request-id <unique-id> --card '#ID'`** from the
+   workspace (the installed `relay-land`, or `scripts/relay-land`). `relay-land try HEAD` is an
+   optional advisory pre-check. Then `relay-land status JOB_ID` and `receipt JOB_ID`. Submission
+   records the job and returns; the publisher reruns the accepted gate on the immutable commit
+   and moves `main` itself. A failed gate or a conflict comes back to you as a handoff in your
+   pane: fix it in the workspace, commit, submit again. Nobody waits for the owner to approve.
+4. **The Board is canonical, in the project root** (`RELAY_BOARD_ROOT`, the shared checkout's
+   `.board/`), never in a workspace, which excludes it. Board tools already write there and a
+   pane's writes are snapshotted into a metadata job at the end of its turn; by hand it is
+   `relay-land board-submit .board/<path> --session <token>`.
+5. **Do not use `scripts/land.py begin`, `try`, `commit` or `board-sync`**, a `git commit` in
+   the shared checkout, or anything that moves `main` by hand: they refuse in queue mode, and a
+   commit a workspace never submitted is never published. `activate`, `pause`, `rollback` and
+   `capture-policy` are the owner's commands; do not run them.
+6. **Edits after a submit stay in the workspace** for the next submission, and retained
+   workspaces are never removed by an agent: dirty, unlanded or pending work is kept for its
+   author.
+
+In **legacy mode** everything below applies unchanged: the shared checkout on `main`, `land.py`
+as the only commit procedure, and `scripts/relay-build` on the shared `build/`.
+
 ## Work in this checkout, on main. No branches, no worktrees.
+
+*(Legacy mode only. In queue mode the section above applies: work and commit in your workspace and publish with `relay-land submit`.)*
 
 Owner's rule, 2026-09-18: **do not create a branch or a git worktree for your work.** Edit
 `/home/elliott/repos/relay-terminal` directly and commit to `main`.
@@ -36,6 +82,8 @@ What this means in practice:
   cannot land in the same function, and tell them not to commit anything they did not write.
 
 ## How to commit here without reverting someone else
+
+*(Legacy mode only. In queue mode the section above applies: work and commit in your workspace and publish with `relay-land submit`.)*
 
 On 2026-09-18 alone, five commits silently undid other sessions' work: each was built from an index
 or a base that was older than `main`, so it wrote files back to their old contents. The working tree

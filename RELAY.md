@@ -6,6 +6,16 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 
 ## Working rules
 
+- **Mode first (queue since the 2026-09-26 cutover, #3MH4):** check `$(git rev-parse
+  --git-common-dir)/relay-publication.json`, or whether `RELAY_WORKSPACE_ID` is set. In
+  **queue mode** work only in your allocated workspace: commit with git there, build and test
+  there, publish with `relay-land submit HEAD --request-id <id> --card '#ID'`, watch
+  `relay-land status`/`receipt`, and fix a failed gate or conflict handoff in the workspace and
+  resubmit. The Board stays canonical in the project root (`RELAY_BOARD_ROOT`); the shared
+  checkout is the owner's `human` branch and is never edited, built in or committed to by an
+  agent; `scripts/land.py begin/try/commit/board-sync` refuse. The Build and Commits bullets
+  below are the **legacy-mode** procedure and apply only when the marker says `legacy`.
+  `CLAUDE.md` ("Read this first") has the full rule; `docs/TREES-AND-LANDING.md` is the contract.
 - **Issues:** file-based tracker in `.board/` (conventions in `.board/README.md`, based on the
   global issue-tracking skill). The folder is hidden, so a plain project-wide `rg` skips it:
   search with `rg --hidden` or name `.board/` explicitly. Sections are the stage list — inbox, discussing, planning, planned,
@@ -15,7 +25,7 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
   `docs/qa_evidence/YYYY-MM-DD-<slug>/` and a QA checklist. `.board/POLICY.md` is the generated
   copy of the rules Relay's own pane agents get in their system prompt — read it when you have no
   `board_*` tools, because it also says how to make each of those calls by editing files.
-- **Build:** `scripts/relay-build`, never `cmake --build` by hand: it locks `build/`
+- **Build (legacy mode; in a queue workspace run it inside the workspace):** `scripts/relay-build`, never `cmake --build` by hand: it locks `build/`
   against the other sessions and stamps the objects it made back to the build's start, so a
   header edited while a compile was running is recompiled instead of silently missed
   (`CLAUDE.md`, "Build through `scripts/relay-build`"). Once a session has `begin`-claimed its
@@ -31,7 +41,7 @@ per-pane BYOK agents, tabs/panes, file panes and an actions palette. Read `docs/
 - **Other agents:** several agents edit this checkout at once, often the same files. That is intended and
   expected: work alongside their changes, never revert them, and do not complain about them or report them
   as a problem. Mention another agent's edit only when it actually blocks your task.
-- **Commits:** land through `python3 scripts/land.py begin <me> <paths>` before editing and
+- **Commits (legacy mode only; queue mode is `relay-land submit` from the workspace):** land through `python3 scripts/land.py begin <me> <paths>` before editing and
   `python3 scripts/land.py commit <me> -m …` afterwards; several sessions share this checkout
   and a plain `git commit` from the shared index reverts them (`CLAUDE.md`).
 - **Crashes:** a fatal signal writes its frames into `relay.log` (`gui_crash …`) and a worker's

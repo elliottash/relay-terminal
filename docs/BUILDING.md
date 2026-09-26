@@ -55,9 +55,19 @@ immutable submitted commit before moving `main`. A successful landing may then b
 a separate runnable-main release under Relay's state root. Those verification and release builds
 consume additional time and disk; `relay-land --repo /path/to/project main-status` reports the
 installed SHA and lag. See [the operating contract](TREES-AND-LANDING.md#operating-a-configured-project)
-and [migration guide](PARALLEL-DEVELOPMENT-MIGRATION.md). This shared Relay checkout still uses
-`scripts/land.py begin`/`try`/`commit` until its own controlled cutover; do not activate it as
-part of a developer build.
+and [migration guide](PARALLEL-DEVELOPMENT-MIGRATION.md).
+
+**This applies to Relay itself since the owner's cutover of 2026-09-26 (#3MH4).** Check the mode
+rather than assume it: `$(git rev-parse --git-common-dir)/relay-publication.json` says
+`"mode": "queue"` while the queue is active, and a pane in a workspace has `RELAY_WORKSPACE_ID`
+set. In queue mode build in your workspace, not in the shared checkout: `scripts/relay-build`
+(and `--fast`) run from inside the workspace and build that tree's own `build/`, sharing the
+compiler cache below, and `relay-land try HEAD` runs the accepted gate on your commit before you
+`relay-land submit` it. The shared checkout is the owner's `human` branch after cutover; do not
+build, edit or `land.py commit` there. The `land.py begin`/`try`/`commit` and shared-`build/`
+instructions in this section and in `CLAUDE.md` are the legacy-mode procedure, in force only
+while the marker says `legacy` (after a rollback). Never run `activate`, `pause` or `rollback` as
+part of a developer build; those are the owner's cutover commands.
 
 **Compiler cache.** Install `ccache` (`sudo apt install ccache`, or `scripts/relay-tooling-setup
 --install`) and every configure — `build/`, `build-fast/`, each `land.py` verify slot — compiles
